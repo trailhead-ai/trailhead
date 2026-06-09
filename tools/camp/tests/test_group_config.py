@@ -1,0 +1,300 @@
+"""Tests for group_config.py — tomllib loader + schema validation.
+
+Test contract (Slice 1):
+- Loads a valid trailhead.toml config.
+- A malformed config (missing required field) → error naming file + failing field.
+- A malformed config (bad type) → error naming file + failing field.
+- bootstrap commands are parsed as a LIST (not a shell string) for shell=False.
+- [dev_env] block present → warn-and-continue (prints deferred note, does not crash).
+- No group config file → legible first-run scaffold/point message.
+"""
+from __future__ import annotations
+
+import io
+import sys
+from pathlib import Path
+
+import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
+_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_GROUPS_EXAMPLE_DIR = _REPO_ROOT / "tools" / "camp" / "groups.example"
+
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+
+# ---------------------------------------------------------------------------
+# Valid config loads
+# ---------------------------------------------------------------------------
+
+_VALID_TOML = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+bootstrap = ["pip", "install", "-e", "."]
+
+[branch]
+pattern = "worktree-{slug}"
+"""
+
+_VALID_TOML_NO_BOOTSTRAP = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+"""
+
+
+def test_load_valid_config(tmp_path: Path) -> None:
+    """Loads a valid TOML config and returns a structured dict."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML)
+    cfg = load_group(f)
+    assert cfg["group"]["name"] == "testgroup"
+    assert len(cfg["members"]) == 1
+    assert cfg["members"][0]["name"] == "myrepo"
+    assert cfg["members"][0]["repo_root"] == "/tmp/myrepo"
+
+
+def test_load_bootstrap_is_list(tmp_path: Path) -> None:
+    """bootstrap is parsed as a list (for subprocess shell=False), not a shell string."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML)
+    cfg = load_group(f)
+    bootstrap = cfg["members"][0]["bootstrap"]
+    assert isinstance(bootstrap, list), "bootstrap must be a list"
+    assert bootstrap == ["pip", "install", "-e", "."]
+
+
+def test_load_bootstrap_defaults_to_empty_list(tmp_path: Path) -> None:
+    """When bootstrap is absent, it defaults to []."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_NO_BOOTSTRAP)
+    cfg = load_group(f)
+    assert cfg["members"][0]["bootstrap"] == []
+
+
+def test_load_branch_pattern_defaults(tmp_path: Path) -> None:
+    """When [branch] is absent, branch_pattern defaults to 'worktree-{slug}'."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_NO_BOOTSTRAP)
+    cfg = load_group(f)
+    assert cfg["branch_pattern"] == "worktree-{slug}"
+
+
+# ---------------------------------------------------------------------------
+# Malformed config → field-named errors
+# ---------------------------------------------------------------------------
+
+_MISSING_GROUP_NAME = """\
+[group]
+# name is missing
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+"""
+
+_MISSING_MEMBER_REPO_ROOT = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+# repo_root is missing
+"""
+
+_MISSING_MEMBER_NAME = """\
+[group]
+name = "testgroup"
+
+[[members]]
+repo_root = "/tmp/myrepo"
+"""
+
+_BOOTSTRAP_NOT_LIST = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+bootstrap = "pip install -e ."
+"""
+
+
+def test_missing_group_name_errors_with_field(tmp_path: Path) -> None:
+    """Missing group.name → error naming file + failing field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_MISSING_GROUP_NAME)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "name" in msg or "group" in msg
+
+
+def test_missing_member_repo_root_errors_with_field(tmp_path: Path) -> None:
+    """Missing member repo_root → error naming file + failing field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_MISSING_MEMBER_REPO_ROOT)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "repo_root" in msg
+
+
+def test_missing_member_name_errors_with_field(tmp_path: Path) -> None:
+    """Missing member name → error naming file + failing field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_MISSING_MEMBER_NAME)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "name" in msg
+
+
+def test_bootstrap_not_list_errors_with_field(tmp_path: Path) -> None:
+    """bootstrap as a string (not a list) → error naming file + failing field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_BOOTSTRAP_NOT_LIST)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "bootstrap" in msg
+
+
+# ---------------------------------------------------------------------------
+# [dev_env] block → warn-and-continue
+# ---------------------------------------------------------------------------
+
+_CONFIG_WITH_DEV_ENV = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[dev_env]
+port_base = 4100
+"""
+
+
+def test_dev_env_block_warns_and_continues(tmp_path: Path, capsys) -> None:
+    """[dev_env] block present → prints deferred note, does NOT raise."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_CONFIG_WITH_DEV_ENV)
+    cfg = load_group(f)  # must not raise
+    assert cfg["group"]["name"] == "testgroup"
+
+    captured = capsys.readouterr()
+    # The warning is printed to stderr
+    assert "dev_env" in captured.err or "dev-env" in captured.err
+    # Must mention "deferred" or "not yet supported"
+    assert "deferred" in captured.err or "not yet supported" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# No config file → first-run scaffold message
+# ---------------------------------------------------------------------------
+
+
+def test_no_config_file_first_run_message(tmp_path: Path) -> None:
+    """When no group config file exists, a legible first-run message is returned."""
+    from group_config import GroupConfigNotFound, load_group
+
+    missing = tmp_path / "nonexistent.toml"
+    with pytest.raises(GroupConfigNotFound) as exc_info:
+        load_group(missing)
+    msg = str(exc_info.value)
+    # Must mention the expected path
+    assert "nonexistent.toml" in msg or str(missing) in msg
+    # Must point at groups.example or copy instruction
+    assert "groups.example" in msg or "copy" in msg.lower() or "example" in msg
+
+
+# ---------------------------------------------------------------------------
+# load_all_groups — scans the groups dir and loads every .toml
+# ---------------------------------------------------------------------------
+
+
+def test_load_all_groups_empty_dir(tmp_path: Path) -> None:
+    """load_all_groups on an empty dir returns empty list."""
+    from group_config import load_all_groups
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    result = load_all_groups(groups_dir)
+    assert result == []
+
+
+def test_load_all_groups_loads_files(tmp_path: Path) -> None:
+    """load_all_groups loads all .toml files in the directory."""
+    from group_config import load_all_groups
+
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    (groups_dir / "alpha.toml").write_text(
+        '[group]\nname = "alpha"\n\n[[members]]\nname = "r"\nrepo_root = "/tmp/r"\n'
+    )
+    (groups_dir / "beta.toml").write_text(
+        '[group]\nname = "beta"\n\n[[members]]\nname = "r"\nrepo_root = "/tmp/r2"\n'
+    )
+    result = load_all_groups(groups_dir)
+    names = [c["group"]["name"] for c in result]
+    assert sorted(names) == ["alpha", "beta"]
+
+
+# ---------------------------------------------------------------------------
+# groups.example/trailhead.toml — verify it loads
+# ---------------------------------------------------------------------------
+
+
+def test_groups_example_trailhead_toml_exists() -> None:
+    """The groups.example/trailhead.toml example file exists."""
+    assert (_GROUPS_EXAMPLE_DIR / "trailhead.toml").is_file(), (
+        f"groups.example/trailhead.toml not found at {_GROUPS_EXAMPLE_DIR}"
+    )
+
+
+def test_groups_example_trailhead_toml_loads() -> None:
+    """The groups.example/trailhead.toml example file loads without error."""
+    from group_config import load_group
+
+    f = _GROUPS_EXAMPLE_DIR / "trailhead.toml"
+    if not f.is_file():
+        pytest.skip("groups.example/trailhead.toml not yet created")
+    cfg = load_group(f)
+    assert cfg["group"]["name"] == "trailhead"
+    # Must have at least one member
+    assert len(cfg["members"]) >= 1
+    # Must NOT have [dev_env] block (per D-D)
+    assert "dev_env" not in cfg
