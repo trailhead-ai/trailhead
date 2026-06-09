@@ -91,22 +91,6 @@ def _validate_env_override(value: str, var_name: str) -> Path | None:
     return p
 
 
-def _expand_home(raw: str, env: dict[str, str], label: str) -> Path:
-    """Expand a path that may contain ~ using HOME from env, not os.environ.
-
-    Raises PathResolutionError if HOME is not set.
-    """
-    if "~" not in raw:
-        return Path(raw)
-    home = env.get("HOME")
-    if not home:
-        raise PathResolutionError(
-            f"Cannot resolve {label}: HOME is not set in the environment. "
-            "Set HOME to a valid directory path."
-        )
-    return Path(home) / raw.lstrip("~/").lstrip("~")
-
-
 def _home(env: dict[str, str], label: str) -> Path:
     """Return the home directory from env, raising PathResolutionError if absent."""
     home = env.get("HOME")
