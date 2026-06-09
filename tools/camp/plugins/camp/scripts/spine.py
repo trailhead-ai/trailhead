@@ -41,6 +41,7 @@ RESERVED = frozenset({
     "ls", "status", "break", "rebase", "path", "open", "fire",
     "foreach", "code", "sweep", "sync", "restock", "doctor", "help",
     "version", "which",
+    "init", "session-bootstrap", "worktree-cleanup",
 })
 
 # ---------------------------------------------------------------------------

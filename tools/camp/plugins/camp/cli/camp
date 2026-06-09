@@ -160,6 +160,25 @@ def main() -> None:
     first = argv[0] if argv else None
 
     # ---------------------------------------------------------------------------
+    # Slice 3: hook handler subcommands (session-bootstrap, worktree-cleanup)
+    # These run before group resolution — they handle their own silent no-op logic.
+    # ---------------------------------------------------------------------------
+    if first == "session-bootstrap":
+        from hook_handlers import cmd_session_bootstrap
+        cmd_session_bootstrap()
+        return
+
+    if first == "worktree-cleanup":
+        from hook_handlers import cmd_worktree_cleanup
+        force = "--force" in argv[1:]
+        cmd_worktree_cleanup(force=force)
+        return
+
+    if first == "init":
+        _cmd_init_cli(argv[1:])
+        return
+
+    # ---------------------------------------------------------------------------
     # Slice 2: group-aware command routing
     # ---------------------------------------------------------------------------
     if first and first not in ("help", "--help", "-h", "doctor", "code",
@@ -552,6 +571,43 @@ def _cmd_rebase_group_cli(
         sys.exit(1)
 
     print(f"camp rebase: {slug!r} rebased onto {onto}")
+
+
+def _cmd_init_cli(args: list[str]) -> None:
+    """camp init <group> — write hook entries into each member's .claude/settings.json."""
+    from group_config import load_all_groups, load_group, GroupConfigError, GroupConfigNotFound
+    from group_resolve import resolve_group_override, validate_no_overlap, GroupResolutionError
+    from init_cmd import run_init
+    import trailhead.paths as _paths
+
+    if not args or args[0] in ("--help", "-h"):
+        print("usage: camp init <group>")
+        print("  Writes SessionStart + WorktreeRemove hook entries into each member's")
+        print("  .claude/settings.json for the named group.")
+        return
+
+    group_name = args[0]
+
+    config_dir = _paths.config_dir("camp") / "groups"
+    try:
+        all_configs = load_all_groups(config_dir)
+    except GroupConfigError as e:
+        print(f"camp init: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        group = resolve_group_override(group_name, all_configs)
+    except GroupResolutionError as e:
+        print(f"camp init: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        run_init(group, str(_BIN_DIR / "camp"), group_configs=all_configs)
+    except (GroupResolutionError, GroupConfigError) as e:
+        print(f"camp init: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"camp init: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
 
 
 if __name__ == "__main__":
