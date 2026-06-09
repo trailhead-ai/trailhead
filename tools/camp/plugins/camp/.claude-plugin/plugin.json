@@ -1,0 +1,5 @@
+{
+  "name": "camp",
+  "version": "0.1.0",
+  "description": "Group worktree orchestration: create, manage, and tear down multi-repo worktrees for any Claude Code project."
+}

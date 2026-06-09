@@ -1,12 +1,8 @@
-# camp's plugin tree lands in Step 2 / WS-1; validate=false skips existence
-# checks until then.  The format is proven now via lore and forge.
-
 [tool]
 name = "camp"
-validate = false
 base = ["skills/worktree"]
 
 [capabilities.dev-env]
 description = "Provision and teardown local dev-env instances for a worktree group."
-skills = ["skills/dev-env"]
+skills = []
 agents = []

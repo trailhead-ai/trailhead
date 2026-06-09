@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""camp CLI entry point.
+
+Two orthogonal import chains, kept distinct (D-H / Slice 0):
+  (a) self-relative sys.path insert toward scripts/ (like cli/lore:37) so
+      camp's own scripts/ modules (repos.py, spine.py) are importable
+      whether run from the repo or from an installed plugin.
+  (b) trailhead.paths import guarded by _check_trailhead_paths_importable()
+      (single guard, hook-subprocess-proof). For Slice 0, cli/camp needs
+      --help / --version / --which; it does NOT call trailhead.paths yet
+      (Slice 1 wires state paths) — but the guard seam is here now.
+
+D-I: camp --version / --which prints the resolved binary path; camp prints
+a not-on-PATH warning if its own bin/ dir isn't on $PATH.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+# (a) Self-relative sys.path insert so scripts/ modules resolve.
+# cli/camp → parent is cli/ → parent is plugins/camp/ → scripts/ is a sibling.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+# (b) D-H guard: single import guard. Slice 0 doesn't call trailhead.paths
+# yet, but the guard is in place for Slice 1+ and hook handlers.
+from spine import _check_trailhead_paths_importable  # noqa: E402
+
+# cli/camp needs paths importable for Slice 1+. For now we warn but continue
+# (--help / --version / --which must work even without it).
+_TRAILHEAD_PATHS_OK = _check_trailhead_paths_importable()
+
+from spine import main as _spine_main  # noqa: E402
+
+_SELF = Path(__file__).resolve()
+_BIN_DIR = _SELF.parent.parent / "bin"
+_VERSION = "0.1.0"
+
+
+def _not_on_path_warning() -> None:
+    """Print a one-time warning if this tool's bin/ dir is not on $PATH."""
+    bin_dir_str = str(_BIN_DIR)
+    path_dirs = os.environ.get("PATH", "").split(":")
+    if not any(Path(p).resolve() == _BIN_DIR.resolve() for p in path_dirs if p):
+        print(
+            f"camp: note — {bin_dir_str} is not on $PATH.\n"
+            f"  Add it: fish_add_path {bin_dir_str}",
+            file=sys.stderr,
+        )
+
+
+def _cmd_version() -> None:
+    print(f"camp {_VERSION}")
+    print(f"binary: {_SELF}")
+    print("group: (resolved in Slice 1)")
+
+
+def _cmd_which() -> None:
+    print(str(_SELF))
+
+
+def main() -> None:
+    argv = sys.argv[1:]
+
+    # D-I: print not-on-PATH warning when invoked with no args
+    if not argv:
+        _not_on_path_warning()
+
+    # Handle meta-flags before dispatch (--version / --which)
+    if argv and argv[0] in ("--version", "version"):
+        _cmd_version()
+        return
+
+    if argv and argv[0] == "--which":
+        _cmd_which()
+        return
+
+    # Delegate everything else to the spine dispatcher
+    _spine_main()
+
+
+if __name__ == "__main__":
+    main()
