@@ -1,0 +1,14 @@
+{
+  "name": "forge-local",
+  "owner": {
+    "name": "forge maintainers"
+  },
+  "description": "Local marketplace for the forge plugin during development.",
+  "plugins": [
+    {
+      "name": "forge",
+      "source": "./plugins/forge",
+      "description": "Portable software-development plugin: general-purpose dev agents and dev-ritual skills for any Claude Code project."
+    }
+  ]
+}

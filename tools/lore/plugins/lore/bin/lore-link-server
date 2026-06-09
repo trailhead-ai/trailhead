@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""lore-link-server — localhost bridge from clickable http links to obsidian:// opens.
+
+Warp (and Claude Code's terminal renderer) only auto-linkify bare http(s) URLs, not
+custom schemes like obsidian://. This server listens on 127.0.0.1:$LORE_LINK_PORT
+(default 7777) and, for any GET /<note-path>, opens the matching note in Obsidian
+by handing an obsidian://open?path=<abs> URI to macOS `open`.
+
+Emit links in tool output as bare URLs whose tail reads as the note name, e.g.:
+
+    http://localhost:7777/tools/lsp
+    http://localhost:7777/sessions/2026-06-04-lore-link-server
+
+Run directly for dev; in normal use kept alive by a launchd agent (com.lore.link-server).
+"""
+import os
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import quote, unquote, urlsplit
+
+HOST = "127.0.0.1"
+_DEFAULT_PORT = 7777
+
+_RESPONSE = (
+    b"<!doctype html><meta charset=utf-8><title>Obsidian</title>"
+    b"<script>window.close()</script>"
+    b"<body style='font-family:system-ui;padding:2rem;color:#555'>"
+    b"Opened in Obsidian \xe2\x80\x94 you can close this tab.</body>"
+)
+
+
+def resolve_port() -> int:
+    """Return the port to bind.
+
+    Priority: $LORE_LINK_PORT (must be a valid int); else 7777.
+    Raises ValueError on an invalid non-empty string so the caller can print a
+    clear error and exit non-zero.
+    """
+    raw = os.environ.get("LORE_LINK_PORT", "").strip()
+    if not raw:
+        return _DEFAULT_PORT
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(
+            f"lore-link-server: LORE_LINK_PORT={raw!r} is not a valid integer port"
+        )
+
+
+def _resolve_vault_root() -> str:
+    """Resolve the vault root from $LORE_VAULT (expanded + resolved), else ~/lore.
+
+    Intentional 6-line mirror of scripts/vault.py:resolve_vault() — this script is
+    launched standalone by launchd (bare `python3 <path>`, no PYTHONPATH), so it
+    cannot import the scripts package. Keep the two in sync.
+    """
+    raw = os.environ.get("LORE_VAULT", "").strip()
+    target = raw if raw else "~/lore"
+    try:
+        return str(Path(target).expanduser().resolve())
+    except Exception:
+        return str(Path(target).expanduser())
+
+
+def is_contained(request_path: str, vault_root: str) -> bool:
+    """Return True iff the decoded request path resolves to inside vault_root.
+
+    Uses os.path.realpath + os.path.commonpath to block any path-traversal
+    sequences (../../, symlinks that escape the vault, etc.).
+    """
+    note = unquote(urlsplit(request_path).path).strip("/")
+    joined = os.path.join(vault_root, note)
+    try:
+        resolved = os.path.realpath(joined)
+        real_vault = os.path.realpath(vault_root)
+        return os.path.commonpath([real_vault, resolved]) == real_vault
+    except ValueError:
+        # Fail closed (treat as not-contained → 404) on any malformed input:
+        #   - embedded null byte → realpath raises ValueError
+        #   - commonpath across different drives (Windows) → ValueError
+        # Impossible-to-rare on darwin, but never let it escape as a traceback.
+        return False
+
+
+def uri_for(request_path: str, vault_root: str) -> str:
+    """Map an incoming request path to an obsidian://open?path=<abs> URI.
+
+    '/tools/lsp'    -> 'obsidian://open?path=/vault/tools/lsp.md'
+    '/tools/lsp.md' -> 'obsidian://open?path=/vault/tools/lsp.md'
+
+    The query string is ignored, a trailing '.md' is stripped from the request
+    path (then re-added to the absolute path), and the result is percent-encoded
+    with forward-slashes preserved (safe='/') so the URI is directly openable.
+    """
+    note = unquote(urlsplit(request_path).path).strip("/")
+    if note.endswith(".md"):
+        note = note[:-3]
+    abs_path = os.path.join(vault_root, note) + ".md"
+    return "obsidian://open?path=" + quote(abs_path, safe="/")
+
+
+class Handler(BaseHTTPRequestHandler):
+    vault_root: str = ""  # set by main() before serving
+
+    def do_GET(self):
+        if self.path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+
+        if not is_contained(self.path, self.vault_root):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        uri = uri_for(self.path, self.vault_root)
+        # No shell: `open` receives the URI as a single argv element.
+        subprocess.run(["open", uri], shell=False, check=False)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(_RESPONSE)))
+        self.end_headers()
+        self.wfile.write(_RESPONSE)
+
+    def log_message(self, *_args):  # silence default stderr access log
+        pass
+
+
+def _check_platform():
+    """Exit non-zero with a clear message when not on darwin or `open` is absent."""
+    if sys.platform != "darwin":
+        print(
+            "lore-link-server: requires macOS (darwin); "
+            f"current platform is {sys.platform!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    result = subprocess.run(
+        ["which", "open"], capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        print(
+            "lore-link-server: `open` not found in PATH; cannot open Obsidian URIs",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def main():
+    _check_platform()
+
+    try:
+        port = resolve_port()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    vault_root = _resolve_vault_root()
+
+    Handler.vault_root = vault_root
+
+    try:
+        srv = ThreadingHTTPServer((HOST, port), Handler)
+    except OSError as exc:
+        print(
+            f"lore-link-server: cannot bind {HOST}:{port} ({exc})",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

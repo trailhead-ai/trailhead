@@ -1,0 +1,14 @@
+{
+  "name": "lore-local",
+  "owner": {
+    "name": "lore maintainers"
+  },
+  "description": "Local marketplace for the lore plugin during development.",
+  "plugins": [
+    {
+      "name": "lore",
+      "source": "./plugins/lore",
+      "description": "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall for any Claude Code project."
+    }
+  ]
+}

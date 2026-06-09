@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# bin/lore — PATH wrapper for the lore CLI.
+#
+# Claude Code auto-adds a plugin's bin/ directory to Bash PATH when the plugin
+# is enabled, so this wrapper makes bare `lore` resolve for any install.
+#
+# Resolution order:
+#   1. ${CLAUDE_PLUGIN_ROOT}/cli/lore  — set by Claude Code at plugin load time
+#   2. Self-relative (macOS-safe, no GNU readlink -f): resolve symlinks via a
+#      while loop, then find cli/lore as a sibling of bin/
+#
+# bin/ and cli/ are siblings under plugins/lore/, so cli/lore is at
+# <plugin_root>/cli/lore regardless of how this wrapper was invoked.
+
+set -euo pipefail
+
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/cli/lore" ]; then
+    CLI="${CLAUDE_PLUGIN_ROOT}/cli/lore"
+else
+    # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
+    SOURCE="${BASH_SOURCE[0]}"
+    while [ -L "$SOURCE" ]; do
+        DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+        SOURCE="$(readlink "$SOURCE")"
+        # Handle relative symlinks.
+        [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+    done
+    BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    PLUGIN_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
+    CLI="$PLUGIN_DIR/cli/lore"
+fi
+
+exec python3 "$CLI" "$@"

@@ -1,0 +1,5 @@
+{
+  "name": "lore",
+  "version": "0.1.0",
+  "description": "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall for any Claude Code project."
+}

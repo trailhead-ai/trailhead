@@ -1,0 +1,1499 @@
+#!/usr/bin/env python3
+"""The `lore` CLI — vault scaffolding and section/status edit primitives.
+
+Subcommands:
+  lore init <path>          Scaffold a new vault (taxonomy + starter docs).
+  lore new <type>           Render a template and write a new vault note.
+  lore seed <name>          Scaffold an inbox capture + open it in Obsidian.
+  lore patch <file> <sec>   Append text under a section (--text or stdin).
+  lore set-status <f> <v>   Validate + set a note's frontmatter status.
+  lore stats                Print counts for the resolved vault.
+  lore session-note         Print this session's note path (id-first resolve).
+  lore finish               Finalize the active session note for this worktree.
+  lore handoff              Shelve the active session note for pickup later.
+  lore shelved              List shelved/handoff session notes for pickup.
+  lore resume [note|slug]   Flip a shelved/handoff note back to active
+                            (omit the target to resume the current session).
+  lore sync                 Stage, commit, and push the vault.
+  lore review               Generate a vault migration-discipline report.
+
+Finds its sibling ../scripts modules at import time so it works whether run
+from the repo or from an installed plugin (${CLAUDE_PLUGIN_ROOT}/cli/lore).
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import date
+from pathlib import Path
+from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import frontmatter  # noqa: E402
+import harvest as harvest_mod  # noqa: E402
+import link_server  # noqa: E402
+import review as review_mod  # noqa: E402
+import sessions as sessions_mod  # noqa: E402
+import status_validator  # noqa: E402
+import vault as vault_mod  # noqa: E402
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+STARTER_DIR = PLUGIN_ROOT / "starter"
+TEMPLATES_DIR = PLUGIN_ROOT / "templates"
+
+# The generic directory taxonomy every vault gets.
+TAXONOMY = [
+    "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
+    "radar", "collaboration", "specs", "plans", "designs", "inbox",
+    "briefings", "reviews", "gotchas", "audits", "tools", "templates",
+]
+
+STARTER_DOCS = ["README.md", "glossary.md", "phases.md", "harvest-protocol.md"]
+
+
+# ---- new --------------------------------------------------------------------
+
+# Map each note type to its vault directory.
+_NOTE_DIRS: dict[str, str] = {
+    "deferred": "deferred",
+    "dead-end": "dead-ends",
+    "decision": "decisions",
+    "radar": "radar",
+    "area": "areas",
+    "spec": "specs",
+    "plan": "plans",
+}
+
+# Types that carry a project: field. dead-end is intentionally absent.
+_PROJECT_BEARING: frozenset[str] = frozenset({"deferred", "decision", "radar", "area", "spec", "plan"})
+
+# Note types stored in date-bucketed YYYY-MM subdirs (the date-bucketed archive
+# layout). The date-based living folders (deferred/dead-ends/decisions/radar)
+# join the archive types; only singleton area profiles (name-keyed) stay
+# flat at the folder root.
+_BUCKETED_TYPES: frozenset[str] = frozenset(
+    {"spec", "plan", "deferred", "decision", "radar", "dead-end"}
+)
+
+# Which section of the session note gets the backlink (None = no backlink).
+_BACKLINK_SECTIONS: dict[str, str | None] = {
+    "deferred": "Deferred",
+    "dead-end": "Learned",
+    "decision": "Decided",
+    "radar": None,
+    "area": None,
+    "spec": None,
+    "plan": None,
+}
+
+
+def _kebab(title: str) -> str:
+    """Lowercase, replace non-alphanumerics with a single hyphen, trim.
+
+    When the result is empty (all-punctuation, whitespace, or non-Latin
+    unicode), falls back to 'note-<first 6 hex chars of sha1(title)>' so the
+    slug is always non-empty.
+    """
+    lowered = title.lower()
+    slugged = re.sub(r"[^a-z0-9]+", "-", lowered)
+    slug = slugged.strip("-")
+    if not slug:
+        digest = hashlib.sha1(title.encode()).hexdigest()[:6]
+        slug = f"note-{digest}"
+    return slug
+
+
+def _unique_path(directory: Path, stem: str) -> Path:
+    """Return a path in directory for <stem>.md that does not exist.
+
+    If <stem>.md is free, return it. Otherwise append -2, -3, … until the
+    path is free. Never overwrites an existing file.
+    """
+    candidate = directory / f"{stem}.md"
+    if not candidate.exists():
+        return candidate
+    counter = 2
+    while True:
+        candidate = directory / f"{stem}-{counter}.md"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _today() -> str:
+    """Return today's date as YYYY-MM-DD, honoring $LORE_TODAY for tests."""
+    override = os.environ.get("LORE_TODAY", "").strip()
+    if override:
+        return override
+    return date.today().isoformat()
+
+
+def _render_template(template_path: Path, substitutions: dict[str, str]) -> str:
+    """Replace {{key}} placeholders in the template with provided values."""
+    text = template_path.read_text()
+    for key, value in substitutions.items():
+        text = text.replace("{{" + key + "}}", value)
+    return text
+
+
+def _csv_to_inline_list(csv: str | None) -> str:
+    """Convert a comma-separated string to an inline YAML list string.
+
+    'a, b, c' → '[a, b, c]'
+    None or empty → '[]'
+    """
+    if not csv:
+        return "[]"
+    items = [k.strip() for k in csv.split(",") if k.strip()]
+    if not items:
+        return "[]"
+    return "[" + ", ".join(items) + "]"
+
+
+def cmd_new(args: argparse.Namespace) -> int:
+    note_type = args.type
+    if note_type not in _NOTE_DIRS:
+        print(
+            f"error: unknown note type {note_type!r}. "
+            f"Choose from: {', '.join(sorted(_NOTE_DIRS))}",
+            file=sys.stderr,
+        )
+        return 1
+
+    vault = Path(args.vault).expanduser().resolve() if args.vault else Path(vault_mod.resolve_vault())
+    today = _today()
+    user = vault_mod.resolve_user()
+
+    # Resolve project: explicit flag wins; for project-bearing types fall back
+    # to git remote inference; dead-end carries no project field at all.
+    if note_type in _PROJECT_BEARING:
+        project = args.project or vault_mod.resolve_project()
+    else:
+        project = args.project or ""
+
+    # Build template substitutions — common fields.
+    subs: dict[str, str] = {
+        "date": today,
+        "user": user,
+        "project": project,
+        "name": args.title,
+    }
+
+    # Per-type substitutions: populate frontmatter fields from CLI flags.
+    if note_type == "deferred":
+        subs["surfaces"] = _csv_to_inline_list(getattr(args, "surfaces", None))
+        subs["next-check"] = getattr(args, "next_check", None) or ""
+        revisit_after = getattr(args, "revisit_after", None) or ""
+        subs["revisit-after"] = revisit_after
+        # status: scheduled when revisit-after is provided, open otherwise.
+        subs["status"] = "scheduled" if revisit_after else "open"
+
+    elif note_type == "dead-end":
+        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
+        subs["tried"] = getattr(args, "tried", None) or today
+        subs["revive-condition"] = getattr(args, "revive_condition", None) or ""
+
+    elif note_type == "decision":
+        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
+
+    elif note_type == "radar":
+        subs["source"] = getattr(args, "source", None) or ""
+        subs["target"] = getattr(args, "target", None) or ""
+        subs["check"] = getattr(args, "check", None) or ""
+
+    elif note_type == "area":
+        subs["keywords"] = _csv_to_inline_list(getattr(args, "keywords", None))
+        subs["key-files"] = _csv_to_inline_list(getattr(args, "key_files", None))
+
+    elif note_type == "spec":
+        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
+
+    elif note_type == "plan":
+        subs["related-areas"] = _csv_to_inline_list(getattr(args, "related_areas", None))
+        subs["related-spec"] = getattr(args, "related_spec", None) or ""
+        subs["slug"] = _kebab(args.title)
+
+    template_path = TEMPLATES_DIR / f"{note_type}.md"
+    if not template_path.is_file():
+        print(f"error: template not found: {template_path}", file=sys.stderr)
+        return 1
+
+    rendered = _render_template(template_path, subs)
+
+    # Validate status if the note type has one.
+    fm = frontmatter.parse_frontmatter_str(rendered)
+    note_status = fm.get("status")
+    if note_status is not None:
+        if not status_validator.is_valid_status(note_type, note_status):
+            permitted = status_validator.permitted_statuses(note_type)
+            print(
+                f"error: template status {note_status!r} is not canonical for "
+                f"type {note_type!r}. permitted: {sorted(permitted) if permitted else '(unconstrained)'}",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Write the note — area profiles are singletons identified by their
+    # bare kebab name (no date prefix). All other types get YYYY-MM-DD-<slug>
+    # naming with collision handling.
+    note_dir = vault / _NOTE_DIRS[note_type]
+    if note_type in _BUCKETED_TYPES:
+        note_dir = vault_mod.bucket_dir(note_dir, today)
+    note_dir.mkdir(parents=True, exist_ok=True)
+    if note_type == "area":
+        stem = _kebab(args.title)
+        note_path = note_dir / f"{stem}.md"
+        if note_path.exists():
+            print(
+                f"error: area profile '{stem}' already exists at {note_path} — "
+                "edit it directly (lore new area creates a new profile).",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        stem = f"{today}-{_kebab(args.title)}"
+        note_path = _unique_path(note_dir, stem)
+    note_path.write_text(rendered)
+    print(f"Created: {note_path}")
+
+    # Backlink to session note (deferred/dead-end/decision only).
+    section = _BACKLINK_SECTIONS[note_type]
+    if section is not None:
+        worktree_name = Path.cwd().name
+        session_note = vault_mod.find_session_note(vault, worktree_name=worktree_name)
+        if session_note is None:
+            print(
+                f"note: no active session note found — backlink to {section!r} skipped.",
+                file=sys.stderr,
+            )
+        else:
+            # Use the note's full vault-relative path (minus suffix) so the
+            # wikilink resolves whether the note is flat or YYYY-MM-bucketed —
+            # `[[deferred/<stem>]]` would not resolve once bucketed.
+            rel_link = note_path.relative_to(vault).with_suffix("").as_posix()
+            title_display = args.title
+            backlink = f"- [[{rel_link}]] — {title_display}"
+            frontmatter.patch_section(session_note, section, backlink)
+
+    return 0
+
+
+# ---- seed -------------------------------------------------------------------
+
+def _obsidian_open_uri(abs_path: Path) -> str:
+    """Return an obsidian://open?path=<abs> URI for an absolute note path.
+
+    Mirrors lore-link-server's uri_for(): percent-encodes the path with
+    forward-slashes preserved (safe='/') so the URI is directly openable by
+    macOS `open`.
+    """
+    return "obsidian://open?path=" + quote(str(abs_path), safe="/")
+
+
+def _open_in_obsidian(abs_path: Path) -> tuple[bool, str]:
+    """Hand an obsidian:// URI to the opener. Returns (launched, detail).
+
+    The opener is $LORE_OPEN_BIN (for tests) else macOS `open`. The default
+    `open` is gated to darwin; an explicit override is trusted on any platform
+    so the launch path stays testable. When the opener is unavailable the note
+    is still on disk — we never fail the command over a missed launch.
+    """
+    opener = os.environ.get("LORE_OPEN_BIN", "").strip() or "open"
+    uri = _obsidian_open_uri(abs_path)
+
+    if opener == "open" and sys.platform != "darwin":
+        return False, f"not darwin ({sys.platform}); open it manually: {abs_path}"
+    if shutil.which(opener) is None and not Path(opener).is_file():
+        return False, f"opener {opener!r} not found; open it manually: {abs_path}"
+
+    subprocess.run([opener, uri], shell=False, check=False)
+    return True, uri
+
+
+def cmd_seed(args: argparse.Namespace) -> int:
+    """Scaffold an inbox capture named <slug> and open it in Obsidian.
+
+    Idempotent: the note is keyed by name alone (no date prefix), so if a note
+    for this name already exists it is opened as-is, never overwritten. The
+    note carries minimal frontmatter (type: inbox, date, status: new) and an H1
+    of the human-readable name.
+    """
+    vault = Path(args.vault).expanduser().resolve() if args.vault else Path(vault_mod.resolve_vault())
+    today = _today()
+
+    note_dir = vault / "inbox"
+    note_dir.mkdir(parents=True, exist_ok=True)
+    note_path = note_dir / f"{_kebab(args.name)}.md"
+
+    if note_path.exists():
+        print(f"Exists: {note_path}")
+    else:
+        template_path = TEMPLATES_DIR / "inbox.md"
+        if not template_path.is_file():
+            print(f"error: template not found: {template_path}", file=sys.stderr)
+            return 1
+        rendered = _render_template(template_path, {"date": today, "name": args.name})
+        note_path.write_text(rendered)
+        print(f"Created: {note_path}")
+
+    if args.no_open:
+        return 0
+
+    launched, detail = _open_in_obsidian(note_path)
+    if launched:
+        print(f"Opened in Obsidian: {detail}")
+    else:
+        print(f"note: {detail}", file=sys.stderr)
+    return 0
+
+
+# ---- init -------------------------------------------------------------------
+
+def _is_under_home(target: Path) -> bool:
+    home = Path.home().resolve()
+    try:
+        target.relative_to(home)
+        return True
+    except ValueError:
+        return False
+
+
+def _planned_tree(target: Path) -> str:
+    lines = [f"{target}/"]
+    for d in TAXONOMY:
+        lines.append(f"  {d}/")
+    lines.append("  .templates/")
+    for doc in STARTER_DOCS:
+        lines.append(f"  {doc}")
+    lines.append("  harvest-pending.md")
+    return "\n".join(lines)
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    target = Path(args.path).expanduser().resolve()
+
+    if not _is_under_home(target) and not args.allow_outside_home:
+        print(
+            f"error: refusing to init outside $HOME: {target}\n"
+            "pass --allow-outside-home to override.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if target.exists() and any(target.iterdir()) and not args.force:
+        print(
+            f"error: refusing to init a non-empty directory: {target}\n"
+            "pass --force to scaffold into it anyway (existing files are kept).",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("Planned vault layout:")
+    print(_planned_tree(target))
+    print()
+
+    if not args.yes:
+        try:
+            answer = input(f"Create this vault at {target}? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Aborted; nothing written.", file=sys.stderr)
+            return 1
+
+    # Scaffold.
+    target.mkdir(parents=True, exist_ok=True)
+    for d in TAXONOMY:
+        (target / d).mkdir(exist_ok=True)
+
+    templates_out = target / ".templates"
+    templates_out.mkdir(exist_ok=True)
+    if TEMPLATES_DIR.is_dir():
+        for item in sorted(TEMPLATES_DIR.iterdir()):
+            if item.name == ".gitkeep":
+                continue
+            dest = templates_out / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dest)
+
+    for doc in STARTER_DOCS:
+        src = STARTER_DIR / doc
+        (target / doc).write_text(src.read_text())
+
+    (target / "harvest-pending.md").write_text(
+        "# Harvest pending\n\n"
+        "Staging area for harvest candidates emitted by subagents. The session "
+        "wrap-up ritual reads and clears this file.\n"
+    )
+
+    # Git-init the vault if it isn't already a git repo.
+    git_dir = target / ".git"
+    if not git_dir.is_dir():
+        result = subprocess.run(
+            ["git", "init", str(target)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            print(f"warning: git init failed: {result.stderr.strip()}", file=sys.stderr)
+        else:
+            print(f"Initialized git repo at {target}")
+
+    # Install the pre-commit status guard.
+    installer = PLUGIN_ROOT / "hooks" / "install-vault-hooks.sh"
+    if installer.is_file():
+        env = dict(os.environ)
+        env["LORE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
+        result = subprocess.run(
+            ["bash", str(installer), str(target)],
+            capture_output=True, text=True, env=env,
+        )
+        if result.returncode != 0:
+            print(f"warning: guard install failed: {result.stderr.strip()}", file=sys.stderr)
+        else:
+            print(result.stdout.strip())
+
+    print(f"\nInitialized lore vault at {target}\n")
+    print(f"export LORE_VAULT={target}")
+    print(
+        "Add that line to your shell profile. Without LORE_VAULT set, lore "
+        "uses the default ~/lore instead of this vault."
+    )
+    return 0
+
+
+# ---- patch ------------------------------------------------------------------
+
+def cmd_patch(args: argparse.Namespace) -> int:
+    path = Path(args.file).expanduser()
+    if not path.is_file():
+        print(f"error: no such file: {path}", file=sys.stderr)
+        return 1
+    text = args.text if args.text is not None else sys.stdin.read()
+    if text == "":
+        print("error: no text to append (pass --text or pipe via stdin)", file=sys.stderr)
+        return 1
+    frontmatter.patch_section(path, args.section, text)
+    return 0
+
+
+# ---- set-status -------------------------------------------------------------
+
+def cmd_set_status(args: argparse.Namespace) -> int:
+    path = Path(args.file).expanduser()
+    if not path.is_file():
+        print(f"error: no such file: {path}", file=sys.stderr)
+        return 1
+    meta = frontmatter.parse_frontmatter(path)
+    note_type = meta.get("type")
+    if not status_validator.is_valid_status(note_type, args.value):
+        permitted = status_validator.permitted_statuses(note_type)
+        permitted_str = sorted(permitted) if permitted else "(unconstrained)"
+        print(
+            f"error: status {args.value!r} is not canonical for type {note_type!r}\n"
+            f"  permitted: {permitted_str}",
+            file=sys.stderr,
+        )
+        return 1
+    if not frontmatter.set_status(path, args.value):
+        print(f"error: {path} has no frontmatter block", file=sys.stderr)
+        return 1
+    return 0
+
+
+# ---- sync -------------------------------------------------------------------
+
+DEFAULT_SYNC_MSG = "lore: sync vault"
+
+
+def _git(vault: Path, *args: str) -> tuple[int, str, str]:
+    """Run a git command in the vault. Returns (returncode, stdout, stderr)."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(vault), *args],
+            capture_output=True, text=True, timeout=60,
+        )
+        return result.returncode, (result.stdout or "").strip(), (result.stderr or "").strip()
+    except Exception as e:
+        return 1, "", f"{type(e).__name__}: {e}"
+
+
+def _vault_is_git_toplevel(vault: Path) -> bool:
+    rc, out, _ = _git(vault, "rev-parse", "--show-toplevel")
+    if rc != 0 or not out:
+        return False
+    try:
+        return Path(out).resolve() == vault.resolve()
+    except Exception:
+        return False
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    vault = Path(vault_mod.resolve_vault())
+
+    if not vault.exists():
+        print(f"error: vault not found: {vault}", file=sys.stderr)
+        return 1
+
+    if not _vault_is_git_toplevel(vault):
+        print(
+            f"error: vault is not its own git toplevel: {vault}\n"
+            "  (vault may be a subdirectory of a larger repo, or not a git repo)\n"
+            "  Aborting — refusing to operate on the wrong tree.",
+            file=sys.stderr,
+        )
+        return 1
+
+    message = getattr(args, "message", None) or DEFAULT_SYNC_MSG
+
+    # Stage everything.
+    rc, _, stderr = _git(vault, "add", "-A")
+    if rc != 0:
+        print(f"error: git add failed: {stderr}", file=sys.stderr)
+        return 1
+
+    # Check if there's anything to commit.
+    rc, status_out, _ = _git(vault, "status", "--porcelain")
+    if rc != 0 or not status_out.strip():
+        print("Nothing to commit — vault is clean.")
+        return 0
+
+    # Commit — never pass -S or --no-gpg-sign; honor adopter's commit.gpgsign.
+    rc, _, stderr = _git(vault, "commit", "-m", message)
+    if rc != 0:
+        print(f"error: git commit failed: {stderr}", file=sys.stderr)
+        return 1
+    print(f"Committed: {message}")
+
+    # Push to origin if it exists.
+    rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
+    if rc_remote != 0 or not remote_url:
+        print("No origin remote — skipping push.")
+        return 0
+
+    rc_push, _, stderr_push = _git(vault, "push", "origin")
+    if rc_push != 0:
+        print(
+            f"notice: committed locally; push failed — re-run `lore sync` when online",
+            file=sys.stderr,
+        )
+        print(f"  push error: {stderr_push}", file=sys.stderr)
+        return 0
+    print("Pushed to origin.")
+    return 0
+
+
+# ---- finish -----------------------------------------------------------------
+
+def _get_current_status(note: Path) -> str | None:
+    """Return the current status value from a note's frontmatter, or None."""
+    try:
+        fm = frontmatter.parse_frontmatter(note)
+        status = fm.get("status")
+        return str(status) if status is not None else None
+    except Exception:
+        return None
+
+
+def _commit_and_push_session_note(vault: Path, session_note: Path, worktree_name: str, verb: str) -> int:
+    """Stage, commit, and push a single session note. Returns exit code."""
+    if not vault.exists():
+        print(f"notice: vault not found: {vault} — skipping commit.", file=sys.stderr)
+        return 0
+
+    if not _vault_is_git_toplevel(vault):
+        print(
+            "notice: vault is not its own git toplevel — skipping commit.",
+            file=sys.stderr,
+        )
+        return 0
+
+    rc, _, stderr = _git(vault, "add", "--", str(session_note))
+    if rc != 0:
+        print(f"error: git add failed: {stderr}", file=sys.stderr)
+        return 1
+
+    rc, status_out, _ = _git(vault, "status", "--porcelain")
+    if rc != 0 or not status_out.strip():
+        print("Nothing to commit — vault is clean.")
+        return 0
+
+    message = f"session: {verb} {worktree_name}"
+    rc, _, stderr = _git(vault, "commit", "-m", message)
+    if rc != 0:
+        print(f"error: git commit failed: {stderr}", file=sys.stderr)
+        return 1
+    print(f"Committed: {message}")
+
+    rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
+    if rc_remote != 0 or not remote_url:
+        print("No origin remote — skipping push.")
+        return 0
+
+    rc_push, _, stderr_push = _git(vault, "push", "origin")
+    if rc_push != 0:
+        print(
+            "notice: committed locally; push failed — re-run `lore sync` when online",
+            file=sys.stderr,
+        )
+        print(f"  push error: {stderr_push}", file=sys.stderr)
+        return 0
+    print("Pushed to origin.")
+    return 0
+
+
+def _harvest_expand(vault: Path, session_note: Path) -> harvest_mod.ExpansionResult | None:
+    """Expand harvest-pending + the session note's candidates block to disk.
+
+    Writes the expanded notes (idempotent by harvest-hash) but does NOT touch
+    the pending file or git — the caller folds the pending rewrite into the
+    same atomic commit. Returns None when there is no pending file to read.
+    """
+    pending = vault / "harvest-pending.md"
+    pending_text = pending.read_text(encoding="utf-8") if pending.exists() else ""
+    try:
+        session_text = session_note.read_text(encoding="utf-8")
+    except Exception:
+        session_text = ""
+
+    project = vault_mod.resolve_project()
+    return harvest_mod.expand(
+        vault=vault,
+        pending_text=pending_text,
+        session_text=session_text,
+        templates_dir=TEMPLATES_DIR,
+        today=_today(),
+        project=project,
+    )
+
+
+def _report_harvest(result: harvest_mod.ExpansionResult) -> None:
+    for path in result.written:
+        print(f"Harvested: {path}")
+    for warning in result.warnings:
+        print(warning, file=sys.stderr)
+    if result.gotchas:
+        print("Surfaced gotchas (not expanded — patch via /lore:area):")
+        for g in result.gotchas:
+            print(f"  - gotcha: {g.body}")
+
+
+def _finish_commit(
+    vault: Path,
+    session_note: Path,
+    pending: Path,
+    new_notes: list[Path],
+    worktree_name: str,
+) -> int:
+    """Stage explicit paths + commit the session note, new notes, and pending
+    in a SINGLE commit. Never `git add -A`. On commit failure the notes remain
+    on disk and the (unrewritten) pending still holds the entries, so a re-run
+    re-expands cleanly (dedup-by-hash). Returns exit code."""
+    if not vault.exists() or not _vault_is_git_toplevel(vault):
+        print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
+        return 0
+
+    paths = [str(session_note)] + [str(p) for p in new_notes]
+    if pending.exists():
+        paths.append(str(pending))
+
+    rc, _, stderr = _git(vault, "add", "--", *paths)
+    if rc != 0:
+        print(f"error: git add failed: {stderr}", file=sys.stderr)
+        return 1
+
+    rc, _, _ = _git(vault, "diff", "--cached", "--quiet")
+    if rc == 0:
+        print("Nothing to commit — index is clean.")
+        return 0
+
+    message = f"session: finalize {worktree_name}"
+    rc, _, stderr = _git(vault, "commit", "-m", message)
+    if rc != 0:
+        print(f"error: git commit failed: {stderr}", file=sys.stderr)
+        return 1
+    print(f"Committed: {message}")
+
+    rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
+    if rc_remote != 0 or not remote_url:
+        print("No origin remote — skipping push.")
+        return 0
+    rc_push, _, stderr_push = _git(vault, "push", "origin")
+    if rc_push != 0:
+        print("notice: committed locally; push failed — re-run `lore sync` when online", file=sys.stderr)
+        print(f"  push error: {stderr_push}", file=sys.stderr)
+        return 0
+    print("Pushed to origin.")
+    return 0
+
+
+def cmd_finish(args: argparse.Namespace) -> int:
+    """Finalize the active session note for the current worktree.
+
+    Resolves the session note via `vault.resolve_session_note()` — exact
+    session-id match first (so the *current* session's note is finalized even
+    when several exist for this worktree), then a worktree-name fallback. Sets
+    `status: complete` and `ended:` (atomic write), then expands the in-scope
+    harvest-pending entries + the note's `## Harvest candidates` block into full
+    vault notes and commits the session note + new notes + the rewritten pending
+    in ONE commit (explicit paths only). `gotcha` entries are surfaced (not
+    expanded) and left in pending; malformed lines are retained + warned. On
+    commit failure the notes are on disk and pending is restored, so a re-run
+    re-expands idempotently. If no active session note is found, prints a notice
+    and exits 0.
+    """
+    vault = Path(vault_mod.resolve_vault())
+    session_id = _session_id_from_args_or_env(args)
+    worktree_name = args.worktree or vault_mod.detect_worktree_name()
+
+    session_note = vault_mod.resolve_session_note(
+        vault, session_id=session_id, worktree_name=worktree_name
+    )
+    if session_note is None:
+        print(
+            f"notice: no active session note found for worktree {worktree_name!r} — "
+            "nothing to finalize.",
+        )
+        return 0
+
+    now_iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ok = sessions_mod.finalize_note(session_note, now_iso)
+    if ok:
+        print(f"Finalized: {session_note.name}")
+    else:
+        # Already terminal. Still attempt harvest expansion: a prior finish may
+        # have finalized the note but failed to commit the harvest (e.g. a
+        # failed commit), leaving pending entries to recover. If there is no
+        # pending work, the expansion + commit are both no-ops.
+        current_status = _get_current_status(session_note)
+        label = current_status if current_status else "terminal"
+        print(f"notice: already {label} — checking for unharvested pending entries.")
+
+    # Expand harvest entries to disk FIRST (notes survive a failed commit).
+    result = _harvest_expand(vault, session_note)
+    if result is not None:
+        _report_harvest(result)
+
+    if not _vault_is_git_toplevel(vault):
+        # Non-git vault: status is set, notes are written, but no commit.
+        print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
+        return 0
+
+    # Rewrite pending to drop consumed entries — but ONLY as part of the same
+    # commit. We write it to disk here, then stage+commit; if the commit fails,
+    # the consumed entries were already cleared from the working tree, so we
+    # restore the file on failure to keep the entries recoverable.
+    pending = vault / "harvest-pending.md"
+    pending_before = pending.read_text(encoding="utf-8") if pending.exists() else None
+    if result is not None and result.consumed_hashes and pending_before is not None:
+        pending.write_text(
+            harvest_mod.rewrite_pending(pending_before, result.consumed_hashes),
+            encoding="utf-8",
+        )
+
+    new_notes = result.written if result is not None else []
+    rc = _finish_commit(vault, session_note, pending, new_notes, worktree_name)
+    if rc != 0 and pending_before is not None:
+        # Commit failed: restore pending so no entry is lost; notes stay on disk
+        # and a clean re-run re-expands idempotently (dedup-by-hash).
+        pending.write_text(pending_before, encoding="utf-8")
+    return rc
+
+
+# ---- handoff ----------------------------------------------------------------
+
+def cmd_handoff(args: argparse.Namespace) -> int:
+    """Shelve the active session note for the current worktree.
+
+    Mirrors `lore finish` but writes ``status: shelved`` instead of
+    ``status: complete``.  Idempotent: when the note is already in a
+    terminal status, prints a notice and returns 0 without committing.
+
+    When ``--pickup-hints-file`` is given, the file's content is written
+    under a ``## Pickup hints`` section of the session note BEFORE shelving
+    (atomic: hints + shelve happen together, never hints-only).  If the note
+    is already terminal, the idempotency guard fires BEFORE writing hints so
+    an already-shelved note is never double-written.
+
+    Resolves the note via `vault.resolve_session_note()` (session-id first,
+    worktree-name fallback) so the *current* session's note is shelved.
+    """
+    vault = Path(vault_mod.resolve_vault())
+    session_id = _session_id_from_args_or_env(args)
+    worktree_name = args.worktree or vault_mod.detect_worktree_name()
+
+    session_note = vault_mod.resolve_session_note(
+        vault, session_id=session_id, worktree_name=worktree_name
+    )
+    if session_note is None:
+        print(
+            f"notice: no active session note found for worktree {worktree_name!r} — "
+            "nothing to shelve.",
+        )
+        return 0
+
+    hints_file: Path | None = getattr(args, "pickup_hints_file", None)
+    if hints_file is not None:
+        hints_file = Path(hints_file)
+
+    now_iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ok = sessions_mod.finalize_note(session_note, now_iso, status="shelved")
+    if not ok:
+        current_status = _get_current_status(session_note)
+        label = current_status if current_status else "terminal"
+        print(f"notice: already {label} — nothing to do.")
+        return 0
+
+    if hints_file is not None:
+        try:
+            hints_text = hints_file.read_text()
+        except Exception as exc:
+            print(f"error: cannot read --pickup-hints-file {hints_file}: {exc}", file=sys.stderr)
+            return 1
+        frontmatter.patch_section(session_note, "Pickup hints", hints_text)
+
+    print(f"Shelved: {session_note.name}")
+    return _commit_and_push_session_note(vault, session_note, worktree_name, "shelve")
+
+
+# ---- shelved / resume (pickup surface) --------------------------------------
+
+def _pickup_hints_fragment(note: Path) -> str:
+    """Return a one-line context fragment for a shelved note.
+
+    Prefers the first non-empty line under a ``## Pickup hints`` heading; falls
+    back to the note's ``# `` title line, then the filename stem. Truncated so a
+    list stays scannable. Never raises.
+    """
+    try:
+        text = note.read_text()
+    except Exception:
+        return note.stem
+
+    lines = text.splitlines()
+    in_hints = False
+    for line in lines:
+        if line.strip().lower().startswith("## pickup hints"):
+            in_hints = True
+            continue
+        if in_hints:
+            if line.strip().startswith("## "):
+                break
+            if line.strip():
+                return line.strip()[:80]
+
+    for line in lines:
+        if line.startswith("# "):
+            return line[2:].strip()[:80]
+    return note.stem
+
+
+def _note_timestamp(note: Path) -> str:
+    """Return the note's ended:/started: frontmatter timestamp, or '(no timestamp)'."""
+    try:
+        fm = frontmatter.parse_frontmatter(note)
+    except Exception:
+        return "(no timestamp)"
+    for key in ("ended", "started"):
+        val = fm.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return "(no timestamp)"
+
+
+def cmd_shelved(args: argparse.Namespace) -> int:
+    """List shelved/handoff session notes, most-recent-first.
+
+    Prints each note's path + frontmatter timestamp + a short context fragment
+    (first Pickup-hints line, else the title) so an interactive picker is
+    usable. Optional ``--slug`` narrows to one worktree slug.
+    """
+    vault = Path(vault_mod.resolve_vault())
+    slug = getattr(args, "slug", None)
+    notes = sessions_mod.find_shelved_notes(vault, slug=slug)
+
+    if not notes:
+        if slug:
+            print(f"Nothing shelved for slug {slug!r}.")
+        else:
+            print("Nothing shelved — no notes to resume.")
+        return 0
+
+    for note in notes:
+        ts = _note_timestamp(note)
+        fragment = _pickup_hints_fragment(note)
+        print(f"{note}")
+        print(f"  {ts} — {fragment}")
+    return 0
+
+
+def _resolve_resume_target(vault: Path, target: str) -> Path | None:
+    """Resolve a resume target — an explicit file path OR a worktree slug.
+
+    A path that exists is used directly. Otherwise *target* is treated as a
+    slug and matched against shelved/handoff notes (most-recent-first). Returns
+    None when nothing matches.
+    """
+    as_path = Path(target).expanduser()
+    if as_path.is_file():
+        return as_path
+    matches = sessions_mod.find_shelved_notes(vault, slug=target)
+    return matches[0] if matches else None
+
+
+def _resolve_implicit_resume_target(vault: Path, args: argparse.Namespace) -> Path | None:
+    """Resolve the resume target when no positional was given: exact
+    session-id match (any status — `resume_note` rejects non-shelved notes),
+    else the most-recent shelved note for the worktree (override or detected)."""
+    session_id = _session_id_from_args_or_env(args)
+    if session_id:
+        return vault_mod.find_session_note_by_session_id(vault, session_id)
+    worktree_name = args.worktree or vault_mod.detect_worktree_name()
+    matches = sessions_mod.find_shelved_notes(vault, slug=worktree_name)
+    return matches[0] if matches else None
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Flip a shelved/handoff session note back to active.
+
+    With a positional target, accepts an explicit note path OR a worktree slug.
+    With no target, resolves the current session's shelved note (``--session-id``
+    → ``--worktree`` → auto-detected worktree). On a non-resumable note
+    (active/complete/finalized) prints a clear no-op message and returns 0.
+    A target that resolves to nothing is an error (non-zero).
+    """
+    vault = Path(vault_mod.resolve_vault())
+    if args.target:
+        note = _resolve_resume_target(vault, args.target)
+    else:
+        note = _resolve_implicit_resume_target(vault, args)
+    if note is None:
+        label = args.target or args.worktree or _session_id_from_args_or_env(args) or "current worktree"
+        print(f"error: no shelved note found for {label!r}", file=sys.stderr)
+        return 1
+
+    if sessions_mod.resume_note(note):
+        print(f"Resumed: {note.name} (status: active)")
+        return 0
+
+    current = _get_current_status(note) or "unknown"
+    print(f"notice: {note.name} is not shelved (status: {current}) — nothing to resume.")
+    return 0
+
+
+# ---- review -----------------------------------------------------------------
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """Generate a vault migration-discipline report.
+
+    Outputs a structured markdown report covering: git activity since the
+    last review, action taxonomy drift, graduation candidates, stale area
+    profiles, open deferred items, dead-ends, open radar items, and active
+    lessons. Read-only — the report never mutates the vault.
+    """
+    vault = Path(vault_mod.resolve_vault())
+
+    if not vault.exists():
+        print(f"error: vault not found: {vault}", file=sys.stderr)
+        return 1
+
+    since = review_mod.resolve_since(vault, getattr(args, "since", None))
+    report = review_mod.build_report(vault, since)
+    print(report)
+    return 0
+
+
+# ---- stats ------------------------------------------------------------------
+
+def _count(directory: Path, predicate, recursive: bool = False) -> int:
+    if not directory.is_dir():
+        return 0
+    return sum(
+        1
+        for p in vault_mod.iter_note_paths(directory, recursive=recursive)
+        if predicate(frontmatter.parse_frontmatter(p))
+    )
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    vault = Path(vault_mod.resolve_vault())
+    areas = _count(vault / "areas", lambda fm: True)
+    open_deferred = _count(
+        vault / "deferred",
+        lambda fm: fm.get("status") in ("open", "resurfaced"),
+        recursive=True,
+    )
+    active_lessons = _count(
+        vault / "lessons",
+        lambda fm: fm.get("status", "active") == "active",
+        recursive=True,
+    )
+    dead_ends = _count(
+        vault / "dead-ends", lambda fm: fm.get("type") == "dead-end", recursive=True
+    )
+    sessions = _count(vault / "sessions", lambda fm: fm.get("type") == "session", recursive=True)
+
+    print(f"vault: {vault}")
+    print(f"areas:          {areas}")
+    print(f"open deferred:  {open_deferred}")
+    print(f"active lessons: {active_lessons}")
+    print(f"dead-ends:      {dead_ends}")
+    print(f"sessions:       {sessions}")
+    return 0
+
+
+# ---- session-note -----------------------------------------------------------
+
+def _session_id_from_args_or_env(args: argparse.Namespace) -> str:
+    """Resolve the session id: explicit ``--session-id`` flag wins, else the
+    Claude Code env var (``CLAUDE_CODE_SESSION_ID``, with the legacy
+    ``CLAUDE_SESSION_ID`` name as a fallback)."""
+    sid = getattr(args, "session_id", None)
+    if sid:
+        return sid
+    return (
+        os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CLAUDE_SESSION_ID")
+        or ""
+    )
+
+
+def cmd_session_note(args: argparse.Namespace) -> int:
+    """Print the vault-relative path of the session note for this session.
+
+    Resolution order (see `vault.resolve_session_note`): exact session-id
+    frontmatter match (cwd-independent) → worktree-name fallback (newest by
+    filename timestamp). On a miss, prints a diagnostic listing what was tried
+    to stderr and exits 1, so callers don't invent exploratory `ls`/`git`
+    commands to guess.
+    """
+    vault = Path(vault_mod.resolve_vault())
+    session_id = _session_id_from_args_or_env(args)
+    worktree_name = args.worktree or vault_mod.detect_worktree_name()
+
+    note = vault_mod.resolve_session_note(
+        vault, session_id=session_id, worktree_name=worktree_name
+    )
+    if note is not None:
+        try:
+            print(note.relative_to(vault))
+        except ValueError:
+            print(note)
+        return 0
+
+    print(
+        "lore session-note: no session note resolved.\n"
+        f"  session_id: {session_id or '<unset>'}\n"
+        f"  worktree:   {worktree_name or '<unknown>'}\n"
+        f"  searched:   {vault / 'sessions'}",
+        file=sys.stderr,
+    )
+    return 1
+
+
+# ---- link-server ------------------------------------------------------------
+
+LINK_SERVER_LABEL = "com.lore.link-server"
+_DEFAULT_LINK_PORT = 7777
+_LINK_SERVER_PYTHON = "/usr/bin/python3"
+_LINK_OUT_LOG = "/tmp/lore-link-server.out.log"
+_LINK_ERR_LOG = "/tmp/lore-link-server.err.log"
+
+
+def _link_server_port() -> int:
+    """Resolve the link-server port — $LORE_LINK_PORT (valid int) else 7777.
+
+    Mirrors lore-link-server's resolve_port() convention.
+    """
+    raw = os.environ.get("LORE_LINK_PORT", "").strip()
+    if not raw:
+        return _DEFAULT_LINK_PORT
+    try:
+        return int(raw)
+    except ValueError:
+        return _DEFAULT_LINK_PORT
+
+
+def _link_server_guards_ok() -> tuple[bool, str]:
+    """Verify darwin + `open` + Obsidian presence.
+
+    Returns (ok, message). On failure the message is actionable and the caller
+    refuses the install without writing anything.
+    """
+    if sys.platform != "darwin":
+        return False, (
+            f"link-server: requires macOS (darwin); current platform is {sys.platform!r}"
+        )
+    if shutil.which("open") is None:
+        return False, "link-server: `open` not found in PATH; cannot open Obsidian URIs"
+    if not Path("/Applications/Obsidian.app").exists():
+        return False, (
+            "link-server: Obsidian not found at /Applications/Obsidian.app — "
+            "install Obsidian before installing the link-server"
+        )
+    return True, ""
+
+
+def _agent_running(label: str) -> bool:
+    """True iff `launchctl list` shows the agent label."""
+    result = subprocess.run(
+        ["launchctl", "list"], capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        return False
+    return any(label in line for line in result.stdout.splitlines())
+
+
+def _link_server_install(args: argparse.Namespace) -> int:
+    port = _link_server_port()
+
+    # (a) port-in-use precheck FIRST — refuse before writing anything.
+    if link_server.port_in_use(port):
+        # A legacy per-user agent on the same port is the usual culprit; let the
+        # operator name it via $LORE_LINK_OLD_AGENT so the message stays
+        # actionable without baking a machine-specific label into the source.
+        old_agent = os.environ.get("LORE_LINK_OLD_AGENT", "").strip()
+        culprit = (
+            f"a previously-loaded launchd agent ({old_agent})"
+            if old_agent
+            else "another process (e.g. a legacy link-server launchd agent)"
+        )
+        unload_hint = (
+            f"\n  launchctl unload -w ~/Library/LaunchAgents/{old_agent}.plist"
+            if old_agent
+            else "\n  launchctl list   # find what holds the port, then unload it"
+        )
+        print(
+            f"link-server: port {port} in use — likely {culprit} still holding it. Run:"
+            f"{unload_hint}\n"
+            "then re-run `lore link-server install`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # (b) darwin + open + Obsidian guards — hard refuse, no partial install.
+    ok, msg = _link_server_guards_ok()
+    if not ok:
+        print(msg, file=sys.stderr)
+        return 1
+
+    vault = vault_mod.resolve_vault()
+    plugin_root = str(PLUGIN_ROOT)
+    server_script = str(PLUGIN_ROOT / "bin" / "lore-link-server")
+
+    launch_agents_dir = Path(args.launch_agents_dir).expanduser()
+    state_dir = Path(args.state_dir).expanduser()
+    plist_path = launch_agents_dir / f"{LINK_SERVER_LABEL}.plist"
+
+    existing = link_server.read_state(state_dir)
+    if existing and existing.get("vault") == vault and existing.get("port") == port:
+        print(f"link-server: already installed (vault {vault}, port {port}); nothing to do.")
+        return 0
+
+    # (c) render + write plist, then load it.
+    xml = link_server.render_plist(
+        label=LINK_SERVER_LABEL,
+        python=_LINK_SERVER_PYTHON,
+        server_script=server_script,
+        vault=vault,
+        port=port,
+        out_log=_LINK_OUT_LOG,
+        err_log=_LINK_ERR_LOG,
+    )
+    launch_agents_dir.mkdir(parents=True, exist_ok=True)
+    plist_path.write_text(xml)
+
+    # A changed-config re-run must drop the old agent before loading the new one.
+    if existing:
+        subprocess.run(
+            ["launchctl", "unload", "-w", str(plist_path)],
+            capture_output=True, text=True, check=False,
+        )
+    load = subprocess.run(
+        ["launchctl", "load", "-w", str(plist_path)],
+        capture_output=True, text=True, check=False,
+    )
+    if load.returncode != 0:
+        print(
+            f"link-server: launchctl load failed: {load.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # (d) write state ONLY after a successful load.
+    link_server.write_state(state_dir, {
+        "schema": link_server.STATE_SCHEMA,
+        "port": port,
+        "plist_path": str(plist_path),
+        "vault": vault,
+        "plugin_root": plugin_root,
+    })
+    print(f"link-server: installed and loaded ({LINK_SERVER_LABEL}, vault {vault}, port {port}).")
+    return 0
+
+
+def _link_server_uninstall(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir).expanduser()
+    launch_agents_dir = Path(args.launch_agents_dir).expanduser()
+
+    state = link_server.read_state(state_dir)
+    plist_path = (
+        Path(state["plist_path"])
+        if state and state.get("plist_path")
+        else launch_agents_dir / f"{LINK_SERVER_LABEL}.plist"
+    )
+
+    if plist_path.exists():
+        subprocess.run(
+            ["launchctl", "unload", "-w", str(plist_path)],
+            capture_output=True, text=True, check=False,
+        )
+        plist_path.unlink()
+
+    link_server.clear_state(state_dir)
+    print("link-server: uninstalled.")
+    return 0
+
+
+def _link_server_status(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir).expanduser()
+    state = link_server.read_state(state_dir)
+
+    if state is None:
+        # No trustworthy state — fall back to the env-resolved port for the hint.
+        print(f"link-server: not installed (resolved port {_link_server_port()}, no state file).")
+        return 0
+
+    # Prefer the installed port from state; $LORE_LINK_PORT in the current shell
+    # may differ from what the agent was actually installed with.
+    port = state.get("port", _link_server_port())
+    print(f"link-server: installed port {port}")
+    print(f"  state: {link_server.state_path(state_dir)}")
+    for key in ("schema", "port", "plist_path", "vault", "plugin_root"):
+        print(f"    {key}: {state.get(key)}")
+
+    current_root = str(PLUGIN_ROOT)
+    if state.get("plugin_root") != current_root:
+        print(
+            f"link-server: STALE — state plugin_root {state.get('plugin_root')!r} "
+            f"!= current {current_root!r}; reinstall with `lore link-server install`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not _agent_running(LINK_SERVER_LABEL):
+        print(
+            f"link-server: WARNING — state file present but agent {LINK_SERVER_LABEL} "
+            "is NOT running; reinstall with `lore link-server install`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("link-server: running.")
+    return 0
+
+
+def cmd_link_server(args: argparse.Namespace) -> int:
+    if args.action == "install":
+        return _link_server_install(args)
+    if args.action == "uninstall":
+        return _link_server_uninstall(args)
+    return _link_server_status(args)
+
+
+# ---- argparse ---------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="lore", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_init = sub.add_parser("init", help="Scaffold a new vault")
+    p_init.add_argument("path")
+    p_init.add_argument("--force", action="store_true", help="Scaffold into a non-empty dir")
+    p_init.add_argument("--allow-outside-home", action="store_true", help="Allow a target outside $HOME")
+    p_init.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+    p_init.set_defaults(func=cmd_init)
+
+    p_patch = sub.add_parser("patch", help="Append text under a section")
+    p_patch.add_argument("file")
+    p_patch.add_argument("section")
+    p_patch.add_argument("--text", default=None, help="Text to append (else read stdin)")
+    p_patch.set_defaults(func=cmd_patch)
+
+    p_status = sub.add_parser("set-status", help="Validate + set a note's status")
+    p_status.add_argument("file")
+    p_status.add_argument("value")
+    p_status.set_defaults(func=cmd_set_status)
+
+    p_stats = sub.add_parser("stats", help="Print counts for the resolved vault")
+    p_stats.set_defaults(func=cmd_stats)
+
+    p_link = sub.add_parser(
+        "link-server",
+        help="Manage the localhost Obsidian link bridge launchd agent",
+    )
+    p_link.add_argument(
+        "action",
+        choices=["install", "uninstall", "status"],
+        help="install / uninstall / status of the com.lore.link-server agent",
+    )
+    p_link.add_argument(
+        "--launch-agents-dir",
+        dest="launch_agents_dir",
+        default="~/Library/LaunchAgents",
+        help="Directory to write the launchd plist into (default: ~/Library/LaunchAgents)",
+    )
+    p_link.add_argument(
+        "--state-dir",
+        dest="state_dir",
+        default="~/.config/lore",
+        help="Directory for the install-state file (default: ~/.config/lore)",
+    )
+    p_link.set_defaults(func=cmd_link_server)
+
+    p_session_note = sub.add_parser(
+        "session-note",
+        help="Print the session note path for this session (id-first, worktree fallback)",
+    )
+    p_session_note.add_argument(
+        "--session-id",
+        dest="session_id",
+        default=None,
+        help="Session id to resolve (default: $CLAUDE_CODE_SESSION_ID)",
+    )
+    p_session_note.add_argument(
+        "--worktree",
+        default=None,
+        help="Worktree name for the fallback (default: auto-detected)",
+    )
+    p_session_note.set_defaults(func=cmd_session_note)
+
+    p_sync = sub.add_parser("sync", help="Stage, commit, and push the vault")
+    p_sync.add_argument(
+        "--message", "-m", default=None,
+        help=f"Commit message (default: {DEFAULT_SYNC_MSG!r})",
+    )
+    p_sync.set_defaults(func=cmd_sync)
+
+    p_new = sub.add_parser("new", help="Render a template and write a new vault note")
+    p_new.add_argument("type", choices=list(_NOTE_DIRS), help="Note type to create")
+    p_new.add_argument("--title", required=True, help="Title for the note (used in slug)")
+    p_new.add_argument("--vault", default=None, help="Vault path (overrides $LORE_VAULT)")
+    p_new.add_argument("--project", default=None, help="Project name to stamp in frontmatter")
+    # deferred
+    p_new.add_argument("--surfaces", default=None, help="CSV area names this item surfaces on (deferred)")
+    p_new.add_argument("--next-check", dest="next_check", default=None, help="When to next check (deferred)")
+    p_new.add_argument("--revisit-after", dest="revisit_after", default=None, help="Date-bound revisit trigger (deferred)")
+    # dead-end
+    p_new.add_argument("--areas", default=None, help="CSV area names (dead-end, decision)")
+    p_new.add_argument("--tried", default=None, help="Date the approach was tried (dead-end; defaults to today)")
+    p_new.add_argument("--revive-condition", dest="revive_condition", default=None, help="Condition to retry (dead-end)")
+    # radar
+    p_new.add_argument("--source", default=None, help="Where updates appear (radar)")
+    p_new.add_argument("--target", default=None, help="Version or state being waited for (radar)")
+    p_new.add_argument("--check", default=None, help="Check cadence (radar)")
+    # area
+    p_new.add_argument("--keywords", default=None, help="CSV keywords for branch-based recall (area)")
+    p_new.add_argument("--key-files", dest="key_files", default=None, help="CSV key file paths (area)")
+    # plan
+    p_new.add_argument("--related-areas", dest="related_areas", default=None, help="CSV area names (plan)")
+    p_new.add_argument("--related-spec", dest="related_spec", default=None, help="Related spec path or wikilink (plan)")
+    p_new.set_defaults(func=cmd_new)
+
+    p_seed = sub.add_parser(
+        "seed",
+        help="Scaffold an inbox capture (named <name>) and open it in Obsidian",
+    )
+    p_seed.add_argument("name", help="Human-readable name; slugified for the filename")
+    p_seed.add_argument("--vault", default=None, help="Vault path (overrides $LORE_VAULT)")
+    p_seed.add_argument("--no-open", dest="no_open", action="store_true", help="Create the note but don't open Obsidian")
+    p_seed.set_defaults(func=cmd_seed)
+
+    def _add_session_selectors(p: argparse.ArgumentParser) -> None:
+        """Shared overrides for the auto-detected session note."""
+        p.add_argument(
+            "--session-id", dest="session_id", default=None,
+            help="Session id to target (default: $CLAUDE_CODE_SESSION_ID)",
+        )
+        p.add_argument(
+            "--worktree", default=None,
+            help="Worktree name for the fallback (default: auto-detected)",
+        )
+
+    p_finish = sub.add_parser(
+        "finish",
+        help="Finalize the active session note for this worktree",
+    )
+    _add_session_selectors(p_finish)
+    p_finish.set_defaults(func=cmd_finish)
+
+    p_handoff = sub.add_parser(
+        "handoff",
+        help="Shelve the active session note for this worktree (for pickup later)",
+    )
+    _add_session_selectors(p_handoff)
+    p_handoff.add_argument(
+        "--pickup-hints-file",
+        dest="pickup_hints_file",
+        default=None,
+        metavar="PATH",
+        help="File whose content is written under '## Pickup hints' before shelving",
+    )
+    p_handoff.set_defaults(func=cmd_handoff)
+
+    p_shelved = sub.add_parser(
+        "shelved",
+        help="List shelved/handoff session notes (most-recent-first) for pickup",
+    )
+    p_shelved.add_argument(
+        "--slug",
+        default=None,
+        help="Narrow to one worktree slug",
+    )
+    p_shelved.set_defaults(func=cmd_shelved)
+
+    p_resume = sub.add_parser(
+        "resume",
+        help="Flip a shelved/handoff session note back to active",
+    )
+    p_resume.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="Session note path OR worktree slug to resume "
+             "(omit to resume the current session's shelved note)",
+    )
+    _add_session_selectors(p_resume)
+    p_resume.set_defaults(func=cmd_resume)
+
+    p_review = sub.add_parser(
+        "review",
+        help="Generate a vault migration-discipline report",
+    )
+    p_review.add_argument(
+        "--since",
+        default=None,
+        help="Lookback window for activity section (e.g. 7d, 2026-04-01). "
+             "Default: since the most recent review note, or 7 days ago.",
+    )
+    p_review.set_defaults(func=cmd_review)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
