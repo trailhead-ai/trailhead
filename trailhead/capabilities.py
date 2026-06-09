@@ -89,6 +89,7 @@ class Manifest:
     """Parsed and validated representation of a ``capabilities.toml``."""
 
     tool_name: str
+    plugin_root: Path
     base: list[str]
     hooks_json: str | None
     validate: bool
@@ -283,6 +284,7 @@ def load_manifest(manifest_path: Path) -> Manifest:
 
     return Manifest(
         tool_name=tool_name,
+        plugin_root=plugin_root,
         base=base,
         hooks_json=hooks_json,
         validate=should_validate,
