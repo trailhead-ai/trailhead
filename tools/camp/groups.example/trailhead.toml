@@ -15,7 +15,9 @@ name = "trailhead"
 [[members]]
 name = "trailhead"
 repo_root = "/Users/tduffield/code/trailhead"
-bootstrap = ["pip", "install", "-e", "."]
+# trailhead is reached via sys.path (walk-up from cli/camp), not pip install.
+# No build step is needed for import resolution on a fresh git clone.
+bootstrap = []
 
 [branch]
 pattern = "worktree-{slug}"

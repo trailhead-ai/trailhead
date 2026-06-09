@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""bin/trailhead — git-only CLI entry point for the trailhead management tool.
+
+Works on a fresh git clone with no pip install. Puts the repo root on sys.path
+so that `import trailhead` resolves self-relatively, then invokes trailhead.cli.main().
+
+Resolution: this file lives at <repo_root>/bin/trailhead, so the repo root is
+one level up from dirname(__file__).
+
+[project.scripts] trailhead = "trailhead.cli:main" in pyproject.toml is kept
+for optional local dev convenience, but nothing depends on it.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Put the repo root on sys.path so `import trailhead` resolves without pip.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from trailhead.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

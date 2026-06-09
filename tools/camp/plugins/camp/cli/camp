@@ -27,13 +27,13 @@ from pathlib import Path
 # cli/camp → parent is cli/ → parent is plugins/camp/ → scripts/ is a sibling.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-# (b) D-H guard: single import guard. Slice 0 doesn't call trailhead.paths
-# yet, but the guard is in place for Slice 1+ and hook handlers.
-from spine import _check_trailhead_paths_importable  # noqa: E402
+# (b) D-H guard: bootstrap trailhead.paths before any command code runs.
+# _bootstrap walks up from this file to the monorepo root automatically,
+# so this works on a fresh git clone without any pip install.
+from _bootstrap import ensure_trailhead_importable  # noqa: E402
 
-# cli/camp needs paths importable for Slice 1+. For now we warn but continue
-# (--help / --version / --which must work even without it).
-_TRAILHEAD_PATHS_OK = _check_trailhead_paths_importable()
+ensure_trailhead_importable()
+_TRAILHEAD_PATHS_OK = True
 
 from spine import main as _spine_main  # noqa: E402
 
