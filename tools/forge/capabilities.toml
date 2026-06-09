@@ -1,0 +1,56 @@
+# Agent filenames reflect CURRENT on-disk names (council-*, sdd-*).
+# The council→circle / sdd→scout/sdd→trailblazer renames are Step 5 / WS-12,
+# which owns updating this manifest alongside the renames.
+
+[tool]
+name = "forge"
+base = ["skills/handoff", "skills/pickup", "skills/followup"]
+
+[capabilities.planning]
+description = "Turn fuzzy ideas into specs and implementation plans — planner and architect subagents."
+skills = ["skills/planning"]
+agents = ["agents/planner.md", "agents/architect.md"]
+
+[capabilities.execute]
+description = "TDD subagent-driven implementation, slice by slice — assumption-prover and implementer."
+skills = ["skills/subagent-driven-development"]
+agents = ["agents/sdd-assumption-prover.md", "agents/sdd-implementer.md"]
+
+[capabilities.review]
+description = "Structured code review of completed work — code-reviewer subagent dispatched after implementation."
+skills = ["skills/requesting-code-review"]
+agents = ["agents/code-reviewer.md"]
+
+[capabilities.circle]
+description = "Four-lens review panel — builder, reliability, security, and user-advocate perspectives on a diff."
+skills = []
+agents = [
+  "agents/council-advocate.md",
+  "agents/council-builder.md",
+  "agents/council-reliability.md",
+  "agents/council-security.md",
+]
+
+[capabilities.design]
+description = "Design-doc authoring — structured spec and design artifacts (WS-2, folds in later)."
+skills = []
+agents = []
+
+[capabilities.release]
+description = "Release rituals — changelog, tagging, and post-merge housekeeping (WS-3, folds in later)."
+skills = []
+agents = []
+
+[capabilities.helpers]
+description = "Cheap specialist subagents for docs, logs, PRs, research, troubleshooting, tests, and security review."
+skills = []
+agents = [
+  "agents/doc-finder.md",
+  "agents/log-sifter.md",
+  "agents/pr-summarizer.md",
+  "agents/researcher.md",
+  "agents/troubleshooter.md",
+  "agents/test-runner.md",
+  "agents/security-auditor.md",
+  "agents/forge-ping.md",
+]

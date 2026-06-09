@@ -1,0 +1,33 @@
+[tool]
+name = "lore"
+base = ["skills/_shared", "skills/sync", "skills/ping"]
+hooks_json = "hooks/hooks.json"
+
+[capabilities.capture]
+description = "Capture decisions, dead-ends, deferrals, radar items, area notes, and intake seeds into the vault."
+skills = [
+  "skills/decision",
+  "skills/dead-end",
+  "skills/defer",
+  "skills/radar",
+  "skills/check-radar",
+  "skills/area",
+  "skills/seed",
+  "skills/brainstorm",
+]
+agents = []
+
+[capabilities.recall]
+description = "Surface, re-justify, and synthesize accumulated vault memory — reviews, reflections, and lore-librarian lookups."
+skills = ["skills/review", "skills/reflect"]
+agents = ["agents/lore-librarian.md"]
+
+[capabilities.sessions]
+description = "Session lifecycle — checkpoint mid-session state and finalize on close."
+skills = ["skills/checkpoint", "skills/finished"]
+agents = []
+
+[capabilities.shared-vaults]
+description = "Layered personal + shared vaults — compose lore across team members (WS-9, not yet built)."
+skills = []
+agents = []
