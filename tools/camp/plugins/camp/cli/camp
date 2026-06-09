@@ -12,6 +12,10 @@ Two orthogonal import chains, kept distinct (D-H / Slice 0):
 
 D-I: camp --version / --which prints the resolved binary path; camp prints
 a not-on-PATH warning if its own bin/ dir isn't on $PATH.
+
+Slice 2: group-aware command routing. The CLI loads the group config from
+cwd (or --group override) and routes lifecycle commands through the central
+manifest + reconcile functions.
 """
 from __future__ import annotations
 
@@ -53,11 +57,85 @@ def _not_on_path_warning() -> None:
 def _cmd_version() -> None:
     print(f"camp {_VERSION}")
     print(f"binary: {_SELF}")
-    print("group: (resolved in Slice 1)")
+    # Attempt group resolution for --version header (D-I)
+    try:
+        _print_active_group()
+    except Exception:
+        print("group: (not resolved)")
+
+
+def _print_active_group() -> None:
+    """Print active group if resolvable from cwd."""
+    from group_config import load_all_groups, GroupConfigError
+    from group_resolve import (
+        resolve_from_cwd,
+        GroupResolutionError,
+        central_state_dir,
+    )
+    import trailhead.paths as _paths
+
+    config_dir = _paths.config_dir("camp") / "groups"
+    try:
+        configs = load_all_groups(config_dir)
+        group_name, slug = resolve_from_cwd(Path.cwd(), configs)
+        print(f"group: {group_name}" + (f" (slug: {slug})" if slug else " (fleet view)"))
+    except (GroupResolutionError, GroupConfigError, Exception):
+        print("group: (not resolved from cwd)")
 
 
 def _cmd_which() -> None:
     print(str(_SELF))
+
+
+def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, str] | None]:
+    """Attempt to load the group config for the current cwd or --group flag.
+
+    Returns (group_config_dict, env) or (None, None) if not resolvable.
+    """
+    if not _TRAILHEAD_PATHS_OK:
+        return None, None
+
+    try:
+        from group_config import load_all_groups, load_group, GroupConfigError, GroupConfigNotFound
+        from group_resolve import (
+            resolve_from_cwd,
+            resolve_group_override,
+            GroupResolutionError,
+        )
+        import trailhead.paths as _paths
+    except ImportError:
+        return None, None
+
+    # Check for --group flag
+    group_override: str | None = None
+    for i, arg in enumerate(argv):
+        if arg == "--group" and i + 1 < len(argv):
+            group_override = argv[i + 1]
+            break
+        if arg.startswith("--group="):
+            group_override = arg[len("--group="):]
+            break
+
+    config_dir = _paths.config_dir("camp") / "groups"
+
+    try:
+        configs = load_all_groups(config_dir)
+        if not configs:
+            return None, None
+
+        if group_override:
+            group = resolve_group_override(group_override, configs)
+        else:
+            group_name, _ = resolve_from_cwd(Path.cwd(), configs)
+            group = next(
+                (c for c in configs if c["group"]["name"] == group_name), None
+            )
+            if group is None:
+                return None, None
+
+        return group, None  # env=None → use os.environ (resolver's default)
+    except Exception:
+        return None, None
 
 
 def main() -> None:
@@ -76,8 +154,404 @@ def main() -> None:
         _cmd_which()
         return
 
-    # Delegate everything else to the spine dispatcher
+    # Strip --dry-run for command dispatch (spine re-checks it)
+    dry_run = "--dry-run" in argv or bool(os.environ.get("CAMP_DRY_RUN"))
+
+    first = argv[0] if argv else None
+
+    # ---------------------------------------------------------------------------
+    # Slice 2: group-aware command routing
+    # ---------------------------------------------------------------------------
+    if first and first not in ("help", "--help", "-h", "doctor", "code",
+                                "foreach", "sweep", "path", "open", "which",
+                                "--version", "version"):
+        group, group_env = _resolve_group_for_command(argv)
+        if group is not None:
+            _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
+            return
+
+    # Delegate everything else to the spine dispatcher (fallback / non-group cmds)
     _spine_main()
+
+
+def _dispatch_group_command(
+    cmd: str,
+    rest: list[str],
+    group: dict,
+    group_env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """Dispatch a group-aware command."""
+    from spine import (
+        _resolve_slug,
+        _consume_flag_value,
+        _die,
+        cmd_help,
+        cmd_path,
+        cmd_code,
+        cmd_foreach,
+        cmd_sweep,
+        cmd_doctor,
+        RESERVED,
+    )
+
+    # Handle slug command (camp <slug>)
+    if cmd not in RESERVED:
+        _cmd_slug_group(cmd, rest, group, group_env, dry_run)
+        return
+
+    if cmd == "status":
+        _cmd_status_group_cli(rest, group, group_env, dry_run)
+    elif cmd == "ls":
+        _cmd_ls_group_cli(rest, group, group_env)
+    elif cmd == "sync":
+        _cmd_sync_group_cli(rest, group, group_env, dry_run)
+    elif cmd == "break":
+        _cmd_break_group_cli(rest, group, group_env, dry_run)
+    elif cmd == "restock":
+        _cmd_restock_group_cli(rest, group, group_env, dry_run)
+    elif cmd == "rebase":
+        _cmd_rebase_group_cli(rest, group, group_env, dry_run)
+    else:
+        # Fall through to spine for non-group commands
+        _spine_main()
+
+
+def _cmd_slug_group(
+    slug_raw: str,
+    extra: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp <slug>: reconcile worktrees then exec claude.
+
+    Decision (D-I integration): camp <slug> calls reconcile_worktree DIRECTLY
+    (so Slice 2 is harness-independent + unit-testable), then execs claude into
+    the primary member's already-created worktree using `claude -r <slug>`.
+    The idempotent reconcile means Slice 3's hook calling it again is a safe no-op.
+    """
+    from spine import _resolve_slug, _dry_run_print
+    from reconcile import reconcile_worktree, format_success_summary
+    from manifest import ManifestError
+
+    slug = _resolve_slug(slug_raw, context="argument")
+    group_name = group["group"]["name"]
+
+    # Primary member = first member in the config
+    members = group["members"]
+    if not members:
+        print(f"camp: group {group_name!r} has no members", file=sys.stderr)
+        sys.exit(1)
+
+    primary = members[0]
+    primary_wt = Path(primary["repo_root"]) / ".claude" / "worktrees" / slug
+
+    if dry_run:
+        print(
+            f"[dry-run] would reconcile_worktree({group_name!r}, {slug!r}) "
+            f"then exec claude in {primary_wt}",
+            file=sys.stderr,
+        )
+        return
+
+    # Reconcile (idempotent create-or-complete)
+    try:
+        result = reconcile_worktree(group, slug, env=env)
+    except Exception as e:
+        print(f"camp: worktree creation failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # D-I: print success summary
+    summary = format_success_summary(result)
+    print(f"camp: {summary}", file=sys.stderr)
+
+    # Exec claude into the primary member's worktree
+    os.chdir(str(primary_wt))
+    cmd = ["claude", "-r", slug, *extra]
+    os.execvp("claude", cmd)
+
+
+def _cmd_status_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp status [--name <slug>] [--json]"""
+    import json as _json
+    from lifecycle_cmds import cmd_status_group
+    from spine import _consume_flag_value
+
+    as_json = "--json" in args
+    filtered = [a for a in args if a != "--json"]
+    name = _consume_flag_value(filtered, "--name")
+
+    try:
+        result = cmd_status_group(group, slug=name, env=env)
+    except Exception as e:
+        print(f"camp status: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if as_json:
+        print(_json.dumps(result))
+        return
+
+    worktrees = result.get("worktrees", [])
+    if not worktrees:
+        print("camp status: no active worktrees — use 'camp <slug>' to create one")
+        return
+
+    print(f"{'SLUG':<24}  {'BRANCH':<30}  MEMBERS")
+    print("-" * 72)
+    for wt in worktrees:
+        slug = wt.get("slug", "?")
+        branch = wt.get("branch", "")
+        members = wt.get("members", [])
+        parts = []
+        for m in members:
+            name_str = m.get("name", "?")
+            if not m.get("present", True):
+                parts.append(f"{name_str}[MISSING]")
+            else:
+                dirty = m.get("dirty_files", 0)
+                ahead = m.get("unpushed_commits", 0)
+                flags = ""
+                if dirty:
+                    flags += f" +{dirty}dirty"
+                if ahead:
+                    flags += f" +{ahead}ahead"
+                parts.append(f"{name_str}{flags}")
+        repo_str = "  ".join(parts) if parts else "(no members)"
+        print(f"{slug:<24}  {branch:<30}  {repo_str}")
+
+
+def _cmd_ls_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+) -> None:
+    """camp ls [--json]"""
+    import json as _json
+    from lifecycle_cmds import cmd_ls_group
+
+    as_json = "--json" in args
+
+    entries = cmd_ls_group(group, env=env)
+
+    if as_json:
+        print(_json.dumps(entries))
+        return
+
+    if not entries:
+        print("camp: no camps — use 'camp <slug>' to create one")
+        return
+
+    header = f"{'SLUG':<24}  {'BRANCH':<36}  GROUP"
+    print(header)
+    print("-" * len(header))
+    for e in entries:
+        print(f"{e['slug']:<24}  {e.get('branch',''):<36}  {e.get('group','')}")
+
+
+def _cmd_sync_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp sync [--force] [--json]"""
+    import json as _json
+    from lifecycle_cmds import cmd_sync_group
+
+    as_json = "--json" in args
+    force = "--force" in args
+
+    if dry_run:
+        print(f"[dry-run] would sync group {group['group']['name']!r}", file=sys.stderr)
+        return
+
+    result = cmd_sync_group(group, force=force, env=env)
+
+    if as_json:
+        print(_json.dumps(result))
+        return
+
+    status = result.get("status", "?")
+    members = result.get("members", {})
+    print(f"camp sync: status={status}")
+    for name, info in members.items():
+        print(f"  {name}: {info.get('action', '?')}")
+
+
+def _cmd_break_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp break [--force] [--name <slug>]"""
+    from reconcile import reconcile_break
+    from spine import _consume_flag_value, _resolve_slug, _die
+    from group_resolve import central_state_dir
+    from manifest import ManifestError
+
+    force = "--force" in args
+    filtered = [a for a in args if a != "--force"]
+    name_flag = _consume_flag_value(filtered, "--name")
+
+    if name_flag is not None:
+        slug = _resolve_slug(name_flag, context="--name")
+    elif filtered:
+        slug = _resolve_slug(filtered[0], context="argument")
+    else:
+        # Try cwd resolution
+        try:
+            from group_resolve import resolve_from_cwd
+            from group_config import load_all_groups
+            import trailhead.paths as _paths
+            config_dir = _paths.config_dir("camp") / "groups"
+            configs = load_all_groups(config_dir)
+            _, slug = resolve_from_cwd(Path.cwd(), configs)
+            if slug is None:
+                _die("camp break: could not determine slug from cwd, pass --name <slug>")
+        except Exception as e:
+            _die(f"camp break: {e}")
+
+    if dry_run:
+        print(f"[dry-run] would break worktree {slug!r} for group {group['group']['name']!r}",
+              file=sys.stderr)
+        return
+
+    try:
+        result = reconcile_break(group, slug, env=env, force=force)
+    except ManifestError as e:
+        _die(f"camp break: {e}")
+    except Exception as e:
+        _die(f"camp break: {e}")
+
+    status = result.get("status", "ok")
+    removed = result.get("removed", [])
+    print(f"camp break: removed worktree {slug!r} ({', '.join(removed)})")
+    if result.get("errors"):
+        print(f"camp break: errors: {result['errors']}", file=sys.stderr)
+
+
+def _cmd_restock_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp restock — re-run bootstrap commands on each canonical member repo."""
+    import json as _json
+    import subprocess
+
+    as_json = "--json" in args
+
+    results: dict = {}
+    errors = 0
+
+    for member in group["members"]:
+        name = member["name"]
+        repo_root = Path(member["repo_root"])
+        bootstrap = member.get("bootstrap") or []
+
+        if not bootstrap:
+            results[name] = {"action": "no-bootstrap"}
+            continue
+
+        if dry_run:
+            print(f"[dry-run] restock {name}: would run {bootstrap}", file=sys.stderr)
+            results[name] = {"action": "dry-run"}
+            continue
+
+        r = subprocess.run(
+            bootstrap,
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if r.returncode == 0:
+            results[name] = {"action": "ok"}
+        else:
+            results[name] = {"action": "error", "error": r.stderr.strip()}
+            errors += 1
+
+    status = "ok" if errors == 0 else "ok_with_warnings"
+    report = {"status": status, "members": results, "errors": errors}
+
+    if as_json:
+        print(_json.dumps(report))
+    else:
+        print(f"camp restock: status={status}")
+        for name, info in results.items():
+            print(f"  {name}: {info.get('action', '?')}")
+
+
+def _cmd_rebase_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp rebase [--onto <branch>] [--name <slug>]"""
+    import subprocess
+    from spine import _consume_flag_value, _resolve_slug, _die
+    from group_resolve import central_state_dir, resolve_from_cwd
+    from manifest import manifest_path_for, read_central_manifest
+
+    filtered = list(args)
+    onto = _consume_flag_value(filtered, "--onto") or "origin/main"
+    name_flag = _consume_flag_value(filtered, "--name")
+
+    if name_flag is not None:
+        slug = _resolve_slug(name_flag, context="--name")
+    else:
+        try:
+            from group_config import load_all_groups
+            import trailhead.paths as _paths
+            config_dir = _paths.config_dir("camp") / "groups"
+            configs = load_all_groups(config_dir)
+            _, slug = resolve_from_cwd(Path.cwd(), configs)
+            if slug is None:
+                _die("camp rebase: could not determine slug from cwd, pass --name <slug>")
+        except Exception as e:
+            _die(f"camp rebase: {e}")
+
+    group_name = group["group"]["name"]
+    mpath = manifest_path_for(group_name, slug, env=env)
+
+    try:
+        mdata = read_central_manifest(mpath)
+    except Exception as e:
+        _die(f"camp rebase: {e}")
+
+    if dry_run:
+        print(f"[dry-run] would rebase worktree {slug!r} onto {onto}", file=sys.stderr)
+        return
+
+    errors = []
+    for m in mdata.get("members", []):
+        wt_path = Path(m["worktree_path"])
+        if not wt_path.is_dir():
+            continue
+        r = subprocess.run(
+            ["git", "-C", str(wt_path), "rebase", onto],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if r.returncode != 0:
+            errors.append(f"{m['name']}: {r.stderr.strip()}")
+
+    if errors:
+        for e in errors:
+            print(f"camp rebase: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"camp rebase: {slug!r} rebased onto {onto}")
 
 
 if __name__ == "__main__":
