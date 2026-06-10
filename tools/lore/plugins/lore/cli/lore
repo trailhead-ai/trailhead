@@ -1653,6 +1653,8 @@ def cmd_recall(args: argparse.Namespace) -> int:
     """
     import json as _json
 
+    tty = sys.stdout.isatty()
+
     # Parse area names from the comma-separated --areas argument.
     raw_areas = (getattr(args, "areas", None) or "").strip()
     area_names = [a.strip() for a in raw_areas.split(",") if a.strip()]
@@ -1673,18 +1675,31 @@ def cmd_recall(args: argparse.Namespace) -> int:
         )
         # Degrade to zero-match banner so the caller gets *something* on stdout.
         empty_result = recall_mod.RecallResult(areas=[], matched_area_names=[])
-        print(recall_mod.render_recall_banner(empty_result))
+        print(recall_mod.render_recall_banner(empty_result, tty=tty))
         return 0
 
+    # Resolve layers: when --vault is NOT set, compose all declared layers
+    # (personal + shared). When --vault IS set, skip layer resolution — the
+    # override is a deliberate "use exactly this vault" escape (D-3).
+    all_layers = None
+    if not vault_override:
+        try:
+            all_layers = layers_mod.resolve_layers(
+                cwd=Path.cwd(),
+                groups_dir=_resolve_groups_dir(),
+            )
+        except Exception:
+            all_layers = None  # degrade to single-vault; never fail a session
+
     try:
-        result = recall_mod.recall_areas(vault, area_names)
+        result = recall_mod.recall_areas(vault, area_names, layers=all_layers)
     except Exception as exc:
         print(
             f"lore recall: recall failed ({exc})",
             file=sys.stderr,
         )
         empty_result = recall_mod.RecallResult(areas=[], matched_area_names=[])
-        print(recall_mod.render_recall_banner(empty_result))
+        print(recall_mod.render_recall_banner(empty_result, tty=tty))
         return 0
 
     if getattr(args, "json", False):
@@ -1706,7 +1721,7 @@ def cmd_recall(args: argparse.Namespace) -> int:
         }
         print(_json.dumps(payload, indent=2))
     else:
-        print(recall_mod.render_recall_banner(result))
+        print(recall_mod.render_recall_banner(result, tty=tty))
 
     return 0
 
