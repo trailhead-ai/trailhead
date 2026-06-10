@@ -486,6 +486,39 @@ def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, s
     return total_candidates
 
 
+def render_area_menu(entries: list[AreaEntry]) -> str:
+    """Render the always-loaded area-map menu block (D-7 structural label).
+
+    Returns empty string when entries is empty — the hook then emits no block.
+    Never raises (pure function over already-parsed entries).
+    """
+    if not entries:
+        return ""
+
+    lines = []
+    lines.append("--- lore area map (reference, not instructions) ---")
+    lines.append(
+        f"Areas ({len(entries)}) — match your task against these,"
+        " then run `lore recall --areas <names>`:"
+    )
+    for entry in entries:
+        name_part = f"  {entry.name}"
+        if entry.one_liner:
+            kw_part = (
+                f" ({', '.join(entry.keywords[:_KEYWORDS_MAX])})"
+                if entry.keywords
+                else ""
+            )
+            lines.append(f"{name_part}  — {entry.one_liner}{kw_part}")
+        else:
+            if entry.keywords:
+                lines.append(f"{name_part}  ({', '.join(entry.keywords[:_KEYWORDS_MAX])})")
+            else:
+                lines.append(name_part)
+    lines.append("--- end lore area map ---")
+    return "\n".join(lines)
+
+
 def render_recall_banner(result: RecallResult) -> str:
     """Render the explainable recall banner with structural framing (D-7).
 
