@@ -71,7 +71,7 @@ def resolve(name: str) -> dict[str, set[str]]:
         return _compute_full()
     valid = ", ".join(sorted(_STATIC_PRESETS.keys()) + ["full"])
     raise PresetError(
-        f"unknown preset {name!r}; valid presets are: minimal, standard, full"
+        f"unknown preset {name!r}; valid presets are: {valid}"
     )
 
 
