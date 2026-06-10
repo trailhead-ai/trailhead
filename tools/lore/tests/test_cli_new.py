@@ -580,6 +580,9 @@ class TestRecallVerb:
         r = run_cli(["recall", "--areas", "anything"], env=env)
         assert r.returncode == 0, f"exit must be 0 even on vault error, got {r.returncode}"
         assert r.stdout.strip() != "", "stdout must have zero-match banner on vault error"
+        assert "lore recall:" in r.stderr, (
+            f"Expected 'lore recall:' stderr signal on vault error, got: {r.stderr!r}"
+        )
 
     def test_recall_differentiated_zero_match_bad_name(self, tmp_path):
         """Unknown area name → mentions 'check' or area name in output (not just blank)."""
