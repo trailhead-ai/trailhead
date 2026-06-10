@@ -38,7 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import frontmatter  # noqa: E402
 import harvest as harvest_mod  # noqa: E402
+import layers as layers_mod  # noqa: E402
 import link_server  # noqa: E402
+import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
 import review as review_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
@@ -93,6 +95,31 @@ _BACKLINK_SECTIONS: dict[str, str | None] = {
     "spec": None,
     "plan": None,
 }
+
+
+def _resolve_groups_dir() -> "Path | None":
+    """Return the camp groups directory, or None if unavailable.
+
+    Checks LORE_GROUPS_DIR first (for tests and overrides), then falls back
+    to trailhead.paths.config_dir("camp")/"groups" via the bootstrap.
+    """
+    env_override = os.environ.get("LORE_GROUPS_DIR", "").strip()
+    if env_override:
+        return Path(env_override)
+    try:
+        import _bootstrap
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+        return _paths.config_dir("camp") / "groups"
+    except (ImportError, SystemExit):
+        return None
+
+
+def _is_tty() -> bool:
+    """Return True if stdin is a real TTY or LORE_SIMULATE_TTY is set (for tests)."""
+    if os.environ.get("LORE_SIMULATE_TTY", "").strip():
+        return True
+    return sys.stdin.isatty()
 
 
 def _kebab(title: str) -> str:
@@ -169,6 +196,30 @@ def cmd_new(args: argparse.Namespace) -> int:
         return 1
 
     vault = Path(args.vault).expanduser().resolve() if args.vault else Path(vault_mod.resolve_vault())
+
+    # D-5: if --vault explicitly points at a shared layer, refuse it.
+    # The raw writer must never reach a shared root.
+    if args.vault:
+        groups_dir = _resolve_groups_dir()
+        try:
+            layers = layers_mod.resolve_layers(
+                cwd=Path.cwd(),
+                groups_dir=groups_dir,
+            )
+        except Exception:
+            layers = []
+        shared_roots = {
+            lay.root.resolve()
+            for lay in layers
+            if lay.kind == "shared"
+        }
+        if vault.resolve() in shared_roots:
+            print(
+                f"error: {args.vault} is a shared vault; "
+                f"use 'lore promote' to write there.",
+                file=sys.stderr,
+            )
+            return 1
     today = _today()
     user = vault_mod.resolve_user()
 
@@ -262,7 +313,20 @@ def cmd_new(args: argparse.Namespace) -> int:
         stem = f"{today}-{_kebab(args.title)}"
         note_path = _unique_path(note_dir, stem)
     note_path.write_text(rendered)
-    print(f"Created: {note_path}")
+
+    # D-4: print [personal] label only when a shared vault is declared.
+    # Resolving layers here is cheap (cached from the D-5 check above when --vault
+    # was passed; resolved fresh otherwise).
+    groups_dir = _resolve_groups_dir()
+    try:
+        all_layers = layers_mod.resolve_layers(cwd=Path.cwd(), groups_dir=groups_dir)
+    except Exception:
+        all_layers = []
+    has_shared = any(lay.kind == "shared" for lay in all_layers)
+    if has_shared:
+        print(f"Created: {note_path} [personal]")
+    else:
+        print(f"Created: {note_path}")
 
     # Backlink to session note (deferred/dead-end/decision only).
     section = _BACKLINK_SECTIONS[note_type]
@@ -284,6 +348,267 @@ def cmd_new(args: argparse.Namespace) -> int:
             frontmatter.patch_section(session_note, section, backlink)
 
     return 0
+
+
+# ---- promote ----------------------------------------------------------------
+
+def cmd_promote(args: argparse.Namespace) -> int:
+    """Copy a personal note into a shared vault, gated by interactive TTY confirm.
+
+    A-1: refused immediately if stdin is not a TTY (or LORE_SIMULATE_TTY not set).
+    D-2: --yes is refused.
+    D-1: actionable error when no shared vault is declared.
+    C-4: overlap blocks promote (unlike recall which degrades).
+    """
+    note_path = Path(args.note).expanduser().resolve()
+
+    # A-1 (FIRST line of cmd_promote, before any I/O / preview / token):
+    # Refuse if stdin is not a real TTY and LORE_SIMULATE_TTY is not set.
+    if not _is_tty():
+        note_arg = str(args.note)
+        to_arg = f" --to {args.to}" if getattr(args, "to", None) else ""
+        print(
+            f"lore: promote refused — stdin is not an interactive terminal.\n"
+            f"The agent cannot self-approve a shared vault write.\n"
+            f"Run this yourself in an interactive terminal:  "
+            f"lore promote {note_arg}{to_arg}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # D-2: --yes is refused.
+    if getattr(args, "yes", False):
+        note_arg = str(args.note)
+        to_arg = f" --to {args.to}" if getattr(args, "to", None) else ""
+        print(
+            f"lore: promote refused — non-interactive promote is not allowed.\n"
+            f"The interactive confirm is mandatory (no --yes path).\n"
+            f"Run this yourself in an interactive terminal:  "
+            f"lore promote {note_arg}{to_arg}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Note must exist.
+    if not note_path.exists():
+        print(
+            f"lore: promote refused — note not found: {note_path}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Resolve layers — using the camp-aware path, NOT the recall degradation path.
+    # C-4: overlap blocks promote (we need an unambiguous target).
+    groups_dir = _resolve_groups_dir()
+    try:
+        all_layers = _resolve_layers_for_promote(groups_dir)
+    except _PromoteOverlapError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"lore: could not resolve layers: {exc}", file=sys.stderr)
+        return 1
+
+    shared_layers = [lay for lay in all_layers if lay.kind == "shared"]
+
+    # D-1: no shared vault declared → actionable error.
+    if not shared_layers:
+        config_path = groups_dir / "*.toml" if groups_dir else Path("~/.config/camp/groups/")
+        # Try to give the actual group config path if we can
+        if groups_dir and groups_dir.exists():
+            toml_files = list(groups_dir.glob("*.toml"))
+            if toml_files:
+                config_path = toml_files[0]
+            else:
+                config_path = groups_dir / "<group>.toml"
+        elif groups_dir:
+            config_path = groups_dir / "<group>.toml"
+        else:
+            config_path = Path("~/.config/camp/groups/<group>.toml")
+
+        print(
+            f"lore: no shared vault declared for this group.\n"
+            f"add a [[shared_vaults]] block to your group config at {config_path}:\n"
+            f"\n"
+            f"    [[shared_vaults]]\n"
+            f'    name = "team"\n'
+            f'    root = "/path/to/team-vault"\n',
+            file=sys.stderr,
+        )
+        return 1
+
+    # Resolve target shared layer.
+    to_name = getattr(args, "to", None)
+    if len(shared_layers) == 1 and not to_name:
+        target_layer = shared_layers[0]
+    elif to_name:
+        matching = [lay for lay in shared_layers if lay.name == to_name]
+        if not matching:
+            available = ", ".join(lay.name for lay in shared_layers)
+            print(
+                f"lore: unknown shared layer {to_name!r}. "
+                f"Available: {available}",
+                file=sys.stderr,
+            )
+            return 1
+        target_layer = matching[0]
+    else:
+        # Multiple shared layers, no --to specified.
+        available = ", ".join(lay.name for lay in shared_layers)
+        print(
+            f"lore: multiple shared vaults declared; specify --to <name>. "
+            f"Available: {available}",
+            file=sys.stderr,
+        )
+        return 1
+
+    dest = target_layer.root / note_path.name
+
+    # Preview (D-5): source, exact destination, WARNING: SHARED prefix.
+    print(f"  Source: {note_path}")
+    print(f"  Destination: {dest}")
+    print(f"  WARNING: writing to SHARED vault [{target_layer.name}]")
+    print()
+
+    # Interactive confirm.
+    try:
+        answer = input("Promote? [y/N] ").strip().lower()
+    except EOFError:
+        answer = ""
+
+    if answer not in ("y", "yes"):
+        print("Aborted; nothing written.")
+        return 0
+
+    # Resolve the token store.
+    token_dir = _resolve_token_dir()
+
+    # Mint token (A-1: tty_confirmed=True because we checked _is_tty() above).
+    try:
+        token = promote_mod.mint_token(
+            token_dir, note_path, target_layer.name, tty_confirmed=True
+        )
+    except promote_mod.PromoteRefusedError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+
+    # Write to shared (the single gated entry point).
+    try:
+        result_dest = promote_mod.write_to_shared(
+            note_path, target_layer, token=token, token_dir=token_dir
+        )
+    except promote_mod.PromoteRefusedError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"lore: promote failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Promoted: {note_path} → [shared:{target_layer.name}] {result_dest}")
+    return 0
+
+
+class _PromoteOverlapError(Exception):
+    """Raised when multiple groups claim the cwd and promote cannot pick one."""
+
+
+def _resolve_layers_for_promote(groups_dir: "Path | None") -> list:
+    """Resolve layers for promote, raising _PromoteOverlapError on group overlap.
+
+    Unlike recall (which degrades on overlap), promote must have an unambiguous
+    target (C-4). This re-runs the discovery but surfaces the overlap rather than
+    swallowing it.
+    """
+    camp_plugin_root = None
+    for _p in (Path(__file__).resolve(), *Path(__file__).resolve().parents):
+        if (_p / "trailhead" / "paths.py").exists():
+            camp_plugin_root = _p / "tools" / "camp" / "plugins"
+            break
+
+    if camp_plugin_root is not None and str(camp_plugin_root) not in sys.path:
+        sys.path.insert(0, str(camp_plugin_root))
+
+    try:
+        import camp.scripts.group_config as _gc
+        import camp.scripts.group_resolve as _gr
+        from camp.scripts.group_config import GroupConfigError
+        from camp.scripts.group_resolve import GroupResolutionError
+    except ImportError:
+        # camp absent — personal-only, no shared vaults.
+        from vault import resolve_vault
+        personal_root = Path(resolve_vault())
+        return [layers_mod.VaultLayer(
+            name="personal", root=personal_root, kind="personal", trusted=True
+        )]
+
+    if groups_dir is None or not groups_dir.exists():
+        from vault import resolve_vault
+        personal_root = Path(resolve_vault())
+        return [layers_mod.VaultLayer(
+            name="personal", root=personal_root, kind="personal", trusted=True
+        )]
+
+    try:
+        group_configs = _gc.load_all_groups(groups_dir)
+    except GroupConfigError as exc:
+        from vault import resolve_vault
+        personal_root = Path(resolve_vault())
+        return [layers_mod.VaultLayer(
+            name="personal", root=personal_root, kind="personal", trusted=True
+        )]
+
+    from vault import resolve_vault
+    personal_root = Path(resolve_vault())
+    personal_layer = layers_mod.VaultLayer(
+        name="personal", root=personal_root, kind="personal", trusted=True
+    )
+
+    if not group_configs:
+        return [personal_layer]
+
+    cwd = Path.cwd()
+    try:
+        group_name, _slug = _gr.resolve_from_cwd(cwd, group_configs)
+    except GroupResolutionError as exc:
+        exc_msg = str(exc)
+        # C-4: overlap blocks promote
+        if "multiple groups" in exc_msg or "multiple" in exc_msg.lower():
+            raise _PromoteOverlapError(exc_msg) from exc
+        # cwd not in any group → no shared vaults
+        return [personal_layer]
+
+    for cfg in group_configs:
+        if cfg["group"]["name"] == group_name:
+            shared_vaults_raw = cfg.get("shared_vaults", [])
+            toml_path = cfg.get("_toml_path", "")
+            layers = [personal_layer]
+            for sv in shared_vaults_raw:
+                sv_name = sv["name"]
+                sv_root_str = sv["root"]
+                sv_root = Path(sv_root_str)
+                if not sv_root.is_absolute() and toml_path:
+                    sv_root = Path(toml_path).parent / sv_root
+                resolved = sv_root.resolve()
+                if resolved.is_dir() and resolved != personal_root.resolve():
+                    layers.append(layers_mod.VaultLayer(
+                        name=sv_name, root=resolved, kind="shared", trusted=False
+                    ))
+            return layers
+
+    return [personal_layer]
+
+
+def _resolve_token_dir() -> Path:
+    """Return the token store directory, using trailhead.paths if available."""
+    try:
+        import _bootstrap
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+        token_dir = _paths.state_dir("lore") / "promote-tokens"
+    except (ImportError, SystemExit):
+        # Fallback: use ~/.local/state/lore/promote-tokens
+        token_dir = Path.home() / ".local" / "state" / "lore" / "promote-tokens"
+    return token_dir
 
 
 # ---- seed -------------------------------------------------------------------
@@ -1480,6 +1805,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--related-areas", dest="related_areas", default=None, help="CSV area names (plan)")
     p_new.add_argument("--related-spec", dest="related_spec", default=None, help="Related spec path or wikilink (plan)")
     p_new.set_defaults(func=cmd_new)
+
+    p_promote = sub.add_parser(
+        "promote",
+        help="Copy a personal note into a shared vault (interactive, TTY-gated)",
+    )
+    p_promote.add_argument(
+        "note",
+        help="Path to the personal note to promote",
+    )
+    p_promote.add_argument(
+        "--to",
+        default=None,
+        help="Name of the target shared layer (required when multiple shared vaults declared)",
+    )
+    p_promote.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,  # Accepted but refused — keeps help clean
+    )
+    p_promote.set_defaults(func=cmd_promote)
 
     p_seed = sub.add_parser(
         "seed",
