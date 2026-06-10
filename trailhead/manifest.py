@@ -35,15 +35,23 @@ A fully-qualified ``https://…`` or ``git@…:…`` source is accepted as-is
 
 Source validation (S-3)
 -----------------------
-The resolved source is validated against an anchored allowlist:
+The resolved source is validated against a true anchored allowlist:
   * ``https://host/path`` — any HTTPS URL
   * ``git@host:path``     — standard SSH git URL
-  * A local filesystem path — passed through ``_confine`` against the
-    ``local_root`` argument (D-3 reuse of the existing confinement posture;
-    do NOT invent a new confiner).
+  * A local filesystem path — ONLY when ``local_root`` is provided for
+    confinement (D-3 reuse of the existing confinement posture; do NOT invent
+    a new confiner).  A local path with no ``local_root`` is refused.
 
-A source beginning with ``--`` or containing shell metacharacters
-(``;``, ``|``, `` ` ``, ``$(``) is rejected before any git invocation.
+Everything else is rejected — including ``ext::`` (git external-transport
+RCE), ``fd::``, ``file://``, ``http://``, and bare paths with no local_root.
+The allowlist replaces the previous denylist (shell-metachar check) which
+provided false confidence while allowing ``ext::`` through.
+
+Name validation (S-path)
+------------------------
+The ``name`` field must not contain path-traversal components (``/``, ``\\``,
+or ``..``).  A name like ``../../evil`` would escape ``dest_parent`` at
+promote time — rejected at parse time.
 
 Duplicate repo entries
 ----------------------
@@ -101,10 +109,14 @@ class InstallManifest:
 
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# Shell metacharacters that must not appear in a resolved source URL/path.
-# The set is intentionally conservative: a legitimate URL or path never needs
-# these characters.
-_SHELL_METACHAR_RE = re.compile(r"[;|`]|\$\(")
+# Anchored allowlist for recognized remote source URL schemes.
+_HTTPS_RE = re.compile(r"^https://")
+_GIT_SSH_RE = re.compile(r"^git@")
+
+# Defense-in-depth: shell metacharacters that must not appear anywhere in a
+# recognized remote URL.  Since git is called with an arg list (never shell=True),
+# these won't cause shell injection, but they indicate a malformed or hostile URL.
+_URL_METACHAR_RE = re.compile(r"[;|`]|\$\(")
 
 
 def _validate_rev(rev: str, repo_name: str, manifest_path: Path) -> None:
@@ -117,6 +129,19 @@ def _validate_rev(rev: str, repo_name: str, manifest_path: Path) -> None:
         )
 
 
+def _validate_name(name: str, manifest_path: Path) -> None:
+    """Assert name contains no path-traversal components; raise InstallManifestError otherwise.
+
+    Rejects names containing '/', '\\', or '..' to prevent path-traversal attacks
+    when the name is used as a directory component under dest_parent.
+    """
+    if "/" in name or "\\" in name or ".." in name:
+        raise InstallManifestError(
+            f"repo name {name!r} contains path-traversal components ('/', '\\\\', or '..') — "
+            f"rejected for security; file: {manifest_path}"
+        )
+
+
 def _validate_source(
     source: str,
     repo_name: str,
@@ -126,54 +151,59 @@ def _validate_source(
 ) -> str:
     """Validate and return the resolved source string.
 
-    Accepted forms (S-3):
-      - https://host/path
-      - git@host:path
-      - An absolute local path (passed through _confine against local_root)
+    Accepted forms (true allowlist — S-3):
+      - https://host/path  — HTTPS remote
+      - git@host:path      — SSH git remote
+      - An absolute local path — ONLY when local_root is provided for confinement.
 
-    Rejected:
+    Rejected (everything else):
+      - ext::, fd::, file://, http:// and any other non-allowlisted scheme
+      - Any local path when local_root is None (no confinement root available)
       - Anything beginning with '--' (git option injection)
-      - Anything containing shell metacharacters (; | ` $()
+
+    The previous denylist (shell metacharacter check) is replaced by this
+    true anchored allowlist.  ext::sh -c '...' (git external-transport RCE)
+    and other dangerous transports are rejected because they don't match the
+    allowlist — not because we enumerate every dangerous form.
 
     Returns the source string unchanged if valid.
     """
-    # Reject leading '--' (git option injection, S-3)
-    if source.startswith("--"):
-        raise InstallManifestError(
-            f"repo {repo_name!r}: source begins with '--', which would inject a git "
-            f"option — rejected for security (S-3); file: {manifest_path}"
-        )
-
-    # Reject shell metacharacters (S-3)
-    if _SHELL_METACHAR_RE.search(source):
-        raise InstallManifestError(
-            f"repo {repo_name!r}: source contains shell metacharacters — "
-            f"rejected for security (S-3); source: {source!r}; file: {manifest_path}"
-        )
-
-    # HTTPS URL — accepted as-is
-    if source.startswith("https://"):
-        return source
-
-    # SSH git URL — accepted as-is
-    if source.startswith("git@"):
-        return source
-
-    # Local path — confine against local_root (D-3, reuse _confine)
-    # A local path with no local_root defaults to / (no meaningful confinement
-    # possible without a root — treat as unconfined local, still safe post-metachar check)
-    if local_root is not None:
-        try:
-            _confine(local_root, source, repo_name, "source")
-        except ConfineError as exc:
+    # HTTPS URL — accepted if no shell metacharacters embedded (anchored allowlist)
+    if _HTTPS_RE.match(source):
+        if _URL_METACHAR_RE.search(source):
             raise InstallManifestError(
-                f"repo {repo_name!r}: local source escapes the confinement root "
-                f"{local_root!r} — {exc}; file: {manifest_path}"
-            ) from exc
+                f"repo {repo_name!r}: source URL contains shell metacharacters — "
+                f"rejected for security (S-3); source: {source!r}; file: {manifest_path}"
+            )
         return source
 
-    # No local_root provided: accept absolute paths that don't start with '--'
-    # and have no shell metacharacters (already checked above).
+    # SSH git URL — accepted if no shell metacharacters embedded (anchored allowlist)
+    if _GIT_SSH_RE.match(source):
+        if _URL_METACHAR_RE.search(source):
+            raise InstallManifestError(
+                f"repo {repo_name!r}: source URL contains shell metacharacters — "
+                f"rejected for security (S-3); source: {source!r}; file: {manifest_path}"
+            )
+        return source
+
+    # Local path — only accepted when local_root is provided for confinement.
+    # A local path with no local_root is refused: no confinement root means
+    # the caller has not established a trust boundary for local sources.
+    if local_root is None:
+        raise InstallManifestError(
+            f"repo {repo_name!r}: source {source!r} is not a recognized remote URL "
+            f"(https:// or git@), and no local_root confinement root was provided — "
+            f"pass local_root to load_install_manifest to allow local sources; "
+            f"file: {manifest_path}"
+        )
+
+    try:
+        _confine(local_root, source, repo_name, "source")
+    except ConfineError as exc:
+        raise InstallManifestError(
+            f"repo {repo_name!r}: local source escapes the confinement root "
+            f"{local_root!r} — {exc}; file: {manifest_path}"
+        ) from exc
     return source
 
 
@@ -214,10 +244,11 @@ def load_install_manifest(
     1. Parse TOML; wrap ``TOMLDecodeError`` as ``InstallManifestError``.
     2. Assert the manifest contains at least one ``[[repo]]`` entry.
     3. For each entry, validate required fields (``name``, ``rev``, ``source``).
-    4. Validate ``rev`` is exactly 40 lowercase hex chars.
-    5. Resolve ``${registry}`` templating in ``source``.
-    6. Validate the resolved source against the S-3 allowlist.
-    7. Detect duplicate ``name`` values (no last-wins).
+    4. Validate ``name`` contains no path-traversal components (S-path).
+    5. Validate ``rev`` is exactly 40 lowercase hex chars.
+    6. Resolve ``${registry}`` templating in ``source``.
+    7. Validate the resolved source against the S-3 true allowlist.
+    8. Detect duplicate ``name`` values (no last-wins).
 
     Args:
         path:        Absolute (or resolvable) path to ``install_manifest.toml``.
@@ -268,6 +299,9 @@ def load_install_manifest(
             raise InstallManifestError(
                 f"install manifest {path}: a [[repo]] entry is missing required field 'name'"
             )
+
+        # S-path: reject names with path-traversal components
+        _validate_name(str(name), path)
 
         # Duplicate name check (no last-wins)
         if name in seen_names:

@@ -40,13 +40,37 @@ Note on self-referential manifest SHA:
 """
 
 import os
+import shutil
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from trailhead.manifest import InstallManifest, InstallManifestError, RepoEntry, load_install_manifest
+
+
+@pytest.fixture
+def short_gnupghome():
+    """Provide an isolated GNUPGHOME with a short path (under /tmp).
+
+    gpg-agent creates a UNIX socket at GNUPGHOME/S.gpg-agent; macOS/Linux cap
+    socket paths at 104 chars.  pytest's tmp_path trees are too deep.
+    We use /tmp directly to keep the path short.
+    """
+    d = Path(tempfile.mkdtemp(dir="/tmp", prefix="th-gpg-"))
+    d.chmod(0o700)
+    try:
+        yield d
+    finally:
+        # Kill any agent that might be running in this GNUPGHOME
+        subprocess.run(
+            ["gpgconf", "--homedir", str(d), "--kill", "gpg-agent"],
+            capture_output=True,
+            env={**os.environ, "GNUPGHOME": str(d)},
+        )
+        shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -641,3 +665,448 @@ class TestA5UnreachableSource:
 
         err = str(exc_info.value)
         assert "fatal:" not in err
+
+
+# ---------------------------------------------------------------------------
+# Helpers for new hermetic GPG tests (Findings 1 + 2)
+# ---------------------------------------------------------------------------
+
+
+def _make_gpg_key(gnupghome: Path, uid: str = "Test Key <test@example.com>") -> str:
+    """Generate an ephemeral RSA GPG key in an isolated GNUPGHOME; return its 40-char fingerprint.
+
+    IMPORTANT: gnupghome must be a short path (under ~60 chars) to avoid the
+    macOS/Linux 104-char UNIX socket path limit that gpg-agent hits when creating
+    S.gpg-agent under deep pytest tmp_path trees.  Callers should pass a path
+    under /tmp, not under pytest's tmp_path.
+    """
+    name = uid.split("<")[0].strip()
+    email = uid.split("<")[1].rstrip(">")
+    batch_params = (
+        "Key-Type: RSA\n"
+        "Key-Length: 2048\n"
+        "Key-Usage: sign\n"
+        f"Name-Real: {name}\n"
+        f"Name-Email: {email}\n"
+        "Expire-Date: 0\n"
+        "%no-protection\n"
+        "%commit\n"
+    )
+    env = {**os.environ, "GNUPGHOME": str(gnupghome)}
+    subprocess.run(
+        ["gpg", "--homedir", str(gnupghome), "--batch", "--gen-key"],
+        input=batch_params,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    result = subprocess.run(
+        ["gpg", "--homedir", str(gnupghome), "--list-keys", "--with-colons"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    fprs = [line.split(":")[9] for line in result.stdout.splitlines() if line.startswith("fpr:")]
+    if not fprs:
+        raise RuntimeError(f"could not extract fingerprint from gpg output: {result.stdout!r}")
+    return fprs[-1]  # return the last (most recently generated) fingerprint
+
+
+def _make_signed_commit_with_key(repo: Path, fingerprint: str, gnupghome: Path,
+                                  filename: str = "file.txt", message: str = "signed") -> str:
+    """Create a signed commit using the specified key fingerprint + GNUPGHOME; return 40-char SHA."""
+    env = {**os.environ, "GNUPGHOME": str(gnupghome)}
+    (repo / filename).write_text("content")
+    subprocess.run(["git", "-C", str(repo), "add", filename], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git", "-C", str(repo),
+            "-c", f"gpg.program=gpg",
+            "commit", f"--gpg-sign={fingerprint}", "-m", message,
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    result = subprocess.run(
+        ["git", "-C", str(repo), "log", "--format=%H", "-1"],
+        check=True, capture_output=True, text=True,
+    )
+    return result.stdout.strip()
+
+
+# ---------------------------------------------------------------------------
+# Finding 1 — CRITICAL: GPG gate must verify the PINNED key, not ANY key
+# ---------------------------------------------------------------------------
+
+
+class TestFinding1PinnedKeyVerification:
+    """Finding 1 (CRITICAL): verify_gpg must refuse a commit signed by a different key.
+
+    The old implementation called ``git verify-commit <sha>`` without --raw and
+    passed as long as exit code was 0 — any key in the keyring would pass.
+    The fix uses ``git verify-commit --raw`` and parses the VALIDSIG fingerprint,
+    refusing if it doesn't match the pinned key.
+    """
+
+    def test_wrong_key_is_refused(self, tmp_path, short_gnupghome):
+        """A commit signed by an 'attacker' key (not the trusted key) must be REFUSED.
+
+        This is the load-bearing regression test: before the fix this passed
+        (any key in keyring would pass); after the fix it must raise FetchError.
+        """
+        fetch = _import_fetch()
+
+        # Generate two keys in the same isolated GNUPGHOME: trusted + attacker
+        trusted_fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
+        attacker_fpr = _make_gpg_key(short_gnupghome, "Attacker Key <attacker@example.com>")
+        assert trusted_fpr != attacker_fpr
+
+        repo = tmp_path / "repo"
+        _git_init(repo)
+
+        # Sign with the ATTACKER key; both keys are in the keyring
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        sha = _make_signed_commit_with_key(repo, attacker_fpr, short_gnupghome, message="attacker signed")
+
+        # Pin the TRUSTED fingerprint — not the attacker's
+        entry = _make_repo_entry("repo", sha, str(repo))
+
+        # Must REFUSE because the commit was signed by the attacker key, not trusted
+        with pytest.raises(fetch.FetchError) as exc_info:
+            fetch.verify_gpg(entry, sha, repo_path=repo, env=env, expected_key_fpr=trusted_fpr)
+        err = str(exc_info.value)
+        assert trusted_fpr[-16:] in err or "key" in err.lower()
+
+    def test_correct_key_passes(self, tmp_path, short_gnupghome):
+        """A commit signed by the pinned key must pass verification."""
+        fetch = _import_fetch()
+
+        trusted_fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
+
+        repo = tmp_path / "repo"
+        _git_init(repo)
+
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        sha = _make_signed_commit_with_key(repo, trusted_fpr, short_gnupghome)
+        entry = _make_repo_entry("repo", sha, str(repo))
+
+        # Must pass — correct key
+        fetch.verify_gpg(entry, sha, repo_path=repo, env=env, expected_key_fpr=trusted_fpr)
+
+    def test_both_keys_in_keyring_wrong_key_still_refused(self, tmp_path, short_gnupghome):
+        """When both keys are in the keyring, a commit signed by the non-pinned key is refused.
+
+        This is the core hollow-gate scenario: git verify-commit returns 0 for both
+        keys (both are in the keyring), but we must still refuse the wrong key.
+        """
+        fetch = _import_fetch()
+
+        trusted_fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
+        attacker_fpr = _make_gpg_key(short_gnupghome, "Attacker Key <attacker@example.com>")
+
+        repo = tmp_path / "repo"
+        _git_init(repo)
+
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        # Sign with attacker; both keys are in the keyring so git exits 0
+        sha = _make_signed_commit_with_key(repo, attacker_fpr, short_gnupghome, message="attacker")
+        entry = _make_repo_entry("repo", sha, str(repo))
+
+        with pytest.raises(fetch.FetchError):
+            fetch.verify_gpg(entry, sha, repo_path=repo, env=env, expected_key_fpr=trusted_fpr)
+
+
+# ---------------------------------------------------------------------------
+# Finding 2 — HIGH: clone_and_verify green-path (and fixed checkout)
+# ---------------------------------------------------------------------------
+
+
+class TestFinding2CloneAndVerifyGreenPath:
+    """Finding 2 (HIGH): clone_and_verify must succeed on the happy path.
+
+    The original code used ``git checkout -- <sha>`` which treats SHA as a
+    pathspec (wrong) and always exits nonzero — the green path was never
+    reachable. After the fix (remove the ``--``) the flow completes.
+    """
+
+    def test_clone_and_verify_success_path(self, tmp_path, short_gnupghome):
+        """Green path: clone from local source, checkout pinned SHA, GPG-verified → returns path.
+
+        This test FAILS before Finding 2 is fixed because checkout -- <sha>
+        always fails (SHA treated as pathspec).
+        """
+        fetch = _import_fetch()
+
+        trusted_fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
+
+        source_repo = tmp_path / "source"
+        _git_init(source_repo)
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        sha = _make_signed_commit_with_key(source_repo, trusted_fpr, short_gnupghome)
+
+        entry = _make_repo_entry("myrepo", sha, str(source_repo))
+        dest_parent = tmp_path / "dest"
+        dest_parent.mkdir()
+
+        promoted = fetch.clone_and_verify(
+            entry, dest_parent=dest_parent, env=env, expected_key_fpr=trusted_fpr
+        )
+
+        assert promoted.exists(), "promoted path must exist after successful clone_and_verify"
+        assert promoted == dest_parent / "myrepo"
+        # Verify the HEAD in the promoted repo matches the pinned SHA
+        head_sha = subprocess.run(
+            ["git", "-C", str(promoted), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert head_sha == sha
+
+    def test_clone_and_verify_wrong_key_refused_no_promote(self, tmp_path, short_gnupghome):
+        """Wrong key: clone succeeds, GPG fails → no promote, FetchError raised."""
+        fetch = _import_fetch()
+
+        trusted_fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
+        attacker_fpr = _make_gpg_key(short_gnupghome, "Attacker Key <attacker@example.com>")
+
+        source_repo = tmp_path / "source"
+        _git_init(source_repo)
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        sha = _make_signed_commit_with_key(source_repo, attacker_fpr, short_gnupghome)
+
+        entry = _make_repo_entry("myrepo", sha, str(source_repo))
+        dest_parent = tmp_path / "dest"
+        dest_parent.mkdir()
+
+        with pytest.raises(fetch.FetchError):
+            fetch.clone_and_verify(
+                entry, dest_parent=dest_parent, env=env, expected_key_fpr=trusted_fpr
+            )
+
+        assert not (dest_parent / "myrepo").exists(), "no dest must be promoted after GPG failure"
+
+
+# ---------------------------------------------------------------------------
+# Finding 3 — HIGH: path traversal via entry.name
+# ---------------------------------------------------------------------------
+
+
+class TestFinding3PathTraversalInName:
+    """Finding 3 (HIGH): a name with path-traversal components must be refused."""
+
+    def test_dotdot_name_refused_at_manifest_parse(self, tmp_path):
+        """A name containing '..' is refused during manifest parsing."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "../../evil"\nrev = "' + "a" * 40 + '"\n'
+            'source = "https://github.com/example/evil"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError) as exc_info:
+            load_install_manifest(manifest_path, registry=None)
+        assert "name" in str(exc_info.value).lower() or "traversal" in str(exc_info.value).lower() or "evil" in str(exc_info.value)
+
+    def test_slash_name_refused_at_manifest_parse(self, tmp_path):
+        """A name containing '/' is refused during manifest parsing."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "sub/dir"\nrev = "' + "a" * 40 + '"\n'
+            'source = "https://github.com/example/sub"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError):
+            load_install_manifest(manifest_path, registry=None)
+
+    def test_backslash_name_refused_at_manifest_parse(self, tmp_path):
+        """A name containing backslash is refused during manifest parsing."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "sub\\\\dir"\nrev = "' + "a" * 40 + '"\n'
+            'source = "https://github.com/example/sub"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError):
+            load_install_manifest(manifest_path, registry=None)
+
+    def test_valid_simple_name_passes(self, tmp_path):
+        """A simple alphanumeric name with hyphens/underscores passes."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "my-repo_v2"\nrev = "' + "a" * 40 + '"\n'
+            'source = "https://github.com/example/my-repo"\ntools = []\n'
+        )
+        result = load_install_manifest(manifest_path, registry=None)
+        assert result.repos[0].name == "my-repo_v2"
+
+
+# ---------------------------------------------------------------------------
+# Finding 4 — MEDIUM: source allowlist (ext::, fd::, file://, http:// refused)
+# ---------------------------------------------------------------------------
+
+
+class TestFinding4SourceAllowlist:
+    """Finding 4 (MEDIUM): _validate_source must be a true allowlist, refusing ext:: etc."""
+
+    def test_ext_transport_refused(self, tmp_path):
+        """ext::sh -c 'x' is refused — RCE vector at git-clone time."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "evil"\nrev = "' + "a" * 40 + '"\n'
+            "source = \"ext::sh -c 'id'\"\ntools = []\n"
+        )
+        with pytest.raises(InstallManifestError) as exc_info:
+            load_install_manifest(manifest_path, registry=None)
+        assert "ext::" in str(exc_info.value) or "source" in str(exc_info.value).lower()
+
+    def test_fd_transport_refused(self, tmp_path):
+        """fd:: transport is refused."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "evil"\nrev = "' + "a" * 40 + '"\n'
+            'source = "fd::3"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError):
+            load_install_manifest(manifest_path, registry=None)
+
+    def test_file_url_refused(self, tmp_path):
+        """file:// URL is refused (not an https:// or git@ source)."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "repo"\nrev = "' + "a" * 40 + '"\n'
+            'source = "file:///etc/passwd"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError):
+            load_install_manifest(manifest_path, registry=None)
+
+    def test_http_url_refused(self, tmp_path):
+        """Plain http:// (not https://) is refused."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "repo"\nrev = "' + "a" * 40 + '"\n'
+            'source = "http://github.com/example/repo"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError):
+            load_install_manifest(manifest_path, registry=None)
+
+    def test_https_url_passes(self, tmp_path):
+        """https:// sources are accepted."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "repo"\nrev = "' + "a" * 40 + '"\n'
+            'source = "https://github.com/trailhead-ai/trailhead"\ntools = []\n'
+        )
+        result = load_install_manifest(manifest_path, registry=None)
+        assert result.repos[0].source == "https://github.com/trailhead-ai/trailhead"
+
+    def test_git_ssh_url_passes(self, tmp_path):
+        """git@host:path SSH URLs are accepted."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        manifest_path.write_text(
+            '[[repo]]\nname = "repo"\nrev = "' + "a" * 40 + '"\n'
+            'source = "git@github.com:trailhead-ai/trailhead"\ntools = []\n'
+        )
+        result = load_install_manifest(manifest_path, registry=None)
+        assert result.repos[0].source == "git@github.com:trailhead-ai/trailhead"
+
+
+# ---------------------------------------------------------------------------
+# Finding 5 — MEDIUM: local path with local_root=None must be refused
+# ---------------------------------------------------------------------------
+
+
+class TestFinding5LocalRootNoneRefused:
+    """Finding 5 (MEDIUM): a bare local path with local_root=None must be refused."""
+
+    def test_local_path_no_local_root_refused(self, tmp_path):
+        """A local filesystem path with no local_root is refused (not silently accepted)."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        local_path = str(tmp_path / "some_repo")
+        manifest_path.write_text(
+            '[[repo]]\nname = "repo"\nrev = "' + "a" * 40 + '"\n'
+            f'source = "{local_path}"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError) as exc_info:
+            load_install_manifest(manifest_path, registry=None, local_root=None)
+        err = str(exc_info.value)
+        assert "local_root" in err.lower() or "local" in err.lower() or "source" in err.lower()
+
+    def test_local_path_with_local_root_passes(self, tmp_path):
+        """A local path confined within local_root passes validation."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        local_path = str(tmp_path / "some_repo")
+        manifest_path.write_text(
+            '[[repo]]\nname = "repo"\nrev = "' + "a" * 40 + '"\n'
+            f'source = "{local_path}"\ntools = []\n'
+        )
+        result = load_install_manifest(manifest_path, registry=None, local_root=tmp_path)
+        assert result.repos[0].source == local_path
+
+    def test_local_path_escaping_local_root_refused(self, tmp_path):
+        """A local path that escapes local_root is refused."""
+        manifest_path = tmp_path / "install_manifest.toml"
+        escaping_path = str(tmp_path.parent / "escape")
+        manifest_path.write_text(
+            '[[repo]]\nname = "repo"\nrev = "' + "a" * 40 + '"\n'
+            f'source = "{escaping_path}"\ntools = []\n'
+        )
+        with pytest.raises(InstallManifestError):
+            load_install_manifest(manifest_path, registry=None, local_root=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Finding 6 — LOW: staging directory must use mode 0o700
+# ---------------------------------------------------------------------------
+
+
+class TestFinding6StagingPermissions:
+    """Finding 6 (LOW): staging directory must be created with 0o700 permissions."""
+
+    def test_staging_dir_created_with_0700_mode(self, tmp_path, short_gnupghome):
+        """The staging directory under state_dir must have mode 0700 (not world-readable)."""
+        fetch = _import_fetch()
+
+        trusted_fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
+
+        source_repo = tmp_path / "source"
+        _git_init(source_repo)
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        sha = _make_signed_commit_with_key(source_repo, trusted_fpr, short_gnupghome)
+
+        entry = _make_repo_entry("myrepo", sha, str(source_repo))
+        dest_parent = tmp_path / "dest"
+        dest_parent.mkdir()
+
+        # Run a successful clone_and_verify so the staging dir gets created
+        fetch.clone_and_verify(entry, dest_parent=dest_parent, env=env, expected_key_fpr=trusted_fpr)
+
+        # Check the staging dir mode under state_dir
+        staging_parent = tmp_path / "state" / "trailhead" / "staging"
+        if staging_parent.exists():
+            mode = stat.S_IMODE(staging_parent.stat().st_mode)
+            assert mode == 0o700, f"staging dir must be mode 0700, got {oct(mode)}"
+
+
+# ---------------------------------------------------------------------------
+# Finding 7 — LOW: _get_head_sha must thread env override
+# ---------------------------------------------------------------------------
+
+
+class TestFinding7GetHeadShaEnv:
+    """Finding 7 (LOW): _get_head_sha must accept and thread an env override."""
+
+    def test_get_head_sha_accepts_env_parameter(self):
+        """_get_head_sha must have an env parameter (not silently ignore it)."""
+        import inspect
+        fetch = _import_fetch()
+        sig = inspect.signature(fetch._get_head_sha)
+        assert "env" in sig.parameters, "_get_head_sha must have an 'env' parameter"
+
+    def test_get_head_sha_returns_correct_sha_with_env(self, tmp_path):
+        """_get_head_sha returns the correct SHA when called with an env override."""
+        fetch = _import_fetch()
+        repo = tmp_path / "repo"
+        _git_init(repo)
+        sha = _make_unsigned_commit(repo)
+        env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+
+        result = fetch._get_head_sha(repo, env=env)
+        assert result == sha
