@@ -47,8 +47,9 @@ _ONE_LINER_MAX = 120
 _KEYWORDS_MAX = 8
 _CROSS_CUTTING_MAX = 10  # Cap cross-cutting items; area-overlap items are unlimited
 
-# Recency default (D-1, calibrated by U-3 scout)
-_DEFAULT_RECENCY_DAYS = 90
+# Recency default (D-1 amended: 90-day window returned ~649 items on the dense
+# live vault — basically the whole vault, mostly noise. Tightened to 14 days.)
+_DEFAULT_RECENCY_DAYS = 14
 
 # Inactive lesson statuses (mirrors the old render_subsystem_block contract)
 _INACTIVE_STATUSES = {"graduated", "archived", "resolved", "superseded", "dropped"}
@@ -86,6 +87,8 @@ class RecallResult:
     # Track which requested area names were found in the area map (for
     # differentiated zero-match rendering).
     matched_area_names: list[str] = field(default_factory=list)
+    # Pre-cap cross-cutting candidate count (D-1: shows "N of M" in --json).
+    cross_cutting_total: int = 0
 
     @property
     def count(self) -> int:
@@ -355,7 +358,9 @@ def recall_areas(
     _pull_dead_ends(vault, requested_slugs, _add)
     _pull_lessons(vault, requested_slugs, _add)
     _pull_decisions(vault, requested_slugs, _add)
-    _pull_cross_cutting(vault, requested_slugs, recency_days, project, _add, seen)
+    result.cross_cutting_total = _pull_cross_cutting(
+        vault, requested_slugs, recency_days, project, _add, seen
+    )
 
     return result
 
@@ -428,11 +433,14 @@ def _pull_decisions(vault, requested_slugs, add_fn):
     )
 
 
-def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, seen):
+def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, seen) -> int:
     """Pull recent notes with NO area overlap (cross-cutting, within window).
 
     Capped at _CROSS_CUTTING_MAX items to keep the banner sane on dense vaults
-    (U-3: a 90-day window on a dense vault returns hundreds of notes otherwise).
+    (U-3: a 14-day window prevents the bulk-noise problem seen with 90 days).
+
+    Returns the pre-cap candidate count (total qualifying items, ignoring the
+    cap) so --json can show "showing N of M".
     """
     folders = [
         ("deferred", "deferred", True, False),
@@ -440,16 +448,13 @@ def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, s
         ("lessons", "lesson", False, True),
         ("decisions", "decision", False, True),
     ]
-    count = 0
+    added = 0
+    total_candidates = 0
     for folder_name, item_type, filter_project, skip_proj in folders:
-        if count >= _CROSS_CUTTING_MAX:
-            break
         folder = vault / folder_name
         if not folder.is_dir():
             continue
         for p in sorted(iter_note_paths(folder, recursive=True), key=lambda p: p.name, reverse=True):
-            if count >= _CROSS_CUTTING_MAX:
-                break
             if p in seen:
                 continue
             fm = _fm_mod.parse_frontmatter(p)
@@ -464,6 +469,9 @@ def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, s
                 continue
             if filter_project and not _project_matches(fm, project):
                 continue
+            total_candidates += 1
+            if added >= _CROSS_CUTTING_MAX:
+                continue  # count but don't add
             try:
                 text = p.read_text(encoding="utf-8", errors="replace")
             except Exception:
@@ -474,7 +482,8 @@ def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, s
                 path=p,
                 one_liner=_note_one_liner(text),
             ))
-            count += 1
+            added += 1
+    return total_candidates
 
 
 def render_recall_banner(result: RecallResult) -> str:

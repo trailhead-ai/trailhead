@@ -5,12 +5,12 @@ Covers:
 - Absent flags resolve to valid empty defaults ([], ""), leaving NO literal {{...}} in any note.
 - `deferred --revisit-after` → status: scheduled; without it → status: open.
 - Both status variants pass status_validator.
-- NO literal {{...}} placeholder survives in any written note (all 5 types).
-- INTEGRATION: lore new deferred --surfaces payments + payments subsystem with keywords
-  → infer_subsystems detects payments AND render_subsystem_block surfaces the deferred note.
+- NO literal {{...}} placeholder survives in any written note (all core types).
+- INTEGRATION: lore new deferred --areas auth + auth area + recall banner surfaces the note.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -36,7 +36,7 @@ def run_cli(args, env=None, input_text=None, cwd=None):
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
-    for d in ("deferred", "dead-ends", "decisions", "radar", "subsystems", "sessions"):
+    for d in ("deferred", "dead-ends", "decisions", "radar", "areas", "sessions"):
         (vault / d).mkdir(parents=True)
     return vault
 
@@ -184,24 +184,24 @@ class TestNewDeferredFlags:
 
 
 # ---------------------------------------------------------------------------
-# Dead-end: --subsystems, --tried, --revive-condition
+# Dead-end: --areas, --tried, --revive-condition
 # ---------------------------------------------------------------------------
 
 class TestNewDeadEndFlags:
-    def test_subsystems_csv_becomes_inline_list(self, tmp_path):
+    def test_areas_csv_becomes_inline_list(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
             "new", "dead-end", "--vault", str(vault),
             "--title", "failed approach",
-            "--subsystems", "auth,payments",
+            "--areas", "auth,payments",
         ])
         assert r.returncode == 0, r.stderr
         fm_mod = load_script("frontmatter")
         note = _find_note(vault / "dead-ends")
         fm = fm_mod.parse_frontmatter(note)
-        assert fm["subsystems"] == ["auth", "payments"]
+        assert fm["areas"] == ["auth", "payments"]
 
-    def test_subsystems_absent_defaults_to_empty_list(self, tmp_path):
+    def test_areas_absent_defaults_to_empty_list(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
             "new", "dead-end", "--vault", str(vault),
@@ -211,7 +211,7 @@ class TestNewDeadEndFlags:
         fm_mod = load_script("frontmatter")
         note = _find_note(vault / "dead-ends")
         fm = fm_mod.parse_frontmatter(note)
-        assert fm.get("subsystems") == [] or fm.get("subsystems") is None or fm.get("subsystems") == ""
+        assert fm.get("areas") == [] or fm.get("areas") is None or fm.get("areas") == ""
 
     def test_tried_set_when_provided(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -261,7 +261,6 @@ class TestNewDeadEndFlags:
         fm_mod = load_script("frontmatter")
         note = _find_note(vault / "dead-ends")
         fm = fm_mod.parse_frontmatter(note)
-        # Absent or empty string is fine — must not be a literal placeholder
         val = fm.get("revive-condition", "")
         assert "{{" not in str(val)
 
@@ -270,7 +269,7 @@ class TestNewDeadEndFlags:
         run_cli([
             "new", "dead-end", "--vault", str(vault),
             "--title", "full dead end",
-            "--subsystems", "auth",
+            "--areas", "auth",
             "--tried", "2026-05-01",
             "--revive-condition", "library X v2",
         ])
@@ -286,25 +285,25 @@ class TestNewDeadEndFlags:
 
 
 # ---------------------------------------------------------------------------
-# Decision: --subsystems
+# Decision: --areas
 # ---------------------------------------------------------------------------
 
 class TestNewDecisionFlags:
-    def test_subsystems_csv_becomes_inline_list(self, tmp_path):
+    def test_areas_csv_becomes_inline_list(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
             "new", "decision", "--vault", str(vault),
             "--title", "use postgres",
             "--project", "demo",
-            "--subsystems", "data,infra",
+            "--areas", "data,infra",
         ])
         assert r.returncode == 0, r.stderr
         fm_mod = load_script("frontmatter")
         note = _find_note(vault / "decisions")
         fm = fm_mod.parse_frontmatter(note)
-        assert fm["subsystems"] == ["data", "infra"]
+        assert fm["areas"] == ["data", "infra"]
 
-    def test_subsystems_absent_defaults_to_empty_list(self, tmp_path):
+    def test_areas_absent_defaults_to_empty_list(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
             "new", "decision", "--vault", str(vault),
@@ -315,8 +314,7 @@ class TestNewDecisionFlags:
         fm_mod = load_script("frontmatter")
         note = _find_note(vault / "decisions")
         fm = fm_mod.parse_frontmatter(note)
-        # Empty list, None, or empty string — but not a placeholder
-        val = fm.get("subsystems", [])
+        val = fm.get("areas", [])
         assert "{{" not in str(val)
 
     def test_no_placeholders_with_all_flags(self, tmp_path):
@@ -325,7 +323,7 @@ class TestNewDecisionFlags:
             "new", "decision", "--vault", str(vault),
             "--title", "full decision",
             "--project", "demo",
-            "--subsystems", "auth",
+            "--areas", "auth",
         ])
         _assert_no_placeholders(_find_note(vault / "decisions"))
 
@@ -424,89 +422,17 @@ class TestNewRadarFlags:
 
 
 # ---------------------------------------------------------------------------
-# Subsystem: --key-files
-# ---------------------------------------------------------------------------
-
-class TestNewSubsystemFlags:
-    def test_key_files_csv_becomes_inline_list(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        r = run_cli([
-            "new", "subsystem", "--vault", str(vault),
-            "--title", "auth-module",
-            "--project", "demo",
-            "--key-files", "lib/auth.ex,lib/token.ex",
-        ])
-        assert r.returncode == 0, r.stderr
-        fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "subsystems")
-        fm = fm_mod.parse_frontmatter(note)
-        assert fm["key-files"] == ["lib/auth.ex", "lib/token.ex"]
-
-    def test_key_files_absent_defaults_to_empty_list(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        r = run_cli([
-            "new", "subsystem", "--vault", str(vault),
-            "--title", "auth-module",
-            "--project", "demo",
-        ])
-        assert r.returncode == 0, r.stderr
-        fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "subsystems")
-        fm = fm_mod.parse_frontmatter(note)
-        val = fm.get("key-files", [])
-        assert "{{" not in str(val)
-
-    def test_key_files_and_keywords_together(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        r = run_cli([
-            "new", "subsystem", "--vault", str(vault),
-            "--title", "auth-module",
-            "--project", "demo",
-            "--keywords", "auth,oauth",
-            "--key-files", "lib/auth.ex",
-        ])
-        assert r.returncode == 0, r.stderr
-        fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "subsystems")
-        fm = fm_mod.parse_frontmatter(note)
-        assert fm["keywords"] == ["auth", "oauth"]
-        assert fm["key-files"] == ["lib/auth.ex"]
-
-    def test_no_placeholders_with_all_flags(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        run_cli([
-            "new", "subsystem", "--vault", str(vault),
-            "--title", "full subsystem",
-            "--project", "demo",
-            "--keywords", "auth",
-            "--key-files", "lib/auth.ex",
-        ])
-        _assert_no_placeholders(_find_note(vault / "subsystems"))
-
-    def test_no_placeholders_with_no_flags(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        run_cli([
-            "new", "subsystem", "--vault", str(vault),
-            "--title", "empty subsystem",
-            "--project", "demo",
-        ])
-        _assert_no_placeholders(_find_note(vault / "subsystems"))
-
-
-# ---------------------------------------------------------------------------
-# Vacuous-placeholder gate — NO {{...}} in any written note across all 5 types
+# Vacuous-placeholder gate — NO {{...}} in any written note across all core types
 # ---------------------------------------------------------------------------
 
 class TestNoPlaceholdersAcrossAllTypes:
     """Regression guard: lore new with ZERO optional flags must not leave any
-    literal {{...}} in the written file for any of the 5 note types."""
+    literal {{...}} in the written file for the core note types."""
 
     def _run_and_check(self, vault, args):
         r = run_cli(args)
         assert r.returncode == 0, r.stderr
-        # Find the single note in all subdirs. Date-bucketed types live in
-        # <subdir>/YYYY-MM/; subsystems stays flat — search both layouts.
-        for subdir in ("deferred", "dead-ends", "decisions", "radar", "subsystems"):
+        for subdir in ("deferred", "dead-ends", "decisions", "radar", "areas"):
             d = vault / subdir
             notes = list(d.glob("*.md")) + list(d.glob("*/*.md"))
             for note in notes:
@@ -536,121 +462,135 @@ class TestNoPlaceholdersAcrossAllTypes:
             "new", "radar", "--vault", str(vault), "--title", "test", "--project", "demo",
         ])
 
-    def test_subsystem_no_extra_flags(self, tmp_path):
+    def test_area_no_extra_flags(self, tmp_path):
         vault = _make_vault(tmp_path)
         self._run_and_check(vault, [
-            "new", "subsystem", "--vault", str(vault), "--title", "test", "--project", "demo",
+            "new", "area", "--vault", str(vault), "--title", "test", "--project", "demo",
         ])
 
 
 # ---------------------------------------------------------------------------
-# INTEGRATION TEST: capture→recall end-to-end
+# INTEGRATION TEST: capture→recall end-to-end via `lore recall --areas`
 # ---------------------------------------------------------------------------
 
 class TestCaptureRecallIntegration:
     """The headline integration test: proves that a deferred item captured via
-    `lore new deferred --surfaces payments` resurfaces in recall when the branch
-    name matches the payments subsystem's keywords.
+    `lore new deferred --surfaces auth` resurfaces in recall when the agent
+    calls `lore recall --areas auth`.
 
-    The subsystem profile is created via the REAL CLI (`lore new subsystem`)
-    so this test would have caught the date-prefix bug (Slice 9b): the CLI
-    previously wrote a DATE-prefixed file (2026-06-02-payments.md) whose stem
-    never matched the bare 'payments' name referenced in `surfaces: [payments]`.
+    D23 area-mediated recall replaces the old branch-keyword infer_subsystems
+    / render_subsystem_block approach.
     """
 
     def _make_full_vault(self, tmp_path: Path) -> Path:
         vault = tmp_path / "vault"
-        for d in ("deferred", "dead-ends", "decisions", "radar", "subsystems", "sessions"):
+        for d in ("deferred", "dead-ends", "decisions", "radar", "areas", "sessions",
+                  "lessons"):
             (vault / d).mkdir(parents=True)
         return vault
 
-    def _create_payments_subsystem_via_cli(self, vault: Path) -> None:
-        """Create the payments subsystem profile via the real `lore new subsystem` CLI."""
+    def _create_auth_area_via_cli(self, vault: Path) -> None:
+        """Create the auth area profile via `lore new area`."""
         r = run_cli([
-            "new", "subsystem", "--vault", str(vault),
-            "--title", "payments",
-            "--keywords", "pay",
+            "new", "area", "--vault", str(vault),
+            "--title", "auth",
+            "--keywords", "oauth,login",
         ])
-        assert r.returncode == 0, f"lore new subsystem failed: {r.stderr}"
+        assert r.returncode == 0, f"lore new area failed: {r.stderr}"
 
-    def test_infer_subsystems_includes_payments_on_matching_branch(self, tmp_path):
-        """After `lore new subsystem --title payments --keywords pay`,
-        infer_subsystems on 'feature/pay-flow' must include 'payments' (bare name)."""
+    def test_area_note_created_without_date_prefix(self, tmp_path):
+        """lore new area --title auth must produce areas/auth.md (no date prefix)."""
         vault = self._make_full_vault(tmp_path)
-        self._create_payments_subsystem_via_cli(vault)
-        recall = load_script("recall")
-        result = recall.infer_subsystems(vault, "feature/pay-flow")
-        assert "payments" in result, (
-            f"Expected 'payments' in infer_subsystems result, got {result}"
+        self._create_auth_area_via_cli(vault)
+        notes = list((vault / "areas").glob("*.md"))
+        assert len(notes) == 1
+        assert notes[0].name == "auth.md", (
+            f"Expected auth.md (no date prefix), got {notes[0].name!r}"
         )
 
-    def test_deferred_with_surfaces_appears_in_render_block(self, tmp_path):
-        """After `lore new deferred --surfaces payments`, the written note's
-        wikilink must appear in render_subsystem_block for ['payments']."""
+    def test_deferred_with_surfaces_appears_in_recall_banner(self, tmp_path):
+        """After `lore new deferred --surfaces auth`, `lore recall --areas auth`
+        must surface the deferred note in its banner."""
         vault = self._make_full_vault(tmp_path)
-        self._create_payments_subsystem_via_cli(vault)
+        self._create_auth_area_via_cli(vault)
 
-        # Capture via lore new with --surfaces payments
         r = run_cli([
             "new", "deferred", "--vault", str(vault),
-            "--title", "Fix payment retry logic",
-            "--surfaces", "payments",
+            "--title", "Fix auth retry logic",
+            "--surfaces", "auth",
             "--project", "demo",
         ])
         assert r.returncode == 0, r.stderr + r.stdout
 
-        # The written note should have surfaces: [payments] in frontmatter
         fm_mod = load_script("frontmatter")
         note = _find_note(vault / "deferred")
         fm = fm_mod.parse_frontmatter(note)
-        assert fm.get("surfaces") == ["payments"], (
-            f"Expected surfaces=['payments'], got {fm.get('surfaces')!r}"
+        assert fm.get("surfaces") == ["auth"], (
+            f"Expected surfaces=['auth'], got {fm.get('surfaces')!r}"
         )
 
-        # render_subsystem_block must include the deferred note's wikilink
-        recall = load_script("recall")
-        block = recall.render_subsystem_block(vault, ["payments"], project="demo")
-        assert block is not None, "render_subsystem_block returned None"
+        r_recall = run_cli([
+            "recall", "--areas", "auth", "--vault", str(vault),
+        ])
+        assert r_recall.returncode == 0, f"lore recall failed: {r_recall.stderr}"
+        assert "Recalled (areas:" in r_recall.stdout, (
+            f"Expected banner in stdout, got: {r_recall.stdout!r}"
+        )
         note_stem = note.stem
-        assert note_stem in block, (
-            f"Deferred note {note_stem!r} not found in recall block:\n{block}"
+        assert note_stem in r_recall.stdout, (
+            f"Deferred note {note_stem!r} not found in recall banner:\n{r_recall.stdout}"
         )
 
     def test_full_capture_recall_loop(self, tmp_path):
-        """End-to-end: branch with 'pay' → infer_subsystems finds 'payments' →
-        render_subsystem_block includes the deferred note captured with --surfaces payments.
-        This proves the capture→recall loop closes."""
+        """End-to-end: create area + capture deferred with --surfaces → recall surfaces it."""
         vault = self._make_full_vault(tmp_path)
-        self._create_payments_subsystem_via_cli(vault)
+        self._create_auth_area_via_cli(vault)
 
-        # Step 1: capture a deferred item targeting payments
         r = run_cli([
             "new", "deferred", "--vault", str(vault),
-            "--title", "Fix payment retry logic",
-            "--surfaces", "payments",
+            "--title", "Fix auth retry logic",
+            "--surfaces", "auth",
             "--project", "demo",
         ])
         assert r.returncode == 0, r.stderr
 
-        # Step 2: infer subsystems from branch containing keyword 'pay'
-        recall = load_script("recall")
-        matched = recall.infer_subsystems(vault, "feature/pay-flow")
-        assert "payments" in matched, (
-            f"infer_subsystems('feature/pay-flow') should include 'payments', got {matched}"
-        )
+        r_recall = run_cli([
+            "recall", "--areas", "auth", "--vault", str(vault),
+        ])
+        assert r_recall.returncode == 0, f"lore recall failed: {r_recall.stderr}"
 
-        # Step 3: render the recall block for those subsystems
-        block = recall.render_subsystem_block(vault, matched, project="demo")
-        assert block is not None, "render_subsystem_block returned None for matched subsystems"
-
-        # Step 4: the deferred note's wikilink must be in the block
         note = _find_note(vault / "deferred")
         note_stem = note.stem
-        assert note_stem in block, (
-            f"Capture→recall BROKEN: deferred note {note_stem!r} not found in recall block.\n"
-            f"Block:\n{block}"
+        assert note_stem in r_recall.stdout, (
+            f"Capture→recall BROKEN: deferred note {note_stem!r} not in recall banner.\n"
+            f"stdout:\n{r_recall.stdout}"
         )
-        # Also confirm the "Open deferred items" section exists
-        assert "Open deferred items" in block, (
-            "Expected 'Open deferred items' section in recall block"
+        assert "Recalled (areas:" in r_recall.stdout
+
+    def test_recall_json_count_agrees_with_banner(self, tmp_path):
+        """--json count must equal the N in the human banner."""
+        vault = self._make_full_vault(tmp_path)
+        self._create_auth_area_via_cli(vault)
+
+        run_cli([
+            "new", "deferred", "--vault", str(vault),
+            "--title", "some-deferred-item",
+            "--surfaces", "auth",
+        ])
+
+        r_human = run_cli(["recall", "--areas", "auth", "--vault", str(vault)])
+        r_json = run_cli(["recall", "--areas", "auth", "--vault", str(vault), "--json"])
+        assert r_human.returncode == 0
+        assert r_json.returncode == 0
+
+        data = json.loads(r_json.stdout)
+        json_count = data["count"]
+
+        import re as _re
+        m = _re.search(r"Recalled \(areas:[^)]+\) — (\d+) item", r_human.stdout)
+        assert m, f"No 'Recalled ... — N items' in banner:\n{r_human.stdout}"
+        banner_count = int(m.group(1))
+
+        assert json_count == banner_count, (
+            f"JSON count {json_count} != banner count {banner_count}"
         )

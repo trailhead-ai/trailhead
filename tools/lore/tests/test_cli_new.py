@@ -16,6 +16,7 @@ Run against a temp vault — never reads or writes $LORE_VAULT.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -244,21 +245,21 @@ class TestNewSpec:
                 f"Private token {token!r} found in rendered spec"
             )
 
-    def test_subsystems_flag_populates_frontmatter(self, tmp_path):
+    def test_areas_flag_populates_frontmatter(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
             ["new", "spec", "--vault", str(vault),
              "--title", "Some Topic",
              "--project", "my-project",
-             "--subsystems", "auth, payments"],
+             "--areas", "auth,payments"],
         )
         fm_mod = load_script("frontmatter")
         note = _find_new_note(vault / "specs")
         fm = fm_mod.parse_frontmatter(note)
-        assert fm.get("subsystems") is not None
-        subsystems_str = str(fm["subsystems"])
-        assert "auth" in subsystems_str
-        assert "payments" in subsystems_str
+        assert fm.get("areas") is not None
+        areas_str = str(fm["areas"])
+        assert "auth" in areas_str
+        assert "payments" in areas_str
 
     def test_unknown_type_is_rejected(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -390,20 +391,20 @@ class TestNewPlan:
                 f"Private token {token!r} found in rendered plan"
             )
 
-    def test_related_subsystems_flag_populates_frontmatter(self, tmp_path):
+    def test_related_areas_flag_populates_frontmatter(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
             ["new", "plan", "--vault", str(vault),
              "--title", "Some Topic",
              "--project", "my-project",
-             "--related-subsystems", "auth, payments"],
+             "--related-areas", "auth,payments"],
         )
         fm_mod = load_script("frontmatter")
         note = _find_new_note(vault / "plans")
         fm = fm_mod.parse_frontmatter(note)
-        subsystems_str = str(fm.get("related-subsystems", ""))
-        assert "auth" in subsystems_str
-        assert "payments" in subsystems_str
+        areas_str = str(fm.get("related-areas", ""))
+        assert "auth" in areas_str
+        assert "payments" in areas_str
 
     def test_related_spec_flag_populates_frontmatter(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -433,3 +434,169 @@ class TestNewPlan:
         slug = fm.get("slug")
         assert slug, "plan frontmatter must have a non-empty slug field"
         assert slug in note.stem
+
+
+# ---------------------------------------------------------------------------
+# lore recall --areas (Slice 1 — CLI verb)
+# ---------------------------------------------------------------------------
+
+class TestRecallVerb:
+    """Behavioral tests for `lore recall --areas` — the D23 recall CLI verb.
+
+    Tests run as subprocess to verify real exit codes and output. Uses a
+    synthetic vault (no real $LORE_VAULT).
+    """
+
+    def _make_recall_vault(self, tmp_path: Path) -> Path:
+        vault = tmp_path / "vault"
+        for d in ("areas", "deferred", "dead-ends", "decisions", "lessons"):
+            (vault / d).mkdir(parents=True)
+        return vault
+
+    def _write_area(self, vault: Path, name: str, summary: str = "An area.") -> None:
+        p = vault / "areas" / f"{name}.md"
+        p.write_text(
+            f"---\ntype: area\nname: {name}\nkeywords: [{name}]\nsummary: {summary}\n---\n"
+        )
+
+    def _write_deferred(self, vault: Path, name: str, areas: list[str]) -> None:
+        areas_str = "[" + ", ".join(areas) + "]"
+        folder = vault / "deferred"
+        p = folder / f"2026-06-01-{name}.md"
+        p.write_text(
+            f"---\ntype: deferred\nstatus: open\nareas: {areas_str}\nsurfaces: []\n"
+            f"next-check: 2026-09-01\n---\n\n# {name}\n\nSomething deferred.\n"
+        )
+
+    def test_recall_registered_in_help(self, tmp_path):
+        """recall subcommand appears in lore --help."""
+        r = run_cli(["--help"])
+        assert "recall" in r.stdout, f"'recall' not in lore --help:\n{r.stdout}"
+
+    def test_recall_with_notes_prints_banner(self, tmp_path):
+        """`lore recall --areas <area-with-notes>` → banner starting 'Recalled (areas:'."""
+        vault = self._make_recall_vault(tmp_path)
+        self._write_area(vault, "auth", "Auth flow area.")
+        self._write_deferred(vault, "fix-auth", ["auth"])
+        r = run_cli(["recall", "--areas", "auth", "--vault", str(vault)])
+        assert r.returncode == 0, f"exit {r.returncode}: {r.stderr}"
+        assert "Recalled (areas:" in r.stdout, f"Banner not in stdout:\n{r.stdout}"
+
+    def test_recall_unknown_area_zero_match_exit_0(self, tmp_path):
+        """`--areas <unknown>` exits 0 with zero-match banner (no stacktrace)."""
+        vault = self._make_recall_vault(tmp_path)
+        r = run_cli(["recall", "--areas", "totally-unknown-xyz", "--vault", str(vault)])
+        assert r.returncode == 0, f"exit code must be 0, got {r.returncode}: {r.stderr}"
+        assert "stacktrace" not in r.stderr.lower()
+        assert "Traceback" not in r.stderr
+        assert r.stdout.strip() != ""
+
+    def test_recall_valid_area_no_notes_zero_match_exit_0(self, tmp_path):
+        """`--areas <valid-area-no-items>` exits 0 with differentiated banner."""
+        vault = self._make_recall_vault(tmp_path)
+        self._write_area(vault, "empty-area", "Empty area.")
+        r = run_cli(["recall", "--areas", "empty-area", "--vault", str(vault)])
+        assert r.returncode == 0
+        assert r.stdout.strip() != ""
+        assert "Traceback" not in r.stderr
+
+    def test_recall_empty_areas_arg_exit_0(self, tmp_path):
+        """`--areas ""` exits 0 with zero-match banner (no stacktrace)."""
+        vault = self._make_recall_vault(tmp_path)
+        r = run_cli(["recall", "--areas", "", "--vault", str(vault)])
+        assert r.returncode == 0
+        assert "Traceback" not in r.stderr
+        assert r.stdout.strip() != ""
+
+    def test_recall_comma_only_areas_exit_0(self, tmp_path):
+        """`--areas ","` exits 0 with zero-match banner."""
+        vault = self._make_recall_vault(tmp_path)
+        r = run_cli(["recall", "--areas", ",", "--vault", str(vault)])
+        assert r.returncode == 0
+        assert "Traceback" not in r.stderr
+        assert r.stdout.strip() != ""
+
+    def test_recall_json_output_structure(self, tmp_path):
+        """`--json` emits valid JSON with areas/items/count/cross_cutting_total."""
+        vault = self._make_recall_vault(tmp_path)
+        self._write_area(vault, "auth", "Auth area.")
+        self._write_deferred(vault, "auth-work", ["auth"])
+        r = run_cli(["recall", "--areas", "auth", "--vault", str(vault), "--json"])
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert "areas" in data
+        assert "items" in data
+        assert "count" in data
+        assert "cross_cutting_total" in data
+        assert isinstance(data["items"], list)
+        assert isinstance(data["count"], int)
+
+    def test_recall_json_items_have_source_layer(self, tmp_path):
+        """`--json` items carry source and layer fields (D-7 provenance)."""
+        vault = self._make_recall_vault(tmp_path)
+        self._write_area(vault, "auth", "Auth area.")
+        self._write_deferred(vault, "auth-work", ["auth"])
+        r = run_cli(["recall", "--areas", "auth", "--vault", str(vault), "--json"])
+        assert r.returncode == 0
+        data = json.loads(r.stdout)
+        assert data["count"] >= 1
+        for item in data["items"]:
+            assert "source" in item, f"item missing 'source': {item}"
+            assert "layer" in item, f"item missing 'layer': {item}"
+            assert item["layer"] == "local"
+
+    def test_recall_json_count_equals_banner_count(self, tmp_path):
+        """`--json` count == human banner N (incl. dedup case)."""
+        vault = self._make_recall_vault(tmp_path)
+        self._write_area(vault, "auth", "Auth area.")
+        self._write_area(vault, "payments", "Payments area.")
+        # Write a note that overlaps BOTH areas — should count once
+        note = vault / "deferred" / "2026-06-01-cross-area.md"
+        note.write_text(
+            "---\ntype: deferred\nstatus: open\nareas: [auth, payments]\nsurfaces: []\n"
+            "next-check: 2026-09-01\n---\n\n# cross-area\n\nOverlaps both.\n"
+        )
+        r_human = run_cli(["recall", "--areas", "auth,payments", "--vault", str(vault)])
+        r_json = run_cli(["recall", "--areas", "auth,payments", "--vault", str(vault), "--json"])
+        assert r_human.returncode == 0
+        assert r_json.returncode == 0
+
+        data = json.loads(r_json.stdout)
+        json_count = data["count"]
+
+        import re as _re
+        m = _re.search(r"Recalled \(areas:[^)]+\) — (\d+) item", r_human.stdout)
+        assert m, f"No count in banner:\n{r_human.stdout}"
+        banner_count = int(m.group(1))
+
+        assert json_count == banner_count, (
+            f"JSON count {json_count} != banner count {banner_count} (dedup bug)"
+        )
+
+    def test_recall_unresolvable_vault_stderr_signal(self, tmp_path):
+        """An unresolvable vault emits a one-line stderr signal AND stdout banner, exit 0."""
+        bad_vault = str(tmp_path / "nonexistent" / "vault")
+        env = {"LORE_VAULT": bad_vault}
+        r = run_cli(["recall", "--areas", "anything"], env=env)
+        assert r.returncode == 0, f"exit must be 0 even on vault error, got {r.returncode}"
+        assert r.stdout.strip() != "", "stdout must have zero-match banner on vault error"
+
+    def test_recall_differentiated_zero_match_bad_name(self, tmp_path):
+        """Unknown area name → mentions 'check' or area name in output (not just blank)."""
+        vault = self._make_recall_vault(tmp_path)
+        r = run_cli(["recall", "--areas", "no-such-area-abc", "--vault", str(vault)])
+        assert r.returncode == 0
+        output = r.stdout
+        assert "check" in output.lower() or "no-such-area-abc" in output, (
+            f"Expected differentiated zero-match message, got: {output!r}"
+        )
+
+    def test_recall_differentiated_zero_match_valid_empty_area(self, tmp_path):
+        """Valid area with no notes → 'no tagged notes' message (not bad-name message)."""
+        vault = self._make_recall_vault(tmp_path)
+        self._write_area(vault, "clean-area", "A clean area.")
+        r = run_cli(["recall", "--areas", "clean-area", "--vault", str(vault)])
+        assert r.returncode == 0
+        assert "no tagged notes" in r.stdout or "0 item" in r.stdout, (
+            f"Expected 'no tagged notes' or '0 items' in output:\n{r.stdout}"
+        )

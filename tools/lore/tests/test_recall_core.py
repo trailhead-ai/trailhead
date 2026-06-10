@@ -447,6 +447,61 @@ class TestRecallAreasCrossCutting:
         titles = [item.title for item in result.items]
         assert not any("stale-cross-cut" in t for t in titles)
 
+    def test_14_day_boundary_10_days_ago_included(self, tmp_path):
+        """D-1 amended: 14-day default. A 10-day-old cross-cutting item is included."""
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="Auth area.")
+        p = vault / "lessons" / "ten-days-ago.md"
+        ten_days = _recent_date(10)
+        p.write_text(
+            f"---\ntype: lesson\nstatus: active\nareas: []\nsurfaces: []\n"
+            f"date: {ten_days}\n---\n\n# ten-days-ago\n\nTen day old lesson.\n"
+        )
+        recall = load_recall()
+        result = recall.recall_areas(vault, ["auth"])  # default 14 days
+        titles = [item.title for item in result.items]
+        assert any("ten-days-ago" in t for t in titles), (
+            "A 10-day-old item must be included in the default 14-day window"
+        )
+
+    def test_14_day_boundary_20_days_ago_excluded(self, tmp_path):
+        """D-1 amended: 14-day default. A 20-day-old cross-cutting item is excluded."""
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="Auth area.")
+        p = vault / "lessons" / "twenty-days-ago.md"
+        twenty_days = _recent_date(20)
+        p.write_text(
+            f"---\ntype: lesson\nstatus: active\nareas: []\nsurfaces: []\n"
+            f"date: {twenty_days}\n---\n\n# twenty-days-ago\n\nTwenty day old lesson.\n"
+        )
+        recall = load_recall()
+        result = recall.recall_areas(vault, ["auth"])  # default 14 days
+        titles = [item.title for item in result.items]
+        assert not any("twenty-days-ago" in t for t in titles), (
+            "A 20-day-old item must be excluded from the default 14-day window"
+        )
+
+    def test_cross_cutting_total_reflects_pre_cap_count(self, tmp_path):
+        """RecallResult.cross_cutting_total is the pre-cap candidate count."""
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="Auth area.")
+        # Write more cross-cutting items than the cap (10)
+        for i in range(15):
+            p = vault / "lessons" / f"cc-item-{i}.md"
+            recent = _recent_date(5)
+            p.write_text(
+                f"---\ntype: lesson\nstatus: active\nareas: []\nsurfaces: []\n"
+                f"date: {recent}\n---\n\n# cc-item-{i}\n\nCross-cutting {i}.\n"
+            )
+        recall = load_recall()
+        result = recall.recall_areas(vault, ["auth"])
+        assert result.cross_cutting_total >= 15, (
+            f"cross_cutting_total should reflect all 15 candidates, got {result.cross_cutting_total}"
+        )
+        # The actual added items are capped at 10
+        cross_items = [it for it in result.items if it.type == "cross-cutting"]
+        assert len(cross_items) <= 10
+
 
 # ---------------------------------------------------------------------------
 # recall_areas — project filter
@@ -514,12 +569,14 @@ class TestRecallAreasEdgeCases:
         assert isinstance(result.count, int)
         assert result.count >= 0
 
-    def test_recency_days_default_is_90(self, tmp_path):
+    def test_recency_days_default_is_14(self, tmp_path):
+        """D-1 amended: 14-day cross-cutting window (90d returned ~649 items on
+        the live vault — noise that diluted area-tagged signal)."""
         vault = _make_vault(tmp_path)
         recall = load_recall()
         import inspect
         sig = inspect.signature(recall.recall_areas)
-        assert sig.parameters["recency_days"].default == 90
+        assert sig.parameters["recency_days"].default == 14
 
     def test_result_items_carry_source_layer_field(self, tmp_path):
         vault = _make_vault(tmp_path)

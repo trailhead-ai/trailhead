@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import frontmatter  # noqa: E402
 import harvest as harvest_mod  # noqa: E402
 import link_server  # noqa: E402
+import recall as recall_mod  # noqa: E402
 import review as review_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
@@ -1309,6 +1310,77 @@ def cmd_link_server(args: argparse.Namespace) -> int:
     return _link_server_status(args)
 
 
+# ---- recall -----------------------------------------------------------------
+
+def cmd_recall(args: argparse.Namespace) -> int:
+    """Print the recall banner for the requested areas to stdout.
+
+    Exit code is always 0 — recall must never fail a session (D-1).
+    A vault-resolution / infra error prints a one-line stderr signal and
+    falls back to the zero-match banner on stdout.
+
+    --json emits the structured RecallResult for programmatic callers
+    (e.g. the lore-librarian agent). JSON items carry source/layer (D-7).
+    """
+    import json as _json
+
+    # Parse area names from the comma-separated --areas argument.
+    raw_areas = (getattr(args, "areas", None) or "").strip()
+    area_names = [a.strip() for a in raw_areas.split(",") if a.strip()]
+
+    # Resolve vault: --vault overrides $LORE_VAULT.
+    vault_override = getattr(args, "vault", None)
+    try:
+        if vault_override:
+            vault = Path(vault_override).expanduser().resolve()
+        else:
+            vault = Path(vault_mod.resolve_vault())
+        if not vault.exists():
+            raise FileNotFoundError(vault)
+    except Exception as exc:
+        print(
+            f"lore recall: could not resolve vault ({exc})",
+            file=sys.stderr,
+        )
+        # Degrade to zero-match banner so the caller gets *something* on stdout.
+        empty_result = recall_mod.RecallResult(areas=[], matched_area_names=[])
+        print(recall_mod.render_recall_banner(empty_result))
+        return 0
+
+    try:
+        result = recall_mod.recall_areas(vault, area_names)
+    except Exception as exc:
+        print(
+            f"lore recall: recall failed ({exc})",
+            file=sys.stderr,
+        )
+        empty_result = recall_mod.RecallResult(areas=[], matched_area_names=[])
+        print(recall_mod.render_recall_banner(empty_result))
+        return 0
+
+    if getattr(args, "json", False):
+        def _item_to_dict(item):
+            return {
+                "type": item.type,
+                "title": item.title,
+                "path": str(item.path),
+                "one_liner": item.one_liner,
+                "source": item.source,
+                "layer": item.layer,
+            }
+        payload = {
+            "areas": result.areas,
+            "items": [_item_to_dict(it) for it in result.items],
+            "count": result.count,
+            "cross_cutting_total": result.cross_cutting_total,
+        }
+        print(_json.dumps(payload, indent=2))
+    else:
+        print(recall_mod.render_recall_banner(result))
+
+    return 0
+
+
 # ---- argparse ---------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1485,6 +1557,28 @@ def build_parser() -> argparse.ArgumentParser:
              "Default: since the most recent review note, or 7 days ago.",
     )
     p_review.set_defaults(func=cmd_review)
+
+    p_recall = sub.add_parser(
+        "recall",
+        help="Pull area-scoped memory (decisions/lessons/dead-ends/deferred) for the agent",
+    )
+    p_recall.add_argument(
+        "--areas",
+        default="",
+        help="Comma-separated area names to recall memory for",
+    )
+    p_recall.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit structured JSON instead of the human banner",
+    )
+    p_recall.add_argument(
+        "--vault",
+        default=None,
+        help="Vault path (overrides $LORE_VAULT)",
+    )
+    p_recall.set_defaults(func=cmd_recall)
 
     return parser
 
