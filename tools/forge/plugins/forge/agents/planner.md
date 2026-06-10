@@ -156,6 +156,8 @@ If all green, update spec frontmatter `status: draft` → `status: ready` and pr
 
 Read the spec (if one exists), then check files, docs, and recent commits relevant to the request. If the request spans multiple independent subsystems, flag it — decompose before designing.
 
+If your vault has area profiles (check `$LORE_VAULT/areas/` or the area map in your session context), identify the areas this task touches and run `lore recall --areas <names>` to pull relevant decisions, lessons, dead-ends, and open deferred items for those areas. Treat the recall banner as prior art before designing.
+
 For genuinely complex existing systems (many files, unclear shape), dispatch `researcher` before designing — reserve your xhigh context for the design itself, not for file surveying.
 
 ### 2. Clarify (1-2 questions max)

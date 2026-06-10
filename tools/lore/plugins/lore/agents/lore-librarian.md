@@ -49,15 +49,21 @@ The vault is at the path stored in `$LORE_VAULT` (default `~/lore`). Resolve it 
    - "Anything pending on W?" → `deferred/` and `radar/`
    - "Recent sessions touching X?" → `sessions/`
 
-3. **List candidates with Glob.** Example: `Glob("$LORE_VAULT/dead-ends/*.md")`. Scan filenames for relevance before reading bodies.
+3. **For area-scoped retrieval, use `lore recall --areas <names> --json`.** When the question maps to one or more known areas (e.g. "what do we know about auth?" → area `auth-service`), run:
+   ```
+   lore recall --areas <name1>,<name2> --json
+   ```
+   The `--json` flag returns a structured result with typed items (decisions, lessons, dead-ends, open deferred, recent cross-cutting) and `source`/`layer` provenance per item. Synthesize from this structured output rather than hand-grepping the vault — it applies the correct overlap logic and recency window automatically.
 
-4. **Grep for content matches.** Use `Grep` with a pattern across the scoped directory to surface notes whose body matches the query. Grep is faster than reading every file.
+4. **List candidates with Glob** for any directories not covered by `lore recall`. Example: `Glob("$LORE_VAULT/dead-ends/*.md")`. Scan filenames for relevance before reading bodies.
 
-5. **Read the notes that matter.** `Read` the full content of the 2–5 most relevant files. Do not synthesize from filenames or frontmatter alone — the body carries the real signal.
+5. **Grep for content matches.** Use `Grep` with a pattern across the scoped directory to surface notes whose body matches the query. Grep is faster than reading every file.
 
-6. **Cross-reference.** If an area note references a dead-end by wikilink, fetch that dead-end. If a decision references a deferred item, fetch it.
+6. **Read the notes that matter.** `Read` the full content of the 2–5 most relevant files. Do not synthesize from filenames or frontmatter alone — the body carries the real signal.
 
-7. **Synthesize, don't dump.** The caller wants the answer, not the raw notes. Use `[[wikilinks]]` (relative path from vault root without `.md`) so they can drill in if needed.
+7. **Cross-reference.** If an area note references a dead-end by wikilink, fetch that dead-end. If a decision references a deferred item, fetch it.
+
+8. **Synthesize, don't dump.** The caller wants the answer, not the raw notes. Use `[[wikilinks]]` (relative path from vault root without `.md`) so they can drill in if needed.
 
 ## Report structure
 

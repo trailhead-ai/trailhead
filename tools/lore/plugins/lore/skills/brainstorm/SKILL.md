@@ -41,18 +41,22 @@ returns a summary.
 ### 1. Frame
 
 - Restate the idea in one paragraph using your own words. Confirm with the user.
-- Identify touched areas (cross-reference with area profiles in `$LORE_VAULT/areas/`
-  if your vault has area profiles).
-- Pull related prior art **for reference only**:
-  - Existing specs in `$LORE_VAULT/specs/` on overlapping topics
-  - Relevant decisions in `$LORE_VAULT/decisions/`
-  - Prior dead-ends in `$LORE_VAULT/dead-ends/`
-  - Active lessons in `$LORE_VAULT/lessons/` for the touched areas — each carries a
-    prevention check that should shape acceptance criteria or non-goals
+- Identify touched areas. The area map is already in your session context (loaded at
+  SessionStart as a compact menu of area names, one-liners, and keywords). Match the
+  task against that menu to determine which areas apply.
+- **Run `lore recall --areas <names>` now** — pass the comma-separated area names
+  identified above. Treat the returned banner as your prior art. This is the primary
+  lookup; do it before reading any vault notes manually.
+  - Zero-match with a valid area name means no tagged notes yet for that area — proceed
+    without prior art for that area.
+  - If the area name is unknown, `lore recall` will say so; check names with `lore status`.
 - **For cross-cutting topics** spanning multiple areas, if a knowledge-synthesis subagent is
   available (such as `lore:lore-librarian`), dispatch it with a synthesis question ("what do we
-  know about X, and what's already been decided / tried / deferred?") rather than reading each
-  note yourself. If no such subagent is configured, read the relevant notes directly.
+  know about X, and what's already been decided / tried / deferred?") — it uses
+  `lore recall --areas` internally for structured retrieval. If no such subagent is configured,
+  fall back to reading vault notes directly — specs, decisions, dead-ends, and
+  active lessons for the touched areas (each lesson carries a prevention check
+  that should shape acceptance criteria or non-goals)
 - Never modify a prior spec. If this work supersedes one, link it from the new spec's `Related`
   section.
 
