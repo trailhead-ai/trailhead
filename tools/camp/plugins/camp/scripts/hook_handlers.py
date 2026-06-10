@@ -107,8 +107,11 @@ def cmd_session_bootstrap() -> None:
     try:
         from reconcile import reconcile_worktree
         reconcile_worktree(group, slug)
-    except Exception:
-        # Don't crash a session start over a reconcile failure.
+    except Exception as e:
+        # Genuine failure in a valid member worktree — warn once, don't crash.
+        sys.stderr.write(
+            f"camp: reconcile failed for {slug!r} — run `camp {slug}` to retry ({e})\n"
+        )
         sys.exit(0)
 
     sys.exit(0)

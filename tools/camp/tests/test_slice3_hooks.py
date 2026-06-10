@@ -817,3 +817,171 @@ bootstrap = []
         )
         assert result.returncode == 0, f"Expected exit 0, got: {result.returncode}: {result.stderr}"
         assert result.stderr == "", f"Expected empty stderr, got: {result.stderr!r}"
+
+
+# ---------------------------------------------------------------------------
+# Refinement 1: session-bootstrap warns on genuine reconcile failure
+# ---------------------------------------------------------------------------
+
+
+class TestSessionBootstrapGenuineFailure:
+    """session-bootstrap emits a one-line warning on genuine reconcile failure
+    (cwd resolves to a valid member worktree but reconcile_worktree raises),
+    and exits 0 — no traceback.
+    """
+
+    def test_genuine_reconcile_failure_warns_once_names_slug_exits_0(
+        self, tmp_path: Path
+    ):
+        """A genuine reconcile failure in a valid member worktree emits exactly one
+        stderr line naming the slug, exits 0, and contains no traceback.
+        """
+        camp_config_dir = tmp_path / "camp-config"
+        groups_dir = camp_config_dir / "groups"
+        groups_dir.mkdir(parents=True, exist_ok=True)
+
+        member_repo = tmp_path / "member_repo"
+        _init_git_repo(member_repo)
+
+        toml_content = f"""
+[group]
+name = "warngroup"
+
+[[members]]
+name = "member"
+repo_root = "{member_repo!s}"
+bootstrap = []
+"""
+        (groups_dir / "warngroup.toml").write_text(toml_content)
+
+        # Create the worktree dir so cwd resolves to a real (group, slug) pair.
+        wt_path = member_repo / ".claude" / "worktrees" / "feat-warn"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        # Poison the CAMP_STATE_DIR so reconcile_worktree tries to write into a
+        # file (not a directory) — this triggers an OS-level exception.
+        # We create a regular FILE at the state path so mkdir fails inside reconcile.
+        bad_state = tmp_path / "bad-state"
+        bad_state.write_text("not a directory")  # file, not dir
+
+        result = _run_session_bootstrap(
+            cwd=str(wt_path),
+            extra_env={
+                "CAMP_STATE_DIR": str(bad_state),
+                "CAMP_CONFIG_DIR": str(camp_config_dir),
+            },
+        )
+
+        assert result.returncode == 0, (
+            f"Expected exit 0 (non-blocking), got {result.returncode}. "
+            f"stderr={result.stderr!r}"
+        )
+
+        stderr_lines = [ln for ln in result.stderr.splitlines() if ln.strip()]
+        assert len(stderr_lines) == 1, (
+            f"Expected exactly one stderr warning line, got {len(stderr_lines)}: "
+            f"{result.stderr!r}"
+        )
+
+        warning = stderr_lines[0]
+        assert "feat-warn" in warning, (
+            f"Warning must name the slug 'feat-warn', got: {warning!r}"
+        )
+        assert "Traceback" not in result.stderr, (
+            f"Traceback must not appear in stderr: {result.stderr!r}"
+        )
+
+    def test_no_op_cases_remain_silent_after_change(self, tmp_path: Path):
+        """The four no-op cases still produce no stderr after the reconcile-failure
+        warning is added. Regression guard.
+        """
+        # Case: cold-start (no config dir at all)
+        nonexistent = str(tmp_path / "nonexistent")
+        result = _run_session_bootstrap(
+            cwd=str(tmp_path),
+            extra_env={
+                "CAMP_STATE_DIR": nonexistent,
+                "CAMP_CONFIG_DIR": nonexistent,
+            },
+        )
+        assert result.returncode == 0
+        assert result.stderr == "", (
+            f"Cold-start case must be silent, got: {result.stderr!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Refinement 2: camp --help lists init
+# ---------------------------------------------------------------------------
+
+
+class TestHelpMenuInit:
+    """camp --help output contains 'init' with a description, exits 0, is
+    not an argparse dump.
+    """
+
+    def test_help_contains_init(self):
+        """camp --help output contains 'init' with a description."""
+        result = subprocess.run(
+            [str(_BIN_CAMP), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"Expected exit 0 from --help, got {result.returncode}: {result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        assert "init" in combined, (
+            f"'init' not found in --help output:\n{combined}"
+        )
+
+    def test_help_init_has_description(self):
+        """camp --help output describes what init does."""
+        result = subprocess.run(
+            [str(_BIN_CAMP), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        combined = result.stdout + result.stderr
+        # Should have some descriptive text adjacent to 'init'
+        assert "init" in combined
+        # Check for keywords that would appear in a one-liner description
+        init_description_words = ["Wire", "wire", "hook", "Hook", "Setup", "setup"]
+        assert any(w in combined for w in init_description_words), (
+            f"Expected a description near 'init' in --help, "
+            f"but none of {init_description_words} found:\n{combined}"
+        )
+
+    def test_help_not_argparse_dump(self):
+        """camp --help is the curated menu, not an argparse dump."""
+        result = subprocess.run(
+            [str(_BIN_CAMP), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        combined = result.stdout + result.stderr
+        # argparse dumps start with 'usage: camp' and contain 'optional arguments:'
+        # or 'options:'; curated help has 'camp —'
+        assert "optional arguments:" not in combined, (
+            f"argparse dump detected in --help output"
+        )
+        assert "positional arguments:" not in combined, (
+            f"argparse dump detected in --help output"
+        )
+
+    def test_help_does_not_list_session_bootstrap_or_worktree_cleanup(self):
+        """session-bootstrap and worktree-cleanup are NOT in the help menu
+        (they're hook-internal).
+        """
+        result = subprocess.run(
+            [str(_BIN_CAMP), "--help"],
+            capture_output=True,
+            text=True,
+        )
+        combined = result.stdout + result.stderr
+        assert "session-bootstrap" not in combined, (
+            f"session-bootstrap should not appear in --help: {combined!r}"
+        )
+        assert "worktree-cleanup" not in combined, (
+            f"worktree-cleanup should not appear in --help: {combined!r}"
+        )
