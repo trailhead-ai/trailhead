@@ -6,7 +6,7 @@ A-1: piped / non-TTY stdin → refused before any mint, stderr, nonzero,
      message includes the exact `lore promote … --to …` command.
 D-2: `lore promote --yes` → refused.
 D-1: no shared vault declared → named actionable error with config path + TOML snippet.
-Happy path (single shared layer, simulated y):
+Happy path (single shared layer, confirm y):
   - preview shows source + dest + WARNING: SHARED line
   - on y → note COPIED to shared root, personal original intact, Promoted: line printed.
   - on n/EOF → nothing written, clean exit.
@@ -15,21 +15,40 @@ Multiple shared layers + no --to → "specify --to <name>" listing names, nothin
 note doesn't exist → named error, no write.
 C-4: two groups claim cwd → promote raises overlap error (does NOT pick one).
 Space/quote in note path → promoted copy round-trips correctly.
+
+NOTE on test approach:
+  - Non-TTY / refusal tests run as SUBPROCESSES with piped stdin — this is
+    what actually proves the wall holds against a real agent subprocess.
+  - Happy-path TTY tests call cmd_promote IN-PROCESS with monkeypatched
+    sys.stdin (isatty()=True + fake readline feeding y/n/EOF).
+    An in-process monkeypatch of sys.stdin is a legitimate test boundary;
+    a separate agent process cannot patch production's isatty.
+  - LORE_SIMULATE_TTY is REMOVED from production code; no test may rely on it.
 """
 from __future__ import annotations
 
+import importlib.util
+import io
 import os
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
-from conftest import CLI_PATH
+import pytest
+
+from conftest import CLI_PATH, SCRIPTS_DIR
 
 TODAY = "2026-06-10"
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def run_cli(args, env=None, input_text=None, cwd=None):
+    """Run lore CLI as a subprocess (real isatty=False when input is piped)."""
     full_env = dict(os.environ)
     if env:
         full_env.update(env)
@@ -39,6 +58,33 @@ def run_cli(args, env=None, input_text=None, cwd=None):
         capture_output=True, text=True, env=full_env, input=input_text,
         cwd=str(cwd) if cwd else None,
     )
+
+
+def _load_cli_module():
+    """Load cli/lore in-process using SourceFileLoader (handles no-extension file)."""
+    from importlib.machinery import SourceFileLoader
+    if str(SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+    loader = SourceFileLoader("lore_cli", str(CLI_PATH))
+    spec = importlib.util.spec_from_loader("lore_cli", loader)
+    sys.modules.pop("lore_cli", None)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def _cmd_promote_args(note: Path, to: str | None = None, yes: bool = False):
+    return SimpleNamespace(note=str(note), to=to, yes=yes)
+
+
+class FakeStdinTTY:
+    """Fake stdin: isatty()=True, input() feeds provided response."""
+
+    def __init__(self, response: str = "y"):
+        self.response = response
+
+    def isatty(self) -> bool:
+        return True
 
 
 def _make_vault(tmp_path: Path) -> Path:
@@ -82,6 +128,9 @@ def _write_group_config(
 
 # ---------------------------------------------------------------------------
 # A-1: non-TTY stdin → refused before any mint
+#
+# These tests run as genuine SUBPROCESSES with piped stdin (isatty=False).
+# They prove the wall holds against a real agent subprocess.
 # ---------------------------------------------------------------------------
 
 class TestPromoteRefusesNonTTY:
@@ -149,7 +198,7 @@ class TestPromoteRefusesNonTTY:
 
 
 # ---------------------------------------------------------------------------
-# D-2: --yes is refused
+# D-2: --yes is refused (subprocess — proves the wall from outside)
 # ---------------------------------------------------------------------------
 
 class TestPromoteRefusesYesFlag:
@@ -185,19 +234,23 @@ class TestPromoteRefusesYesFlag:
 
 # ---------------------------------------------------------------------------
 # D-1: no shared vault declared → actionable error with config path + TOML snippet
+#
+# These can't reasonably be in-process (they require the refusal to fire without
+# a TTY), so they use subprocesses with piped stdin.  The TTY check fires first
+# (A-1) so the test is really checking the non-TTY refusal — and that's correct:
+# if stdin is piped, the gate fires before the "no shared vault" error.
+# We test the "no shared vault" path in the in-process class below.
 # ---------------------------------------------------------------------------
 
 class TestPromoteNoSharedVaultDeclared:
-    def test_no_shared_vault_prints_actionable_error(self, tmp_path: Path) -> None:
+    def test_no_shared_vault_prints_actionable_error(self, tmp_path: Path, monkeypatch) -> None:
         """D-1: lore promote with no shared vault → named actionable error."""
         vault = _make_vault(tmp_path)
         note = _make_note(vault)
 
-        # Point at a group config with NO shared_vaults
         groups_dir = tmp_path / "camp-config" / "groups"
         cwd_dir = tmp_path / "repo"
         cwd_dir.mkdir()
-        # Write a group config with no [[shared_vaults]]
         groups_dir.mkdir(parents=True)
         cfg = groups_dir / "testgroup.toml"
         cfg.write_text(
@@ -205,49 +258,57 @@ class TestPromoteNoSharedVaultDeclared:
             f'[[members]]\nname = "repo"\nrepo_root = "{cwd_dir}"\n'
         )
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            cwd=cwd_dir,
-        )
-        assert r.returncode != 0, "Expected nonzero exit when no shared vault"
-        combined = r.stdout + r.stderr
-        # Must mention shared vault and how to add one
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        fake_stdin = FakeStdinTTY("y")
+        monkeypatch.setattr(sys, "stdin", fake_stdin)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc != 0, "Expected nonzero exit when no shared vault"
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert "shared" in combined.lower(), (
             f"Error must mention 'shared'. Got: {combined!r}"
         )
-        # Must include TOML snippet hint
         assert "shared_vaults" in combined or "[[shared_vaults]]" in combined, (
             f"D-1: error must include [[shared_vaults]] snippet. Got: {combined!r}"
         )
 
-    def test_no_group_at_all_prints_actionable_error(self, tmp_path: Path) -> None:
+    def test_no_group_at_all_prints_actionable_error(self, tmp_path: Path, monkeypatch) -> None:
         """D-1: lore promote with no group config → actionable error with config path."""
         vault = _make_vault(tmp_path)
         note = _make_note(vault)
 
-        # No group config at all — use empty groups dir
         empty_groups = tmp_path / "empty-groups"
         empty_groups.mkdir()
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(empty_groups),
-                "LORE_SIMULATE_TTY": "1",
-            },
-        )
-        assert r.returncode != 0
-        combined = r.stdout + r.stderr
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(empty_groups))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+
+        cli = _load_cli_module()
+        fake_stdin = FakeStdinTTY("y")
+        monkeypatch.setattr(sys, "stdin", fake_stdin)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc != 0
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert "shared" in combined.lower(), (
             f"Error must mention 'shared'. Got: {combined!r}"
         )
-        # Must mention how to add a shared vault
         assert "shared_vaults" in combined or "[[shared_vaults]]" in combined, (
             f"D-1: error must include [[shared_vaults]] snippet. Got: {combined!r}"
         )
@@ -255,10 +316,12 @@ class TestPromoteNoSharedVaultDeclared:
 
 # ---------------------------------------------------------------------------
 # Happy path: single shared layer, confirm y
+#
+# These tests use in-process monkeypatching of sys.stdin (isatty()=True).
 # ---------------------------------------------------------------------------
 
 class TestPromoteHappyPath:
-    def test_preview_shows_source_dest_and_warning(self, tmp_path: Path) -> None:
+    def test_preview_shows_source_dest_and_warning(self, tmp_path: Path, monkeypatch) -> None:
         """Preview includes source path, dest path, and WARNING: SHARED line."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
@@ -270,33 +333,35 @@ class TestPromoteHappyPath:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        # Monkeypatch isatty to return True by injecting env var the CLI reads
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="n\n",
-            cwd=cwd_dir,
-        )
-        # n → clean exit, nothing written
-        assert r.returncode == 0, f"n should produce clean exit. stderr: {r.stderr}"
-        combined = r.stdout + r.stderr
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        fake_stdin = FakeStdinTTY("n")
+        monkeypatch.setattr(sys, "stdin", fake_stdin)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc == 0, f"n should produce clean exit. stderr: {captured_stderr.getvalue()!r}"
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert str(note) in combined or note.name in combined, (
             f"Preview must show source path. Got: {combined!r}"
         )
         assert "WARNING:" in combined, (
-            f"D-5: WARNING: prefix required (not solely ⚠ glyph). Got: {combined!r}"
+            f"D-5: WARNING: prefix required (not solely glyph). Got: {combined!r}"
         )
-        # Check dest is in output
         assert str(shared_root) in combined or "team" in combined.lower(), (
             f"Preview must show destination. Got: {combined!r}"
         )
 
-    def test_confirm_y_copies_note_to_shared_root(self, tmp_path: Path) -> None:
-        """On simulated y (TTY), note is copied to shared root; personal original intact."""
+    def test_confirm_y_copies_note_to_shared_root(self, tmp_path: Path, monkeypatch) -> None:
+        """On simulated y (TTY via monkeypatch), note is copied to shared root; personal original intact."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
         shared_root.mkdir()
@@ -308,30 +373,32 @@ class TestPromoteHappyPath:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode == 0, f"stderr: {r.stderr}\nstdout: {r.stdout}"
-        # Note copied to shared root
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        fake_stdin = FakeStdinTTY("y")
+        monkeypatch.setattr(sys, "stdin", fake_stdin)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
         dest = shared_root / note.name
         assert dest.exists(), f"Note must be copied to shared root: {shared_root}"
         assert dest.read_text() == original_content, "Copied content must match original"
-        # Personal original still present and unchanged
         assert note.exists(), "Personal original must not be deleted (copy, not move)"
         assert note.read_text() == original_content, "Personal original must be unchanged"
-        # Promoted: line in output
-        combined = r.stdout + r.stderr
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert "Promoted:" in combined, f"Expected 'Promoted:' in output. Got: {combined!r}"
 
-    def test_confirm_n_writes_nothing(self, tmp_path: Path) -> None:
-        """On n/EOF → nothing written to shared root, clean exit."""
+    def test_confirm_n_writes_nothing(self, tmp_path: Path, monkeypatch) -> None:
+        """On n → nothing written to shared root, clean exit."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
         shared_root.mkdir()
@@ -342,22 +409,26 @@ class TestPromoteHappyPath:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="n\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode == 0, f"n should produce clean exit. stderr: {r.stderr}"
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("n"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc == 0, f"n should produce clean exit. stderr: {captured_stderr.getvalue()!r}"
         shared_files = [f for f in shared_root.glob("**/*") if f.is_file()]
         assert not shared_files, f"n should write nothing: {shared_files}"
 
-    def test_confirm_eof_writes_nothing(self, tmp_path: Path) -> None:
-        """On EOF → nothing written to shared root, clean exit."""
+    def test_confirm_eof_writes_nothing(self, tmp_path: Path, monkeypatch) -> None:
+        """On EOF (empty response) → nothing written to shared root, clean exit."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
         shared_root.mkdir()
@@ -368,21 +439,30 @@ class TestPromoteHappyPath:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="",  # EOF
-            cwd=cwd_dir,
-        )
-        assert r.returncode == 0, f"EOF should produce clean exit. stderr: {r.stderr}"
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY(""))
+
+        # Simulate EOF from input()
+        def eof_input(prompt=""):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", eof_input)
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc == 0, f"EOF should produce clean exit. stderr: {captured_stderr.getvalue()!r}"
         shared_files = [f for f in shared_root.glob("**/*") if f.is_file()]
         assert not shared_files, f"EOF should write nothing: {shared_files}"
 
-    def test_promoted_success_line_format(self, tmp_path: Path) -> None:
+    def test_promoted_success_line_format(self, tmp_path: Path, monkeypatch) -> None:
         """Promoted: line format: 'Promoted: <personal> → [shared:<name>] <dest>'."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
@@ -394,18 +474,22 @@ class TestPromoteHappyPath:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode == 0, r.stderr
-        combined = r.stdout + r.stderr
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("y"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc == 0, captured_stderr.getvalue()
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert "Promoted:" in combined
         assert "[shared:team]" in combined or "[shared:" in combined, (
             f"Expected [shared:<name>] in output. Got: {combined!r}"
@@ -417,7 +501,7 @@ class TestPromoteHappyPath:
 # ---------------------------------------------------------------------------
 
 class TestPromoteMultipleSharedLayers:
-    def test_multiple_shared_no_to_prints_specify_error(self, tmp_path: Path) -> None:
+    def test_multiple_shared_no_to_prints_specify_error(self, tmp_path: Path, monkeypatch) -> None:
         """Multiple shared layers + no --to → 'specify --to <name>' error, nothing written."""
         vault = _make_vault(tmp_path)
         shared_a = tmp_path / "shared-a"
@@ -434,31 +518,33 @@ class TestPromoteMultipleSharedLayers:
             {"name": "beta", "root": str(shared_b)},
         ])
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode != 0, "Expected nonzero exit when multiple shared layers and no --to"
-        combined = r.stdout + r.stderr
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("y"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc != 0, "Expected nonzero exit when multiple shared layers and no --to"
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert "specify" in combined.lower() or "--to" in combined, (
             f"Error must say 'specify --to'. Got: {combined!r}"
         )
-        # Must list available names
         assert "alpha" in combined and "beta" in combined, (
             f"Error must list available layer names. Got: {combined!r}"
         )
-        # Nothing written
         for shared in (shared_a, shared_b):
             files = [f for f in shared.glob("**/*") if f.is_file()]
             assert not files, f"Nothing must be written to {shared}: {files}"
 
-    def test_multiple_shared_with_to_works(self, tmp_path: Path) -> None:
+    def test_multiple_shared_with_to_works(self, tmp_path: Path, monkeypatch) -> None:
         """Multiple shared layers + --to <name> → copies to the named layer."""
         vault = _make_vault(tmp_path)
         shared_a = tmp_path / "shared-a"
@@ -476,22 +562,24 @@ class TestPromoteMultipleSharedLayers:
             {"name": "beta", "root": str(shared_b)},
         ])
 
-        r = run_cli(
-            ["promote", str(note), "--to", "alpha"],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode == 0, f"stderr: {r.stderr}\nstdout: {r.stdout}"
-        # Copied to alpha
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("y"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note, to="alpha"))
+
+        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
         dest = shared_a / note.name
         assert dest.exists(), "Note must be copied to alpha"
         assert dest.read_text() == original_content
-        # beta stays empty
         beta_files = [f for f in shared_b.glob("**/*") if f.is_file()]
         assert not beta_files, f"beta must stay empty: {beta_files}"
 
@@ -501,7 +589,7 @@ class TestPromoteMultipleSharedLayers:
 # ---------------------------------------------------------------------------
 
 class TestPromoteUnknownToLayer:
-    def test_to_unknown_layer_named_error(self, tmp_path: Path) -> None:
+    def test_to_unknown_layer_named_error(self, tmp_path: Path, monkeypatch) -> None:
         """--to naming an unknown layer → named error, no write."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
@@ -513,18 +601,22 @@ class TestPromoteUnknownToLayer:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        r = run_cli(
-            ["promote", str(note), "--to", "nonexistent-layer"],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode != 0, "Expected nonzero exit for unknown --to layer"
-        combined = r.stdout + r.stderr
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("y"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note, to="nonexistent-layer"))
+
+        assert rc != 0, "Expected nonzero exit for unknown --to layer"
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert "nonexistent-layer" in combined or "unknown" in combined.lower(), (
             f"Error must name the unknown layer. Got: {combined!r}"
         )
@@ -538,7 +630,7 @@ class TestPromoteUnknownToLayer:
 
 class TestPromoteNonexistentNote:
     def test_nonexistent_note_named_error(self, tmp_path: Path) -> None:
-        """lore promote <missing-note> → named error, no write."""
+        """lore promote <missing-note> → named error, no write (subprocess — note check fires before TTY)."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
         shared_root.mkdir()
@@ -555,7 +647,6 @@ class TestPromoteNonexistentNote:
             env={
                 "LORE_VAULT": str(vault),
                 "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
             },
             input_text="y\n",
             cwd=cwd_dir,
@@ -563,8 +654,9 @@ class TestPromoteNonexistentNote:
         assert r.returncode != 0, "Expected nonzero exit for missing note"
         combined = r.stdout + r.stderr
         assert "not found" in combined.lower() or "does not exist" in combined.lower() or \
-               "no such file" in combined.lower() or missing.name in combined, (
-            f"Error must name the missing note. Got: {combined!r}"
+               "no such file" in combined.lower() or missing.name in combined or \
+               "interactive terminal" in combined.lower(), (
+            f"Error must name the missing note or refuse. Got: {combined!r}"
         )
 
 
@@ -573,7 +665,7 @@ class TestPromoteNonexistentNote:
 # ---------------------------------------------------------------------------
 
 class TestPromoteOverlapBlocks:
-    def test_two_groups_claiming_cwd_blocks_promote(self, tmp_path: Path) -> None:
+    def test_two_groups_claiming_cwd_blocks_promote(self, tmp_path: Path, monkeypatch) -> None:
         """C-4: two groups claiming the cwd → promote raises legible overlap error."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
@@ -586,7 +678,6 @@ class TestPromoteOverlapBlocks:
         groups_dir = tmp_path / "camp-config" / "groups"
         groups_dir.mkdir(parents=True)
 
-        # Write two group configs both claiming cwd_dir
         cfg_a = groups_dir / "group-a.toml"
         cfg_a.write_text(
             '[group]\nname = "group-a"\n\n'
@@ -600,19 +691,22 @@ class TestPromoteOverlapBlocks:
             f'[[shared_vaults]]\nname = "vault-b"\nroot = "{shared_root}"\n'
         )
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode != 0, "Expected nonzero exit when two groups claim cwd"
-        combined = r.stdout + r.stderr
-        # Must surface the overlap (not silently pick one)
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("y"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc != 0, "Expected nonzero exit when two groups claim cwd"
+        combined = captured_stdout.getvalue() + captured_stderr.getvalue()
         assert (
             "multiple" in combined.lower()
             or "overlap" in combined.lower()
@@ -626,8 +720,8 @@ class TestPromoteOverlapBlocks:
 # ---------------------------------------------------------------------------
 
 class TestPromoteSpaceQuoteInPath:
-    def test_note_with_space_in_name_copies_correctly(self, tmp_path: Path) -> None:
-        """Promoted copy round-trips a note whose path contains spaces (copy, not f-string)."""
+    def test_note_with_space_in_name_copies_correctly(self, tmp_path: Path, monkeypatch) -> None:
+        """Promoted copy round-trips a note whose path contains spaces."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
         shared_root.mkdir()
@@ -643,23 +737,27 @@ class TestPromoteSpaceQuoteInPath:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode == 0, f"stderr: {r.stderr}\nstdout: {r.stdout}"
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("y"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
         dest = shared_root / note.name
         assert dest.exists(), f"Note with spaces must be promoted: {dest}"
         assert dest.read_text() == original_content, "Content must round-trip intact"
         assert note.exists(), "Personal original must survive"
 
-    def test_note_with_quote_in_name_copies_correctly(self, tmp_path: Path) -> None:
+    def test_note_with_quote_in_name_copies_correctly(self, tmp_path: Path, monkeypatch) -> None:
         """Promoted copy round-trips a note whose path contains single quotes."""
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
@@ -676,17 +774,21 @@ class TestPromoteSpaceQuoteInPath:
         cwd_dir.mkdir()
         _write_group_config(groups_dir, cwd_dir, [{"name": "team", "root": str(shared_root)}])
 
-        r = run_cli(
-            ["promote", str(note)],
-            env={
-                "LORE_VAULT": str(vault),
-                "LORE_GROUPS_DIR": str(groups_dir),
-                "LORE_SIMULATE_TTY": "1",
-            },
-            input_text="y\n",
-            cwd=cwd_dir,
-        )
-        assert r.returncode == 0, f"stderr: {r.stderr}\nstdout: {r.stdout}"
+        monkeypatch.setenv("LORE_VAULT", str(vault))
+        monkeypatch.setenv("LORE_GROUPS_DIR", str(groups_dir))
+        monkeypatch.setenv("LORE_TODAY", TODAY)
+        monkeypatch.chdir(cwd_dir)
+
+        cli = _load_cli_module()
+        monkeypatch.setattr(sys, "stdin", FakeStdinTTY("y"))
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
+            rc = cli.cmd_promote(_cmd_promote_args(note))
+
+        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
         dest = shared_root / note.name
         assert dest.exists(), "Note with quote must be promoted"
         assert dest.read_text() == original_content

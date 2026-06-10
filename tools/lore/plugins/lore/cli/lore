@@ -116,9 +116,13 @@ def _resolve_groups_dir() -> "Path | None":
 
 
 def _is_tty() -> bool:
-    """Return True if stdin is a real TTY or LORE_SIMULATE_TTY is set (for tests)."""
-    if os.environ.get("LORE_SIMULATE_TTY", "").strip():
-        return True
+    """Return True if stdin is a real interactive TTY.
+
+    This is the PRIMARY wall on the private→shared boundary (A-1).  There is
+    intentionally NO override path — not an env-var, not a flag.  Tests that
+    need to exercise the TTY path patch sys.stdin.isatty in-process via
+    monkeypatch; a separate agent subprocess cannot patch production's isatty.
+    """
     return sys.stdin.isatty()
 
 
@@ -355,7 +359,7 @@ def cmd_new(args: argparse.Namespace) -> int:
 def cmd_promote(args: argparse.Namespace) -> int:
     """Copy a personal note into a shared vault, gated by interactive TTY confirm.
 
-    A-1: refused immediately if stdin is not a TTY (or LORE_SIMULATE_TTY not set).
+    A-1: refused immediately if sys.stdin.isatty() is False (no override path).
     D-2: --yes is refused.
     D-1: actionable error when no shared vault is declared.
     C-4: overlap blocks promote (unlike recall which degrades).
@@ -363,7 +367,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
     note_path = Path(args.note).expanduser().resolve()
 
     # A-1 (FIRST line of cmd_promote, before any I/O / preview / token):
-    # Refuse if stdin is not a real TTY and LORE_SIMULATE_TTY is not set.
+    # Refuse if stdin is not a real TTY. No override path exists.
     if not _is_tty():
         note_arg = str(args.note)
         to_arg = f" --to {args.to}" if getattr(args, "to", None) else ""
@@ -483,7 +487,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
     # Resolve the token store.
     token_dir = _resolve_token_dir()
 
-    # Mint token (A-1: tty_confirmed=True because we checked _is_tty() above).
+    # Mint token (A-1: tty_confirmed=True because _is_tty() passed above).
     try:
         token = promote_mod.mint_token(
             token_dir, note_path, target_layer.name, tty_confirmed=True
