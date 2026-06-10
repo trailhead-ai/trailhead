@@ -1,0 +1,26 @@
+# Trailhead install manifest
+#
+# Each [[repo]] entry pins a suite component at a full 40-char commit SHA.
+# Rules enforced at parse time:
+#   - rev must be exactly 40 lowercase hex chars (never a tag, short SHA, HEAD, or 'latest')
+#   - source may use ${registry} (resolved against `trailhead config registry`) or a
+#     fully-qualified https:// or git@host:path URL for per-repo mirrors
+#   - duplicate repo names are rejected (no last-wins)
+#
+# Integrity verification (Slice 2): the installed repo's HEAD must match the pinned rev;
+# git verify-commit is checked against the configured signing key before wiring.
+# Key fingerprint: 74AEB40C93C4250A — see docs/install-manifest.md
+
+[[repo]]
+name = "trailhead"
+rev = "a47335d1d28baa368c9e13d078449ff8e209fb5f"
+source = "${registry}/trailhead"
+tools = ["trailhead", "lore", "camp", "forge"]
+
+# outpost is a personal dev tool (local PR / dev-env / deploy dashboard).
+# Forward-declared here for completeness; uncomment and set a rev to enable.
+# [[repo]]
+# name = "outpost"
+# rev = ""  # pin a 40-char SHA before enabling
+# source = "https://github.com/tduffield/outpost"
+# tools = ["outpost"]
