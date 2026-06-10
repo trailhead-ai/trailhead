@@ -43,11 +43,14 @@ def test_skill_has_registrable_frontmatter(skill_md: Path):
 
 
 def test_all_capture_and_ritual_skills_present():
-    """Guard against a skill dir silently disappearing."""
+    """Guard against a skill dir silently disappearing.
+
+    Note: 'subsystem' was renamed to 'area'; 'vault-sync' was renamed to 'sync'.
+    """
     names = {p.parent.name for p in _skill_files()}
     expected = {
-        "defer", "dead-end", "decision", "radar", "subsystem",
-        "checkpoint", "finished", "vault-sync", "ping",
+        "defer", "dead-end", "decision", "radar", "area",
+        "checkpoint", "finished", "sync", "ping",
         "reflect", "check-radar",
     }
     missing = expected - names

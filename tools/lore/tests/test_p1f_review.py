@@ -99,10 +99,11 @@ def _write_lesson(vault: Path, slug: str, *, status: str = "active") -> Path:
 
 
 def _write_subsystem(vault: Path, slug: str, *, last_touched: str = "2020-01-01") -> Path:
-    p = vault / "subsystems" / f"{slug}.md"
+    """Write a synthetic area profile (formerly 'subsystem'). Now goes in areas/."""
+    p = vault / "areas" / f"{slug}.md"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        f"---\ntype: subsystem\nlast-touched: {last_touched}\n---\n\n# {slug}\n\nSynthetic.\n"
+        f"---\ntype: area\nname: {slug}\nlast-touched: {last_touched}\n---\n\n# {slug}\n\nSynthetic.\n"
     )
     return p
 
@@ -161,12 +162,13 @@ class TestReportSections:
         report = mod.build_report(vault, since="7 days ago")
         assert "## Graduation candidates" in report
 
-    def test_report_has_stale_subsystems_section(self, tmp_path):
+    def test_report_has_stale_areas_section(self, tmp_path):
+        """Review report uses 'Stale area profiles' (renamed from 'subsystem profiles')."""
         vault = _make_vault(tmp_path)
         _init_git(vault)
         mod = load_review()
         report = mod.build_report(vault, since="7 days ago")
-        assert "## Stale subsystem profiles" in report
+        assert "## Stale area profiles" in report
 
     def test_report_has_open_deferred_section(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -260,7 +262,11 @@ class TestReportContent:
         report = mod.build_report(vault, since="7 days ago")
         assert "synth-lesson-superseded" not in report
 
-    def test_stale_subsystem_appears(self, tmp_path):
+    def test_stale_area_appears(self, tmp_path):
+        """A stale area profile (old last-touched) appears in the stale areas section.
+
+        Rederived: subsystem profiles are now area profiles in areas/ dir.
+        """
         vault = _make_vault(tmp_path)
         _write_subsystem(vault, "synth-sub-epsilon", last_touched="2020-01-01")
         _init_git(vault)
@@ -277,7 +283,7 @@ class TestReportContent:
         mod = load_review()
         report = mod.build_report(vault, since="7 days ago")
         # Should not appear in the "stale" list (might appear elsewhere)
-        assert "last-touched" not in report or "synth-sub-fresh" not in report.split("## Stale subsystem profiles")[1].split("##")[0]
+        assert "last-touched" not in report or "synth-sub-fresh" not in report.split("## Stale area profiles")[1].split("##")[0]
 
     def test_old_collaboration_note_appears_as_graduation_candidate(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -342,12 +348,13 @@ class TestGracefulDegradation:
         report = mod.build_report(vault, since="7 days ago")
         assert "## Active lessons" in report
 
-    def test_missing_subsystems_dir_no_crash(self, tmp_path):
+    def test_missing_areas_dir_no_crash(self, tmp_path):
+        """Missing areas/ dir → report still generates with the stale-areas section."""
         vault = _make_vault(tmp_path)
         _init_git(vault)
         mod = load_review()
         report = mod.build_report(vault, since="7 days ago")
-        assert "## Stale subsystem profiles" in report
+        assert "## Stale area profiles" in report
 
     def test_missing_collaboration_dir_no_crash(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -589,12 +596,15 @@ class TestReviewSeesBucketedLivingNotes:
         actions = mod._collect_actions(vault)
         assert "synth-action" in actions
 
-    def test_subsystems_stay_flat_in_review(self, tmp_path):
-        """Over-recursion guard: a subsystem profile in a YYYY-MM subdir must
-        NOT be picked up by the stale-subsystems section."""
+    def test_areas_stay_flat_in_review(self, tmp_path):
+        """Over-recursion guard: an area profile in a YYYY-MM subdir must
+        NOT be picked up by the stale-areas section.
+
+        Rederived: subsystems/ is now areas/.
+        """
         vault = _make_vault(tmp_path)
-        _bucket(vault, "subsystems", "synth-sub-bucketed",
-                "---\ntype: subsystem\nlast-touched: 2020-01-01\n"
+        _bucket(vault, "areas", "synth-sub-bucketed",
+                "---\ntype: area\nname: synth-sub-bucketed\nlast-touched: 2020-01-01\n"
                 "---\n\n# synth-sub-bucketed\n")
         _init_git(vault)
         mod = load_review()

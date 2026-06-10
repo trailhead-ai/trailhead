@@ -174,53 +174,17 @@ def test_brainstorm_skill_has_no_private_tokens():
 # that MUST NOT appear in the genericized skill as raw literals.
 # ---------------------------------------------------------------------------
 
-_INTAKE_SKILL = SKILLS_DIR / "intake" / "SKILL.md"
+def test_intake_skill_is_not_present():
+    """The intake skill was removed from the plugin.
 
-# Tokens specific to intake that must be absent (in addition to _PRIVATE_TOKENS).
-# Constructed at runtime to avoid the P1-F self-referential leak-gate trap.
-_INTAKE_EXTRA_BANNED: list[str] = [
-    "".join(["app", ".", "as", "ana", ".com"]),
-    "".join(["as", "ana", "_", "sync"]),
-    "".join(["create", "_", "tasks"]),
-    "".join(["as", "ana", "-", "res", "ync"]),
-    "".join(["brain", "/", "inbox"]),
-]
-
-# Positive: each stripped seam must announce itself.
-# These are contiguous substrings — deleting the seam's notice deletes the phrase.
-_INTAKE_SKIP_PHRASES: list[tuple[str, str]] = [
-    ("issue_tracker_skip", "no issue tracker configured"),
-    ("issue_tracker_skip_ticket_linkage", "ticket linkage skipped"),
-]
-
-
-@pytest.mark.parametrize(
-    "test_id,phrase",
-    _INTAKE_SKIP_PHRASES,
-    ids=[t[0] for t in _INTAKE_SKIP_PHRASES],
-)
-def test_intake_visible_skip_phrase_present(test_id: str, phrase: str):
-    """intake/SKILL.md must announce each stripped seam with a visible-skip
-    phrase — a silent omission must fail this test."""
-    assert _INTAKE_SKILL.exists(), (
-        "intake/SKILL.md does not exist — create it before these tests pass"
+    The intake SKILL.md was removed as part of the subsystems→areas rename
+    cleanup (it was coupled to Asana-specific issue tracker integration that
+    is a private seam). This test asserts the removal is intentional so any
+    re-addition of an intake skill is a deliberate change that also must pass
+    the private-token generic checks.
+    """
+    intake_skill = SKILLS_DIR / "intake" / "SKILL.md"
+    assert not intake_skill.exists(), (
+        "intake/SKILL.md must not be present — it was removed. "
+        "Re-adding it requires genericizing all private tokens first."
     )
-    text = _INTAKE_SKILL.read_text()
-    assert phrase in text, (
-        f"intake/SKILL.md missing visible-skip phrase {phrase!r} "
-        f"(test: {test_id}). Every stripped private seam must announce itself — "
-        "a silent omission defeats the degradation contract."
-    )
-
-
-def test_intake_skill_has_no_private_tokens():
-    """intake/SKILL.md must contain zero private app-specific tokens."""
-    assert _INTAKE_SKILL.exists(), (
-        "intake/SKILL.md does not exist"
-    )
-    text = _INTAKE_SKILL.read_text().lower()
-    for token in _PRIVATE_TOKENS + _INTAKE_EXTRA_BANNED:
-        assert token.lower() not in text, (
-            f"intake/SKILL.md contains the private token {token!r}. "
-            "Genericize: strip all app-specific tokens."
-        )

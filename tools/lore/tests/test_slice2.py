@@ -57,11 +57,15 @@ def test_skill_references_gotcha_surfaced():
     )
 
 
-def test_skill_references_lore_subsystem_for_gotchas():
-    """The skill must direct the user to /lore:subsystem for gotcha entries."""
+def test_skill_references_lore_area_for_gotchas():
+    """The skill must direct the user to /lore:area for gotcha entries.
+
+    Rederived: 'subsystem' was renamed to 'area'; the finished skill now
+    references /lore:area as the path for recording gotcha entries.
+    """
     text = _skill_text()
-    assert "lore:subsystem" in text or "subsystem" in text.lower(), (
-        "finished/SKILL.md must mention /lore:subsystem as the path for gotcha entries"
+    assert "lore:area" in text or "area" in text.lower(), (
+        "finished/SKILL.md must mention /lore:area as the path for gotcha entries"
     )
 
 

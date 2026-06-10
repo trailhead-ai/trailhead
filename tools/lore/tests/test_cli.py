@@ -12,7 +12,7 @@ from pathlib import Path
 from conftest import CLI_PATH, SCRIPTS_DIR, load_script
 
 TAXONOMY = [
-    "sessions", "deferred", "subsystems", "decisions", "dead-ends", "lessons",
+    "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
     "radar", "collaboration", "specs", "plans", "designs", "inbox",
     "briefings", "reviews", "gotchas", "audits", "tools", "templates",
 ]

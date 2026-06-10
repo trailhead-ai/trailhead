@@ -36,7 +36,7 @@ def run_cli(args, env=None, input_text=None, cwd=None):
 def _make_vault(tmp_path: Path) -> Path:
     """Create a minimal vault directory structure."""
     vault = tmp_path / "vault"
-    for d in ("deferred", "dead-ends", "decisions", "radar", "subsystems", "sessions"):
+    for d in ("deferred", "dead-ends", "decisions", "radar", "areas", "sessions"):
         (vault / d).mkdir(parents=True)
     return vault
 
@@ -538,72 +538,72 @@ class TestNewRadar:
 
 
 # ---------------------------------------------------------------------------
-# lore new subsystem
+# lore new area (renamed from subsystem)
 # ---------------------------------------------------------------------------
 
-class TestNewSubsystem:
-    def test_writes_to_subsystems_dir(self, tmp_path):
+class TestNewArea:
+    def test_writes_to_areas_dir(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli(
-            ["new", "subsystem", "--vault", str(vault),
+            ["new", "area", "--vault", str(vault),
              "--title", "auth-module",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
-        assert len(list((vault / "subsystems").glob("*.md"))) == 1
+        assert len(list((vault / "areas").glob("*.md"))) == 1
 
-    def test_frontmatter_has_type_subsystem(self, tmp_path):
+    def test_frontmatter_has_type_area(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "subsystem", "--vault", str(vault),
+            ["new", "area", "--vault", str(vault),
              "--title", "auth-module",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
         fm_mod = load_script("frontmatter")
-        note = _find_new_note(vault / "subsystems")
+        note = _find_new_note(vault / "areas")
         fm = fm_mod.parse_frontmatter(note)
-        assert fm["type"] == "subsystem"
+        assert fm["type"] == "area"
 
     def test_no_status_field(self, tmp_path):
-        """Subsystems do not carry a status field."""
+        """Area profiles do not carry a status field."""
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "subsystem", "--vault", str(vault),
+            ["new", "area", "--vault", str(vault),
              "--title", "auth-module",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
         fm_mod = load_script("frontmatter")
-        note = _find_new_note(vault / "subsystems")
+        note = _find_new_note(vault / "areas")
         fm = fm_mod.parse_frontmatter(note)
         assert "status" not in fm
 
     def test_no_literal_user_placeholder(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "subsystem", "--vault", str(vault),
+            ["new", "area", "--vault", str(vault),
              "--title", "auth-module",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
-        note = _find_new_note(vault / "subsystems")
+        note = _find_new_note(vault / "areas")
         assert "{{user}}" not in note.read_text()
 
     def test_keywords_inline_list_roundtrip(self, tmp_path):
         """keywords: must be written as an inline list and parse back as a list
-        (not a string). This is load-bearing for Slice 5 recall."""
+        (not a string). Load-bearing for recall.build_area_map."""
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "subsystem", "--vault", str(vault),
+            ["new", "area", "--vault", str(vault),
              "--title", "auth-module",
              "--project", "my-project",
              "--keywords", "auth, login, oauth"],
             env={"LORE_USER": "ada"},
         )
         fm_mod = load_script("frontmatter")
-        note = _find_new_note(vault / "subsystems")
+        note = _find_new_note(vault / "areas")
         fm = fm_mod.parse_frontmatter(note)
         assert isinstance(fm.get("keywords"), list), (
             f"keywords must parse as list, got {type(fm.get('keywords'))}: {fm.get('keywords')}"
@@ -611,12 +611,12 @@ class TestNewSubsystem:
         assert "auth" in fm["keywords"]
 
     def test_no_backlink_attempted(self, tmp_path):
-        """Subsystem does NOT backlink to the session note."""
+        """Area profiles do NOT backlink to the session note."""
         vault = _make_vault(tmp_path)
         session = _make_session_note(vault)
         original = session.read_text()
         run_cli(
-            ["new", "subsystem", "--vault", str(vault),
+            ["new", "area", "--vault", str(vault),
              "--title", "auth-module",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
@@ -681,15 +681,15 @@ class TestLeakGate:
         )
         self._check_note(_find_new_note(vault / "radar"))
 
-    def test_subsystem_note_has_no_leaks(self, tmp_path):
+    def test_area_note_has_no_leaks(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "subsystem", "--vault", str(vault),
+            ["new", "area", "--vault", str(vault),
              "--title", "No leaks please",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
-        self._check_note(_find_new_note(vault / "subsystems"))
+        self._check_note(_find_new_note(vault / "areas"))
 
 
 # ---------------------------------------------------------------------------

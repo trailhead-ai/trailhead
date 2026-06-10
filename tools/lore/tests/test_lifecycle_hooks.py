@@ -141,14 +141,15 @@ class TestEnsureSessionNote:
         )
         assert note.name == "2026-06-02-1200-cool-wt.md"
 
-    def test_subsystems_inline_empty(self, tmp_path):
+    def test_areas_inline_empty(self, tmp_path):
+        """Session note frontmatter uses areas: [] (renamed from subsystems:)."""
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note, _ = s.ensure_session_note(
             vault=vault, worktree_name="wt", branch="b", project="p",
             now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
         )
-        assert "subsystems: []" in note.read_text()
+        assert "areas: []" in note.read_text()
 
     def test_resumes_recent_note_for_same_worktree(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -278,9 +279,10 @@ class TestSessionContext:
         assert fm["type"] == "session"
         sv = load_script("status_validator")
         assert sv.is_valid_status(fm["type"], fm["status"])
-        # Index references the session note and lists lore commands
+        # Index references the session note (via link) and lists lore commands.
+        # The note slug (without .md) appears in the session link.
         assert "/lore:defer" in ctx
-        assert notes[0].name in ctx
+        assert notes[0].stem in ctx
 
     def test_resolves_vault_via_lore_vault(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -498,49 +500,18 @@ class TestHarvest:
 # ---------------------------------------------------------------------------
 
 class TestPermissionLog:
-    def test_appends_entry(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        mod = load_hook("permission-log")
-        payload = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "git -C foo status"},
-            "session_id": "sess-1",
-        }
-        env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", ""),
-               "HOME": os.environ.get("HOME", "")}
-        with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))):
-                with mock.patch("sys.stdout", io.StringIO()):
-                    rc = mod.main()
-        assert rc == 0
-        log_dir = vault / "permission-log"
-        logs = list(log_dir.glob("*.jsonl"))
-        assert len(logs) == 1
-        line = json.loads(logs[0].read_text().strip())
-        assert line["tool"] == "Bash"
-        assert line["signature"] == "git status"
+    def test_permission_log_hook_not_present(self):
+        """permission-log.py was removed from the hooks directory.
 
-    def test_resolves_log_under_vault(self, tmp_path):
-        """The log lives under the resolved $LORE_VAULT, not a hardcoded path."""
-        vault = _make_vault(tmp_path)
-        mod = load_hook("permission-log")
-        payload = {"tool_name": "Read", "tool_input": {"file_path": "/x/y.txt"},
-                   "session_id": "s2"}
-        env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", "")}
-        with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))):
-                with mock.patch("sys.stdout", io.StringIO()):
-                    mod.main()
-        assert (vault / "permission-log" / "s2.jsonl").exists()
-
-    def test_never_raises_on_garbage(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        mod = load_hook("permission-log")
-        env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", "")}
-        with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch("sys.stdin", io.StringIO("garbage {{{")):
-                with mock.patch("sys.stdout", io.StringIO()):
-                    assert mod.main() == 0
+        The PreToolUse / permission-logging hook was removed as part of the
+        subsystems→areas rename cleanup. This test asserts the removal is
+        intentional so any re-addition of a permission-log hook is a deliberate
+        change, not an accidental resurrection.
+        """
+        assert not (HOOKS_DIR / "permission-log.py").exists(), (
+            "permission-log.py must not be present — it was removed with the "
+            "PreToolUse hook. Re-adding it requires updating hooks.json too."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -548,10 +519,15 @@ class TestPermissionLog:
 # ---------------------------------------------------------------------------
 
 class TestHooksJson:
-    def test_registers_all_four_events(self):
+    def test_registers_all_three_events(self):
+        """hooks.json registers the three active lifecycle events.
+
+        Note: PreToolUse was removed; the active events are SessionStart,
+        PostToolUse (harvest-candidates), and WorktreeRemove (finalize).
+        """
         data = json.loads((HOOKS_DIR / "hooks.json").read_text())
         hooks = data["hooks"]
-        for event in ("SessionStart", "PreToolUse", "PostToolUse", "WorktreeRemove"):
+        for event in ("SessionStart", "PostToolUse", "WorktreeRemove"):
             assert event in hooks, f"missing {event}"
 
     def test_session_start_points_at_session_context(self):

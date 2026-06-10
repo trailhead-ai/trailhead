@@ -182,17 +182,21 @@ class TestNewPlanSpecBucket:
         names = sorted(p.name for p in bucket.glob("*.md"))
         assert names == ["2026-06-15-same-slug-2.md", "2026-06-15-same-slug.md"]
 
-    def test_subsystem_stays_flat(self, tmp_path):
-        """Out-of-scope note types (subsystem) must NOT bucket."""
+    def test_area_stays_flat(self, tmp_path):
+        """Out-of-scope note types (area) must NOT bucket — name-keyed, stays flat.
+
+        Rederived: 'subsystem' was renamed to 'area'; the areas/ dir is name-keyed
+        (not date-bucketed), so lore new area must write flat, not into YYYY-MM/.
+        """
         vault = _make_vault(tmp_path)
-        (vault / "subsystems").mkdir(parents=True, exist_ok=True)
+        (vault / "areas").mkdir(parents=True, exist_ok=True)
         r = run_cli(
-            ["new", "subsystem", "--vault", str(vault), "--title", "Foo Widget"],
+            ["new", "area", "--vault", str(vault), "--title", "Foo Widget"],
             env={"LORE_TODAY": "2026-06-15"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
-        assert (vault / "subsystems" / "foo-widget.md").exists()
-        assert not (vault / "subsystems" / "2026-06").exists()
+        assert (vault / "areas" / "foo-widget.md").exists()
+        assert not (vault / "areas" / "2026-06").exists()
 
 
 # ---------------------------------------------------------------------------

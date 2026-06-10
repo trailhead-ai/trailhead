@@ -248,17 +248,21 @@ class TestGetVaultStats:
         stats = sessions.get_vault_stats(vault)
         assert stats["active_lessons"] == 2
 
-    def test_subsystems_count_stays_flat(self, vault):
-        """Name-keyed folders must NOT recurse (over-recursion guard)."""
-        sub = vault / "subsystems"
+    def test_areas_count_stays_flat(self, vault):
+        """Name-keyed folders must NOT recurse (over-recursion guard).
+
+        Rederived: subsystems/ is now areas/ and stats key is 'areas'.
+        """
+        sub = vault / "areas"
+        sub.mkdir(parents=True, exist_ok=True)
         (sub / "2026-06").mkdir(parents=True)
         (sub / "2026-06" / "bucketed.md").write_text(
-            "---\ntype: subsystem\n---\n# Bucketed\n"
+            "---\ntype: area\n---\n# Bucketed\n"
         )
-        (sub / "flat.md").write_text("---\ntype: subsystem\n---\n# Flat\n")
+        (sub / "flat.md").write_text("---\ntype: area\n---\n# Flat\n")
         sessions = load_script("sessions")
         stats = sessions.get_vault_stats(vault)
-        assert stats["subsystems"] == 1
+        assert stats["areas"] == 1
 
     def test_build_action_index_dead_ends_recurses(self, vault):
         dead = vault / "dead-ends"
