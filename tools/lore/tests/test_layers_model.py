@@ -93,8 +93,11 @@ class TestResolveLayers:
         m = _layers()
         vault_dir = tmp_path / "my-vault"
         vault_dir.mkdir()
+        # Hermetic: point groups_dir at an empty dir so no real on-disk shared
+        # vault declaration (e.g. a user's trailhead group config) leaks in.
+        no_groups = tmp_path / "no-groups"
         with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault_dir)}, clear=False):
-            layers = m.resolve_layers()
+            layers = m.resolve_layers(groups_dir=no_groups)
         assert len(layers) == 1
         layer = layers[0]
         assert layer.name == "personal"
@@ -106,12 +109,13 @@ class TestResolveLayers:
             expected_root = resolve_vault()
         assert str(layer.root) == expected_root
 
-    def test_without_lore_vault_uses_home_lore_default(self) -> None:
+    def test_without_lore_vault_uses_home_lore_default(self, tmp_path: Path) -> None:
         """$LORE_VAULT unset → root is ~/lore resolved."""
         m = _layers()
+        no_groups = tmp_path / "no-groups"
         env = {k: v for k, v in os.environ.items() if k != "LORE_VAULT"}
         with mock.patch.dict(os.environ, env, clear=True):
-            layers = m.resolve_layers()
+            layers = m.resolve_layers(groups_dir=no_groups)
         assert len(layers) == 1
         layer = layers[0]
         assert layer.name == "personal"
@@ -120,10 +124,10 @@ class TestResolveLayers:
         expected = str(Path("~/lore").expanduser().resolve())
         assert str(layer.root) == expected
 
-    def test_resolve_layers_returns_list(self) -> None:
+    def test_resolve_layers_returns_list(self, tmp_path: Path) -> None:
         """resolve_layers() returns a list (not a generator or tuple)."""
         m = _layers()
-        result = m.resolve_layers()
+        result = m.resolve_layers(groups_dir=tmp_path / "no-groups")
         assert isinstance(result, list)
 
 
