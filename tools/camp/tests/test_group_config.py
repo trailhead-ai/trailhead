@@ -298,3 +298,162 @@ def test_groups_example_trailhead_toml_loads() -> None:
     assert len(cfg["members"]) >= 1
     # Must NOT have [dev_env] block (per D-D)
     assert "dev_env" not in cfg
+
+
+# ---------------------------------------------------------------------------
+# [[shared_vaults]] block — B-2: parse + thread into returned dict
+# ---------------------------------------------------------------------------
+
+_VALID_TOML_WITH_SHARED_VAULTS = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[shared_vaults]]
+name = "team-vault"
+root = "/tmp/team-vault"
+
+[[shared_vaults]]
+name = "another-vault"
+root = "/tmp/another-vault"
+"""
+
+_VALID_TOML_NO_SHARED_VAULTS = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+"""
+
+_SHARED_VAULTS_MISSING_NAME = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[shared_vaults]]
+root = "/tmp/team-vault"
+"""
+
+_SHARED_VAULTS_EMPTY_NAME = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[shared_vaults]]
+name = ""
+root = "/tmp/team-vault"
+"""
+
+_SHARED_VAULTS_MISSING_ROOT = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[shared_vaults]]
+name = "team-vault"
+"""
+
+_SHARED_VAULTS_EMPTY_ROOT = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[shared_vaults]]
+name = "team-vault"
+root = ""
+"""
+
+
+def test_shared_vaults_round_trips_into_dict(tmp_path: Path) -> None:
+    """B-2/B-3: a valid [[shared_vaults]] block is returned in the dict."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_WITH_SHARED_VAULTS)
+    cfg = load_group(f)
+    assert "shared_vaults" in cfg, "shared_vaults key must be in returned dict"
+    svs = cfg["shared_vaults"]
+    assert len(svs) == 2
+    assert svs[0]["name"] == "team-vault"
+    assert svs[0]["root"] == "/tmp/team-vault"
+    assert svs[1]["name"] == "another-vault"
+    assert svs[1]["root"] == "/tmp/another-vault"
+
+
+def test_no_shared_vaults_defaults_to_empty_list(tmp_path: Path) -> None:
+    """Back-compat: a config with no [[shared_vaults]] returns shared_vaults=[]."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_NO_SHARED_VAULTS)
+    cfg = load_group(f)
+    assert cfg.get("shared_vaults") == []
+
+
+def test_shared_vaults_missing_name_raises(tmp_path: Path) -> None:
+    """Missing shared_vaults[i].name → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_SHARED_VAULTS_MISSING_NAME)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "name" in msg
+
+
+def test_shared_vaults_empty_name_raises(tmp_path: Path) -> None:
+    """Empty shared_vaults[i].name → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_SHARED_VAULTS_EMPTY_NAME)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "name" in msg
+
+
+def test_shared_vaults_missing_root_raises(tmp_path: Path) -> None:
+    """Missing shared_vaults[i].root → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_SHARED_VAULTS_MISSING_ROOT)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "root" in msg
+
+
+def test_shared_vaults_empty_root_raises(tmp_path: Path) -> None:
+    """Empty shared_vaults[i].root → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_SHARED_VAULTS_EMPTY_ROOT)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "root" in msg

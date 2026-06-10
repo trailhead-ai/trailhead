@@ -159,10 +159,43 @@ def load_group(path: Path) -> dict[str, Any]:
             file=sys.stderr,
         )
 
+    # --- [[shared_vaults]] section (optional) ---
+    shared_vaults_raw = raw.get("shared_vaults")
+    if shared_vaults_raw is None:
+        shared_vaults_raw = []
+    if not isinstance(shared_vaults_raw, list):
+        raise GroupConfigError(
+            f"{path}: field 'shared_vaults' must be a list of tables"
+        )
+
+    shared_vaults: list[dict[str, Any]] = []
+    for i, sv in enumerate(shared_vaults_raw):
+        if not isinstance(sv, dict):
+            raise GroupConfigError(
+                f"{path}: shared_vaults[{i}] must be a table"
+            )
+
+        sv_name = sv.get("name")
+        if not isinstance(sv_name, str) or not sv_name.strip():
+            raise GroupConfigError(
+                f"{path}: shared_vaults[{i}].name is required and must be a non-empty string"
+            )
+
+        sv_root = sv.get("root")
+        if not isinstance(sv_root, str) or not sv_root.strip():
+            raise GroupConfigError(
+                f"{path}: shared_vaults[{i}] ('{sv_name}'): field 'root' is required "
+                "and must be a non-empty string"
+            )
+
+        shared_vaults.append({"name": sv_name, "root": sv_root})
+
     return {
         "group": {"name": group_name},
         "members": members,
         "branch_pattern": branch_pattern,
+        "shared_vaults": shared_vaults,
+        "_toml_path": str(path),
     }
 
 
