@@ -1367,6 +1367,7 @@ def cmd_recall(args: argparse.Namespace) -> int:
                 "one_liner": item.one_liner,
                 "source": item.source,
                 "layer": item.layer,
+                "trusted": item.trusted,
             }
         payload = {
             "areas": result.areas,

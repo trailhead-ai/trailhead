@@ -6,20 +6,37 @@ Three pure layers, each independently testable:
      Scans areas/*.md, reads name/keywords/one-liner per area, returns the
      compact always-loaded menu (alpha order, hard caps applied).
 
-  2. recall_areas(vault, area_names, project, recency_days)  -> RecallResult
+  2. recall_areas(vault, area_names, project, recency_days, layers)  -> RecallResult
      For each requested area: pulls every decision/lesson/dead-end/open-
      deferred whose areas/surfaces frontmatter overlaps the requested set
      (slug-reduced, list-aware via frontmatter.parse_frontmatter) plus
      recent cross-cutting items within recency_days.
 
-  3. render_recall_banner(result)   -> str
+     When layers is given (list[VaultLayer]), iterates each layer in order and
+     stamps each RecallItem.layer with the source layer's name. Dedup is
+     per-layer (D-7: provenance, not precedence). When layers is None, falls
+     back to the single vault arg — exact Step-3 behavior, untouched.
+
+  3. render_recall_banner(result, tty)   -> str
      Produces the explainable banner with structural framing label.
      Differentiated zero-match: bad-name vs valid-area-empty vs results.
+
+     When tty=True (interactive terminal): shared items render with human-
+     readable separator (--- [shared: name] --- / --- [end shared] ---).
+     When tty=False (piped/agent): shared items wrapped in the structural
+     <external-memory layer="shared" source="…">…</external-memory> data
+     channel (security-load-bearing, injection defense). Default: auto-detect
+     via sys.stdout.isatty().
 
 Security (D-7): area resolution is a LOOKUP into the enumerated area names
 from build_area_map — never a path built from the caller-supplied string.
 Overlap fields read via frontmatter.parse_frontmatter (list-aware) — NEVER
 the scalar dict from regenerate_indices.load_md_files (D-8b).
+
+Injection defense (A-3): shared-item bodies are XML-entity-encoded in the
+<external-memory> channel so that literal </external-memory> or
+<external-memory in note content cannot break out of or self-forge the
+channel framing. The source= attribute is XML-attribute-escaped.
 """
 from __future__ import annotations
 
@@ -77,7 +94,8 @@ class RecallItem:
     path: Path
     one_liner: str
     source: str = "local"
-    layer: str = "local"
+    layer: str = "personal"   # layer name — "personal" or shared vault name
+    trusted: bool = True       # False for shared-vault items (C-5)
 
 
 @dataclass
@@ -315,12 +333,19 @@ def recall_areas(
     area_names: list[str],
     project: str | None = None,
     recency_days: int = _DEFAULT_RECENCY_DAYS,
+    *,
+    layers=None,  # list[VaultLayer] | None — Slice 3 layered-vault path
 ) -> RecallResult:
     """Pull memory for the requested area names.
 
     For each requested area: pulls decisions/lessons/dead-ends/open-deferred
     whose areas/surfaces frontmatter overlaps the requested set, plus recent
     cross-cutting items within recency_days.
+
+    When layers is given (list[VaultLayer]), iterates each layer and stamps
+    each RecallItem with the source layer's name and trusted bool. Dedup is
+    per-layer (D26: provenance, not precedence). When layers is None, falls
+    back to the single vault path — exact Step-3 behavior.
 
     Security (D-7): area_names are set-deduped + case-normalized (D-1), then
     resolved via LOOKUP into the enumerated area map — never used as filesystem
@@ -329,6 +354,11 @@ def recall_areas(
     D-8b: overlap fields read via frontmatter.parse_frontmatter (list-aware).
     """
     vault = Path(vault)
+
+    if layers is not None:
+        return _recall_areas_layered(vault, area_names, project, recency_days, layers)
+
+    # ---- single-vault path (Step-3 back-compat, layers=None) ----
 
     # D-1: set-dedup + case-normalize
     normalized = {_slug(n) for n in area_names if n.strip()}
@@ -362,6 +392,77 @@ def recall_areas(
         vault, requested_slugs, recency_days, project, _add, seen
     )
 
+    # Stamp layer/trusted for single-vault path (personal)
+    for item in result.items:
+        item.layer = "personal"
+        item.trusted = True
+
+    return result
+
+
+def _recall_areas_layered(
+    vault: Path,
+    area_names: list[str],
+    project: str | None,
+    recency_days: int,
+    layers: list,
+) -> RecallResult:
+    """Pull memory across multiple VaultLayers (Slice 3 layered path).
+
+    Iterates each layer, pulls per-root, stamps RecallItem.layer and .trusted
+    from the source layer's name/trusted fields. Dedup is per-layer (D26).
+
+    The vault arg is used only to derive matched_area_names (area map built
+    from the personal/first layer); the area map is per-layer.
+    """
+    # Collect matched_area_names from all layers (union) for the result header
+    all_matched: set[str] = set()
+
+    result = RecallResult(areas=[], matched_area_names=[])
+    total_cross_cutting = 0
+
+    for layer in layers:
+        layer_root = Path(layer.root)
+        if not layer_root.is_dir():
+            continue  # missing shared layer → skip silently
+
+        # D-1: set-dedup + case-normalize per-layer
+        normalized = {_slug(n) for n in area_names if n.strip()}
+        valid_area_map = _build_valid_area_names(layer_root)
+        matched_names = [n for n in normalized if n in valid_area_map]
+        requested_slugs = set(matched_names)
+        all_matched.update(matched_names)
+
+        if not requested_slugs:
+            continue
+
+        # Per-layer seen set (D26: dedup is per-root, not cross-layer)
+        layer_seen: set[Path] = set()
+
+        def _make_add(layer_obj, seen_set):
+            """Capture layer_obj and seen_set by value for this layer's closure."""
+            def _add(item: RecallItem) -> None:
+                if item.path not in seen_set:
+                    seen_set.add(item.path)
+                    item.layer = layer_obj.name
+                    item.trusted = layer_obj.trusted
+                    result.items.append(item)
+            return _add
+
+        add_fn = _make_add(layer, layer_seen)
+
+        _pull_deferred(layer_root, requested_slugs, project, add_fn)
+        _pull_dead_ends(layer_root, requested_slugs, add_fn)
+        _pull_lessons(layer_root, requested_slugs, add_fn)
+        _pull_decisions(layer_root, requested_slugs, add_fn)
+        total_cross_cutting += _pull_cross_cutting(
+            layer_root, requested_slugs, recency_days, project, add_fn, layer_seen
+        )
+
+    sorted_matched = sorted(all_matched)
+    result.areas = sorted_matched
+    result.matched_area_names = sorted_matched
+    result.cross_cutting_total = total_cross_cutting
     return result
 
 
@@ -486,6 +587,46 @@ def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, s
     return total_candidates
 
 
+# ---------------------------------------------------------------------------
+# A-3: XML helpers for the shared data-channel delimiter
+# ---------------------------------------------------------------------------
+
+def _xml_attr_escape(value: str) -> str:
+    """XML-attribute-escape a string for use in an attribute value.
+
+    Escapes & " < > so the value is safe inside a double-quoted attribute.
+    A-3: a vault name like '"><script' must not break the tag structure.
+    """
+    value = value.replace("&", "&amp;")
+    value = value.replace('"', "&quot;")
+    value = value.replace("<", "&lt;")
+    value = value.replace(">", "&gt;")
+    return value
+
+
+def _xml_body_escape(text: str) -> str:
+    """Encode text so it cannot break out of or self-forge the external-memory channel.
+
+    A-3 (both directions):
+    - A literal '</external-memory>' in the body must not terminate the channel
+      early. We encode the leading '<' as '&lt;' which makes the channel
+      un-escapable.
+    - A literal '<external-memory' in the body must not forge a new framing tag.
+      Same encoding: all '<' become '&lt;', all '>' become '&gt;'.
+    - '&' becomes '&amp;' first so we don't double-encode.
+
+    This is a full XML character-data escape (the body is emitted as CDATA
+    within the XML element content). The only characters that need escaping in
+    XML text content are & and <.
+    """
+    text = text.replace("&", "&amp;")
+    text = text.replace("<", "&lt;")
+    # '>' is technically only special in ']]>' sequences but encode it for
+    # safety so the body cannot contain a well-formed closing tag either.
+    text = text.replace(">", "&gt;")
+    return text
+
+
 def render_area_menu(entries: list[AreaEntry]) -> str:
     """Render the always-loaded area-map menu block (D-7 structural label).
 
@@ -519,29 +660,40 @@ def render_area_menu(entries: list[AreaEntry]) -> str:
     return "\n".join(lines)
 
 
-def render_recall_banner(result: RecallResult) -> str:
+def render_recall_banner(result: RecallResult, tty: bool | None = None) -> str:
     """Render the explainable recall banner with structural framing (D-7).
 
     D-9 differentiated zero-match:
       - no areas matched any requested name -> name-check message
       - valid area(s) but zero items         -> "no tagged notes yet" message
       - results                              -> full grouped banner
+
+    D-3 TTY-conditional shared-item routing:
+      - tty=True  (interactive terminal) → human-readable separator
+        --- [shared: name] --- / --- [end shared] ---
+      - tty=False (non-TTY / piped / agent) → structural XML data channel
+        <external-memory layer="shared" source="...">...</external-memory>
+      - tty=None (default) → auto-detect via sys.stdout.isatty()
+
+    A-3 injection defense (non-TTY shared path only):
+      - source= attribute is XML-attribute-escaped
+      - item content is XML-body-escaped (& < > encoded) so literal
+        </external-memory> or <external-memory in note bodies cannot
+        break out of or self-forge the channel framing.
     """
+    if tty is None:
+        tty = sys.stdout.isatty()
+
     lines = []
     lines.append(_FRAME_OPEN)
     lines.append("")
 
     if not result.areas and not result.matched_area_names:
-        # No requested names matched any area in the map
         area_str = ", ".join(
             f"'{a}'" for a in (result.areas or ["(none)"])
         )
-        lines.append(
-            f"Recalled (areas: {area_str}) — 0 items"
-        )
-        lines.append(
-            "no areas matched — check area names with `lore status`"
-        )
+        lines.append(f"Recalled (areas: {area_str}) — 0 items")
+        lines.append("no areas matched — check area names with `lore status`")
     elif result.count == 0:
         area_str = ", ".join(result.areas) if result.areas else "(none)"
         lines.append(f"Recalled (areas: {area_str}) — 0 items")
@@ -551,21 +703,85 @@ def render_recall_banner(result: RecallResult) -> str:
         lines.append(f"Recalled (areas: {area_str}) — {result.count} items")
         lines.append("")
 
-        # Group by type
-        by_type: dict[str, list[RecallItem]] = {}
-        for item in result.items:
-            by_type.setdefault(item.type, []).append(item)
+        # Partition items: personal (trusted) vs shared (not trusted)
+        # C-5: routing is from VaultLayer.kind (item.trusted), never frontmatter
+        personal_items = [it for it in result.items if it.trusted]
+        shared_items = [it for it in result.items if not it.trusted]
 
-        type_order = ["decision", "lesson", "dead-end", "deferred", "cross-cutting"]
-        for t in type_order:
-            items = by_type.get(t, [])
-            if not items:
-                continue
-            lines.append(f"{t.capitalize()}s ({len(items)}):")
-            for item in items:
-                summary = f" — {item.one_liner}" if item.one_liner else ""
-                lines.append(f"  {item.path.stem}{summary}")
+        # Render personal items in the existing trusted framing (unchanged)
+        if personal_items:
+            by_type: dict[str, list[RecallItem]] = {}
+            for item in personal_items:
+                by_type.setdefault(item.type, []).append(item)
+
+            type_order = ["decision", "lesson", "dead-end", "deferred", "cross-cutting"]
+            for t in type_order:
+                items = by_type.get(t, [])
+                if not items:
+                    continue
+                lines.append(f"{t.capitalize()}s ({len(items)}):")
+                for item in items:
+                    summary = f" — {item.one_liner}" if item.one_liner else ""
+                    lines.append(f"  {item.path.stem}{summary}")
+
+        # Render shared items — grouped by layer (vault name)
+        if shared_items:
+            # Group shared items by their layer name (vault name)
+            by_vault: dict[str, list[RecallItem]] = {}
+            for item in shared_items:
+                by_vault.setdefault(item.layer, []).append(item)
+
+            for vault_name, vault_items in by_vault.items():
+                vault_block = _render_shared_vault_block(vault_name, vault_items)
+                if tty:
+                    # D-3: human-readable separator for interactive terminals
+                    lines.append(f"--- [shared: {vault_name}] ---")
+                    lines.extend(vault_block)
+                    lines.append(f"--- [end shared] ---")
+                else:
+                    # D-3: structural XML data channel for agent/piped output
+                    # A-3: XML-escape the source= attribute value
+                    escaped_name = _xml_attr_escape(vault_name)
+                    lines.append(
+                        f'<external-memory layer="shared" source="{escaped_name}">'
+                    )
+                    lines.extend(vault_block)
+                    lines.append("</external-memory>")
 
     lines.append("")
     lines.append(_FRAME_CLOSE)
     return "\n".join(lines)
+
+
+def _render_shared_vault_block(vault_name: str, items: list[RecallItem]) -> list[str]:
+    """Render shared-vault items as lines (type-grouped), with body escaping.
+
+    A-3: item one_liner text is XML-body-escaped when rendered — this is the
+    text that will appear inside the <external-memory> channel on non-TTY.
+    We escape here (not in render_recall_banner) so both TTY and non-TTY paths
+    share the same safe rendering. For TTY this is slightly over-encoded but
+    safe; the agent path (where injection matters) gets the escaping it needs.
+
+    NOTE: we escape the one_liner (the summary text), not the full note body —
+    the banner only shows the one-liner. The one-liner is derived from the note
+    body so it can contain injection payloads from that body.
+    """
+    by_type: dict[str, list[RecallItem]] = {}
+    for item in items:
+        by_type.setdefault(item.type, []).append(item)
+
+    type_order = ["decision", "lesson", "dead-end", "deferred", "cross-cutting"]
+    block_lines = []
+    for t in type_order:
+        type_items = by_type.get(t, [])
+        if not type_items:
+            continue
+        block_lines.append(f"{t.capitalize()}s ({len(type_items)}):")
+        for item in type_items:
+            # A-3: escape the one_liner for XML channel safety
+            safe_one_liner = _xml_body_escape(item.one_liner) if item.one_liner else ""
+            summary = f" — {safe_one_liner}" if safe_one_liner else ""
+            # Stem (filename without extension) — also escape for safety
+            safe_stem = _xml_body_escape(item.path.stem)
+            block_lines.append(f"  {safe_stem}{summary}")
+    return block_lines

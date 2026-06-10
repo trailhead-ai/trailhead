@@ -411,7 +411,10 @@ class TestRecallAreasOverlap:
         )
         for item in result.items:
             assert isinstance(item.source, str), "items must have source field"
-            assert item.layer == "local", "items must have layer field set to 'local'"
+            assert item.layer in ("local", "personal"), (
+                "items must have layer field set to 'local' or 'personal' "
+                "(Slice 3 upgrades 'local' to 'personal')"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +590,9 @@ class TestRecallAreasEdgeCases:
         for item in result.items:
             assert hasattr(item, "source"), "RecallItem must have source field"
             assert hasattr(item, "layer"), "RecallItem must have layer field"
-            assert item.layer == "local"
+            assert item.layer in ("local", "personal"), (
+                "Slice 3 upgrades layer from 'local' to 'personal' for single-vault path"
+            )
 
 
 # ---------------------------------------------------------------------------

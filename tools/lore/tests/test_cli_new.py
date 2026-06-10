@@ -532,7 +532,11 @@ class TestRecallVerb:
         assert isinstance(data["count"], int)
 
     def test_recall_json_items_have_source_layer(self, tmp_path):
-        """`--json` items carry source and layer fields (D-7 provenance)."""
+        """`--json` items carry source and layer fields (D-7 provenance).
+
+        Slice 3: layer value is 'personal' (not 'local') for the single-vault
+        path — the value was upgraded in Slice 3 to reflect real semantics.
+        """
         vault = self._make_recall_vault(tmp_path)
         self._write_area(vault, "auth", "Auth area.")
         self._write_deferred(vault, "auth-work", ["auth"])
@@ -543,7 +547,9 @@ class TestRecallVerb:
         for item in data["items"]:
             assert "source" in item, f"item missing 'source': {item}"
             assert "layer" in item, f"item missing 'layer': {item}"
-            assert item["layer"] == "local"
+            assert item["layer"] == "personal", (
+                "Slice 3: single-vault path must return layer='personal' not 'local'"
+            )
 
     def test_recall_json_count_equals_banner_count(self, tmp_path):
         """`--json` count == human banner N (incl. dedup case)."""
