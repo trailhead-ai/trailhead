@@ -60,6 +60,7 @@ stub; the default is the real ``subprocess.run`` path inside
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import tempfile
@@ -72,6 +73,62 @@ from trailhead.paths import ensure_dir, state_dir
 from trailhead.registry import generate_marketplace_json, register, rewire
 
 _REGISTERED_MARKER = ".trailhead-registered"
+_LOCK_FILENAME = "trailhead.lock"
+
+
+class LockError(Exception):
+    """Raised when the shared wire lock is already held by another operation."""
+
+
+def _acquire_wire_lock(lock_path: Path) -> None:
+    """Acquire the exclusive O_EXCL wire lock at lock_path.
+
+    Raises LockError if the file already exists (lock is held by another process).
+    """
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.write(fd, f"locked by pid {os.getpid()}\n".encode())
+        os.close(fd)
+    except FileExistsError:
+        raise LockError(
+            f"trailhead: another trailhead operation is already running "
+            f"(lock file exists at {lock_path}).\n"
+            f"If no other process is running, remove the lock file and retry:\n"
+            f"  rm {lock_path}"
+        )
+
+
+def _release_wire_lock(lock_path: Path) -> None:
+    """Release the wire lock (delete the file)."""
+    try:
+        lock_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def wire_lock(*, env: dict[str, str] | None = None):
+    """Context manager that acquires/releases the shared wire lock (R-8).
+
+    Acquires the O_EXCL lock under state_dir("trailhead")/trailhead.lock.
+    Releases it in the finally block regardless of exceptions.
+
+    Usage::
+
+        with wire_lock(env=_env):
+            wire(selection, env=_env)
+
+    Raises LockError if the lock is already held.
+    """
+    _environ = env if env is not None else dict(os.environ)
+    _state_dir = state_dir("trailhead", env=_environ)
+    ensure_dir(_state_dir)
+    lock_path = _state_dir / _LOCK_FILENAME
+    _acquire_wire_lock(lock_path)
+    try:
+        yield lock_path
+    finally:
+        _release_wire_lock(lock_path)
 
 
 @dataclass
@@ -218,7 +275,7 @@ def _compose_tool(
         raise WireError(tool=tool, stage=stage, cause=exc) from exc
 
 
-def _default_manifest_paths() -> dict[str, Path]:
+def default_manifest_paths() -> dict[str, Path]:
     """Return the default manifest paths relative to the repo root."""
     repo_root = Path(__file__).parent.parent
     return {
@@ -226,3 +283,7 @@ def _default_manifest_paths() -> dict[str, Path]:
         "camp": repo_root / "tools" / "camp" / "capabilities.toml",
         "forge": repo_root / "tools" / "forge" / "capabilities.toml",
     }
+
+
+# Keep the private alias for any callers that haven't migrated yet.
+_default_manifest_paths = default_manifest_paths

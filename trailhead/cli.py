@@ -16,10 +16,36 @@ import argparse
 import sys
 
 from trailhead import __version__
+from trailhead.capabilities import ConfineError, ManifestError
+from trailhead.compose import CollisionError, DestConfinementError, UnknownCapabilityError
+from trailhead.config import ConfigError
 from trailhead.config_cmd import run_config
 from trailhead.doctor import run_doctor
+from trailhead.fetch import FetchError
 from trailhead.install import run_install
+from trailhead.manifest import InstallManifestError
+from trailhead.pathint import PathIntegrationError
+from trailhead.paths import PathResolutionError
+from trailhead.presets import PresetError
 from trailhead.update import run_update
+from trailhead.wire import LockError, WireError
+
+# Named error family — maps to a clean 'trailhead: <message>' line (M5 / A-9).
+_TRAILHEAD_ERRORS = (
+    ConfigError,
+    InstallManifestError,
+    FetchError,
+    WireError,
+    PathIntegrationError,
+    PathResolutionError,
+    PresetError,
+    LockError,
+    ManifestError,
+    ConfineError,
+    UnknownCapabilityError,
+    CollisionError,
+    DestConfinementError,
+)
 
 _CURATED_HELP = """\
 trailhead {version} — manage and compose lore, forge, and camp plugins.
@@ -150,4 +176,13 @@ def main() -> int:
         print(f"trailhead: unknown command {args.command!r}", file=sys.stderr)
         return 1
 
-    return handler(args)
+    # M5 / A-9: top-level error guard — named errors produce a clean
+    # 'trailhead: <message>' line on stderr + nonzero exit; no raw tracebacks.
+    try:
+        return handler(args)
+    except _TRAILHEAD_ERRORS as exc:
+        print(f"trailhead: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"trailhead: unexpected error: {exc}", file=sys.stderr)
+        return 1

@@ -32,13 +32,14 @@ Hermeticity (B-3):
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 from trailhead.config import load_config, save_config
 from trailhead.pathint import install_path_integration, remove_path_integration
-from trailhead.wire import WireError, wire
+from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 # ---------------------------------------------------------------------------
 # Module-level repo root (needed to build tool bin paths for pathint)
@@ -64,7 +65,7 @@ def run_config(
                "lore", "recall", "off"]).
         env:   Env dict for path resolution (hermeticity).
     """
-    _env = env if env is not None else {}
+    _env = env if env is not None else dict(os.environ)
 
     if not args:
         print("usage: trailhead config <subcommand> [...]", file=sys.stderr)
@@ -214,14 +215,18 @@ def _cmd_capabilities(args: list[str], *, env: dict[str, str]) -> int:
     else:
         new_caps = current_caps | {cap}
 
-    # R-2 (binding): re-wire FIRST, persist ONLY on success
-    # Build manifest_paths for the affected tool only
-    from trailhead.wire import _default_manifest_paths
-    manifest_paths = _default_manifest_paths()
-
+    # R-2 (binding): re-wire FIRST, persist ONLY on success.
+    # I1 (R-8): acquire shared wire lock to guard against concurrent
+    # update / install / toggle races on the composed dest.
+    manifest_paths = default_manifest_paths()
     selection = {tool: new_caps}
+
     try:
-        wire(selection, manifest_paths=manifest_paths, env=env)
+        with wire_lock(env=env):
+            wire(selection, manifest_paths=manifest_paths, env=env)
+    except LockError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     except WireError as exc:
         print(
             f"trailhead: re-wire failed for {tool!r} — {exc}; config unchanged",

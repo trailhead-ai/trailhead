@@ -255,7 +255,10 @@ def _check_drift(
             present_caps = None
 
         if present_caps is None:
-            # No dest → no drift to report
+            # No dest → not yet composed; skip drift check.
+            # Trade-off (M3): this avoids false-positives on fresh installs but
+            # introduces a false-negative — a wired-then-deleted dest reads as
+            # "not yet composed", so genuine dest-deletion drift is invisible.
             drift_checks.append({
                 "check": f"drift:{tool}",
                 "description": f"config↔filesystem coherence for {tool}",

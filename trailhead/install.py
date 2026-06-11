@@ -33,14 +33,15 @@ U-1 / A-7: for the already-present-repo case (dogfood) we verify-in-place and
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
 from trailhead.config import TrailheadConfig, load_config, save_config
 from trailhead.fetch import FetchError, verify_present_repo
 from trailhead.manifest import InstallManifest, load_install_manifest
-from trailhead.pathint import PathIntegrationResult, install_path_integration
-from trailhead.paths import config_dir
+from trailhead.pathint import PathIntegrationError, PathIntegrationResult, install_path_integration
+from trailhead.paths import config_dir, ensure_dir, state_dir
 from trailhead.presets import PresetError, resolve
 from trailhead.wire import WireError, wire
 
@@ -87,7 +88,7 @@ def run_install(
     Returns:
         0 on success, nonzero on failure.
     """
-    _env = env if env is not None else {}
+    _env = env if env is not None else dict(os.environ)
     is_tty = _is_tty()
 
     # ------------------------------------------------------------------
@@ -146,7 +147,7 @@ def run_install(
 
     try:
         wire(selection, env=_env)
-    except (WireError, FetchError, Exception) as exc:
+    except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
@@ -159,6 +160,10 @@ def run_install(
     cfg.preset = preset_name
     cfg.capabilities = capabilities_dict
     save_config(cfg, env=_env)
+
+    # M2: seed update_state.json so the first `trailhead update` after install
+    # is a true no-op (wire not re-called for unchanged revs).
+    _seed_update_state(manifest, env=_env)
 
     # ------------------------------------------------------------------
     # Step 6: PATH integration
@@ -180,8 +185,15 @@ def run_install(
                 env=_env,
             )
         except Exception as exc:
-            print(f"trailhead: PATH integration failed: {exc}", file=sys.stderr)
-            return 1
+            # M1: pathint failure is a warning — the install (wire + config) succeeded.
+            # PATH is separately fixable; exiting nonzero would mislead the user.
+            shim_hint = state_dir("trailhead", env=_env) / "bin"
+            print(
+                f"trailhead: could not write PATH block: {exc}\n"
+                f"  add {shim_hint} to your PATH manually, or run "
+                f"`trailhead config path_integration on`",
+                file=sys.stderr,
+            )
 
     # ------------------------------------------------------------------
     # Step 7: Print the summary
@@ -270,6 +282,19 @@ def _find_trailhead_entry(manifest: InstallManifest):
         if entry.name == "trailhead":
             return entry
     return None
+
+
+def _seed_update_state(manifest: InstallManifest, *, env: dict[str, str]) -> None:
+    """Write update_state.json seeded with the current manifest revs (M2).
+
+    Called at the end of a successful install so the first `trailhead update`
+    with unchanged revs is a true no-op rather than always re-wiring.
+    """
+    _state_dir = state_dir("trailhead", env=env)
+    ensure_dir(_state_dir)
+    state_file = _state_dir / "update_state.json"
+    revs = {entry.name: entry.rev for entry in manifest.repos}
+    state_file.write_text(json.dumps(revs))
 
 
 # ---------------------------------------------------------------------------

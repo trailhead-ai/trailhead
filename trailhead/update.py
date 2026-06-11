@@ -47,7 +47,7 @@ from trailhead.fetch import FetchError, verify_present_repo
 from trailhead.manifest import InstallManifest, InstallManifestError, load_install_manifest
 from trailhead.paths import ensure_dir, state_dir
 from trailhead.presets import resolve as resolve_preset
-from trailhead.wire import WireError, wire, _default_manifest_paths
+from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -56,44 +56,7 @@ from trailhead.wire import WireError, wire, _default_manifest_paths
 _MANIFEST_PATH = Path(__file__).parent / "install_manifest.toml"
 _REPO_ROOT = Path(__file__).parent.parent
 
-_LOCK_FILENAME = "trailhead.lock"
 _UPDATE_STATE_FILENAME = "update_state.json"
-
-
-# ---------------------------------------------------------------------------
-# Lock helpers (R-8)
-# ---------------------------------------------------------------------------
-
-
-class LockError(Exception):
-    """Raised when the update lock is already held."""
-
-
-def _acquire_lock(lock_path: Path) -> None:
-    """Acquire an exclusive advisory lock at lock_path.
-
-    Uses O_CREAT|O_EXCL so only one process can hold the lock at a time.
-    Raises LockError if the file already exists (lock is held).
-    """
-    try:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        os.write(fd, f"locked by pid {os.getpid()}\n".encode())
-        os.close(fd)
-    except FileExistsError:
-        raise LockError(
-            f"trailhead: another trailhead operation is already running "
-            f"(lock file exists at {lock_path}).\n"
-            f"If no other process is running, remove the lock file and retry:\n"
-            f"  rm {lock_path}"
-        )
-
-
-def _release_lock(lock_path: Path) -> None:
-    """Release the advisory lock (delete the file)."""
-    try:
-        lock_path.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +95,7 @@ def run_update(
     Args:
         env:  Env dict for path resolution (hermeticity).
     """
-    _env = env if env is not None else {}
+    _env = env if env is not None else dict(os.environ)
 
     # Resolve state dir
     try:
@@ -142,33 +105,26 @@ def run_update(
         print(f"trailhead: cannot access state dir: {exc}", file=sys.stderr)
         return 1
 
-    lock_path = _state_dir / _LOCK_FILENAME
     state_file = _state_dir / _UPDATE_STATE_FILENAME
 
     # ----------------------------------------------------------------
-    # Step 1: Acquire lock (R-8)
+    # Step 1: Acquire shared wire lock (R-8)
     # ----------------------------------------------------------------
     try:
-        _acquire_lock(lock_path)
+        with wire_lock(env=_env):
+            return _run_update_locked(
+                _env=_env,
+                state_file=state_file,
+            )
     except LockError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-
-    try:
-        return _run_update_locked(
-            _env=_env,
-            state_file=state_file,
-            lock_path=lock_path,
-        )
-    finally:
-        _release_lock(lock_path)
 
 
 def _run_update_locked(
     *,
     _env: dict[str, str],
     state_file: Path,
-    lock_path: Path,
 ) -> int:
     """Execute update logic while holding the lock."""
     # ----------------------------------------------------------------
@@ -209,8 +165,14 @@ def _run_update_locked(
 
     # ----------------------------------------------------------------
     # Step 4: Verify changed repos in place (already-present-repo case)
+    # I2: only verify entries whose local checkout root is known (trailhead).
+    # Other entries (e.g. outpost, future repos) are skipped here — verifying
+    # their pinned rev against the trailhead checkout root would always produce
+    # a false SHA mismatch.
     # ----------------------------------------------------------------
     for entry in changed_entries:
+        if entry.name != "trailhead":
+            continue
         try:
             verify_present_repo(entry, repo_path=_REPO_ROOT)
         except FetchError as exc:
@@ -233,7 +195,7 @@ def _run_update_locked(
     # Track what was previously wired vs. what will be wired (R-8 newly-wired)
     prev_wired = set(cfg.capabilities.keys())
 
-    manifest_paths = _default_manifest_paths()
+    manifest_paths = default_manifest_paths()
     try:
         wire(selection, manifest_paths=manifest_paths, env=_env)
     except WireError as exc:
