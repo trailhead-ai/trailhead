@@ -129,9 +129,9 @@ class TestCuratedHelp:
 
 
 class TestSubcommandStubs:
-    def test_install_stub_exits_zero(self):
-        exit_code, out, err = _run(["install"])
-        assert exit_code == 0
+    # install is now fully implemented (Slice 4) — its stub tests are superseded
+    # by trailhead/tests/test_install.py. The remaining stubs (update, doctor,
+    # config) are Slice 5 — they still print "not yet wired".
 
     def test_update_stub_exits_zero(self):
         exit_code, out, err = _run(["update"])
@@ -144,11 +144,6 @@ class TestSubcommandStubs:
     def test_config_stub_exits_zero(self):
         exit_code, out, err = _run(["config"])
         assert exit_code == 0
-
-    def test_install_stub_prints_not_yet_wired(self):
-        exit_code, out, err = _run(["install"])
-        combined = out + err
-        assert "not yet wired" in combined.lower() or "wired" in combined.lower()
 
     def test_update_stub_prints_not_yet_wired(self):
         exit_code, out, err = _run(["update"])
@@ -164,6 +159,12 @@ class TestSubcommandStubs:
         exit_code, out, err = _run(["config"])
         combined = out + err
         assert "not yet wired" in combined.lower() or "wired" in combined.lower()
+
+    def test_install_has_preset_flag(self):
+        """Slice 4: install now accepts --preset; --help must show it."""
+        exit_code, out, err = _run(["install", "--help"])
+        assert exit_code == 0
+        assert "preset" in out.lower() or "preset" in err.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import argparse
 import sys
 
 from trailhead import __version__
+from trailhead.install import run_install
 
 _CURATED_HELP = """\
 trailhead {version} — manage and compose lore, forge, and camp plugins.
@@ -34,9 +35,12 @@ def _print_curated_help() -> None:
     print(_CURATED_HELP.format(version=__version__))
 
 
-def _cmd_install(_args: argparse.Namespace) -> int:
-    print("install: not yet wired (Slice 4)")
-    return 0
+def _cmd_install(args: argparse.Namespace) -> int:
+    return run_install(
+        args.preset,
+        quiet=args.quiet,
+        as_json=args.json,
+    )
 
 
 def _cmd_update(_args: argparse.Namespace) -> int:
@@ -68,10 +72,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
-    subparsers.add_parser(
+    install_p = subparsers.add_parser(
         "install",
         help="Wire a preset of tools and capabilities into the Claude Code harness.",
     )
+    install_p.add_argument(
+        "--preset",
+        metavar="PRESET",
+        default=None,
+        help="Preset to install: minimal, standard, or full. Default: standard (or prompts on TTY).",
+    )
+    install_p.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress progress lines; summary is still printed.",
+    )
+    install_p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Print machine-readable JSON summary instead of human-readable output.",
+    )
+
     subparsers.add_parser(
         "update",
         help="Re-wire to the latest pinned manifest versions from the configured source.",
