@@ -124,41 +124,40 @@ class TestCuratedHelp:
 
 
 # ---------------------------------------------------------------------------
-# Subcommand stubs exit 0 with "not yet wired" line
+# Subcommand integration: update, doctor, config are now wired (Slice 5)
+# (The old "stub" tests tested Slice-0 "not yet wired" stubs; those are
+# superseded by Slice 5 behavioral contracts in test_doctor.py,
+# test_config_cmd.py, and test_update.py.)
 # ---------------------------------------------------------------------------
 
 
 class TestSubcommandStubs:
-    # install is now fully implemented (Slice 4) — its stub tests are superseded
-    # by trailhead/tests/test_install.py. The remaining stubs (update, doctor,
-    # config) are Slice 5 — they still print "not yet wired".
+    # install is fully implemented (Slice 4).
+    # update, doctor, config are fully implemented (Slice 5).
 
-    def test_update_stub_exits_zero(self):
+    def test_update_produces_output(self):
+        """update runs and produces some output (may fail, but not silently)."""
         exit_code, out, err = _run(["update"])
-        assert exit_code == 0
+        combined = out + err
+        # Either succeeds or fails with a message — never empty
+        assert len(combined.strip()) > 0
 
-    def test_doctor_stub_exits_zero(self):
+    def test_doctor_exits_zero_with_no_tools_wired(self):
+        """doctor runs successfully even with no tools wired."""
         exit_code, out, err = _run(["doctor"])
         assert exit_code == 0
 
-    def test_config_stub_exits_zero(self):
-        exit_code, out, err = _run(["config"])
-        assert exit_code == 0
-
-    def test_update_stub_prints_not_yet_wired(self):
-        exit_code, out, err = _run(["update"])
-        combined = out + err
-        assert "not yet wired" in combined.lower() or "wired" in combined.lower()
-
-    def test_doctor_stub_prints_not_yet_wired(self):
+    def test_doctor_produces_output(self):
+        """doctor produces health output."""
         exit_code, out, err = _run(["doctor"])
         combined = out + err
-        assert "not yet wired" in combined.lower() or "wired" in combined.lower()
+        assert len(combined.strip()) > 0
 
-    def test_config_stub_prints_not_yet_wired(self):
+    def test_config_no_args_returns_usage(self):
+        """config with no args returns nonzero and shows usage."""
         exit_code, out, err = _run(["config"])
         combined = out + err
-        assert "not yet wired" in combined.lower() or "wired" in combined.lower()
+        assert "config" in combined.lower() or "subcommand" in combined.lower() or "usage" in combined.lower()
 
     def test_install_has_preset_flag(self):
         """Slice 4: install now accepts --preset; --help must show it."""

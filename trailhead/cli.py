@@ -16,7 +16,10 @@ import argparse
 import sys
 
 from trailhead import __version__
+from trailhead.config_cmd import run_config
+from trailhead.doctor import run_doctor
 from trailhead.install import run_install
+from trailhead.update import run_update
 
 _CURATED_HELP = """\
 trailhead {version} — manage and compose lore, forge, and camp plugins.
@@ -44,18 +47,21 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
 
 def _cmd_update(_args: argparse.Namespace) -> int:
-    print("update: not yet wired (Slice 5)")
-    return 0
+    return run_update()
 
 
-def _cmd_doctor(_args: argparse.Namespace) -> int:
-    print("doctor: not yet wired (Slice 5)")
-    return 0
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    result = run_doctor(as_json=getattr(args, "json", False))
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(result.data))
+    else:
+        print(result.human_output)
+    return result.exit_code
 
 
-def _cmd_config(_args: argparse.Namespace) -> int:
-    print("config: not yet wired (Slice 5)")
-    return 0
+def _cmd_config(args: argparse.Namespace) -> int:
+    return run_config(args.config_args)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -99,13 +105,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "update",
         help="Re-wire to the latest pinned manifest versions from the configured source.",
     )
-    subparsers.add_parser(
+
+    doctor_p = subparsers.add_parser(
         "doctor",
         help="Roll up health checks across all wired tools.",
     )
-    subparsers.add_parser(
+    doctor_p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Print machine-readable JSON aggregate.",
+    )
+
+    config_p = subparsers.add_parser(
         "config",
         help="Read and write trailhead configuration (registry, preset, capabilities).",
+    )
+    config_p.add_argument(
+        "config_args",
+        nargs=argparse.REMAINDER,
+        help="Config subcommand and arguments (e.g. registry, path_integration, capabilities).",
     )
 
     return parser
