@@ -27,8 +27,8 @@ from pathlib import Path
 
 import pytest
 
-from trailhead.capabilities import ManifestError, load_manifest
-from trailhead.presets import PresetError, resolve as resolve_preset
+from trailhead.capabilities import load_manifest
+from trailhead.presets import _STATIC_PRESETS
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _CLAIMS_FILE = _REPO_ROOT / "trailhead" / "landing_claims.toml"
@@ -49,15 +49,18 @@ _ALL_VALID_KINDS = _RESOLVABLE_KINDS | _PROSE_KINDS
 # ---------------------------------------------------------------------------
 
 
-def build_real_anchor_set() -> dict[str, dict[str, set[str]]]:
+def build_real_anchor_set(root: Path = _REPO_ROOT) -> dict[str, dict[str, set[str]]]:
     """Enumerate {tool: {capabilities: set, skills: set, agents: set}} from manifests.
 
-    Discovers manifests from sorted(REPO_ROOT.glob("tools/*/capabilities.toml")) (R-1).
+    Discovers manifests from sorted(root.glob("tools/*/capabilities.toml")) (R-1).
     Asserts m.validate is True for each manifest before trusting its anchors (R-2).
     Includes capabilities with empty skills/agents — do not filter (R-5, deterministic).
+
+    `root` defaults to the repo root; tests inject a tmp_path tools tree to exercise
+    the R-2 guard against the REAL code path (not a hand-copied assertion).
     """
     anchors: dict[str, dict[str, set[str]]] = {}
-    for path in sorted(_REPO_ROOT.glob("tools/*/capabilities.toml")):
+    for path in sorted(root.glob("tools/*/capabilities.toml")):
         m = load_manifest(path)
         assert m.validate is True, (
             f"manifest {path} has validate=false; gate requires validate=true — "
@@ -76,15 +79,13 @@ def build_real_anchor_set() -> dict[str, dict[str, set[str]]]:
 
 
 def _preset_names() -> frozenset[str]:
-    """Return the set of valid preset names."""
-    names: set[str] = set()
-    for name in ("minimal", "standard", "full"):
-        try:
-            resolve_preset(name)
-            names.add(name)
-        except PresetError:
-            pass
-    return frozenset(names)
+    """Return the set of valid preset names.
+
+    Enumerated from the same source of truth the installer uses
+    (presets._STATIC_PRESETS + the runtime-computed "full"), so it can't drift
+    as presets are added (mirrors R-1's discovery philosophy; M-1).
+    """
+    return frozenset(set(_STATIC_PRESETS.keys()) | {"full"})
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,10 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
 
     Explicitly skips prose-assertion kinds (positioning / allowlisted-example).
     Rejects unknown kinds with a named failure (S-5).
+
+    Note: `source` is forward-looking metadata (which README makes the claim — used by
+    Slice 2's inverse check and in error messages); it is NOT a resolution input, so a
+    wrong `source` is not caught here (M-2).
     """
     kind = claim["kind"]
     ref = claim["ref"]
@@ -397,28 +402,48 @@ class TestBuildRealAnchorSet:
         b = build_real_anchor_set()
         assert a == b
 
-    def test_validate_false_synthetic_fixture_raises_on_assertion(self, tmp_path):
-        """A synthetic validate=false manifest fixture triggers the R-2 guard pattern."""
-        content = """
-[tool]
-name = "testtool"
-validate = false
+    def test_build_real_anchor_set_raises_on_validate_false_manifest(self, tmp_path):
+        """build_real_anchor_set() itself must raise on a validate=false manifest (R-2).
 
-[capabilities.dev-env]
-description = "provision/teardown dev-env instances"
-skills = []
-agents = []
-"""
-        manifest_path = tmp_path / "capabilities.toml"
-        manifest_path.write_text(content)
-        m = load_manifest(manifest_path)
-        assert m.validate is False
-        # The guard that build_real_anchor_set() uses:
+        I-1 fix: drive the REAL function (via an injected tmp_path tools tree) instead of
+        re-typing the guard inline — so deleting/weakening the line-62 assertion fails this
+        test. A validate=false tool could reference missing paths that load_manifest never
+        validated; the gate must refuse to trust it.
+        """
+        manifest_path = tmp_path / "tools" / "testtool" / "capabilities.toml"
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(
+            "[tool]\n"
+            'name = "testtool"\n'
+            "validate = false\n"
+            "\n"
+            "[capabilities.dev-env]\n"
+            'description = "provision/teardown dev-env instances"\n'
+            "skills = []\n"
+            "agents = []\n"
+        )
         with pytest.raises(AssertionError, match="validate=false"):
-            assert m.validate is True, (
-                f"manifest {manifest_path} has validate=false; gate requires validate=true — "
-                "the gate's oracle contract depends on load_manifest having validated all paths"
-            )
+            build_real_anchor_set(root=tmp_path)
+
+    def test_build_real_anchor_set_accepts_injected_root(self, tmp_path):
+        """A valid validate=true manifest under an injected root is enumerated (positive twin).
+
+        Empty skill/agent lists keep validate=true honest — there are no paths to resolve.
+        """
+        manifest_path = tmp_path / "tools" / "testtool" / "capabilities.toml"
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(
+            "[tool]\n"
+            'name = "testtool"\n'
+            "validate = true\n"
+            "\n"
+            "[capabilities.solo]\n"
+            'description = "a lone capability"\n'
+            "skills = []\n"
+            "agents = []\n"
+        )
+        anchors = build_real_anchor_set(root=tmp_path)
+        assert anchors["testtool"]["capabilities"] == {"solo"}
 
 
 # ---------------------------------------------------------------------------
