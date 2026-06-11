@@ -308,3 +308,73 @@ class TestDefaultRunnerShape:
         assert "runner" in sig.parameters, (
             "rewire must accept a runner= kwarg for test injection"
         )
+
+
+# ---------------------------------------------------------------------------
+# T-R5: C-2 — registration-state marker written/absent/removed correctly.
+# ---------------------------------------------------------------------------
+
+
+class TestRegistrationMarker:
+    def test_register_writes_marker_on_success(self, tmp_path):
+        """C-2: register writes .trailhead-registered under mkt_root on success."""
+        from trailhead.registry import register
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+
+        register(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+
+        assert (mkt_root / ".trailhead-registered").exists(), (
+            "C-2: .trailhead-registered not written after successful register"
+        )
+
+    def test_register_does_not_write_marker_when_runner_raises(self, tmp_path):
+        """C-2: marker absent when register runner raises (install fails)."""
+        from trailhead.registry import register
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+
+        def failing_on_install(args, **kw):
+            if "install" in args:
+                raise RuntimeError("install failed")
+
+        with pytest.raises(RuntimeError):
+            register(tool="lore", mkt_root=mkt_root, runner=failing_on_install)
+
+        assert not (mkt_root / ".trailhead-registered").exists(), (
+            "C-2: marker written despite install failure"
+        )
+
+    def test_rewire_writes_marker_on_success(self, tmp_path):
+        """C-2: rewire refreshes the .trailhead-registered marker on success."""
+        from trailhead.registry import rewire
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+
+        rewire(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+
+        assert (mkt_root / ".trailhead-registered").exists(), (
+            "C-2: .trailhead-registered not present after successful rewire"
+        )
+
+    def test_rewire_clears_stale_marker_if_runner_raises(self, tmp_path):
+        """C-2: if rewire runner raises, stale marker is removed (avoid false positive)."""
+        from trailhead.registry import rewire
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+        # Pre-create a stale marker (from a prior successful registration)
+        (mkt_root / ".trailhead-registered").write_text("{}")
+
+        def failing_update(args, **kw):
+            raise RuntimeError("update failed")
+
+        with pytest.raises(RuntimeError):
+            rewire(tool="lore", mkt_root=mkt_root, runner=failing_update)
+
+        assert not (mkt_root / ".trailhead-registered").exists(), (
+            "C-2: stale marker still present after failed rewire"
+        )

@@ -11,9 +11,34 @@ Architecture
    at ``<mkt_root>/.claude-plugin/marketplace.json``.
 2. ``register`` — shells the harness CLI (``claude plugin marketplace add``
    then ``claude plugin install``) to register and install a newly composed
-   plugin.
+   plugin.  Writes a ``.trailhead-registered`` sentinel under ``mkt_root``
+   **only after both CLI calls succeed** (C-2 registration-state marker).
 3. ``rewire`` — shells the harness CLI (``claude plugin update``) to refresh
-   an already-registered plugin after recomposition.
+   an already-registered plugin after recomposition.  Refreshes the
+   ``.trailhead-registered`` sentinel on success; removes it if the update
+   fails (so the next ``wire`` call re-attempts ``register`` rather than
+   calling ``update`` again on a potentially broken state).
+
+Registration-state marker (C-2)
+--------------------------------
+The file ``<mkt_root>/.trailhead-registered`` is written **only** after
+``register`` completes both CLI steps without error.  ``wire.py`` keys the
+register-vs-rewire decision on this marker (not on dir existence) so that a
+tool whose plugin tree exists but was never fully installed self-heals on the
+next ``wire`` call (re-attempts ``register`` instead of calling ``plugin
+update`` on a never-installed plugin, which would wedge forever).
+
+``rewire`` clears the marker before invoking the CLI and re-writes it after
+success, so a failed ``plugin update`` leaves the marker absent and triggers
+a fresh ``register`` path on the next run.
+
+Live-dogfood residual
+---------------------
+The exact behaviour of ``claude plugin marketplace add`` when the marketplace
+is already registered (idempotent? error? silent?) and of ``claude plugin
+install`` on a re-run can only be confirmed in a live harness session — these
+calls are always stubbed in tests.  The marker design is defensive: it makes
+the register-vs-rewire decision robust regardless of harness CLI idempotency.
 
 Hermeticity contract (B-3)
 --------------------------
@@ -52,6 +77,9 @@ where ``wire.py`` composes the plugin tree into
 import json
 import subprocess
 from pathlib import Path
+
+
+_REGISTERED_MARKER = ".trailhead-registered"
 
 
 _TOOL_DESCRIPTIONS: dict[str, str] = {
@@ -119,6 +147,11 @@ def register(
       1. ``claude plugin marketplace add --scope user <mkt_root>``
       2. ``claude plugin install <tool>@trailhead-<tool> --scope user``
 
+    Writes ``<mkt_root>/.trailhead-registered`` only after both CLI steps
+    succeed (C-2 registration-state marker).  The marker is absent if either
+    step raises, so a later ``wire`` call can re-attempt registration instead
+    of calling ``plugin update`` on a never-installed plugin.
+
     Args:
         tool:     Tool name.
         mkt_root: Marketplace root directory (absolute).
@@ -139,6 +172,8 @@ def register(
         f"{tool}@trailhead-{tool}",
         "--scope", "user",
     ])
+    # Both CLI steps succeeded — write the registration-state marker (C-2).
+    (mkt_root / _REGISTERED_MARKER).write_text("{}")
 
 
 def rewire(
@@ -152,17 +187,28 @@ def rewire(
     Shells:
       ``claude plugin update <tool>@trailhead-<tool>``
 
+    Clears the ``<mkt_root>/.trailhead-registered`` marker before invoking
+    the CLI and re-writes it on success (C-2).  A failed update leaves the
+    marker absent, so the next ``wire`` call falls back to ``register`` rather
+    than looping on a broken ``plugin update``.
+
     Args:
         tool:     Tool name.
-        mkt_root: Marketplace root directory (unused by the CLI call itself,
-                  present for API symmetry with ``register`` and for future
-                  per-tool scoping).
+        mkt_root: Marketplace root directory (used to manage the
+                  registration-state marker; the CLI call itself does not
+                  need the path).
         runner:   Injectable runner (same contract as in ``register``).
     """
     if runner is None:
         runner = lambda args, **kw: subprocess.run(args, check=True, **kw)  # noqa: E731
 
+    # Clear marker before the CLI call; re-written only on success (C-2).
+    marker = mkt_root / _REGISTERED_MARKER
+    marker.unlink(missing_ok=True)
+
     runner([
         "claude", "plugin", "update",
         f"{tool}@trailhead-{tool}",
     ])
+
+    marker.write_text("{}")

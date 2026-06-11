@@ -15,12 +15,36 @@ R-1 atomicity
 -------------
 All filesystem writes go to a temporary staging directory first.  Only after
 a clean compose (no exceptions) is the staging dir atomically promoted into
-the live dest via ``shutil.move``.  If promotion fails mid-way (e.g. disk
-full during copy), the prior live dest is untouched — staging cleanup happens
-in a finally block.
+the live dest via ``shutil.move``.  Staging cleanup is always performed in a
+``try/finally`` block, so a ``KeyboardInterrupt`` or ``SystemExit`` mid-compose
+does not orphan ``_<tool>_staging_*`` directories (C-1.1).
+
+The promote step is a ``rmtree`` + ``shutil.move`` pair.  The window between
+those two operations is a known crash risk for this single-user tool: if the
+process dies after ``rmtree`` but before ``move`` completes, the live dest is
+gone but the staging dir has not taken its place.  Acceptable for the current
+use case; a future hardening pass could use ``os.replace`` via a temp sibling
+for a near-atomic swap (Minor-1).
 
 A tool absent from ``selection`` is not wired at all (no dir, no entry) —
 this is the preset-gating guarantee (B-5).
+
+C-1.2 / I-1 multi-tool semantics
+---------------------------------
+``wire()`` is **best-effort sequential**: it processes tools in iteration
+order.  A failure on tool N raises ``WireError(tool=N, stage=..., cause=...)``
+immediately; tools already processed (0…N-1) remain fully wired.  Tool N+1…
+are not attempted.  This is intentional — partial wiring is visible and named,
+not silently swallowed.  Full multi-tool rollback is out of scope.
+
+C-2 register-vs-rewire decision
+---------------------------------
+The register-vs-rewire decision is keyed on the ``<mkt_root>/.trailhead-registered``
+sentinel file written by ``registry.register`` after both CLI steps succeed.
+This avoids the wedge where a prior ``register`` promoted the plugin tree but
+failed before ``install`` completed — in that case the dir exists but the
+marker does not, so the next ``wire`` call re-attempts ``register`` (self-
+healing) instead of calling ``plugin update`` on a never-installed plugin.
 
 S-2
 ---
@@ -34,15 +58,41 @@ stub; the default is the real ``subprocess.run`` path inside
 ``trailhead.registry``.  ``wire()`` itself never imports subprocess.
 """
 
+from __future__ import annotations
+
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
 from trailhead.paths import ensure_dir, state_dir
 from trailhead.registry import generate_marketplace_json, register, rewire
+
+_REGISTERED_MARKER = ".trailhead-registered"
+
+
+@dataclass
+class WireError(Exception):
+    """Raised when composing or registering a single tool fails.
+
+    Attributes:
+        tool:  The tool name that failed (e.g. ``"forge"``).
+        stage: Which phase failed: ``"compose"``, ``"promote"``, or
+               ``"register"``/``"rewire"``.
+        cause: The underlying exception (also chained via ``__cause__``).
+    """
+
+    tool: str
+    stage: str
+    cause: BaseException
+
+    def __str__(self) -> str:
+        return (
+            f"wire failed for tool {self.tool!r} at stage {self.stage!r}: {self.cause}"
+        )
 
 
 def wire(
@@ -53,6 +103,14 @@ def wire(
     runner=None,
 ) -> None:
     """Compose and register each tool in selection.
+
+    Multi-tool semantics (C-1.2/I-1)
+    ---------------------------------
+    ``wire()`` is **best-effort sequential**: tools are processed in iteration
+    order.  A failure on any tool raises ``WireError`` naming the tool and the
+    stage (``compose``, ``promote``, or ``register``/``rewire``).  Tools
+    processed before the failure remain fully wired; tools after the failure
+    are not attempted.  Full rollback across all tools is out of scope.
 
     Args:
         selection:      Mapping of tool name → set of capability names to wire.
@@ -79,6 +137,11 @@ def wire(
 
         ensure_dir(mkt_root / "plugins")
 
+        # C-2: key register-vs-rewire on the registration-state marker,
+        # not on dir existence — so a half-registered tool (dir exists, marker
+        # absent) self-heals via register instead of wedging on plugin update.
+        already_registered = (mkt_root / _REGISTERED_MARKER).exists()
+
         _compose_tool(
             tool=tool,
             manifest=manifest,
@@ -86,7 +149,7 @@ def wire(
             mkt_root=mkt_root,
             live_dest=live_dest,
             runner=runner,
-            already_wired=live_dest.exists(),
+            already_registered=already_registered,
         )
 
 
@@ -97,9 +160,13 @@ def _compose_tool(
     mkt_root: Path,
     live_dest: Path,
     runner,
-    already_wired: bool,
+    already_registered: bool,
 ) -> None:
-    """Compose one tool into the live dest using staging + atomic promote (R-1)."""
+    """Compose one tool into the live dest using staging + atomic promote (R-1).
+
+    Raises WireError (C-1.2) naming the tool and stage on any failure.
+    Staging cleanup always runs via try/finally (C-1.1).
+    """
     staging_parent = mkt_root / "plugins"
     staging_dir_path: Path | None = None
 
@@ -109,32 +176,46 @@ def _compose_tool(
             tempfile.mkdtemp(prefix=f"_{tool}_staging_", dir=staging_parent)
         )
 
-        # Pure plan — no writes until apply_plan
-        plan = compose_plan(manifest, caps, staging_dir_path)
+        try:
+            # Pure plan — no writes until apply_plan
+            plan = compose_plan(manifest, caps, staging_dir_path)
+            # Write to staging only (S-2: always copy mode)
+            apply_plan(plan, mode="copy")
+        except BaseException as exc:
+            raise WireError(tool=tool, stage="compose", cause=exc) from exc
 
-        # Write to staging only (S-2: always copy mode)
-        apply_plan(plan, mode="copy")
+        try:
+            # Atomic promote: remove old live dest, move staging into place.
+            # Minor-1: the rmtree + move pair has a crash window (process dies
+            # between the two calls → live dest gone, staging not yet in place).
+            # Acceptable for this single-user tool; a near-atomic swap via
+            # os.replace would eliminate the window if hardening is needed later.
+            if live_dest.exists():
+                shutil.rmtree(live_dest)
+            shutil.move(str(staging_dir_path), str(live_dest))
+        except BaseException as exc:
+            raise WireError(tool=tool, stage="promote", cause=exc) from exc
 
-        # Atomic promote: remove old live dest, move staging into place
-        if live_dest.exists():
-            shutil.rmtree(live_dest)
-        shutil.move(str(staging_dir_path), str(live_dest))
         staging_dir_path = None  # Transferred; don't clean up in finally
 
-    except Exception:
-        # Leave the live dest untouched; clean up staging
+    finally:
+        # C-1.1: always clean up the staging dir unless it was successfully
+        # promoted (staging_dir_path is set to None on success).
         if staging_dir_path is not None and staging_dir_path.exists():
             shutil.rmtree(staging_dir_path, ignore_errors=True)
-        raise
 
     # Generate marketplace.json under mkt_root/.claude-plugin/
     generate_marketplace_json(tool=tool, mkt_root=mkt_root)
 
-    # Register or rewire via harness CLI
-    if already_wired:
-        rewire(tool=tool, mkt_root=mkt_root, runner=runner)
-    else:
-        register(tool=tool, mkt_root=mkt_root, runner=runner)
+    # Register or rewire via harness CLI (C-2: marker-keyed decision)
+    try:
+        if already_registered:
+            rewire(tool=tool, mkt_root=mkt_root, runner=runner)
+        else:
+            register(tool=tool, mkt_root=mkt_root, runner=runner)
+    except BaseException as exc:
+        stage = "rewire" if already_registered else "register"
+        raise WireError(tool=tool, stage=stage, cause=exc) from exc
 
 
 def _default_manifest_paths() -> dict[str, Path]:

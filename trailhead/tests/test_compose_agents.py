@@ -106,14 +106,14 @@ class TestAgentCopyOpsIncluded:
         assert dest / "agents/lore-librarian.md" in dest_paths
 
     def test_lore_capture_has_no_agents(self, tmp_path):
-        """lore capture has agents=[] — no agent CopyOps from that capability."""
+        """lore capture has agents=[] — no agent CopyOps from that capability.
+
+        capture has no agents declared; the meaningful enforcement is the
+        count-assert below (not a loop over an empty list).
+        """
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"capture"}, dest)
-        dest_paths = {op.dest for op in plan.ops}
-        # capture has no agents declared
-        for agent in m.capabilities["capture"]["agents"]:
-            assert dest / agent in dest_paths  # vacuously true for empty list
 
         # Confirm no agent path is wired (agents dir would be under dest/agents/)
         agent_ops = [
@@ -273,17 +273,27 @@ agents = ["agents/helper.md"]
 
 
 class TestSubsetEnforcement:
-    def test_minimal_lore_plan_has_no_shared_vaults_agents(self, tmp_path):
-        """Composing lore without shared-vaults: shared-vaults agents absent."""
+    def test_minimal_lore_plan_has_no_recall_agents_when_recall_absent(self, tmp_path):
+        """Composing lore WITHOUT recall: lore-librarian agent must not appear in plan.
+
+        M-5 fix: shared-vaults has agents=[], so testing its absence is vacuous.
+        Instead assert that recall's agent (lore-librarian.md, non-empty) is absent
+        when recall is not in the selection.
+        """
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
-        # shared-vaults has agents=[] anyway, but assert no agents leak from unselected caps
-        plan = compose_plan(m, {"capture", "recall", "sessions"}, dest)
+        # Select capture only — recall is NOT selected
+        plan = compose_plan(m, {"capture"}, dest)
         dest_paths = {op.dest for op in plan.ops}
-        for agent in m.capabilities["shared-vaults"]["agents"]:
+        # recall has the lore-librarian agent — must not leak
+        for agent in m.capabilities["recall"]["agents"]:
             assert dest / agent not in dest_paths, (
-                f"shared-vaults agent {agent!r} leaked into minimal lore plan"
+                f"recall agent {agent!r} leaked into capture-only plan"
             )
+        # Confirm we're actually checking something: recall must have agents
+        assert len(m.capabilities["recall"]["agents"]) > 0, (
+            "test is vacuous: recall has no agents to check"
+        )
 
     def test_minimal_lore_apply_no_shared_vaults_content(self, tmp_path):
         """After apply_plan for minimal lore, no shared-vaults skill dirs exist."""

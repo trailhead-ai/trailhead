@@ -11,9 +11,15 @@ Contract:
   - S-2: apply_plan(mode="copy") — no symlinks in composed tree.
   - R-1: staging-dir + atomic promote — a mid-compose failure leaves the
     prior dest unchanged, not half-written.
+  - C-1.1: staging cleanup runs on ANY exception (try/finally), including
+    BaseException subclasses like KeyboardInterrupt.
+  - C-1.2/I-1: WireError names tool + stage on per-tool failure; multi-tool
+    wire is best-effort sequential (already-processed tools stay committed).
   - B-5: minimal preset → no camp/forge dests.
   - Re-wiring same selection is idempotent.
   - structural validity: dest/.claude-plugin/plugin.json parses.
+  - Minor-2: cross-tool dest collision is structurally unreachable (each tool
+    composes into its own composed/<tool>/plugins/<tool> namespace).
 """
 
 import json
@@ -178,8 +184,12 @@ class TestStandardPreset:
         )
         assert (tmp_path / "composed" / "forge" / "plugins" / "forge").exists()
 
-    def test_standard_forge_circle_skills_absent(self, tmp_path):
-        """circle capability skills absent when forge wired without circle."""
+    def test_standard_forge_circle_agents_absent(self, tmp_path):
+        """circle capability agents absent when forge wired without circle.
+
+        M-5 fix: circle has skills=[], so testing skill absence is vacuous.
+        circle DOES have 4 agents (council-*.md) — assert none appear in dest.
+        """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
@@ -196,21 +206,30 @@ class TestStandardPreset:
         )
         forge_manifest = load_manifest(_FORGE_MANIFEST)
         forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
-        # circle has skills=[] anyway, but agents must not leak
-        for agent in forge_manifest.capabilities["circle"]["agents"]:
+        circle_agents = forge_manifest.capabilities["circle"]["agents"]
+        # Confirm we're testing something real
+        assert len(circle_agents) > 0, "test is vacuous: circle has no agents"
+        for agent in circle_agents:
             assert not (forge_dest / agent).exists(), (
                 f"circle agent {agent!r} present in forge dest despite circle not selected"
             )
 
-    def test_standard_forge_design_release_absent(self, tmp_path):
-        """design and release skill dirs absent when not in standard preset."""
+    def test_standard_forge_unselected_circle_and_execute_absent(self, tmp_path):
+        """Agents from unselected circle capability must not appear in the wired dest.
+
+        M-5 fix: design and release both have skills=[] and agents=[], making their
+        absence loops vacuous.  circle has 4 real agents (council-*.md) that are
+        structurally excluded when circle is not in the selection.  execute also has
+        real agents (sdd-*.md) — kept here for symmetry.
+        """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
+        # Wire standard forge WITHOUT circle or execute
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
-            "forge": {"planning", "execute", "review", "helpers"},
+            "forge": {"planning", "review", "helpers"},
         }
         wire(
             selection,
@@ -220,10 +239,13 @@ class TestStandardPreset:
         )
         forge_manifest = load_manifest(_FORGE_MANIFEST)
         forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
-        for absent_cap in ("design", "release"):
-            for skill in forge_manifest.capabilities[absent_cap]["skills"]:
-                assert not (forge_dest / skill).exists(), (
-                    f"{absent_cap} skill {skill!r} present in standard forge dest"
+        for absent_cap in ("circle", "execute"):
+            agents = forge_manifest.capabilities[absent_cap]["agents"]
+            assert len(agents) > 0, f"test is vacuous: {absent_cap} has no agents"
+            for agent in agents:
+                assert not (forge_dest / agent).exists(), (
+                    f"{absent_cap} agent {agent!r} present in forge dest despite "
+                    f"{absent_cap} not being selected"
                 )
 
     def test_lore_shared_vaults_absent_in_standard(self, tmp_path):
@@ -417,7 +439,7 @@ class TestAtomicPromote:
             return original_copy2(src, dst, **kwargs)
 
         with patch("shutil.copy2", side_effect=failing_copy2):
-            with pytest.raises(OSError, match="simulated disk-full"):
+            with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(
                     selection,
                     manifest_paths=_manifest_paths(),
@@ -455,7 +477,7 @@ class TestAtomicPromote:
             return original_copy2(src, dst, **kwargs)
 
         with patch("shutil.copy2", side_effect=failing_copy2):
-            with pytest.raises(OSError):
+            with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(
                     selection,
                     manifest_paths=_manifest_paths(),
@@ -580,4 +602,359 @@ class TestMinimalLoreContent:
         lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
         assert (lore_dest / "agents" / "lore-librarian.md").exists(), (
             "lore-librarian.md missing from minimal lore dest"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T-W8: C-1.1 — staging cleanup runs on BaseException (try/finally), not
+#        just Exception, so KeyboardInterrupt orphans no staging dir.
+# ---------------------------------------------------------------------------
+
+
+class TestStagingCleanupOnBaseException:
+    def test_staging_dir_cleaned_on_keyboard_interrupt(self, tmp_path):
+        """C-1.1: a KeyboardInterrupt mid-compose must leave no staging dir."""
+        import trailhead.wire as wire_mod
+        from trailhead.wire import wire
+
+        staging_parent = tmp_path / "composed" / "lore" / "plugins"
+
+        def raising_compose_plan(manifest, caps, dest):
+            # Let staging dir creation happen inside _compose_tool first;
+            # raise KeyboardInterrupt to simulate interrupt mid-compose.
+            raise KeyboardInterrupt("simulated interrupt")
+
+        with patch.object(wire_mod, "compose_plan", side_effect=raising_compose_plan):
+            with pytest.raises((KeyboardInterrupt, Exception)):
+                wire(
+                    {"lore": {"capture"}},
+                    manifest_paths=_manifest_paths(),
+                    env=_env(tmp_path),
+                    runner=_noop_runner,
+                )
+
+        # No _<tool>_staging_* dir should survive
+        if staging_parent.exists():
+            leftover = list(staging_parent.glob("_lore_staging_*"))
+            assert leftover == [], (
+                f"C-1.1 violated: staging dirs orphaned after KeyboardInterrupt: {leftover}"
+            )
+
+    def test_staging_dir_cleaned_on_system_exit(self, tmp_path):
+        """C-1.1: a SystemExit mid-compose must leave no staging dir."""
+        import trailhead.wire as wire_mod
+        from trailhead.wire import wire
+
+        staging_parent = tmp_path / "composed" / "lore" / "plugins"
+
+        def raising_compose_plan(manifest, caps, dest):
+            raise SystemExit(1)
+
+        with patch.object(wire_mod, "compose_plan", side_effect=raising_compose_plan):
+            with pytest.raises((SystemExit, Exception)):
+                wire(
+                    {"lore": {"capture"}},
+                    manifest_paths=_manifest_paths(),
+                    env=_env(tmp_path),
+                    runner=_noop_runner,
+                )
+
+        if staging_parent.exists():
+            leftover = list(staging_parent.glob("_lore_staging_*"))
+            assert leftover == [], (
+                f"C-1.1 violated: staging dirs orphaned after SystemExit: {leftover}"
+            )
+
+    def test_successful_promote_leaves_no_staging_dir(self, tmp_path):
+        """After a successful wire, no staging dir lingers under plugins/."""
+        from trailhead.wire import wire
+
+        wire(
+            {"lore": {"capture"}},
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+        staging_parent = tmp_path / "composed" / "lore" / "plugins"
+        leftover = list(staging_parent.glob("_lore_staging_*"))
+        assert leftover == [], (
+            f"staging dir not cleaned after successful wire: {leftover}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T-W9: C-1.2/I-1 — WireError names the failing tool + stage; multi-tool
+#        best-effort sequential semantics (already-processed tools stay wired).
+# ---------------------------------------------------------------------------
+
+
+class TestWireErrorIsolation:
+    def test_wire_error_raised_naming_failing_tool(self, tmp_path):
+        """C-1.2: a per-tool failure raises WireError naming the tool."""
+        import trailhead.wire as wire_mod
+        from trailhead.wire import WireError, wire
+
+        call_count = {"n": 0}
+        original_compose_plan = wire_mod.compose_plan
+
+        def forge_failing_plan(manifest, caps, dest):
+            call_count["n"] += 1
+            if manifest.tool_name == "forge":
+                raise RuntimeError("forge compose exploded")
+            return original_compose_plan(manifest, caps, dest)
+
+        with patch.object(wire_mod, "compose_plan", side_effect=forge_failing_plan):
+            with pytest.raises(WireError) as exc_info:
+                wire(
+                    {"lore": {"capture"}, "forge": {"planning"}},
+                    manifest_paths=_manifest_paths(),
+                    env=_env(tmp_path),
+                    runner=_noop_runner,
+                )
+
+        err = exc_info.value
+        assert err.tool == "forge", f"WireError.tool should be 'forge', got {err.tool!r}"
+        assert err.stage == "compose", (
+            f"WireError.stage should be 'compose', got {err.stage!r}"
+        )
+        assert isinstance(err.__cause__, RuntimeError)
+
+    def test_already_wired_tool_stays_committed_after_later_failure(self, tmp_path):
+        """C-1.2/I-1: lore stays wired when forge fails — best-effort sequential."""
+        import trailhead.wire as wire_mod
+        from trailhead.wire import WireError, wire
+
+        original_compose_plan = wire_mod.compose_plan
+
+        def forge_failing_plan(manifest, caps, dest):
+            if manifest.tool_name == "forge":
+                raise RuntimeError("forge compose exploded")
+            return original_compose_plan(manifest, caps, dest)
+
+        # Ensure lore is processed before forge by passing ordered dict
+        selection = {"lore": {"capture"}, "forge": {"planning"}}
+        with patch.object(wire_mod, "compose_plan", side_effect=forge_failing_plan):
+            with pytest.raises(WireError):
+                wire(
+                    selection,
+                    manifest_paths=_manifest_paths(),
+                    env=_env(tmp_path),
+                    runner=_noop_runner,
+                )
+
+        # lore dest must be fully wired (lore was processed first)
+        lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        assert lore_dest.exists(), (
+            "I-1: lore dest gone after forge failure — best-effort sequential violated"
+        )
+
+    def test_no_orphaned_staging_dir_after_wire_error(self, tmp_path):
+        """C-1.2: WireError raised after forge failure leaves no forge staging dir."""
+        import trailhead.wire as wire_mod
+        from trailhead.wire import WireError, wire
+
+        original_compose_plan = wire_mod.compose_plan
+
+        def forge_failing_plan(manifest, caps, dest):
+            if manifest.tool_name == "forge":
+                raise RuntimeError("forge compose exploded")
+            return original_compose_plan(manifest, caps, dest)
+
+        with patch.object(wire_mod, "compose_plan", side_effect=forge_failing_plan):
+            with pytest.raises(WireError):
+                wire(
+                    {"lore": {"capture"}, "forge": {"planning"}},
+                    manifest_paths=_manifest_paths(),
+                    env=_env(tmp_path),
+                    runner=_noop_runner,
+                )
+
+        forge_plugins_dir = tmp_path / "composed" / "forge" / "plugins"
+        if forge_plugins_dir.exists():
+            leftover = list(forge_plugins_dir.glob("_forge_staging_*"))
+            assert leftover == [], (
+                f"orphaned forge staging dirs after WireError: {leftover}"
+            )
+
+    def test_wire_error_register_stage(self, tmp_path):
+        """WireError names stage='register' when the runner raises on install."""
+        from trailhead.wire import WireError, wire
+
+        call_count = {"n": 0}
+
+        def failing_on_install(args, **kwargs):
+            if "install" in args:
+                raise RuntimeError("install failed")
+
+        with pytest.raises(WireError) as exc_info:
+            wire(
+                {"lore": {"capture"}},
+                manifest_paths=_manifest_paths(),
+                env=_env(tmp_path),
+                runner=failing_on_install,
+            )
+
+        err = exc_info.value
+        assert err.tool == "lore"
+        assert err.stage == "register"
+        assert isinstance(err.__cause__, RuntimeError)
+
+
+# ---------------------------------------------------------------------------
+# T-W10: C-2 — registration-state marker; re-attempt register (not rewire)
+#         for a tool whose dir exists but whose marker is absent.
+# ---------------------------------------------------------------------------
+
+
+class TestRegistrationMarker:
+    def test_marker_written_after_successful_register(self, tmp_path):
+        """C-2: .trailhead-registered marker exists after a successful wire."""
+        from trailhead.wire import wire
+
+        wire(
+            {"lore": {"capture"}},
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+        mkt_root = tmp_path / "composed" / "lore"
+        assert (mkt_root / ".trailhead-registered").exists(), (
+            "C-2: .trailhead-registered marker absent after successful wire"
+        )
+
+    def test_marker_absent_after_failed_register(self, tmp_path):
+        """C-2: marker is NOT written when register fails mid-way."""
+        from trailhead.wire import WireError, wire
+
+        def failing_on_install(args, **kwargs):
+            if "install" in args:
+                raise RuntimeError("install failed")
+
+        with pytest.raises(WireError):
+            wire(
+                {"lore": {"capture"}},
+                manifest_paths=_manifest_paths(),
+                env=_env(tmp_path),
+                runner=failing_on_install,
+            )
+
+        mkt_root = tmp_path / "composed" / "lore"
+        assert not (mkt_root / ".trailhead-registered").exists(), (
+            "C-2: marker written despite register failure"
+        )
+
+    def test_second_wire_without_marker_calls_register_not_rewire(self, tmp_path):
+        """C-2: dir exists but marker absent → register (not rewire) is called.
+
+        Simulates a partially-registered tool: promote succeeded, but register
+        failed before marker was written.  Next wire must self-heal via register,
+        not call `plugin update` (which would fail on a never-installed plugin).
+        """
+        from trailhead.wire import wire
+
+        # First wire: succeed to create the dir, then wipe the marker to simulate
+        # a half-registered state.
+        calls = []
+
+        def recording_runner(args, **kwargs):
+            calls.append(list(args))
+
+        wire(
+            {"lore": {"capture"}},
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=recording_runner,
+        )
+        # Wipe the marker to simulate promote-succeeded-but-register-failed
+        marker = tmp_path / "composed" / "lore" / ".trailhead-registered"
+        marker.unlink()
+        calls.clear()
+
+        # Second wire: dir exists but no marker → must call register (add+install)
+        wire(
+            {"lore": {"capture"}},
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=recording_runner,
+        )
+
+        update_calls = [c for c in calls if "update" in c]
+        install_calls = [c for c in calls if "install" in c]
+        assert update_calls == [], (
+            f"C-2: rewire called on half-registered tool (should have called register): {update_calls}"
+        )
+        assert len(install_calls) >= 1, (
+            f"C-2: register (install) not called for half-registered tool: {calls}"
+        )
+
+    def test_second_wire_with_marker_calls_rewire(self, tmp_path):
+        """C-2: dir + marker present → rewire (plugin update) is called."""
+        from trailhead.wire import wire
+
+        calls = []
+
+        def recording_runner(args, **kwargs):
+            calls.append(list(args))
+
+        # First wire: fully successful — dir + marker both created
+        wire(
+            {"lore": {"capture"}},
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=recording_runner,
+        )
+        calls.clear()
+
+        # Second wire: fully registered → rewire path
+        wire(
+            {"lore": {"capture"}},
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=recording_runner,
+        )
+
+        update_calls = [c for c in calls if "update" in c]
+        assert len(update_calls) >= 1, (
+            f"C-2: rewire (plugin update) not called for fully-registered tool: {calls}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T-W11: Minor-2 — cross-tool dest collision is structurally unreachable.
+#         Each tool composes into composed/<tool>/plugins/<tool>, so two tools
+#         can never collide.  This test documents that structural guarantee.
+# ---------------------------------------------------------------------------
+
+
+class TestCrossToolCollisionUnreachable:
+    def test_each_tool_has_distinct_mkt_root(self, tmp_path):
+        """Minor-2: each tool's mkt_root is distinct (composed/<tool>/).
+
+        Cross-tool dest collision is structurally unreachable: tool A writes to
+        composed/A/plugins/A and tool B writes to composed/B/plugins/B.
+        Two different tools can never share the same dest path.
+        """
+        from trailhead.wire import wire
+
+        selection = {
+            "lore": {"capture", "recall"},
+            "forge": {"planning", "helpers"},
+        }
+        wire(
+            selection,
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+
+        lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
+        assert lore_dest.exists()
+        assert forge_dest.exists()
+        # The two live dests are rooted under different mkt_roots — no collision possible
+        assert not lore_dest.is_relative_to(forge_dest), (
+            "Minor-2: lore dest is under forge dest (collision!)"
+        )
+        assert not forge_dest.is_relative_to(lore_dest), (
+            "Minor-2: forge dest is under lore dest (collision!)"
         )
