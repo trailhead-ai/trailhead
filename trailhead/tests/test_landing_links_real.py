@@ -1,7 +1,8 @@
 """Gate: every claim in landing_claims.toml resolves to a real on-disk anchor.
 
-TDD contract (Slice 1 — forward check only; Slice 2 adds the inverse anti-rot check):
+TDD contract (Slice 1 — forward check; Slice 2 — inverse anti-rot check):
 
+Slice 1 — forward check:
 1. Schema-pin (B-3): landing_claims.toml parses via tomllib into [[claim]] entries with
    four required fields: kind / tool / ref / source.
 2. Closed kind set (S-5): gate rejects an unknown kind with a named assertion; never
@@ -18,10 +19,23 @@ TDD contract (Slice 1 — forward check only; Slice 2 adds the inverse anti-rot 
    asserts m.validate is True for each (R-2), includes empty caps (don't filter), is
    deterministic (R-5).
 6. Hermeticity: only in-repo manifests + tmp_path synthetics; no network / ~/.claude/ / vault.
+
+Slice 2 — inverse anti-rot check (D-5, U-3, S-2, R-4, R-5):
+7. README_INDEX names the four READMEs the gate scans.
+8. extract_fenced_commands(readme_text) → set[tuple[str,str]] extracts (tool, subcommand)
+   pairs from fenced ```sh / ```bash blocks ONLY (U-3 grammar boundedness).
+9. extract_relative_links(readme_text) → set[str] extracts markdown relative links
+   (leading ./ or ../) but NOT absolute http(s):// or anchor-only #frag links.
+10. check_inverse(readme_path, claims, repo_root) asserts:
+    - every extracted (tool, sub) is registered in claims or has kind=allowlisted-example (R-4)
+    - every extracted relative link is confined to the repo root (S-2) and exists on disk
+      OR is registered as a doc-link claim
+    - R-5: all comparisons on sorted sets; READMEs scanned in sorted order
 """
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -474,5 +488,402 @@ class TestForwardCheckOverRealClaims:
 
         assert not failures, (
             f"{len(failures)} claim(s) in landing_claims.toml failed to resolve:\n"
+            + "\n".join(f"  - {f}" for f in failures)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Slice 2 — inverse anti-rot check (D-5, U-3, S-2, R-4, R-5)
+# ---------------------------------------------------------------------------
+
+# The four READMEs the gate scans (sorted — R-5 determinism).
+README_INDEX: list[Path] = sorted(
+    [
+        _REPO_ROOT / "README.md",
+        _REPO_ROOT / "tools" / "lore" / "README.md",
+        _REPO_ROOT / "tools" / "forge" / "README.md",
+        _REPO_ROOT / "tools" / "camp" / "README.md",
+    ]
+)
+
+# Tools whose fenced-block commands the gate tracks.
+_TRACKED_TOOLS = frozenset({"trailhead", "lore", "forge", "camp"})
+
+# Fenced sh/bash block pattern (U-3: bounded to fenced blocks only).
+_FENCED_BLOCK_RE = re.compile(r"```(?:sh|bash)\n(.*?)```", re.DOTALL)
+# Command line pattern within a fenced block.
+_CMD_LINE_RE = re.compile(
+    r"^\s*(" + "|".join(sorted(_TRACKED_TOOLS)) + r")\s+(\S+)", re.MULTILINE
+)
+# Markdown relative link pattern: [label](./path) or [label](../path).
+# Excludes absolute http(s):// and anchor-only #frag links.
+_REL_LINK_RE = re.compile(r"\[([^\]]*)\]\((\.\.?/[^)]+)\)")
+
+
+def extract_fenced_commands(readme_text: str) -> set[tuple[str, str]]:
+    """Extract (tool, subcommand) pairs from fenced ```sh / ```bash blocks (U-3).
+
+    Only fenced blocks with language tag 'sh' or 'bash' are scanned —
+    bare inline prose mentions ("you can run install") are NOT extracted.
+    Returns a set of (tool, subcommand) tuples; sorted() for determinism (R-5).
+    """
+    found: set[tuple[str, str]] = set()
+    for block_match in _FENCED_BLOCK_RE.finditer(readme_text):
+        block_text = block_match.group(1)
+        for cmd_match in _CMD_LINE_RE.finditer(block_text):
+            found.add((cmd_match.group(1), cmd_match.group(2)))
+    return found
+
+
+def extract_relative_links(readme_text: str) -> set[str]:
+    """Extract markdown relative links (leading ./ or ../) from readme_text.
+
+    Excludes absolute http(s):// URLs and anchor-only #frag links.
+    Returns a set of path strings; sorted() for determinism (R-5).
+    """
+    return {m.group(2) for m in _REL_LINK_RE.finditer(readme_text)}
+
+
+def _is_command_registered(
+    tool: str, subcommand: str, claims: list[dict]
+) -> bool:
+    """Return True if (tool, subcommand) is registered in the claims manifest.
+
+    Matching rule (Slice 2 contract):
+    - kind="allowlisted-example" with ref="<tool> <subcommand>" — escape hatch (R-4)
+    - kind="command"     with tool=<tool> and ref=<subcommand>
+    - kind="capability"  with tool=<tool> and ref starts with <subcommand>
+                         (ref == subcommand, OR ref.startswith(subcommand + "/"))
+    - kind="skill"       same prefix rule as capability
+    - kind="agent"       same prefix rule
+    The prefix rule lets a fenced `lore recall` match kind=capability ref="recall".
+    """
+    allowlist_key = f"{tool} {subcommand}"
+    for claim in claims:
+        if claim.get("tool") != tool:
+            continue
+        kind = claim.get("kind", "")
+        ref = claim.get("ref", "")
+        if kind == "allowlisted-example" and ref == allowlist_key:
+            return True
+        if kind == "command" and ref == subcommand:
+            return True
+        if kind in ("capability", "skill", "agent"):
+            if ref == subcommand or ref.startswith(subcommand + "/"):
+                return True
+    return False
+
+
+def check_inverse(
+    readme_path: Path,
+    claims: list[dict],
+    repo_root: Path,
+) -> None:
+    """Check a single README for commands/links that are unregistered in claims.
+
+    For each extracted (tool, subcommand) from fenced sh/bash blocks:
+      - must be registered or allowlisted (R-4); else raises AssertionError with
+        "README <path> shows command `<tool> <sub>` not registered in landing_claims.toml"
+
+    For each extracted relative link:
+      - must be confined to repo_root (S-2); else raises with "relative link <x> escapes repo root"
+      - must either exist on disk or be registered as a doc-link claim in claims
+
+    Sets are sorted before assertions (R-5).
+    """
+    readme_text = readme_path.read_text(encoding="utf-8")
+    repo_root_resolved = repo_root.resolve()
+
+    # --- commands ---
+    commands = extract_fenced_commands(readme_text)
+    unregistered_cmds = sorted(
+        f"{tool} {sub}"
+        for tool, sub in commands
+        if not _is_command_registered(tool, sub, claims)
+    )
+    assert not unregistered_cmds, (
+        f"README {readme_path} shows command(s) not registered in landing_claims.toml:\n"
+        + "\n".join(f"  `{c}`" for c in unregistered_cmds)
+    )
+
+    # --- relative links ---
+    links = extract_relative_links(readme_text)
+    readme_dir = readme_path.parent
+    doc_link_refs = {c["ref"] for c in claims if c.get("kind") == "doc-link"}
+    for link in sorted(links):
+        resolved = (readme_dir / link).resolve()
+        # S-2: confinement check — must not escape repo root
+        try:
+            resolved.relative_to(repo_root_resolved)
+        except ValueError:
+            raise AssertionError(
+                f"README {readme_path}: relative link {link!r} escapes repo root "
+                f"({repo_root_resolved})"
+            )
+        # Must exist on disk OR be registered as a doc-link claim
+        if not resolved.exists() and link not in doc_link_refs:
+            raise AssertionError(
+                f"README {readme_path}: relative link {link!r} does not resolve to "
+                f"an existing path and is not registered as a doc-link claim"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Slice 2 tests (write FIRST — must fail RED before helpers are implemented)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractFencedCommands:
+    """extract_fenced_commands() grammar-boundedness tests (U-3)."""
+
+    def test_extracts_command_from_sh_block(self):
+        """A trailhead command in a ```sh block is extracted."""
+        text = "```sh\ntrailhead doctor\n```"
+        result = extract_fenced_commands(text)
+        assert ("trailhead", "doctor") in result
+
+    def test_extracts_command_from_bash_block(self):
+        """A trailhead command in a ```bash block is extracted."""
+        text = "```bash\ntrailhead install\n```"
+        result = extract_fenced_commands(text)
+        assert ("trailhead", "install") in result
+
+    def test_bare_prose_mention_not_extracted(self):
+        """A bare inline mention 'you can run install' is NOT extracted (U-3)."""
+        text = "you can run trailhead install to get started\n"
+        result = extract_fenced_commands(text)
+        assert result == set()
+
+    def test_plain_fenced_block_not_extracted(self):
+        """A plain ``` block (no sh/bash tag) is NOT extracted (U-3)."""
+        text = "```\ntrailhead doctor\n```"
+        result = extract_fenced_commands(text)
+        assert result == set()
+
+    def test_lore_command_extracted(self):
+        """A lore command in a ```bash block is extracted."""
+        text = "```bash\nlore init ~/vault\n```"
+        result = extract_fenced_commands(text)
+        assert ("lore", "init") in result
+
+    def test_multiple_commands_extracted(self):
+        """Multiple commands across multiple fenced blocks are all extracted."""
+        text = (
+            "```sh\ntrailhead doctor\n```\n"
+            "```bash\nlore recall --areas auth\n```\n"
+        )
+        result = extract_fenced_commands(text)
+        assert ("trailhead", "doctor") in result
+        assert ("lore", "recall") in result
+
+    def test_result_is_set(self):
+        """Duplicate commands in fenced blocks appear once (set semantics)."""
+        text = "```sh\ntrailhead install\ntrailhead install\n```"
+        result = extract_fenced_commands(text)
+        assert result == {("trailhead", "install")}
+
+    def test_sorted_result_is_deterministic(self):
+        """sorted() on the result is stable across calls (R-5)."""
+        text = "```sh\ntrailhead doctor\ntrailhead install\n```"
+        r1 = sorted(extract_fenced_commands(text))
+        r2 = sorted(extract_fenced_commands(text))
+        assert r1 == r2
+
+
+class TestExtractRelativeLinks:
+    """extract_relative_links() grammar tests."""
+
+    def test_extracts_dot_slash_link(self):
+        """[label](./path) is extracted."""
+        text = "See [guide](./docs/paths.md) for details."
+        result = extract_relative_links(text)
+        assert "./docs/paths.md" in result
+
+    def test_extracts_dot_dot_slash_link(self):
+        """[label](../path) is extracted."""
+        text = "See [sibling](../lore) for details."
+        result = extract_relative_links(text)
+        assert "../lore" in result
+
+    def test_absolute_https_link_not_extracted(self):
+        """[label](https://...) is NOT extracted."""
+        text = "[docs](https://example.com/docs)"
+        result = extract_relative_links(text)
+        assert result == set()
+
+    def test_anchor_link_not_extracted(self):
+        """[label](#section) is NOT extracted."""
+        text = "[section](#install)"
+        result = extract_relative_links(text)
+        assert result == set()
+
+    def test_non_relative_bare_path_not_extracted(self):
+        """[label](LICENSE) without leading ./ is NOT extracted."""
+        text = "[LICENSE](LICENSE)"
+        result = extract_relative_links(text)
+        assert result == set()
+
+    def test_sorted_result_is_deterministic(self):
+        """sorted() on the result is stable across calls (R-5)."""
+        text = "[a](./a.md) [b](./b.md)"
+        r1 = sorted(extract_relative_links(text))
+        r2 = sorted(extract_relative_links(text))
+        assert r1 == r2
+
+
+class TestCheckInverseFixtures:
+    """Fixture-driven inverse check tests (the Slice-2 contract)."""
+
+    _FIXTURE_CLAIMS = [
+        {
+            "kind": "command",
+            "tool": "trailhead",
+            "ref": "doctor",
+            "source": "root",
+        },
+        {
+            "kind": "doc-link",
+            "tool": "trailhead",
+            "ref": "docs/paths.md",
+            "source": "root",
+        },
+    ]
+
+    def test_registered_command_and_link_pass(self, tmp_path):
+        """A registered fenced command + registered doc-link → inverse check passes."""
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir()
+        (docs_dir / "paths.md").write_text("# paths")
+        readme = tmp_path / "README.md"
+        readme.write_text(
+            "```sh\ntrailhead doctor\n```\n"
+            "See [guide](./docs/paths.md).\n"
+        )
+        # must not raise
+        check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
+
+    def test_unregistered_fenced_command_fails_named_assertion(self, tmp_path):
+        """An unregistered fenced command raises with 'not registered' in the message."""
+        readme = tmp_path / "README.md"
+        readme.write_text("```sh\ntrailhead frobnicate\n```\n")
+        with pytest.raises(AssertionError, match="not registered in landing_claims.toml"):
+            check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
+
+    def test_unregistered_relative_link_fails(self, tmp_path):
+        """A relative link to a nonexistent, unregistered path raises."""
+        readme = tmp_path / "README.md"
+        readme.write_text("[ghost](./docs/ghost.md)\n")
+        with pytest.raises(AssertionError, match="does not resolve to"):
+            check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
+
+    def test_traversal_link_fails_escapes_repo_root(self, tmp_path):
+        """A path-traversal link escaping repo root fails with 'escapes repo root' (S-2)."""
+        readme = tmp_path / "README.md"
+        # ../../../etc/passwd escapes tmp_path — this must fail even if /etc/passwd exists
+        readme.write_text("[evil](../../../etc/passwd)\n")
+        with pytest.raises(AssertionError, match="escapes repo root"):
+            check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
+
+    def test_allowlisted_example_does_not_fail(self, tmp_path):
+        """A deliberately-wrong command in an allowlisted-example claim does not fail (R-4)."""
+        allowlist_claims = [
+            {
+                "kind": "allowlisted-example",
+                "tool": "trailhead",
+                "ref": "trailhead frobnicate",
+                "source": "root",
+            }
+        ]
+        readme = tmp_path / "README.md"
+        readme.write_text(
+            "# Don't do this:\n```sh\ntrailhead frobnicate\n```\n"
+        )
+        # must not raise
+        check_inverse(readme, allowlist_claims, tmp_path)
+
+    def test_bare_prose_not_flagged(self, tmp_path):
+        """A bare inline prose mention is NOT extracted/flagged (U-3)."""
+        readme = tmp_path / "README.md"
+        readme.write_text("you can run trailhead frobnicate to get started\n")
+        # frobnicate is not in claims, but prose mentions are not extracted → must not raise
+        check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
+
+    def test_capability_claim_satisfies_fenced_command(self, tmp_path):
+        """A kind=capability claim with ref=<subcommand> satisfies a fenced lore <subcommand>."""
+        claims = [
+            {
+                "kind": "capability",
+                "tool": "lore",
+                "ref": "recall",
+                "source": "lore",
+            }
+        ]
+        readme = tmp_path / "README.md"
+        readme.write_text("```bash\nlore recall --areas auth\n```\n")
+        # must not raise — the capability claim satisfies the lore recall command
+        check_inverse(readme, claims, tmp_path)
+
+    def test_existing_relative_link_passes(self, tmp_path):
+        """A relative link that resolves to an existing file passes."""
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "paths.md").write_text("# paths")
+        readme = tmp_path / "README.md"
+        readme.write_text("See [paths](./docs/paths.md).\n")
+        # must not raise
+        check_inverse(readme, [], tmp_path)
+
+    def test_sorted_extraction_determinism(self, tmp_path):
+        """Extraction result sorted before assertion is stable (R-5)."""
+        readme = tmp_path / "README.md"
+        readme.write_text(
+            "```sh\ntrailhead doctor\ntrailhead install\n```\n"
+        )
+        claims = [
+            {"kind": "command", "tool": "trailhead", "ref": "doctor", "source": "root"},
+            {"kind": "command", "tool": "trailhead", "ref": "install", "source": "root"},
+        ]
+        # Call twice; should produce same result (no flake)
+        check_inverse(readme, claims, tmp_path)
+        check_inverse(readme, claims, tmp_path)
+
+
+class TestRealReadmeInverseScan:
+    """Real-README inverse scan over the four indexed READMEs.
+
+    These tests are xfail until Slice 3 registers all anchors from the tool READMEs.
+    The mechanism is verified by TestCheckInverseFixtures above; the real-README
+    green is the Slice 3/4 milestone.
+
+    Marked strict=False so a surprise early-green is reported as XPASS (a signal
+    that registration happened earlier than expected), not a test error.
+    """
+
+    @pytest.mark.xfail(
+        reason=(
+            "Slice 3 milestone: real READMEs contain commands/links not yet "
+            "registered in landing_claims.toml (e.g. lore init, ../lore link). "
+            "Will go green once Slice 3 registers all tool-README anchors."
+        ),
+        strict=False,
+    )
+    def test_all_real_readmes_pass_inverse_check(self):
+        """Every fenced command + relative link in the four READMEs is registered."""
+        assert _CLAIMS_FILE.exists(), f"landing_claims.toml not found at {_CLAIMS_FILE}"
+        with open(_CLAIMS_FILE, "rb") as f:
+            data = tomllib.load(f)
+        claims = data.get("claim", [])
+
+        failures: list[str] = []
+        for readme_path in README_INDEX:
+            if not readme_path.exists():
+                continue
+            try:
+                check_inverse(readme_path, claims, _REPO_ROOT)
+            except AssertionError as e:
+                failures.append(str(e))
+
+        assert not failures, (
+            f"{len(failures)} README(s) failed the inverse check:\n"
             + "\n".join(f"  - {f}" for f in failures)
         )
