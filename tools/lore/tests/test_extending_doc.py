@@ -17,7 +17,7 @@ The set of real extension points is DISCOVERED from the source tree at test time
 keep pace. The forge tree is the dev-agent half; lore ships its own seamed
 skills (brainstorm/intake). Both are scanned.
 
-`design_mockup`, the `lore-librarian` knowledge-synthesis seam, and other tokens
+`design_mockup`, the `loremaster` knowledge-synthesis seam, and other tokens
 appearing in this file are STRUCTURAL extension-point identifiers, not private
 app tokens — they carry no denylist match and are safe as literals here.
 """

@@ -2,7 +2,7 @@
 name: followup
 description: >
   Batch up post-implementation follow-up items, clarify any ambiguities inline, then dispatch
-  `sdd-implementer` to do the actual work in a cheaper subagent context — keeping mechanical
+  `trailblazer` to do the actual work in a cheaper subagent context — keeping mechanical
   iteration off the main session's expensive tokens.
   TRIGGER when: user invokes `/followup`, OR provides a numbered/bulleted list of post-implementation
   changes that includes the words "follow up", "follow-up", "followup", "follow ups", "fix-ups",
@@ -20,7 +20,7 @@ Take a batch of post-implementation items, clarify ambiguities, hand off to a su
 
 Post-implementation iteration tends to come in batches: "the button needs to be larger, the empty state isn't handled, line 42 has a typo, and that helper should be extracted." Each item is small. The whole batch is mechanical. There is no reason to burn Opus tokens running the edits, the test re-runs, and the commits in the main session.
 
-This skill is the thin wrapper that turns the batch into a brief, dispatches `sdd-implementer`, and reports back.
+This skill is the thin wrapper that turns the batch into a brief, dispatches `trailblazer`, and reports back.
 
 ## Skip Gate
 
@@ -79,7 +79,7 @@ For each item, decide:
 - **TDD applies?** — production code → yes; pure docs/config/comments → no. Mark explicitly so the implementer doesn't churn.
 - **Dependency order** — if item B depends on item A, note it.
 
-If items span multiple working directories, group them by directory. You will dispatch once per directory (sdd-implementer takes a single working directory per dispatch).
+If items span multiple working directories, group them by directory. You will dispatch once per directory (trailblazer takes a single working directory per dispatch).
 
 ### 4. Write the brief
 
@@ -145,9 +145,9 @@ For each item that touches production code, the implementer must add or update t
 
 Keep the brief tight. The implementer reads it and works from it — verbosity here costs nothing in dispatch but slows the implementer's first read.
 
-### 5. Dispatch sdd-implementer
+### 5. Dispatch trailblazer
 
-One dispatch per brief (per working directory). Use the `Agent` tool with `subagent_type: sdd-implementer`. Pass:
+One dispatch per brief (per working directory). Use the `Agent` tool with `subagent_type: trailblazer`. Pass:
 
 - **plan path** — absolute path to the brief you just wrote
 - **slice** — `Slice 1: Follow-ups batch`
@@ -180,7 +180,7 @@ If items span multiple working directories:
 2. Dispatch serially in step 5.
 3. Aggregate the reports in step 6 — one user-facing summary covering all dispatches, organized by directory.
 
-Do NOT try to write a single brief that asks the implementer to operate on multiple working directories — sdd-implementer enforces worktree-only paths and will refuse.
+Do NOT try to write a single brief that asks the implementer to operate on multiple working directories — trailblazer enforces worktree-only paths and will refuse.
 
 ## Red Flags
 

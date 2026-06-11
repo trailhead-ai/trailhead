@@ -188,7 +188,7 @@ class TestStandardPreset:
         """circle capability agents absent when forge wired without circle.
 
         M-5 fix: circle has skills=[], so testing skill absence is vacuous.
-        circle DOES have 4 agents (council-*.md) — assert none appear in dest.
+        circle DOES have 4 agents (circle-*.md) — assert none appear in dest.
         """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
@@ -218,9 +218,9 @@ class TestStandardPreset:
         """Agents from unselected circle capability must not appear in the wired dest.
 
         M-5 fix: design and release both have skills=[] and agents=[], making their
-        absence loops vacuous.  circle has 4 real agents (council-*.md) that are
+        absence loops vacuous.  circle has 4 real agents (circle-*.md) that are
         structurally excluded when circle is not in the selection.  execute also has
-        real agents (sdd-*.md) — kept here for symmetry.
+        real agents (scout/trailblazer) — kept here for symmetry.
         """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
@@ -372,7 +372,7 @@ class TestIdempotency:
         """Re-wiring a narrower selection removes the previously-wired caps."""
         from trailhead.wire import wire
 
-        # First wire: lore with recall (has lore-librarian agent)
+        # First wire: lore with recall (has loremaster agent)
         selection_full = {"lore": {"capture", "recall", "sessions"}}
         wire(
             selection_full,
@@ -381,9 +381,9 @@ class TestIdempotency:
             runner=_noop_runner,
         )
         plugin_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        assert (plugin_dest / "agents" / "lore-librarian.md").exists()
+        assert (plugin_dest / "agents" / "loremaster.md").exists()
 
-        # Re-wire: lore with capture only (no recall → no lore-librarian agent)
+        # Re-wire: lore with capture only (no recall → no loremaster agent)
         selection_narrow = {"lore": {"capture"}}
         wire(
             selection_narrow,
@@ -392,11 +392,11 @@ class TestIdempotency:
             runner=_noop_runner,
         )
         # recall skills/agents must be gone
-        assert not (plugin_dest / "agents" / "lore-librarian.md").exists(), (
-            "lore-librarian.md still present after rewiring without recall (S-4/R-1)"
+        assert not (plugin_dest / "agents" / "loremaster.md").exists(), (
+            "loremaster.md still present after rewiring without recall (S-4/R-1)"
         )
-        assert not (plugin_dest / "skills" / "review").exists(), (
-            "skills/review still present after rewiring without recall"
+        assert not (plugin_dest / "skills" / "tend").exists(), (
+            "skills/tend still present after rewiring without recall"
         )
 
 
@@ -589,7 +589,7 @@ class TestMinimalLoreContent:
                 )
 
     def test_lore_minimal_lore_librarian_agent_present(self, tmp_path):
-        """Minimal lore includes recall → lore-librarian.md agent in dest."""
+        """Minimal lore includes recall → loremaster.md agent in dest."""
         from trailhead.wire import wire
 
         selection = {"lore": {"capture", "recall", "sessions"}}
@@ -600,8 +600,8 @@ class TestMinimalLoreContent:
             runner=_noop_runner,
         )
         lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        assert (lore_dest / "agents" / "lore-librarian.md").exists(), (
-            "lore-librarian.md missing from minimal lore dest"
+        assert (lore_dest / "agents" / "loremaster.md").exists(), (
+            "loremaster.md missing from minimal lore dest"
         )
 
 

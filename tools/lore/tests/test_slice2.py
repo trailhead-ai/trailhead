@@ -1,21 +1,21 @@
-"""Slice 2 tests: doc-consistency check for the `finished` skill update.
+"""Slice 2 tests: doc-consistency check for the `finish` skill update.
 
 Verifies that:
-1. The `lore:finished` SKILL.md references harvest-expansion behavior (the
+1. The `lore:finish` SKILL.md references harvest-expansion behavior (the
    word "harvest" is present), confirming the skill documents the Slice 1 CLI.
 2. The skill does NOT claim the skill itself performs synthesis/expansion
    (the heavy lifting is the CLI — the skill stays lean, just calling
    `lore finish`).
-3. The skill describes `lore:finished` as the canonical end-of-session finish.
+3. The skill describes `lore:finish` as the canonical end-of-session finish.
 4. The README's `lore finish` CLI description reflects the expanded behavior.
 5. All existing registrable/doc tests still pass (covered by running the full
-   suite, but we pin the finished-skill entries here explicitly).
+   suite, but we pin the finish-skill entries here explicitly).
 """
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 SKILLS_DIR = REPO_ROOT / "plugins" / "lore" / "skills"
-FINISHED_SKILL = SKILLS_DIR / "finished" / "SKILL.md"
+FINISHED_SKILL = SKILLS_DIR / "finish" / "SKILL.md"
 README = REPO_ROOT / "README.md"
 
 
@@ -35,7 +35,7 @@ def test_skill_references_harvest():
     """The finished skill must mention 'harvest' — it documents the CLI expansion."""
     text = _skill_text()
     assert "harvest" in text.lower(), (
-        "finished/SKILL.md must reference harvest behavior that lore finish now performs; "
+        "finish/SKILL.md must reference harvest behavior that lore finish now performs; "
         "got no 'harvest' in the file"
     )
 
@@ -44,7 +44,7 @@ def test_skill_references_harvest_pending():
     """The skill must specifically call out harvest-pending.md as the source."""
     text = _skill_text()
     assert "harvest-pending" in text, (
-        "finished/SKILL.md must mention 'harvest-pending' — that is the file the CLI reads"
+        "finish/SKILL.md must mention 'harvest-pending' — that is the file the CLI reads"
     )
 
 
@@ -52,7 +52,7 @@ def test_skill_references_gotcha_surfaced():
     """The skill must note that gotcha entries are surfaced, not auto-expanded."""
     text = _skill_text()
     assert "gotcha" in text.lower(), (
-        "finished/SKILL.md must document that 'gotcha' entries are surfaced "
+        "finish/SKILL.md must document that 'gotcha' entries are surfaced "
         "(not expanded) for manual /lore:subsystem patching"
     )
 
@@ -65,7 +65,7 @@ def test_skill_references_lore_area_for_gotchas():
     """
     text = _skill_text()
     assert "lore:area" in text or "area" in text.lower(), (
-        "finished/SKILL.md must mention /lore:area as the path for gotcha entries"
+        "finish/SKILL.md must mention /lore:area as the path for gotcha entries"
     )
 
 
@@ -73,7 +73,7 @@ def test_skill_documents_malformed_lines_retained():
     """The skill must state that malformed/unmarked lines are left in pending."""
     text = _skill_text()
     assert "malformed" in text.lower() or "unmarked" in text.lower(), (
-        "finished/SKILL.md must document that malformed/unmarked lines are "
+        "finish/SKILL.md must document that malformed/unmarked lines are "
         "retained in harvest-pending.md (not silently consumed)"
     )
 
@@ -103,7 +103,7 @@ def test_skill_does_not_claim_skill_itself_expands():
     ]
     for pattern in bad_patterns:
         assert not re.search(pattern, text, re.IGNORECASE), (
-            f"finished/SKILL.md must not instruct the model to manually expand "
+            f"finish/SKILL.md must not instruct the model to manually expand "
             f"harvest entries (pattern found: {pattern!r}). The CLI does it."
         )
 
@@ -116,7 +116,7 @@ def test_skill_framed_as_canonical():
     """The skill must describe lore:finished as the canonical end-of-session finish."""
     text = _skill_text()
     assert "canonical" in text.lower(), (
-        "finished/SKILL.md should frame lore:finished as the canonical "
+        "finish/SKILL.md should frame lore:finished as the canonical "
         "end-of-session finish"
     )
 
@@ -151,12 +151,12 @@ def test_readme_lore_finish_mentions_harvest_or_expanded():
 def test_finished_skill_frontmatter_still_registrable():
     """Editing the skill must not break the frontmatter that Claude Code needs."""
     text = FINISHED_SKILL.read_text()
-    assert text.startswith("---\n"), "finished/SKILL.md must still open with a YAML frontmatter block"
+    assert text.startswith("---\n"), "finish/SKILL.md must still open with a YAML frontmatter block"
     end = text.find("\n---", 3)
-    assert end > 0, "finished/SKILL.md frontmatter block must still be closed"
+    assert end > 0, "finish/SKILL.md frontmatter block must still be closed"
     frontmatter = text[3:end]
     desc_lines = [
         ln for ln in frontmatter.splitlines()
         if ln.strip().startswith("description:") and ln.split(":", 1)[1].strip()
     ]
-    assert desc_lines, "finished/SKILL.md must still carry a non-empty description:"
+    assert desc_lines, "finish/SKILL.md must still carry a non-empty description:"

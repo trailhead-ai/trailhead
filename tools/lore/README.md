@@ -140,7 +140,7 @@ lore/
 
 ## Searching the vault
 
-Use the `/lore:lore-librarian` agent to search and synthesize across the vault.
+Use the `/lore:loremaster` agent to search and synthesize across the vault.
 It uses `Glob`, `Grep`, and `Read` — no MCP — and returns a cited synthesis,
 not a raw dump.
 

@@ -98,12 +98,12 @@ class TestAgentCopyOpsIncluded:
                 )
 
     def test_lore_recall_lore_librarian_in_plan(self, tmp_path):
-        """lore recall capability declares agents/lore-librarian.md; must be in plan."""
+        """lore recall capability declares agents/loremaster.md; must be in plan."""
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"recall"}, dest)
         dest_paths = {op.dest for op in plan.ops}
-        assert dest / "agents/lore-librarian.md" in dest_paths
+        assert dest / "agents/loremaster.md" in dest_paths
 
     def test_lore_capture_has_no_agents(self, tmp_path):
         """lore capture has agents=[] — no agent CopyOps from that capability.
@@ -128,7 +128,7 @@ class TestAgentCopyOpsIncluded:
         """Agents from an unselected capability must NOT appear in the plan."""
         m = load_manifest(_FORGE_MANIFEST)
         dest = tmp_path / "dest"
-        # Select planning only — circle agents (council-*.md) must not appear
+        # Select planning only — circle agents (circle-*.md) must not appear
         plan = compose_plan(m, {"planning"}, dest)
         dest_paths = {op.dest for op in plan.ops}
         for agent in m.capabilities["circle"]["agents"]:
@@ -170,12 +170,12 @@ class TestAgentApplyLanding:
             )
 
     def test_lore_librarian_lands_after_apply(self, tmp_path):
-        """lore recall → agents/lore-librarian.md lands in dest."""
+        """lore recall → agents/loremaster.md lands in dest."""
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"recall"}, dest)
         apply_plan(plan, mode="copy")
-        agent_path = dest / "agents" / "lore-librarian.md"
+        agent_path = dest / "agents" / "loremaster.md"
         assert agent_path.exists()
         assert agent_path.is_file()
 
@@ -185,8 +185,8 @@ class TestAgentApplyLanding:
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"recall"}, dest)
         apply_plan(plan, mode="copy")
-        src_agent = m.plugin_root / "agents" / "lore-librarian.md"
-        dest_agent = dest / "agents" / "lore-librarian.md"
+        src_agent = m.plugin_root / "agents" / "loremaster.md"
+        dest_agent = dest / "agents" / "loremaster.md"
         assert dest_agent.read_text() == src_agent.read_text()
 
     def test_s2_no_symlinks_in_composed_tree(self, tmp_path):
@@ -274,10 +274,10 @@ agents = ["agents/helper.md"]
 
 class TestSubsetEnforcement:
     def test_minimal_lore_plan_has_no_recall_agents_when_recall_absent(self, tmp_path):
-        """Composing lore WITHOUT recall: lore-librarian agent must not appear in plan.
+        """Composing lore WITHOUT recall: loremaster agent must not appear in plan.
 
         M-5 fix: shared-vaults has agents=[], so testing its absence is vacuous.
-        Instead assert that recall's agent (lore-librarian.md, non-empty) is absent
+        Instead assert that recall's agent (loremaster.md, non-empty) is absent
         when recall is not in the selection.
         """
         m = load_manifest(_LORE_MANIFEST)
@@ -285,7 +285,7 @@ class TestSubsetEnforcement:
         # Select capture only — recall is NOT selected
         plan = compose_plan(m, {"capture"}, dest)
         dest_paths = {op.dest for op in plan.ops}
-        # recall has the lore-librarian agent — must not leak
+        # recall has the loremaster agent — must not leak
         for agent in m.capabilities["recall"]["agents"]:
             assert dest / agent not in dest_paths, (
                 f"recall agent {agent!r} leaked into capture-only plan"

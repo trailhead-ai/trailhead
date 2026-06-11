@@ -59,8 +59,8 @@ AGENTS_DIR = Path(__file__).parent.parent / "plugins" / "forge" / "agents"
 # dispatch can't leave a stale expectation), and (b) every name resolves to an
 # installed forge agent file (so a dispatch can't silently dead-end).
 _SDD_DISPATCHED_AGENTS: list[str] = [
-    "sdd-assumption-prover",
-    "sdd-implementer",
+    "scout",
+    "trailblazer",
     "code-reviewer",
     "test-runner",
     "troubleshooter",

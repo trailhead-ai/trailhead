@@ -496,12 +496,12 @@ class TestNoHardcodedPaths:
         assert "/Users/" not in content
 
     def test_skill_md_has_no_brain_vault_literal(self):
-        skill_path = PLUGIN_ROOT / "skills" / "review" / "SKILL.md"
+        skill_path = PLUGIN_ROOT / "skills" / "tend" / "SKILL.md"
         content = skill_path.read_text()
         assert "BRAIN_VAULT" not in content
 
     def test_skill_md_has_no_home_path_literal(self):
-        skill_path = PLUGIN_ROOT / "skills" / "review" / "SKILL.md"
+        skill_path = PLUGIN_ROOT / "skills" / "tend" / "SKILL.md"
         content = skill_path.read_text()
         assert "/Users/" not in content
 

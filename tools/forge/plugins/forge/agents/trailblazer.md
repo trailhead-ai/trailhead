@@ -1,5 +1,5 @@
 ---
-name: sdd-implementer
+name: trailblazer
 description: |
   TDD implementer for a single slice in the subagent-driven-development loop. Reads the plan, writes tests first, implements, self-reviews, commits (GPG-signed), and reports DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
 
@@ -8,7 +8,7 @@ description: |
   - "Build Slice N of plan X" with a clear delivers list
 
   Bad fits:
-  - Slice has unresolved unknowns — dispatch `sdd-assumption-prover` first
+  - Slice has unresolved unknowns — dispatch `scout` first
   - Architectural decisions still open — escalate to `architect` or back to planning
 model: sonnet
 ---

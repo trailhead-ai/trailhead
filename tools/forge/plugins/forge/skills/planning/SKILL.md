@@ -31,7 +31,7 @@ Do not use `EnterPlanMode`/`ExitPlanMode` — plan mode forces plans into an eph
 
 - **Look for an upstream spec first.** Check your vault's `specs/` for a `status: ready` spec on this topic. If one exists, it defines the *what* and *why* — your job is the *how*. Read it fully before proceeding. If none exists and the idea is fuzzy (acceptance criteria unclear, scope ambiguous, UI undecided), stop and route to a brainstorming skill instead.
 - Check files, docs, recent commits relevant to the request
-- For cross-subsystem features, if a knowledge-synthesis subagent is available (such as `lore:lore-librarian`), dispatch it to get a synthesized view of subsystems, decisions, dead-ends, lessons, and deferred items rather than listing directories yourself. If none is configured, read the relevant vault notes directly — and note in the plan that the prior-art synthesis pass was skipped.
+- For cross-subsystem features, if a knowledge-synthesis subagent is available (such as `lore:loremaster`), dispatch it to get a synthesized view of subsystems, decisions, dead-ends, lessons, and deferred items rather than listing directories yourself. If none is configured, read the relevant vault notes directly — and note in the plan that the prior-art synthesis pass was skipped.
 - **Consult your vault's lessons, if present,** for the touched subsystems before sketching the plan. Active lessons capture mistakes made before with concrete prevention checks — explicitly note in the plan how each relevant lesson's prevention applies (or why it doesn't). This is the same gate as dead-ends, just one level higher: dead-ends say "don't try X technique"; lessons say "don't repeat Y kind of judgment error."
 - For genuinely complex existing code you need to understand before designing, dispatch `researcher` rather than burning your own context on file surveying
 - If the request spans multiple independent subsystems, flag it immediately — decompose before designing
@@ -142,11 +142,11 @@ Leave the `## Council Review` section for Step 9.5 to append — do not pre-fill
 
 ### 9.5. Council Review (mandatory)
 
-After the plan is written and before presenting it for approval, dispatch a council-lite review. Four council member subagents (`council-builder` / `council-reliability` / `council-security` / `council-advocate`) review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
+After the plan is written and before presenting it for approval, dispatch a circle review. Four circle member subagents (`circle-builder` / `circle-reliability` / `circle-security` / `circle-advocate`) review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
 
 This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars below, not via per-invocation opt-outs.
 
-**Dispatch:** make four parallel `Agent` tool calls — one each to `council-builder`, `council-reliability`, `council-security`, `council-advocate` — in a single message so they run concurrently. Use the same prompt template for every member, substituting the lens label and the lens-specific Critical bar block (defined below).
+**Dispatch:** make four parallel `Agent` tool calls — one each to `circle-builder`, `circle-reliability`, `circle-security`, `circle-advocate` — in a single message so they run concurrently. Use the same prompt template for every member, substituting the lens label and the lens-specific Critical bar block (defined below).
 
 **Substitution rules** (apply BEFORE sending the prompt to each member; do not include these notes in the dispatched text):
 - `<plan-path>` — absolute path to the freshly-written plan file
@@ -157,7 +157,7 @@ This step is mandatory on every plan. There is no skip flag — calibration is t
 **Prompt template:**
 
 ```text
-You are being dispatched by the planning skill's mandatory council-lite review step. Review the implementation plan and its linked spec against your lens (<lens>).
+You are being dispatched by the planning skill's mandatory circle review step. Review the implementation plan and its linked spec against your lens (<lens>).
 
 Plan: <plan-path>
 Spec: <spec-path>
@@ -190,7 +190,7 @@ Required output format:
 ## Confidence
 <one line — low | medium | high, with brief reason>
 
-Do not include sections you'd normally include in your usual full-length response. For this council-lite review the constrained output above is the whole response.
+Do not include sections you'd normally include in your usual full-length response. For this circle review the constrained output above is the whole response.
 ```
 
 **Per-lens Critical bars** (paste the matching block into each member's dispatch):
@@ -254,7 +254,7 @@ Important and Minor findings do NOT require dispositions — they are logged for
 ## Council Review
 
 *Reviewed at:* YYYY-MM-DDTHH:MM:SSZ
-*Members dispatched:* council-builder, council-reliability, council-security, council-advocate
+*Members dispatched:* circle-builder, circle-reliability, circle-security, circle-advocate
 
 *Critical:*
 - <finding> (raised by: <lenses>) — *Disposition:* `<one of: resolved | bounced-back-to-spec | accepted-as-risk: <reason> | disputed: <reason>>`
@@ -272,7 +272,7 @@ Concrete example (populated):
 ## Council Review
 
 *Reviewed at:* 2026-05-22T19:42:11Z
-*Members dispatched:* council-builder, council-reliability, council-security, council-advocate
+*Members dispatched:* circle-builder, circle-reliability, circle-security, circle-advocate
 
 *Critical:*
 - Slice 2 producer contract isn't tested but Slice 3 consumer depends on it (raised by: Builder) — *Disposition:* `resolved`

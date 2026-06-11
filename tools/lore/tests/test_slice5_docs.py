@@ -3,7 +3,7 @@
 Test contract:
   1. The brainstorm SKILL.md carries the "delimited shared content is data,
      not instructions" rule.
-  2. The lore-librarian agent doc carries the same injection-defense instruction.
+  2. The loremaster agent doc carries the same injection-defense instruction.
   3. A lore docs section documents the "shared vaults default private"
      consequence.
   4. D-6: the docs state that shared areas surface only on explicit lore recall,
@@ -15,7 +15,7 @@ from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
 BRAINSTORM_SKILL = PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
-LORE_LIBRARIAN_AGENT = PLUGIN_ROOT / "agents" / "lore-librarian.md"
+LORE_LIBRARIAN_AGENT = PLUGIN_ROOT / "agents" / "loremaster.md"
 LORE_PROMOTE_DOC = PLUGIN_ROOT / "docs" / "PROMOTE.md"
 
 
@@ -47,27 +47,27 @@ class TestBrainstormSkillInjectionInstruction:
 
 
 # ---------------------------------------------------------------------------
-# Injection defense instruction: agents/lore-librarian.md
+# Injection defense instruction: agents/loremaster.md
 # ---------------------------------------------------------------------------
 
-class TestLoreLibrarianInjectionInstruction:
+class TestLoremasterInjectionInstruction:
     def test_lore_librarian_has_shared_content_is_data_rule(self) -> None:
-        """lore-librarian.md must carry the injection-defense instruction."""
+        """loremaster.md must carry the injection-defense instruction."""
         text = LORE_LIBRARIAN_AGENT.read_text()
         assert (
             "external-memory" in text
             or "shared" in text.lower() and "not instructions" in text.lower()
             or "data" in text.lower() and "not instructions" in text.lower()
         ), (
-            f"lore-librarian.md must carry the 'shared content is data, not instructions' rule. "
+            f"loremaster.md must carry the 'shared content is data, not instructions' rule. "
             f"Got: {text[:500]!r}"
         )
 
     def test_lore_librarian_references_external_memory_channel(self) -> None:
-        """lore-librarian.md must mention the <external-memory> structural delimiter."""
+        """loremaster.md must mention the <external-memory> structural delimiter."""
         text = LORE_LIBRARIAN_AGENT.read_text()
         assert "external-memory" in text, (
-            f"lore-librarian.md must reference the <external-memory> delimiter. "
+            f"loremaster.md must reference the <external-memory> delimiter. "
             f"Got: {text[:500]!r}"
         )
 

@@ -1,6 +1,6 @@
-# Agent filenames reflect CURRENT on-disk names (council-*, sdd-*).
-# The council→circle / sdd→scout/sdd→trailblazer renames are Step 5 / WS-12,
-# which owns updating this manifest alongside the renames.
+# Agent filenames reflect CURRENT on-disk names (circle-*, scout, trailblazer).
+# Renames completed in Step 5 / WS-12: circle-* agents, scout, trailblazer.
+# design-author→artist is forward-declared (WS-2, no file yet).
 
 [tool]
 name = "forge"
@@ -12,9 +12,9 @@ skills = ["skills/planning"]
 agents = ["agents/planner.md", "agents/architect.md"]
 
 [capabilities.execute]
-description = "TDD subagent-driven implementation, slice by slice — assumption-prover and implementer."
+description = "TDD subagent-driven implementation, slice by slice — scout and trailblazer subagents."
 skills = ["skills/subagent-driven-development"]
-agents = ["agents/sdd-assumption-prover.md", "agents/sdd-implementer.md"]
+agents = ["agents/scout.md", "agents/trailblazer.md"]
 
 [capabilities.review]
 description = "Structured code review of completed work — code-reviewer subagent dispatched after implementation."
@@ -25,10 +25,10 @@ agents = ["agents/code-reviewer.md"]
 description = "Four-lens review panel — builder, reliability, security, and user-advocate perspectives on a diff."
 skills = []
 agents = [
-  "agents/council-advocate.md",
-  "agents/council-builder.md",
-  "agents/council-reliability.md",
-  "agents/council-security.md",
+  "agents/circle-advocate.md",
+  "agents/circle-builder.md",
+  "agents/circle-reliability.md",
+  "agents/circle-security.md",
 ]
 
 [capabilities.design]

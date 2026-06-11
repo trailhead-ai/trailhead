@@ -109,14 +109,14 @@ class TestLoreManifestParsesCorrectly:
     def test_lore_recall_capability(self):
         m = load_manifest(_LORE_MANIFEST)
         cap = m.capabilities["recall"]
-        assert cap["skills"] == ["skills/review", "skills/reflect"]
-        assert "agents/lore-librarian.md" in cap["agents"]
+        assert cap["skills"] == ["skills/tend", "skills/reflect"]
+        assert "agents/loremaster.md" in cap["agents"]
 
     def test_lore_sessions_capability(self):
         m = load_manifest(_LORE_MANIFEST)
         cap = m.capabilities["sessions"]
         assert "skills/checkpoint" in cap["skills"]
-        assert "skills/finished" in cap["skills"]
+        assert "skills/finish" in cap["skills"]
         assert cap["agents"] == []
 
     def test_lore_shared_vaults_explicitly_empty(self):
@@ -159,7 +159,7 @@ class TestLoreManifestValidatesAgainstDisk:
     def test_lore_recall_agent_file_exists(self):
         m = load_manifest(_LORE_MANIFEST)
         plugin_root = _LORE_MANIFEST.parent / "plugins" / m.tool_name
-        p = plugin_root / "agents/lore-librarian.md"
+        p = plugin_root / "agents/loremaster.md"
         assert p.is_file(), f"agent file missing: {p}"
 
     def test_lore_hooks_json_exists_as_file(self):
@@ -201,8 +201,8 @@ class TestForgeManifestValidatesAgainstDisk:
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["execute"]
         assert "skills/subagent-driven-development" in cap["skills"]
-        assert "agents/sdd-assumption-prover.md" in cap["agents"]
-        assert "agents/sdd-implementer.md" in cap["agents"]
+        assert "agents/scout.md" in cap["agents"]
+        assert "agents/trailblazer.md" in cap["agents"]
 
     def test_forge_circle_capability_agents_exist(self):
         m = load_manifest(_FORGE_MANIFEST)

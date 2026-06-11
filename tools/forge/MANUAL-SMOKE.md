@@ -13,9 +13,9 @@ For an adopter quickstart, see the README instead.
 **Result: PASS (mechanism), 2026-06-03.**
 
 **Evidence (mechanism, no install needed):** the already-installed `lore` plugin
-ships an agent, `lore-librarian`, and it appears in the running Claude Code
+ships an agent, `loremaster`, and it appears in the running Claude Code
 session's agent registry as the **namespaced** subagent_type
-`lore:lore-librarian` — dispatchable via the `Agent` tool. Plugin-provided
+`lore:loremaster` — dispatchable via the `Agent` tool. Plugin-provided
 agents are namespaced `<plugin>:<agent>`; stow-symlinked `~/.claude/agents`
 copies appear *un*-namespaced (e.g. `pr-updater`). The `lore:` prefix is direct
 proof that marketplace-installed plugins register agents, not merely skills.
@@ -30,7 +30,7 @@ the proof agent in a fresh session (steps below). Record PASS/FAIL here.
 
 | Date | Who | forge install + `forge:forge-ping` dispatch | Notes |
 |------|-----|---------------------------------------------|-------|
-| 2026-06-03 | — | _pending manual run_ | mechanism already PASS via `lore:lore-librarian` |
+| 2026-06-03 | — | _pending manual run_ | mechanism already PASS via `lore:loremaster` |
 
 > **Fallback if forge-specific install ever FAILs** (mechanism is proven, so this
 > is not expected): host the dev agents via a de-symlinked `~/.claude/agents`
@@ -93,4 +93,4 @@ subagent types as `forge:forge-ping`) and returns the confirmation string.
 | `/plugin marketplace add` fails | Wrong path; verify the repo root has `.claude-plugin/marketplace.json` |
 | `forge@forge-local` not found | Marketplace not added, or `marketplace.json` `name`/`plugins[0].name` mismatch |
 | `forge:forge-ping` not a known subagent_type | Plugin not installed, session not restarted, or agent missing valid frontmatter at `plugins/forge/agents/forge-ping.md` |
-| Agent dispatches but errors | Frontmatter `tools:`/`model:` invalid — check against `lore-librarian` |
+| Agent dispatches but errors | Frontmatter `tools:`/`model:` invalid — check against `loremaster` |

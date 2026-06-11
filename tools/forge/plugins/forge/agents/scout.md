@@ -1,5 +1,5 @@
 ---
-name: sdd-assumption-prover
+name: scout
 description: |
   Resolves an unknown before the SDD loop builds on top of it. Writes a TDD test that captures the assumption, runs it, reports VALIDATED / INVALIDATED with evidence and surprises. The test is ephemeral — the implementer cleans it up after building proper behavioral tests.
 

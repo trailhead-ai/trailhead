@@ -1,8 +1,8 @@
 ---
 name: subagent-driven-development
 description: >
-  Use when executing an approved implementation plan slice-by-slice, dispatching `sdd-assumption-prover`
-  and `sdd-implementer` subagents for each slice rather than building inline. The controller (you)
+  Use when executing an approved implementation plan slice-by-slice, dispatching `scout`
+  and `trailblazer` subagents for each slice rather than building inline. The controller (you)
   orchestrates; subagents do the work.
   TRIGGER when: user says "execute", "execute the plan", "start building", "let's build", "build it",
   "implement this", "run the plan", "work the slices", "start the slices", "go" (following plan approval),
@@ -21,8 +21,8 @@ Execute a plan slice-by-slice. For each slice, resolve unknowns first, then buil
 
 | Role | Agent | Purpose |
 |------|-------|---------|
-| Resolve unknowns | `sdd-assumption-prover` | Writes a TDD test that proves or disproves an assumption |
-| Build slices | `sdd-implementer` | Writes tests first, implements, self-reviews, commits |
+| Resolve unknowns | `scout` | Writes a TDD test that proves or disproves an assumption |
+| Build slices | `trailblazer` | Writes tests first, implements, self-reviews, commits |
 | Review work | `code-reviewer` | Spec compliance + code quality in one pass |
 
 The controller decides which to dispatch and absorbs findings between iterations.
@@ -48,7 +48,7 @@ Before the first slice, read the plan's `Feature Flag` field.
 - **`n/a`:** skip — no flag work this loop.
 - **Field missing:** stop. The plan is non-conformant. Bounce back to `planning` (or `brainstorm` if the spec is also missing the rollout decision). Do not invent a flag and do not proceed flagless if the plan should have one.
 
-When the flag is declared, every slice that touches the gated path **must** include test cases for both flag states (on and off) in its test contract. The `sdd-implementer` is responsible for executing these via TDD; the controller verifies both states are covered before marking the slice DONE. Treat a slice that only tests the on-path as incomplete — bounce it back.
+When the flag is declared, every slice that touches the gated path **must** include test cases for both flag states (on and off) in its test contract. The `trailblazer` is responsible for executing these via TDD; the controller verifies both states are covered before marking the slice DONE. Treat a slice that only tests the on-path as incomplete — bounce it back.
 
 ## The Loop
 
@@ -60,7 +60,7 @@ For each slice in the plan:
 
 ### 1. Does this slice have an unresolved unknown?
 
-**Yes → dispatch `sdd-assumption-prover`.**
+**Yes → dispatch `scout`.**
 
 The agent expects: plan path, the unknown (specific and restated), why it matters (which slice is blocked), working directory.
 
@@ -74,7 +74,7 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 - **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status).
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they block the current slice or a future one.
 
-### 3. Dispatch `sdd-implementer`
+### 3. Dispatch `trailblazer`
 
 The agent expects:
 - Plan path and slice number/name
@@ -133,8 +133,8 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 
 | Role | Default | Escalate to |
 |------|---------|-------------|
-| `sdd-assumption-prover` | Sonnet | Sonnet/high if the unknown spans multiple subsystems or needs deeper code exploration |
-| `sdd-implementer` | Sonnet | `model: "opus"` per-dispatch for integration-heavy slices |
+| `scout` | Sonnet | Sonnet/high if the unknown spans multiple subsystems or needs deeper code exploration |
+| `trailblazer` | Sonnet | `model: "opus"` per-dispatch for integration-heavy slices |
 | `code-reviewer` | Opus/high | (already pinned, no override needed) |
 
 **Escalation signals:**

@@ -169,12 +169,12 @@ agents = []
 
 [capabilities.recall]
 description = "Surface, re-justify, and synthesize accumulated vault memory."
-skills = ["skills/review", "skills/reflect"]
-agents = ["agents/lore-librarian.md"]
+skills = ["skills/tend", "skills/reflect"]
+agents = ["agents/loremaster.md"]
 
 [capabilities.sessions]
 description = "Session lifecycle — checkpoint mid-session state and finalize on close."
-skills = ["skills/checkpoint", "skills/finished"]
+skills = ["skills/checkpoint", "skills/finish"]
 agents = []
 
 [capabilities.shared-vaults]

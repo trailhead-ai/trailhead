@@ -1,5 +1,5 @@
 ---
-name: lore-librarian
+name: loremaster
 description: |
   Searches and synthesizes across the lore vault at $LORE_VAULT — area profiles, deferred items, dead-ends, lessons, decisions, radar, sessions, plans, and specs. Understands the taxonomy and returns synthesized answers with [[wikilinks]] to source notes, not raw dumps. Uses Grep/Read/Glob over the vault filesystem — no MCP required.
 

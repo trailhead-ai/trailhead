@@ -18,11 +18,11 @@ register as `forge:<name>`:
 - `architect`, `researcher`, `troubleshooter`
 - `code-reviewer`, `security-auditor`
 - `doc-finder`, `test-runner`, `log-sifter`, `pr-summarizer`
-- `sdd-assumption-prover`, `sdd-implementer`
-- `council-builder`, `council-reliability`, `council-security`, `council-advocate`
+- `scout`, `trailblazer`
+- `circle-builder`, `circle-reliability`, `circle-security`, `circle-advocate`
 
-The four **council review-lens agents** (`council-*`) are dispatched as a
-parallel quartet by a planning skill's council-lite review step — not
+The four **circle review-lens agents** (`circle-*`) are dispatched as a
+parallel quartet by a planning skill's circle review step — not
 standalone. Each holds a single perspective (Builder=architecture,
 Reliability=tests/failure modes, Security=threat model, Advocate=UX) and
 returns a focused single-lens response rather than a synthesis. If you need

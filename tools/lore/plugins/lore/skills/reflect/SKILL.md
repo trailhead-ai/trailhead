@@ -87,7 +87,7 @@ Skip `active`-status session notes — they'll be picked up by the next reflecti
 
 ### Step 2 — Subagent synthesis
 
-Dispatch **one** `lore:lore-librarian` subagent with the gathered paths. If `lore:lore-librarian` is not configured, write the reflection yourself from the gathered paths; note in the output that the synthesis pass was skipped and results may be shallower.
+Dispatch **one** `lore:loremaster` subagent with the gathered paths. If `lore:loremaster` is not configured, write the reflection yourself from the gathered paths; note in the output that the synthesis pass was skipped and results may be shallower.
 
 Brief:
 
