@@ -95,7 +95,8 @@ step, not wired today.
 
 ### Try it today (from a local checkout)
 
-The tools are real and run today. Clone the repo and do an editable install:
+The tools are real and run today. From your checkout of the repo, do an
+editable install:
 
 ```sh
 pip install -e .
@@ -120,8 +121,8 @@ After install, start a fresh Claude Code session to load the wired tools.
 
 ### When the public registry lands
 
-The public home for this repo lands with the org/repo-homing work (WS-10). Once
-it's live, the canonical install path will be:
+The public home for this repo lands with the org/repo-homing work. Once it's
+live, the canonical install path will be:
 
 ```sh
 trailhead config registry <registry-url>

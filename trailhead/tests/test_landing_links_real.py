@@ -1008,7 +1008,7 @@ class TestNoToolReadmePypiLine:
         text = readme.read_text(encoding="utf-8")
         assert "pip install trailhead" not in text, (
             f"{readme.parent.name}/README.md must not contain 'pip install trailhead' — "
-            "the public PyPI install does not exist yet (lands with WS-10 org/repo-homing); "
+            "the public PyPI install does not exist yet (lands with the org/repo-homing work); "
             "showing it implies a live install that would 404 (S-3)"
         )
 
@@ -1032,7 +1032,7 @@ class TestRootReadmeNoPypiLine:
         text = _ROOT_README.read_text(encoding="utf-8")
         assert "pip install trailhead" not in text, (
             "README.md must not contain 'pip install trailhead' — "
-            "the public PyPI install does not exist yet (lands with WS-10 org/repo-homing). "
+            "the public PyPI install does not exist yet (lands with the org/repo-homing work). "
             "Use the editable local install block ('Try it today') + the registry-future block "
             "instead (S-3 / D-2)."
         )
