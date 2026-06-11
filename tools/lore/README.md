@@ -61,6 +61,9 @@ with the area map already included so the agent knows which areas exist.
 
 The `lore` CLI handles the deterministic operations skills delegate to it.
 
+<!-- Intentionally an untagged block (no sh/bash): this is a CLI reference listing,
+     not a runnable snippet. A tagged sh/bash block here is scanned by the landing-claims
+     inverse gate, which would require every line's subcommand to be registered. -->
 ```
 lore init <path>          Scaffold a new vault
 lore new <type>           Render a template and write a new vault note

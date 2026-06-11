@@ -151,7 +151,7 @@ python3 -m pytest -q
 ```
 
 Covers manifest validity (`marketplace.json` / `plugin.json`), agent + skill
-frontmatter registrability, structural genericity (no brain-vault seams), and
+frontmatter registrability, structural genericity (no host-project-specific seams), and
 the deterministic handoff-capture helper (git-state survey, lore 3-state
 detection, degraded-file write) including a real cross-repo integration test
 that drives the actual `lore handoff` against a synthetic fixture vault. The

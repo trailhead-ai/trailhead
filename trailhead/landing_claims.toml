@@ -380,29 +380,8 @@ tool = "forge"
 ref = "agents/code-reviewer.md"
 source = "forge"
 
-[[claim]]
-kind = "agent"
-tool = "forge"
-ref = "agents/circle-builder.md"
-source = "forge"
-
-[[claim]]
-kind = "agent"
-tool = "forge"
-ref = "agents/circle-reliability.md"
-source = "forge"
-
-[[claim]]
-kind = "agent"
-tool = "forge"
-ref = "agents/circle-security.md"
-source = "forge"
-
-[[claim]]
-kind = "agent"
-tool = "forge"
-ref = "agents/circle-advocate.md"
-source = "forge"
+# circle-* agents (advocate/builder/reliability/security) are registered once,
+# above in the circle-capability block — not duplicated here.
 
 [[claim]]
 kind = "agent"

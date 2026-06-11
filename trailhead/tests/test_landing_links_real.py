@@ -894,12 +894,8 @@ class TestCheckInverseFixtures:
 
 
 class TestRealReadmeInverseScan:
-    """Real-README inverse scan over the four indexed READMEs.
-
-    xfail removed once Slice 3 registers all anchors from the tool READMEs and
-    the lore README recall oversell is fixed. Both forward + inverse scans are
-    expected green after Slice 3.
-    """
+    """Real-README inverse scan over the four indexed READMEs: every fenced command
+    and relative link in each README is registered in landing_claims.toml (D-5)."""
 
     def test_all_real_readmes_pass_inverse_check(self):
         """Every fenced command + relative link in the four READMEs is registered."""
@@ -974,21 +970,25 @@ class TestLoreRecallHonestyGuards:
         )
 
     def test_lore_readme_no_semantic_recall_as_built_feature(self):
-        """Negative: lore README must not present Tier-2 semantic/embedding recall as built.
+        """Negative regression sentinel: lore README must not present Tier-2 semantic/
+        embedding recall as built.
 
-        Tier-2 local embeddings are opt-in and NOT built (D23). The README must not
-        claim an unqualified 'semantic recall' capability as if it exists today.
-        Strategy: assert 'semantic recall' does not appear at all unless paired with
-        a qualifier ('planned', 'not yet', 'coming'). We check each line individually
-        to avoid variable-width lookbehind.
+        Tier-2 local embeddings are opt-in and NOT built (D23). This is a *phrase-pinned*
+        regression guard: it triggers on the embedding/semantic vocabulary a reintroduction
+        would most likely use, and only passes such a line if it carries a not-yet-built
+        qualifier. It is dormant today (none of these phrases appear), and is a sentinel
+        against a *future* edit reintroducing the oversell — it is NOT a general semantic-
+        claim detector (a wholly-novel paraphrase could still slip past; the prose-honesty
+        review is the backstop). We scan line-by-line to avoid variable-width lookbehind.
         """
         assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
         text = _LORE_README.read_text(encoding="utf-8")
-        qualifying_terms = ("planned", "not yet", "coming soon", "opt-in")
+        trigger_terms = ("semantic recall", "semantic search", "embedding", "vector search")
+        qualifying_terms = ("planned", "not yet", "coming soon", "opt-in", "not built")
         unqualified_lines = []
         for line in text.splitlines():
             lower = line.lower()
-            if "semantic recall" in lower:
+            if any(t in lower for t in trigger_terms):
                 if not any(q in lower for q in qualifying_terms):
                     unqualified_lines.append(line.strip())
         assert not unqualified_lines, (
