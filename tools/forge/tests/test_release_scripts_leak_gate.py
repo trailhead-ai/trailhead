@@ -47,8 +47,10 @@ def step6_denylist(tmp_path: Path) -> Path:
         "\\bdash0\\b\n"
         "\\bzenith\\b\n"
         "\\.workspace-manifest\n"
-        "KNOWN_SIBLINGS\n"
-        "MERGE_ORDER\n"
+        # Catch the Python constant pattern KNOWN_SIBLINGS = {...}
+        "KNOWN_SIBLINGS\\s*=\n"
+        # Catch the Python constant pattern MERGE_ORDER = [...] (not the config key 'merge_order')
+        "MERGE_ORDER\\s*=\\s*\\[\n"
         "brain/(designs|chrome|specs|plans|sessions)\n"
         # mobile-app as a hardcoded sibling name (not in a comment about the tool name)
         '"mobile-app"\n'
@@ -177,6 +179,7 @@ class TestEphemeralDenylistPlumbing:
     ) -> None:
         dirty = tmp_path / "ks-tree"
         dirty.mkdir()
-        (dirty / "bad.py").write_text('KNOWN_SIBLINGS = {"platform", "mobile-app"}\n')
+        # The pattern catches 'KNOWN_SIBLINGS =' (the constant assignment)
+        (dirty / "bad.py").write_text('KNOWN_SIBLINGS = {"platform"}\n')
         r = _run_gate([dirty], step6_denylist)
         assert r.returncode == 1

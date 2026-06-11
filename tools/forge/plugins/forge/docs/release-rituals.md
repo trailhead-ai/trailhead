@@ -2,7 +2,7 @@
 
 Forge's `release` capability de-zenithed release scripts that operate on a
 **camp group** — reading repos, merging PRs, and evaluating actionability from
-the **camp central manifest** (not zenith's retired `.workspace-manifest.json`).
+the **camp central manifest** (not the retired single-repo worktree manifest format).
 
 ## Camp manifest read surface
 
