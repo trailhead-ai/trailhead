@@ -516,8 +516,10 @@ _CMD_LINE_RE = re.compile(
     r"^\s*(" + "|".join(sorted(_TRACKED_TOOLS)) + r")\s+(\S+)", re.MULTILINE
 )
 # Markdown relative link pattern: [label](./path) or [label](../path).
-# Excludes absolute http(s):// and anchor-only #frag links.
-_REL_LINK_RE = re.compile(r"\[([^\]]*)\]\((\.\.?/[^)]+)\)")
+# Excludes absolute http(s):// and anchor-only #frag links. The path capture stops
+# at whitespace so a markdown title attribute — [label](./p "title") — does not leak
+# into the path (M-2).
+_REL_LINK_RE = re.compile(r"\[([^\]]*)\]\((\.\.?/[^)\s]+)")
 
 
 def extract_fenced_commands(readme_text: str) -> set[tuple[str, str]]:
@@ -587,7 +589,10 @@ def check_inverse(
 
     For each extracted relative link:
       - must be confined to repo_root (S-2); else raises with "relative link <x> escapes repo root"
-      - must either exist on disk or be registered as a doc-link claim in claims
+      - must either exist on disk or be registered as a doc-link claim in claims. The link is
+        normalized to a repo-root-relative path before the registration compare, since doc-link
+        claim refs are repo-root-relative (e.g. "LICENSE") while extracted links are
+        readme-dir-relative with a ./ or ../ prefix (I-1).
 
     Sets are sorted before assertions (R-5).
     """
@@ -614,14 +619,16 @@ def check_inverse(
         resolved = (readme_dir / link).resolve()
         # S-2: confinement check — must not escape repo root
         try:
-            resolved.relative_to(repo_root_resolved)
+            rel_to_root = resolved.relative_to(repo_root_resolved)
         except ValueError:
             raise AssertionError(
                 f"README {readme_path}: relative link {link!r} escapes repo root "
                 f"({repo_root_resolved})"
             )
-        # Must exist on disk OR be registered as a doc-link claim
-        if not resolved.exists() and link not in doc_link_refs:
+        # Must exist on disk OR be registered as a doc-link claim. doc-link refs are
+        # repo-root-relative, so compare against the normalized rel_to_root, not the raw
+        # readme-dir-relative link (I-1 — fixes the dead-branch namespace mismatch).
+        if not resolved.exists() and str(rel_to_root) not in doc_link_refs:
             raise AssertionError(
                 f"README {readme_path}: relative link {link!r} does not resolve to "
                 f"an existing path and is not registered as a doc-link claim"
@@ -846,6 +853,44 @@ class TestCheckInverseFixtures:
         # Call twice; should produce same result (no flake)
         check_inverse(readme, claims, tmp_path)
         check_inverse(readme, claims, tmp_path)
+
+    def test_registered_doc_link_to_absent_file_passes_via_registration(self, tmp_path):
+        """A registered doc-link claim is the ONLY thing that can pass a link to an
+        absent file — proves the registration branch is live, not dead (I-1).
+
+        The link target does not exist on disk, so existence cannot pass it; only the
+        repo-root-relative doc-link claim match can. doc-link refs are repo-root-relative
+        ("docs/future.md"), the extracted link is readme-dir-relative ("./docs/future.md")."""
+        claims = [
+            {"kind": "doc-link", "tool": "trailhead", "ref": "docs/future.md", "source": "root"}
+        ]
+        readme = tmp_path / "README.md"
+        readme.write_text("See the [future guide](./docs/future.md) (not written yet).\n")
+        # docs/future.md does not exist; must pass purely via the doc-link registration.
+        check_inverse(readme, claims, tmp_path)
+
+    def test_unregistered_absent_link_still_fails_after_normalization(self, tmp_path):
+        """The I-1 normalization must not loosen the dangling-link guard: an absent,
+        UN-registered link still fails."""
+        claims = [
+            {"kind": "doc-link", "tool": "trailhead", "ref": "docs/other.md", "source": "root"}
+        ]
+        readme = tmp_path / "README.md"
+        readme.write_text("[ghost](./docs/ghost.md)\n")
+        with pytest.raises(AssertionError, match="does not resolve to"):
+            check_inverse(readme, claims, tmp_path)
+
+    def test_link_with_title_attribute_does_not_leak_into_path(self, tmp_path):
+        """A markdown title attribute — [label](./p "title") — must not leak into the
+        extracted path (M-2)."""
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "paths.md").write_text("# paths")
+        readme = tmp_path / "README.md"
+        readme.write_text('See [paths](./docs/paths.md "the paths guide").\n')
+        assert extract_relative_links(readme.read_text()) == {"./docs/paths.md"}
+        # and the inverse check resolves it cleanly (no spurious title in the path)
+        check_inverse(readme, [], tmp_path)
 
 
 class TestRealReadmeInverseScan:
