@@ -36,6 +36,9 @@ Slice 2 — inverse anti-rot check (D-5, U-3, S-2, R-4, R-5):
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -1120,3 +1123,294 @@ class TestRootReadmeStructuralGuard:
             "The lore use-case + first command must appear before the 'What's included' "
             "table — lead with one use case, not the concept map (A-3)."
         )
+
+
+# ---------------------------------------------------------------------------
+# Slice 5 — mandatory landing leak gate (S-1) + no-D17-collapse scope guard
+# ---------------------------------------------------------------------------
+
+# The five landing-surface files the gate must certify as clean.
+_LANDING_FILES: list[Path] = [
+    _REPO_ROOT / "README.md",
+    _REPO_ROOT / "tools" / "lore" / "README.md",
+    _REPO_ROOT / "tools" / "forge" / "README.md",
+    _REPO_ROOT / "tools" / "camp" / "README.md",
+    _REPO_ROOT / "trailhead" / "landing_claims.toml",
+]
+
+# Path to the leak_gate.py script.
+_LEAK_GATE = (
+    _REPO_ROOT / "tools" / "forge" / "plugins" / "forge" / "scripts" / "leak_gate.py"
+)
+
+# Denylist token classes seeded into the ephemeral denylist (S-1).
+#
+# Regex design rationale:
+#   brain/ path tokens — brain/ prefix catches vault path references in any context
+#   ~/code/brain — absolute brain path (home-relative form)
+#   localhost:7777 — the lore-link-server port (internal tooling URL)
+#   \bzenith\b — bare word; the company/product name; NOT "zenithhealth" (contained)
+#   \bpenny\b — the internal product name
+#   WS-\d+ — internal workstream IDs
+#   /Users/tduffield — the author's absolute home path
+#   5CC67114CCF2B7B5 — the zenith work GPG key (internal signing key ID)
+#
+# Words that must NOT false-positive (legitimate landing vocabulary checked below):
+#   trailhead, lore, forge, camp, Claude Code, agent-native, recall, area, preset,
+#   skill, agent, capability, install, doctor, config, update, minimal, standard, full
+#
+_DENYLIST_ENTRIES: list[str] = [
+    # brain vault path references
+    r"brain/",
+    r"~/code/brain",
+    # internal tooling URL
+    r"localhost:7777",
+    # internal product / company tokens (bare word only — not in compound identifiers)
+    r"\bzenith\b",
+    r"\bpenny\b",
+    # internal workstream IDs
+    r"WS-\d+",
+    # author's absolute home path
+    r"/Users/tduffield",
+    # zenith work GPG key ID (internal)
+    r"5CC67114CCF2B7B5",
+]
+
+_DENYLIST_COMMENT = "# Slice-5 ephemeral landing-surface denylist — business-context strings, not secrets\n"
+
+
+def _build_denylist(tmp_path: Path) -> Path:
+    """Write an ephemeral denylist to tmp_path and return its path."""
+    dl = tmp_path / "landing-denylist"
+    dl.write_text(
+        _DENYLIST_COMMENT + "\n".join(_DENYLIST_ENTRIES) + "\n",
+        encoding="utf-8",
+    )
+    return dl
+
+
+def _copy_landing_files_to_dir(dest: Path) -> Path:
+    """Copy the five landing-surface files into a flat directory under dest.
+
+    leak_gate.py's _text_files() uses rglob("*") — it only yields files when
+    scanning a DIRECTORY tree, not an individual file path. Copying into a
+    directory ensures the scan is non-vacuous (the file is actually read and
+    checked).
+
+    Files are copied with a flat name derived from their tool context so
+    distinct-enough for error messages:
+      README.md          → root-README.md
+      tools/lore/README.md   → lore-README.md
+      tools/forge/README.md  → forge-README.md
+      tools/camp/README.md   → camp-README.md
+      trailhead/landing_claims.toml → landing_claims.toml
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    name_map: list[tuple[Path, str]] = [
+        (_REPO_ROOT / "README.md", "root-README.md"),
+        (_REPO_ROOT / "tools" / "lore" / "README.md", "lore-README.md"),
+        (_REPO_ROOT / "tools" / "forge" / "README.md", "forge-README.md"),
+        (_REPO_ROOT / "tools" / "camp" / "README.md", "camp-README.md"),
+        (_REPO_ROOT / "trailhead" / "landing_claims.toml", "landing_claims.toml"),
+    ]
+    for src, dst_name in name_map:
+        assert src.exists(), f"landing file not found: {src}"
+        shutil.copy2(src, dest / dst_name)
+    return dest
+
+
+def _run_gate(trees: list[Path], denylist: Path) -> subprocess.CompletedProcess:
+    """Run leak_gate.py as a subprocess of the current Python interpreter."""
+    cmd = [sys.executable, str(_LEAK_GATE), *[str(t) for t in trees], "--denylist", str(denylist)]
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+class TestLandingSurfaceLeakGate:
+    """S-1: mandatory, gating leak-gate run over the five landing-surface files.
+
+    Uses an ephemeral, repo-tracked denylist written to tmp_path so the gate
+    runs identically on any checkout — never depends on ~/.claude/leak-gate.denylist.
+
+    Test structure:
+    1. Positive (GATING): scanning the real landing files with the denylist exits 0.
+       This is the mandatory S-1 gate — a real leak makes the suite RED.
+    2. Non-vacuous negative twin: a tmp_path file seeded with a denylist token exits 1,
+       proving the denylist actually catches leaks (so the exit-0 is not vacuous).
+    3. Fail-closed (exit 2): missing path and empty denylist.
+    """
+
+    def test_positive_gate_landing_surface_is_clean(self, tmp_path: Path) -> None:
+        """S-1 GATING: the five landing-surface files must exit 0 with the ephemeral denylist.
+
+        A real leak (e.g. a brain/ path reference, a WS-\\d+ workstream ID, a bare
+        'zenith' token) in any of the five files makes this test RED — that is the
+        intended behavior. Do NOT loosen the denylist to make it pass; fix the leak.
+
+        The files are copied into a tmp_path directory so _text_files() scans them
+        via rglob("*") — scanning a directory is non-vacuous; scanning a bare file
+        path is vacuous (rglob on a file yields nothing).
+        """
+        scan_dir = _copy_landing_files_to_dir(tmp_path / "scan")
+        denylist = _build_denylist(tmp_path)
+        result = _run_gate([scan_dir], denylist)
+        assert result.returncode == 0, (
+            "Landing surface contains a forbidden token — leak-gate exited 1.\n"
+            "DO NOT loosen the denylist to fix this; instead fix the leak in the "
+            "offending landing file.\n"
+            f"Gate output:\n{result.stdout}\n{result.stderr}"
+        )
+
+    def test_negative_twin_seeded_token_exits_1(self, tmp_path: Path) -> None:
+        """Non-vacuous: a file seeded with a denylist token exits 1.
+
+        This proves the denylist is actually enforced and the positive exit-0 above
+        is not vacuous (the gate truly scanned the files, not nothing).
+        """
+        dirty_dir = tmp_path / "dirty"
+        dirty_dir.mkdir()
+        (dirty_dir / "leak.md").write_text(
+            "This doc was part of the zenith project.\n",
+            encoding="utf-8",
+        )
+        denylist = _build_denylist(tmp_path)
+        result = _run_gate([dirty_dir], denylist)
+        assert result.returncode == 1, (
+            f"Expected exit 1 (leak found) for seeded token 'zenith', got {result.returncode}. "
+            f"Output: {result.stdout}{result.stderr}"
+        )
+
+    def test_negative_twin_brain_path_exits_1(self, tmp_path: Path) -> None:
+        """Non-vacuous: a brain/ path reference in a file exits 1."""
+        dirty_dir = tmp_path / "dirty-brain"
+        dirty_dir.mkdir()
+        (dirty_dir / "leak.md").write_text(
+            "See brain/areas/my-area.md for context.\n",
+            encoding="utf-8",
+        )
+        denylist = _build_denylist(tmp_path)
+        result = _run_gate([dirty_dir], denylist)
+        assert result.returncode == 1, (
+            f"Expected exit 1 (leak found) for 'brain/' path, got {result.returncode}. "
+            f"Output: {result.stdout}{result.stderr}"
+        )
+
+    def test_negative_twin_ws_id_exits_1(self, tmp_path: Path) -> None:
+        """Non-vacuous: a WS-N internal workstream ID in a file exits 1."""
+        dirty_dir = tmp_path / "dirty-ws"
+        dirty_dir.mkdir()
+        (dirty_dir / "leak.md").write_text(
+            "This feature was tracked as WS-8 internally.\n",
+            encoding="utf-8",
+        )
+        denylist = _build_denylist(tmp_path)
+        result = _run_gate([dirty_dir], denylist)
+        assert result.returncode == 1, (
+            f"Expected exit 1 (leak found) for 'WS-8', got {result.returncode}. "
+            f"Output: {result.stdout}{result.stderr}"
+        )
+
+    def test_fail_closed_missing_path_exits_2(self, tmp_path: Path) -> None:
+        """Fail-closed: a non-existent tree path exits 2 (cannot certify clean)."""
+        denylist = _build_denylist(tmp_path)
+        result = _run_gate([tmp_path / "does-not-exist"], denylist)
+        assert result.returncode == 2, (
+            f"Expected exit 2 (fail-closed) for missing path, got {result.returncode}. "
+            f"Output: {result.stdout}{result.stderr}"
+        )
+
+    def test_fail_closed_empty_denylist_exits_2(self, tmp_path: Path) -> None:
+        """Fail-closed: an empty denylist exits 2 (vacuous certification refused)."""
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        (scan_dir / "harmless.md").write_text("nothing here\n", encoding="utf-8")
+        empty_dl = tmp_path / "empty.denylist"
+        empty_dl.write_text("# only a comment\n\n", encoding="utf-8")
+        result = _run_gate([scan_dir], empty_dl)
+        assert result.returncode == 2, (
+            f"Expected exit 2 (fail-closed) for empty denylist, got {result.returncode}. "
+            f"Output: {result.stdout}{result.stderr}"
+        )
+
+    def test_legitimate_vocabulary_not_flagged(self, tmp_path: Path) -> None:
+        """Denylist must NOT false-positive on legitimate landing vocabulary.
+
+        Words that are valid in a public-facing landing: trailhead, lore, forge,
+        camp, Claude Code, agent-native, recall, area, preset, skill, agent,
+        capability, install, doctor, config, update, minimal, standard, full.
+        """
+        clean_dir = tmp_path / "clean-vocab"
+        clean_dir.mkdir()
+        (clean_dir / "vocab.md").write_text(
+            "# trailhead\n\n"
+            "Agent-native project memory that works with your existing setup.\n\n"
+            "lore, forge, and camp are the three plugins.\n"
+            "Run `trailhead install` to get started with the minimal or standard preset.\n"
+            "Use `lore recall --areas <topic>` to load area memory.\n"
+            "Claude Code is the agent runtime. forge:trailblazer is a skill.\n"
+            "Run `trailhead doctor` or `trailhead config` or `trailhead update`.\n"
+            "The full preset wires all capabilities.\n",
+            encoding="utf-8",
+        )
+        denylist = _build_denylist(tmp_path)
+        result = _run_gate([clean_dir], denylist)
+        assert result.returncode == 0, (
+            "Denylist false-positived on legitimate landing vocabulary.\n"
+            f"Gate output:\n{result.stdout}\n{result.stderr}"
+        )
+
+
+class TestNoDivCollapseGuard:
+    """D17 scope guard: asserts that Slice 5 did NOT wire the D17 group-workspace-config.
+
+    The D17 collapse (wiring trailhead as the group's camp workspace + adding a
+    group CLAUDE.md/AGENTS.md) is explicitly deferred as a tracked follow-up, not
+    built in WS-8 (D-3). This parallels Step-6's no-cutover guard: the boundary is
+    a tested contract, not just a comment.
+
+    Two negative assertions (kept simple and meaningful, not brittle):
+    1. The root README.md does NOT claim "this repo is the group's workspace" /
+       "camp workspace" (the D-3 omit branch: if D17 wiring isn't in, the sentence
+       must not be in either — the claim would be link-dead).
+    2. No group coordination file (CLAUDE.md or AGENTS.md) was added to the repo root
+       by WS-8 work.
+    """
+
+    def test_root_readme_does_not_claim_group_workspace(self) -> None:
+        """Root README must not claim 'this repo is the group's workspace' (D-3 omit).
+
+        If D17 hasn't landed, the link-dead sentence must not be in the README.
+        The guard targets the specific vocabulary the workspace-config feature would
+        introduce: 'group's workspace', 'camp workspace', 'workspace = <path>' wiring.
+        """
+        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
+        text = _ROOT_README.read_text(encoding="utf-8")
+        # None of these phrases should appear in a landing that hasn't wired D17
+        forbidden_phrases = (
+            "group's workspace",
+            "group workspace",
+            "camp workspace",
+            "workspace = ",
+        )
+        for phrase in forbidden_phrases:
+            assert phrase.lower() not in text.lower(), (
+                f"README.md contains '{phrase}', which implies D17 group-workspace-config "
+                "is wired. D17 is deferred (D-3) — this claim is link-dead until D17 lands. "
+                "Either wire D17 properly (out of WS-8 scope) or remove the sentence."
+            )
+
+    def test_no_group_coordination_file_at_repo_root(self) -> None:
+        """No CLAUDE.md or AGENTS.md must be added to the trailhead repo root by WS-8.
+
+        The group coordination files (CLAUDE.md / AGENTS.md) are part of the D17
+        group-workspace-config collapse, which is explicitly deferred. Their presence
+        at repo root signals D17 was wired — which is out of WS-8 scope.
+        """
+        repo_root = _REPO_ROOT
+        for fname in ("CLAUDE.md", "AGENTS.md"):
+            candidate = repo_root / fname
+            assert not candidate.exists(), (
+                f"{fname} found at repo root ({candidate}). "
+                f"Adding {fname} to the trailhead repo root wires the D17 "
+                "group-workspace-config collapse, which is explicitly deferred out of "
+                "WS-8 scope (D-3). Remove it here and track it as the D17 follow-up."
+            )
