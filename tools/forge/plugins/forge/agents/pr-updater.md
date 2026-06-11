@@ -81,9 +81,13 @@ Write PR associations to the forge-owned `prs.json` sidecar that lives alongside
 
 ```bash
 python3 <SCRIPTS_DIR>/release_prs_sidecar.py write \
-  --manifest-path <manifest_path> \
-  <repo1>:<pr_number1>:<pr_url1>:<branch1> [<repo2>:... ...]
+  --sidecar <manifest_dir>/prs.json \
+  --pr <repo1>:<pr_number1>:<pr_url1>:<branch1> \
+  [--pr <repo2>:<pr_number2>:<pr_url2>:<branch2> ...]
 ```
+
+`<manifest_dir>` is the directory containing `manifest_path` (`Path(manifest_path).parent`).
+Each `--pr` flag is repeatable: one per PR, in `<repo>:<pr_number>:<url>:<branch>` form.
 
 The sidecar shape: `{schema_version:1, prs:[{repo, pr_number, url, branch}], external_tracker:null}`.
 The `external_tracker` field is reserved and defaults to null — no connector is built.

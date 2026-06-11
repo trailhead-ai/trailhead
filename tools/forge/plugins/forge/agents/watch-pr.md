@@ -33,7 +33,9 @@ notification reaches the top-level session the user sees.
 - `group` — the camp group name
 - `slug` — the worktree slug within the group
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
-- `pr_pairs` — comma-separated `<repo_path>:<pr_number>` list (optional — detected if absent)
+- `group_toml_path` — absolute path to the group TOML file (used for `[release]` config including
+  `review_bot_login`, `soak_health_command`, `external_tracker`, and `merge_order`)
+- `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
 `{schema_version:1, group, slug, branch, members:[{name, repo_root, worktree_path}]}`.
@@ -47,6 +49,7 @@ python3 <SCRIPTS_DIR>/detect_repos.py --manifest <manifest_path>
 ```
 
 Then for each repo: `gh pr list --head <branch> --json number --jq '.[0].number'`.
+Build pairs as `<repo_path>:<pr_number>:<member_name>` using `members[].name` from the manifest.
 
 ## Config-summary on launch (A-2)
 
@@ -74,11 +77,20 @@ Set `last_checked_at` = now (ISO-8601). Call `wait_for_actionable.py` — it blo
 (polling every 30s) until something is actionable:
 
 ```bash
+# When review_bot_login is configured (from group_toml_path [release] block):
 python3 <SCRIPTS_DIR>/wait_for_actionable.py \
-  --scripts-dir <SCRIPTS_DIR> \
+  --since <last_checked_at> \
+  --review-bot-login <review_bot_login> \
+  <repo1_path>:<pr1_number> [<repo2_path>:<pr2_number> ...]
+
+# When review_bot_login is absent (default — CI-only mode):
+python3 <SCRIPTS_DIR>/wait_for_actionable.py \
   --since <last_checked_at> \
   <repo1_path>:<pr1_number> [<repo2_path>:<pr2_number> ...]
 ```
+
+Pass `--review-bot-login <login>` only when `review_bot_login` is configured in the group TOML
+`[release]` block; omit it entirely when absent (preserves CI-only default, D-3 inert-by-default).
 
 Handle each actionable entry's `action` field:
 
@@ -107,12 +119,17 @@ When **all** PRs report `done`, merge them in dependency order:
 ```bash
 python3 <SCRIPTS_DIR>/merge_prs.py \
   --manifest <manifest_path> \
-  <repo1_path>:<pr1_number> [<repo2_path>:<pr2_number> ...]
+  --toml <group_toml_path> \
+  <repo1_path>:<pr1_number>:<member1_name> [<repo2_path>:<pr2_number>:<member2_name> ...]
 ```
 
-`merge_prs.py` reads merge order from the `[release].merge_order` key in the group TOML if
-present; otherwise uses manifest member order. If >1 PR is queued and no `merge_order` is
-declared, `merge_prs.py` refuses with a named error — honor that exit code and surface it as
+Each pair is `<repo_path>:<pr_number>:<member_name>` where `member_name` comes from
+`members[].name` in the camp manifest (not the worktree basename, which may differ).
+
+`merge_prs.py` reads `merge_order` from the `[release]` block of the group TOML (`--toml`);
+without `--toml`, `_load_merge_order` returns None and multi-PR merge is refused (R-6 gate).
+If >1 PR is queued and no `merge_order` is declared, `merge_prs.py` refuses with a named error —
+honor that exit code and surface it as
 `BLOCKED: merge_prs.py requires merge_order configured in [release] of the group TOML`.
 
 `merge_prs.py` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
