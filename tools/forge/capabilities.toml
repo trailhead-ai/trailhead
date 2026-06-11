@@ -36,9 +36,22 @@ skills = []
 agents = ["agents/artist.md"]
 
 [capabilities.release]
-description = "Release rituals — changelog, tagging, and post-merge housekeeping (WS-3, folds in later)."
-skills = []
-agents = []
+description = "Release rituals — PR lifecycle, CI watch, merge ordering, and post-merge soak for a camp group."
+skills = [
+  "skills/create-pr",
+  "skills/update-pr",
+  "skills/watch-pr",
+  "skills/watch-preview",
+  "skills/merge-pr",
+  "skills/github-pr",
+  "skills/post-merge-decide",
+]
+agents = [
+  "agents/pr-updater.md",
+  "agents/watch-pr.md",
+  "agents/watch-preview.md",
+  "agents/diagnose-preview.md",
+]
 
 [capabilities.helpers]
 description = "Cheap specialist subagents for docs, logs, PRs, research, troubleshooting, tests, and security review."
