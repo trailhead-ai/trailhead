@@ -896,22 +896,11 @@ class TestCheckInverseFixtures:
 class TestRealReadmeInverseScan:
     """Real-README inverse scan over the four indexed READMEs.
 
-    These tests are xfail until Slice 3 registers all anchors from the tool READMEs.
-    The mechanism is verified by TestCheckInverseFixtures above; the real-README
-    green is the Slice 3/4 milestone.
-
-    Marked strict=False so a surprise early-green is reported as XPASS (a signal
-    that registration happened earlier than expected), not a test error.
+    xfail removed once Slice 3 registers all anchors from the tool READMEs and
+    the lore README recall oversell is fixed. Both forward + inverse scans are
+    expected green after Slice 3.
     """
 
-    @pytest.mark.xfail(
-        reason=(
-            "Slice 3 milestone: real READMEs contain commands/links not yet "
-            "registered in landing_claims.toml (e.g. lore init, ../lore link). "
-            "Will go green once Slice 3 registers all tool-README anchors."
-        ),
-        strict=False,
-    )
     def test_all_real_readmes_pass_inverse_check(self):
         """Every fenced command + relative link in the four READMEs is registered."""
         assert _CLAIMS_FILE.exists(), f"landing_claims.toml not found at {_CLAIMS_FILE}"
@@ -931,4 +920,94 @@ class TestRealReadmeInverseScan:
         assert not failures, (
             f"{len(failures)} README(s) failed the inverse check:\n"
             + "\n".join(f"  - {f}" for f in failures)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Slice 3 — honesty guards (R-3, S-3)
+# ---------------------------------------------------------------------------
+
+
+_LORE_README = _REPO_ROOT / "tools" / "lore" / "README.md"
+_TOOL_READMES: list[Path] = [
+    _REPO_ROOT / "tools" / "lore" / "README.md",
+    _REPO_ROOT / "tools" / "forge" / "README.md",
+    _REPO_ROOT / "tools" / "camp" / "README.md",
+]
+
+
+class TestLoreRecallHonestyGuards:
+    """D22 recall-fix honesty guards — positive (R-3) + negative.
+
+    The lore README "How recall works" section must:
+      - Contain `recall --areas` (the real mechanism — R-3 positive).
+      - Not assert branch-keyword recall as a live mechanism (removed 2026-06-05).
+      - Not present Tier-2 semantic/embedding recall as a built feature.
+    """
+
+    def test_lore_readme_contains_recall_areas_positive(self):
+        """R-3 positive: the lore README must contain 'recall --areas' (the real mechanism)."""
+        assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
+        text = _LORE_README.read_text(encoding="utf-8")
+        assert "recall --areas" in text, (
+            "lore README must contain 'recall --areas' — the area-mediated recall mechanism "
+            "(R-3 positive: ensures the real mechanism is documented, not just that the old "
+            "oversell is absent)"
+        )
+
+    def test_lore_readme_no_branch_keyword_recall_as_live_feature(self):
+        """Negative: lore README must not assert branch-keyword recall as a live mechanism.
+
+        The branch-keyword recall was removed 2026-06-05 (every camp branch is
+        worktree-<slug> so the keyword matched universally). The stale paragraph
+        "When the current git branch contains any of those keywords" must be gone.
+
+        Note: a historical mention ("was removed") is distinct from the stale *claim* phrasing
+        and would not match this targeted grep — the test targets the live-claim form.
+        """
+        assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
+        text = _LORE_README.read_text(encoding="utf-8")
+        assert "git branch contains" not in text, (
+            "lore README must not assert branch-keyword recall as a live mechanism — "
+            "the 'When the current git branch contains any of those keywords' paragraph "
+            "describes a removed feature (removed 2026-06-05)"
+        )
+
+    def test_lore_readme_no_semantic_recall_as_built_feature(self):
+        """Negative: lore README must not present Tier-2 semantic/embedding recall as built.
+
+        Tier-2 local embeddings are opt-in and NOT built (D23). The README must not
+        claim an unqualified 'semantic recall' capability as if it exists today.
+        Strategy: assert 'semantic recall' does not appear at all unless paired with
+        a qualifier ('planned', 'not yet', 'coming'). We check each line individually
+        to avoid variable-width lookbehind.
+        """
+        assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
+        text = _LORE_README.read_text(encoding="utf-8")
+        qualifying_terms = ("planned", "not yet", "coming soon", "opt-in")
+        unqualified_lines = []
+        for line in text.splitlines():
+            lower = line.lower()
+            if "semantic recall" in lower:
+                if not any(q in lower for q in qualifying_terms):
+                    unqualified_lines.append(line.strip())
+        assert not unqualified_lines, (
+            "lore README must not present Tier-2 semantic/embedding recall as a built feature. "
+            "If mentioned at all, qualify explicitly as 'planned / not yet built'. "
+            f"Unqualified occurrences: {unqualified_lines}"
+        )
+
+
+class TestNoToolReadmePypiLine:
+    """S-3: none of the three tool READMEs may contain a 'pip install trailhead' line."""
+
+    @pytest.mark.parametrize("readme", _TOOL_READMES, ids=lambda p: p.parent.name)
+    def test_no_pip_install_trailhead_line(self, readme):
+        """Tool README must not contain 'pip install trailhead' (name-squat exposure, S-3)."""
+        assert readme.exists(), f"README not found at {readme}"
+        text = readme.read_text(encoding="utf-8")
+        assert "pip install trailhead" not in text, (
+            f"{readme.parent.name}/README.md must not contain 'pip install trailhead' — "
+            "the public PyPI install does not exist yet (lands with WS-10 org/repo-homing); "
+            "showing it implies a live install that would 404 (S-3)"
         )

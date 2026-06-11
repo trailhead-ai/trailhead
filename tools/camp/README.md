@@ -7,9 +7,8 @@ managing git worktrees across a configured group of repositories. It handles the
 **Standalone use:** camp stands alone — adopt it without lore or forge if you only
 want the worktree orchestration.
 
-**Status:** Slice 0 (scaffold + quarried worktree spine). Group config wiring is
-Slice 1; full multi-member lifecycle is Slice 2. See the trailhead root README for
-install instructions.
+**Status:** Slice 0 (scaffold + worktree spine). Group config wiring is Slice 1;
+full multi-member lifecycle is Slice 2. See the root README for install instructions.
 
 ## PATH setup (until `trailhead install` automates it)
 
@@ -41,5 +40,5 @@ camp --version       # show version + resolved binary path
 
 ## Dev-env commands
 
-`camp fire` (dev-env management) is deferred — see
-`deferred/2026-06/camp-dev-env-engine-half` for the revive trigger.
+`camp fire` (dev-env management) is deferred — the `dev-env` capability will cover
+provision and teardown of local dev-env instances once the engine ships.

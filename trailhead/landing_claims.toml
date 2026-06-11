@@ -12,7 +12,7 @@
 #   ref     — the anchor to resolve (subcommand name, path, capability name, etc.)
 #   source  — which README/surface makes this claim: root | lore | forge | camp
 #
-# Slice 3 will extend this with per-tool README anchors.
+# Slice 3 extended this with per-tool README anchors.
 # Slice 4 will extend with root README anchors.
 
 # ---------------------------------------------------------------------------
@@ -246,3 +246,232 @@ kind = "doc-link"
 tool = "trailhead"
 ref = "trailhead/docs/paths.md"
 source = "root"
+
+# ---------------------------------------------------------------------------
+# Slice 3 additions — lore tool README anchors
+# ---------------------------------------------------------------------------
+
+# lore capture skills (named in the skills table, all in capabilities.capture)
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/defer"
+source = "lore"
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/dead-end"
+source = "lore"
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/decision"
+source = "lore"
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/radar"
+source = "lore"
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/checkpoint"
+source = "lore"
+
+# Note: lore base skills (sync, ping) are in [tool] base = [...] not a capability group;
+# build_real_anchor_set() enumerates only capability-grouped skills, so these can't be
+# claimed as kind="skill" — they are real on-disk but unverifiable by the gate oracle.
+# Prose mentions are fine; they are not shown in fenced sh/bash blocks.
+
+# lore capability: capture (named in the what-it-captures table)
+# (already present above — no duplicate needed)
+
+# ---------------------------------------------------------------------------
+# Slice 3 additions — forge tool README anchors
+# ---------------------------------------------------------------------------
+
+# forge capabilities named in the README capabilities table
+[[claim]]
+kind = "capability"
+tool = "forge"
+ref = "review"
+source = "forge"
+
+[[claim]]
+kind = "capability"
+tool = "forge"
+ref = "helpers"
+source = "forge"
+
+# Note: forge base skills (handoff, pickup, followup) are in [tool] base = [...] not a
+# capability group; build_real_anchor_set() enumerates only capability-grouped skills,
+# so these can't be claimed as kind="skill" — they are real on-disk but unverifiable by
+# the gate oracle. Prose mentions are fine; they are not shown in fenced sh/bash blocks.
+
+# forge capability skills named in the README
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/requesting-code-review"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/create-pr"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/update-pr"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/watch-pr"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/watch-preview"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/merge-pr"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/github-pr"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/post-merge-decide"
+source = "forge"
+
+# forge agents named in the README
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/planner.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/architect.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/code-reviewer.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-builder.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-reliability.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-security.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-advocate.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/pr-updater.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/watch-pr.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/watch-preview.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/diagnose-preview.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/researcher.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/troubleshooter.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/doc-finder.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/test-runner.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/log-sifter.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/pr-summarizer.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/security-auditor.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/forge-ping.md"
+source = "forge"

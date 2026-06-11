@@ -1,64 +1,81 @@
 # forge
 
-A portable **software-development** plugin for Claude Code: general-purpose dev
-agents and dev-ritual skills that work in any project, with no app-specific
-assumptions baked in.
+A portable **software-development** plugin for Claude Code: dev agents and
+dev-ritual skills that work in any project, with no app-specific assumptions
+baked in.
 
 forge is the dev-tooling sibling of [lore](../lore) (portable knowledge
 management). Where lore owns *what you know*, forge owns *how you build*:
 the reusable agents and rituals a developer reaches for regardless of which
 codebase they're in.
 
-## Status
+## Capabilities
 
-**Agent fleet populated (v0.2.0).** The 15 general dev agents are present and
-genericized — they carry zero app-specific or vault-specific strings and
-register as `forge:<name>`:
+forge ships seven capability groups, each with agents and skills:
 
-- `architect`, `researcher`, `troubleshooter`
-- `code-reviewer`, `security-auditor`
-- `doc-finder`, `test-runner`, `log-sifter`, `pr-summarizer`
-- `scout`, `trailblazer`
-- `circle-builder`, `circle-reliability`, `circle-security`, `circle-advocate`
+| Capability | What it covers |
+|---|---|
+| `planning` | Turn fuzzy ideas into specs and implementation plans |
+| `execute` | TDD subagent-driven implementation, slice by slice |
+| `review` | Structured code review after implementation |
+| `circle` | Four-lens review panel (builder / reliability / security / advocate) |
+| `design` | Design-doc authoring and structured spec artifacts |
+| `release` | PR lifecycle, CI watch, merge ordering, and post-merge soak |
+| `helpers` | Cheap specialist subagents for docs, logs, PRs, research, tests, security |
 
-The four **circle review-lens agents** (`circle-*`) are dispatched as a
-parallel quartet by a planning skill's circle review step — not
-standalone. Each holds a single perspective (Builder=architecture,
-Reliability=tests/failure modes, Security=threat model, Advocate=UX) and
-returns a focused single-lens response rather than a synthesis. If you need
-general architecture advice outside a planning context, use `architect` instead.
+## Agents
 
-**First skills shipped.** `/forge:handoff` and `/forge:pickup` are the first
-dev-ritual skills — a symmetric shelve/resume pair (see *What lives here*
-below). They stood up forge's skill test harness
-(`tests/test_skills_registrable.py` + `tests/test_skills_generic.py`).
+**Planning:** `forge:planner`, `forge:architect`
 
-A proof-of-life agent (`forge-ping`) also ships to confirm plugin agent
-registration works. Two agents are intentionally **not** here: `planner` moves
-in a later phase alongside the `/planning` skill, and `design-mockup-writer`
-is bound to a specific app's visual aesthetic and lives in that app's own repo.
-`code-simplifier` is a separate plugin and was never part of this fleet.
+**Execute:** `forge:scout` (assumption-prover), `forge:trailblazer` (TDD
+implementer)
+
+**Review:** `forge:code-reviewer`
+
+**Circle** — four-lens review panel dispatched as a parallel quartet by a
+planning skill's circle review step:
+- `forge:circle-builder` (architecture)
+- `forge:circle-reliability` (tests/failure modes)
+- `forge:circle-security` (threat model)
+- `forge:circle-advocate` (UX/user perspective)
+
+**Design:** `forge:artist`
+
+**Release:** `forge:pr-updater`, `forge:watch-pr`, `forge:watch-preview`,
+`forge:diagnose-preview`
+
+**Helpers:** `forge:researcher`, `forge:troubleshooter`, `forge:doc-finder`,
+`forge:test-runner`, `forge:log-sifter`, `forge:pr-summarizer`,
+`forge:security-auditor`, `forge:forge-ping`
+
 Nothing app-specific belongs in forge; per-project automation stays in that
 project's own repo.
 
-## What lives here
+## Skills
 
-- **Agents** (`plugins/forge/agents/`) — general dev subagents, dispatchable as
-  `forge:<name>` once installed.
-- **Skills** (`plugins/forge/skills/`) — dev-ritual skills, invocable as
-  `/forge:<name>`:
-  - `handoff` — record read-only git state + shelve a session note with pickup
-    hints so a future session can resume.
-  - `pickup` — resume a shelved work chain (surface recorded git state + hints).
+Base skills (always available): `/forge:handoff`, `/forge:pickup`,
+`/forge:followup`
 
-  **lore-optional coupling:** the handoff/pickup pair drives the [lore](../lore)
-  CLI (`lore handoff` / the session-note finder) when it's available, and
-  degrades to a local forge handoff file at `~/.forge/handoffs/<slug>.md` — out
-  of any repo — when lore is absent, `$LORE_VAULT` is unset, or `lore stats`
-  fails. This is the same one-directional optional dependency forge already has
-  on lore (forge → lore is allowed; lore never depends on forge). The git
-  capture is strictly **read-only** — these rituals record state, they do not
-  commit, push, or rebase your code.
+**Planning:** `/forge:planning`
+
+**Execute:** `/forge:subagent-driven-development`
+
+**Review:** `/forge:requesting-code-review`
+
+**Release:** `/forge:create-pr`, `/forge:update-pr`, `/forge:watch-pr`,
+`/forge:watch-preview`, `/forge:merge-pr`, `/forge:github-pr`,
+`/forge:post-merge-decide`
+
+`/forge:handoff` and `/forge:pickup` are a symmetric shelve/resume pair — record
+read-only git state and shelve a session note with pickup hints so a future
+session can resume. The git capture is strictly **read-only** — these rituals
+record state, they do not commit, push, or rebase your code.
+
+**lore-optional coupling:** the handoff/pickup pair drives the [lore](../lore)
+CLI when it's available, and degrades to a local forge handoff file at
+`~/.forge/handoffs/<slug>.md` when lore is absent, `$LORE_VAULT` is unset, or
+`lore stats` fails. This is the same one-directional optional dependency forge
+already has on lore (forge → lore is allowed; lore never depends on forge).
 
 ## Layout
 
@@ -74,7 +91,12 @@ tests/                            # packaging + registrability invariants
 Claude Code rejects `source: "."` — the plugin must live in a `plugins/forge/`
 subdir referenced by `source: "./plugins/forge"` in the root marketplace.
 
-## Install (local dev)
+## Install
+
+forge is installed as part of Trailhead — see the [root README](../../README.md)
+for `trailhead install` instructions.
+
+For local dev work on the plugin itself:
 
 ```
 /plugin marketplace add /path/to/forge
