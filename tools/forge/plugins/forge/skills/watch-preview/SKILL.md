@@ -23,12 +23,12 @@ After `watch-pr` finishes its merge loop it emits a JSON marker as the LAST line
 its completion summary:
 
 ```json
-{"post_merge_handoff": {"merge_pairs": [{"repo": "<name>", "sha": "<sha>", "pr": <n>}, ...], "manifest_path": "<abs-path>", "sidecar_path": "<abs-path>"}}
+{"post_merge_handoff": {"merge_pairs": [{"repo": "<name>", "sha": "<sha>", "pr": <n>}, ...], "manifest_path": "<abs-path>", "sidecar_path": "<abs-path>", "group_toml_path": "<abs-path>"}}
 ```
 
 Parse this marker from the last non-empty line of watch-pr's completion summary.
 If it parses and contains `post_merge_handoff`, dispatch `watch-preview` in the
-background with the `manifest_path` and `sidecar_path` values.
+background with the `manifest_path`, `sidecar_path`, and `group_toml_path` values.
 
 ## Dispatch
 

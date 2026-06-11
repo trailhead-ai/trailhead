@@ -10,6 +10,8 @@ Test contract:
     command fails rather than spawning a subshell. No subshell expansion.
   - R-3 timeout: a never-returning command is killed after the timeout and
     escalates (exits nonzero). Does NOT hang.
+  - Min-1: malformed soak_health_command (unbalanced quote) → clean exit 2 with
+    an error message on stderr instead of a ValueError traceback.
   - Hermeticity: tmp_path-based stub commands; no network; no real ~/.claude/;
     stdlib only; script imported via sys.path.insert(SCRIPTS_DIR).
 
@@ -18,10 +20,8 @@ stdlib tomllib, never imports trailhead.paths or camp internals).
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
-import textwrap
 import time
 from pathlib import Path
 
@@ -245,4 +245,57 @@ class TestSoakTimeout:
         assert r.returncode == 0, (
             f"R-3: a fast-exiting health command must not be killed by the timeout;\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Min-1: malformed soak_health_command → clean exit-2, not ValueError traceback
+# ---------------------------------------------------------------------------
+
+def _write_toml_raw_command(tmp_path: Path, raw_command: str) -> Path:
+    """Write a TOML with soak_health_command as a TOML single-quoted literal string.
+
+    Single-quoted TOML strings allow the value to contain double quotes (useful for
+    writing a command like `echo "unterminated` without breaking TOML parsing).
+    This lets us test shlex.split ValueError without hitting a TOMLDecodeError.
+    """
+    toml_path = tmp_path / "group.toml"
+    toml_path.write_text(
+        f"[group]\nname = \"test-group\"\n\n[release]\n"
+        f"soak_health_command = '{raw_command}'\n",
+        encoding="utf-8",
+    )
+    return toml_path
+
+
+class TestSoakMalformedCommand:
+    def test_unbalanced_quote_exits_two(self, tmp_path: Path) -> None:
+        """Min-1: unbalanced quote in soak_health_command → exit 2, not a traceback.
+
+        Uses a TOML single-quoted literal string so the TOML is valid; the value
+        contains an unbalanced double-quote that shlex.split raises ValueError on.
+        """
+        toml = _write_toml_raw_command(tmp_path, 'echo "unterminated')
+        r = _run_soak(toml)
+        assert r.returncode == 2, (
+            f"Min-1: malformed soak_health_command must exit 2 (named error), not "
+            f"{r.returncode} (got stdout: {r.stdout!r}, stderr: {r.stderr!r})"
+        )
+
+    def test_unbalanced_quote_prints_error_to_stderr(self, tmp_path: Path) -> None:
+        """Min-1: malformed soak_health_command must print a human-readable error to stderr."""
+        toml = _write_toml_raw_command(tmp_path, 'echo "unterminated')
+        r = _run_soak(toml)
+        assert "malformed" in r.stderr.lower() or "error" in r.stderr.lower(), (
+            f"Min-1: soak_health.py must print a descriptive error to stderr for a "
+            f"malformed soak_health_command; got stderr: {r.stderr!r}"
+        )
+
+    def test_unbalanced_quote_no_traceback(self, tmp_path: Path) -> None:
+        """Min-1: a malformed command must not produce a Python traceback."""
+        toml = _write_toml_raw_command(tmp_path, 'echo "unterminated')
+        r = _run_soak(toml)
+        assert "Traceback" not in r.stderr, (
+            f"Min-1: soak_health.py must not emit a ValueError traceback for a "
+            f"malformed soak_health_command; got stderr: {r.stderr!r}"
         )

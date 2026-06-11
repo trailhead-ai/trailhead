@@ -7,11 +7,16 @@ Reads `soak_health_command` from the `[release]` block of the group TOML
 Execution contract (D-3 / S-1 / R-3 / R-4):
   - Default (no command configured): prints 'soak: n/a — no health command
     configured' and exits 0. No subprocess is spawned (D-3 inert-by-default).
-  - Command configured: runs it via shlex.split → subprocess.run(args,
-    shell=False) — NEVER shell=True/os.system/f-string concat (S-1 no-shell).
-    Group-TOML docs state the value is an arg-list, not a shell expression.
-  - Timeout (R-3): runs with a configurable timeout (default 120s); a hung
-    command is killed after the timeout and treated as a regression (escalate).
+  - Command configured: runs it via shlex.split → Popen(args, shell=False) —
+    NEVER shell=True/os.system/f-string concat (S-1 no-shell). Group-TOML docs
+    state the value is an arg-list, not a shell expression.
+  - Timeout (R-3): uses Popen + start_new_session=True + os.killpg, NOT
+    subprocess.run(timeout=). subprocess.run only SIGKILLs the direct child —
+    a grandchild (e.g. `sleep` behind a shell wrapper) survives, holds the
+    caller's inherited pipe open, and causes a hang. killpg reaps the whole
+    process group. Not using runner_protocol.run for the same reason:
+    runner_protocol hardcodes capture_output + a fixed 60s — incompatible with
+    interactive soak commands and with the user-configurable timeout here.
   - One-shot escalate (R-4): one non-zero/timeout result → immediate escalate,
     no retry, no flake-tolerance. Exit nonzero on regression.
 
@@ -21,12 +26,14 @@ Usage:
 Exit codes:
     0  healthy or inert (no command configured)
     1  regression — health command exited nonzero or timed out
-    2  error — TOML unreadable / unexpected exception
+    2  error — TOML unreadable / malformed soak_health_command / unexpected exception
 """
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
+import signal
 import subprocess
 import sys
 import tomllib
@@ -84,15 +91,24 @@ def run_soak(toml_path: Path, timeout_s: int) -> int:
         return 0
 
     # S-1: always use shlex.split → arg-list; NEVER shell=True
-    args = shlex.split(cmd)
+    try:
+        args = shlex.split(cmd)
+    except ValueError as e:
+        print(
+            f"soak: error — malformed soak_health_command: {e}",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         proc = subprocess.Popen(
             args,
             shell=False,  # S-1: explicit no-shell
-            # Run in a new session so a kill() terminates the entire process
-            # group (including grandchild processes like 'sleep'), preventing
-            # orphan grandchildren from holding open the caller's pipes.
+            # Start in a new session so killpg terminates the entire process
+            # group including grandchildren (e.g. a `sleep` behind a shell
+            # wrapper). subprocess.run(timeout=) only SIGKILLs the direct
+            # child — grandchildren survive and hold the pipe open, hanging
+            # the caller.
             start_new_session=True,
         )
         try:
@@ -100,8 +116,6 @@ def run_soak(toml_path: Path, timeout_s: int) -> int:
         except subprocess.TimeoutExpired:
             # R-3: hung command is killed after timeout → escalate.
             # Kill the entire process group to reap grandchildren.
-            import os
-            import signal
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except ProcessLookupError:

@@ -73,7 +73,17 @@ _RELEASE_AGENTS = [
 # ---------------------------------------------------------------------------
 
 class TestReleaseCapabilityResolves:
-    """B-4: every [capabilities.release] entry must resolve to an existing file/dir."""
+    """B-4: every [capabilities.release] entry must resolve to an existing file/dir.
+
+    M-1 note: trailhead.capabilities.load_manifest (the real validating loader from
+    ce0de78) is NOT importable from the forge test harness — the forge pyproject.toml
+    does not declare trailhead as a dependency and the trailhead package is not on
+    sys.path when forge tests run (confirmed: `python3 -c "from trailhead.capabilities
+    import load_manifest"` fails with ModuleNotFoundError from the forge test cwd).
+    We use stdlib tomllib + path-existence checks instead. The real loader also
+    validates confinement (D-F) and schema correctness — those are covered by
+    trailhead/tests/test_capabilities.py over the live capabilities.toml.
+    """
 
     def _load_capabilities(self) -> dict:
         """Load capabilities.toml and return the parsed dict (stdlib tomllib)."""

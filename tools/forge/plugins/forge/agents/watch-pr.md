@@ -180,7 +180,7 @@ set warrants a soak.
 Format:
 
 ```json
-{"post_merge_handoff": {"merge_pairs": [{"repo": "<repo-name>", "sha": "<full-sha>", "pr": <pr-number>}, ...], "manifest_path": "<abs-path-to-camp-manifest.json>", "sidecar_path": "<abs-path-to-prs.json>"}}
+{"post_merge_handoff": {"merge_pairs": [{"repo": "<repo-name>", "sha": "<full-sha>", "pr": <pr-number>}, ...], "manifest_path": "<abs-path-to-camp-manifest.json>", "sidecar_path": "<abs-path-to-prs.json>", "group_toml_path": "<abs-path-to-group.toml>"}}
 ```
 
 Field notes:
@@ -188,6 +188,9 @@ Field notes:
   Use the repo name only (e.g. `"api"`, `"web"`), not the full path.
 - `manifest_path` — absolute path to the camp manifest JSON for this worktree.
 - `sidecar_path` — absolute path to the `prs.json` sidecar alongside the manifest.
+- `group_toml_path` — absolute path to the group TOML file. Required by `watch-preview`
+  to locate `[release].soak_health_command`. watch-pr already reads this TOML for its
+  A-2 config summary, so the path is always available at emit time.
 
 The top-level session locates this marker by reading the last non-empty line of the completion
 summary and attempting `json.loads`. If it parses and contains `post_merge_handoff`, the session
