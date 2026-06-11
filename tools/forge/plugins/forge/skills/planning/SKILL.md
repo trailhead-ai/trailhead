@@ -68,7 +68,7 @@ If the design involves libraries, frameworks, or language features you haven't u
 
 This applies to new dependencies AND to unfamiliar parts of existing dependencies.
 
-Findings from this step (library version, API quirks, supported behaviors) feed directly into the plan template's **Given Axioms** block as cited ground truth. If something needs investigation to verify, leave it as a Known Unknown for the assumption-prover instead.
+Findings from this step (library version, API quirks, supported behaviors) feed directly into the plan template's **Given Axioms** block as cited ground truth. If something needs investigation to verify, leave it as a Known Unknown for the scout instead.
 
 ### 6. Identify Known Unknowns
 
@@ -138,9 +138,9 @@ The plan template (`lore new plan`) renders these canonical sections — fill ea
 - **Known Unknowns** — checkbox list; each notes which slice it blocks.
 - **Slices** — each slice carries Delivers / Test contract / Files, plus "Unknown to resolve first" and "Depends on" where applicable.
 
-Leave the `## Council Review` section for Step 9.5 to append — do not pre-fill it.
+Leave the `## Circle Review` section for Step 9.5 to append — do not pre-fill it.
 
-### 9.5. Council Review (mandatory)
+### 9.5. Circle Review (mandatory)
 
 After the plan is written and before presenting it for approval, dispatch a circle review. Four circle member subagents (`circle-builder` / `circle-reliability` / `circle-security` / `circle-advocate`) review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
 
@@ -235,7 +235,7 @@ Otherwise internal-admin findings are Important at most. Admin users tolerate fr
 
 After all four members return:
 1. **De-duplicate by issue, not by member.** If two members raised the same finding (e.g. Security and Reliability both flag a missing audit log), present it once, grouped by the issue, noting which lenses raised it.
-2. **Auto-downgrade speculative Criticals.** If a Critical finding is vague ("this could be a problem"), requires guessing about scale / future state / user behavior, or doesn't name a concrete failure scenario, reclassify it as Important during the consolidated presentation. State explicitly which findings were downgraded and why, both (a) in the user-facing message and (b) in the persisted `## Council Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so future calibration audits can detect demote-heavy synthesizers.
+2. **Auto-downgrade speculative Criticals.** If a Critical finding is vague ("this could be a problem"), requires guessing about scale / future state / user behavior, or doesn't name a concrete failure scenario, reclassify it as Important during the consolidated presentation. State explicitly which findings were downgraded and why, both (a) in the user-facing message and (b) in the persisted `## Circle Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so future calibration audits can detect demote-heavy synthesizers.
 3. **Present the consolidated list** to the user, grouped by severity (Critical → Important → Minor). Briefly note total member count behind each finding when more than one member raised it.
 
 **Disposition (required for every Critical):**
@@ -248,10 +248,10 @@ For each Critical finding, the user assigns one of:
 
 Important and Minor findings do NOT require dispositions — they are logged for the audit trail only.
 
-**Persistence:** append a `## Council Review` section to the plan file capturing all findings and the disposition for each Critical. Structure:
+**Persistence:** append a `## Circle Review` section to the plan file capturing all findings and the disposition for each Critical. Structure:
 
 ```markdown
-## Council Review
+## Circle Review
 
 *Reviewed at:* YYYY-MM-DDTHH:MM:SSZ
 *Members dispatched:* circle-builder, circle-reliability, circle-security, circle-advocate
@@ -269,7 +269,7 @@ Important and Minor findings do NOT require dispositions — they are logged for
 Concrete example (populated):
 
 ```markdown
-## Council Review
+## Circle Review
 
 *Reviewed at:* 2026-05-22T19:42:11Z
 *Members dispatched:* circle-builder, circle-reliability, circle-security, circle-advocate
@@ -296,7 +296,7 @@ If no Critical findings surfaced, the section still gets appended — record an 
 
 Share the plan path and a short summary, then wait for explicit user approval before writing any implementation code. Do **not** call `ExitPlanMode` — this skill runs outside plan mode so the plan can be written directly into the vault.
 
-**Before printing the handoff prompt, confirm every Critical finding from Step 9.5 has a disposition recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print the handoff prompt — return to disposition gathering with the user.
+**Before printing the handoff prompt, confirm every Critical finding from Step 9.5 has a disposition recorded in the plan's `## Circle Review` section.** If any Critical is undisposed, do not print the handoff prompt — return to disposition gathering with the user.
 
 End the presentation with an explicit handoff prompt so the trigger is unambiguous, e.g.:
 

@@ -1,7 +1,7 @@
 ---
 name: scout
 description: |
-  Resolves an unknown before the SDD loop builds on top of it. Writes a TDD test that captures the assumption, runs it, reports VALIDATED / INVALIDATED with evidence and surprises. The test is ephemeral — the implementer cleans it up after building proper behavioral tests.
+  Resolves an unknown before the SDD loop builds on top of it. Writes a TDD test that captures the assumption, runs it, reports VALIDATED / INVALIDATED with evidence and surprises. The test is ephemeral — the trailblazer cleans it up after building proper behavioral tests.
 
   Good fits:
   - Dispatched by the `subagent-driven-development` skill when a slice depends on an unresolved unknown
@@ -38,7 +38,7 @@ If the unknown involves a library, framework, or language feature, fetch officia
 The test should pass if the assumption is true and fail if false. One behavior, one reason to fail.
 
 - Use the repo's existing test framework and helpers.
-- Place the test somewhere it can run alongside the existing suite, even though it's ephemeral. The implementer will remove it later — note exactly which file(s) and line ranges to clean up in your report.
+- Place the test somewhere it can run alongside the existing suite, even though it's ephemeral. The trailblazer will remove it later — note exactly which file(s) and line ranges to clean up in your report.
 - Don't over-invest in polish. This test gets deleted.
 
 ## Step 4: Run the test
@@ -73,7 +73,7 @@ Status: VALIDATED | INVALIDATED | NEEDS_CONTEXT | BLOCKED
 <the test you wrote and its result — paste the test body and the runner output>
 
 ## Test files to clean up
-<exact paths and line ranges the implementer should remove>
+<exact paths and line ranges the trailblazer should remove>
 
 ## Surprises
 <anything unexpected: new unknowns, behavior that differs from docs, edge cases the plan didn't anticipate>
@@ -109,4 +109,4 @@ Hard rules:
 - Self-filter — only emit candidates that would survive a rigorous review. Mid-investigation noise stays out.
 - The block must be the suffix of your message — a downstream hook locates it by anchor.
 
-For an assumption prover specifically, the highest-value emissions are **lessons** (the invariant you actually proved or disproved — "the job's `unique` does dedupe across queues" is a durable fact future planners need) and **gotchas** (surprising library or framework behavior you hit while writing the probe — exactly what belongs in a subsystem profile). Skip dead-ends (you prove or disprove one assumption, you don't try multiple approaches), decisions, and deferred items (those belong to the controller, not you).
+For a scout specifically, the highest-value emissions are **lessons** (the invariant you actually proved or disproved — "the job's `unique` does dedupe across queues" is a durable fact future planners need) and **gotchas** (surprising library or framework behavior you hit while writing the probe — exactly what belongs in a subsystem profile). Skip dead-ends (you prove or disprove one assumption, you don't try multiple approaches), decisions, and deferred items (those belong to the controller, not you).

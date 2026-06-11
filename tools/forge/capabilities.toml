@@ -1,6 +1,5 @@
 # Agent filenames reflect CURRENT on-disk names (circle-*, scout, trailblazer).
 # Renames completed in Step 5 / WS-12: circle-* agents, scout, trailblazer.
-# design-author→artist is forward-declared (WS-2, no file yet).
 
 [tool]
 name = "forge"

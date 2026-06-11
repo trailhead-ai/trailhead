@@ -76,7 +76,7 @@ If a clarifying answer reveals an item is much bigger than a follow-up (architec
 For each item, decide:
 
 - **Working directory** — which directory / worktree does this item touch? If your setup spans multiple repos, group items by directory.
-- **TDD applies?** — production code → yes; pure docs/config/comments → no. Mark explicitly so the implementer doesn't churn.
+- **TDD applies?** — production code → yes; pure docs/config/comments → no. Mark explicitly so the trailblazer doesn't churn.
 - **Dependency order** — if item B depends on item A, note it.
 
 If items span multiple working directories, group them by directory. You will dispatch once per directory (trailblazer takes a single working directory per dispatch).
@@ -126,7 +126,7 @@ N. <Item N — ...>
 
 ### Test contract
 
-For each item that touches production code, the implementer must add or update tests covering:
+For each item that touches production code, the trailblazer must add or update tests covering:
 
 - <test behavior for item 1, or "no test — docs/config only">
 - <test behavior for item 2, ...>
@@ -134,7 +134,7 @@ For each item that touches production code, the implementer must add or update t
 
 ### Expected files
 
-- <file:line ranges where known; "TBD by implementer" where not>
+- <file:line ranges where known; "TBD by trailblazer" where not>
 
 ### Notes
 
@@ -143,7 +143,7 @@ For each item that touches production code, the implementer must add or update t
 - <Items explicitly marked "no TDD" with one-line reason>
 ```
 
-Keep the brief tight. The implementer reads it and works from it — verbosity here costs nothing in dispatch but slows the implementer's first read.
+Keep the brief tight. The trailblazer reads it and works from it — verbosity here costs nothing in dispatch but slows the trailblazer's first read.
 
 ### 5. Dispatch trailblazer
 
@@ -152,7 +152,7 @@ One dispatch per brief (per working directory). Use the `Agent` tool with `subag
 - **plan path** — absolute path to the brief you just wrote
 - **slice** — `Slice 1: Follow-ups batch`
 - **proven unknowns** — `None`
-- **assumption-prover tests to clean up** — `None`
+- **scout tests to clean up** — `None`
 - **working directory** — absolute path to the worktree for this brief
 
 Default model is Sonnet (the agent's frontmatter default). Override to Opus only if a follow-up is integration-heavy (3+ files, cross-module). Most follow-ups stay on Sonnet — that's the whole point.
@@ -161,10 +161,10 @@ If you have multiple briefs (multi-repo), dispatch them **serially**, not in par
 
 ### 6. Absorb the report
 
-The implementer returns DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
+The trailblazer returns DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
 
 - **DONE:** Summarize for the user — items completed, files touched, tests added, commits made. Two or three sentences.
-- **DONE_WITH_CONCERNS:** Read the concerns. If the implementer fixed everything but flagged observations, note them. If the implementer left work undone (e.g. one item was unclear), surface it.
+- **DONE_WITH_CONCERNS:** Read the concerns. If the trailblazer fixed everything but flagged observations, note them. If the trailblazer left work undone (e.g. one item was unclear), surface it.
 - **NEEDS_CONTEXT:** Re-dispatch with the missing context, OR pull the unclear item out of the batch and ask the user.
 - **BLOCKED:** Do not retry blindly. Report to the user with the blocker; decide together whether to (a) re-dispatch with more context, (b) re-dispatch on Opus, (c) pull the item out and handle inline, or (d) drop it.
 
@@ -180,7 +180,7 @@ If items span multiple working directories:
 2. Dispatch serially in step 5.
 3. Aggregate the reports in step 6 — one user-facing summary covering all dispatches, organized by directory.
 
-Do NOT try to write a single brief that asks the implementer to operate on multiple working directories — trailblazer enforces worktree-only paths and will refuse.
+Do NOT try to write a single brief that asks the trailblazer to operate on multiple working directories — trailblazer enforces worktree-only paths and will refuse.
 
 ## Red Flags
 

@@ -54,7 +54,7 @@ When the flag is declared, every slice that touches the gated path **must** incl
 
 ### Issue tracker — advance to "in progress"
 
-Before dispatching the first slice (whether assumption-prover or implementer for slice 1), advance the work item's status if an issue tracker is wired up. **Issue tracker (extension point — `issue_tracker`):** if an issue tracker is configured in your environment, advance the corresponding ticket to the in-progress status (e.g. "Code In Progress" or equivalent). **If no issue tracker configured — status transitions skipped**; proceed directly to slice 1.
+Before dispatching the first slice (whether scout or trailblazer for slice 1), advance the work item's status if an issue tracker is wired up. **Issue tracker (extension point — `issue_tracker`):** if an issue tracker is configured in your environment, advance the corresponding ticket to the in-progress status (e.g. "Code In Progress" or equivalent). **If no issue tracker configured — status transitions skipped**; proceed directly to slice 1.
 
 For each slice in the plan:
 
@@ -70,8 +70,8 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 
 ### 2. Absorb findings
 
-- **VALIDATED:** update the plan, check off the unknown. Carry the **test files to clean up** from the prover's report into the implementer dispatch so it removes them after building proper tests.
-- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status).
+- **VALIDATED:** update the plan, check off the unknown. Carry the **test files to clean up** from the prover's report into the trailblazer dispatch so it removes them after building proper tests.
+- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Scout Status](#handling-scout-status).
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they block the current slice or a future one.
 
 ### 3. Dispatch `trailblazer`
@@ -82,13 +82,13 @@ The agent expects:
 - Assumption-prover tests to clean up (or "None")
 - Working directory
 
-The implementer figures out implementation steps — don't over-specify the *how*. Specify the *what*.
+Trailblazer figures out implementation steps — don't over-specify the *how*. Specify the *what*.
 
 Default model is Sonnet. Override per-dispatch when needed:
 - `model: "opus"` for integration-heavy slices (3-5 files, cross-module coordination)
 - Re-dispatch with Opus if a Sonnet attempt returns BLOCKED with unclear cause and `troubleshooter` confirms the issue is reasoning capacity
 
-Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Implementer Status](#handling-implementer-status).
+Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Trailblazer Status](#handling-trailblazer-status).
 
 ### 4. Review (scaled to change size)
 
@@ -98,7 +98,7 @@ Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Impl
 | **Medium** (30-200 lines, 3-5 files) | Dispatch `code-reviewer` for combined spec + quality pass. |
 | **Large** (200+ lines or 5+ files) | Dispatch `code-reviewer` twice: once asking for spec compliance focus, once for code quality. Same agent, different framing. |
 
-When dispatching `code-reviewer`, give it: plan path + slice number, the implementer's status report (so it can verify the claim), and base/head SHAs for the diff.
+When dispatching `code-reviewer`, give it: plan path + slice number, the trailblazer's status report (so it can verify the claim), and base/head SHAs for the diff.
 
 ### 5. Update the plan file
 
@@ -139,13 +139,13 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 
 **Escalation signals:**
 
-- Implementer returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the implementer.
-- Implementer returns `DONE_WITH_CONCERNS` repeatedly on the same slice → re-dispatch with `model: "opus"` or break the slice smaller.
-- Assumption-prover returns `NEEDS_CONTEXT` → it's not the model, it's the prompt. Give it more context and re-dispatch at the same tier.
+- Trailblazer returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the trailblazer.
+- Trailblazer returns `DONE_WITH_CONCERNS` repeatedly on the same slice → re-dispatch with `model: "opus"` or break the slice smaller.
+- Scout returns `NEEDS_CONTEXT` → it's not the model, it's the prompt. Give it more context and re-dispatch at the same tier.
 
 **Why not Opus everywhere:** Opus is the most capable but also the slowest and most expensive. Sonnet is more than enough for mechanical TDD work. Reserve Opus for reasoning-heavy roles (review, troubleshooting, architecture) where fresh eyes matter.
 
-## Handling Assumption-Prover Status
+## Handling Scout Status
 
 **VALIDATED:** Proceed to build the slice.
 
@@ -160,7 +160,7 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 
 **BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user.
 
-## Handling Implementer Status
+## Handling Trailblazer Status
 
 **DONE:** Proceed to review.
 
@@ -173,7 +173,7 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 2. Needs more reasoning → re-dispatch with `model: "opus"`
 3. Slice too large → break into smaller pieces
 4. Plan is wrong → escalate to user
-5. Cause unclear → dispatch `troubleshooter` to diagnose before re-dispatching the implementer. Don't keep re-dispatching the same prompt hoping for a different outcome.
+5. Cause unclear → dispatch `troubleshooter` to diagnose before re-dispatching the trailblazer. Don't keep re-dispatching the same prompt hoping for a different outcome.
 
 ## Red Flags
 
@@ -181,6 +181,6 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 - Build a slice before its unknown is resolved
 - Proceed after an invalidated assumption without user input
 - Skip review for medium+ changes
-- Dispatch multiple *implementer* subagents in parallel on the same slice (they'll conflict on the same files). Parallel dispatch is fine when the agents operate on independent scopes — e.g. one checker per repo.
+- Dispatch multiple *trailblazer* subagents in parallel on the same slice (they'll conflict on the same files). Parallel dispatch is fine when the agents operate on independent scopes — e.g. one checker per repo.
 - Ignore subagent questions or surprises
 - Start on main/master without explicit user consent

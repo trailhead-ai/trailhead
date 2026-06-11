@@ -154,6 +154,68 @@ class TestGrepGuard:
             "rename it to skills/tend."
         )
 
+    def test_no_council_review_prose(self):
+        """'Council Review' Title-Case prose must not appear in SKILL.md bodies after rename to 'Circle Review'.
+
+        Excludes:
+        - lines that reference the 'code-reviewer' agent or 'code review' (not the circle panel)
+        - the 'council-session' lore vault type (a different concept)
+        - the experiments/ corpus (frozen)
+        """
+        files = [
+            f for f in _collect_files()
+            if "experiments" not in f.parts and f.suffix == ".md"
+        ]
+        hits = _grep_files(r"Council Review", files)
+        # No exclusions needed: 'Council Review' with both words Title-Cased is
+        # exclusively the old circle-review panel label.
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'Council Review' — must be 'Circle Review' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_assumption_prover_title_case_prose(self):
+        """'Assumption-Prover' Title-Case prose must not appear in SKILL.md bodies after rename to 'scout'.
+
+        Excludes the experiments/ corpus (frozen).
+        The lowercase 'assumption-prover' identifier guard is already in test_no_sdd_dash_references
+        (via sdd-); this covers the prose Title-Case form which the identifier guard misses.
+        """
+        files = [
+            f for f in _collect_files()
+            if "experiments" not in f.parts and f.suffix == ".md"
+        ]
+        hits = _grep_files(r"Assumption-Prover", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'Assumption-Prover' Title-Case — must be 'scout' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_implementer_role_prose_in_sdd_skill(self):
+        """Role-sense 'Implementer' (Title-Case section headers + 'Implementer returns' callouts)
+        must not appear in the SDD SKILL.md after rename to 'trailblazer'.
+
+        Scoped to the SDD skill file only — the most tightly constrained signal for the role label.
+        Generic uses of lowercase 'implementer' elsewhere (researcher.md, troubleshooter.md) are
+        NOT renamed and are not checked here.
+        """
+        sdd_skill = _FORGE_PLUGIN_ROOT / "skills" / "subagent-driven-development" / "SKILL.md"
+        if not sdd_skill.exists():
+            pytest.skip(f"SDD skill not found at {sdd_skill}")
+        text = sdd_skill.read_text()
+        # Check for the section-header form: "## Handling Implementer Status"
+        assert "## Handling Implementer Status" not in text, (
+            "SDD SKILL.md still has '## Handling Implementer Status' — "
+            "rename section header to '## Handling Trailblazer Status'"
+        )
+        # Check for the "Implementer returns" callout form (Title-Case role label)
+        assert "Implementer returns" not in text, (
+            "SDD SKILL.md still has 'Implementer returns' callouts — "
+            "rename to 'Trailblazer returns' after rename"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. load_manifest(validate=True) post-rename
