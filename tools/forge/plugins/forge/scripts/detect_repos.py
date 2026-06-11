@@ -24,32 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import runner_protocol as rp
-
-
-class ManifestReadError(Exception):
-    """Raised on a missing or malformed manifest (path always in the message)."""
-
-
-def _load_manifest(manifest_path: str) -> dict[str, Any]:
-    """Load and parse the camp central manifest using stdlib json."""
-    p = Path(manifest_path)
-    try:
-        text = p.read_text(encoding="utf-8")
-    except OSError as e:
-        raise ManifestReadError(
-            f"detect_repos: cannot read manifest at {manifest_path}: {e}"
-        ) from e
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ManifestReadError(
-            f"detect_repos: malformed manifest at {manifest_path}: {e}"
-        ) from e
-    if not isinstance(data, dict):
-        raise ManifestReadError(
-            f"detect_repos: manifest at {manifest_path} is not a JSON object"
-        )
-    return data
+from manifest_read import ManifestReadError, load_manifest as _load_manifest
 
 
 def _inspect(repo_name: str, worktree_path: str, *, runner: rp.Runner) -> dict | None:

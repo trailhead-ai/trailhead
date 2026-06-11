@@ -360,3 +360,24 @@ class TestDetectReposNoHardcodes:
 
         result = dr.detect_repos(str(manifest_path), runner=stub)
         assert result[0]["repo"] == "my-custom-service"
+
+
+# ---------------------------------------------------------------------------
+# Shared manifest_read module: single ManifestReadError (Item 7)
+# ---------------------------------------------------------------------------
+
+
+class TestSharedManifestRead:
+    def test_detect_repos_uses_shared_manifest_read_error(self) -> None:
+        """detect_repos.ManifestReadError is the same class as manifest_read.ManifestReadError."""
+        import manifest_read as mr
+        assert dr.ManifestReadError is mr.ManifestReadError, (
+            "detect_repos must re-export manifest_read.ManifestReadError, "
+            "not define its own"
+        )
+
+    def test_manifest_read_module_exists(self) -> None:
+        """manifest_read module is importable from SCRIPTS_DIR."""
+        import manifest_read as mr
+        assert hasattr(mr, "ManifestReadError")
+        assert hasattr(mr, "load_manifest")

@@ -86,10 +86,15 @@ All keys are optional. Omitting `review_bot_login` → CI-only PR evaluation
 (no bot review path). Omitting `soak_health_command` → soak reports
 `n/a — no health command configured` (inert by default).
 
+## Error convention split
+
+The three evaluator scripts (`pr_evaluate_status.py`, `check_pr_status.py`, `wait_for_actionable.py`) return **JSON on stdout including errors** (callers parse structured output). The orchestration scripts (`detect_repos.py`, `merge_prs.py`) use **exit-code + stderr** for errors (exit 2 on config/manifest failure, exit 1 on partial-merge). Do not mix the two conventions within a single script.
+
 ## Script inventory
 
 | Script | Role |
 |--------|------|
+| `manifest_read.py` | Shared manifest reader; single `ManifestReadError` type for both orchestration scripts |
 | `detect_repos.py` | Reads manifest members[], returns active repos with branch/ahead/dirty |
 | `merge_prs.py` | Merges PRs in resolved order with safety checks |
 | `pr_evaluate_status.py` | Classifies a PR: done/rebase/fix_ci/rerun_ci/review/wait |

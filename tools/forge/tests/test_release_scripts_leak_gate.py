@@ -45,6 +45,7 @@ def step6_denylist(tmp_path: Path) -> Path:
         "cortana(-zh)?\n"
         "\\basana\\b\n"
         "\\bdash0\\b\n"
+        "\\bplatform\\b\n"
         "\\bzenith\\b\n"
         "\\.workspace-manifest\n"
         # Catch the Python constant pattern KNOWN_SIBLINGS = {...}
@@ -54,8 +55,12 @@ def step6_denylist(tmp_path: Path) -> Path:
         "brain/(designs|chrome|specs|plans|sessions)\n"
         # mobile-app as a hardcoded sibling name (not in a comment about the tool name)
         '"mobile-app"\n'
+        # mobile-overview as a hardcoded sibling name
+        '"mobile-overview"\n'
         # platform-infra as a hardcoded sibling name
-        "platform-infra\n",
+        "platform-infra\n"
+        # platform-admin-ui as a hardcoded sibling name
+        '"platform-admin-ui"\n',
         encoding="utf-8",
     )
     return dl
@@ -110,10 +115,17 @@ class TestReleaseScriptsLeakGate:
             f"runner_protocol.py contains forbidden tokens:\n{r.stdout}\n{r.stderr}"
         )
 
+    def test_manifest_read_is_clean(self, step6_denylist: Path) -> None:
+        r = _run_gate([SCRIPTS_DIR / "manifest_read.py"], step6_denylist)
+        assert r.returncode == 0, (
+            f"manifest_read.py contains forbidden tokens:\n{r.stdout}\n{r.stderr}"
+        )
+
     def test_all_release_scripts_as_group_are_clean(self, step6_denylist: Path) -> None:
         """Scan all re-homed release scripts in one pass."""
         targets = [
             SCRIPTS_DIR / "detect_repos.py",
+            SCRIPTS_DIR / "manifest_read.py",
             SCRIPTS_DIR / "merge_prs.py",
             SCRIPTS_DIR / "pr_evaluate_status.py",
             SCRIPTS_DIR / "check_pr_status.py",

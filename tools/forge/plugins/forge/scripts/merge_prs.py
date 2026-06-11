@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import runner_protocol as rp
+from manifest_read import ManifestReadError, load_manifest as _load_manifest
 
 
 # ---------------------------------------------------------------------------
@@ -39,8 +41,7 @@ import runner_protocol as rp
 # ---------------------------------------------------------------------------
 
 
-class ManifestReadError(Exception):
-    """Missing or malformed camp central manifest (path always in message)."""
+# ManifestReadError is imported from manifest_read (shared with detect_repos).
 
 
 class MergeOrderRequiredError(Exception):
@@ -49,6 +50,10 @@ class MergeOrderRequiredError(Exception):
 
 class MergeConfigError(Exception):
     """Raised when merge_order names a member not in the manifest."""
+
+
+class InvalidInputError(Exception):
+    """Raised on option-injection attack vectors (pr_number / branch validation)."""
 
 
 # ---------------------------------------------------------------------------
@@ -66,27 +71,6 @@ class PRPair:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _load_manifest(manifest_path: str) -> dict[str, Any]:
-    p = Path(manifest_path)
-    try:
-        text = p.read_text(encoding="utf-8")
-    except OSError as e:
-        raise ManifestReadError(
-            f"merge_prs: cannot read manifest at {manifest_path}: {e}"
-        ) from e
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ManifestReadError(
-            f"merge_prs: malformed manifest at {manifest_path}: {e}"
-        ) from e
-    if not isinstance(data, dict):
-        raise ManifestReadError(
-            f"merge_prs: manifest at {manifest_path} is not a JSON object"
-        )
-    return data
 
 
 def _load_merge_order(toml_path: str | None) -> list[str] | None:
@@ -107,6 +91,14 @@ def _load_merge_order(toml_path: str | None) -> list[str] | None:
     if isinstance(order, list) and all(isinstance(x, str) for x in order):
         return order
     return None
+
+
+def _validate_pr_number(pr_number: str) -> None:
+    """Reject non-numeric pr_number values (option-injection guard)."""
+    if not re.fullmatch(r"\d+", pr_number):
+        raise InvalidInputError(
+            f"merge_prs: pr_number must be all digits, got: {pr_number!r}"
+        )
 
 
 def _resolve_author_email(runner: rp.Runner) -> str:
@@ -148,11 +140,14 @@ def _do_merge(repo_path: str, pr_number: str, author_email: str, runner: rp.Runn
 
 
 def _delete_remote_branch(repo_path: str, branch: str, runner: rp.Runner) -> None:
-    if branch and branch not in ("main", "master"):
-        rp.run(
-            ["git", "-C", repo_path, "push", "origin", "--delete", branch],
-            runner=runner,
-        )
+    if not branch or branch in ("main", "master"):
+        return
+    if branch.startswith("-"):
+        return
+    rp.run(
+        ["git", "-C", repo_path, "push", "origin", "--delete", "--", branch],
+        runner=runner,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +177,9 @@ def merge_prs(
         MergeOrderRequiredError: On >1 PR + no merge_order (R-6).
         MergeConfigError: On merge_order naming a non-existent member.
     """
+    for pair in pr_pairs:
+        _validate_pr_number(pair.pr_number)
+
     effective_runner = runner if runner is not None else rp._default_runner
 
     manifest_data = _load_manifest(manifest_path)
@@ -307,6 +305,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         repo_path = parts[0]
         pr_number = parts[1]
+        if not re.fullmatch(r"\d+", pr_number):
+            print(f"merge_prs: pr_number must be all digits, got: {pr_number!r}", file=sys.stderr)
+            return 2
         member_name = parts[2] if len(parts) > 2 else repo_path.rstrip("/").split("/")[-1]
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
 
@@ -316,6 +317,9 @@ def main(argv: list[str] | None = None) -> int:
             manifest_path=args.manifest,
             toml_path=args.toml,
         )
+    except InvalidInputError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     except ManifestReadError as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -323,6 +327,9 @@ def main(argv: list[str] | None = None) -> int:
         print(str(e), file=sys.stderr)
         return 2
     except MergeConfigError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    except RuntimeError as e:
         print(str(e), file=sys.stderr)
         return 2
 

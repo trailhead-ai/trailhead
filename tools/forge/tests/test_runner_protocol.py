@@ -180,3 +180,45 @@ class TestShellSafety:
         assert rp.SHELL_FALSE is True, (
             "runner_protocol.SHELL_FALSE must be True (documents shell=False)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Timeout: default runner passes a timeout to subprocess (Item 5)
+# ---------------------------------------------------------------------------
+
+
+class TestRunnerTimeout:
+    def test_default_runner_passes_timeout_kwarg(self, tmp_path: Path) -> None:
+        """_default_runner forwards a 'timeout' kwarg to subprocess.run."""
+        captured: list[dict] = []
+
+        import subprocess as _sp
+        original_run = _sp.run
+
+        def spy(*args, **kwargs):
+            captured.append(kwargs)
+            return original_run(*args, **kwargs)
+
+        import unittest.mock as mock
+        repo = tmp_path / "repo"
+        _git_init_repo(repo)
+        with mock.patch("subprocess.run", side_effect=spy):
+            rp._default_runner(["git", "rev-parse", "HEAD"], cwd=str(repo))
+
+        assert captured, "subprocess.run was not called"
+        assert "timeout" in captured[0], (
+            "_default_runner must pass timeout= to subprocess.run"
+        )
+
+    def test_rp_run_forwards_timeout_to_stub(self) -> None:
+        """rp.run passes timeout kwarg through to the injected runner stub."""
+        captured_kwargs: list[dict] = []
+
+        def stub(cmd: list[str], **kwargs):
+            captured_kwargs.append(kwargs)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        rp.run(["git", "status"], runner=stub, timeout=99)
+        assert captured_kwargs[0].get("timeout") == 99, (
+            "rp.run must forward timeout= kwarg to the runner"
+        )

@@ -26,8 +26,12 @@ SHELL_FALSE: bool = True
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
+_DEFAULT_TIMEOUT: int = 60  # seconds; prevents hung gh/git on network stall
+
+
 def _default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
     """Production runner: subprocess.run with shell=False, inherited env."""
+    kwargs.setdefault("timeout", _DEFAULT_TIMEOUT)
     return subprocess.run(
         cmd,
         shell=False,

@@ -63,6 +63,14 @@ def _make_pr_stub(
     """
     fail_on = fail_on or set()
 
+    def _token_after(cmd: list[str], keyword: str) -> str | None:
+        """Return the token immediately after `keyword` in cmd, or None."""
+        try:
+            idx = cmd.index(keyword)
+            return cmd[idx + 1] if idx + 1 < len(cmd) else None
+        except ValueError:
+            return None
+
     def stub(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
         cmd_str = " ".join(cmd)
 
@@ -72,22 +80,7 @@ def _make_pr_stub(
 
         # gh pr view <pr_number> --json ...
         if "gh" in cmd_str and "pr" in cmd_str and "view" in cmd_str and "--json" in cmd_str:
-            pr_number = None
-            for tok in cmd:
-                try:
-                    pr_number = int(tok)
-                    pr_number = str(tok)
-                    break
-                except ValueError:
-                    continue
-            if pr_number is None:
-                # Try to find it another way
-                for i, tok in enumerate(cmd):
-                    if tok not in ("gh", "pr", "view", "--json", "--repo-override") and not tok.startswith("-"):
-                        if "," not in tok:
-                            pr_number = tok
-                            break
-
+            pr_number = _token_after(cmd, "view")
             status = pr_statuses.get(str(pr_number), "MERGEABLE_CLEAN")
             if status == "MERGED":
                 payload = {"state": "MERGED", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "headRefName": "feat"}
@@ -101,11 +94,7 @@ def _make_pr_stub(
 
         # gh pr merge <pr_number>
         if "gh" in cmd_str and "pr" in cmd_str and "merge" in cmd_str:
-            pr_number = None
-            for tok in cmd:
-                if tok not in ("gh", "pr", "merge", "--merge", "--author-email", "test@example.com") and not tok.startswith("-"):
-                    pr_number = tok
-                    break
+            pr_number = _token_after(cmd, "merge")
             if pr_number in fail_on:
                 return subprocess.CompletedProcess(cmd, 1, "", "merge failed")
             return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
@@ -389,3 +378,308 @@ class TestMergePrsManifestErrors:
                 toml_path=str(toml),
                 runner=lambda cmd, **kw: None,
             )
+
+
+# ---------------------------------------------------------------------------
+# Shared manifest_read module: single ManifestReadError (Item 7)
+# ---------------------------------------------------------------------------
+
+
+class TestMergePrsSharedManifestRead:
+    def test_merge_prs_uses_shared_manifest_read_error(self) -> None:
+        """merge_prs.ManifestReadError is the same class as manifest_read.ManifestReadError."""
+        import manifest_read as mr
+        assert mp.ManifestReadError is mr.ManifestReadError, (
+            "merge_prs must re-export manifest_read.ManifestReadError, "
+            "not define its own"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Option-injection: boundary validation (S-4 extension)
+# ---------------------------------------------------------------------------
+
+
+class TestOptionInjection:
+    def test_pr_number_with_leading_dash_rejected(self, tmp_path: Path) -> None:
+        """A pr_number starting with '-' must yield a named error, not execution."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+        pr_pairs = [mp.PRPair(repo_path=str(wt), pr_number="--repo", member_name="alpha")]
+        with pytest.raises(mp.InvalidInputError):
+            mp.merge_prs(
+                pr_pairs=pr_pairs,
+                manifest_path=str(manifest),
+                toml_path=str(toml),
+                runner=lambda cmd, **kw: None,
+            )
+
+    def test_pr_number_non_numeric_rejected(self, tmp_path: Path) -> None:
+        """A pr_number that is not all digits must yield a named error."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+        pr_pairs = [mp.PRPair(repo_path=str(wt), pr_number="abc123", member_name="alpha")]
+        with pytest.raises(mp.InvalidInputError):
+            mp.merge_prs(
+                pr_pairs=pr_pairs,
+                manifest_path=str(manifest),
+                toml_path=str(toml),
+                runner=lambda cmd, **kw: None,
+            )
+
+    def test_valid_pr_number_passes_validation(self, tmp_path: Path) -> None:
+        """A purely numeric pr_number is accepted."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+        stub = _make_pr_stub({"42": "MERGEABLE_CLEAN"})
+        pr_pairs = [mp.PRPair(repo_path=str(wt), pr_number="42", member_name="alpha")]
+        result = mp.merge_prs(
+            pr_pairs=pr_pairs,
+            manifest_path=str(manifest),
+            toml_path=str(toml),
+            runner=stub,
+        )
+        assert result["failed"] == {}
+
+    def test_branch_with_leading_dash_skips_delete(self, tmp_path: Path) -> None:
+        """A branch name starting with '-' is rejected before the git push --delete call."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+
+        delete_calls: list[list[str]] = []
+
+        def stub(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+            if "push" in cmd and "--delete" in cmd:
+                delete_calls.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if "config" in cmd and "user.email" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+            if "view" in cmd and "--json" in cmd:
+                # Return a branch name starting with '-'
+                payload = {
+                    "state": "OPEN", "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN", "isDraft": False,
+                    "headRefName": "--upload-pack=x",
+                }
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+            if "merge" in cmd and "--merge" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        pr_pairs = [mp.PRPair(repo_path=str(wt), pr_number="42", member_name="alpha")]
+        mp.merge_prs(
+            pr_pairs=pr_pairs,
+            manifest_path=str(manifest),
+            toml_path=str(toml),
+            runner=stub,
+        )
+        # The dangerous branch name must never reach git push --delete
+        assert delete_calls == [], f"git push --delete called with suspicious branch: {delete_calls}"
+
+    def test_git_push_delete_includes_double_dash_terminator(self, tmp_path: Path) -> None:
+        """git push --delete args include '--' before the branch name."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+
+        delete_cmds: list[list[str]] = []
+
+        def stub(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+            if "push" in cmd and "--delete" in cmd:
+                delete_cmds.append(list(cmd))
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if "config" in cmd and "user.email" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+            if "view" in cmd and "--json" in cmd:
+                payload = {
+                    "state": "OPEN", "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN", "isDraft": False,
+                    "headRefName": "feat-branch",
+                }
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+            if "merge" in cmd and "--merge" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        pr_pairs = [mp.PRPair(repo_path=str(wt), pr_number="42", member_name="alpha")]
+        mp.merge_prs(
+            pr_pairs=pr_pairs,
+            manifest_path=str(manifest),
+            toml_path=str(toml),
+            runner=stub,
+        )
+        assert delete_cmds, "expected git push --delete to be called"
+        cmd = delete_cmds[0]
+        # '--' must appear between '--delete' and the branch name
+        assert "--" in cmd, f"'--' terminator missing from push --delete: {cmd}"
+        dd_idx = cmd.index("--")
+        branch_idx = cmd.index("feat-branch")
+        assert dd_idx < branch_idx, f"'--' must precede branch name: {cmd}"
+
+    def test_cli_pr_number_leading_dash_exits_2(self, tmp_path: Path) -> None:
+        """CLI: a pr_number of '--repo' exits 2 with a named error, not execution."""
+        manifest = _write_manifest(tmp_path, [])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+        code = mp.main([
+            "--manifest", str(manifest),
+            "--toml", str(toml),
+            f"{tmp_path}:--repo:alpha",
+        ])
+        assert code == 2
+
+
+# ---------------------------------------------------------------------------
+# R-2: main() exit-code contract
+# ---------------------------------------------------------------------------
+
+
+class TestMainExitCode:
+    def test_main_exits_0_on_all_merged(self, tmp_path: Path) -> None:
+        """main() returns 0 when all PRs merge successfully."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+
+        stub = _make_pr_stub({"42": "MERGEABLE_CLEAN"})
+
+        # Inject stub via monkeypatching: call main() with a stub runner
+        # We do this by temporarily replacing _default_runner in merge_prs module
+        original = mp.rp._default_runner
+        mp.rp._default_runner = stub
+        try:
+            code = mp.main([
+                "--manifest", str(manifest),
+                "--toml", str(toml),
+                f"{wt}:42:alpha",
+            ])
+        finally:
+            mp.rp._default_runner = original
+
+        assert code == 0, f"expected exit 0 on clean merge, got {code}"
+
+    def test_main_exits_1_on_partial_merge(self, tmp_path: Path) -> None:
+        """main() returns 1 when at least one PR is failed or skipped."""
+        wt_a = tmp_path / "wt" / "alpha"
+        wt_b = tmp_path / "wt" / "beta"
+        wt_a.mkdir(parents=True)
+        wt_b.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
+            {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
+        ])
+        toml = _write_toml(
+            tmp_path,
+            '[release]\nmerge_order = ["alpha", "beta"]\n',
+        )
+
+        stub = _make_pr_stub({"10": "BLOCKED", "20": "MERGEABLE_CLEAN"})
+
+        original = mp.rp._default_runner
+        mp.rp._default_runner = stub
+        try:
+            code = mp.main([
+                "--manifest", str(manifest),
+                "--toml", str(toml),
+                f"{wt_a}:10:alpha",
+                f"{wt_b}:20:beta",
+            ])
+        finally:
+            mp.rp._default_runner = original
+
+        assert code == 1, f"expected exit 1 on partial merge (failed/skipped), got {code}"
+
+    def test_main_exits_1_on_already_blocked(self, tmp_path: Path) -> None:
+        """main() returns 1 when a single PR is in an unmerged blocked state."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+
+        stub = _make_pr_stub({"99": "BLOCKED"})
+
+        original = mp.rp._default_runner
+        mp.rp._default_runner = stub
+        try:
+            code = mp.main([
+                "--manifest", str(manifest),
+                "--toml", str(toml),
+                f"{wt}:99:alpha",
+            ])
+        finally:
+            mp.rp._default_runner = original
+
+        assert code == 1, f"expected exit 1 on blocked PR, got {code}"
+
+
+# ---------------------------------------------------------------------------
+# RuntimeError from _resolve_author_email → stderr + nonzero exit (not traceback)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAuthorEmailError:
+    def test_missing_email_exits_nonzero_no_traceback(self, tmp_path: Path) -> None:
+        """When git config user.email is unset, main() exits nonzero with a message — no traceback."""
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(tmp_path, [
+            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+        ])
+        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+
+        def stub(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+            if "config" in cmd and "user.email" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, "", "not set")
+            if "view" in cmd and "--json" in cmd:
+                payload = {
+                    "state": "OPEN", "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN", "isDraft": False, "headRefName": "feat",
+                }
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        original = mp.rp._default_runner
+        mp.rp._default_runner = stub
+        try:
+            import io
+            err_buf = io.StringIO()
+            import sys as _sys
+            old_stderr = _sys.stderr
+            _sys.stderr = err_buf
+            try:
+                code = mp.main([
+                    "--manifest", str(manifest),
+                    "--toml", str(toml),
+                    f"{wt}:42:alpha",
+                ])
+            finally:
+                _sys.stderr = old_stderr
+        finally:
+            mp.rp._default_runner = original
+
+        assert code != 0, "expected nonzero exit when user.email is unset"
+        err_text = err_buf.getvalue()
+        assert "Traceback" not in err_text, f"raw traceback leaked to stderr: {err_text}"

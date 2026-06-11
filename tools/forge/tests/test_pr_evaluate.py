@@ -327,3 +327,69 @@ class TestWaitForActionable:
         src = SCRIPTS_DIR / "wait_for_actionable.py"
         text = src.read_text()
         assert "cortana" not in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Annotation-fetch integration: gh api .../annotations call issued (Item 6)
+# ---------------------------------------------------------------------------
+
+
+class TestAnnotationFetchPath:
+    def test_annotation_gh_api_call_issued_for_actions_run_link(self) -> None:
+        """check_status issues a gh api .../annotations call when a check has an
+        actions/runs/<N>/job/<M> link and the remote is a github.com repo."""
+        calls: list[list[str]] = []
+
+        view_data = {
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "BLOCKED",
+            "isDraft": False,
+            "reviews": [],
+        }
+        checks_data = [
+            {
+                "name": "ci",
+                "state": "FAILURE",
+                "link": "https://github.com/myorg/myrepo/actions/runs/111/job/222",
+            }
+        ]
+        annotations_data = [
+            {"path": "src/foo.py", "start_line": 10, "message": "assertion failed",
+             "annotation_level": "failure"},
+        ]
+
+        def stub(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+            calls.append(list(cmd))
+            cmd_str = " ".join(cmd)
+            if "remote" in cmd_str and "get-url" in cmd_str:
+                return subprocess.CompletedProcess(
+                    cmd, 0, "git@github.com:myorg/myrepo.git\n", ""
+                )
+            if "pr" in cmd_str and "checks" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(checks_data), "")
+            if "pr" in cmd_str and "view" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(view_data), "")
+            if "api" in cmd_str and "annotations" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(annotations_data), "")
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+        result = cps.check_status("some/path", "42", runner=stub)
+
+        # gh api .../annotations call must have been made
+        annotation_calls = [c for c in calls if "api" in c and any("annotations" in tok for tok in c)]
+        assert annotation_calls, (
+            "expected gh api .../annotations call; calls were: "
+            + str([" ".join(c) for c in calls])
+        )
+        # The URL must reference check-runs/222 (the job ID from the link)
+        api_call_str = " ".join(annotation_calls[0])
+        assert "check-runs/222" in api_call_str, (
+            f"expected check-runs/222 in annotations URL, got: {api_call_str}"
+        )
+        assert "myorg/myrepo" in api_call_str
+
+        # The annotations must propagate into failingChecks
+        failing = result["failingChecks"]
+        assert len(failing) == 1
+        assert failing[0]["annotations"], "annotations must be non-empty"
+        assert failing[0]["annotations"][0]["path"] == "src/foo.py"
