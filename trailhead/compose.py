@@ -29,8 +29,8 @@ Every composed plugin automatically includes:
 Union-of-selected rule
 ----------------------
 For each name in ``selected``, the capability's ``skills`` entries are
-added to the CopyOp list.  ``agents`` are NOT directory-copied (they are
-files; agent composition is a Step-5 concern).
+added as directory CopyOps, and ``agents`` entries are added as file
+CopyOps under the dest plugin's ``agents/`` directory.
 
 De-dup vs collision
 -------------------
@@ -55,10 +55,11 @@ Symlinks
 so that symlinks inside a source tree are *never* preserved as escaping
 links — their targets' contents are copied instead.
 
-What is NOT here (Step 5)
---------------------------
+What is NOT here (installer layer)
+------------------------------------
 * Preset → capability-name mapping (``--preset minimal``).
 * Installer UX and ``trailhead config`` sub-command.
+* Multi-tool orchestration and marketplace registration (``wire.py``, ``registry.py``).
 * Live harness-launch validation (U3 proven structurally; live load deferred).
 
 U3 resolution
@@ -265,11 +266,13 @@ def compose_plan(manifest: Manifest, selected: set[str] | list[str], dest: Path)
     if manifest.hooks_json is not None:
         _add_file(manifest.hooks_json)
 
-    # Selected capabilities: skills dirs
+    # Selected capabilities: skills dirs + agent files
     for name in selected_names:
         cap = manifest.capabilities[name]
         for skill in cap["skills"]:
             _add_dir(skill)
+        for agent in cap["agents"]:
+            _add_file(agent)
 
     # De-duplicate benign overlaps first
     deduped = _dedup_ops(raw_ops)

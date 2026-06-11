@@ -38,11 +38,10 @@ Every composed plugin automatically includes, regardless of `selected`:
 
 ## Union-of-selected rule
 
-For each name in `selected`, the capability's `skills` entries are added to the plan.
-The result is the **union** of the always-on set and all selected capability skill dirs.
-
-`agents` entries are NOT directory-copied at this layer; agent composition is a
-Step-5 concern.
+For each name in `selected`, the capability's `skills` entries are added as
+**directory** CopyOps, and `agents` entries are added as **file** CopyOps under
+`dest/agents/`.  The result is the **union** of the always-on set, all selected
+capability skill dirs, and all selected capability agent files.
 
 ## De-dup vs collision
 
@@ -95,15 +94,31 @@ This satisfies U3: structural validity by inspection.
 actually loads the composed plugin as a working harness extension).  This
 requires the installer UX to exist and is deferred to Step 5.
 
-## What is Step 5, not here
+## Multi-tool orchestration: `wire.py` + `registry.py`
 
-The following are explicitly **not** built in Slice 4 / Step 1:
+`compose_plan`/`apply_plan` compose a single tool.  Multi-tool orchestration
+lives in `wire.py`, which sequences:
 
-- Preset → capability-name mapping (`--preset minimal` → `{}`).
-- Installer UX (`trailhead install`, `trailhead config` sub-command).
-- Multi-tool composition (each `compose_plan` call covers one tool's manifest).
-- Live harness-launch validation (deferred to Step 5 where the installer exists).
-- Agent-file composition (agents are files; dir-selection covers dirs only).
+1. For each tool in the selection, call `compose_plan` (pure).
+2. Write to a **staging dir** under `state_dir("trailhead")/composed/tmp/`.
+3. **Atomic promote**: `shutil.rmtree(live_dest)` then `shutil.move(staging, live_dest)`.
+   A mid-compose failure leaves the prior live dest untouched (R-1).
+4. Call `registry.generate_marketplace_json` and `registry.register` (or `rewire`).
+
+`registry.py` owns the narrow harness-registration concern: generate
+`marketplace.json` (Shape A) and shell the `claude plugin` CLI.  The runner is
+injectable for test hermeticity — tests stub it and assert on the args; the real
+`claude plugin` CLI is never invoked in tests.
+
+## What is NOT here (installer layer)
+
+The following are explicitly handled by the installer layer, not this module:
+
+- Preset → capability-name mapping (`--preset minimal` → `{}`).  See `presets.py`.
+- Installer UX (`trailhead install`, `trailhead config` sub-command).  See `cli.py`.
+- Multi-tool orchestration and marketplace registration.  See `wire.py` and `registry.py`.
+- Live harness-launch validation (structural validity proven; live load deferred to
+  the dogfood checkpoint).
 
 ## Summary of named errors
 
