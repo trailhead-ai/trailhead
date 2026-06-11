@@ -1,8 +1,53 @@
 # Design Authoring — `combine_design.py`
 
 This document covers the combine contract, the filename-prefix convention (D-5), the
-docbar-variant convention (D-6), and the `combine_design.py` CLI so the design phase
-is usable directly before the brainstorm-dispatch wire lands (A-6).
+docbar-variant convention (D-6), the `combine_design.py` CLI, and the
+`design_mockup` provider seam so the design phase is usable directly before the
+brainstorm-dispatch wire lands (A-6).
+
+---
+
+## The design phase
+
+`design` is the loop's **design phase**: the `artist` agent renders a design
+(per-screen `.html` files + an `index.md` engineering record, anchored to the
+real chrome catalog for the target surface), and `combine_design.py` produces
+the self-contained `<slug>-design-reference.html` reference from those files.
+
+The phase runs in two steps:
+
+1. **Render** — dispatch the `artist` agent with a brief describing the feature,
+   surface(s), chrome catalog path, and component-mapping rows. The artist
+   produces per-screen HTML files and an `index.md`.
+2. **Combine** — run `combine_design.py` over the design directory to produce
+   one self-contained reference document (docbar + tokens swatch + numbered
+   screen sections + TOC + spec link).
+
+---
+
+## `design_mockup` provider seam
+
+**RESERVED — not yet wired. The brainstorm cutover is a follow-up.**
+
+This is the named contract for how forge's `brainstorm` skill will eventually
+dispatch the `artist` agent as the `design_mockup` provider. The seam is
+documented here so the contract is stable before the cutover lands.
+
+**Provider contract:**
+
+| Field | Value |
+|-------|-------|
+| Agent name | `artist` |
+| Trigger | `design_mockup` provider slot in `brainstorm` |
+| Brief shape | See `artist.md` input fields: `feature`, `surface`, `designs_root`, `chrome_root`, `component_mapping` rows (each a `file:line` citation or `"new, no counterpart — <justification>"`) |
+
+The `artist` agent is invoked with the brief above and produces per-screen HTML
+files that the combine step assembles into the reference document.
+
+**Status:** RESERVED. No forge file dispatches the artist as a live provider yet.
+The lore `brainstorm` skill is not modified in this step. The upstream
+`design-mockup-writer` agent is not retired in this step. Both the
+brainstorm rewire and the retirement are captured as a follow-up deferred item.
 
 ---
 
