@@ -220,17 +220,32 @@ class TestForgeManifestValidatesAgainstDisk:
             p = plugin_root / agent
             assert p.is_file(), f"agent file missing: {p}"
 
-    def test_forge_design_capability_explicitly_empty(self):
+    def test_forge_design_capability_has_artist_agent(self):
+        """forge design has no skills and exactly one agent: agents/artist.md."""
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["design"]
         assert cap["skills"] == []
-        assert cap["agents"] == []
+        assert cap["agents"] == ["agents/artist.md"]
 
-    def test_forge_release_capability_explicitly_empty(self):
+    def test_forge_release_capability_has_skills_and_agents(self):
+        """forge release has 7 release skills and 4 release agents."""
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["release"]
-        assert cap["skills"] == []
-        assert cap["agents"] == []
+        assert cap["skills"] == [
+            "skills/create-pr",
+            "skills/update-pr",
+            "skills/watch-pr",
+            "skills/watch-preview",
+            "skills/merge-pr",
+            "skills/github-pr",
+            "skills/post-merge-decide",
+        ]
+        assert cap["agents"] == [
+            "agents/pr-updater.md",
+            "agents/watch-pr.md",
+            "agents/watch-preview.md",
+            "agents/diagnose-preview.md",
+        ]
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,248 @@
+# landing_claims.toml — tracked, typed claims manifest for the Trailhead landing.
+#
+# Every load-bearing anchor the landing prose names is registered here.
+# The link-real gate (test_landing_links_real.py) resolves each [[claim]] against
+# the real source of truth and fails closed if any anchor is unresolved or stale.
+#
+# Schema: array-of-tables [[claim]] with four required fields:
+#   kind    — one of: command | preset | skill | agent | capability | doc-link
+#             prose-assertion exceptions (not resolved by the gate):
+#               positioning | allowlisted-example
+#   tool    — trailhead | lore | forge | camp
+#   ref     — the anchor to resolve (subcommand name, path, capability name, etc.)
+#   source  — which README/surface makes this claim: root | lore | forge | camp
+#
+# Slice 3 will extend this with per-tool README anchors.
+# Slice 4 will extend with root README anchors.
+
+# ---------------------------------------------------------------------------
+# CLI subcommands (kind=command)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "command"
+tool = "trailhead"
+ref = "install"
+source = "root"
+
+[[claim]]
+kind = "command"
+tool = "trailhead"
+ref = "update"
+source = "root"
+
+[[claim]]
+kind = "command"
+tool = "trailhead"
+ref = "doctor"
+source = "root"
+
+[[claim]]
+kind = "command"
+tool = "trailhead"
+ref = "config"
+source = "root"
+
+# ---------------------------------------------------------------------------
+# Presets (kind=preset)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "preset"
+tool = "trailhead"
+ref = "minimal"
+source = "root"
+
+[[claim]]
+kind = "preset"
+tool = "trailhead"
+ref = "standard"
+source = "root"
+
+[[claim]]
+kind = "preset"
+tool = "trailhead"
+ref = "full"
+source = "root"
+
+# ---------------------------------------------------------------------------
+# lore capabilities (kind=capability)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "capability"
+tool = "lore"
+ref = "capture"
+source = "lore"
+
+[[claim]]
+kind = "capability"
+tool = "lore"
+ref = "recall"
+source = "lore"
+
+[[claim]]
+kind = "capability"
+tool = "lore"
+ref = "sessions"
+source = "lore"
+
+# ---------------------------------------------------------------------------
+# lore skills (kind=skill)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/tend"
+source = "lore"
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/reflect"
+source = "lore"
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/area"
+source = "lore"
+
+[[claim]]
+kind = "skill"
+tool = "lore"
+ref = "skills/finish"
+source = "lore"
+
+# ---------------------------------------------------------------------------
+# lore agents (kind=agent)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "agent"
+tool = "lore"
+ref = "agents/loremaster.md"
+source = "lore"
+
+# ---------------------------------------------------------------------------
+# forge capabilities (kind=capability)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "capability"
+tool = "forge"
+ref = "planning"
+source = "forge"
+
+[[claim]]
+kind = "capability"
+tool = "forge"
+ref = "execute"
+source = "forge"
+
+[[claim]]
+kind = "capability"
+tool = "forge"
+ref = "circle"
+source = "forge"
+
+[[claim]]
+kind = "capability"
+tool = "forge"
+ref = "design"
+source = "forge"
+
+[[claim]]
+kind = "capability"
+tool = "forge"
+ref = "release"
+source = "forge"
+
+# ---------------------------------------------------------------------------
+# forge skills (kind=skill)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/subagent-driven-development"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/planning"
+source = "forge"
+
+# ---------------------------------------------------------------------------
+# forge agents (kind=agent)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/scout.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/trailblazer.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/artist.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-advocate.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-builder.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-reliability.md"
+source = "forge"
+
+[[claim]]
+kind = "agent"
+tool = "forge"
+ref = "agents/circle-security.md"
+source = "forge"
+
+# ---------------------------------------------------------------------------
+# camp capabilities (kind=capability)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "capability"
+tool = "camp"
+ref = "dev-env"
+source = "camp"
+
+# ---------------------------------------------------------------------------
+# doc-links (kind=doc-link) — real files that the landing references
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "LICENSE"
+source = "root"
+
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "trailhead/docs/paths.md"
+source = "root"
