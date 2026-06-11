@@ -199,24 +199,38 @@ def test_blocked_message_names_greenfield_escape(artist_text: str):
 
 
 def test_blocked_message_names_both_escapes_in_block_rule(artist_text: str):
-    """The BLOCKED rule section must contain both escape hatches adjacent to the BLOCKED keyword (A-3).
+    """The citation-block BLOCKED message must name both escape hatches within its own text (A-3).
 
-    The exact structural requirement: the text describes the block condition with
-    BOTH 'file:line' and 'new, no counterpart' as unblock paths, so a greenfield
-    user is not left without a stated way out.
+    Specifically: find the BLOCKED: whose text contains 'no anchor' or 'component-mapping row'
+    (the A-3 citation check at validation step), and assert BOTH 'file:line' AND
+    'new, no counterpart' appear within that specific block message — not by proximity
+    to some other BLOCKED: message elsewhere in the doc.
     """
-    # Find the BLOCKED: prose in the agent
-    blocked_idx = artist_text.find("BLOCKED:")
-    assert blocked_idx != -1, "artist.md must contain a 'BLOCKED:' rule section"
+    # Locate all BLOCKED: occurrences and find the citation-block one specifically
+    search_start = 0
+    citation_blocked_idx = -1
+    while True:
+        idx = artist_text.find("BLOCKED:", search_start)
+        if idx == -1:
+            break
+        window = artist_text[idx: idx + 400]
+        if "no anchor" in window or "component-mapping row" in window:
+            citation_blocked_idx = idx
+            break
+        search_start = idx + 1
 
-    # Extract a generous window around the first BLOCKED: mention to check both escapes
-    # are present in the same rule section (within 800 chars covers a typical paragraph)
-    window = artist_text[max(0, blocked_idx - 50): blocked_idx + 800]
-    assert "file:line" in window, (
-        "The BLOCKED: rule must name 'file:line' as an escape hatch within the rule section (A-3)"
+    assert citation_blocked_idx != -1, (
+        "artist.md must contain a BLOCKED: message for the citation check — "
+        "one whose text references 'no anchor' or 'component-mapping row' (A-3)"
     )
-    assert "new, no counterpart" in window, (
-        "The BLOCKED: rule must name 'new, no counterpart' as a greenfield escape hatch within the rule section (A-3)"
+
+    # The citation block itself must name both escapes
+    block_window = artist_text[citation_blocked_idx: citation_blocked_idx + 400]
+    assert "file:line" in block_window, (
+        "The citation-block BLOCKED message must name 'file:line' as an escape hatch (A-3)"
+    )
+    assert "new, no counterpart" in block_window, (
+        "The citation-block BLOCKED message must name 'new, no counterpart' as a greenfield escape hatch (A-3)"
     )
 
 
@@ -280,11 +294,20 @@ def test_both_modes_structurally_present(artist_text: str):
 # ---------------------------------------------------------------------------
 
 def test_artist_resolves_roots_from_input_env(artist_text: str):
-    """artist.md must reference resolving designs/chrome roots from agent input + env (not hardcoded)."""
-    has_input_ref = "input" in artist_text.lower()
-    has_env_ref = "env" in artist_text.lower()
-    assert has_input_ref or has_env_ref, (
-        "artist.md must describe resolving roots from agent input and/or env, not hardcoded paths"
+    """artist.md must reference resolving designs_root/chrome_root from input fields AND DESIGNS_ROOT/CHROME_ROOT env vars."""
+    # Must name the concrete fields
+    assert "designs_root" in artist_text, (
+        "artist.md must name the 'designs_root' field so callers know the resolution contract"
+    )
+    assert "chrome_root" in artist_text, (
+        "artist.md must name the 'chrome_root' field so callers know the resolution contract"
+    )
+    # Must name the env vars (now that I-1 makes them real in combine_design.py)
+    assert "DESIGNS_ROOT" in artist_text, (
+        "artist.md must name the DESIGNS_ROOT env var as a fallback for designs_root"
+    )
+    assert "CHROME_ROOT" in artist_text, (
+        "artist.md must name the CHROME_ROOT env var as a fallback for chrome_root"
     )
 
 
@@ -296,6 +319,9 @@ def test_artist_does_not_name_specific_aesthetic(artist_text: str):
         "serif",
         "Zenith's established",
         "established admin aesthetic",
+        # Surface-specific descriptors from the de-zenith source (M-1 regression armor)
+        "Suisse Intl",
+        "390-wide",
     ]
     for term in forbidden_aesthetic_terms:
         assert term.lower() not in artist_text.lower(), (

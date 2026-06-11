@@ -76,7 +76,7 @@ The caller provides a structured brief. Required fields depend on mode.
 - `intro` — one or two sentences framing the doc
 - `component_mapping` — list of rows for **net-new chrome only** (regions not in the catalog) OR
   surface-specific overrides. Each row: `{ region, surface, component_or_class, file_line }`.
-  Every row must have a real `file:line` citation (e.g. `core_components.ex:685`) OR an explicit
+  Every row must have a real `file:line` citation (e.g. `components/Button.tsx:42`) OR an explicit
   `"new, no counterpart — <justification>"` note for net-new/greenfield UI with no existing
   counterpart. Optional if the design uses only catalog chrome.
 - `brand_tokens` — `auto` (default) to use the relevant catalog(s) brand-token sets, OR explicit
@@ -122,13 +122,13 @@ verbatim — wrap in the surface's outer `<div>` if not already wrapped.
 
 2. **Validate the brief.** `surfaces` is non-empty and each entry maps to an existing catalog at
    `<chrome_root>/<surface>.md`. Every supplied `component_mapping` row has a `file:line` citation
-   (e.g. `core_components.ex:685`) OR a justified `"new, no counterpart — <justification>"` note.
+   (e.g. `components/Button.tsx:42`) OR a justified `"new, no counterpart — <justification>"` note.
    `path` is under `designs_root`. File doesn't already exist (use `Glob` to check).
 
    If any check fails, return:
    ```
    BLOCKED: component-mapping row '<region>' has no anchor. Provide a real file:line
-   (e.g. core_components.ex:685) OR a 'new, no counterpart — <justification>' note for
+   (e.g. components/Button.tsx:42) OR a 'new, no counterpart — <justification>' note for
    net-new/greenfield UI with no existing counterpart.
    ```
    and stop.
@@ -201,8 +201,8 @@ verbatim — wrap in the surface's outer `<div>` if not already wrapped.
 - **Don't invent component mappings.** Missing citation → `BLOCKED`.
 - **Don't substitute Tailwind classes for inline styles.** Mockups must render in any markdown
   viewer without a build step.
-- **Don't re-anchor to "better" components.** If the caller cites `core_components.ex:685`, you
-  cite `core_components.ex:685`.
+- **Don't re-anchor to "better" components.** If the caller cites `components/Button.tsx:42`, you
+  cite `components/Button.tsx:42`.
 - **Don't introduce a default aesthetic.** No colors, fonts, or layout assumptions that aren't in
   the consumed chrome catalog.
 - **Don't add motion, hover effects, or interactive JS.** Static HTML only.

@@ -735,6 +735,172 @@ def _write_ephemeral_denylist(p: Path) -> Path:
     return dl
 
 
+# ---------------------------------------------------------------------------
+# I-1: env-var root-resolution fallbacks (DESIGNS_ROOT / CHROME_ROOT)
+# ---------------------------------------------------------------------------
+
+def test_env_fallback_designs_root_when_flag_absent(tmp_path: Path, monkeypatch):
+    """When --designs-dir is absent but DESIGNS_ROOT is set, combine_design.py uses the env var."""
+    designs = tmp_path / "designs"
+    designs.mkdir()
+    _write(designs, "web-home.html", _make_screen_html("Home", "<p>env-root sentinel</p>"))
+
+    chrome = tmp_path / "chrome.md"
+    chrome.write_text(_make_chrome([]))
+
+    (designs / "index.md").write_text(_minimal_index([
+        {"surface": "web", "screen": "home", "file": "web-home.html"},
+    ]))
+
+    out_path = tmp_path / "env-root-reference.html"
+    script = SCRIPTS_DIR / "combine_design.py"
+
+    env = {"DESIGNS_ROOT": str(designs), "CHROME_ROOT": str(chrome.parent)}
+    # Inherit PATH so python and locale work; inject our vars
+    import os
+    full_env = {**os.environ, **env}
+
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            # --designs-dir intentionally absent; DESIGNS_ROOT env provides it
+            "--chrome-path", str(chrome),
+            "--slug", "env-root",
+            "--output", str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        env=full_env,
+    )
+
+    assert result.returncode == 0, (
+        f"combine_design.py must fall back to DESIGNS_ROOT when --designs-dir absent. "
+        f"stderr: {result.stderr}"
+    )
+    assert out_path.exists()
+    assert "<p>env-root sentinel</p>" in out_path.read_text(encoding="utf-8")
+
+
+def test_env_fallback_chrome_root_when_flag_absent(tmp_path: Path, monkeypatch):
+    """When --chrome-path is absent but CHROME_ROOT is set, combine_design.py uses CHROME_ROOT as the chrome path."""
+    designs = tmp_path / "designs"
+    designs.mkdir()
+    _write(designs, "web-home.html", _make_screen_html("Home", "<p>chrome-root sentinel</p>"))
+
+    chrome = tmp_path / "chrome.md"
+    chrome.write_text(_make_chrome([]))
+
+    (designs / "index.md").write_text(_minimal_index([
+        {"surface": "web", "screen": "home", "file": "web-home.html"},
+    ]))
+
+    out_path = tmp_path / "chrome-root-reference.html"
+    script = SCRIPTS_DIR / "combine_design.py"
+
+    import os
+    # CHROME_ROOT points to the chrome file path (the fallback for --chrome-path)
+    full_env = {**os.environ, "CHROME_ROOT": str(chrome)}
+
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--designs-dir", str(designs),
+            # --chrome-path intentionally absent; CHROME_ROOT env provides it
+            "--slug", "chrome-root",
+            "--output", str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        env=full_env,
+    )
+
+    assert result.returncode == 0, (
+        f"combine_design.py must fall back to CHROME_ROOT when --chrome-path absent. "
+        f"stderr: {result.stderr}"
+    )
+    assert out_path.exists()
+    assert "<p>chrome-root sentinel</p>" in out_path.read_text(encoding="utf-8")
+
+
+def test_cli_flag_wins_over_env_designs_root(tmp_path: Path):
+    """Explicit --designs-dir flag must take precedence over DESIGNS_ROOT env var."""
+    # Two design directories — flag points to flag_designs, env points to env_designs.
+    flag_designs = tmp_path / "flag_designs"
+    flag_designs.mkdir()
+    _write(flag_designs, "web-home.html", _make_screen_html("Home", "<p>FLAG sentinel</p>"))
+    (flag_designs / "index.md").write_text(_minimal_index([
+        {"surface": "web", "screen": "home", "file": "web-home.html"},
+    ]))
+
+    env_designs = tmp_path / "env_designs"
+    env_designs.mkdir()
+    _write(env_designs, "web-home.html", _make_screen_html("Home", "<p>ENV sentinel</p>"))
+    (env_designs / "index.md").write_text(_minimal_index([
+        {"surface": "web", "screen": "home", "file": "web-home.html"},
+    ]))
+
+    chrome = tmp_path / "chrome.md"
+    chrome.write_text(_make_chrome([]))
+
+    out_path = tmp_path / "flag-wins-reference.html"
+    script = SCRIPTS_DIR / "combine_design.py"
+
+    import os
+    full_env = {**os.environ, "DESIGNS_ROOT": str(env_designs)}
+
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--designs-dir", str(flag_designs),  # flag points here
+            "--chrome-path", str(chrome),
+            "--slug", "flag-wins",
+            "--output", str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        env=full_env,
+    )
+
+    assert result.returncode == 0, f"CLI failed: {result.stderr}"
+    content = out_path.read_text(encoding="utf-8")
+    assert "<p>FLAG sentinel</p>" in content, "Flag must win over DESIGNS_ROOT env var"
+    assert "<p>ENV sentinel</p>" not in content
+
+
+def test_cli_neither_flag_nor_env_exits_nonzero(tmp_path: Path):
+    """When neither --designs-dir nor DESIGNS_ROOT is provided, combine_design.py exits nonzero with a named error."""
+    chrome = tmp_path / "chrome.md"
+    chrome.write_text(_make_chrome([]))
+
+    out_path = tmp_path / "no-root-reference.html"
+    script = SCRIPTS_DIR / "combine_design.py"
+
+    import os
+    # Strip DESIGNS_ROOT from env if set
+    env = {k: v for k, v in os.environ.items() if k != "DESIGNS_ROOT"}
+
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            # --designs-dir absent, DESIGNS_ROOT absent
+            "--chrome-path", str(chrome),
+            "--slug", "no-root",
+            "--output", str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0, (
+        "combine_design.py must exit nonzero when neither --designs-dir nor DESIGNS_ROOT is provided"
+    )
+    error_output = result.stderr + result.stdout
+    assert "DESIGNS_ROOT" in error_output or "designs" in error_output.lower(), (
+        f"Error message must name DESIGNS_ROOT or designs dir. Got: {error_output!r}"
+    )
+
+
 def test_leak_gate_combine_design_script_is_clean(tmp_path: Path):
     """combine_design.py must have no Step-6 zenith tokens (D-7/S-3)."""
     script_path = SCRIPTS_DIR / "combine_design.py"

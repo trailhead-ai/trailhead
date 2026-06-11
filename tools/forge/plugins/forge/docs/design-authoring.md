@@ -83,16 +83,18 @@ combine_design.py --designs-dir <DIR> --chrome-path <FILE> --slug <SLUG>
 
 | Argument | Description |
 |----------|-------------|
-| `--designs-dir` | Directory containing `<surface>-<screen>.html` files + `index.md` |
-| `--chrome-path` | Path to the chrome catalog markdown file |
 | `--slug` | Design slug — used as the output filename prefix and document title |
 
-### Optional arguments
+### Positional/optional arguments
 
-| Argument | Description |
-|----------|-------------|
-| `--output` | Output path (default: `<designs-dir>/<slug>-design-reference.html`) |
-| `--spec-url` | URL to link back to the originating spec (does not duplicate the decision log) |
+| Argument | Env fallback | Description |
+|----------|--------------|-------------|
+| `--designs-dir` | `DESIGNS_ROOT` | Directory containing `<surface>-<screen>.html` files + `index.md`. When omitted, falls back to the `DESIGNS_ROOT` env var. Error if neither is provided. |
+| `--chrome-path` | `CHROME_ROOT` | Path to the chrome catalog markdown file. When omitted, falls back to the `CHROME_ROOT` env var. Error if neither is provided. |
+| `--output` | — | Output path (default: `<designs-dir>/<slug>-design-reference.html`) |
+| `--spec-url` | — | URL to link back to the originating spec (does not duplicate the decision log) |
+
+The CLI flag always takes precedence over the env var; the env var is the fallback only.
 
 ### Example invocation
 

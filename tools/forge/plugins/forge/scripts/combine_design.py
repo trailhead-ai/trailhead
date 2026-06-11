@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -420,15 +421,21 @@ def main(argv: list[str]) -> int:
     )
     ap.add_argument(
         "--designs-dir",
-        required=True,
+        default=None,
         metavar="DIR",
-        help="directory containing per-screen <surface>-<screen>.html files + index.md",
+        help=(
+            "directory containing per-screen <surface>-<screen>.html files + index.md "
+            "(falls back to DESIGNS_ROOT env var when absent)"
+        ),
     )
     ap.add_argument(
         "--chrome-path",
-        required=True,
+        default=None,
         metavar="FILE",
-        help="path to the chrome catalog markdown file (declares variants for docbar)",
+        help=(
+            "path to the chrome catalog markdown file (declares variants for docbar) "
+            "(falls back to CHROME_ROOT env var when absent)"
+        ),
     )
     ap.add_argument(
         "--slug",
@@ -448,8 +455,25 @@ def main(argv: list[str]) -> int:
     )
     args = ap.parse_args(argv)
 
-    designs_dir = Path(args.designs_dir).expanduser()
-    chrome_path = Path(args.chrome_path).expanduser()
+    # Resolve --designs-dir: flag takes precedence, then DESIGNS_ROOT env var
+    designs_dir_raw = args.designs_dir or os.environ.get("DESIGNS_ROOT")
+    if not designs_dir_raw:
+        print(
+            "combine_design: ERROR --designs-dir not provided and DESIGNS_ROOT env var is not set.",
+            file=sys.stderr,
+        )
+        return 1
+    designs_dir = Path(designs_dir_raw).expanduser()
+
+    # Resolve --chrome-path: flag takes precedence, then CHROME_ROOT env var
+    chrome_path_raw = args.chrome_path or os.environ.get("CHROME_ROOT")
+    if not chrome_path_raw:
+        print(
+            "combine_design: ERROR --chrome-path not provided and CHROME_ROOT env var is not set.",
+            file=sys.stderr,
+        )
+        return 1
+    chrome_path = Path(chrome_path_raw).expanduser()
 
     if args.output:
         output_path = Path(args.output).expanduser()
