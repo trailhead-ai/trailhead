@@ -31,9 +31,9 @@ agents = [
 ]
 
 [capabilities.design]
-description = "Design-doc authoring — structured spec and design artifacts (WS-2, folds in later)."
+description = "Design-doc authoring — structured spec and design artifacts."
 skills = []
-agents = []
+agents = ["agents/artist.md"]
 
 [capabilities.release]
 description = "Release rituals — changelog, tagging, and post-merge housekeeping (WS-3, folds in later)."
