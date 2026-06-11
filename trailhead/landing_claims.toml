@@ -248,6 +248,29 @@ ref = "trailhead/docs/paths.md"
 source = "root"
 
 # ---------------------------------------------------------------------------
+# Slice 4 additions — root README anchors
+# ---------------------------------------------------------------------------
+
+# Root README links to the three tool READMEs (relative doc-links)
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "tools/lore/README.md"
+source = "root"
+
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "tools/forge/README.md"
+source = "root"
+
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "tools/camp/README.md"
+source = "root"
+
+# ---------------------------------------------------------------------------
 # Slice 3 additions — lore tool README anchors
 # ---------------------------------------------------------------------------
 

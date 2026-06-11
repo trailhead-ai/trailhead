@@ -1011,3 +1011,112 @@ class TestNoToolReadmePypiLine:
             "the public PyPI install does not exist yet (lands with WS-10 org/repo-homing); "
             "showing it implies a live install that would 404 (S-3)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Slice 4 — root README honesty + structural guards
+# ---------------------------------------------------------------------------
+
+_ROOT_README = _REPO_ROOT / "README.md"
+
+
+class TestRootReadmeNoPypiLine:
+    """S-3 applied to the root README: no 'pip install trailhead' line allowed.
+
+    The current root README has TWO such lines; the narrative landing must remove them.
+    """
+
+    def test_root_readme_no_pip_install_trailhead(self):
+        """Root README must not contain 'pip install trailhead' (S-3, D-2 no-lie)."""
+        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
+        text = _ROOT_README.read_text(encoding="utf-8")
+        assert "pip install trailhead" not in text, (
+            "README.md must not contain 'pip install trailhead' — "
+            "the public PyPI install does not exist yet (lands with WS-10 org/repo-homing). "
+            "Use the editable local install block ('Try it today') + the registry-future block "
+            "instead (S-3 / D-2)."
+        )
+
+
+class TestRootReadmeNoSemanticRecallOversell:
+    """Root README must not present Tier-2 semantic/embedding recall as a built feature (D-2).
+
+    Mirrors the lore-README guard from Slice 3. Tier-2 local embeddings are opt-in and
+    NOT built (D23). Any mention must carry a not-yet-built qualifier.
+    """
+
+    def test_root_readme_no_unqualified_semantic_recall(self):
+        """Root README must not claim semantic/embedding recall as built.
+
+        Phrase-pinned regression sentinel: triggers on embedding/semantic vocabulary a
+        reintroduction would most likely use. A wholly-novel paraphrase could slip past;
+        the prose-honesty review is the backstop.
+        """
+        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
+        text = _ROOT_README.read_text(encoding="utf-8")
+        trigger_terms = ("semantic recall", "semantic search", "embedding", "vector search")
+        qualifying_terms = ("planned", "not yet", "coming soon", "opt-in", "not built")
+        unqualified_lines = []
+        for line in text.splitlines():
+            lower = line.lower()
+            if any(t in lower for t in trigger_terms):
+                if not any(q in lower for q in qualifying_terms):
+                    unqualified_lines.append(line.strip())
+        assert not unqualified_lines, (
+            "README.md must not present Tier-2 semantic/embedding recall as a built feature. "
+            "If mentioned at all, qualify explicitly as 'planned / not yet built'. "
+            f"Unqualified occurrences: {unqualified_lines}"
+        )
+
+
+class TestRootReadmeStructuralGuard:
+    """A-3: the root README must NOT place a four-tool markdown table before the lore lead.
+
+    The funnel rule: the lore use-case + first command must appear BEFORE any
+    multi-tool table that names lore, camp, and forge together in a single row.
+    This prevents the 'concept-map first' anti-pattern the plan warns against.
+
+    Implementation: find the character-offset of the first fenced sh/bash block
+    (the lore lead's two commands) and the first multi-tool table row (a Markdown
+    table row containing at least two of: lore, camp, forge). Assert the fenced
+    block comes first.
+    """
+
+    def test_lore_lead_appears_before_multi_tool_table(self):
+        """The first fenced sh/bash block (lore lead) must precede any multi-tool table row.
+
+        A multi-tool table row is any '| ... |' line that names at least two of the
+        three tools (lore, camp, forge) — the signal that a 'What's included' concept
+        map has started. The lore use-case must come first (A-3).
+        """
+        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
+        text = _ROOT_README.read_text(encoding="utf-8")
+
+        # Locate the first fenced sh/bash block
+        fenced_match = _FENCED_BLOCK_RE.search(text)
+        assert fenced_match is not None, (
+            "README.md has no fenced sh/bash code block — "
+            "the lore use-case lead must include at least one runnable command block"
+        )
+        first_fenced_offset = fenced_match.start()
+
+        # Locate the first multi-tool table row: a '|' line naming ≥2 of lore/camp/forge
+        multi_tool_table_offset: int | None = None
+        for line_match in re.finditer(r"^\|.*\|.*$", text, re.MULTILINE):
+            line_text = line_match.group(0).lower()
+            named_tools = sum(1 for t in ("lore", "camp", "forge") if t in line_text)
+            if named_tools >= 2:
+                multi_tool_table_offset = line_match.start()
+                break
+
+        if multi_tool_table_offset is None:
+            # No multi-tool table found — the guard is trivially satisfied
+            return
+
+        assert first_fenced_offset < multi_tool_table_offset, (
+            "README.md places a multi-tool concept table before the lore lead. "
+            f"First fenced block at offset {first_fenced_offset}; "
+            f"first multi-tool table row at offset {multi_tool_table_offset}. "
+            "The lore use-case + first command must appear before the 'What's included' "
+            "table — lead with one use case, not the concept map (A-3)."
+        )
