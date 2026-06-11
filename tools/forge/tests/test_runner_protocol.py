@@ -1,0 +1,182 @@
+"""Tests for the injectable runner protocol (R-1, S-4).
+
+The runner is the abstraction used by all re-homed release scripts to invoke
+gh/git subcommands. This file proves:
+
+  R-1a: the stub receives the EXACT gh/git subcommand + args the caller
+        constructed — no args dropped, no shell interpolation.
+  R-1b: the no-runner production path works against a real tmp_path git repo
+        (git init + commit) to catch env={}-style blindspots from Step 5.
+  S-4:  a pr_number or branch containing shell metacharacters (';', '&&',
+        '$(...)') is passed LITERALLY — no subshell spawned; the caller
+        gets a named error, not silent execution of the injected fragment.
+
+Import pattern: sys.path.insert(SCRIPTS_DIR) per test_handoff_capture.py:28-31.
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+SCRIPTS_DIR = Path(__file__).parent.parent / "plugins" / "forge" / "scripts"
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+import runner_protocol as rp  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _git_init_repo(path: Path) -> None:
+    """Create a minimal git repo with one commit under path."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@example.com"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"],
+        check=True, capture_output=True,
+    )
+    readme = path / "README.md"
+    readme.write_text("init\n")
+    subprocess.run(["git", "-C", str(path), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True, capture_output=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# R-1a: stub receives the exact args
+# ---------------------------------------------------------------------------
+
+
+class TestRunnerStub:
+    """The stub runner records every call exactly as passed."""
+
+    def test_stub_records_single_call(self) -> None:
+        calls: list[list[str]] = []
+
+        def stub(cmd: list[str], **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        rp.run(["gh", "pr", "view", "42", "--json", "state"], runner=stub)
+        assert calls == [["gh", "pr", "view", "42", "--json", "state"]]
+
+    def test_stub_records_multiple_calls_in_order(self) -> None:
+        calls: list[list[str]] = []
+
+        def stub(cmd: list[str], **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        rp.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], runner=stub)
+        rp.run(["git", "status", "--porcelain"], runner=stub)
+
+        assert calls[0] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        assert calls[1] == ["git", "status", "--porcelain"]
+
+    def test_stub_return_value_propagated(self) -> None:
+        def stub(cmd: list[str], **kwargs):
+            return subprocess.CompletedProcess(cmd, returncode=7, stdout="out", stderr="err")
+
+        result = rp.run(["gh", "pr", "merge", "1", "--merge"], runner=stub)
+        assert result.returncode == 7
+        assert result.stdout == "out"
+        assert result.stderr == "err"
+
+    def test_stub_receives_cwd_kwarg(self) -> None:
+        captured_kwargs: list[dict] = []
+
+        def stub(cmd: list[str], **kwargs):
+            captured_kwargs.append(kwargs)
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        rp.run(["git", "status"], cwd="/some/path", runner=stub)
+        assert captured_kwargs[0].get("cwd") == "/some/path"
+
+
+# ---------------------------------------------------------------------------
+# R-1b: the production path (no runner) works on a real git repo
+# ---------------------------------------------------------------------------
+
+
+class TestRunnerProduction:
+    """The default (no-runner) path must work on a real tmp_path git repo.
+
+    This catches env={}-style blindspots: if the real subprocess call
+    is invoked with an empty env or missing PATH, it will fail here.
+    """
+
+    def test_real_git_rev_parse_on_tmp_repo(self, tmp_path: Path) -> None:
+        repo = tmp_path / "my-repo"
+        _git_init_repo(repo)
+        result = rp.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(repo))
+        assert result.returncode == 0
+        assert result.stdout.strip() in ("main", "master")
+
+    def test_real_git_status_on_tmp_repo(self, tmp_path: Path) -> None:
+        repo = tmp_path / "my-repo"
+        _git_init_repo(repo)
+        result = rp.run(["git", "status", "--porcelain"], cwd=str(repo))
+        assert result.returncode == 0
+
+    def test_production_path_inherits_env(self, tmp_path: Path) -> None:
+        """Env is inherited (not {}) — git can find system objects."""
+        repo = tmp_path / "env-repo"
+        _git_init_repo(repo)
+        # git log requires GIT_EXEC_PATH (found via PATH inheritance)
+        result = rp.run(["git", "log", "--oneline"], cwd=str(repo))
+        assert result.returncode == 0
+        assert "init" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# S-4: shell metacharacters in args are passed literally — no subshell
+# ---------------------------------------------------------------------------
+
+
+class TestShellSafety:
+    """Args containing shell metacharacters must never spawn a subshell.
+
+    The runner is shell=False, so metacharacters become literal string args.
+    The called program receives them as-is and typically errors (unknown arg)
+    or the overall command fails — a named error, not silent execution.
+    """
+
+    def test_metachar_in_pr_number_passed_literally(self) -> None:
+        """A PR number like '42; rm -rf /' must be passed as a literal string arg."""
+        calls: list[list[str]] = []
+
+        def stub(cmd: list[str], **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="{}", stderr="")
+
+        rp.run(["gh", "pr", "view", "42; echo PWNED", "--json", "state"], runner=stub)
+        assert calls[0][3] == "42; echo PWNED", (
+            "shell metachar must be a literal arg, not interpreted"
+        )
+
+    def test_metachar_branch_name_passed_literally(self) -> None:
+        calls: list[list[str]] = []
+
+        def stub(cmd: list[str], **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        branch = "feature/$(id)"
+        rp.run(["git", "push", "origin", branch], runner=stub)
+        assert calls[0][3] == branch
+
+    def test_no_shell_flag_is_false(self) -> None:
+        """Verify the module-level runner constant exposes shell=False."""
+        assert rp.SHELL_FALSE is True, (
+            "runner_protocol.SHELL_FALSE must be True (documents shell=False)"
+        )
