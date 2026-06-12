@@ -12,7 +12,7 @@ dependencies = []
 trailhead = "trailhead.cli:main"
 
 [tool.setuptools]
-packages = ["trailhead"]
+packages = ["trailhead", "trailhead.vcs"]
 
 [tool.pytest.ini_options]
 testpaths = [
