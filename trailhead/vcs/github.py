@@ -651,6 +651,9 @@ class _GitHubCI(CISurface):
         since: str | None = None,
         review_bot_login: str | None = None,
     ) -> dict[str, Any]:
+        # Deliberate same-underlying-read alias of pr.status: ci.checks and pr.status
+        # both fetch the current PR check state; they exist as separate surface methods
+        # so callers can route through the appropriate surface (CI vs PR concern).
         return _check_status(
             repo_path,
             pr_number,
@@ -680,7 +683,9 @@ class _GitHubCI(CISurface):
                     status = self._pr.status(
                         repo, pr, since=since, review_bot_login=review_bot_login,
                     )
-                    result = _evaluate(status, review_bot_login=review_bot_login, fail_count=0)
+                    result = self._pr.evaluate(
+                        status, review_bot_login=review_bot_login, fail_count=0,
+                    )
                 except Exception as e:
                     result = {"action": "error", "reason": str(e)}
 
@@ -692,8 +697,9 @@ class _GitHubCI(CISurface):
             if actionable:
                 return {"actionable": actionable, "waiting": waiting}
 
-            time.sleep(interval)
-            elapsed += interval
+            sleep_for = min(interval, timeout - elapsed)
+            time.sleep(sleep_for)
+            elapsed += sleep_for
 
         return {"timeout": True, "elapsed_seconds": elapsed}
 

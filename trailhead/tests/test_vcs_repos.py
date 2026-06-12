@@ -153,6 +153,22 @@ class TestReposDetect:
             provider.repos.detect(str(bad))
         assert str(bad) in str(exc_info.value)
 
+    def test_empty_members_returns_empty_list(self, tmp_path: Path) -> None:
+        """M-3: a valid manifest with members absent or empty returns [] — not an error."""
+        manifest_absent = tmp_path / "absent_members.json"
+        manifest_absent.write_text(
+            json.dumps({"schema_version": 1, "group": "grp", "slug": "feat"}),
+            encoding="utf-8",
+        )
+        manifest_empty = tmp_path / "empty_members.json"
+        manifest_empty.write_text(
+            json.dumps({"schema_version": 1, "group": "grp", "slug": "feat", "members": []}),
+            encoding="utf-8",
+        )
+        provider = get_provider("github", runner=lambda cmd, **kw: None)
+        assert provider.repos.detect(str(manifest_absent)) == []
+        assert provider.repos.detect(str(manifest_empty)) == []
+
     def test_detect_routes_through_injected_runner(self, manifest_path: Path) -> None:
         """Every git call is captured by the stub — none uses a shell string."""
         import subprocess

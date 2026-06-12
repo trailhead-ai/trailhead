@@ -160,6 +160,28 @@ class TestPrStatus:
         assert calls
         assert all(c[0] in ("gh", "git") for c in calls)
 
+    def test_since_filter_excludes_older_bot_reviews(self) -> None:
+        """M-2: bot reviews with submittedAt <= since are filtered out."""
+        view = {
+            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False,
+            "reviews": [
+                {"author": {"login": "my-bot"}, "state": "CHANGES_REQUESTED",
+                 "body": "old review", "submittedAt": "2024-01-01T10:00:00Z"},
+                {"author": {"login": "my-bot"}, "state": "APPROVED",
+                 "body": "new review", "submittedAt": "2024-06-01T10:00:00Z"},
+            ],
+        }
+        provider = get_provider("github", runner=_make_gh_stub(view, []))
+        # since is set after the old review but before the new one
+        result = provider.pr.status(
+            "some/path", "42",
+            review_bot_login="my-bot",
+            since="2024-03-01T00:00:00Z",
+        )
+        bot_reviews = result.get("botReviews", [])
+        assert len(bot_reviews) == 1, f"expected 1 bot review after since filter, got {bot_reviews}"
+        assert bot_reviews[0]["state"] == "APPROVED"
+
 
 # ---------------------------------------------------------------------------
 # ci.checks — annotation fetch integration
@@ -474,3 +496,63 @@ class TestCiWait:
         provider = get_provider("github", runner=stub)
         result = provider.ci.wait([("some/path", "1")], timeout=2, interval=1)
         assert result.get("timeout") is True
+
+    def test_total_slept_does_not_exceed_timeout(self) -> None:
+        """I-1: the loop must never sleep past timeout (no overshoot on terminal iteration)."""
+        draft_view = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "reviews": []}
+        slept: list[float] = []
+
+        def fake_sleep(secs: float) -> None:
+            slept.append(secs)
+
+        def stub(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "checks" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "[]", "")
+            if "pr" in cmd_str and "view" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(draft_view), "")
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+        import trailhead.vcs.github as gh_module
+        original_sleep = gh_module.time.sleep
+        gh_module.time.sleep = fake_sleep  # type: ignore[method-assign]
+        try:
+            provider = get_provider("github", runner=stub)
+            provider.ci.wait([("some/path", "1")], timeout=100, interval=30)
+        finally:
+            gh_module.time.sleep = original_sleep
+
+        assert slept, "expected at least one sleep call"
+        assert sum(slept) <= 100, (
+            f"total slept ({sum(slept)}) exceeded timeout (100); slept={slept}"
+        )
+
+    def test_wait_routes_evaluate_through_pr_surface(self) -> None:
+        """I-3: ci.wait must call self._pr.evaluate so a subclass override is honoured."""
+        from trailhead.vcs.github import _GitHubCI, _GitHubPR
+
+        evaluate_calls: list[dict] = []
+
+        class _CapturingPR(_GitHubPR):
+            def evaluate(self, status, *, review_bot_login=None, fail_count=0):
+                evaluate_calls.append({"status": status, "review_bot_login": review_bot_login})
+                # Return actionable immediately so the loop exits after one iteration.
+                return {"action": "done", "reason": "captured"}
+
+        view_data = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                     "isDraft": False, "reviews": []}
+
+        def stub(cmd, **kw):
+            cmd_str = " ".join(cmd)
+            if "checks" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "[]", "")
+            if "pr" in cmd_str and "view" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(view_data), "")
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+        pr = _CapturingPR(stub)
+        ci = _GitHubCI(stub, pr)
+        result = ci.wait([("some/path", "42")], timeout=60, interval=5)
+
+        assert evaluate_calls, "ci.wait did not route through self._pr.evaluate"
+        assert result.get("timeout") is not True

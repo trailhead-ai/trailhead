@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from trailhead.vcs import runner
+from trailhead.vcs import runner as _runner_module
 
 if TYPE_CHECKING:
     from trailhead.vcs.interface import Provider
@@ -62,5 +62,7 @@ def get_provider(name: str = _DEFAULT_PROVIDER, *, runner=None) -> "Provider":
     provider_cls = getattr(module, class_name)
     return provider_cls(runner=runner)
 
+
+runner = _runner_module  # re-export so ``from trailhead.vcs import runner`` works for callers
 
 __all__ = ["get_provider", "runner"]
