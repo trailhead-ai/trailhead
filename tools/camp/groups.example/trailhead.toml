@@ -1,7 +1,7 @@
 # camp group config for the trailhead monorepo.
 #
 # The trailhead group has one member: the trailhead repo itself.
-# lore, forge, and camp live inside it as tools/<name>/, not as separate member repos.
+# lore, craft, and camp live inside it as tools/<name>/, not as separate member repos.
 #
 # Multi-member lifecycle is validated via synthetic 2-member test fixtures (see
 # tools/camp/tests/). The 1-member trailhead group serves as the live smoke test.

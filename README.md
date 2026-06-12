@@ -42,11 +42,11 @@ siblings are available when you're ready:
 structured primitives for managing git worktrees across a group of repositories —
 the "where is the work happening" question, answered automatically.
 
-**→ Add forge** when you want the dev rituals: structured planning, TDD
+**→ Add craft** when you want the dev rituals: structured planning, TDD
 subagent-driven implementation slice by slice, assumption-proving scouts, and a
-four-lens council review. forge owns *how you build*; lore owns *what you know*.
+four-lens council review. craft owns *how you build*; lore owns *what you know*.
 
-**You never have to adopt the whole suite.** lore, camp, and forge are each
+**You never have to adopt the whole suite.** lore, camp, and craft are each
 independently adoptable — wire only what you need. portage and landing depend
 on the trailhead install layout (the `trailhead.vcs` library) and are available
 in the `full` preset for teams that want automated merge and deploy soak.
@@ -85,7 +85,7 @@ One `trailhead` repo ships all six tools, pinned at a single commit SHA:
 | `trailhead`  | Management CLI — install, update, doctor, config |
 | `lore`       | Agent-native project memory — capture, recall, sessions |
 | `camp`       | Worktree + group orchestration across repos |
-| `forge`      | Dev rituals — planning, TDD execute, review, release |
+| `craft`      | Dev rituals — planning, TDD execute, review, release |
 | `portage`    | PR lifecycle — open, update, watch CI, and merge in dependency order (`full` preset) |
 | `landing`    | Post-merge deploy soak and deploy-health diagnosis (`full` preset) |
 
@@ -114,7 +114,7 @@ lives, and the next command to run. Pick a preset:
 # minimal: lore only — lowest buy-in
 trailhead install --preset minimal
 
-# standard: lore + camp + forge subset — the common loop
+# standard: lore + camp + craft subset — the common loop
 trailhead install --preset standard
 
 # full: every capability in every tool
@@ -159,7 +159,7 @@ re-investigation, lore has paid for itself.
 ## Tool READMEs
 
 - [lore](./tools/lore/README.md) — skills, recall mechanics, vault layout
-- [forge](./tools/forge/README.md) — agents, skills, capability groups
+- [craft](./tools/craft/README.md) — agents, skills, capability groups
 - [camp](./tools/camp/README.md) — worktree commands, group config
 - [portage](./tools/portage/README.md) — PR lifecycle agents and skills
 - [landing](./tools/landing/README.md) — deploy soak and health-diagnosis agents and skills

@@ -55,7 +55,7 @@ _REPO_ROOT = Path(__file__).parent.parent
 _A6_MENU = """\
 Preset? [minimal / standard / full] (default: standard)
   minimal:  lore only — capture + recall (lowest buy-in)
-  standard: lore + camp + forge subset (the common loop)
+  standard: lore + camp + craft subset (the common loop)
   full:     everything
 """
 

@@ -5,7 +5,7 @@ with a YAML frontmatter block carrying a non-empty `name:` and `description:`.
 This test locks the invariant so a skill can't silently fail to register, and
 pins `name:` == the skill dir name.
 
-Unique basename so it does not collide with forge's/lore's/portage's same-named test.
+Unique basename so it does not collide with craft's/lore's/portage's same-named test.
 """
 from pathlib import Path
 

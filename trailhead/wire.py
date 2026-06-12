@@ -136,7 +136,7 @@ class WireError(Exception):
     """Raised when composing or registering a single tool fails.
 
     Attributes:
-        tool:  The tool name that failed (e.g. ``"forge"``).
+        tool:  The tool name that failed (e.g. ``"craft"``).
         stage: Which phase failed: ``"compose"``, ``"promote"``, or
                ``"register"``/``"rewire"``.
         cause: The underlying exception (also chained via ``__cause__``).
@@ -281,7 +281,7 @@ def default_manifest_paths() -> dict[str, Path]:
     return {
         "lore": repo_root / "tools" / "lore" / "capabilities.toml",
         "camp": repo_root / "tools" / "camp" / "capabilities.toml",
-        "forge": repo_root / "tools" / "forge" / "capabilities.toml",
+        "craft": repo_root / "tools" / "craft" / "capabilities.toml",
     }
 
 

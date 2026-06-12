@@ -5,7 +5,7 @@ Usage: check_pr_status.py <repo-path> <pr-number> [--since <iso>]
        [--review-bot-login <login>]
 
 Thin consumer of trailhead.vcs: delegates to ``get_provider().pr.status(...)``.
-Reproduces the forge CLI's argv + JSON output shape.
+Reproduces the craft CLI's argv + JSON output shape.
 
 Output JSON:
   {mergeable, mergeStateStatus, isDraft, failingChecks[, botReviews]}

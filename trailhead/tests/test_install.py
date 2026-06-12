@@ -5,8 +5,8 @@ implementation exists, then pass after.
 
 Test contract:
   - --preset minimal → wires lore only, persists preset+caps to config, summary
-    names lore (not camp/forge), includes next command + config path + restart note.
-  - --preset standard → wires lore+camp+forge subset.
+    names lore (not camp/craft), includes next command + config path + restart note.
+  - --preset standard → wires lore+camp+craft subset.
   - --preset full → all tools.
   - Unknown --preset → named error, nonzero exit.
   - non-TTY, no --preset → defaults to standard, prints "defaulting to standard"
@@ -173,10 +173,10 @@ class TestPresetMinimal:
         # (it may appear in help text, but not as a wired tool)
         assert "camp" not in out.lower() or "wired" not in out.lower()
 
-    def test_summary_does_not_name_forge(self, tmp_path):
+    def test_summary_does_not_name_craft(self, tmp_path):
         env = _hermetic_env(tmp_path)
         code, out, err = _run_install(["--preset", "minimal"], env=env)
-        assert "forge" not in out.lower() or "wired" not in out.lower()
+        assert "craft" not in out.lower() or "wired" not in out.lower()
 
     def test_config_persisted_preset_minimal(self, tmp_path):
         env = _hermetic_env(tmp_path)
@@ -224,7 +224,7 @@ class TestPresetMinimal:
 
 
 # ---------------------------------------------------------------------------
-# T-I2: --preset standard → lore + camp + forge subset
+# T-I2: --preset standard → lore + camp + craft subset
 # ---------------------------------------------------------------------------
 
 
@@ -234,12 +234,12 @@ class TestPresetStandard:
         code, out, err = _run_install(["--preset", "standard"], env=env)
         assert code == 0
 
-    def test_summary_names_lore_camp_forge(self, tmp_path):
+    def test_summary_names_lore_camp_craft(self, tmp_path):
         env = _hermetic_env(tmp_path)
         code, out, err = _run_install(["--preset", "standard"], env=env)
         assert "lore" in out
         assert "camp" in out
-        assert "forge" in out
+        assert "craft" in out
 
     def test_config_persisted_preset_standard(self, tmp_path):
         env = _hermetic_env(tmp_path)
@@ -253,16 +253,16 @@ class TestPresetStandard:
         cfg = _load_config(env)
         assert "camp" in cfg.capabilities
 
-    def test_config_persisted_forge_capabilities(self, tmp_path):
+    def test_config_persisted_craft_capabilities(self, tmp_path):
         env = _hermetic_env(tmp_path)
         _run_install(["--preset", "standard"], env=env)
         cfg = _load_config(env)
-        assert "forge" in cfg.capabilities
-        forge_caps = set(cfg.capabilities["forge"])
-        assert "planning" in forge_caps
-        assert "execute" in forge_caps
-        assert "review" in forge_caps
-        assert "helpers" in forge_caps
+        assert "craft" in cfg.capabilities
+        craft_caps = set(cfg.capabilities["craft"])
+        assert "planning" in craft_caps
+        assert "execute" in craft_caps
+        assert "review" in craft_caps
+        assert "helpers" in craft_caps
 
 
 # ---------------------------------------------------------------------------
@@ -276,12 +276,12 @@ class TestPresetFull:
         code, out, err = _run_install(["--preset", "full"], env=env)
         assert code == 0
 
-    def test_summary_names_lore_camp_forge(self, tmp_path):
+    def test_summary_names_lore_camp_craft(self, tmp_path):
         env = _hermetic_env(tmp_path)
         code, out, err = _run_install(["--preset", "full"], env=env)
         assert "lore" in out
         assert "camp" in out
-        assert "forge" in out
+        assert "craft" in out
 
     def test_config_persisted_preset_full(self, tmp_path):
         env = _hermetic_env(tmp_path)
@@ -658,9 +658,9 @@ class TestMultiLineSummary:
         lines = [l for l in out.strip().splitlines() if l.strip()]
         assert len(lines) > 1
 
-    def test_standard_summary_names_forge_caps_separately(self, tmp_path):
-        """A-10: standard preset summary should show forge caps on a line."""
+    def test_standard_summary_names_craft_caps_separately(self, tmp_path):
+        """A-10: standard preset summary should show craft caps on a line."""
         env = _hermetic_env(tmp_path)
         code, out, err = _run_install(["--preset", "standard"], env=env)
-        # forge capabilities should be visible in summary
+        # craft capabilities should be visible in summary
         assert "planning" in out or "execute" in out or "review" in out

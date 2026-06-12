@@ -5,7 +5,7 @@ tools/portage/plugins/portage/agents/monitor.md (the producer) are a SUPERSET
 of the required inputs documented in
 tools/landing/plugins/landing/agents/soaker.md (the consumer).
 
-This guards the boundary introduced when Slice 6b deleted the old forge
+This guards the boundary introduced when Slice 6b deleted the old craft
 test_handoff_field_parity.py: the contract survived the deletion because the
 producer/consumer moved to portage monitor → landing soaker.
 

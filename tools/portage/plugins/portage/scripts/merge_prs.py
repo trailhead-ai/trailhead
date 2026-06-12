@@ -5,7 +5,7 @@ Usage: merge_prs.py --manifest <path> [--toml <path>] <path1:pr1[:name]> [...]
 
 Thin consumer of trailhead.vcs: delegates to ``get_provider().pr.merge(...)``.
 The provider owns the ordered-merge logic and the R-6 safety gate (>1 PR with no
-merge_order declared → refuse). This script reproduces the forge CLI's argv,
+merge_order declared → refuse). This script reproduces the craft CLI's argv,
 JSON output, and exit codes, including surfacing the R-6 refusal.
 
 Output JSON:

@@ -5,7 +5,7 @@ Plan: 2026-06-12-trailhead-lean-execute-loop-controller
 - Slice 2: code-reviewer structured verdict (agents/code-reviewer.md + skills/review/code-reviewer.md)
 - Slice 3: execute SKILL §4 single-pass + §5 working set (skills/execute/SKILL.md)
 
-TDD contract: grep-style body guards on the forge agent/skill prompt files.
+TDD contract: grep-style body guards on the craft agent/skill prompt files.
 
 Per the binding vacuous-test lesson: assert *distinctive, contiguous* phrases,
 and pair every "added" assertion with a "removed" / negative assertion. The
@@ -24,9 +24,9 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
-_FORGE_PLUGIN_ROOT = _REPO_ROOT / "tools" / "forge" / "plugins" / "forge"
+_CRAFT_PLUGIN_ROOT = _REPO_ROOT / "tools" / "craft" / "plugins" / "craft"
 
-_EXECUTOR_MD = _FORGE_PLUGIN_ROOT / "agents" / "executor.md"
+_EXECUTOR_MD = _CRAFT_PLUGIN_ROOT / "agents" / "executor.md"
 
 
 # ---------------------------------------------------------------------------
@@ -335,8 +335,8 @@ class TestSecurityEscalationInHead:
 #   A synonym like "maximum length" must FAIL — assert the contiguous token, not the concept.
 # ---------------------------------------------------------------------------
 
-_AGENT_REVIEWER_MD = _FORGE_PLUGIN_ROOT / "agents" / "code-reviewer.md"
-_SKILL_REVIEWER_MD = _FORGE_PLUGIN_ROOT / "skills" / "review" / "code-reviewer.md"
+_AGENT_REVIEWER_MD = _CRAFT_PLUGIN_ROOT / "agents" / "code-reviewer.md"
+_SKILL_REVIEWER_MD = _CRAFT_PLUGIN_ROOT / "skills" / "review" / "code-reviewer.md"
 
 _CAP_PHRASE = "hard cap:"  # the exact contiguous token the implementer must write
 
@@ -579,7 +579,7 @@ class TestCodeReviewerSeverityLabelsInvariant:
 #   INVARIANT §5: plan-file-as-source-of-truth + draft→in-progress still present.
 # ---------------------------------------------------------------------------
 
-_EXECUTE_SKILL_MD = _FORGE_PLUGIN_ROOT / "skills" / "execute" / "SKILL.md"
+_EXECUTE_SKILL_MD = _CRAFT_PLUGIN_ROOT / "skills" / "execute" / "SKILL.md"
 
 
 def _execute_skill_text() -> str:

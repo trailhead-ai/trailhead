@@ -57,12 +57,12 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 The manual end-to-end parity gate — open → CI watch → merge (portage) plus
 soak → doctor (landing) — is documented in
 [`MANUAL-SMOKE.md`](MANUAL-SMOKE.md). Run it on a real PR before any deletion
-of the preceding forge `release` capability cluster.
+of the preceding craft `release` capability cluster.
 
 ## Relationship to the rest of trailhead
 
 portage ships inside the trailhead install layout and consumes the shared
 `trailhead.vcs` library; it is not independently adoptable. It sits alongside its
-sibling plugins — [lore](../lore) (knowledge management), [forge](../forge)
+sibling plugins — [lore](../lore) (knowledge management), [craft](../craft)
 (plan / execute / review), and [camp](../camp) (group worktrees) — and reuses
-forge's general helper agents (`log-sifter`, `code-reviewer`) at runtime.
+craft's general helper agents (`log-sifter`, `code-reviewer`) at runtime.

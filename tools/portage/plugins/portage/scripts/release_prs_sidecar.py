@@ -5,7 +5,7 @@ The sidecar lives alongside the camp central manifest: <manifest_dir>/prs.json
 
 Thin consumer of trailhead.vcs: ``write`` delegates to ``get_provider().pr.open``
 (atomic, 0o600); ``read`` delegates to ``get_provider().pr.read_sidecar`` (schema-
-validated). Reproduces the forge CLI's argv + JSON output + exit codes.
+validated). Reproduces the craft CLI's argv + JSON output + exit codes.
 
 CLI usage:
     release_prs_sidecar.py write --sidecar <path> --pr <repo>:<pr_number>:<url>:<branch> [--pr ...]

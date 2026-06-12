@@ -629,7 +629,7 @@ class TestNewArea:
 # ---------------------------------------------------------------------------
 # Generated notes must never bake in an absolute home/machine path. Project- or
 # stack-specific token enforcement on the *shipped* tree is delegated to the
-# denylist-driven pre-commit gate (see README → forge leak gate), which reads a
+# denylist-driven pre-commit gate (see README → craft leak gate), which reads a
 # machine-local denylist so no private token lives in this tracked repo.
 
 class TestLeakGate:

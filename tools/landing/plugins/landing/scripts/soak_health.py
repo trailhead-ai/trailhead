@@ -3,7 +3,7 @@
 
 Reads `soak_health_command` from the `[release]` block of the group TOML
 (path passed as an explicit --toml arg). Landing's own concern — this probe is
-NOT behind the provider abstraction; it is a verbatim port of forge's
+NOT behind the provider abstraction; it is a verbatim port of craft's
 soak_health.py, stdlib-only (it never imports trailhead).
 
 Execution contract (D-3 / S-1 / R-3 / R-4):

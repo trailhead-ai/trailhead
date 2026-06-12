@@ -1,20 +1,20 @@
 # Extending lore for your project
 
 This is the adopter cookbook: how to take the two portable plugins — **lore**
-(a git-backed second brain) and **forge** (portable dev agents) — and bolt your
+(a git-backed second brain) and **craft** (portable dev agents) — and bolt your
 own project-specific layer on top, without forking either plugin.
 
 If you only want to install and use lore as-is, see the
-[README](../README.md). This guide is for when you want forge's planning and
+[README](../README.md). This guide is for when you want craft's planning and
 review skills to talk to *your* feature-flag provider, *your* issue tracker,
 *your* metrics stack, or *your* test commands.
 
 > **Architecture as of 2026-06-04.** All three layers described below ship today:
-> lore and forge are published plugins, and the "app layer" pattern is a thin
+> lore and craft are published plugins, and the "app layer" pattern is a thin
 > project-scoped `.claude/` directory you write. This guide describes the
 > shipped state, not a roadmap. The extension points named here are sourced from
 > the actual `extension point — X` seams in the shipped skills and agents; the
-> forge `plugins/forge/docs/DEGRADATION.md` and
+> craft `plugins/craft/docs/DEGRADATION.md` and
 > [lore DEGRADATION.md](DEGRADATION.md) are the canonical re-add references and
 > the source of truth if this guide and they ever disagree.
 
@@ -30,7 +30,7 @@ Adoption is a stack of three layers with a strict, one-directional dependency:
 │                    skills,hooks} + a thin config + any    │
 │                    app-specific tail                      │
 ├─────────────────────────────────────────────────────────┤
-│  forge           — portable dev agents (planning, review, │
+│  craft           — portable dev agents (planning, review, │
 │                    subagent-driven dev, test-runner, …)   │
 ├─────────────────────────────────────────────────────────┤
 │  lore            — portable PKM (capture, session notes,  │
@@ -40,11 +40,11 @@ Adoption is a stack of three layers with a strict, one-directional dependency:
 
 **lore** is the bottom, fully portable layer: capture commands, automatic
 session notes, branch/keyword recall, and a vault with a status guard. It has
-**no** dependency on forge and no knowledge of your app.
+**no** dependency on craft and no knowledge of your app.
 
-**forge** is the dev-agent layer: planning, code review, subagent-driven
+**craft** is the dev-agent layer: planning, code review, subagent-driven
 development, and the helper agents (`test-runner`, `log-sifter`,
-`pr-summarizer`, `researcher`, the council). forge **may** use lore — several of
+`pr-summarizer`, `researcher`, the council). craft **may** use lore — several of
 its skills and agents write durable notes to the vault through the `lore` CLI,
 and the council agents will consult a knowledge-synthesis subagent
 (`lore:librarian`) if one is installed. This dependency only ever points
@@ -52,10 +52,10 @@ and the council agents will consult a knowledge-synthesis subagent
 
 **The dependency rule:**
 
-> forge MAY use lore. lore MUST NOT need forge.
+> craft MAY use lore. lore MUST NOT need craft.
 
 That is what makes lore adoptable on its own — you can install lore in a repo
-that has no dev-agent workflow at all, and nothing breaks. forge degrades
+that has no dev-agent workflow at all, and nothing breaks. craft degrades
 gracefully when lore (or any other optional integration) is absent: it prints a
 visible-skip notice instead of failing.
 
@@ -64,7 +64,7 @@ and hooks that know about *your* stack. It lives in the project's own
 `.claude/` directory (project-scoped, committed to your app repo), plus a thin
 config file and whatever app-specific tail you need. This is where you wire the
 extension points (Section 3) to your real providers. You never edit the lore or
-forge plugins to do this — you add a project layer that fills their seams.
+craft plugins to do this — you add a project layer that fills their seams.
 
 ---
 
@@ -76,8 +76,8 @@ forge plugins to do this — you add a project layer that fills their seams.
 /plugin marketplace add https://github.com/<lore-repo>
 /plugin install lore@lore-local
 
-/plugin marketplace add https://github.com/<forge-repo>
-/plugin install forge@forge-local
+/plugin marketplace add https://github.com/<craft-repo>
+/plugin install craft@craft-local
 ```
 
 Substitute the published repository URLs for your fork (or this repo). For local
@@ -142,7 +142,7 @@ command path first.
 
 ## 3. Extension-point cookbook
 
-forge's dev skills and lore's planning-adjacent skills carry **extension
+craft's dev skills and lore's planning-adjacent skills carry **extension
 points** — named seams where the generic skill defers to a provider you wire in
 your app layer. When a seam is unconfigured, the skill emits a **visible-skip**
 notice (it announces the omission rather than silently dropping the step) and
@@ -152,7 +152,7 @@ layer and wiring it at the named step.
 **The re-add paths below are summarized — the canonical, never-stale source of
 truth is the DEGRADATION reference, which you should link to and follow:**
 
-- **forge `plugins/forge/docs/DEGRADATION.md`** — the formal table for
+- **craft `plugins/craft/docs/DEGRADATION.md`** — the formal table for
   `feature_flags`, `observability`, and `issue_tracker`, with the exact
   visible-skip phrase and re-add path for each.
 - [lore DEGRADATION.md](DEGRADATION.md) — lore's own degradations (see
@@ -165,7 +165,7 @@ truth is the DEGRADATION reference, which you should link to and follow:**
 | **`feature_flags`** | Provider-specific flag naming + the flag-configuration dispatch in `planning` and `execute`. The flag-touchpoint *decision* still happens; only provider wire-up is skipped. | `no feature-flag provider configured — see the extend guide` / `flag setup skipped` | Add a flag-configuration skill to your app layer that knows your provider's SDK and naming conventions; dispatch it at the Pre-Loop flag-setup step. |
 | **`observability`** | Provider-specific metric naming, alert-rule generation, and health-check wiring in `planning` and the `planner` agent. The Observability & Failure Visibility *decision* still happens. | `no observability provider configured — see the extend guide` | Add an alert/metric-configuration skill that knows your metrics/alerting provider's conventions; dispatch it at the provider step. |
 | **`issue_tracker`** | Advancing your work item's status (in-progress / complete transitions) from `planning`, `execute`, and `intake`. The plan is always written to the vault. | `no issue tracker configured — status sync skipped` / `status transitions skipped` | Add a tracker-sync skill that calls your tracker's API; hook it into the plan-write, loop-entry, and after-all-slices steps. |
-| **`design_mockup`** | The mockup-generation step in lore's `brainstorm` skill, for ideas with a user-facing surface. With forge installed this is wired LIVE to the forge `artist` agent (its default provider). | `the mockup step is skipped` (announced when design work isn't applicable or no chrome catalog exists; or when no `design_mockup` provider is available because forge isn't installed) | Install forge — `brainstorm` dispatches its `artist` agent by default. Or add your own design-mockup tool/skill to your app layer as the provider; `brainstorm` dispatches it with a structured brief. |
+| **`design_mockup`** | The mockup-generation step in lore's `brainstorm` skill, for ideas with a user-facing surface. With craft installed this is wired LIVE to the craft `artist` agent (its default provider). | `the mockup step is skipped` (announced when design work isn't applicable or no chrome catalog exists; or when no `design_mockup` provider is available because craft isn't installed) | Install craft — `brainstorm` dispatches its `artist` agent by default. Or add your own design-mockup tool/skill to your app layer as the provider; `brainstorm` dispatches it with a structured brief. |
 | **`build_test_commands`** | The exact build/test/lint command the `test-runner` agent runs. The agent is stack-agnostic — it runs whatever command it is given. | (no provider banner — the caller simply supplies the command per invocation) | Pass your project's test runner, lint tool, or CI script as the command when you dispatch `test-runner`, or wrap it in an app skill that always supplies your stack's commands. |
 
 Describe these generically for your own stack: `issue_tracker` → *your* tracker's
@@ -201,7 +201,7 @@ duplicate them, so they cannot drift.
 ## 4. Worked example — a reference adopter
 
 Here is what a real adopter stack looks like, abstracted to vendor-neutral terms.
-A reference adopter installs **lore + forge** and adds a project `.claude/`
+A reference adopter installs **lore + craft** and adds a project `.claude/`
 layer plus a `project.config.json`-style tail:
 
 ```
@@ -246,7 +246,7 @@ the providers your team uses and write the thin skills that bridge to them.
 
 ## 5. Checklist
 
-1. Install lore and forge from the marketplace.
+1. Install lore and craft from the marketplace.
 2. `export LORE_VAULT` and `lore init` a vault.
 3. Create a project `.claude/` with `settings.json` registering any hooks via
    **`$CLAUDE_PROJECT_DIR`-anchored** command paths (never relative).
@@ -262,5 +262,5 @@ Content-accuracy note: the extension points named in this guide
 build_test_commands) are cross-checked against the shipped `extension point — X`
 seams by tests/test_extending_doc.py. If you add or rename a seam upstream,
 that test forces this guide to keep pace. Manual cross-check last performed
-2026-06-04 against the lore + forge shipped skills/agents and DEGRADATION.md.
+2026-06-04 against the lore + craft shipped skills/agents and DEGRADATION.md.
 -->

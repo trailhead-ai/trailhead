@@ -86,7 +86,7 @@ active") is handled *inside* `hooks.json` via matchers, not by splitting
 the hooks file across capabilities.  You cannot meaningfully compose two
 capabilities' `hooks_json` paths.
 
-Forge has no hooks — `hooks_json` is omitted entirely.
+Craft has no hooks — `hooks_json` is omitted entirely.
 
 ---
 

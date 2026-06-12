@@ -6,7 +6,7 @@ Asserts that:
 2. area/SKILL.md no longer contains "inactive" / "removed pending" recall language
    and describes agent-driven recall.
 3. agents/librarian.md references `lore recall` with `--json`.
-4. tools/forge/plugins/forge/agents/planner.md references `lore recall --areas`.
+4. tools/craft/plugins/craft/agents/planner.md references `lore recall --areas`.
 
 These are anti-regression tests for D-9 (recall wired as primary, not advisory).
 """
@@ -18,20 +18,20 @@ PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
 AGENTS_DIR = PLUGIN_ROOT / "agents"
 
-# forge planner lives in the sibling forge plugin tree
+# craft planner lives in the sibling craft plugin tree
 # __file__ = tools/lore/tests/test_recall_wiring.py
 # parent      = tools/lore/tests/
 # parent.parent = tools/lore/
 # parent.parent.parent = tools/
-FORGE_AGENTS_DIR = (
+CRAFT_AGENTS_DIR = (
     Path(__file__).parent.parent.parent  # tools/
-    / "forge" / "plugins" / "forge" / "agents"
+    / "craft" / "plugins" / "craft" / "agents"
 )
 
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 _AREA_SKILL = SKILLS_DIR / "area" / "SKILL.md"
 _LORE_LIBRARIAN = AGENTS_DIR / "librarian.md"
-_FORGE_PLANNER = FORGE_AGENTS_DIR / "planner.md"
+_CRAFT_PLANNER = CRAFT_AGENTS_DIR / "planner.md"
 
 
 # ---------------------------------------------------------------------------
@@ -184,20 +184,20 @@ class TestLoreLibrarianRecallPrimitive:
 
 
 # ---------------------------------------------------------------------------
-# forge planner agent — recall reference
+# craft planner agent — recall reference
 # ---------------------------------------------------------------------------
 
-class TestForgePlannerRecallReference:
-    def test_forge_planner_references_lore_recall_areas(self):
-        """forge planner.md must reference `lore recall --areas` in its
+class TestCraftPlannerRecallReference:
+    def test_craft_planner_references_lore_recall_areas(self):
+        """craft planner.md must reference `lore recall --areas` in its
         context-exploration / discovery step."""
-        assert _FORGE_PLANNER.exists(), (
-            f"forge planner.md not found at {_FORGE_PLANNER}. "
-            "Check the path: tools/forge/plugins/forge/agents/planner.md"
+        assert _CRAFT_PLANNER.exists(), (
+            f"craft planner.md not found at {_CRAFT_PLANNER}. "
+            "Check the path: tools/craft/plugins/craft/agents/planner.md"
         )
-        text = _FORGE_PLANNER.read_text()
+        text = _CRAFT_PLANNER.read_text()
         assert "lore recall" in text, (
-            "forge/agents/planner.md must reference `lore recall --areas` in its "
+            "craft/agents/planner.md must reference `lore recall --areas` in its "
             "context-exploration step (D-9, Slice 3). Add a mention of running "
             "`lore recall --areas <names>` for the areas the task touches."
         )

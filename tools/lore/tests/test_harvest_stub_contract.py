@@ -50,7 +50,7 @@ ENTRY_RE: re.Pattern = _hook.ENTRY_RE
 
 _RESEARCHER_MD = (
     Path(__file__).resolve().parent.parent.parent.parent
-    / "tools" / "forge" / "plugins" / "forge" / "agents" / "researcher.md"
+    / "tools" / "craft" / "plugins" / "craft" / "agents" / "researcher.md"
 )
 
 # The old harvest type, assembled at runtime to avoid tripping the renames guard.
@@ -307,7 +307,7 @@ class TestResearcherMdInvariants:
 
 _AGENTS_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
-    / "tools" / "forge" / "plugins" / "forge" / "agents"
+    / "tools" / "craft" / "plugins" / "craft" / "agents"
 )
 
 # (stem, distinctive_role_keyword) — the keyword is a substring that only exists

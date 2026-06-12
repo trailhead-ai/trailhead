@@ -1,6 +1,6 @@
 """Tests for trailhead.vcs.runner — the injectable runner seam (R-1, S-4).
 
-Copied from forge's runner_protocol.py contract. Proves:
+Copied from craft's runner_protocol.py contract. Proves:
 
   R-1a: the stub receives the EXACT gh/git subcommand + args the caller
         constructed — no args dropped, no shell interpolation.

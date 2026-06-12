@@ -1,6 +1,6 @@
 """Tests for GitHubProvider pr.status / pr.evaluate / pr.merge / ci.checks / ci.wait.
 
-Ports the forge test coverage (test_pr_evaluate.py, test_merge_prs.py) rewritten
+Ports the craft test coverage (test_pr_evaluate.py, test_merge_prs.py) rewritten
 against the provider interface. All gh/git calls go through an injected stub
 runner — zero network. No hardcoded review-bot login (a passed param).
 """

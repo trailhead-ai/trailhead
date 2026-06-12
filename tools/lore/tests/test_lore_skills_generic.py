@@ -115,16 +115,16 @@ def test_template_has_no_private_tokens(template_md: Path):
 
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 
-# The four extension-point skip notices plus the cross-plugin forge handoff.
+# The four extension-point skip notices plus the cross-plugin craft handoff.
 # Each tuple is: (test_id, phrase) — phrase is a SINGLE DISTINCTIVE CONTIGUOUS
 # substring that must appear verbatim. These are deliberately not split into
 # common-word parts: a "parts present anywhere" check is vacuous (the council
-# Advocate forge-handoff guard would pass even if the whole notice were deleted,
-# as long as "forge"/"plugin"/"planning" survived elsewhere). Each phrase below
+# Advocate craft-handoff guard would pass even if the whole notice were deleted,
+# as long as "craft"/"plugin"/"planning" survived elsewhere). Each phrase below
 # is load-bearing — deleting the seam's notice deletes the only occurrence.
 #
 # design_mockup is no longer a stripped seam: the artist brainstorm cutover
-# (Slice 8) wires it LIVE, so brainstorm now dispatches the forge `artist` as the
+# (Slice 8) wires it LIVE, so brainstorm now dispatches the craft `artist` as the
 # DEFAULT provider rather than announcing the step's absence. Its assertion moved
 # to test_brainstorm_dispatches_artist below. The fallback ("note the mockup step
 # is skipped") still surfaces verbally when design work isn't applicable, but it
@@ -133,7 +133,7 @@ _BRAINSTORM_SKIP_PHRASES: list[tuple[str, str]] = [
     ("feature_flags_skip", "no feature-flag provider configured"),
     ("observability_skip", "no observability provider configured"),
     ("issue_tracker_skip", "no issue tracker configured"),
-    ("forge_planning_handoff", "skill lives in the forge plugin"),
+    ("craft_planning_handoff", "skill lives in the craft plugin"),
 ]
 
 
@@ -158,9 +158,9 @@ def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
 
 
 def test_brainstorm_dispatches_artist_as_design_mockup_provider():
-    """The design_mockup seam is LIVE: brainstorm names the forge `artist` as its
+    """The design_mockup seam is LIVE: brainstorm names the craft `artist` as its
     default provider (Slice 8 cutover). The genericized skill may name `artist`
-    (a forge agent stem, not a private app token) but never the retired
+    (a craft agent stem, not a private app token) but never the retired
     `design-mockup-writer`."""
     assert _BRAINSTORM_SKILL.exists(), "brainstorm/SKILL.md does not exist"
     text = _BRAINSTORM_SKILL.read_text()
@@ -168,7 +168,7 @@ def test_brainstorm_dispatches_artist_as_design_mockup_provider():
         "brainstorm/SKILL.md no longer documents the design_mockup extension point"
     )
     assert "artist" in text, (
-        "brainstorm/SKILL.md must name the forge `artist` as the design_mockup "
+        "brainstorm/SKILL.md must name the craft `artist` as the design_mockup "
         "provider — the cutover dispatches it by default"
     )
     assert "design-mockup-writer" not in text, (

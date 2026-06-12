@@ -150,12 +150,12 @@ python -m pytest tests/
 
 A **pre-commit leak gate** keeps project- or machine-specific tokens out of the
 shipped plugin surface. Install the generic, denylist-driven gate from the
-[forge](../forge) plugin — it reads a machine-local denylist
+[craft](../craft) plugin — it reads a machine-local denylist
 (`~/.claude/leak-gate.denylist`, untracked) so no private token lives in this
 tracked repo:
 
 ```bash
-forge/plugins/forge/scripts/install-hooks.sh "$(pwd)" plugins/lore tests docs
+craft/plugins/craft/scripts/install-hooks.sh "$(pwd)" plugins/lore tests docs
 ```
 
 The `docs` tree is included so adopter-facing docs (e.g. `EXTENDING.md`) are
@@ -166,7 +166,7 @@ registration, `${CLAUDE_PLUGIN_ROOT}`, skill namespacing).
 
 ## Extending lore for your project
 
-To bolt your own project layer on top of lore and the forge dev agents — wiring
-forge's extension points (feature flags, issue tracker, observability, test
+To bolt your own project layer on top of lore and the craft dev agents — wiring
+craft's extension points (feature flags, issue tracker, observability, test
 commands) to your own stack — see the adopter cookbook in
 [`docs/EXTENDING.md`](docs/EXTENDING.md).

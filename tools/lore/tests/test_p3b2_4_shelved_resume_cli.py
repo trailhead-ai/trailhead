@@ -4,7 +4,7 @@ TDD: tests written before implementation. All fixtures are SYNTHETIC
 (invented vocabulary, no real vault/session/repo names).
 
 `find_shelved_notes` + `resume_note` already exist in sessions.py (P3B2-2) but
-are NOT reachable via the CLI. The forge `/forge:pickup` skill can only call
+are NOT reachable via the CLI. The craft `/craft:pickup` skill can only call
 lore through PATH/CLI (cross-plugin), so this slice exposes:
 
   - `lore shelved [--slug SLUG]`  list shelved/handoff notes, most-recent-first,

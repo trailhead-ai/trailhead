@@ -41,7 +41,7 @@ the scalar dict from regenerate_indices.load_md_files (D-8b).
 
 Injection defense (A-3): shared-item bodies are XML-entity-encoded in the
 <external-memory> channel so that literal </external-memory> or
-<external-memory in note content cannot break out of or self-forge the
+<external-memory in note content cannot break out of or spoof the
 channel framing. The source= attribute is XML-attribute-escaped.
 """
 from __future__ import annotations
@@ -611,13 +611,13 @@ def _xml_attr_escape(value: str) -> str:
 
 
 def _xml_body_escape(text: str) -> str:
-    """Encode text so it cannot break out of or self-forge the external-memory channel.
+    """Encode text so it cannot break out of or spoof the external-memory channel.
 
     A-3 (both directions):
     - A literal '</external-memory>' in the body must not terminate the channel
       early. We encode the leading '<' as '&lt;' which makes the channel
       un-escapable.
-    - A literal '<external-memory' in the body must not forge a new framing tag.
+    - A literal '<external-memory' in the body must not spoof a new framing tag.
       Same encoding: all '<' become '&lt;', all '>' become '&gt;'.
     - '&' becomes '&amp;' first so we don't double-encode.
 
@@ -713,7 +713,7 @@ def render_recall_banner(result: RecallResult, tty: bool | None = None) -> str:
       - source= attribute is XML-attribute-escaped
       - item content is XML-body-escaped (& < > encoded) so literal
         </external-memory> or <external-memory in note bodies cannot
-        break out of or self-forge the channel framing.
+        break out of or spoof the channel framing.
     """
     if tty is None:
         tty = sys.stdout.isatty()

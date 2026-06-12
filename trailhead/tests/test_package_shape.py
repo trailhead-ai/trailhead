@@ -12,7 +12,7 @@ Invariants:
 - `bin/trailhead --version` works from a fresh clone with no pip install.
 - `tools/camp/plugins/camp/bin/camp --version` works the same way.
 - tools/ data dirs are NOT importable top-level packages (Option B invariant).
-- bare editable install does NOT pull in lore/forge/camp dists.
+- bare editable install does NOT pull in lore/craft/camp dists.
 """
 
 import importlib.util
@@ -129,10 +129,10 @@ def test_lore_not_importable():
     )
 
 
-def test_forge_not_importable():
-    """tools/forge is a data dir — NOT an importable top-level package (Option B invariant)."""
-    spec = importlib.util.find_spec("forge")
+def test_craft_not_importable():
+    """tools/craft is a data dir — NOT an importable top-level package (Option B invariant)."""
+    spec = importlib.util.find_spec("craft")
     assert spec is None, (
-        f"'forge' should not be importable as a top-level package; got spec={spec}. "
+        f"'craft' should not be importable as a top-level package; got spec={spec}. "
         "tools/ must not be auto-discovered by setuptools."
     )

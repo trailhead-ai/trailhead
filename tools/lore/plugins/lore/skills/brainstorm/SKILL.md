@@ -110,9 +110,9 @@ objectives.
    populated, error, edge cases), the primary actions, the information hierarchy.
 
 3. **Design mockup (extension point — `design_mockup`):**
-   - **Default — dispatch the `artist`.** When the forge plugin is installed and the surface has
-     a chrome catalog, dispatch the forge `artist` agent (the wired `design_mockup` provider, per
-     forge's `docs/design-authoring.md`) with a structured brief. The brief carries the fields
+   - **Default — dispatch the `artist`.** When the craft plugin is installed and the surface has
+     a chrome catalog, dispatch the craft `artist` agent (the wired `design_mockup` provider, per
+     craft's `docs/design-authoring.md`) with a structured brief. The brief carries the fields
      from the artist's input contract:
      - `feature` — the feature name and design goals (from the spec's UI Direction section).
      - `surface` — the surface(s) being designed, so the artist selects the right chrome catalog.
@@ -125,7 +125,7 @@ objectives.
      section from that output.
    - **Fallback — skip and describe verbally.** If the design work isn't applicable (backend-only
      change) or no chrome catalog exists for the surface, note the mockup step is skipped and
-     describe the UI direction verbally in the spec instead. (If forge isn't installed at all,
+     describe the UI direction verbally in the spec instead. (If craft isn't installed at all,
      the `design_mockup` provider is unavailable — see `docs/DEGRADATION.md`.)
 
 4. **Iterate.** For follow-on edits, work in conversation or re-dispatch the `artist` (update
@@ -223,8 +223,8 @@ If all checklist items are green, propose the handoff:
 
 On user agreement, update the spec frontmatter `status: ready` and stop.
 
-**Cross-plugin handoff (forge plugin):**
-The `planning` skill lives in the forge plugin — install forge to continue into planning, or write
+**Cross-plugin handoff (craft plugin):**
+The `planning` skill lives in the craft plugin — install craft to continue into planning, or write
 your implementation slices directly from this spec. Do not enter planning yourself from within
 brainstorm — let the user invoke it explicitly so the planning skill loads cleanly.
 

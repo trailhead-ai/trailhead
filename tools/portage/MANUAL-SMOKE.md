@@ -3,7 +3,7 @@
 This is the manual parity gate for the deployment-extraction hard cut.
 
 Run this checklist on a **real PR** after the full automated suites are green
-and **before** Slice 6b deletes forge's `release` capability cluster. A written
+and **before** Slice 6b deletes craft's `release` capability cluster. A written
 PASS recorded in the log below is the trigger for that deletion.
 
 For day-to-day portage/landing operation, see the tool READMEs instead.
@@ -19,7 +19,7 @@ the whole-repo pytest basename collision (no `__init__.py` in test dirs):
 - `tools/portage/tests/` — 38 tests
 - `tools/landing/tests/` — 39 tests
 
-forge also has 3 known-baseline-RED tests that are **environmental, not
+craft also has 3 known-baseline-RED tests that are **environmental, not
 regressions from this work**. They are not a gate blocker; do not attribute
 them to the extraction. The three failing tests are:
 
@@ -152,13 +152,13 @@ a bad token) and surfaced in-band.
 ## Written-PASS log
 
 Record date, PR URL, and PASS/FAIL per step here. Slice 6b's deletion of
-forge's `release` capability is gated on a PASS recorded in this table.
+craft's `release` capability is gated on a PASS recorded in this table.
 
 | Date | PR URL | Step 1 open | Step 2 monitor | Step 3 merge | Step 4 soak | Step 5 doctor | Step 6 visibility | Overall |
 |------|--------|-------------|----------------|--------------|-------------|---------------|-------------------|---------|
 | _pending_ | | | | | | | | |
 
-**Do not proceed to Slice 6b (forge `release` deletion) until at least one row
+**Do not proceed to Slice 6b (craft `release` deletion) until at least one row
 above shows PASS in all step columns.**
 
 ---
@@ -166,14 +166,14 @@ above shows PASS in all step columns.**
 ## Rollback path
 
 The Slice 6b deletion lands as a **single, revertable commit**. If a
-post-deletion gap surfaces after the forge `release` cluster is removed, the
+post-deletion gap surfaces after the craft `release` cluster is removed, the
 escape hatch is:
 
 ```
 git revert <slice-6b-commit>
 ```
 
-This revert restores forge's `release` capability cluster exactly. The portage
+This revert restores craft's `release` capability cluster exactly. The portage
 and landing plugins remain in place — the revert only re-arms the old surface
 alongside the new one; no data is lost and no portage/landing work is undone.
 Once the gap is closed, the deletion can be re-applied as a new commit.
