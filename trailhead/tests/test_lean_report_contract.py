@@ -411,31 +411,25 @@ class TestCodeReviewerHardCap:
             "followed by a number + unit. A synonym like 'maximum length' must not satisfy this."
         )
 
-    def test_agent_cap_phrase_not_synonymous(self):
-        """Mutation guard: 'maximum length' must NOT satisfy the cap assertion.
+    def test_cap_phrase_is_bounded_by_number_and_unit(self):
+        """The cap must be a real bound: 'hard cap:' followed by a number + unit.
 
-        This test fails if the production assertion above is vacuous enough to accept synonyms.
-        If this test passes (i.e., 'maximum length' is absent from the file), the production
-        cap test's stringency is confirmed. If the implementer wrote 'maximum length' instead
-        of 'hard cap:', this test passes (correctly — the wrong synonym is absent) but the
-        production cap test would fail (correctly).
-
-        The paired logic: cap test asserts 'hard cap:' IS present; this test confirms
-        'maximum length' behavior by checking the file does NOT substitute the synonym.
-        """
-        text = _agent_reviewer_text()
-        # We assert the pinned phrase IS present (above); here we confirm the synonym
-        # is absent so both conditions (right phrase in, wrong phrase out) hold together.
-        # If the synonym appears instead of the pinned phrase, the cap test above fails — good.
-        # This test's job is to document the non-vacuousness intent, not to add new coverage.
-        # It remains valid: the phrase "maximum length" is not the contract — "hard cap:" is.
-        # (It is OK if "maximum length" happens to also appear for other reasons; the cap test
-        # above is the binding one. This note captures intent only — see plan binding lesson.)
-        assert "Verdict: SHIP | FIX_FIRST | BLOCK" in text, (
-            "Mutation guard: the cap test pins 'hard cap:' — a rewrite that uses only "
-            "'maximum length' would pass this guard but fail the cap assertion above. "
-            "This assertion keeps the verdict line anchor so both invariants travel together."
+        Stronger than mere presence (Slice 2 review, Minor #1): a bare 'hard cap:' with no
+        figure, or the cap phrase pointing at prose instead of a limit, must FAIL. Asserts in
+        BOTH reviewer files. Replaces the former verdict-anchor test, whose name promised a
+        synonym check its body never performed (it re-asserted the verdict line)."""
+        cap_with_bound = re.compile(
+            re.escape(_CAP_PHRASE) + r"\s*~?\s*\d+\s*(word|line)s?\b",
+            re.IGNORECASE,
         )
+        for label, text in (
+            ("agents/code-reviewer.md", _agent_reviewer_text()),
+            ("skills/review/code-reviewer.md", _skill_reviewer_text()),
+        ):
+            assert cap_with_bound.search(text), (
+                f"{label} must state the hard cap as {_CAP_PHRASE!r} followed by a number "
+                "+ unit (e.g. 'hard cap: 600 words') — a bare cap phrase with no figure fails."
+            )
 
 
 class TestCodeReviewerNegativeAbsence:
