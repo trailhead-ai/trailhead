@@ -22,7 +22,7 @@ agents = ["agents/code-reviewer.md"]
 
 [capabilities.circle]
 description = "Four-lens review panel — builder, reliability, security, and user-advocate perspectives on a diff."
-skills = []
+skills = ["skills/consult"]
 agents = [
   "agents/advocate.md",
   "agents/builder.md",

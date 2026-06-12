@@ -166,6 +166,12 @@ source = "forge"
 [[claim]]
 kind = "skill"
 tool = "forge"
+ref = "skills/consult"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
 ref = "skills/subagent-driven-development"
 source = "forge"
 

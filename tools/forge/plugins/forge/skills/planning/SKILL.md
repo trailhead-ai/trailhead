@@ -142,11 +142,13 @@ Leave the `## Circle Review` section for Step 9.5 to append — do not pre-fill 
 
 ### 9.5. Circle Review (mandatory)
 
-After the plan is written and before presenting it for approval, dispatch a circle review. Four circle member subagents (`builder` / `breaker` / `attacker` / `advocate`) review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
+After the plan is written and before presenting it for approval, dispatch a circle review. The circle members review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
+
+**Membership is defined in `_shared/circle.md`** — the single source of truth for who the circle is (`builder` / `breaker` / `attacker` / `advocate`) and the dispatch contract. Read it; do not hardcode the roster here. Planning dispatches the circle **directly** off that shared list — it does **not** call the `/forge:consult` skill (a skill→skill chain is unreliable). `consult` is the standalone-invocable form of this same panel for questions outside the planning flow.
 
 This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars below, not via per-invocation opt-outs.
 
-**Dispatch:** make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the same prompt template for every member, substituting the lens label and the lens-specific Critical bar block (defined below).
+**Dispatch:** per `_shared/circle.md`, make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the same prompt template for every member, substituting the lens label and the lens-specific Critical bar block (defined below).
 
 **Substitution rules** (apply BEFORE sending the prompt to each member; do not include these notes in the dispatched text):
 - `<plan-path>` — absolute path to the freshly-written plan file

@@ -327,8 +327,13 @@ class TestManifestValidation:
             )
 
 
-def _read_description(agent_file: Path) -> str:
-    """Return the agent's frontmatter description block (lowercased)."""
+def _read_agent_text(agent_file: Path) -> str:
+    """Return the agent file's full text, lowercased.
+
+    Reads the WHOLE file (not just the frontmatter `description:` block) — the
+    differentiation asserts below substring-match against the entire agent prose,
+    so the name must not imply a narrower scope (a latent false-green otherwise).
+    """
     text = agent_file.read_text()
     return text.lower()
 
@@ -344,7 +349,7 @@ class TestCircleAgentStandaloneDescriptions:
         for stem in ("advocate", "builder", "breaker", "attacker"):
             path = _FORGE_PLUGIN_ROOT / "agents" / f"{stem}.md"
             assert path.exists(), f"renamed circle agent not found: {path}"
-            desc = _read_description(path)
+            desc = _read_agent_text(path)
             assert "use only when invoked by a planning skill" not in desc, (
                 f"{stem}.md still gates itself to the planning circle step — "
                 "drop the 'Use only when invoked by a planning skill's circle review step' clause."
@@ -357,8 +362,8 @@ class TestCircleAgentStandaloneDescriptions:
         troubleshooter diagnoses root cause of an *existing* failure. The differentiating
         phrase must live in breaker and not in troubleshooter.
         """
-        breaker = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "breaker.md")
-        troubleshooter = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "troubleshooter.md")
+        breaker = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "breaker.md")
+        troubleshooter = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "troubleshooter.md")
         phrase = "before building"
         assert phrase in breaker, (
             f"breaker.md description must carry the differentiating phrase {phrase!r}"
@@ -375,8 +380,8 @@ class TestCircleAgentStandaloneDescriptions:
         audits an existing diff/PR/module against OWASP. The differentiating phrase must live in
         attacker and not in security-auditor.
         """
-        attacker = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "attacker.md")
-        auditor = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "security-auditor.md")
+        attacker = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "attacker.md")
+        auditor = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "security-auditor.md")
         phrase = "red-team a design"
         assert phrase in attacker, (
             f"attacker.md description must carry the differentiating phrase {phrase!r}"
@@ -542,4 +547,161 @@ class TestFrontmatterNameMatchesFilename:
         assert name == stem, (
             f"{path.name} frontmatter name: is {name!r}, expected {stem!r}. "
             "Frontmatter name must match the filename stem after rename."
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7. Slice 2 — forge:consult skill + single-source circle membership
+# ---------------------------------------------------------------------------
+
+_CONSULT_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "consult" / "SKILL.md"
+_CIRCLE_INCLUDE = _FORGE_PLUGIN_ROOT / "skills" / "_shared" / "circle.md"
+_PLANNING_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "planning" / "SKILL.md"
+
+# The four circle agent stems the membership single-source-of-truth must name,
+# each resolving to agents/<stem>.md.
+_CIRCLE_STEMS = ("advocate", "builder", "breaker", "attacker")
+
+
+def _has_registrable_frontmatter(skill_md: Path) -> bool:
+    """Return True if SKILL.md opens with frontmatter carrying non-empty name + description."""
+    text = skill_md.read_text()
+    if not text.startswith("---\n"):
+        return False
+    end = text.find("\n---", 3)
+    if end < 0:
+        return False
+    frontmatter = text[3:end]
+
+    def _has(field: str) -> bool:
+        return any(
+            ln.strip().startswith(f"{field}:") and ln.split(":", 1)[1].strip()
+            for ln in frontmatter.splitlines()
+        )
+
+    return _has("name") and _has("description")
+
+
+class TestConsultSkillAndSharedCircle:
+    """Slice 2: the forge:consult skill and the single-source circle membership include."""
+
+    def test_consult_skill_dir_exists_with_skill_md(self):
+        """skills/consult/ must exist with a SKILL.md (new standalone-invocable circle skill)."""
+        assert _CONSULT_SKILL.exists(), (
+            f"skills/consult/SKILL.md not found at {_CONSULT_SKILL} — "
+            "create the forge:consult skill that convenes the circle panel."
+        )
+
+    def test_consult_skill_is_registrable(self):
+        """skills/consult/SKILL.md must carry non-empty name: + description: frontmatter.
+
+        Without registrable frontmatter Claude Code will not register it as a
+        /forge:consult command (same invariant as test_skills_registrable).
+        """
+        assert _CONSULT_SKILL.exists(), f"skills/consult/SKILL.md not found at {_CONSULT_SKILL}"
+        assert _has_registrable_frontmatter(_CONSULT_SKILL), (
+            "skills/consult/SKILL.md must open with frontmatter carrying a non-empty "
+            "`name:` and `description:` or Claude Code will not register /forge:consult"
+        )
+
+    def test_consult_frontmatter_name_is_consult(self):
+        """skills/consult/SKILL.md frontmatter name: must be 'consult'."""
+        name = _parse_frontmatter_name(_CONSULT_SKILL)
+        assert name == "consult", (
+            f"skills/consult/SKILL.md frontmatter name: is {name!r}, expected 'consult'"
+        )
+
+    def test_circle_include_exists(self):
+        """skills/_shared/circle.md must exist as the single-source circle membership include."""
+        assert _CIRCLE_INCLUDE.exists(), (
+            f"skills/_shared/circle.md not found at {_CIRCLE_INCLUDE} — "
+            "create the shared four-agent membership include."
+        )
+
+    def test_circle_include_names_all_four_agents(self):
+        """The shared include must name all four circle agent stems."""
+        assert _CIRCLE_INCLUDE.exists(), f"skills/_shared/circle.md not found at {_CIRCLE_INCLUDE}"
+        text = _CIRCLE_INCLUDE.read_text()
+        missing = [stem for stem in _CIRCLE_STEMS if stem not in text]
+        assert not missing, (
+            f"skills/_shared/circle.md must name all four circle agents; missing: {missing}"
+        )
+
+    def test_circle_include_stems_resolve_to_agent_files(self):
+        """C1: each of the four stems named in the include resolves to agents/<stem>.md.
+
+        This is the anti-drift assertion — the single-source membership cannot silently
+        diverge from the renamed agent files that planning + consult both dispatch off it.
+        Parses the include for the stems it actually names, then asserts each is an
+        existing agent file by exact name.
+        """
+        assert _CIRCLE_INCLUDE.exists(), f"skills/_shared/circle.md not found at {_CIRCLE_INCLUDE}"
+        text = _CIRCLE_INCLUDE.read_text()
+        for stem in _CIRCLE_STEMS:
+            assert stem in text, (
+                f"circle.md must name the {stem!r} agent (single source of truth)"
+            )
+            agent_file = _FORGE_PLUGIN_ROOT / "agents" / f"{stem}.md"
+            assert agent_file.exists(), (
+                f"circle.md names {stem!r} but {agent_file} does not exist — "
+                "the membership include drifted from the renamed agent files."
+            )
+
+    def test_consult_references_shared_circle_include(self):
+        """consult must read membership from the shared include (not hardcode its own list)."""
+        assert _CONSULT_SKILL.exists(), f"skills/consult/SKILL.md not found at {_CONSULT_SKILL}"
+        text = _CONSULT_SKILL.read_text()
+        assert "_shared/circle.md" in text, (
+            "skills/consult/SKILL.md must reference the shared '_shared/circle.md' include "
+            "as the single source of circle membership."
+        )
+
+    def test_planning_references_shared_circle_include(self):
+        """planning's Circle Review step must read membership from the shared include.
+
+        Planning must NOT call consult (the unreliable skill->skill chain) — it dispatches
+        the circle directly off the shared list, same as consult.
+        """
+        assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
+        text = _PLANNING_SKILL.read_text()
+        assert "_shared/circle.md" in text, (
+            "planning/SKILL.md Circle Review step must reference the shared "
+            "'_shared/circle.md' include rather than hardcoding the membership."
+        )
+
+    def test_planning_dispatches_circle_directly_not_via_consult(self):
+        """planning must dispatch the four agents directly, not delegate to the consult skill.
+
+        The robust invariant is the presence of the direct-dispatch instruction (parallel
+        Agent calls to the four members), NOT the absence of the string 'consult' — planning
+        legitimately *mentions* consult to explain it must not delegate to it. We assert the
+        direct-dispatch evidence (each member named for an Agent dispatch) so a future rewrite
+        that swaps direct dispatch for a `/forge:consult` call would drop these and fail.
+        """
+        assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
+        text = _PLANNING_SKILL.read_text()
+        assert "Agent` tool calls" in text, (
+            "planning/SKILL.md must instruct direct parallel `Agent` tool calls to the circle "
+            "members — not delegate the panel to the consult skill."
+        )
+        for stem in _CIRCLE_STEMS:
+            assert stem in text, (
+                f"planning/SKILL.md must still name {stem!r} for direct circle dispatch"
+            )
+
+    def test_forge_circle_capability_includes_consult_skill(self):
+        """forge circle capability must list skills/consult."""
+        m = load_manifest(_FORGE_MANIFEST)
+        cap = m.capabilities["circle"]
+        assert "skills/consult" in cap["skills"], (
+            f"forge circle capability must reference 'skills/consult'; got {cap['skills']}"
+        )
+
+    def test_forge_circle_compose_includes_consult_skill(self, tmp_path):
+        """compose_plan({'circle'}) must include the consult skill dir as a CopyOp."""
+        m = load_manifest(_FORGE_MANIFEST)
+        plan = compose_plan(m, {"circle"}, tmp_path / "dest")
+        skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
+        assert "consult" in skill_srcs, (
+            f"compose_plan for forge 'circle' must include the consult skill dir; got {skill_srcs}"
         )

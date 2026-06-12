@@ -59,6 +59,10 @@ Base skills (always available): `/forge:handoff`, `/forge:pickup`,
 
 **Planning:** `/forge:planning`
 
+**Circle:** `/forge:consult` — convene the four-lens panel on a question and
+synthesize. The standalone form of the planning skill's circle-review step;
+membership is single-sourced from `skills/_shared/circle.md`.
+
 **Execute:** `/forge:subagent-driven-development`
 
 **Review:** `/forge:requesting-code-review`
