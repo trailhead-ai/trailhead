@@ -108,7 +108,7 @@ class TestS5InProcessBoundary:
     """A hostile $TRAILHEAD_ROOT must not hijack an already-importable trailhead."""
 
     def test_hostile_trailhead_root_does_not_redirect(self, tmp_path, monkeypatch):
-        """Tier-1 (already importable) wins before Tier-2 ($TRAILHEAD_ROOT).
+        """Tier-1 (already importable) wins before Tier-3 ($TRAILHEAD_ROOT).
 
         Plant a decoy ``trailhead/paths.py`` under a tmp dir, point
         ``$TRAILHEAD_ROOT`` at it, and assert that — because trailhead is already
