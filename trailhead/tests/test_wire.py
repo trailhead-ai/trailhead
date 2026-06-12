@@ -188,7 +188,7 @@ class TestStandardPreset:
         """circle capability agents absent when forge wired without circle.
 
         M-5 fix: circle has skills=[], so testing skill absence is vacuous.
-        circle DOES have 4 agents (circle-*.md) — assert none appear in dest.
+        circle DOES have 4 agents (advocate/builder/breaker/attacker) — assert none appear in dest.
         """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
@@ -218,7 +218,7 @@ class TestStandardPreset:
         """Agents from unselected circle capability must not appear in the wired dest.
 
         M-5 fix: design and release both have skills=[] and agents=[], making their
-        absence loops vacuous.  circle has 4 real agents (circle-*.md) that are
+        absence loops vacuous.  circle has 4 real agents (advocate/builder/breaker/attacker) that are
         structurally excluded when circle is not in the selection.  execute also has
         real agents (scout/trailblazer) — kept here for symmetry.
         """

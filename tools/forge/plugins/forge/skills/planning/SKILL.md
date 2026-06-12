@@ -142,11 +142,11 @@ Leave the `## Circle Review` section for Step 9.5 to append — do not pre-fill 
 
 ### 9.5. Circle Review (mandatory)
 
-After the plan is written and before presenting it for approval, dispatch a circle review. Four circle member subagents (`circle-builder` / `circle-reliability` / `circle-security` / `circle-advocate`) review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
+After the plan is written and before presenting it for approval, dispatch a circle review. Four circle member subagents (`builder` / `breaker` / `attacker` / `advocate`) review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
 
 This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars below, not via per-invocation opt-outs.
 
-**Dispatch:** make four parallel `Agent` tool calls — one each to `circle-builder`, `circle-reliability`, `circle-security`, `circle-advocate` — in a single message so they run concurrently. Use the same prompt template for every member, substituting the lens label and the lens-specific Critical bar block (defined below).
+**Dispatch:** make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the same prompt template for every member, substituting the lens label and the lens-specific Critical bar block (defined below).
 
 **Substitution rules** (apply BEFORE sending the prompt to each member; do not include these notes in the dispatched text):
 - `<plan-path>` — absolute path to the freshly-written plan file
@@ -254,7 +254,7 @@ Important and Minor findings do NOT require dispositions — they are logged for
 ## Circle Review
 
 *Reviewed at:* YYYY-MM-DDTHH:MM:SSZ
-*Members dispatched:* circle-builder, circle-reliability, circle-security, circle-advocate
+*Members dispatched:* builder, breaker, attacker, advocate
 
 *Critical:*
 - <finding> (raised by: <lenses>) — *Disposition:* `<one of: resolved | bounced-back-to-spec | accepted-as-risk: <reason> | disputed: <reason>>`
@@ -272,7 +272,7 @@ Concrete example (populated):
 ## Circle Review
 
 *Reviewed at:* 2026-05-22T19:42:11Z
-*Members dispatched:* circle-builder, circle-reliability, circle-security, circle-advocate
+*Members dispatched:* builder, breaker, attacker, advocate
 
 *Critical:*
 - Slice 2 producer contract isn't tested but Slice 3 consumer depends on it (raised by: Builder) — *Disposition:* `resolved`

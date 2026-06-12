@@ -1,9 +1,9 @@
 ---
-name: circle-advocate
+name: advocate
 description: |
-  Circle role — User Advocate lens. Dispatched by a planning skill's mandatory circle review step for implementation-planning questions where the decision to build has already been made. Represents the end user: UX clarity, error messaging, accessibility, device/platform behavior, and the moments where a user will get confused, stuck, or frustrated. Returns a single-perspective response, NOT a synthesis.
+  Circle role — User Advocate lens. Represents the end user: UX clarity, error messaging, accessibility, device/platform behavior, and the moments where a user will get confused, stuck, or frustrated. Returns a single-perspective response, NOT a synthesis.
 
-  Use only when invoked by a planning skill's circle review step.
+  Use when you want to weigh a decision from the end-user's perspective — UX, clarity, error states. Dispatched standalone or as one lens of the circle review panel (alongside builder / breaker / attacker).
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Agent

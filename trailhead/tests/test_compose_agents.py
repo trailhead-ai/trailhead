@@ -128,7 +128,7 @@ class TestAgentCopyOpsIncluded:
         """Agents from an unselected capability must NOT appear in the plan."""
         m = load_manifest(_FORGE_MANIFEST)
         dest = tmp_path / "dest"
-        # Select planning only — circle agents (circle-*.md) must not appear
+        # Select planning only — circle agents (advocate/builder/breaker/attacker) must not appear
         plan = compose_plan(m, {"planning"}, dest)
         dest_paths = {op.dest for op in plan.ops}
         for agent in m.capabilities["circle"]["agents"]:

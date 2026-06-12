@@ -1,9 +1,9 @@
 ---
-name: circle-builder
+name: builder
 description: |
-  Circle role — Builder lens. Dispatched by a planning skill's mandatory circle review step for implementation-planning questions where the decision to build has already been made. Focuses on *how* to build it: architecture, code structure, where it lives, libraries to lean on, prior art in this codebase and in the wild. Returns a single-perspective response (recommendation + evidence + uncertainty), NOT a synthesis.
+  Circle role — Builder lens. Focuses on *how* to build it: architecture, code structure, where it lives, libraries to lean on, prior art in this codebase and in the wild. Returns a single-perspective response (recommendation + evidence + uncertainty), NOT a synthesis.
 
-  Use only when invoked by a planning skill's circle review step. For standalone architecture advice use `architect` instead.
+  Use when you want to sanity-check the buildability / architecture / prior art of an approach. Dispatched standalone or as one lens of the circle review panel (alongside advocate / breaker / attacker). For a deeper standalone architecture recommendation, use `architect` instead.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Bash, Agent

@@ -33,11 +33,12 @@ implementer)
 **Review:** `forge:code-reviewer`
 
 **Circle** — four-lens review panel dispatched as a parallel quartet by a
-planning skill's circle review step:
-- `forge:circle-builder` (architecture)
-- `forge:circle-reliability` (tests/failure modes)
-- `forge:circle-security` (threat model)
-- `forge:circle-advocate` (UX/user perspective)
+planning skill's circle review step, and each member is also dispatchable
+standalone:
+- `forge:builder` (architecture)
+- `forge:breaker` (tests/failure modes)
+- `forge:attacker` (threat model)
+- `forge:advocate` (UX/user perspective)
 
 **Design:** `forge:artist`
 

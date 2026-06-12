@@ -1,5 +1,5 @@
-# Agent filenames reflect CURRENT on-disk names (circle-*, scout, trailblazer).
-# Renames completed in Step 5 / WS-12: circle-* agents, scout, trailblazer.
+# Agent filenames reflect CURRENT on-disk names (advocate/builder/breaker/attacker, scout, trailblazer).
+# Circle agents renamed to bare names in Spec A / Slice 1.
 
 [tool]
 name = "forge"
@@ -24,10 +24,10 @@ agents = ["agents/code-reviewer.md"]
 description = "Four-lens review panel — builder, reliability, security, and user-advocate perspectives on a diff."
 skills = []
 agents = [
-  "agents/circle-advocate.md",
-  "agents/circle-builder.md",
-  "agents/circle-reliability.md",
-  "agents/circle-security.md",
+  "agents/advocate.md",
+  "agents/builder.md",
+  "agents/breaker.md",
+  "agents/attacker.md",
 ]
 
 [capabilities.design]

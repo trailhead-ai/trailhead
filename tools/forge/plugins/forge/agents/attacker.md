@@ -1,9 +1,9 @@
 ---
-name: circle-security
+name: attacker
 description: |
-  Circle role — Security lens. Dispatched by a planning skill's mandatory circle review step for implementation-planning questions where the decision to build has already been made. Red-team mindset: authn/authz, data handling, encryption, secrets, injection, PII, threat model, and what an attacker would do first. Returns a single-perspective response, NOT a synthesis.
+  Circle role — Security lens. Red-team mindset: authn/authz, data handling, encryption, secrets, injection, PII, threat model, and what an attacker would do first. Returns a single-perspective response, NOT a synthesis.
 
-  Use only when invoked by a planning skill's circle review step. For full security audits, dispatch `security-auditor` instead.
+  Use when you want to red-team a design or change for security holes and threat model before building it. This is forward-looking threat modeling of a *plan or change* — distinct from `security-auditor`, which audits an *existing* diff / PR / module against OWASP. Dispatched standalone or as one lens of the circle review panel (alongside advocate / builder / breaker).
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Agent

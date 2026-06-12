@@ -165,10 +165,10 @@ _VISIBLE_SKIP_AGENTS: list[str] = [
     "troubleshooter",
     "researcher",
     "planner",
-    "circle-builder",
-    "circle-reliability",
-    "circle-security",
-    "circle-advocate",
+    "builder",
+    "breaker",
+    "attacker",
+    "advocate",
 ]
 
 

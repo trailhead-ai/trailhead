@@ -108,6 +108,22 @@ class TestGrepGuard:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
 
+    def test_no_circle_dash_agent_references(self):
+        """circle-advocate/builder/reliability/security must not appear in tools/ source after rename to bare names.
+
+        Token-scoped to the four old circle agent stems so it does NOT flag:
+        - the `circle` *capability* name (capabilities.toml, landing_claims.toml)
+        - `circle-*.md` generic glob descriptions in test comments
+        - the `council-session` lore vault type (already covered by its own forbid)
+        """
+        files = _collect_files()
+        hits = _grep_files(r"circle-(advocate|builder|reliability|security)", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of old circle-* agent names — must be zero after rename to bare names:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
     def test_no_sdd_dash_references(self):
         """sdd- prefix must not appear in tools/ source after rename to scout/trailblazer."""
         files = _collect_files()
@@ -286,26 +302,89 @@ class TestManifestValidation:
         )
 
     def test_forge_circle_references_circle_agents(self):
-        """forge circle capability must reference circle-*.md (not council-*.md)."""
+        """forge circle capability must reference the bare-named circle agents (advocate/builder/breaker/attacker)."""
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["circle"]
         agents = cap["agents"]
-        assert "agents/circle-advocate.md" in agents, (
-            f"forge circle must reference 'agents/circle-advocate.md'; got {agents}"
+        assert "agents/advocate.md" in agents, (
+            f"forge circle must reference 'agents/advocate.md'; got {agents}"
         )
-        assert "agents/circle-builder.md" in agents, (
-            f"forge circle must reference 'agents/circle-builder.md'; got {agents}"
+        assert "agents/builder.md" in agents, (
+            f"forge circle must reference 'agents/builder.md'; got {agents}"
         )
-        assert "agents/circle-reliability.md" in agents, (
-            f"forge circle must reference 'agents/circle-reliability.md'; got {agents}"
+        assert "agents/breaker.md" in agents, (
+            f"forge circle must reference 'agents/breaker.md'; got {agents}"
         )
-        assert "agents/circle-security.md" in agents, (
-            f"forge circle must reference 'agents/circle-security.md'; got {agents}"
+        assert "agents/attacker.md" in agents, (
+            f"forge circle must reference 'agents/attacker.md'; got {agents}"
         )
         for agent in agents:
             assert "council-" not in agent, (
                 f"forge circle still references old council- agent: {agent}"
             )
+            assert "circle-" not in agent, (
+                f"forge circle still references old circle- agent: {agent}"
+            )
+
+
+def _read_description(agent_file: Path) -> str:
+    """Return the agent's frontmatter description block (lowercased)."""
+    text = agent_file.read_text()
+    return text.lower()
+
+
+class TestCircleAgentStandaloneDescriptions:
+    """Renamed circle agents must drop the 'use only when ... circle review step' gate
+    and carry a differentiating standalone 'use when' phrase so natural-language dispatch
+    routes them apart from the overlapping troubleshooter / security-auditor agents.
+    """
+
+    def test_circle_agents_drop_circle_only_gate(self):
+        """No renamed circle agent may keep the 'use only when invoked' standalone-blocking clause."""
+        for stem in ("advocate", "builder", "breaker", "attacker"):
+            path = _FORGE_PLUGIN_ROOT / "agents" / f"{stem}.md"
+            assert path.exists(), f"renamed circle agent not found: {path}"
+            desc = _read_description(path)
+            assert "use only when invoked by a planning skill" not in desc, (
+                f"{stem}.md still gates itself to the planning circle step — "
+                "drop the 'Use only when invoked by a planning skill's circle review step' clause."
+            )
+
+    def test_breaker_differentiates_from_troubleshooter(self):
+        """breaker's description must carry a 'use when' phrase absent from troubleshooter's.
+
+        breaker probes a design for failure modes / edge cases / recovery *before building*;
+        troubleshooter diagnoses root cause of an *existing* failure. The differentiating
+        phrase must live in breaker and not in troubleshooter.
+        """
+        breaker = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "breaker.md")
+        troubleshooter = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "troubleshooter.md")
+        phrase = "before building"
+        assert phrase in breaker, (
+            f"breaker.md description must carry the differentiating phrase {phrase!r}"
+        )
+        assert phrase not in troubleshooter, (
+            f"differentiating phrase {phrase!r} must be absent from troubleshooter.md "
+            "so natural-language dispatch routes breaker vs troubleshooter correctly"
+        )
+
+    def test_attacker_differentiates_from_security_auditor(self):
+        """attacker's description must carry a 'use when' phrase absent from security-auditor's.
+
+        attacker red-teams a *design or change* for the threat model up front; security-auditor
+        audits an existing diff/PR/module against OWASP. The differentiating phrase must live in
+        attacker and not in security-auditor.
+        """
+        attacker = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "attacker.md")
+        auditor = _read_description(_FORGE_PLUGIN_ROOT / "agents" / "security-auditor.md")
+        phrase = "red-team a design"
+        assert phrase in attacker, (
+            f"attacker.md description must carry the differentiating phrase {phrase!r}"
+        )
+        assert phrase not in auditor, (
+            f"differentiating phrase {phrase!r} must be absent from security-auditor.md "
+            "so natural-language dispatch routes attacker vs security-auditor correctly"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -356,12 +435,11 @@ class TestNewAgentNamesInCompose:
     """compose_plan for forge circle/execute resolves new agent names."""
 
     def test_forge_circle_compose_includes_circle_agents(self, tmp_path):
-        """forge circle compose includes circle-*.md agent CopyOps."""
+        """forge circle compose includes the bare-named circle agent CopyOps."""
         m = load_manifest(_FORGE_MANIFEST)
         plan = compose_plan(m, {"circle"}, tmp_path / "dest")
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
-        for name in ("circle-advocate.md", "circle-builder.md",
-                     "circle-reliability.md", "circle-security.md"):
+        for name in ("advocate.md", "builder.md", "breaker.md", "attacker.md"):
             assert name in agent_srcs, (
                 f"compose_plan for forge 'circle' must include {name}; got {agent_srcs}"
             )
@@ -450,10 +528,10 @@ class TestFrontmatterNameMatchesFilename:
 
     @pytest.mark.parametrize("stem,path", [
         ("loremaster", _LORE_PLUGIN_ROOT / "agents" / "loremaster.md"),
-        ("circle-advocate", _FORGE_PLUGIN_ROOT / "agents" / "circle-advocate.md"),
-        ("circle-builder", _FORGE_PLUGIN_ROOT / "agents" / "circle-builder.md"),
-        ("circle-reliability", _FORGE_PLUGIN_ROOT / "agents" / "circle-reliability.md"),
-        ("circle-security", _FORGE_PLUGIN_ROOT / "agents" / "circle-security.md"),
+        ("advocate", _FORGE_PLUGIN_ROOT / "agents" / "advocate.md"),
+        ("builder", _FORGE_PLUGIN_ROOT / "agents" / "builder.md"),
+        ("breaker", _FORGE_PLUGIN_ROOT / "agents" / "breaker.md"),
+        ("attacker", _FORGE_PLUGIN_ROOT / "agents" / "attacker.md"),
         ("scout", _FORGE_PLUGIN_ROOT / "agents" / "scout.md"),
         ("trailblazer", _FORGE_PLUGIN_ROOT / "agents" / "trailblazer.md"),
     ])

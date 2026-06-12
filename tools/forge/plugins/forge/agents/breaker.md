@@ -1,9 +1,9 @@
 ---
-name: circle-reliability
+name: breaker
 description: |
-  Circle role — Reliability lens. Dispatched by a planning skill's mandatory circle review step for implementation-planning questions where the decision to build has already been made. Focuses on how we'll know it works and how it behaves when it doesn't: tests, edge cases, failure modes, recovery, graceful degradation, and user abuse patterns. Returns a single-perspective response, NOT a synthesis.
+  Circle role — Reliability lens. Focuses on how we'll know it works and how it behaves when it doesn't: tests, edge cases, failure modes, recovery, graceful degradation, and user abuse patterns. Returns a single-perspective response, NOT a synthesis.
 
-  Use only when invoked by a planning skill's circle review step.
+  Use when you want to probe a design for failure modes, edge cases, and recovery before building it. This is forward-looking reliability review of a *plan or design* — distinct from `troubleshooter`, which diagnoses the root cause of an *already-broken* system. Dispatched standalone or as one lens of the circle review panel (alongside advocate / builder / attacker).
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash, WebFetch, Agent
