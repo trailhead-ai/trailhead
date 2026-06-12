@@ -68,19 +68,6 @@ Keep the report tight. A 400-word report with five precise citations beats a 200
 
 ## Harvest candidates (end-of-message)
 
-If your investigation surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
-
-Entry format: one entry per line with a typed prefix:
-- `lesson:` — durable invariants you discovered about the codebase or domain
-- `dead-end:` — approaches tried and ruled out, with the revive condition
-- `deferred:` — work set aside, with a trigger condition for revisiting
-- `follow-up:` — items to watch but not act on yet
-- `decision:` — choices made, with the key reason and what was rejected
-- `gotcha:` — surprising subsystem behavior worth recording
-
-Hard rules:
-- Omit the section entirely if you have nothing. Empty headers are noise.
-- Self-filter — only emit candidates that would survive a rigorous review. Mid-investigation noise stays out.
-- The block must be the suffix of your message — a downstream hook locates it by anchor.
+If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
 
 For a researcher specifically, the highest-value emissions are **lessons** (durable invariants you discovered) and **gotchas** (surprising subsystem behavior worth patching into a subsystem profile). Skip dead-ends — those belong to troubleshooters/implementers who actually tried things.
