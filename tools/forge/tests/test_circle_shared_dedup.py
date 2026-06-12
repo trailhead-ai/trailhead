@@ -105,6 +105,30 @@ def test_prompt_template_skeleton_in_shared():
     assert "## Confidence" in text
 
 
+def test_template_output_calibration_pinned():
+    # The output-shape constraints ARE review-calibration behavior — a future edit
+    # that loosens "≤2 Critical" to "≤3" or drops the no-speculative rule changes
+    # how every circle review prioritizes. Pin the binding literals (review M-2).
+    text = SHARED.read_text()
+    assert "≤2 Critical" in text, "the ≤2-Critical forced-prioritization cap must stay pinned"
+    assert "≤300 words total" in text, "the ≤300-word output budget must stay pinned"
+    assert "No speculative Critical" in text, "the no-speculative-Criticals rule must stay pinned"
+    assert "REPLACE your usual" in text, (
+        "the explicit output-budget override (vs the agents' ~400-600 word default) "
+        "must stay pinned — it is the binding instruction, not the agent's stated default"
+    )
+
+
+def test_lens_substitution_documented_in_shared():
+    # The <lens> fill instruction now lives ONLY in the shared file (review I-1).
+    # Pin that the shared file both names the token and enumerates its four values,
+    # so the dispatcher always knows what to substitute.
+    text = SHARED.read_text()
+    assert "<lens>" in text
+    for lens in ("Builder", "Reliability", "Security", "Advocate"):
+        assert lens in text, f"shared file must enumerate the {lens} lens value for <lens>"
+
+
 # --- negative: the shared scaffolding is no longer duplicated in the skills ---
 
 def test_bars_not_duplicated_in_plan_body():
@@ -191,18 +215,22 @@ def test_skills_reference_shared_circle():
         )
 
 
-# --- net-leaner: the merged shared file is smaller than the two original blocks ---
+# --- net-leaner: the merged shared file stays compressed, no silent re-bloat ---
 
-# Pre-slice circle-block line counts (captured before the hoist):
-#   plan/SKILL.md circle block (prompt template + bars + synthesis): lines 159-242 = 84 lines
-#   consult/SKILL.md circle block (prompt template + synthesis):     lines 55-99  = 45 lines
-PRE_SLICE_COMBINED_CIRCLE_BLOCK_LINES = 84 + 45  # = 129
+# The shared file legitimately holds the pre-existing 30-line roster PLUS the
+# hoisted circle scaffolding. Comparing total size against only the two original
+# circle blocks (84+45=129) is a loose backstop (review M-1): the file could grow
+# to ~128 by re-inlining dispatch prose and still pass. Instead pin a TIGHT ceiling
+# at current + small epsilon — any meaningful re-bloat (re-inlining the ~84-line
+# bars block, restoring the second persistence example, etc.) blows past it.
+MAX_SHARED_LINES = 126  # current ~119 + ~7 headroom for legitimate small edits
 
 
-def test_shared_circle_is_net_leaner():
+def test_shared_circle_stays_compressed():
     shared_lines = len(SHARED.read_text().splitlines())
-    assert shared_lines < PRE_SLICE_COMBINED_CIRCLE_BLOCK_LINES, (
-        f"_shared/circle.md is {shared_lines} lines; the merge must be leaner than "
-        f"the {PRE_SLICE_COMBINED_CIRCLE_BLOCK_LINES}-line sum of the two original "
-        "circle blocks (compression, not pure relocation)"
+    assert shared_lines <= MAX_SHARED_LINES, (
+        f"_shared/circle.md is {shared_lines} lines, over the {MAX_SHARED_LINES}-line "
+        "ceiling — the circle scaffolding has re-bloated. Compression, not relocation: "
+        "if this grew intentionally, confirm it's not re-inlining hoisted content and "
+        "bump the ceiling deliberately."
     )

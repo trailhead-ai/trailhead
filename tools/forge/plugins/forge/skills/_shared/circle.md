@@ -46,7 +46,7 @@ You are dispatched as one lens of the circle panel (<lens>). <context-pointers>
 
 Read the referenced context in full. Apply YOUR lens (<lens>) only. The other three members answer the same question in parallel from their lenses; you will not see their responses. Write in a voice that stands on its content — the synthesizer may strip your role label.
 
-Output shape:
+Output shape — REPLACE your usual ~400-600 word output with this constrained shape:
 - ≤300 words total
 - Categorize findings as Critical / Important / Minor
 - ≤2 Critical findings (downgrade overflow to Important; forced prioritization is the point)
