@@ -343,3 +343,24 @@ class TestCommittedManifestWellFormed:
         assert re.fullmatch(r"[0-9a-f]{40}", trailhead_entry.rev), (
             f"trailhead rev is not a 40-char lowercase hex SHA: {trailhead_entry.rev!r}"
         )
+
+    def test_committed_manifest_trailhead_entry_includes_portage_and_landing(self):
+        """The trailhead tools list in the committed manifest must include portage and landing.
+
+        Slice 5 registers these two new tools in the trailhead manager.
+        """
+        repo_root = Path(__file__).parent.parent.parent
+        manifest_path = repo_root / "trailhead" / "install_manifest.toml"
+        result = load_install_manifest(
+            manifest_path, registry="https://github.com/trailhead-ai"
+        )
+        trailhead_entry = next((r for r in result.repos if r.name == "trailhead"), None)
+        assert trailhead_entry is not None, "no 'trailhead' entry in committed manifest"
+        assert "portage" in trailhead_entry.tools, (
+            f"install_manifest.toml trailhead tools list must include 'portage'; "
+            f"got: {trailhead_entry.tools}"
+        )
+        assert "landing" in trailhead_entry.tools, (
+            f"install_manifest.toml trailhead tools list must include 'landing'; "
+            f"got: {trailhead_entry.tools}"
+        )

@@ -46,8 +46,10 @@ the "where is the work happening" question, answered automatically.
 subagent-driven implementation slice by slice, assumption-proving scouts, and a
 four-lens circle review. forge owns *how you build*; lore owns *what you know*.
 
-**You never have to adopt the whole suite.** Each tool is independently
-adoptable. Wire only what you need.
+**You never have to adopt the whole suite.** lore, camp, and forge are each
+independently adoptable — wire only what you need. portage and landing depend
+on the trailhead install layout (the `trailhead.vcs` library) and are available
+in the `full` preset for teams that want automated merge and deploy soak.
 
 ---
 
@@ -76,7 +78,7 @@ infrastructure.
 
 ## What's included
 
-One `trailhead` repo ships all four tools, pinned at a single commit SHA:
+One `trailhead` repo ships all six tools, pinned at a single commit SHA:
 
 | Tool         | What it covers |
 |---|---|
@@ -84,6 +86,8 @@ One `trailhead` repo ships all four tools, pinned at a single commit SHA:
 | `lore`       | Agent-native project memory — capture, recall, sessions |
 | `camp`       | Worktree + group orchestration across repos |
 | `forge`      | Dev rituals — planning, TDD execute, review, release |
+| `portage`    | PR lifecycle — open, update, watch CI, and merge in dependency order (`full` preset) |
+| `landing`    | Post-merge deploy soak and deploy-health diagnosis (`full` preset) |
 
 **outpost** (a personal dev-env and PR review dashboard) is a companion tool
 in its own repo — forward-declared in the install manifest for a future install
@@ -157,6 +161,8 @@ re-investigation, lore has paid for itself.
 - [lore](./tools/lore/README.md) — skills, recall mechanics, vault layout
 - [forge](./tools/forge/README.md) — agents, skills, capability groups
 - [camp](./tools/camp/README.md) — worktree commands, group config
+- [portage](./tools/portage/README.md) — PR lifecycle agents and skills
+- [landing](./tools/landing/README.md) — deploy soak and health-diagnosis agents and skills
 
 ## License
 

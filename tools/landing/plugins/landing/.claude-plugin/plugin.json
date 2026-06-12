@@ -1,0 +1,5 @@
+{
+  "name": "landing",
+  "version": "0.1.0",
+  "description": "Get it deployed: post-merge deploy soak and deploy-health incident handling for a camp group, on the trailhead.vcs provider library."
+}

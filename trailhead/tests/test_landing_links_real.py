@@ -499,18 +499,21 @@ class TestForwardCheckOverRealClaims:
 # Slice 2 — inverse anti-rot check (D-5, U-3, S-2, R-4, R-5)
 # ---------------------------------------------------------------------------
 
-# The four READMEs the gate scans (sorted — R-5 determinism).
+# The READMEs the gate scans (sorted — R-5 determinism).
+# Slice 3 added tools/portage/README.md; Slice 4 added tools/landing/README.md.
 README_INDEX: list[Path] = sorted(
     [
         _REPO_ROOT / "README.md",
         _REPO_ROOT / "tools" / "lore" / "README.md",
         _REPO_ROOT / "tools" / "forge" / "README.md",
         _REPO_ROOT / "tools" / "camp" / "README.md",
+        _REPO_ROOT / "tools" / "portage" / "README.md",
+        _REPO_ROOT / "tools" / "landing" / "README.md",
     ]
 )
 
 # Tools whose fenced-block commands the gate tracks.
-_TRACKED_TOOLS = frozenset({"trailhead", "lore", "forge", "camp"})
+_TRACKED_TOOLS = frozenset({"trailhead", "lore", "forge", "camp", "portage", "landing"})
 
 # Fenced sh/bash block pattern (U-3: bounded to fenced blocks only).
 _FENCED_BLOCK_RE = re.compile(r"```(?:sh|bash)\n(.*?)```", re.DOTALL)
@@ -1129,12 +1132,15 @@ class TestRootReadmeStructuralGuard:
 # Slice 5 — mandatory landing leak gate (S-1) + no-D17-collapse scope guard
 # ---------------------------------------------------------------------------
 
-# The five landing-surface files the gate must certify as clean.
+# The landing-surface files the gate must certify as clean.
+# Slice 3 added tools/portage/README.md; Slice 4 added tools/landing/README.md.
 _LANDING_FILES: list[Path] = [
     _REPO_ROOT / "README.md",
     _REPO_ROOT / "tools" / "lore" / "README.md",
     _REPO_ROOT / "tools" / "forge" / "README.md",
     _REPO_ROOT / "tools" / "camp" / "README.md",
+    _REPO_ROOT / "tools" / "portage" / "README.md",
+    _REPO_ROOT / "tools" / "landing" / "README.md",
     _REPO_ROOT / "trailhead" / "landing_claims.toml",
 ]
 
@@ -1190,7 +1196,7 @@ def _build_denylist(tmp_path: Path) -> Path:
 
 
 def _copy_landing_files_to_dir(dest: Path) -> Path:
-    """Copy the five landing-surface files into a flat directory under dest.
+    """Copy the landing-surface files into a flat directory under dest.
 
     leak_gate.py's _text_files() uses rglob("*") — it only yields files when
     scanning a DIRECTORY tree, not an individual file path. Copying into a
@@ -1211,6 +1217,8 @@ def _copy_landing_files_to_dir(dest: Path) -> Path:
         (_REPO_ROOT / "tools" / "lore" / "README.md", "lore-README.md"),
         (_REPO_ROOT / "tools" / "forge" / "README.md", "forge-README.md"),
         (_REPO_ROOT / "tools" / "camp" / "README.md", "camp-README.md"),
+        (_REPO_ROOT / "tools" / "portage" / "README.md", "portage-README.md"),
+        (_REPO_ROOT / "tools" / "landing" / "README.md", "landing-README.md"),
         (_REPO_ROOT / "trailhead" / "landing_claims.toml", "landing_claims.toml"),
     ]
     for src, dst_name in name_map:
@@ -1226,7 +1234,7 @@ def _run_gate(trees: list[Path], denylist: Path) -> subprocess.CompletedProcess:
 
 
 class TestLandingSurfaceLeakGate:
-    """S-1: mandatory, gating leak-gate run over the five landing-surface files.
+    """S-1: mandatory, gating leak-gate run over the landing-surface files.
 
     Uses an ephemeral, repo-tracked denylist written to tmp_path so the gate
     runs identically on any checkout — never depends on ~/.claude/leak-gate.denylist.
@@ -1240,10 +1248,10 @@ class TestLandingSurfaceLeakGate:
     """
 
     def test_positive_gate_landing_surface_is_clean(self, tmp_path: Path) -> None:
-        """S-1 GATING: the five landing-surface files must exit 0 with the ephemeral denylist.
+        """S-1 GATING: the landing-surface files must exit 0 with the ephemeral denylist.
 
         A real leak (e.g. a brain/ path reference, a WS-\\d+ workstream ID, a bare
-        'zenith' token) in any of the five files makes this test RED — that is the
+        'zenith' token) in any of the files makes this test RED — that is the
         intended behavior. Do NOT loosen the denylist to make it pass; fix the leak.
 
         The files are copied into a tmp_path directory so _text_files() scans them

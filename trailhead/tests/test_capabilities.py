@@ -232,25 +232,11 @@ class TestForgeManifestValidatesAgainstDisk:
         assert cap["skills"] == []
         assert cap["agents"] == ["agents/artist.md"]
 
-    def test_forge_release_capability_has_skills_and_agents(self):
-        """forge release has 7 release skills and 4 release agents."""
+    def test_forge_has_no_release_capability(self):
+        """forge no longer ships a `release` capability — PR lifecycle moved to
+        portage and post-merge soak moved to landing (Slice 6 hard cut)."""
         m = load_manifest(_FORGE_MANIFEST)
-        cap = m.capabilities["release"]
-        assert cap["skills"] == [
-            "skills/create-pr",
-            "skills/update-pr",
-            "skills/watch-pr",
-            "skills/watch-preview",
-            "skills/merge-pr",
-            "skills/github-pr",
-            "skills/post-merge-decide",
-        ]
-        assert cap["agents"] == [
-            "agents/pr-updater.md",
-            "agents/watch-pr.md",
-            "agents/watch-preview.md",
-            "agents/diagnose-preview.md",
-        ]
+        assert "release" not in m.capabilities
 
 
 # ---------------------------------------------------------------------------

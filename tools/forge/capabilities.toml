@@ -35,31 +35,12 @@ description = "Design-doc authoring — structured spec and design artifacts."
 skills = []
 agents = ["agents/artist.md"]
 
-[capabilities.release]
-description = "Release rituals — PR lifecycle, CI watch, merge ordering, and post-merge soak for a camp group."
-skills = [
-  "skills/create-pr",
-  "skills/update-pr",
-  "skills/watch-pr",
-  "skills/watch-preview",
-  "skills/merge-pr",
-  "skills/github-pr",
-  "skills/post-merge-decide",
-]
-agents = [
-  "agents/pr-updater.md",
-  "agents/watch-pr.md",
-  "agents/watch-preview.md",
-  "agents/diagnose-preview.md",
-]
-
 [capabilities.helpers]
-description = "Cheap specialist subagents for docs, logs, PRs, research, troubleshooting, tests, and security review."
+description = "Cheap specialist subagents for docs, logs, research, troubleshooting, tests, and security review."
 skills = []
 agents = [
   "agents/doc-finder.md",
   "agents/log-sifter.md",
-  "agents/pr-summarizer.md",
   "agents/researcher.md",
   "agents/troubleshooter.md",
   "agents/test-runner.md",
