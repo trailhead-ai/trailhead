@@ -3,7 +3,7 @@
 The deterministic logic behind `/forge:pickup` lives in
 `plugins/forge/scripts/pickup_resume.py` so it can be tested without driving a
 live Claude Code session. `/forge:pickup` resumes work shelved by
-`/forge:handoff` — it surfaces the recorded git state + pickup hints and flips
+`/forge:shelve` — it surfaces the recorded git state + pickup hints and flips
 the shelved note back to active. Coverage:
 
   - most-recent forge handoff read (symmetric with handoff's degraded write):

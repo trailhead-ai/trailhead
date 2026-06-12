@@ -144,7 +144,8 @@ def test_skill_has_no_app_seam_tokens(skill_md: Path):
 
 # skill stem -> list of contiguous visible-skip phrases that MUST be present
 _VISIBLE_SKIP_PHRASES: dict[str, list[str]] = {
-    "planning": [
+    # planning skill renamed to plan in Spec A / Slice 4.
+    "plan": [
         "no feature-flag provider configured",
         "no observability provider configured",
         "no issue tracker configured",
@@ -191,7 +192,9 @@ def test_skill_visible_skip_phrases_present(stem: str):
 # ---------------------------------------------------------------------------
 
 _GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
-    "followup": [
+    # skill stems renamed in Spec A / Slice 4 (followup→polish; the old code-review
+    # request skill → review).
+    "polish": [
         (
             "brain/plans/",
             "lore new plan",
@@ -201,7 +204,7 @@ _GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
             "lore new plan",
         ),
     ],
-    "requesting-code-review": [
+    "review": [
         (
             "brain/plans/",
             "the plan/requirements the caller provides",

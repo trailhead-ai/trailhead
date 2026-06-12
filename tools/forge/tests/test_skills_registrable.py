@@ -94,14 +94,14 @@ def test_execute_dispatched_agents_resolve():
         )
 
 
-def test_handoff_and_pickup_skills_present():
+def test_shelve_and_pickup_skills_present():
     """Guard against a dev-ritual skill dir silently disappearing.
 
-    handoff + pickup are the dev rituals forge owns (P3-B2). They are listed
-    here from the start so the expected-set is a stable contract even before
-    pickup lands.
+    shelve (renamed from handoff in Spec A / Slice 4) + pickup are the dev
+    rituals forge owns (P3-B2). They are listed here so the expected-set is a
+    stable contract.
     """
     names = {p.parent.name for p in _skill_files()}
-    expected = {"handoff", "pickup"}
+    expected = {"shelve", "pickup"}
     missing = expected - names
     assert not missing, f"expected forge skills missing from the plugin: {sorted(missing)}"

@@ -44,7 +44,7 @@ Report the revert PR URLs for each repo.
 ### `forward-fix`
 
 1. Note the causal chain from `diagnose-preview`'s recommendation.
-2. Apply the identified fix inline or dispatch a `executor` subagent if multi-file.
+2. Apply the identified fix inline or dispatch an `executor` subagent if multi-file.
 3. Follow the normal `create-pr` / `watch-pr` flow to ship the fix.
 
 ### `wait-and-recheck`

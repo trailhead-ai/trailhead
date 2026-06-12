@@ -610,7 +610,7 @@ class TestFrontmatterNameMatchesFilename:
 
 _CONSULT_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "consult" / "SKILL.md"
 _CIRCLE_INCLUDE = _FORGE_PLUGIN_ROOT / "skills" / "_shared" / "circle.md"
-_PLANNING_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "planning" / "SKILL.md"
+_PLANNING_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
 
 # The four circle agent stems the membership single-source-of-truth must name,
 # each resolving to agents/<stem>.md.
@@ -811,3 +811,239 @@ class TestPlanningExecuteHandoff:
             "(e.g. **build**) so the trigger word is not identical to the `/forge:execute` "
             "skill name."
         )
+
+
+# ---------------------------------------------------------------------------
+# 9. Slice 4 — forge skill renames: followup→polish, handoff→shelve,
+#    planning→plan, requesting-code-review→review.
+#
+# CRITICAL scoping (Builder/Advocate, per-slice green-bar rule): forge keeps a
+# `review` *capability* name and the new `review` *skill* slots under it. The
+# `requesting-code-review` forbid greps the LITERAL old token / skill path,
+# never a bare `review`. Likewise `plan` is common English — assert the
+# `skills/plan/` dir/path, never a bare `plan` word. And `handoff`/`followup`
+# survive legitimately as the `lore handoff` CLI subcommand, the
+# `handoff_capture.py` script, `~/.forge/handoffs/`, and the plan-brief schema
+# tokens `followup-to:` / `-followup-<n>` — so those forbids target the skill
+# IDENTITY only (skill path, `name:` frontmatter, `/forge:` invocation), never
+# the bare word.
+# ---------------------------------------------------------------------------
+
+_POLISH_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "polish" / "SKILL.md"
+_SHELVE_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "shelve" / "SKILL.md"
+_PLAN_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
+_REVIEW_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "review" / "SKILL.md"
+
+
+class TestSlice4SkillRenameForbids:
+    """Old forge skill identifiers must be gone from tools/ source.
+
+    Each forbid is token/path-scoped to the skill identity so it never trips a
+    legitimate surviving name (the `review`/`circle` capabilities, the
+    `lore handoff` CLI subcommand, the `handoff_capture.py` script, the
+    `followup-to:` plan-brief schema field).
+    """
+
+    def test_no_skills_followup_path(self):
+        """The `skills/followup` skill path must not appear after rename to skills/polish."""
+        files = _collect_files()
+        hits = _grep_files(r"skills/followup", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/followup' — must be 'skills/polish' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_skills_handoff_path(self):
+        """The `skills/handoff` skill path must not appear after rename to skills/shelve.
+
+        Token-scoped to the skill path so it does NOT flag the legitimately
+        surviving `lore handoff` CLI subcommand, the `handoff_capture.py` script,
+        or the `~/.forge/handoffs/` degraded-write location.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"skills/handoff", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/handoff' — must be 'skills/shelve' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_skills_planning_path(self):
+        """The `skills/planning` skill path must not appear after rename to skills/plan."""
+        files = _collect_files()
+        hits = _grep_files(r"skills/planning", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/planning' — must be 'skills/plan' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_requesting_code_review_token(self):
+        """The literal `requesting-code-review` token must not appear after rename to skills/review.
+
+        Greps the LITERAL old token (path and skill stem) — NEVER a bare `review`,
+        which survives as the forge `review` capability name and elsewhere.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"requesting-code-review", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'requesting-code-review' — must be 'review' (skill) after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_forge_handoff_command_invocation(self):
+        """The `/forge:handoff` skill invocation must not appear after rename to /forge:shelve.
+
+        Scoped to the slash-command form so it targets the skill identity, not the
+        `lore handoff` subcommand or the `handoff_capture.py` helper name.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"/forge:handoff", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of '/forge:handoff' — must be '/forge:shelve' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_followup_command_invocation(self):
+        """The `/followup` and `/forge:followup` skill invocations must not appear after rename to polish.
+
+        Scoped to the slash-command form so it targets the skill identity, NOT the
+        `followup-to:` plan-brief frontmatter field or the `-followup-<n>` slug
+        convention (those are the brief schema, not the skill name).
+        """
+        files = _collect_files()
+        hits = _grep_files(r"/(forge:)?followup", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of '/followup' invocation — must be '/polish' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_followup_skill_name_frontmatter(self):
+        """No SKILL.md may carry `name: followup` after rename to polish."""
+        files = _collect_files()
+        hits = _grep_files(r"^name: followup\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of `name: followup` frontmatter — must be `name: polish` after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_handoff_skill_name_frontmatter(self):
+        """No SKILL.md may carry `name: handoff` after rename to shelve."""
+        files = _collect_files()
+        hits = _grep_files(r"^name: handoff\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of `name: handoff` frontmatter — must be `name: shelve` after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_planning_skill_name_frontmatter(self):
+        """No SKILL.md may carry `name: planning` after rename to plan."""
+        files = _collect_files()
+        hits = _grep_files(r"^name: planning\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of `name: planning` frontmatter — must be `name: plan` after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_old_skill_dirs_gone(self):
+        """The four old skill directories must not exist under forge plugins."""
+        for old in ("followup", "handoff", "planning", "requesting-code-review"):
+            old_dir = _FORGE_PLUGIN_ROOT / "skills" / old
+            assert not old_dir.exists(), (
+                f"Old skills/{old}/ still exists at {old_dir} — rename it."
+            )
+
+
+class TestSlice4RenamedSkillsExistAndRegistrable:
+    """The four renamed skill dirs must exist + be registrable with matching `name:`.
+
+    The `skills/plan/` and `skills/review/` assertions key on the exact skill DIR
+    path — never a bare `plan`/`review` word — so they can't be satisfied by the
+    surviving `plan`/`review` capability tokens.
+    """
+
+    @pytest.mark.parametrize("stem,skill_md", [
+        ("polish", _POLISH_SKILL),
+        ("shelve", _SHELVE_SKILL),
+        ("plan", _PLAN_SKILL),
+        ("review", _REVIEW_SKILL),
+    ])
+    def test_renamed_skill_dir_exists_with_skill_md(self, stem: str, skill_md: Path):
+        assert skill_md.exists(), (
+            f"skills/{stem}/SKILL.md not found at {skill_md} — rename the old skill dir."
+        )
+
+    @pytest.mark.parametrize("stem,skill_md", [
+        ("polish", _POLISH_SKILL),
+        ("shelve", _SHELVE_SKILL),
+        ("plan", _PLAN_SKILL),
+        ("review", _REVIEW_SKILL),
+    ])
+    def test_renamed_skill_is_registrable_with_matching_name(self, stem: str, skill_md: Path):
+        assert skill_md.exists(), f"skills/{stem}/SKILL.md not found at {skill_md}"
+        assert _has_registrable_frontmatter(skill_md), (
+            f"skills/{stem}/SKILL.md must open with non-empty name: + description: frontmatter "
+            f"or Claude Code will not register /forge:{stem}"
+        )
+        name = _parse_frontmatter_name(skill_md)
+        assert name == stem, (
+            f"skills/{stem}/SKILL.md frontmatter name: is {name!r}, expected {stem!r}"
+        )
+
+
+class TestSlice4ManifestRepointed:
+    """capabilities.toml must repoint the four renamed skills atomically."""
+
+    def test_base_skills_repointed_to_shelve_and_polish(self):
+        """[tool] base must list skills/shelve + skills/polish (pickup stays); the old
+        skills/handoff + skills/followup must be gone."""
+        m = load_manifest(_FORGE_MANIFEST)
+        base = m.base
+        assert "skills/shelve" in base, f"forge base must reference 'skills/shelve'; got {base}"
+        assert "skills/polish" in base, f"forge base must reference 'skills/polish'; got {base}"
+        assert "skills/pickup" in base, f"forge base must keep 'skills/pickup'; got {base}"
+        assert "skills/handoff" not in base, "forge base still references old 'skills/handoff'"
+        assert "skills/followup" not in base, "forge base still references old 'skills/followup'"
+
+    def test_planning_capability_references_plan_skill(self):
+        """forge planning capability must reference skills/plan (not skills/planning)."""
+        m = load_manifest(_FORGE_MANIFEST)
+        cap = m.capabilities["planning"]
+        assert "skills/plan" in cap["skills"], (
+            f"forge planning must reference 'skills/plan'; got {cap['skills']}"
+        )
+        assert "skills/planning" not in cap["skills"], (
+            "forge planning still references old 'skills/planning'"
+        )
+
+    def test_review_capability_references_review_skill(self):
+        """forge review capability must reference skills/review (not skills/requesting-code-review).
+
+        The capability NAME stays `review`; only the skill path changes.
+        """
+        m = load_manifest(_FORGE_MANIFEST)
+        cap = m.capabilities["review"]
+        assert "skills/review" in cap["skills"], (
+            f"forge review must reference 'skills/review'; got {cap['skills']}"
+        )
+        assert "skills/requesting-code-review" not in cap["skills"], (
+            "forge review still references old 'skills/requesting-code-review'"
+        )
+
+    def test_renamed_skills_compose_to_existing_src(self, tmp_path):
+        """compose_plan for planning/review/base must resolve the renamed skill dirs on disk."""
+        m = load_manifest(_FORGE_MANIFEST)
+        for cap in ("planning", "review"):
+            plan = compose_plan(m, {cap}, tmp_path / cap)
+            skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
+            if cap == "planning":
+                assert "plan" in skill_srcs, f"compose({cap}) must include the plan skill dir; got {skill_srcs}"
+            if cap == "review":
+                assert "review" in skill_srcs, f"compose({cap}) must include the review skill dir; got {skill_srcs}"

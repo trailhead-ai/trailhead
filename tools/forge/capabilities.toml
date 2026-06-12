@@ -3,11 +3,11 @@
 
 [tool]
 name = "forge"
-base = ["skills/handoff", "skills/pickup", "skills/followup"]
+base = ["skills/shelve", "skills/pickup", "skills/polish"]
 
 [capabilities.planning]
 description = "Turn fuzzy ideas into specs and implementation plans — planner and architect subagents."
-skills = ["skills/planning"]
+skills = ["skills/plan"]
 agents = ["agents/planner.md", "agents/architect.md"]
 
 [capabilities.execute]
@@ -17,7 +17,7 @@ agents = ["agents/assumption-prover.md", "agents/executor.md"]
 
 [capabilities.review]
 description = "Structured code review of completed work — code-reviewer subagent dispatched after implementation."
-skills = ["skills/requesting-code-review"]
+skills = ["skills/review"]
 agents = ["agents/code-reviewer.md"]
 
 [capabilities.circle]

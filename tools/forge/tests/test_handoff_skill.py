@@ -1,4 +1,4 @@
-"""Content contract for `plugins/forge/skills/handoff/SKILL.md`.
+"""Content contract for `plugins/forge/skills/shelve/SKILL.md`.
 
 The council folded several non-negotiable user-facing guarantees into the
 handoff ritual. These are prose contracts the orchestrating SKILL.md must carry
@@ -24,7 +24,7 @@ import pytest
 
 SKILL = (
     Path(__file__).parent.parent
-    / "plugins" / "forge" / "skills" / "handoff" / "SKILL.md"
+    / "plugins" / "forge" / "skills" / "shelve" / "SKILL.md"
 )
 
 

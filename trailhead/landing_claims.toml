@@ -178,7 +178,7 @@ source = "forge"
 [[claim]]
 kind = "skill"
 tool = "forge"
-ref = "skills/planning"
+ref = "skills/plan"
 source = "forge"
 
 # ---------------------------------------------------------------------------
@@ -345,7 +345,7 @@ source = "forge"
 [[claim]]
 kind = "skill"
 tool = "forge"
-ref = "skills/requesting-code-review"
+ref = "skills/review"
 source = "forge"
 
 [[claim]]

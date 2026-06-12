@@ -1,9 +1,9 @@
 ---
-name: handoff
-description: Record your current git state and shelve a session note so a future session can resume. Use for /forge:handoff, "hand off this work", "save my progress", "I'm done for now".
+name: shelve
+description: Record your current git state and shelve a session note so a future session can resume. Use for /forge:shelve, "shelve this work", "hand off this work", "save my progress", "I'm done for now".
 ---
 
-# Handoff
+# Shelve
 
 Capture a read-only snapshot of your git state, compose pickup hints, and shelve a session note (via the `lore` CLI when available, otherwise a local forge file). A future `/forge:pickup` resurfaces it.
 

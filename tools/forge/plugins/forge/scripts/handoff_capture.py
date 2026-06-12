@@ -1,6 +1,6 @@
-"""Deterministic helpers for the `/forge:handoff` dev ritual.
+"""Deterministic helpers for the `/forge:shelve` dev ritual.
 
-`/forge:handoff` records generic git state and shelves a session note so a
+`/forge:shelve` records generic git state and shelves a session note so a
 future session can resume. The SKILL.md orchestrates; the testable logic lives
 here:
 

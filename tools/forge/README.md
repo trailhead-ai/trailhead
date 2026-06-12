@@ -54,10 +54,10 @@ project's own repo.
 
 ## Skills
 
-Base skills (always available): `/forge:handoff`, `/forge:pickup`,
-`/forge:followup`
+Base skills (always available): `/forge:shelve`, `/forge:pickup`,
+`/forge:polish`
 
-**Planning:** `/forge:planning`
+**Planning:** `/forge:plan`
 
 **Circle:** `/forge:consult` — convene the four-lens panel on a question and
 synthesize. The standalone form of the planning skill's circle-review step;
@@ -65,13 +65,13 @@ membership is single-sourced from `skills/_shared/circle.md`.
 
 **Execute:** `/forge:execute`
 
-**Review:** `/forge:requesting-code-review`
+**Review:** `/forge:review`
 
 **Release:** `/forge:create-pr`, `/forge:update-pr`, `/forge:watch-pr`,
 `/forge:watch-preview`, `/forge:merge-pr`, `/forge:github-pr`,
 `/forge:post-merge-decide`
 
-`/forge:handoff` and `/forge:pickup` are a symmetric shelve/resume pair — record
+`/forge:shelve` and `/forge:pickup` are a symmetric shelve/resume pair — record
 read-only git state and shelve a session note with pickup hints so a future
 session can resume. The git capture is strictly **read-only** — these rituals
 record state, they do not commit, push, or rebase your code.

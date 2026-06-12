@@ -188,12 +188,14 @@ class TestForgeManifestValidatesAgainstDisk:
 
     def test_forge_base_dirs(self):
         m = load_manifest(_FORGE_MANIFEST)
-        assert set(m.base) == {"skills/handoff", "skills/pickup", "skills/followup"}
+        # handoff→shelve, followup→polish renamed in Spec A / Slice 4 (pickup unchanged).
+        assert set(m.base) == {"skills/shelve", "skills/pickup", "skills/polish"}
 
     def test_forge_planning_capability(self):
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["planning"]
-        assert "skills/planning" in cap["skills"]
+        # planning→plan skill renamed in Spec A / Slice 4 (capability name unchanged).
+        assert "skills/plan" in cap["skills"]
         assert "agents/planner.md" in cap["agents"]
         assert "agents/architect.md" in cap["agents"]
 

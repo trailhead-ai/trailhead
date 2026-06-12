@@ -1,12 +1,12 @@
 ---
-name: planning
+name: plan
 description: >
   Use when starting a new feature, substantial change, or multi-step task that needs design alignment before code.
   TRIGGER when: user says "feature", "implement", "build", "add support for", "design", "plan", "architecture", or describes a multi-step task.
   DO NOT TRIGGER when: user says "fix", "bug", "debug", "broken", small single-file changes, or tasks with clear intent needing no design.
 ---
 
-# Planning
+# Plan
 
 Design the whole feature end-to-end, then build it in slices — proving unknowns before building on top of them.
 

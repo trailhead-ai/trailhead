@@ -1,20 +1,23 @@
 ---
-name: followup
+name: polish
 description: >
-  Batch up post-implementation follow-up items, clarify any ambiguities inline, then dispatch
+  Batch up post-implementation code fix-ups, clarify any ambiguities inline, then dispatch
   `executor` to do the actual work in a cheaper subagent context — keeping mechanical
   iteration off the main session's expensive tokens.
-  TRIGGER when: user invokes `/followup`, OR provides a numbered/bulleted list of post-implementation
-  changes that includes the words "follow up", "follow-up", "followup", "follow ups", "fix-ups",
-  "polish", or "iterate on these".
-  DO NOT TRIGGER when: single small item (just do it inline), planning a new feature (use `planning`),
-  debugging a specific failure (use `systematic-debugging`), or "follow up" appears as a passing
-  reference ("I'll follow up on that later") rather than as the framing of a batch.
+  TRIGGER when: user invokes `/polish`, OR provides a numbered/bulleted list of post-implementation
+  CODE changes framed as "polish these fix-ups", "fix-ups", "iterate on these", "clean these up",
+  or "tidy these up".
+  DO NOT TRIGGER when: single small item (just do it inline), planning a new feature (use `plan`),
+  debugging a specific failure (use `systematic-debugging`), or the user wants to NOTE / capture a
+  follow-up for later (that is lore's `follow-up` capture — "note a follow-up", "put this on my
+  follow-ups" — not a batch of code edits to run now).
 ---
 
-# Followup
+# Polish
 
-Take a batch of post-implementation items, clarify ambiguities, hand off to a subagent to do the work. Main session stays cheap; mechanical iteration runs on Sonnet.
+Take a batch of post-implementation code fix-ups, clarify ambiguities, hand off to a subagent to do the work. Main session stays cheap; mechanical iteration runs on Sonnet.
+
+**Not to be confused with lore's `follow-up` capture.** This skill *runs* a batch of mechanical code edits now (it dispatches `executor`). Lore's `follow-up` *records* a thing to revisit later. "Polish these fix-ups" → here; "note a follow-up" → lore.
 
 ## Why this exists
 
@@ -44,7 +47,7 @@ When in doubt, use the skill — the marginal cost of dispatch is small; the cos
 
 Read every item the user provided. Number them 1..N if not already numbered. Resolve "this", "that", "the helper" to concrete files/symbols by referring back to recent conversation context — if you cannot resolve a reference, that's a clarifying question (step 2).
 
-If the user invoked `/followup` with no items in the same message, ask for the batch and stop.
+If the user invoked `/polish` with no items in the same message, ask for the batch and stop.
 
 ### 1b. Resolve the parent plan
 
@@ -54,7 +57,7 @@ Resolve the active session note (e.g. `lore current`) and read its `plan:` front
 
 - **Exactly one plan slug listed** → that's the parent. Use its filename stem (e.g. `2026-04-27-survey-config-activation-cascade`) as `<parent-slug>`.
 - **Multiple plan slugs** → ask the user which plan these follow-ups apply to in your clarifying turn (step 2).
-- **No plan slugs OR session note missing** → either the user is doing follow-ups on work that didn't go through `/planning`, or this is a fresh session. Ask the user for the parent plan filename. If they say "none / standalone", proceed without a parent (`<parent-slug>` becomes the free-form `<feature-slug>` derived from conversation context, and the brief omits `followup-to`).
+- **No plan slugs OR session note missing** → either the user is doing fix-ups on work that didn't go through `/plan`, or this is a fresh session. Ask the user for the parent plan filename. If they say "none / standalone", proceed without a parent (`<parent-slug>` becomes the free-form `<feature-slug>` derived from conversation context, and the brief omits `followup-to`).
 
 Also capture the parent's `related-subsystems` from its frontmatter — you'll inherit those into the brief so the followup is associated with the right subsystems for recall.
 
@@ -194,4 +197,4 @@ Do NOT try to write a single brief that asks the executor to operate on multiple
 ## Notes
 
 - Briefs are a useful artifact — they document what changed and why during the iteration phase. Use `lore new plan` to write them into your vault.
-- This skill does NOT touch an issue tracker hook. Follow-ups are post-implementation polish, not status transitions. If a follow-up is large enough that the tracker state should advance again, the user should run `/planning`, not `/followup`.
+- This skill does NOT touch an issue tracker hook. Fix-ups are post-implementation polish, not status transitions. If a fix-up is large enough that the tracker state should advance again, the user should run `/plan`, not `/polish`.

@@ -1,11 +1,11 @@
 ---
 name: pickup
-description: Resume a shelved work chain — surface the recorded git state and pickup hints from a prior /forge:handoff. Use for /forge:pickup, /forge:pickup <slug>, "pick up where I left off", "resume the work on X".
+description: Resume a shelved work chain — surface the recorded git state and pickup hints from a prior /forge:shelve. Use for /forge:pickup, /forge:pickup <slug>, "pick up where I left off", "resume the work on X".
 ---
 
 # Pickup
 
-Resume work shelved by `/forge:handoff` — locate the shelved session note (or local forge handoff file), surface its `## Pickup hints` and recorded git state, and flip the note back to active. A `<slug>` argument targets a specific shelved chain; with no argument, pickup surfaces the most recent one.
+Resume work shelved by `/forge:shelve` — locate the shelved session note (or local forge handoff file), surface its `## Pickup hints` and recorded git state, and flip the note back to active. A `<slug>` argument targets a specific shelved chain; with no argument, pickup surfaces the most recent one.
 
 ## Announce FIRST (no-rebase — required)
 

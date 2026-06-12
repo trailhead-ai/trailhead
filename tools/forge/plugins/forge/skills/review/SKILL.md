@@ -1,9 +1,9 @@
 ---
-name: requesting-code-review
+name: review
 description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements
 ---
 
-# Requesting Code Review
+# Review
 
 **Recommended tier:** Sonnet/low for the caller — this skill is a dispatcher. The `code-reviewer` subagent it dispatches is pinned to Opus/high, where the actual review reasoning happens. `/model sonnet` *before* invoking if on Opus. (Advisory — the harness doesn't auto-switch.)
 
@@ -108,4 +108,4 @@ You: [Fix progress indicators]
 - Show code/tests that prove it works
 - Request clarification
 
-See template at: requesting-code-review/code-reviewer.md
+See template at: review/code-reviewer.md
