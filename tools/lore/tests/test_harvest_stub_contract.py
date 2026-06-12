@@ -18,12 +18,15 @@ test_renames_guard.py Slice-9 guard across all non-allowlisted source files.
 Any reference to the old harvest type is assembled at runtime.
 
 Slice: WS-8 Slice 1a (scaffolding-dedup plan).
+Slice: WS-8 Slice 1b extends to all 7 harvest-bearing agents.
 """
 from __future__ import annotations
 
 import importlib.util
 import re
 from pathlib import Path
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Load SECTION_RE and ENTRY_RE from the real hook — not copies, the live ones.
@@ -292,3 +295,62 @@ class TestResearcherMdInvariants:
             "researcher.md still contains the verbose 'Entry format:' subsection. "
             "Replace lines 69-86 with the compressed stub (plan Slice 1a)."
         )
+
+
+# ---------------------------------------------------------------------------
+# Slice 1b — all 7 harvest-bearing agents parametrized contract.
+#
+# Each agent must: (1) contain literal '## Harvest candidates', (2) contain its
+# role-specific sentence (identified by a distinctive substring), and (3) NOT
+# contain 'Entry format:' (proving compression happened).
+# ---------------------------------------------------------------------------
+
+_AGENTS_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "tools" / "forge" / "plugins" / "forge" / "agents"
+)
+
+# (stem, distinctive_role_keyword) — the keyword is a substring that only exists
+# in the role-specific final sentence, unique enough to confirm verbatim preservation.
+_HARVEST_AGENTS_ROLE_KEYWORDS: list[tuple[str, str]] = [
+    ("researcher",        "Skip dead-ends — those belong to troubleshooters"),
+    ("executor",          "Skip decisions (the plan already made them) and follow-ups"),
+    ("architect",         "Skip dead-ends (you didn't try anything — you advised)"),
+    ("assumption-prover", "you prove or disprove one assumption"),
+    ("code-reviewer",     "only emit a lesson if the pattern is durable across reviews"),
+    ("security-auditor",  "only emit a lesson if the pattern is durable across audits"),
+    ("troubleshooter",    "the caller decides what to do about the bug, not you"),
+]
+
+
+@pytest.mark.parametrize("stem,role_keyword", _HARVEST_AGENTS_ROLE_KEYWORDS)
+def test_agent_harvest_block_contains_heading(stem: str, role_keyword: str):
+    """Each harvest-bearing agent must contain the literal '## Harvest candidates' heading."""
+    text = (_AGENTS_DIR / f"{stem}.md").read_text()
+    assert "## Harvest candidates" in text, (
+        f"{stem}.md is missing the literal '## Harvest candidates' heading."
+    )
+
+
+@pytest.mark.parametrize("stem,role_keyword", _HARVEST_AGENTS_ROLE_KEYWORDS)
+def test_agent_harvest_block_contains_role_sentence(stem: str, role_keyword: str):
+    """Each harvest-bearing agent must contain its role-specific final sentence."""
+    text = (_AGENTS_DIR / f"{stem}.md").read_text()
+    assert role_keyword in text, (
+        f"{stem}.md is missing the role-specific sentence (expected substring: "
+        f"{role_keyword!r}). The compressed stub must preserve this verbatim."
+    )
+
+
+@pytest.mark.parametrize("stem,role_keyword", _HARVEST_AGENTS_ROLE_KEYWORDS)
+def test_agent_harvest_block_is_compressed(stem: str, role_keyword: str):
+    """Each harvest-bearing agent must use the compressed stub, not the verbose form.
+
+    The verbose form has an explicit 'Entry format:' subsection.
+    The compressed stub does NOT — it names the six types inline on one instruction line.
+    """
+    text = (_AGENTS_DIR / f"{stem}.md").read_text()
+    assert "Entry format:" not in text, (
+        f"{stem}.md still contains the verbose 'Entry format:' subsection. "
+        "Replace the harvest block with the compressed stub (plan Slice 1b)."
+    )

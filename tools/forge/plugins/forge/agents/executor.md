@@ -127,19 +127,6 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 
 ## Harvest candidates (end-of-message)
 
-If your implementation surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
-
-Entry format: one entry per line with a typed prefix:
-- `lesson:` — TDD or scope-discipline mistakes worth a future prevention check
-- `dead-end:` — an approach you actually code-tried that didn't work, with the revive condition
-- `deferred:` — work set aside, with a trigger condition for revisiting
-- `follow-up:` — items to watch but not act on yet
-- `decision:` — choices made, with the key reason and what was rejected
-- `gotcha:` — subsystem behavior that bit you mid-slice
-
-Hard rules:
-- Omit the section entirely if you have nothing. Empty headers are noise.
-- Self-filter — only emit candidates that would survive a rigorous review. Mid-investigation noise stays out.
-- The block must be the suffix of your message — a downstream hook locates it by anchor.
+If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
 
 For an executor specifically, the highest-value emissions are **gotchas** (subsystem behavior that bit you mid-slice — the kind of thing a future plan should warn about), **dead-ends** (approaches you actually code-tried that didn't work, with the revive condition — you have unique signal here because you ran the code), and **lessons** (TDD or scope-discipline mistakes you made that a future plan or slice check could catch). Skip decisions (the plan already made them) and follow-ups (rarely surface during implementation).

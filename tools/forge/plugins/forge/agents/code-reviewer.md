@@ -70,19 +70,6 @@ When reviewing against a plan, use `Read` to load the plan file the caller provi
 
 ## Harvest candidates (end-of-message)
 
-If your review surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
-
-Entry format: one entry per line with a typed prefix:
-- `lesson:` — recurring quality issues worth recording as a prevention check
-- `dead-end:` — approaches tried and ruled out, with the revive condition
-- `deferred:` — work set aside, with a trigger condition for revisiting
-- `follow-up:` — items to watch but not act on yet
-- `decision:` — choices made, with the key reason and what was rejected
-- `gotcha:` — subsystem behavior that contradicts comments or surface intuition
-
-Hard rules:
-- Omit the section entirely if you have nothing. Empty headers are noise.
-- Self-filter — only emit candidates that would survive a rigorous review. Mid-investigation noise stays out.
-- The block must be the suffix of your message — a downstream hook locates it by anchor.
+If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
 
 For a code reviewer specifically, the highest-value emissions are **lessons** (recurring quality issues you keep flagging — "we keep making mistake X; the prevention check is Y" is gold for future plan templates) and **gotchas** (subsystem behavior you noticed that contradicts comments or surface intuition). Skip decisions (not your call) and dead-ends (you're reviewing, not trying); single-finding Critical issues belong in the report body, not the harvest block — only emit a lesson if the pattern is durable across reviews.

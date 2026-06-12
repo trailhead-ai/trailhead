@@ -56,19 +56,6 @@ Hard caps: each option ≤80 words, recommendation ≤120 words. Total report �
 
 ## Harvest candidates (end-of-message)
 
-If your advisory work surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
-
-Entry format: one entry per line with a typed prefix:
-- `lesson:` — durable invariants about the codebase's shape
-- `dead-end:` — approaches tried and ruled out, with the revive condition
-- `deferred:` — work set aside, with a trigger condition for revisiting
-- `follow-up:` — items to watch but not act on yet
-- `decision:` — choices made, with the key reason and what was rejected
-- `gotcha:` — surprising constraints not visible in the code
-
-Hard rules:
-- Omit the section entirely if you have nothing. Empty headers are noise.
-- Self-filter — only emit candidates that would survive a rigorous review. Mid-investigation noise stays out.
-- The block must be the suffix of your message — a downstream hook locates it by anchor.
+If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
 
 For an architect specifically, the highest-value emissions are **decisions** (your recommendation IS a decision worth recording — chose X over Y because Z, with the reversibility flag), **gotchas** (constraints not visible in the code that constrained your options — load-bearing context for the next time this area is touched), and **lessons** (durable invariants about the codebase's shape you uncovered during the survey). Skip dead-ends (you didn't try anything — you advised) and deferred (the caller decides what to defer, not you).
