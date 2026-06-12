@@ -178,19 +178,18 @@ def test_write_degraded_handoff_creates_dir_when_missing(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def _resolve_lore_cli() -> list[str] | None:
-    """Locate a runnable lore CLI without hardcoding a machine path.
+    """Resolve the monorepo's own lore CLI (the sibling tool), run via python3.
 
-    Order: `lore` on PATH (preferred), else the local lore plugin's bin under
-    $HOME. Returns the argv prefix, or None when neither is available.
+    Post-monorepo, "the lore CLI" is the sibling ``tools/lore`` plugin — not
+    whatever ``lore`` happens to be on PATH, which on a dev machine may be a
+    divergent standalone checkout (the pre-monorepo ``~/code/lore``). Resolving
+    it relatively keeps the test hermetic and exercises the code in *this* repo.
+    Returns the argv prefix, or None when the CLI is absent.
     """
-    import shutil as _shutil
-
-    on_path = _shutil.which("lore")
-    if on_path:
-        return [on_path]
-    candidate = Path(os.environ["HOME"]) / "code" / "lore" / "plugins" / "lore" / "bin" / "lore"
-    if candidate.is_file() and os.access(candidate, os.X_OK):
-        return [str(candidate)]
+    repo_root = Path(__file__).resolve().parents[3]
+    cli = repo_root / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
+    if cli.is_file():
+        return [sys.executable, str(cli)]
     return None
 
 
@@ -240,6 +239,11 @@ def test_real_lore_handoff_with_pickup_hints_file(fixture_vault: Path, tmp_path:
 
     env = dict(os.environ)
     env["LORE_VAULT"] = str(fixture_vault)
+    # Pin worktree detection to the cwd basename so it matches the note slug
+    # (mirrors the real invariant: note named from $CLAUDE_PROJECT_DIR basename,
+    # resolution detects the same). Otherwise detect_worktree_name() falls
+    # through to the vault's git-toplevel basename and never matches the note.
+    env["CLAUDE_PROJECT_DIR"] = str(cwd)
 
     proc = subprocess.run(
         [*cli, "handoff", "--pickup-hints-file", str(hints_file)],
