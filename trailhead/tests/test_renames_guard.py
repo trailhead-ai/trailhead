@@ -1,4 +1,4 @@
-"""Slice 7 guard tests: UX renames sweep — finish/tend/circle/librarian/scout/trailblazer.
+"""Slice 7 guard tests: UX renames sweep — finish/tend/council/librarian/scout/trailblazer.
 
 TDD contract (R-6 + Slice 7 test contract):
   1. Suite-wide grep guard — zero occurrences of the old identifiers in the live
@@ -7,7 +7,7 @@ TDD contract (R-6 + Slice 7 test contract):
   2. load_manifest(validate=True) succeeds for both lore and forge post-rename.
   3. R-6 resolve-all-capabilities oracle — compose_plan for every declared
      capability across lore + forge; every CopyOp.src exists on disk.
-  4. New agent names appear in forge circle/execute compose output.
+  4. New agent names appear in forge council/execute compose output.
   5. lore finish skill dir exists; lore tend skill dir is GONE (Slice 7 deletes tend/review).
   6. Agent frontmatter name: fields match the new filenames.
 
@@ -109,17 +109,17 @@ class TestGrepGuard:
             pytest.fail("\n".join(msg_lines))
 
     def test_no_circle_dash_agent_references(self):
-        """circle-advocate/builder/reliability/security must not appear in tools/ source after rename to bare names.
+        """circle-advocate/builder/reliability/security must not appear in tools/ source.
 
-        Token-scoped to the four old circle agent stems so it does NOT flag:
-        - the `circle` *capability* name (capabilities.toml, landing_claims.toml)
-        - `circle-*.md` generic glob descriptions in test comments
-        - the `council-session` lore vault type (already covered by its own forbid)
+        Permanent defensive forbid: the panel was briefly named `circle` (with bare
+        agents) before being renamed back to `council`. Token-scoped to the four
+        agent stems so it does NOT flag a hypothetical future `circle` substring in
+        unrelated prose — only the hyphenated old agent-name form.
         """
         files = _collect_files()
         hits = _grep_files(r"circle-(advocate|builder|reliability|security)", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of old circle-* agent names — must be zero after rename to bare names:"]
+            msg_lines = [f"Found {len(hits)} occurrence(s) of old circle-* agent names — must be zero (forbidden form):"]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -231,23 +231,23 @@ class TestGrepGuard:
             "delete it (the tend/review skill was removed in Slice 7)."
         )
 
-    def test_no_council_review_prose(self):
-        """'Council Review' Title-Case prose must not appear in SKILL.md bodies after rename to 'Circle Review'.
+    def test_no_circle_review_prose(self):
+        """'Circle Review' Title-Case prose must not appear in SKILL.md bodies after rename to 'Council Review'.
 
-        Excludes:
-        - lines that reference the 'code-reviewer' agent or 'code review' (not the circle panel)
-        - the 'council-session' lore vault type (a different concept)
+        The panel's review step is now labelled 'Council Review'; the old 'Circle
+        Review' label must be gone. Excludes:
+        - lines that reference the 'code-reviewer' agent or 'code review' (not the council panel)
         - the experiments/ corpus (frozen)
         """
         files = [
             f for f in _collect_files()
             if "experiments" not in f.parts and f.suffix == ".md"
         ]
-        hits = _grep_files(r"Council Review", files)
-        # No exclusions needed: 'Council Review' with both words Title-Cased is
-        # exclusively the old circle-review panel label.
+        hits = _grep_files(r"Circle Review", files)
+        # No exclusions needed: 'Circle Review' with both words Title-Cased is
+        # exclusively the old panel-review label.
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'Council Review' — must be 'Circle Review' after rename:"]
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'Circle Review' — must be 'Council Review' after rename:"]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -388,29 +388,29 @@ class TestManifestValidation:
             "forge execute still references old 'skills/subagent-driven-development'"
         )
 
-    def test_forge_circle_references_circle_agents(self):
-        """forge circle capability must reference the bare-named circle agents (advocate/builder/breaker/attacker)."""
+    def test_forge_council_references_council_agents(self):
+        """forge council capability must reference the bare-named council agents (advocate/builder/breaker/attacker)."""
         m = load_manifest(_FORGE_MANIFEST)
-        cap = m.capabilities["circle"]
+        cap = m.capabilities["council"]
         agents = cap["agents"]
         assert "agents/advocate.md" in agents, (
-            f"forge circle must reference 'agents/advocate.md'; got {agents}"
+            f"forge council must reference 'agents/advocate.md'; got {agents}"
         )
         assert "agents/builder.md" in agents, (
-            f"forge circle must reference 'agents/builder.md'; got {agents}"
+            f"forge council must reference 'agents/builder.md'; got {agents}"
         )
         assert "agents/breaker.md" in agents, (
-            f"forge circle must reference 'agents/breaker.md'; got {agents}"
+            f"forge council must reference 'agents/breaker.md'; got {agents}"
         )
         assert "agents/attacker.md" in agents, (
-            f"forge circle must reference 'agents/attacker.md'; got {agents}"
+            f"forge council must reference 'agents/attacker.md'; got {agents}"
         )
         for agent in agents:
             assert "council-" not in agent, (
-                f"forge circle still references old council- agent: {agent}"
+                f"forge council still references old council- agent: {agent}"
             )
             assert "circle-" not in agent, (
-                f"forge circle still references old circle- agent: {agent}"
+                f"forge council still references old circle- agent: {agent}"
             )
 
 
@@ -425,21 +425,21 @@ def _read_agent_text(agent_file: Path) -> str:
     return text.lower()
 
 
-class TestCircleAgentStandaloneDescriptions:
-    """Renamed circle agents must drop the 'use only when ... circle review step' gate
+class TestCouncilAgentStandaloneDescriptions:
+    """Renamed council agents must drop the 'use only when ... council review step' gate
     and carry a differentiating standalone 'use when' phrase so natural-language dispatch
     routes them apart from the overlapping troubleshooter / security-auditor agents.
     """
 
-    def test_circle_agents_drop_circle_only_gate(self):
-        """No renamed circle agent may keep the 'use only when invoked' standalone-blocking clause."""
+    def test_council_agents_drop_council_only_gate(self):
+        """No renamed council agent may keep the 'use only when invoked' standalone-blocking clause."""
         for stem in ("advocate", "builder", "breaker", "attacker"):
             path = _FORGE_PLUGIN_ROOT / "agents" / f"{stem}.md"
-            assert path.exists(), f"renamed circle agent not found: {path}"
+            assert path.exists(), f"renamed council agent not found: {path}"
             desc = _read_agent_text(path)
             assert "use only when invoked by a planning skill" not in desc, (
-                f"{stem}.md still gates itself to the planning circle step — "
-                "drop the 'Use only when invoked by a planning skill's circle review step' clause."
+                f"{stem}.md still gates itself to the planning council step — "
+                "drop the 'Use only when invoked by a planning skill's council review step' clause."
             )
 
     def test_breaker_differentiates_from_troubleshooter(self):
@@ -519,21 +519,21 @@ class TestResolveAllCapabilitiesOracle:
 
 
 # ---------------------------------------------------------------------------
-# 4. New agent names appear in compose output for circle/execute
+# 4. New agent names appear in compose output for council/execute
 # ---------------------------------------------------------------------------
 
 
 class TestNewAgentNamesInCompose:
-    """compose_plan for forge circle/execute resolves new agent names."""
+    """compose_plan for forge council/execute resolves new agent names."""
 
-    def test_forge_circle_compose_includes_circle_agents(self, tmp_path):
-        """forge circle compose includes the bare-named circle agent CopyOps."""
+    def test_forge_council_compose_includes_council_agents(self, tmp_path):
+        """forge council compose includes the bare-named council agent CopyOps."""
         m = load_manifest(_FORGE_MANIFEST)
-        plan = compose_plan(m, {"circle"}, tmp_path / "dest")
+        plan = compose_plan(m, {"council"}, tmp_path / "dest")
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
         for name in ("advocate.md", "builder.md", "breaker.md", "attacker.md"):
             assert name in agent_srcs, (
-                f"compose_plan for forge 'circle' must include {name}; got {agent_srcs}"
+                f"compose_plan for forge 'council' must include {name}; got {agent_srcs}"
             )
 
     def test_forge_execute_compose_includes_assumption_prover_and_executor(self, tmp_path):
@@ -649,16 +649,16 @@ class TestFrontmatterNameMatchesFilename:
 
 
 # ---------------------------------------------------------------------------
-# 7. Slice 2 — forge:consult skill + single-source circle membership
+# 7. Slice 2 — forge:consult skill + single-source council membership
 # ---------------------------------------------------------------------------
 
 _CONSULT_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "consult" / "SKILL.md"
-_CIRCLE_INCLUDE = _FORGE_PLUGIN_ROOT / "skills" / "_shared" / "circle.md"
+_COUNCIL_INCLUDE = _FORGE_PLUGIN_ROOT / "skills" / "_shared" / "council.md"
 _PLANNING_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
 
-# The four circle agent stems the membership single-source-of-truth must name,
+# The four council agent stems the membership single-source-of-truth must name,
 # each resolving to agents/<stem>.md.
-_CIRCLE_STEMS = ("advocate", "builder", "breaker", "attacker")
+_COUNCIL_STEMS = ("advocate", "builder", "breaker", "attacker")
 
 
 def _has_registrable_frontmatter(skill_md: Path) -> bool:
@@ -680,14 +680,14 @@ def _has_registrable_frontmatter(skill_md: Path) -> bool:
     return _has("name") and _has("description")
 
 
-class TestConsultSkillAndSharedCircle:
-    """Slice 2: the forge:consult skill and the single-source circle membership include."""
+class TestConsultSkillAndSharedCouncil:
+    """Slice 2: the forge:consult skill and the single-source council membership include."""
 
     def test_consult_skill_dir_exists_with_skill_md(self):
-        """skills/consult/ must exist with a SKILL.md (new standalone-invocable circle skill)."""
+        """skills/consult/ must exist with a SKILL.md (new standalone-invocable council skill)."""
         assert _CONSULT_SKILL.exists(), (
             f"skills/consult/SKILL.md not found at {_CONSULT_SKILL} — "
-            "create the forge:consult skill that convenes the circle panel."
+            "create the forge:consult skill that convenes the council panel."
         )
 
     def test_consult_skill_is_registrable(self):
@@ -709,23 +709,23 @@ class TestConsultSkillAndSharedCircle:
             f"skills/consult/SKILL.md frontmatter name: is {name!r}, expected 'consult'"
         )
 
-    def test_circle_include_exists(self):
-        """skills/_shared/circle.md must exist as the single-source circle membership include."""
-        assert _CIRCLE_INCLUDE.exists(), (
-            f"skills/_shared/circle.md not found at {_CIRCLE_INCLUDE} — "
+    def test_council_include_exists(self):
+        """skills/_shared/council.md must exist as the single-source council membership include."""
+        assert _COUNCIL_INCLUDE.exists(), (
+            f"skills/_shared/council.md not found at {_COUNCIL_INCLUDE} — "
             "create the shared four-agent membership include."
         )
 
-    def test_circle_include_names_all_four_agents(self):
-        """The shared include must name all four circle agent stems."""
-        assert _CIRCLE_INCLUDE.exists(), f"skills/_shared/circle.md not found at {_CIRCLE_INCLUDE}"
-        text = _CIRCLE_INCLUDE.read_text()
-        missing = [stem for stem in _CIRCLE_STEMS if stem not in text]
+    def test_council_include_names_all_four_agents(self):
+        """The shared include must name all four council agent stems."""
+        assert _COUNCIL_INCLUDE.exists(), f"skills/_shared/council.md not found at {_COUNCIL_INCLUDE}"
+        text = _COUNCIL_INCLUDE.read_text()
+        missing = [stem for stem in _COUNCIL_STEMS if stem not in text]
         assert not missing, (
-            f"skills/_shared/circle.md must name all four circle agents; missing: {missing}"
+            f"skills/_shared/council.md must name all four council agents; missing: {missing}"
         )
 
-    def test_circle_include_stems_resolve_to_agent_files(self):
+    def test_council_include_stems_resolve_to_agent_files(self):
         """C1: each of the four stems named in the include resolves to agents/<stem>.md.
 
         This is the anti-drift assertion — the single-source membership cannot silently
@@ -733,41 +733,41 @@ class TestConsultSkillAndSharedCircle:
         Parses the include for the stems it actually names, then asserts each is an
         existing agent file by exact name.
         """
-        assert _CIRCLE_INCLUDE.exists(), f"skills/_shared/circle.md not found at {_CIRCLE_INCLUDE}"
-        text = _CIRCLE_INCLUDE.read_text()
-        for stem in _CIRCLE_STEMS:
+        assert _COUNCIL_INCLUDE.exists(), f"skills/_shared/council.md not found at {_COUNCIL_INCLUDE}"
+        text = _COUNCIL_INCLUDE.read_text()
+        for stem in _COUNCIL_STEMS:
             assert stem in text, (
-                f"circle.md must name the {stem!r} agent (single source of truth)"
+                f"council.md must name the {stem!r} agent (single source of truth)"
             )
             agent_file = _FORGE_PLUGIN_ROOT / "agents" / f"{stem}.md"
             assert agent_file.exists(), (
-                f"circle.md names {stem!r} but {agent_file} does not exist — "
+                f"council.md names {stem!r} but {agent_file} does not exist — "
                 "the membership include drifted from the renamed agent files."
             )
 
-    def test_consult_references_shared_circle_include(self):
+    def test_consult_references_shared_council_include(self):
         """consult must read membership from the shared include (not hardcode its own list)."""
         assert _CONSULT_SKILL.exists(), f"skills/consult/SKILL.md not found at {_CONSULT_SKILL}"
         text = _CONSULT_SKILL.read_text()
-        assert "_shared/circle.md" in text, (
-            "skills/consult/SKILL.md must reference the shared '_shared/circle.md' include "
-            "as the single source of circle membership."
+        assert "_shared/council.md" in text, (
+            "skills/consult/SKILL.md must reference the shared '_shared/council.md' include "
+            "as the single source of council membership."
         )
 
-    def test_planning_references_shared_circle_include(self):
-        """planning's Circle Review step must read membership from the shared include.
+    def test_planning_references_shared_council_include(self):
+        """planning's Council Review step must read membership from the shared include.
 
         Planning must NOT call consult (the unreliable skill->skill chain) — it dispatches
-        the circle directly off the shared list, same as consult.
+        the council directly off the shared list, same as consult.
         """
         assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
         text = _PLANNING_SKILL.read_text()
-        assert "_shared/circle.md" in text, (
-            "planning/SKILL.md Circle Review step must reference the shared "
-            "'_shared/circle.md' include rather than hardcoding the membership."
+        assert "_shared/council.md" in text, (
+            "planning/SKILL.md Council Review step must reference the shared "
+            "'_shared/council.md' include rather than hardcoding the membership."
         )
 
-    def test_planning_dispatches_circle_directly_not_via_consult(self):
+    def test_planning_dispatches_council_directly_not_via_consult(self):
         """planning must dispatch the four agents directly, not delegate to the consult skill.
 
         The robust invariant is the presence of the direct-dispatch instruction (parallel
@@ -779,29 +779,29 @@ class TestConsultSkillAndSharedCircle:
         assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
         text = _PLANNING_SKILL.read_text()
         assert "Agent` tool calls" in text, (
-            "planning/SKILL.md must instruct direct parallel `Agent` tool calls to the circle "
+            "planning/SKILL.md must instruct direct parallel `Agent` tool calls to the council "
             "members — not delegate the panel to the consult skill."
         )
-        for stem in _CIRCLE_STEMS:
+        for stem in _COUNCIL_STEMS:
             assert stem in text, (
-                f"planning/SKILL.md must still name {stem!r} for direct circle dispatch"
+                f"planning/SKILL.md must still name {stem!r} for direct council dispatch"
             )
 
-    def test_forge_circle_capability_includes_consult_skill(self):
-        """forge circle capability must list skills/consult."""
+    def test_forge_council_capability_includes_consult_skill(self):
+        """forge council capability must list skills/consult."""
         m = load_manifest(_FORGE_MANIFEST)
-        cap = m.capabilities["circle"]
+        cap = m.capabilities["council"]
         assert "skills/consult" in cap["skills"], (
-            f"forge circle capability must reference 'skills/consult'; got {cap['skills']}"
+            f"forge council capability must reference 'skills/consult'; got {cap['skills']}"
         )
 
-    def test_forge_circle_compose_includes_consult_skill(self, tmp_path):
-        """compose_plan({'circle'}) must include the consult skill dir as a CopyOp."""
+    def test_forge_council_compose_includes_consult_skill(self, tmp_path):
+        """compose_plan({'council'}) must include the consult skill dir as a CopyOp."""
         m = load_manifest(_FORGE_MANIFEST)
-        plan = compose_plan(m, {"circle"}, tmp_path / "dest")
+        plan = compose_plan(m, {"council"}, tmp_path / "dest")
         skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
         assert "consult" in skill_srcs, (
-            f"compose_plan for forge 'circle' must include the consult skill dir; got {skill_srcs}"
+            f"compose_plan for forge 'council' must include the consult skill dir; got {skill_srcs}"
         )
 
 
@@ -883,7 +883,7 @@ class TestSlice4SkillRenameForbids:
     """Old forge skill identifiers must be gone from tools/ source.
 
     Each forbid is token/path-scoped to the skill identity so it never trips a
-    legitimate surviving name (the `review`/`circle` capabilities, the
+    legitimate surviving name (the `review`/`council` capabilities, the
     `lore handoff` CLI subcommand, the `handoff_capture.py` script, the
     `followup-to:` plan-brief schema field).
     """

@@ -286,16 +286,16 @@ def test_visible_skip_notice_present(stem: str):
     )
 
 
-# Circle agents must state the skip notice exactly once — once in the Output
+# Council agents must state the skip notice exactly once — once in the Output
 # shape / Uncertainty field. The subagent-section bullet must NOT restate it
 # (Slice 3 dedup). The existing presence check above already guards against
 # zero occurrences; this guards against the double-statement.
-_CIRCLE_AGENTS: list[str] = ["advocate", "attacker", "breaker", "builder"]
+_COUNCIL_AGENTS: list[str] = ["advocate", "attacker", "breaker", "builder"]
 
 
-@pytest.mark.parametrize("stem", _CIRCLE_AGENTS)
-def test_circle_agent_skip_notice_exactly_once(stem: str):
-    """Each circle agent must contain 'synthesis pass was skipped' exactly once.
+@pytest.mark.parametrize("stem", _COUNCIL_AGENTS)
+def test_council_agent_skip_notice_exactly_once(stem: str):
+    """Each council agent must contain 'synthesis pass was skipped' exactly once.
 
     The canonical location is the Output shape / Uncertainty field. The
     Confidence boost / subagent section must NOT restate it — that duplication
@@ -303,7 +303,7 @@ def test_circle_agent_skip_notice_exactly_once(stem: str):
     """
     agent_md = AGENTS_DIR / f"{stem}.md"
     assert agent_md.exists(), (
-        f"Expected circle agent {stem}.md to exist in {AGENTS_DIR}."
+        f"Expected council agent {stem}.md to exist in {AGENTS_DIR}."
     )
     text = agent_md.read_text()
     count = text.count("synthesis pass was skipped")

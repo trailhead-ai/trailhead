@@ -1,14 +1,14 @@
-"""Slice 2 drift-guard + behavior-preservation for the circle review scaffolding.
+"""Slice 2 drift-guard + behavior-preservation for the council review scaffolding.
 
 The per-lens Critical bars, the synthesis rules, and the parameterized prompt
 template are hoisted out of `plan/SKILL.md` and `consult/SKILL.md` into the
-single shared reference `_shared/circle.md` (read-on-reference, same mechanism as
+single shared reference `_shared/council.md` (read-on-reference, same mechanism as
 the membership roster). This test pins three things so a future edit can't
 silently regress them:
 
-1. The shared scaffolding lives in `_shared/circle.md` (positive) and is no longer
+1. The shared scaffolding lives in `_shared/council.md` (positive) and is no longer
    duplicated in the two skill bodies (negative).
-2. The four per-lens Critical bars appear in `_shared/circle.md` BYTE-FOR-BYTE as
+2. The four per-lens Critical bars appear in `_shared/council.md` BYTE-FOR-BYTE as
    they read before the hoist, and the four disposition option names survive
    byte-for-byte in `plan/SKILL.md` (plan's retained delta — the disposition gate
    stays with planning). Together this proves the compression touched only
@@ -18,12 +18,12 @@ silently regress them:
    persistence schema + hard-floor `**build**`; `consult` carries no persistence.
 
 The merged shared file must also be net-leaner than the sum of the two original
-circle blocks, so a future edit can't re-bloat it back to pure relocation.
+council blocks, so a future edit can't re-bloat it back to pure relocation.
 """
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "forge" / "skills"
-SHARED = SKILLS_DIR / "_shared" / "circle.md"
+SHARED = SKILLS_DIR / "_shared" / "council.md"
 PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 CONSULT = SKILLS_DIR / "consult" / "SKILL.md"
 
@@ -72,14 +72,14 @@ ALL_BARS = [BUILDER_BARS, RELIABILITY_BARS, SECURITY_BARS, ADVOCATE_BARS]
 DISPOSITION_NAMES = ["resolved", "bounced-back-to-spec", "accepted-as-risk", "disputed"]
 
 
-# --- positive: shared scaffolding now lives in _shared/circle.md ---
+# --- positive: shared scaffolding now lives in _shared/council.md ---
 
 def test_bars_byte_for_byte_in_shared():
     text = SHARED.read_text()
     for bars in ALL_BARS:
         assert bars in text, (
             "per-lens Critical bar block drifted or is missing from "
-            "_shared/circle.md — bars must move BYTE-FOR-BYTE (no-behavior-change)"
+            "_shared/council.md — bars must move BYTE-FOR-BYTE (no-behavior-change)"
         )
 
 
@@ -110,7 +110,7 @@ def test_prompt_template_skeleton_in_shared():
 def test_template_output_calibration_pinned():
     # The output-shape constraints ARE review-calibration behavior — a future edit
     # that loosens "≤2 Critical" to "≤3" or drops the no-speculative rule changes
-    # how every circle review prioritizes. Pin the binding literals (review M-2).
+    # how every council review prioritizes. Pin the binding literals (review M-2).
     text = SHARED.read_text()
     assert "≤2 Critical" in text, "the ≤2-Critical forced-prioritization cap must stay pinned"
     assert "≤300 words total" in text, "the ≤300-word output budget must stay pinned"
@@ -138,7 +138,7 @@ def test_bars_not_duplicated_in_plan_body():
     for bars in ALL_BARS:
         assert bars not in text, (
             "per-lens Critical bars still inlined in plan/SKILL.md — they must be "
-            "hoisted to _shared/circle.md, not duplicated"
+            "hoisted to _shared/council.md, not duplicated"
         )
 
 
@@ -147,7 +147,7 @@ def test_bars_not_in_consult_body():
     for bars in ALL_BARS:
         assert bars not in text, (
             "per-lens Critical bars inlined in consult/SKILL.md — read from "
-            "_shared/circle.md instead"
+            "_shared/council.md instead"
         )
 
 
@@ -161,7 +161,7 @@ def test_synthesis_rules_not_reinlined():
         has_downgrade = "Auto-downgrade speculative" in text
         assert not (has_dedup and has_downgrade), (
             f"{skill.parent.name}/SKILL.md re-inlines the full synthesis rules — "
-            "they belong in _shared/circle.md"
+            "they belong in _shared/council.md"
         )
 
 
@@ -169,7 +169,7 @@ def test_synthesis_rules_not_reinlined():
 
 def test_plan_retains_disposition_gate_and_persistence():
     text = PLAN.read_text()
-    assert "## Circle Review" in text, "plan must keep the persistence schema heading"
+    assert "## Council Review" in text, "plan must keep the persistence schema heading"
     assert "*Disposition:*" in text, "plan must keep the disposition gate"
     assert "Hard-floor gate" in text or "hard-floor" in text.lower()
     assert "**build**" in text, "plan must keep the hard-floor build handoff prompt"
@@ -194,7 +194,7 @@ def test_consult_keeps_role_label_note_and_context_pointers():
 
 def test_consult_has_no_persistence_schema():
     text = CONSULT.read_text()
-    assert "## Circle Review" not in text, (
+    assert "## Council Review" not in text, (
         "consult has no plan file to persist into — no persistence schema allowed"
     )
     assert "*Disposition:*" not in text, "consult has no disposition gate"
@@ -210,29 +210,29 @@ def test_single_persistence_worked_example():
 
 # --- both skills still reference the shared file (read-on-reference) ---
 
-def test_skills_reference_shared_circle():
+def test_skills_reference_shared_council():
     for skill in (PLAN, CONSULT):
-        assert "_shared/circle.md" in skill.read_text(), (
-            f"{skill.parent.name}/SKILL.md must reference _shared/circle.md"
+        assert "_shared/council.md" in skill.read_text(), (
+            f"{skill.parent.name}/SKILL.md must reference _shared/council.md"
         )
 
 
 # --- net-leaner: the merged shared file stays compressed, no silent re-bloat ---
 
 # The shared file legitimately holds the pre-existing 30-line roster PLUS the
-# hoisted circle scaffolding. Comparing total size against only the two original
-# circle blocks (84+45=129) is a loose backstop (review M-1): the file could grow
+# hoisted council scaffolding. Comparing total size against only the two original
+# council blocks (84+45=129) is a loose backstop (review M-1): the file could grow
 # to ~128 by re-inlining dispatch prose and still pass. Instead pin a TIGHT ceiling
 # at current + small epsilon — any meaningful re-bloat (re-inlining the ~84-line
 # bars block, restoring the second persistence example, etc.) blows past it.
 MAX_SHARED_LINES = 126  # current ~119 + ~7 headroom for legitimate small edits
 
 
-def test_shared_circle_stays_compressed():
+def test_shared_council_stays_compressed():
     shared_lines = len(SHARED.read_text().splitlines())
     assert shared_lines <= MAX_SHARED_LINES, (
-        f"_shared/circle.md is {shared_lines} lines, over the {MAX_SHARED_LINES}-line "
-        "ceiling — the circle scaffolding has re-bloated. Compression, not relocation: "
+        f"_shared/council.md is {shared_lines} lines, over the {MAX_SHARED_LINES}-line "
+        "ceiling — the council scaffolding has re-bloated. Compression, not relocation: "
         "if this grew intentionally, confirm it's not re-inlining hoisted content and "
         "bump the ceiling deliberately."
     )

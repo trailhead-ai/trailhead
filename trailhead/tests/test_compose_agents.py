@@ -128,12 +128,12 @@ class TestAgentCopyOpsIncluded:
         """Agents from an unselected capability must NOT appear in the plan."""
         m = load_manifest(_FORGE_MANIFEST)
         dest = tmp_path / "dest"
-        # Select planning only — circle agents (advocate/builder/breaker/attacker) must not appear
+        # Select planning only — council agents (advocate/builder/breaker/attacker) must not appear
         plan = compose_plan(m, {"planning"}, dest)
         dest_paths = {op.dest for op in plan.ops}
-        for agent in m.capabilities["circle"]["agents"]:
+        for agent in m.capabilities["council"]["agents"]:
             assert dest / agent not in dest_paths, (
-                f"unselected circle agent {agent!r} leaked into plan"
+                f"unselected council agent {agent!r} leaked into plan"
             )
 
     def test_empty_selection_no_agent_ops(self, tmp_path):

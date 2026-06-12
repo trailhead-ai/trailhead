@@ -209,10 +209,10 @@ class TestForgeManifestValidatesAgainstDisk:
         assert "agents/assumption-prover.md" in cap["agents"]
         assert "agents/executor.md" in cap["agents"]
 
-    def test_forge_circle_capability_agents_exist(self):
+    def test_forge_council_capability_agents_exist(self):
         m = load_manifest(_FORGE_MANIFEST)
         plugin_root = _FORGE_MANIFEST.parent / "plugins" / m.tool_name
-        cap = m.capabilities["circle"]
+        cap = m.capabilities["council"]
         for agent in cap["agents"]:
             p = plugin_root / agent
             assert p.is_file(), f"agent file missing: {p}"

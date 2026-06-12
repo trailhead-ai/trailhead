@@ -92,9 +92,9 @@ class TestStandardPreset:
         result = resolve("standard")
         assert set(result.keys()) == {"lore", "camp", "forge"}
 
-    def test_standard_forge_excludes_circle(self):
+    def test_standard_forge_excludes_council(self):
         result = resolve("standard")
-        assert "circle" not in result["forge"]
+        assert "council" not in result["forge"]
 
     def test_standard_forge_excludes_design(self):
         result = resolve("standard")
@@ -152,9 +152,9 @@ class TestFullPreset:
         result = resolve("full")
         assert "shared-vaults" in result["lore"]
 
-    def test_full_includes_circle(self):
+    def test_full_includes_council(self):
         result = resolve("full")
-        assert "circle" in result["forge"]
+        assert "council" in result["forge"]
 
 
 # ---------------------------------------------------------------------------
