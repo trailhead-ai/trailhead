@@ -11,7 +11,10 @@ codebase they're in.
 
 ## Capabilities
 
-forge ships seven capability groups, each with agents and skills:
+forge ships six capability groups, each with agents and skills. forge owns the
+**plan → execute → review** development loop; shipping (PR lifecycle) and deploy
+(post-merge soak) live in the sibling [portage](../portage) and
+[landing](../landing) plugins.
 
 | Capability | What it covers |
 |---|---|
@@ -20,8 +23,7 @@ forge ships seven capability groups, each with agents and skills:
 | `review` | Structured code review after implementation |
 | `circle` | Four-lens review panel (builder / reliability / security / advocate) |
 | `design` | Design-doc authoring and structured spec artifacts |
-| `release` | PR lifecycle, CI watch, merge ordering, and post-merge soak |
-| `helpers` | Cheap specialist subagents for docs, logs, PRs, research, tests, security |
+| `helpers` | Cheap specialist subagents for docs, logs, research, tests, security |
 
 ## Agents
 
@@ -41,12 +43,9 @@ planning skill's circle review step:
 
 **Design:** `forge:artist`
 
-**Release:** `forge:pr-updater`, `forge:watch-pr`, `forge:watch-preview`,
-`forge:diagnose-preview`
-
 **Helpers:** `forge:researcher`, `forge:troubleshooter`, `forge:doc-finder`,
-`forge:test-runner`, `forge:log-sifter`, `forge:pr-summarizer`,
-`forge:security-auditor`, `forge:forge-ping`
+`forge:test-runner`, `forge:log-sifter`, `forge:security-auditor`,
+`forge:forge-ping`
 
 Nothing app-specific belongs in forge; per-project automation stays in that
 project's own repo.
@@ -62,10 +61,6 @@ Base skills (always available): `/forge:handoff`, `/forge:pickup`,
 
 **Review:** `/forge:requesting-code-review`
 
-**Release:** `/forge:create-pr`, `/forge:update-pr`, `/forge:watch-pr`,
-`/forge:watch-preview`, `/forge:merge-pr`, `/forge:github-pr`,
-`/forge:post-merge-decide`
-
 `/forge:handoff` and `/forge:pickup` are a symmetric shelve/resume pair — record
 read-only git state and shelve a session note with pickup hints so a future
 session can resume. The git capture is strictly **read-only** — these rituals
@@ -76,6 +71,22 @@ CLI when it's available, and degrades to a local forge handoff file at
 `~/.forge/handoffs/<slug>.md` when lore is absent, `$LORE_VAULT` is unset, or
 `lore stats` fails. This is the same one-directional optional dependency forge
 already has on lore (forge → lore is allowed; lore never depends on forge).
+
+## Moved commands — shipping & deploy now live in portage / landing
+
+forge used to ship a `release` capability for the PR-lifecycle and post-merge
+soak. That surface moved to the sibling [portage](../portage) (get it merged)
+and [landing](../landing) (get it deployed) plugins. If you reach for a removed
+`forge` command, use its replacement:
+
+| Removed | Replacement |
+|---|---|
+| `/forge:create-pr` | `/portage:open` |
+| `/forge:update-pr` | `/portage:update` |
+| `/forge:merge-pr` | `/portage:merge` |
+| `/forge:watch-pr` | `/portage:monitor` |
+| `/forge:watch-preview` | `/landing:soak` |
+| `/forge:post-merge-decide` | `/landing:resolve` |
 
 ## Layout
 

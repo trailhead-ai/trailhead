@@ -535,3 +535,94 @@ class TestOldReleaseIdentifiersAbsentFromPortageLanding:
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
+
+
+# ---------------------------------------------------------------------------
+# 8. Slice 6 — forge release cluster is GONE (the hard cut)
+# ---------------------------------------------------------------------------
+
+# The 8 release scripts moved to trailhead/vcs/ + landing — they must be ABSENT
+# from tools/forge after Slice 6's deletion.
+_MOVED_RELEASE_SCRIPTS = [
+    "detect_repos.py",
+    "check_pr_status.py",
+    "pr_evaluate_status.py",
+    "merge_prs.py",
+    "release_prs_sidecar.py",
+    "wait_for_actionable.py",
+    "runner_protocol.py",
+    "soak_health.py",
+]
+
+# The 7 release skill dirs deleted from forge.
+_DELETED_RELEASE_SKILLS = [
+    "create-pr",
+    "update-pr",
+    "watch-pr",
+    "watch-preview",
+    "merge-pr",
+    "github-pr",
+    "post-merge-decide",
+]
+
+# The 5 release agents deleted from forge (incl. pr-summarizer → portage's summarizer).
+_DELETED_RELEASE_AGENTS = [
+    "pr-updater.md",
+    "watch-pr.md",
+    "watch-preview.md",
+    "diagnose-preview.md",
+    "pr-summarizer.md",
+]
+
+
+class TestForgeReleaseClusterDeleted:
+    """Slice 6 hard cut: forge no longer exposes a `release` capability and the
+    moved release scripts/skills/agents are absent from tools/forge.
+
+    portage + landing now own shipping + deploy; this locks the deletion so a
+    revert (or a stray reintroduction) is caught by the suite.
+    """
+
+    def test_forge_manifest_has_no_release_capability(self):
+        """forge capabilities.toml must not declare a `release` capability."""
+        m = load_manifest(_FORGE_MANIFEST)
+        assert "release" not in m.capabilities, (
+            "forge still exposes a `release` capability — Slice 6 deletes it; "
+            "portage owns PR lifecycle and landing owns deploy soak now."
+        )
+
+    def test_forge_helpers_no_longer_lists_pr_summarizer(self):
+        """forge helpers must not reference agents/pr-summarizer.md (→ portage summarizer)."""
+        m = load_manifest(_FORGE_MANIFEST)
+        helpers = m.capabilities["helpers"]
+        assert "agents/pr-summarizer.md" not in helpers["agents"], (
+            "forge helpers still references agents/pr-summarizer.md — it became "
+            "portage's `summarizer`; remove it from [capabilities.helpers]."
+        )
+
+    @pytest.mark.parametrize("script", _MOVED_RELEASE_SCRIPTS)
+    def test_moved_release_script_absent_from_forge(self, script: str):
+        """Each moved release script must be absent from tools/forge."""
+        path = _FORGE_PLUGIN_ROOT / "scripts" / script
+        assert not path.exists(), (
+            f"{path.relative_to(_REPO_ROOT)} still exists — it moved to "
+            "trailhead/vcs/ (or landing) in the extraction; delete the forge copy."
+        )
+
+    @pytest.mark.parametrize("skill", _DELETED_RELEASE_SKILLS)
+    def test_deleted_release_skill_dir_absent_from_forge(self, skill: str):
+        """Each deleted release skill directory must be absent from tools/forge."""
+        path = _FORGE_PLUGIN_ROOT / "skills" / skill
+        assert not path.exists(), (
+            f"forge skills/{skill}/ still exists — Slice 6 deletes the release "
+            "skill cluster (portage/landing own it now)."
+        )
+
+    @pytest.mark.parametrize("agent", _DELETED_RELEASE_AGENTS)
+    def test_deleted_release_agent_absent_from_forge(self, agent: str):
+        """Each deleted release agent file must be absent from tools/forge."""
+        path = _FORGE_PLUGIN_ROOT / "agents" / agent
+        assert not path.exists(), (
+            f"forge agents/{agent} still exists — Slice 6 deletes the release "
+            "agent cluster (portage/landing own it now)."
+        )

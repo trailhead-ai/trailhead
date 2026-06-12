@@ -125,7 +125,7 @@ Move to the next slice in the plan. Repeat from step 1.
 Before running verification, advance the work item's status if an issue tracker is wired up. **Issue tracker (extension point — `issue_tracker`):** if an issue tracker is configured in your environment, advance the corresponding ticket to the complete status (e.g. "Code Complete" or equivalent). **If no issue tracker configured — status transitions skipped**; proceed directly to verification.
 
 1. Run verification — dispatch `test-runner` for each applicable suite (the project's test run and lint/typecheck/CI checks) rather than running inline. Keeps the noisy test output out of your main context and returns a concise pass/fail.
-2. Report completion to the user and stop. Do **not** automatically invoke `/create-pr` — the user decides when to open a PR.
+2. Report completion to the user and stop. Do **not** automatically invoke `/portage:open` — the user decides when to open a PR.
 
 ## Model Selection
 
