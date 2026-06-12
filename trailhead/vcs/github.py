@@ -846,15 +846,26 @@ class _GitHubDeploy(DeploySurface):
         sentinel is appended when the raw count exceeds ``max_annotations``.
         """
         owner_repo = _resolve_owner_repo(repo_path, self._runner)
-        # gh nonzero here (e.g. 404 on a not-found job) is a no-false-alarm
-        # empty result, not a doctor-visible error — use the lossy _gh.
-        raw = _gh(
-            ["api", f"repos/{owner_repo}/check-runs/{job_id}/annotations",
-             "--paginate", "-q",
-             '[.[] | select(.annotation_level=="failure") | {path, start_line, message: .message}]'],
-            cwd=repo_path,
-            runner=self._runner,
-        )
+        args = [
+            "api", f"repos/{owner_repo}/check-runs/{job_id}/annotations",
+            "--paginate", "-q",
+            '[.[] | select(.annotation_level=="failure") | {path, start_line, message: .message}]',
+        ]
+        r = rp.run(["gh"] + args, cwd=repo_path, runner=self._runner)
+        if r.returncode != 0:
+            stderr = (r.stderr or "").strip()
+            if "404" in stderr or "Not Found" in stderr:
+                return []
+            raise DeployError(
+                f"gh api check-runs/{job_id}/annotations failed (returncode {r.returncode}): "
+                f"{stderr or '<no stderr>'}"
+            )
+        try:
+            raw = json.loads(r.stdout)
+        except json.JSONDecodeError as e:
+            raise DeployError(
+                f"gh api check-runs/{job_id}/annotations returned non-JSON / empty stdout: {e}"
+            ) from e
         if not raw:
             return []
         annotations = raw[:max_annotations]

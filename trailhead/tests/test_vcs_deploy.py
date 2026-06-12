@@ -309,7 +309,7 @@ class TestLogs:
         assert provider.deploy.logs("some/path", job_id="222") == []
 
     def test_not_found_run_returns_empty_list(self) -> None:
-        """A 404 from gh (nonzero) on the annotations path is no-false-alarm: empty list."""
+        """A 404 from gh (nonzero + Not-Found stderr) on annotations is no-false-alarm: empty list."""
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:
@@ -318,6 +318,18 @@ class TestLogs:
 
         provider = get_provider("github", runner=stub)
         assert provider.deploy.logs("some/path", job_id="999") == []
+
+    def test_non_404_nonzero_raises_deploy_error(self) -> None:
+        """A non-404 nonzero (e.g. 403 rate-limit) raises DeployError — never returns []."""
+        def stub(cmd, **kw):
+            resp = _remote_stub_response(cmd)
+            if resp is not None:
+                return resp
+            return subprocess.CompletedProcess(cmd, 1, "", "gh: API rate limit exceeded (HTTP 403)")
+
+        provider = get_provider("github", runner=stub)
+        with pytest.raises(DeployError):
+            provider.deploy.logs("some/path", job_id="999")
 
     def test_truncation_sentinel_appended_past_cap(self) -> None:
         many = [
@@ -355,9 +367,12 @@ class TestLogs:
         api_str = " ".join(api_calls[0])
         assert "check-runs/222/annotations" in api_str
         assert "myorg/myrepo" in api_str
-        # the jq filter is a list element, not a shell pipe
+        # the jq filter is a list element, not a shell pipe — no unguarded | outside of jq select
         assert "-q" in api_calls[0]
-        assert not any("|" in tok and "select" not in tok for tok in api_calls[0][:2])
+        assert not any(
+            "|" in tok and "select" not in tok
+            for tok in api_calls[0]
+        )
 
     def test_all_calls_list_form(self) -> None:
         def stub(cmd, **kw):

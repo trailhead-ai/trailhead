@@ -104,9 +104,8 @@ class CISurface(ABC):
 class DeploySurface(ABC):
     """Workflow-run + deployment status + log interrogation.
 
-    Declared in Slice 1 to stabilise the interface shape; implemented in
-    Slice 2. Calling a deploy method on the Slice-1 GitHubProvider raises
-    NotImplementedError.
+    Implemented by ``GitHubProvider``; the interface is provider-agnostic so
+    a second backend (GitLab via ``glab``/REST) maps onto the same method set.
     """
 
     @abstractmethod
@@ -118,8 +117,8 @@ class DeploySurface(ABC):
         """List deployment statuses (Slice 2)."""
 
     @abstractmethod
-    def logs(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        """Fetch failure annotations for a run (Slice 2)."""
+    def logs(self, repo_path: str, *, job_id: str, **kwargs: Any) -> list[dict]:
+        """Fetch failure annotations for a check run — the doctor signal."""
 
 
 class Provider(ABC):
