@@ -68,13 +68,17 @@ differ (the impedance mismatches are the design risk this mapping de-risks).
 | `ci.checks(repo_path, pr_number)` | `gh pr checks --json name,state,link` + `gh api repos/{o}/{r}/check-runs/{job_id}/annotations` | `glab ci status` / `GET /projects/:id/merge_requests/:iid/pipelines` → `GET /projects/:id/pipelines/:pid/jobs` | **Impedance mismatch:** GitLab has no per-job *annotations* concept. The nearest signal is the job trace (`GET /projects/:id/jobs/:job_id/trace`) parsed for failures, or pipeline/job `status`. A `GitLabProvider` normalizes pipeline jobs into the same `failingChecks[{name,state,link,annotations}]` shape `evaluate` expects. |
 | `ci.wait(pr_pairs)` | polls `pr.status` → `pr.evaluate` until actionable/timeout | **identical** — built on `pr.status` + `pr.evaluate`, both already mapped | Poll loop is platform-agnostic. |
 
-### `deploy` surface (Slice 2 — mapping appended there)
+### `deploy` surface (Slice 2)
 
-The `deploy` surface (`workflow_runs`/`status`/`logs`) is declared in the
-interface in Slice 1 but implemented in Slice 2. Its GitLab mapping (GitHub
-Actions runs/deployments → GitLab pipelines/environments/deployments, and the
-annotations → job-trace impedance mismatch) is appended to this table when
-Slice 2 lands.
+The `deploy` surface is the post-merge deploy-health signal `landing`'s `doctor`
+interrogates. Every call is list-form `gh api` through the runner (`shell=False`);
+the jq `-q` filter is a list element, never a shell pipe.
+
+| Interface method | GitHub (today) | GitLab (`glab` / REST) | Notes |
+|------------------|----------------|------------------------|-------|
+| `deploy.workflow_runs(repo_path, status=…, per_page=…)` | REST `gh api repos/{o}/{r}/actions/runs[?status=&per_page=]`, parse `.workflow_runs[]` (`id` int, `name`, `status`, `conclusion`, `head_sha`, `created_at`, `html_url`, `workflow_id`) | `glab ci list` / `GET /projects/:id/pipelines[?status=&per_page=]` → each pipeline (`id`, `status`, `sha`, `ref`, `created_at`, `web_url`) | **Impedance mismatch:** GHA *workflow runs* ≈ GitLab *pipelines*. GHA `conclusion` (success/failure/…) is folded into GitLab's single pipeline `status` field; a `GitLabProvider` would normalize `status`→(`status`,`conclusion`). Uses REST `id` (int), **not** `gh run list`'s `databaseId`, so the run→job→annotation chain stays consistent. |
+| `deploy.status(repo_path)` | `gh api repos/{o}/{r}/deployments` then `.../deployments/{id}/statuses`; parse `state`, `environment`, `created_at`, `log_url`, deployment `id`/`sha` | `GET /projects/:id/deployments` → each deployment's `status`, `environment.name`, `created_at`, `deployable.web_url`, `sha` | GitLab deployments are first-class (no separate statuses sub-resource — `status` is on the deployment). **Zero deployments is a valid steady state on both → `[]`, never raise** (the API is opt-in; out-of-band deploys leave it empty). |
+| `deploy.logs(repo_path, job_id=…)` | `gh api repos/{o}/{r}/check-runs/{job_id}/annotations --paginate -q '[… select(.annotation_level=="failure") … ]'` → `[{path, start_line, message}]` + truncation sentinel | `GET /projects/:id/jobs/:job_id/trace` (raw log), parsed for failures | **Impedance mismatch (the sharpest one):** GitLab has **no per-job annotations** concept. GHA annotations give structured `{path, start_line, message}` failure rows; GitLab only exposes the raw job *trace*, so a `GitLabProvider` must regex/parse the trace into the same `{path, start_line, message}` shape `doctor` consumes — a lossy reconstruction, not a 1:1 field map. A clean / not-found job yields `[]` on both (no false alarm). |
 
 ## Sources
 

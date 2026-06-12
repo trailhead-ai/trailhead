@@ -65,6 +65,16 @@ class InvalidInputError(Exception):
     """Raised on option-injection attack vectors (pr_number / branch validation)."""
 
 
+class DeployError(Exception):
+    """Raised by the deploy surface when a gh call fails legibly.
+
+    Unlike the lossy ``_gh`` collapse used by repos/pr/ci, the deploy paths ARE
+    the doctor signal, so this carries the cause: it distinguishes a gh nonzero
+    exit (returncode + stderr) from a gh that exited zero but returned non-JSON
+    / empty stdout (M-4).
+    """
+
+
 @dataclass
 class PRPair:
     repo_path: str
@@ -173,6 +183,28 @@ def _gh(args: list[str], cwd: str, runner: rp.Runner) -> Any | None:
         return json.loads(r.stdout)
     except json.JSONDecodeError:
         return None
+
+
+def _gh_or_raise(args: list[str], cwd: str, runner: rp.Runner) -> Any:
+    """gh call for the deploy surface — raises DeployError carrying the cause.
+
+    Distinguishes the two failure modes the lossy ``_gh`` collapses into ``None``:
+    a nonzero gh exit (returncode + stderr) vs. a zero exit with non-JSON / empty
+    stdout. The deploy paths feed doctor, so an opaque ``None`` is not acceptable.
+    """
+    r = rp.run(["gh"] + args, cwd=cwd, runner=runner)
+    if r.returncode != 0:
+        stderr = (r.stderr or "").strip()
+        raise DeployError(
+            f"gh {' '.join(args[:2])} failed (returncode {r.returncode}): "
+            f"{stderr or '<no stderr>'}"
+        )
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError as e:
+        raise DeployError(
+            f"gh {' '.join(args[:2])} returned non-JSON / empty stdout: {e}"
+        ) from e
 
 
 def _get_owner_repo(cwd: str, runner: rp.Runner) -> str | None:
@@ -704,25 +736,131 @@ class _GitHubCI(CISurface):
         return {"timeout": True, "elapsed_seconds": elapsed}
 
 
-class _GitHubDeploy(DeploySurface):
-    """Slice-1 stub: the deploy surface is implemented in Slice 2."""
+_WORKFLOW_RUN_FIELDS = (
+    "id",
+    "name",
+    "status",
+    "conclusion",
+    "head_sha",
+    "created_at",
+    "html_url",
+    "workflow_id",
+)
 
-    _NOT_YET = (
-        "trailhead.vcs deploy surface is implemented in Slice 2 — "
-        "not available on the Slice-1 GitHubProvider"
-    )
+
+def _resolve_owner_repo(cwd: str, runner: rp.Runner) -> str:
+    owner_repo = _get_owner_repo(cwd, runner)
+    if not owner_repo:
+        raise DeployError(
+            f"could not resolve github owner/repo from origin remote in {cwd}"
+        )
+    return owner_repo
+
+
+class _GitHubDeploy(DeploySurface):
+    """GHA workflow-run + deployment status + failure-log interrogation.
+
+    The surface landing's ``doctor`` interrogates for a post-merge deploy
+    regression. Every gh call is list-form through ``trailhead.vcs.runner``
+    (shell=False); the jq ``-q`` filter is a list element, not a shell pipe.
+
+    Uses ``_gh_or_raise`` (not the lossy ``_gh``) so a failed deploy query
+    surfaces a legible cause to doctor (M-4).
+    """
 
     def __init__(self, runner: rp.Runner) -> None:
         self._runner = runner
 
-    def workflow_runs(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        raise NotImplementedError(self._NOT_YET)
+    def workflow_runs(
+        self,
+        repo_path: str,
+        *,
+        status: str | None = None,
+        per_page: int | None = None,
+    ) -> list[dict]:
+        """List GHA workflow runs via REST ``actions/runs``.
+
+        REST (not ``gh run list``) so ``id`` is the int the run→job→annotation
+        chain needs — ``gh run list`` names it ``databaseId``.
+        """
+        owner_repo = _resolve_owner_repo(repo_path, self._runner)
+        path = f"repos/{owner_repo}/actions/runs"
+        query: list[str] = []
+        if status is not None:
+            query.append(f"status={status}")
+        if per_page is not None:
+            query.append(f"per_page={per_page}")
+        if query:
+            path = f"{path}?{'&'.join(query)}"
+
+        data = _gh_or_raise(["api", path], repo_path, self._runner)
+        runs = data.get("workflow_runs", []) if isinstance(data, dict) else []
+        return [{k: run.get(k) for k in _WORKFLOW_RUN_FIELDS} for run in runs]
 
     def status(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        raise NotImplementedError(self._NOT_YET)
+        """List the latest deployment status per GitHub Deployment.
 
-    def logs(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        raise NotImplementedError(self._NOT_YET)
+        Zero deployments is a valid steady state (the deployments API is opt-in
+        and trailhead-ai/trailhead deploys out-of-band) — return ``[]``, never
+        raise.
+        """
+        owner_repo = _resolve_owner_repo(repo_path, self._runner)
+        deployments = _gh_or_raise(
+            ["api", f"repos/{owner_repo}/deployments"], repo_path, self._runner
+        )
+        if not isinstance(deployments, list):
+            return []
+
+        results: list[dict] = []
+        for dep in deployments:
+            dep_id = dep.get("id")
+            statuses = _gh_or_raise(
+                ["api", f"repos/{owner_repo}/deployments/{dep_id}/statuses"],
+                repo_path,
+                self._runner,
+            )
+            latest = statuses[0] if isinstance(statuses, list) and statuses else {}
+            results.append(
+                {
+                    "id": dep_id,
+                    "sha": dep.get("sha"),
+                    "state": latest.get("state"),
+                    "environment": latest.get("environment", dep.get("environment")),
+                    "created_at": latest.get("created_at"),
+                    "log_url": latest.get("log_url", ""),
+                }
+            )
+        return results
+
+    def logs(
+        self,
+        repo_path: str,
+        *,
+        job_id: str,
+        max_annotations: int = 10,
+    ) -> list[dict]:
+        """Failure annotations for a run's job — the doctor signal.
+
+        Filters ``check-runs/{job_id}/annotations`` to ``annotation_level=="failure"``.
+        A not-found / clean job yields ``[]`` (no false alarm); the truncation
+        sentinel is appended when the raw count exceeds ``max_annotations``.
+        """
+        owner_repo = _resolve_owner_repo(repo_path, self._runner)
+        # gh nonzero here (e.g. 404 on a not-found job) is a no-false-alarm
+        # empty result, not a doctor-visible error — use the lossy _gh.
+        raw = _gh(
+            ["api", f"repos/{owner_repo}/check-runs/{job_id}/annotations",
+             "--paginate", "-q",
+             '[.[] | select(.annotation_level=="failure") | {path, start_line, message: .message}]'],
+            cwd=repo_path,
+            runner=self._runner,
+        )
+        if not raw:
+            return []
+        annotations = raw[:max_annotations]
+        if len(raw) > max_annotations:
+            annotations.append({"truncated": True, "total": len(raw)})
+        return annotations
 
 
 class GitHubProvider(Provider):

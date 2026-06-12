@@ -95,11 +95,10 @@ class TestProviderShape:
         for m in ("checks", "wait"):
             assert hasattr(provider.ci, m), f"ci.{m} missing"
 
-    def test_deploy_surface_unimplemented_in_slice_1(self) -> None:
-        """deploy is declared but its methods are not implemented this slice."""
+    def test_deploy_methods(self) -> None:
         provider = get_provider("github")
-        with pytest.raises(NotImplementedError):
-            provider.deploy.status("some/path")
+        for m in ("workflow_runs", "status", "logs"):
+            assert hasattr(provider.deploy, m), f"deploy.{m} missing"
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +110,7 @@ _DOC_PATH = (
     Path(__file__).resolve().parent.parent / "docs" / "vcs-provider.md"
 )
 
-# The repos/pr/ci surface — every method here must appear in the doc.
+# The repos/pr/ci/deploy surface — every method here must appear in the doc.
 _INTERFACE_METHODS = [
     "repos.detect",
     "pr.open",
@@ -120,6 +119,9 @@ _INTERFACE_METHODS = [
     "pr.merge",
     "ci.checks",
     "ci.wait",
+    "deploy.workflow_runs",
+    "deploy.status",
+    "deploy.logs",
 ]
 
 
