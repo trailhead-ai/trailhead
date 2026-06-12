@@ -8,7 +8,7 @@ TDD contract (R-6 + Slice 7 test contract):
   3. R-6 resolve-all-capabilities oracle — compose_plan for every declared
      capability across lore + forge; every CopyOp.src exists on disk.
   4. New agent names appear in forge circle/execute compose output.
-  5. lore finish skill dir exists and lore tend skill dir exists.
+  5. lore finish skill dir exists; lore tend skill dir is GONE (Slice 7 deletes tend/review).
   6. Agent frontmatter name: fields match the new filenames.
 
 Write BEFORE the renames — these tests must fail RED first, then green after.
@@ -216,11 +216,11 @@ class TestGrepGuard:
             pytest.fail("\n".join(msg_lines))
 
     def test_no_skills_review_lore_reference_in_manifest(self):
-        """lore capabilities.toml must not reference skills/review after rename to skills/tend."""
+        """lore capabilities.toml must not reference skills/review (the tend/review skill is deleted)."""
         text = _LORE_MANIFEST.read_text()
         assert "skills/review" not in text, (
             "lore/capabilities.toml still references 'skills/review' — "
-            "update to 'skills/tend' after renaming the skill directory."
+            "delete the reference entirely (the tend/review skill was removed in Slice 7)."
         )
 
     def test_no_skills_review_lore_reference_in_skill_files(self):
@@ -228,7 +228,7 @@ class TestGrepGuard:
         old_dir = _LORE_PLUGIN_ROOT / "skills" / "review"
         assert not old_dir.exists(), (
             f"Old skills/review directory still exists at {old_dir} — "
-            "rename it to skills/tend."
+            "delete it (the tend/review skill was removed in Slice 7)."
         )
 
     def test_no_council_review_prose(self):

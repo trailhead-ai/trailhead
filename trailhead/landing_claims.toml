@@ -299,7 +299,7 @@ tool = "lore"
 ref = "skills/checkpoint"
 source = "lore"
 
-# Note: lore base skills (sync, ping) are in [tool] base = [...] not a capability group;
+# Note: lore base skills (sync) are in [tool] base = [...] not a capability group;
 # build_real_anchor_set() enumerates only capability-grouped skills, so these can't be
 # claimed as kind="skill" — they are real on-disk but unverifiable by the gate oracle.
 # Prose mentions are fine; they are not shown in fenced sh/bash blocks.
@@ -324,7 +324,7 @@ tool = "forge"
 ref = "helpers"
 source = "forge"
 
-# Note: forge base skills (handoff, pickup, followup) are in [tool] base = [...] not a
+# Note: forge base skills (shelve, pickup, polish) are in [tool] base = [...] not a
 # capability group; build_real_anchor_set() enumerates only capability-grouped skills,
 # so these can't be claimed as kind="skill" — they are real on-disk but unverifiable by
 # the gate oracle. Prose mentions are fine; they are not shown in fenced sh/bash blocks.
