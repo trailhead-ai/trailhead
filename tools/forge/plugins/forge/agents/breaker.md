@@ -58,7 +58,7 @@ Budget: at most 1–2 subagent dispatches. Stay in your lane — don't research 
 
 Use:
 - **`researcher`** — "how is this class of failure typically detected / tested," common abuse patterns for this shape of feature, known incidents in similar systems
-- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — past dead-ends, lessons learned, incident notes, subsystem gotchas in the project knowledge vault. **If no knowledge-synthesis subagent is configured, prior decisions and vault context were not consulted; note in Uncertainty that the synthesis pass was skipped and results may be shallower.**
+- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — past dead-ends, lessons learned, incident notes, subsystem gotchas in the project knowledge vault.
 - **`doc-finder`** — specific test-framework or assertion-library docs
 - **`Explore`** — find existing test patterns in the codebase for similar features
 

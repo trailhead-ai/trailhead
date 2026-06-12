@@ -284,3 +284,31 @@ def test_visible_skip_notice_present(stem: str):
         "'if none is configured, note in your report that the prior-art synthesis "
         "pass was skipped and results may be shallower.'"
     )
+
+
+# Circle agents must state the skip notice exactly once — once in the Output
+# shape / Uncertainty field. The subagent-section bullet must NOT restate it
+# (Slice 3 dedup). The existing presence check above already guards against
+# zero occurrences; this guards against the double-statement.
+_CIRCLE_AGENTS: list[str] = ["advocate", "attacker", "breaker", "builder"]
+
+
+@pytest.mark.parametrize("stem", _CIRCLE_AGENTS)
+def test_circle_agent_skip_notice_exactly_once(stem: str):
+    """Each circle agent must contain 'synthesis pass was skipped' exactly once.
+
+    The canonical location is the Output shape / Uncertainty field. The
+    Confidence boost / subagent section must NOT restate it — that duplication
+    adds token cost without adding information (Slice 3 dedup).
+    """
+    agent_md = AGENTS_DIR / f"{stem}.md"
+    assert agent_md.exists(), (
+        f"Expected circle agent {stem}.md to exist in {AGENTS_DIR}."
+    )
+    text = agent_md.read_text()
+    count = text.count("synthesis pass was skipped")
+    assert count == 1, (
+        f"{agent_md.name} contains 'synthesis pass was skipped' {count} time(s); "
+        "expected exactly 1. Keep the occurrence in the Output shape / Uncertainty "
+        "field and remove the duplicate from the Confidence boost section."
+    )
