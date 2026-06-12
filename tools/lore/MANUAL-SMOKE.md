@@ -83,26 +83,7 @@ Pass criteria: the session-start context contains the resolved vault path.
 
 ---
 
-### 4. Confirm /lore:ping is invocable
-
-In the session, run:
-
-```
-/lore:ping
-```
-
-Expected: Claude executes the skill body — it runs the inline Python snippet and
-prints something like:
-
-```
-lore vault path: /home/<you>/lore
-```
-
-Pass criteria: the skill runs without error and the vault path is printed.
-
----
-
-### 5. Confirm ${CLAUDE_PLUGIN_ROOT} resolved and sibling import succeeded
+### 4. Confirm ${CLAUDE_PLUGIN_ROOT} resolved and sibling import succeeded
 
 The SessionStart hook (`plugins/lore/hooks/session-context.py`) runs via
 `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/session-context.py"`. It imports
@@ -127,5 +108,4 @@ JSON output was populated (not `{}`).
 | `/plugin marketplace add` fails | Wrong path; verify the repo root exists and has `.claude-plugin/marketplace.json` |
 | `lore@lore-local` not found | Marketplace not added, or `marketplace.json` `name`/`plugins[0].name` mismatch |
 | Hook fires but emits `{}` | Python error in `session-context.py`; run `python3 plugins/lore/hooks/session-context.py` manually with `echo '{}' | ...` to debug |
-| `/lore:ping` not found | Plugin not installed, or skill dir not at `plugins/lore/skills/ping/SKILL.md` |
 | `${CLAUDE_PLUGIN_ROOT}` not expanded | Claude Code version too old; update Claude Code |

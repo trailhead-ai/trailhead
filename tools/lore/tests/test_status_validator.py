@@ -26,7 +26,7 @@ def test_canonical_vocab_matches_source():
     assert sv.CANONICAL["deferred"] == frozenset(
         {"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}
     )
-    assert sv.CANONICAL["radar"] == frozenset({"active", "resolved", "dropped"})
+    assert sv.CANONICAL["follow-ups"] == frozenset({"active", "resolved", "dropped"})
     assert sv.CANONICAL["lessons"] == frozenset({"active", "superseded"})
     assert sv.CANONICAL["dead-ends"] == frozenset({"active", "archived"})
 
@@ -42,7 +42,7 @@ def test_is_valid_status_accepts_canonical():
 def test_is_valid_status_rejects_noncanonical():
     sv = load_script("status_validator")
     assert sv.is_valid_status("deferred", "active") is False
-    assert sv.is_valid_status("radar", "open") is False
+    assert sv.is_valid_status("follow-up", "open") is False
     assert sv.is_valid_status("lesson", "complete") is False
 
 
@@ -67,7 +67,7 @@ def test_is_valid_status_unknown_type_is_valid():
 
 def test_permitted_statuses_lists_canonical():
     sv = load_script("status_validator")
-    assert sorted(sv.permitted_statuses("radar")) == ["active", "dropped", "resolved"]
+    assert sorted(sv.permitted_statuses("follow-up")) == ["active", "dropped", "resolved"]
     assert sv.permitted_statuses("nonexistent") is None
 
 

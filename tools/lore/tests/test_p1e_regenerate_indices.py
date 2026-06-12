@@ -63,17 +63,17 @@ def _write_deferred(vault: Path, slug: str, *, value: str = "high",
     return p
 
 
-def _write_radar(vault: Path, slug: str, *, revisit: str = "2099-06-01",
+def _write_follow_up(vault: Path, slug: str, *, revisit: str = "2099-06-01",
                  status: str = "open") -> Path:
-    p = vault / "radar" / f"{slug}.md"
+    p = vault / "follow-ups" / f"{slug}.md"
     p.write_text(
         f"---\n"
-        f"type: radar\n"
+        f"type: follow-up\n"
         f"status: {status}\n"
         f"revisit-after: {revisit}\n"
         f"added: 2099-01-01\n"
         f"---\n\n"
-        f"# {slug}\n\nSynthetic radar item.\n"
+        f"# {slug}\n\nSynthetic follow-up item.\n"
     )
     return p
 
@@ -178,12 +178,12 @@ class TestBasicGeneration:
         assert rc == 0
         assert (vault / "deferred" / "_index.md").exists()
 
-    def test_radar_index_created(self, tmp_path):
-        vault = _make_vault(tmp_path, "radar")
-        _write_radar(vault, "synth-radar-alpha")
+    def test_follow_up_index_created(self, tmp_path):
+        vault = _make_vault(tmp_path, "follow-ups")
+        _write_follow_up(vault, "synth-followup-alpha")
         rc = _run_main(vault)
         assert rc == 0
-        assert (vault / "radar" / "_index.md").exists()
+        assert (vault / "follow-ups" / "_index.md").exists()
 
     def test_lessons_index_created(self, tmp_path):
         vault = _make_vault(tmp_path, "lessons")
@@ -332,14 +332,14 @@ class TestIdempotency:
         second = (vault / "plans" / "_index.md").read_text()
         assert first == second, "plans _index.md not byte-identical on second run"
 
-    def test_radar_idempotent(self, tmp_path):
-        vault = _make_vault(tmp_path, "radar")
-        _write_radar(vault, "synth-idem-radar")
+    def test_follow_up_idempotent(self, tmp_path):
+        vault = _make_vault(tmp_path, "follow-ups")
+        _write_follow_up(vault, "synth-idem-followup")
         _run_main(vault)
-        first = (vault / "radar" / "_index.md").read_text()
+        first = (vault / "follow-ups" / "_index.md").read_text()
         _run_main(vault)
-        second = (vault / "radar" / "_index.md").read_text()
-        assert first == second, "radar _index.md not byte-identical on second run"
+        second = (vault / "follow-ups" / "_index.md").read_text()
+        assert first == second, "follow-ups _index.md not byte-identical on second run"
 
     def test_lessons_idempotent(self, tmp_path):
         vault = _make_vault(tmp_path, "lessons")
@@ -387,18 +387,18 @@ class TestGracefulDegradation:
         assert "## Uncategorized" in content
 
     def test_note_missing_date_fields_still_indexed(self, tmp_path):
-        vault = _make_vault(tmp_path, "radar")
-        p = vault / "radar" / "synth-no-date.md"
+        vault = _make_vault(tmp_path, "follow-ups")
+        p = vault / "follow-ups" / "synth-no-date.md"
         p.write_text(
             "---\n"
-            "type: radar\n"
+            "type: follow-up\n"
             "status: open\n"
             "---\n\n"
-            "# synth-no-date\n\nRadar item with no date.\n"
+            "# synth-no-date\n\nFollow-up with no date.\n"
         )
         rc = _run_main(vault)
         assert rc == 0
-        content = (vault / "radar" / "_index.md").read_text()
+        content = (vault / "follow-ups" / "_index.md").read_text()
         assert "synth-no-date" in content
 
     def test_lesson_missing_subsystems_still_indexed(self, tmp_path):
@@ -428,17 +428,17 @@ class TestGracefulDegradation:
     def test_all_folders_populated_no_crash(self, tmp_path):
         """End-to-end: all six folder types present → all indices generated."""
         vault = _make_vault(
-            tmp_path, "deferred", "radar", "lessons", "plans", "specs", "designs"
+            tmp_path, "deferred", "follow-ups", "lessons", "plans", "specs", "designs"
         )
         _write_deferred(vault, "synth-all-d")
-        _write_radar(vault, "synth-all-r")
+        _write_follow_up(vault, "synth-all-r")
         _write_lesson(vault, "synth-all-l")
         _write_plan(vault, "synth-all-p")
         _write_spec(vault, "synth-all-s")
         _write_design(vault, "synth-all-g")
         rc = _run_main(vault)
         assert rc == 0
-        for folder in ("deferred", "radar", "lessons", "plans", "specs", "designs"):
+        for folder in ("deferred", "follow-ups", "lessons", "plans", "specs", "designs"):
             assert (vault / folder / "_index.md").exists(), f"missing index for {folder}"
 
 
@@ -497,7 +497,7 @@ def _get_tree_files(vault: Path) -> set[str]:
 class TestBucketedScan:
     """Slice 4: plans/specs/designs index regeneration recurses one level into
     YYYY-MM/ buckets and emits resolvable vault-relative wikilinks. Out-of-scope
-    folders (deferred/radar/lessons) stay flat.
+    folders (deferred/follow-ups/lessons) stay flat.
 
     Lore cannot import the brain auditor, so link correctness is asserted on the
     emitted string: it must be the resolvable `[[plans/2026-06/foo]]` form and
@@ -593,17 +593,17 @@ class TestBucketedScan:
         assert "synth-nested-deferred" in content
         assert "[[deferred/2026-06/synth-nested-deferred]]" in content
 
-    def test_radar_index_recurses_into_buckets(self, tmp_path):
-        vault = _make_vault(tmp_path, "radar/2026-06")
-        _write_radar(vault, "synth-flat-radar")
-        (vault / "radar" / "2026-06" / "synth-nested-radar.md").write_text(
-            "---\ntype: radar\nstatus: open\nrevisit-after: 2099-06-01\n"
-            "added: 2099-01-01\n---\n\n# synth-nested-radar\n\nSynthetic.\n"
+    def test_follow_up_index_recurses_into_buckets(self, tmp_path):
+        vault = _make_vault(tmp_path, "follow-ups/2026-06")
+        _write_follow_up(vault, "synth-flat-followup")
+        (vault / "follow-ups" / "2026-06" / "synth-nested-followup.md").write_text(
+            "---\ntype: follow-up\nstatus: open\nrevisit-after: 2099-06-01\n"
+            "added: 2099-01-01\n---\n\n# synth-nested-followup\n\nSynthetic.\n"
         )
         _run_main(vault)
-        content = (vault / "radar" / "_index.md").read_text()
-        assert "synth-flat-radar" in content
-        assert "synth-nested-radar" in content
+        content = (vault / "follow-ups" / "_index.md").read_text()
+        assert "synth-flat-followup" in content
+        assert "synth-nested-followup" in content
 
     def test_lessons_index_recurses_into_buckets(self, tmp_path):
         vault = _make_vault(tmp_path, "lessons/2026-06")

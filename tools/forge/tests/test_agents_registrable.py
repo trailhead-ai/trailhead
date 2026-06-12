@@ -5,9 +5,9 @@ agent `.md` only registers as a dispatchable `subagent_type` if it opens with a
 YAML frontmatter block carrying a non-empty `name:` and `description:`. This
 test locks that invariant so an agent can't silently fail to register.
 
-Live proof of the mechanism (KU1): the lore plugin's `loremaster` agent
+Live proof of the mechanism (KU1): the lore plugin's `librarian` agent
 appears in the running session's registry as the namespaced subagent_type
-`lore:loremaster`. forge's agents register the same way as `forge:<name>`.
+`lore:librarian`. forge's agents register the same way as `forge:<name>`.
 """
 from pathlib import Path
 

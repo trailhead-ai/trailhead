@@ -144,12 +144,13 @@ def test_skill_has_no_app_seam_tokens(skill_md: Path):
 
 # skill stem -> list of contiguous visible-skip phrases that MUST be present
 _VISIBLE_SKIP_PHRASES: dict[str, list[str]] = {
-    "planning": [
+    # planning skill renamed to plan in Spec A / Slice 4.
+    "plan": [
         "no feature-flag provider configured",
         "no observability provider configured",
         "no issue tracker configured",
     ],
-    "subagent-driven-development": [
+    "execute": [
         "no feature-flag provider configured — flag setup skipped",
         "no issue tracker configured — status transitions skipped",
     ],
@@ -191,7 +192,9 @@ def test_skill_visible_skip_phrases_present(stem: str):
 # ---------------------------------------------------------------------------
 
 _GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
-    "followup": [
+    # skill stems renamed in Spec A / Slice 4 (followup→polish; the old code-review
+    # request skill → review).
+    "polish": [
         (
             "brain/plans/",
             "lore new plan",
@@ -201,7 +204,7 @@ _GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
             "lore new plan",
         ),
     ],
-    "requesting-code-review": [
+    "review": [
         (
             "brain/plans/",
             "the plan/requirements the caller provides",
@@ -240,7 +243,7 @@ def test_skill_generalize_replacement_landed(stem: str):
 # Inlined-value assertions: when a generic table/value is RELOCATED inline from
 # an external doc (rather than degraded or path-genericized), a tokens-absent
 # scan can't tell a faithful copy from a copy-paste corruption. The
-# subagent-driven-development review-threshold table was relocated inline from
+# execute review-threshold table was relocated inline from
 # the host project's CLAUDE.md — guard its boundary values so a future edit
 # that scrambles them fails loud (council Reliability Minor).
 #
@@ -248,7 +251,7 @@ def test_skill_generalize_replacement_landed(stem: str):
 # ---------------------------------------------------------------------------
 
 _INLINED_VALUES: dict[str, list[str]] = {
-    "subagent-driven-development": [
+    "execute": [
         "30",   # Small/Medium line boundary (≤30 lines)
         "200",  # Medium/Large line boundary (30-200 lines)
         "5+",   # Large file-count threshold (5+ files)

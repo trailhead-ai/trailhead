@@ -42,7 +42,7 @@ LORE_COMMANDS = (
     "`/lore:defer`",
     "`/lore:dead-end`",
     "`/lore:decision`",
-    "`/lore:radar`",
+    "`/lore:follow-up`",
     "`/lore:area`",
 )
 

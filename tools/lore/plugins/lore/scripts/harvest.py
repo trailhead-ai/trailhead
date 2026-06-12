@@ -2,7 +2,7 @@
 
 `lore finish` reads `<vault>/harvest-pending.md` and the active session note's
 `## Harvest candidates` block, then expands each typed one-liner of the five
-in-scope types (deferred / decision / dead-end / radar / lesson) into a full
+in-scope types (deferred / decision / dead-end / follow-up / lesson) into a full
 templated note in the matching vault directory.
 
 Out of scope:
@@ -31,7 +31,7 @@ from vault import bucket_dir, iter_note_paths
 # Typed one-liner: `- <type>: <body>  <!-- h:<hash> -->` (marker optional here;
 # unmarked typed lines are treated as malformed — they can't be deduped safely).
 _ENTRY_RE = re.compile(
-    r"^[ \t]*-[ \t]+(lesson|dead-end|deferred|radar|decision|gotcha):[ \t]*(.+?)"
+    r"^[ \t]*-[ \t]+(lesson|dead-end|deferred|follow-up|decision|gotcha):[ \t]*(.+?)"
     r"(?:[ \t]*<!--[ \t]*h:([a-f0-9]+)[ \t]*-->)?[ \t]*$"
 )
 _HASH_RE = re.compile(r"<!--[ \t]*h:([a-f0-9]+)[ \t]*-->")
@@ -41,7 +41,7 @@ _TYPE_DIRS: dict[str, str] = {
     "deferred": "deferred",
     "decision": "decisions",
     "dead-end": "dead-ends",
-    "radar": "radar",
+    "follow-up": "follow-ups",
     "lesson": "lessons",
 }
 
@@ -218,7 +218,7 @@ def render_note(entry: Entry, templates_dir: Path, today: str, project: str) -> 
         if revive:
             rendered = _append_section(rendered, "## What would make it worth retrying", revive + ".")
 
-    elif kind == "radar":
+    elif kind == "follow-up":
         subs = {
             "project": project, "date": today,
             "source": "", "target": "",

@@ -27,17 +27,18 @@ forge ships seven capability groups, each with agents and skills:
 
 **Planning:** `forge:planner`, `forge:architect`
 
-**Execute:** `forge:scout` (assumption-prover), `forge:trailblazer` (TDD
-implementer)
+**Execute:** `forge:assumption-prover` (resolves unknowns via throwaway TDD
+tests), `forge:executor` (TDD implementer)
 
 **Review:** `forge:code-reviewer`
 
 **Circle** — four-lens review panel dispatched as a parallel quartet by a
-planning skill's circle review step:
-- `forge:circle-builder` (architecture)
-- `forge:circle-reliability` (tests/failure modes)
-- `forge:circle-security` (threat model)
-- `forge:circle-advocate` (UX/user perspective)
+planning skill's circle review step, and each member is also dispatchable
+standalone:
+- `forge:builder` (architecture)
+- `forge:breaker` (tests/failure modes)
+- `forge:attacker` (threat model)
+- `forge:advocate` (UX/user perspective)
 
 **Design:** `forge:artist`
 
@@ -46,27 +47,31 @@ planning skill's circle review step:
 
 **Helpers:** `forge:researcher`, `forge:troubleshooter`, `forge:doc-finder`,
 `forge:test-runner`, `forge:log-sifter`, `forge:pr-summarizer`,
-`forge:security-auditor`, `forge:forge-ping`
+`forge:security-auditor`
 
 Nothing app-specific belongs in forge; per-project automation stays in that
 project's own repo.
 
 ## Skills
 
-Base skills (always available): `/forge:handoff`, `/forge:pickup`,
-`/forge:followup`
+Base skills (always available): `/forge:shelve`, `/forge:pickup`,
+`/forge:polish`
 
-**Planning:** `/forge:planning`
+**Planning:** `/forge:plan`
 
-**Execute:** `/forge:subagent-driven-development`
+**Circle:** `/forge:consult` — convene the four-lens panel on a question and
+synthesize. The standalone form of the planning skill's circle-review step;
+membership is single-sourced from `skills/_shared/circle.md`.
 
-**Review:** `/forge:requesting-code-review`
+**Execute:** `/forge:execute`
+
+**Review:** `/forge:review`
 
 **Release:** `/forge:create-pr`, `/forge:update-pr`, `/forge:watch-pr`,
 `/forge:watch-preview`, `/forge:merge-pr`, `/forge:github-pr`,
 `/forge:post-merge-decide`
 
-`/forge:handoff` and `/forge:pickup` are a symmetric shelve/resume pair — record
+`/forge:shelve` and `/forge:pickup` are a symmetric shelve/resume pair — record
 read-only git state and shelve a session note with pickup hints so a future
 session can resume. The git capture is strictly **read-only** — these rituals
 record state, they do not commit, push, or rebase your code.
@@ -103,8 +108,9 @@ For local dev work on the plugin itself:
 /plugin install forge@forge-local
 ```
 
-Then restart the session and confirm with the `forge-ping` agent. See
-[`MANUAL-SMOKE.md`](MANUAL-SMOKE.md) for the full boundary smoke test.
+Then restart the session and confirm a forge agent dispatches as a
+`forge:<name>` subagent_type. See [`MANUAL-SMOKE.md`](MANUAL-SMOKE.md) for the
+full boundary smoke test.
 
 ## Leak gate
 

@@ -2,7 +2,7 @@
 
 Agent-native project memory that works with your existing setup. Lore captures
 the durable, non-obvious things worth remembering across sessions — decisions,
-dead-ends, deferrals, radar items, area mental models, and a running session
+dead-ends, deferrals, follow-up items, area mental models, and a running session
 log — and loads what's relevant automatically when a session starts.
 
 **No MCP required.** Lore uses only `Read`, `Write`, `Edit`, `Glob`, `Grep`,
@@ -15,11 +15,11 @@ and `Bash(git)` — tools every Claude Code session already has.
 | `/lore:defer` | Work chosen not to do now, with a trigger to revisit |
 | `/lore:dead-end` | Approaches tried that didn't work, with a revive condition |
 | `/lore:decision` | Non-obvious architectural choices and their reasoning |
-| `/lore:radar` | External things out of your control being watched |
+| `/lore:follow-up` | External things out of your control being watched |
 | `/lore:area` | Mental model of a codebase area (files, gotchas, conventions) |
 
 Session lifecycle is automatic: `/lore:checkpoint` snapshots in-flight state;
-`/lore:finished` wraps the session. `/lore:sync` commits and pushes the vault at
+`/lore:finish` wraps the session. `/lore:sync` commits and pushes the vault at
 any point.
 
 ## Install
@@ -48,14 +48,12 @@ with the area map already included so the agent knows which areas exist.
 | `/lore:defer` | Capture a deferred item |
 | `/lore:dead-end` | Record a dead-end approach |
 | `/lore:decision` | Record an architectural decision |
-| `/lore:radar` | Add a radar watch item |
+| `/lore:follow-up` | Add a follow-up watch item |
+| `/lore:check-in` | Poll active follow-ups for movement |
 | `/lore:area` | Create or update an area profile |
 | `/lore:checkpoint` | Mid-session snapshot — harvest state into the session note |
-| `/lore:finished` | Canonical end-of-session finish — fill, finalize, expand harvest-pending, and commit |
-| `/lore:review` | Weekly vault migration — re-justify or close every open item |
-| `/lore:reflect` | Narrative synthesis of vault activity over a period |
+| `/lore:finish` | Canonical end-of-session finish — fill, finalize, expand harvest-pending, and commit |
 | `/lore:sync` | Commit and push the vault |
-| `/lore:ping` | Confirm the plugin is installed and show the resolved vault path |
 
 ## The `lore` CLI
 
@@ -115,7 +113,7 @@ Key transitions:
 
 - **sessions:** `active` → `complete` (or `shelved` for handoffs)
 - **deferred:** `open` → `resolved` / `dropped` / `graduated`
-- **radar:** `active` → `resolved` / `dropped`
+- **follow-ups:** `active` → `resolved` / `dropped`
 - **dead-ends:** `active` → `archived`
 
 ## Vault layout
@@ -128,7 +126,7 @@ lore/
   dead-ends/     Failed approaches with revive conditions
   lessons/       Mistakes plus prevention checks
   deferred/      Work set aside with revisit triggers
-  radar/         External things to watch
+  follow-ups/    External things to watch
   collaboration/ Working-style preferences
   specs/         Specification artifacts
   plans/         Implementation plans
@@ -139,7 +137,7 @@ lore/
 
 ## Searching the vault
 
-Use the `/lore:loremaster` agent to search and synthesize across the vault.
+Use the `/lore:librarian` agent to search and synthesize across the vault.
 It uses `Glob`, `Grep`, and `Read` — no MCP — and returns a cited synthesis,
 not a raw dump.
 

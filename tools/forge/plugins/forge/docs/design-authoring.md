@@ -1,9 +1,9 @@
 # Design Authoring — `combine_design.py`
 
 This document covers the combine contract, the filename-prefix convention (D-5), the
-docbar-variant convention (D-6), the `combine_design.py` CLI, and the
-`design_mockup` provider seam so the design phase is usable directly before the
-brainstorm-dispatch wire lands (A-6).
+docbar-variant convention (D-6), the `combine_design.py` CLI, and the live
+`design_mockup` provider seam — the wire by which lore's `brainstorm` skill
+dispatches the `artist` (A-6).
 
 ---
 
@@ -27,11 +27,13 @@ The phase runs in two steps:
 
 ## `design_mockup` provider seam
 
-**RESERVED — not yet wired. The brainstorm cutover is a follow-up.**
+**LIVE — wired.** Lore's `brainstorm` skill dispatches the `artist` agent as its
+default `design_mockup` provider.
 
-This is the named contract for how forge's `brainstorm` skill will eventually
-dispatch the `artist` agent as the `design_mockup` provider. The seam is
-documented here so the contract is stable before the cutover lands.
+This is the named contract for how lore's `brainstorm` skill dispatches the
+`artist` agent as the `design_mockup` provider. The brainstorm cutover has
+landed: `brainstorm`'s design-mockup step (step 4) names the `artist` as the
+default provider and dispatches it with the brief shape below.
 
 **Provider contract:**
 
@@ -44,10 +46,11 @@ documented here so the contract is stable before the cutover lands.
 The `artist` agent is invoked with the brief above and produces per-screen HTML
 files that the combine step assembles into the reference document.
 
-**Status:** RESERVED. No forge file dispatches the artist as a live provider yet.
-The lore `brainstorm` skill is not modified in this step. The upstream
-`design-mockup-writer` agent is not retired in this step. Both the
-brainstorm rewire and the retirement are captured as a follow-up deferred item.
+**Status:** LIVE. Lore's `brainstorm` skill (step 4, the `design_mockup`
+extension point) dispatches the `artist` as its default provider with the brief
+above. Retirement of the older upstream mockup-writer agent (its external
+copies) is tracked separately and is **not** complete as part of this wire — the
+in-repo path is the `artist`, and the external retirement is a follow-up.
 
 ---
 
@@ -155,8 +158,8 @@ This produces `path/to/designs/my-feature/my-feature-design-reference.html`.
 
 ### How to invoke the artist directly
 
-Before the brainstorm-dispatch wire is connected, you can use the `artist` agent
-directly by providing it a brief containing:
+Outside the `brainstorm` flow you can also dispatch the `artist` agent directly
+by providing it a brief containing:
 
 - The feature name and design goals
 - The surface(s) being designed (to select the right chrome catalog)

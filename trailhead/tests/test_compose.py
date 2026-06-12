@@ -115,13 +115,13 @@ class TestLoreCaptureComposePlan:
             assert dest / skill in dest_paths, f"capture skill missing: {skill}"
 
     def test_plan_has_exactly_expected_ops_count(self, tmp_path):
-        # always-on: .claude-plugin (1) + 3 base dirs + hooks_json (1)
-        # capture: 8 skill dirs
-        # total = 13
+        # always-on: .claude-plugin (1) + len(base) dirs + hooks_json (1)
+        # capture: its declared skill dirs
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"capture"}, dest)
-        assert len(plan.ops) == 13
+        expected = 1 + len(m.base) + len(m.capabilities["capture"]["skills"]) + 1
+        assert len(plan.ops) == expected
 
     def test_src_paths_are_under_plugin_root(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
@@ -378,11 +378,11 @@ class TestEmptySelection:
             )
 
     def test_empty_selection_exact_count(self, tmp_path):
-        # .claude-plugin (1) + 3 base + hooks_json (1) = 5
+        # .claude-plugin (1) + len(base) + hooks_json (1)
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, set(), dest)
-        assert len(plan.ops) == 5
+        assert len(plan.ops) == 1 + len(m.base) + 1
 
 
 # ---------------------------------------------------------------------------

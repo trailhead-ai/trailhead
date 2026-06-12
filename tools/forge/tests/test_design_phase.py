@@ -2,13 +2,12 @@
 
 Contract assertions:
 
-  1. Provider-seam present: design-authoring.md has a documented, reserved
-     design_mockup provider seam that names the artist + brief shape and is
-     marked RESERVED / not-yet-wired (D-9).
+  1. Provider-seam present: design-authoring.md has a documented, LIVE
+     design_mockup provider seam that names the artist + brief shape (D-9;
+     flipped LIVE by the Slice 8 brainstorm cutover).
 
-  2. No-cutover guard: the seam is documentation only — design-authoring.md
-     carries the RESERVED marker and no forge file dispatches the artist as a
-     live provider yet.
+  2. Cutover landed: the seam is wired — design-authoring.md is marked LIVE and
+     states lore's brainstorm dispatches the artist as the default provider.
 
   3. Full-surface leak gate (D-7 / S-3): leak_gate.py over the full WS-2
      surface (artist.md + combine_design.py + design-authoring.md + any new
@@ -122,63 +121,54 @@ def test_provider_seam_references_brief_shape(doc_text: str):
     )
 
 
-def test_provider_seam_is_marked_reserved(doc_text: str):
-    """The design_mockup seam must carry a RESERVED marker (D-9 — not yet wired)."""
-    # Search for the design_mockup section heading specifically (## ... design_mockup ...)
-    # then look for RESERVED / not-yet-wired in the section body.
+def test_provider_seam_is_marked_live(doc_text: str):
+    """The design_mockup seam must be marked LIVE (Slice 8 cutover — brainstorm
+    now dispatches the artist; the seam is no longer RESERVED / not-yet-wired)."""
     import re as _re
     doc_lower = doc_text.lower()
 
     # Find the section heading that introduces the provider seam
     section_match = _re.search(r"##[^\n]*design_mockup[^\n]*\n", doc_lower)
     if section_match:
-        # Search from the section heading forward for up to 1200 chars
         start = section_match.start()
         window = doc_lower[start: start + 1200]
     else:
-        # Fallback: search the whole doc
         window = doc_lower
 
-    has_reserved = "reserved" in window
-    has_not_wired = "not yet wired" in window or "not wired" in window or "follow-up" in window
-    assert has_reserved or has_not_wired, (
-        "The design_mockup seam must be marked RESERVED or 'not yet wired' (D-9)"
+    assert "live" in window, (
+        "The design_mockup seam must be marked LIVE — the brainstorm cutover landed"
+    )
+    assert "reserved" not in window and "not yet wired" not in window, (
+        "The design_mockup seam must no longer be marked RESERVED / not yet wired "
+        "(Slice 8 flipped it LIVE)"
     )
 
 
 # ---------------------------------------------------------------------------
-# 2. No-cutover guard (D-9)
-# The seam is documentation-only: design-authoring.md does not dispatch the
-# artist as a live provider. We assert the forge-side seam is inert.
+# 2. Cutover landed (Slice 8)
+# The seam is now LIVE: design-authoring.md states that lore's brainstorm
+# dispatches the artist as the default design_mockup provider.
 # ---------------------------------------------------------------------------
 
-def test_seam_is_marked_not_yet_wired(doc_text: str):
-    """design-authoring.md must state the seam is not-yet-wired / follow-up (D-9)."""
+def test_seam_is_marked_live(doc_text: str):
+    """design-authoring.md must state the design_mockup seam is LIVE / wired (Slice 8)."""
     doc_lower = doc_text.lower()
-    # Must explicitly state this is a reserved/follow-up seam, not a live dispatch
-    has_deferred_signal = (
-        "not yet wired" in doc_lower
-        or "follow-up" in doc_lower
-        or "reserved" in doc_lower
-    )
-    assert has_deferred_signal, (
-        "design-authoring.md must mark the design_mockup seam as reserved / not yet "
-        "wired / deferred follow-up (D-9 — no brainstorm cutover in this step)"
+    assert "live" in doc_lower and "reserved" not in doc_lower, (
+        "design-authoring.md must mark the design_mockup seam LIVE (Slice 8 cutover) "
+        "and no longer carry the RESERVED marker"
     )
 
 
-def test_seam_does_not_claim_live_dispatch(doc_text: str):
-    """design-authoring.md must NOT claim the artist is already dispatched by brainstorm (D-9)."""
-    # Must not say "brainstorm dispatches the artist" as a present fact
+def test_seam_states_brainstorm_dispatches_artist(doc_text: str):
+    """design-authoring.md must state brainstorm dispatches the artist as the
+    live design_mockup provider (Slice 8 cutover)."""
     doc_lower = doc_text.lower()
-    # Check there's no unqualified "dispatches the artist" claim
-    # (it's OK to say "will dispatch" / "reserved for" / "follow-up")
     has_present_dispatch = bool(
-        re.search(r"brainstorm\s+(now\s+)?dispatches\s+the\s+artist", doc_lower)
+        re.search(r"brainstorm[^.]*dispatch(?:es)?\s+the\s+`?artist`?", doc_lower)
     )
-    assert not has_present_dispatch, (
-        "design-authoring.md must not claim brainstorm currently dispatches the artist — "
-        "the cutover is a follow-up (D-9)"
+    assert has_present_dispatch, (
+        "design-authoring.md must state that brainstorm dispatches the artist as the "
+        "live provider — the cutover has landed (Slice 8)"
     )
 
 

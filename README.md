@@ -59,7 +59,7 @@ Basic Memory, claude-mem, native Claude Code memory:
 | What                     | How lore handles it                              |
 |---|---|
 | **Git-native versioning** | Every capture is a vault commit — PR-reviewable, diffable, rollbackable |
-| **Typed taxonomy**        | `dead-end` / `deferred` / `radar` capture negative + future-conditional knowledge that pure text search misses |
+| **Typed taxonomy**        | `dead-end` / `deferred` / `follow-up` capture negative + future-conditional knowledge that pure text search misses |
 | **Multi-repo scoping**    | A single vault tracks memory across however many repos your project spans |
 | **Local / no-egress**     | The vault is a plain git repo on your machine; no data leaves without a push |
 | **Explainable recall**    | Area-mediated: the agent says *why* it recalled, not just "here is some context" |

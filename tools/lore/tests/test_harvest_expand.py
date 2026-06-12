@@ -2,7 +2,7 @@
 
 TDD — written before implementation. Covers (council dispositions in brackets):
 
-- (a) each of the 5 in-scope types (deferred/decision/dead-end/radar/lesson)
+- (a) each of the 5 in-scope types (deferred/decision/dead-end/follow-up/lesson)
       expands into a correct note in the right dir with one-liner fields populated.
 - (b) lesson uses the new lesson template.
 - (c) gotcha is surfaced AND left in harvest-pending.md (not expanded) [scope].
@@ -43,7 +43,7 @@ def run_cli(args, env=None, cwd=None):
 
 def _git_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
-    for d in ("sessions", "deferred", "decisions", "dead-ends", "radar", "lessons"):
+    for d in ("sessions", "deferred", "decisions", "dead-ends", "follow-ups", "lessons"):
         (vault / d).mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
@@ -66,7 +66,7 @@ Staging area.
 - deferred: rewrite the gizmo loader. Trigger to revisit: when the gizmo count exceeds 100.  <!-- h:aaaaaaaaaaaa -->
 - decision: chose the ring buffer over a linked list because lookups stay O(1). Reversibility: hard.  <!-- h:bbbbbbbbbbbb -->
 - dead-end: tried caching the sprocket index in memory. Failed because the index outgrew the heap. Revive if: we shard the sprocket store.  <!-- h:cccccccccccc -->
-- radar: the doodad library v3 release. Cadence: monthly. Why: v3 removes the legacy adapter we depend on.  <!-- h:dddddddddddd -->
+- follow-up: the doodad library v3 release. Cadence: monthly. Why: v3 removes the legacy adapter we depend on.  <!-- h:dddddddddddd -->
 - lesson: skipped the bounds check on the flange array. Why it matters: out-of-range writes corrupt the adjacent widget. Confidence: high.  <!-- h:eeeeeeeeeeee -->
 - gotcha: the flux capacitor resets its counter on every reconnect. Where it bit: flux_capacitor.py:88.  <!-- h:ffffffffffff -->
 - this is a malformed line with no type prefix and no hash marker
@@ -101,7 +101,7 @@ def _seed_session_note(vault: Path, worktree: str = "widget-worktree") -> Path:
         "## Learned\n\n"
         "## Open questions\n\n"
         "## Harvest candidates\n\n"
-        "- radar: the gadget API deprecation. Cadence: weekly. Why: the v1 endpoint sunsets soon.  <!-- h:1111aaaa1111 -->\n"
+        "- follow-up: the gadget API deprecation. Cadence: weekly. Why: the v1 endpoint sunsets soon.  <!-- h:1111aaaa1111 -->\n"
     )
     return note
 
@@ -171,18 +171,18 @@ class TestExpansionLandsNotes:
         assert "shard the sprocket store" in body
         assert "type: dead-end" in body
 
-    def test_radar_note_created_with_fields(self, tmp_path):
+    def test_follow_up_note_created_with_fields(self, tmp_path):
         vault = _git_vault(tmp_path)
         _seed_pending(vault)
         _seed_session_note(vault)
         _commit_baseline(vault)
         _finish(vault, tmp_path)
-        notes = _notes_in(vault, "radar")
+        notes = _notes_in(vault, "follow-ups")
         # one from pending + one from the session-note Harvest candidates block
         bodies = [n.read_text() for n in notes]
         assert any("doodad library v3" in b for b in bodies), bodies
         assert any("gadget API deprecation" in b for b in bodies), bodies
-        assert all("type: radar" in b for b in bodies)
+        assert all("type: follow-up" in b for b in bodies)
 
     def test_lesson_note_created_with_fields_and_template(self, tmp_path):
         vault = _git_vault(tmp_path)
@@ -213,7 +213,7 @@ class TestGotchaSurfaced:
         _commit_baseline(vault)
         result = _finish(vault, tmp_path)
         # no note dir should contain the gotcha body
-        for sub in ("deferred", "decisions", "dead-ends", "radar", "lessons"):
+        for sub in ("deferred", "decisions", "dead-ends", "follow-ups", "lessons"):
             for note in _notes_in(vault, sub):
                 assert "flux capacitor resets its counter" not in note.read_text()
         # surfaced in the finish output
@@ -473,7 +473,7 @@ def _expand(vault: Path, pending_text: str, session_text: str = ""):
 class TestHarvestBuckets:
     def _bare_vault(self, tmp_path: Path) -> Path:
         vault = tmp_path / "vault"
-        for d in ("deferred", "decisions", "dead-ends", "radar", "lessons"):
+        for d in ("deferred", "decisions", "dead-ends", "follow-ups", "lessons"):
             (vault / d).mkdir(parents=True, exist_ok=True)
         return vault
 

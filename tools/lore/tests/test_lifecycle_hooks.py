@@ -454,7 +454,7 @@ class TestHarvest:
         vault = _make_vault(tmp_path)
         payload = {
             "tool_name": "Agent",
-            "tool_input": {"subagent_type": "trailblazer"},
+            "tool_input": {"subagent_type": "executor"},
             "tool_response": {"content": HARVEST_TEXT},
             "cwd": str(tmp_path / "wt"),
         }
