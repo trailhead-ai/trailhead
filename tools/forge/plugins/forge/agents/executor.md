@@ -82,6 +82,8 @@ Before reporting back, ask yourself:
 
 Fix issues found during self-review *before* reporting. The reviewer should not have to flag things you would have caught yourself.
 
+Any security- or decision-relevant finding (e.g. "I touched a secrets file", "I made an architectural call not in the plan") must be surfaced in the head's `blocking` or `unknowns` field — the full self-review text lives only in the durable tail and is not returned to the controller.
+
 ## When you're in over your head
 
 It is always OK to stop. Bad work is worse than no work.
@@ -98,14 +100,26 @@ Do not power through uncertainty by guessing.
 
 ## Report format
 
+The report has two parts: a **controller-facing head** that you return as your reply, and a **durable tail** that you write to the commit body (Step 7) and is not returned / not echoed to the controller.
+
+### Controller-facing head (return this)
+
 ```
 Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+files: <git diff --stat one-liner, e.g. "2 files changed, 45 insertions(+), 12 deletions(-)">
+review: needed | skip
+blocking: <one-liner on anything that stops the next slice, or "none">
+unknowns: <new unknowns discovered during this slice, or "none">
+cleanup: <assumption-prover test files/ranges removed, or "none">
+```
 
+### Durable tail (write to commit body, not returned)
+
+The tail is not part of your returned reply. Write it as the body of the GPG-signed commit you author in Step 7. It retains these headings for scannability in commit logs and on `/pickup`:
+
+```
 ## What I built
 <2-3 sentences>
-
-## Tests
-<count passed / failed; what behaviors are covered>
 
 ## Files changed
 <git diff --stat output>
@@ -114,7 +128,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 <anything you noticed and fixed, or "none">
 
 ## Surprises / concerns
-<anything the controller should know — invalidated assumptions, scope creep risk, follow-ups>
+<anything worth knowing — invalidated assumptions, scope creep risk, follow-ups>
 ```
 
 ## Rules
