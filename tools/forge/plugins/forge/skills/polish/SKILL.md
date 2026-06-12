@@ -72,7 +72,7 @@ For each item, scan for ambiguity:
 
 **Ask ALL clarifying questions in a single consolidated message.** Multi-turn ping-pong defeats the point of the skill — you'd burn the tokens you were trying to save. If everything is clear, skip this step entirely and proceed to step 3.
 
-If a clarifying answer reveals an item is much bigger than a follow-up (architectural change, new feature scope), pull it out of the batch and surface to the user — that item belongs in `planning`, not here.
+If a clarifying answer reveals an item is much bigger than a follow-up (architectural change, new feature scope), pull it out of the batch and surface to the user — that item belongs in `plan`, not here.
 
 ### 3. Triage per item
 
@@ -192,7 +192,7 @@ Do NOT try to write a single brief that asks the executor to operate on multiple
 - Dispatch without reading the items yourself first. You need to spot ambiguities before the subagent does.
 - Skip the clarifying step when items are genuinely unclear, just because it costs a turn. The cost of a wrong-direction subagent run is much higher.
 - Auto-open a PR after the dispatch returns — do not auto-open a PR. The user decides when to open one.
-- Bundle a real feature change into a follow-up batch. If something turns out to be big, pull it out and route it to `planning`.
+- Bundle a real feature change into a follow-up batch. If something turns out to be big, pull it out and route it to `plan`.
 
 ## Notes
 
