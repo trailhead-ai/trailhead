@@ -317,18 +317,23 @@ class TestSecurityEscalationInHead:
 
     def test_head_or_step8_describes_security_escalation_path(self):
         """executor.md must state that security/decision-relevant self-review findings
-        go into the head's blocking or unknowns field."""
+        go into the head's blocking or unknowns field.
+
+        Asserts the contiguous directive phrase, NOT whole-document co-occurrence of the
+        common tokens 'security' + 'blocking' — the latter goes vacuously green the moment
+        any unrelated edit adds 'security' elsewhere (Slice 1 review, Minor #1)."""
         text = _executor_text()
-        # This can appear in the self-review step or in the report format section
         lower = text.lower()
-        # Look for the pattern: security (or decision) + blocking/unknowns combination
-        has_security_escalation = (
-            ("security" in lower and "blocking" in lower) or
-            ("security" in lower and "unknowns" in lower) or
-            ("decision-relevant" in lower and ("blocking" in lower or "unknowns" in lower))
+        # The directive must route the finding to the head's blocking/unknowns field via a
+        # contiguous phrase, AND name the trigger (security- or decision-relevant).
+        routes_to_head_field = (
+            "surfaced in the head's `blocking` or `unknowns` field" in lower
+            or "surfaced in the head's `unknowns` or `blocking` field" in lower
         )
-        assert has_security_escalation, (
-            "executor.md must state that security- or decision-relevant self-review "
-            "findings must be surfaced in the head's 'blocking' or 'unknowns' field, "
+        names_trigger = "security- or decision-relevant" in lower
+        assert routes_to_head_field and names_trigger, (
+            "executor.md must state that a 'security- or decision-relevant' self-review "
+            "finding is 'surfaced in the head's `blocking` or `unknowns` field' "
+            "(assert the contiguous directive phrase, not token co-occurrence), "
             "since the full self-review text now lives only in the durable tail."
         )
