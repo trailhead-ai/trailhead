@@ -372,7 +372,7 @@ class TestIdempotency:
         """Re-wiring a narrower selection removes the previously-wired caps."""
         from trailhead.wire import wire
 
-        # First wire: lore with recall (has loremaster agent)
+        # First wire: lore with recall (has librarian agent)
         selection_full = {"lore": {"capture", "recall", "sessions"}}
         wire(
             selection_full,
@@ -381,9 +381,9 @@ class TestIdempotency:
             runner=_noop_runner,
         )
         plugin_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        assert (plugin_dest / "agents" / "loremaster.md").exists()
+        assert (plugin_dest / "agents" / "librarian.md").exists()
 
-        # Re-wire: lore with capture only (no recall → no loremaster agent)
+        # Re-wire: lore with capture only (no recall → no librarian agent)
         selection_narrow = {"lore": {"capture"}}
         wire(
             selection_narrow,
@@ -392,8 +392,8 @@ class TestIdempotency:
             runner=_noop_runner,
         )
         # recall skills/agents must be gone
-        assert not (plugin_dest / "agents" / "loremaster.md").exists(), (
-            "loremaster.md still present after rewiring without recall (S-4/R-1)"
+        assert not (plugin_dest / "agents" / "librarian.md").exists(), (
+            "librarian.md still present after rewiring without recall (S-4/R-1)"
         )
         assert not (plugin_dest / "skills" / "tend").exists(), (
             "skills/tend still present after rewiring without recall"
@@ -589,7 +589,7 @@ class TestMinimalLoreContent:
                 )
 
     def test_lore_minimal_lore_librarian_agent_present(self, tmp_path):
-        """Minimal lore includes recall → loremaster.md agent in dest."""
+        """Minimal lore includes recall → librarian.md agent in dest."""
         from trailhead.wire import wire
 
         selection = {"lore": {"capture", "recall", "sessions"}}
@@ -600,8 +600,8 @@ class TestMinimalLoreContent:
             runner=_noop_runner,
         )
         lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        assert (lore_dest / "agents" / "loremaster.md").exists(), (
-            "loremaster.md missing from minimal lore dest"
+        assert (lore_dest / "agents" / "librarian.md").exists(), (
+            "librarian.md missing from minimal lore dest"
         )
 
 

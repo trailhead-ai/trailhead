@@ -44,7 +44,7 @@ Budget: at most 1–2 subagent dispatches. Stay in your lane — don't research 
 Use:
 - **`researcher`** — "how is this pattern typically implemented," library evaluation, prior-art surveys outside the codebase
 - **`doc-finder`** — specific API / function / config option documentation
-- **a knowledge-synthesis subagent if one is configured (e.g. `lore:loremaster`)** — prior structural decisions, subsystem profiles, lessons learned, deferred items in the project knowledge vault. **If no knowledge-synthesis subagent is configured, prior decisions and vault context were not consulted; note in Uncertainty that the synthesis pass was skipped and results may be shallower.**
+- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — prior structural decisions, subsystem profiles, lessons learned, deferred items in the project knowledge vault. **If no knowledge-synthesis subagent is configured, prior decisions and vault context were not consulted; note in Uncertainty that the synthesis pass was skipped and results may be shallower.**
 - **`Explore`** — broad codebase survey when Grep/Glob isn't enough to find the closest analogue
 
 Only dispatch if the answer would materially change your recommendation. Record what you dispatched and what it returned in your output's Uncertainty section (so the coordinator can see where your confidence came from).

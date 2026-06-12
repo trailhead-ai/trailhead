@@ -1,4 +1,4 @@
-"""Slice 7 guard tests: UX renames sweep — finish/tend/circle/loremaster/scout/trailblazer.
+"""Slice 7 guard tests: UX renames sweep — finish/tend/circle/librarian/scout/trailblazer.
 
 TDD contract (R-6 + Slice 7 test contract):
   1. Suite-wide grep guard — zero occurrences of the old identifiers in the live
@@ -175,11 +175,32 @@ class TestGrepGuard:
             pytest.fail("\n".join(msg_lines))
 
     def test_no_lore_librarian_references(self):
-        """lore-librarian must not appear in tools/ source after rename to loremaster."""
+        """lore-librarian must NEVER appear in tools/ source.
+
+        This was a prior forbidden name (the agent was briefly called lore-librarian
+        before loremaster). Spec A renames loremaster→librarian — the new bare name is
+        `librarian`, NOT `lore-librarian`. This forbid stays so the hyphenated form is
+        never reintroduced.
+        """
         files = _collect_files()
         hits = _grep_files(r"lore-librarian", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'lore-librarian' — must be zero after rename:"]
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'lore-librarian' — must be zero (forbidden name):"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_loremaster_references(self):
+        """The `loremaster` agent token must not appear in tools/ source after rename to librarian.
+
+        Token-scoped to the old agent stem. The new name is `librarian` (the lore vault
+        search/synthesis agent) — never `lore-librarian` (a separately forbidden name).
+        Verified RED-first: every current hit is a reference to the old agent name.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"loremaster", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'loremaster' — must be 'librarian' after rename:"]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -310,15 +331,19 @@ class TestManifestValidation:
             "lore recall still references 'skills/review' — update to 'skills/tend'"
         )
 
-    def test_lore_recall_references_loremaster_agent(self):
-        """lore recall capability must reference agents/loremaster.md."""
+    def test_lore_recall_references_librarian_agent(self):
+        """lore recall capability must reference agents/librarian.md (was agents/loremaster.md).
+
+        Inverts the prior assertion: Spec A makes 'librarian' the desired agent name.
+        The old agents/loremaster.md must be gone from the manifest.
+        """
         m = load_manifest(_LORE_MANIFEST)
         cap = m.capabilities["recall"]
-        assert "agents/loremaster.md" in cap["agents"], (
-            f"lore recall must reference 'agents/loremaster.md'; got {cap['agents']}"
+        assert "agents/librarian.md" in cap["agents"], (
+            f"lore recall must reference 'agents/librarian.md'; got {cap['agents']}"
         )
-        assert "agents/lore-librarian.md" not in cap["agents"], (
-            "lore recall still references 'agents/lore-librarian.md' — update to 'agents/loremaster.md'"
+        assert "agents/loremaster.md" not in cap["agents"], (
+            "lore recall still references old 'agents/loremaster.md' — update to 'agents/librarian.md'"
         )
 
     def test_lore_sessions_references_finish_skill(self):
@@ -515,13 +540,16 @@ class TestNewAgentNamesInCompose:
             f"compose_plan for forge 'execute' must include executor.md; got {agent_srcs}"
         )
 
-    def test_lore_recall_compose_includes_loremaster(self, tmp_path):
-        """lore recall compose includes loremaster.md CopyOp."""
+    def test_lore_recall_compose_includes_librarian(self, tmp_path):
+        """lore recall compose includes librarian.md CopyOp (was loremaster.md)."""
         m = load_manifest(_LORE_MANIFEST)
         plan = compose_plan(m, {"recall"}, tmp_path / "dest")
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
-        assert "loremaster.md" in agent_srcs, (
-            f"compose_plan for lore 'recall' must include loremaster.md; got {agent_srcs}"
+        assert "librarian.md" in agent_srcs, (
+            f"compose_plan for lore 'recall' must include librarian.md; got {agent_srcs}"
+        )
+        assert "loremaster.md" not in agent_srcs, (
+            f"compose_plan for lore 'recall' still includes old loremaster.md; got {agent_srcs}"
         )
 
 
@@ -586,7 +614,7 @@ class TestFrontmatterNameMatchesFilename:
     """Agent frontmatter name: field must match the new filename stem."""
 
     @pytest.mark.parametrize("stem,path", [
-        ("loremaster", _LORE_PLUGIN_ROOT / "agents" / "loremaster.md"),
+        ("librarian", _LORE_PLUGIN_ROOT / "agents" / "librarian.md"),
         ("advocate", _FORGE_PLUGIN_ROOT / "agents" / "advocate.md"),
         ("builder", _FORGE_PLUGIN_ROOT / "agents" / "builder.md"),
         ("breaker", _FORGE_PLUGIN_ROOT / "agents" / "breaker.md"),

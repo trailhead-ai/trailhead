@@ -7,7 +7,7 @@ a tier are roughly ordered by value, not necessarily by implementation order.
 
 Session lifecycle, five capture skills, subsystem recall via branch-keyword
 matching, `lore` CLI, pre-commit status guard, vault-sync, and the
-loremaster agent. See the README for the full feature list.
+librarian agent. See the README for the full feature list.
 
 ## Tier 1.5 — Near-term additions
 

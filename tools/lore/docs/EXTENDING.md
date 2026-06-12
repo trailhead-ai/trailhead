@@ -47,7 +47,7 @@ development, and the helper agents (`test-runner`, `log-sifter`,
 `pr-summarizer`, `researcher`, the council). forge **may** use lore — several of
 its skills and agents write durable notes to the vault through the `lore` CLI,
 and the council agents will consult a knowledge-synthesis subagent
-(`lore:loremaster`) if one is installed. This dependency only ever points
+(`lore:librarian`) if one is installed. This dependency only ever points
 **down**.
 
 **The dependency rule:**

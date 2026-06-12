@@ -62,7 +62,7 @@ Budget: at most 1–2 subagent dispatches. Stay in your lane — don't research 
 
 Use:
 - **`researcher`** — UX patterns for this flow shape in comparable apps, accessibility standards (WCAG specifics), platform convention research (iOS HIG, Material Design)
-- **a knowledge-synthesis subagent if one is configured (e.g. `lore:loremaster`)** — prior UX decisions, design-system notes, brand/voice conventions in the project knowledge vault. **If no knowledge-synthesis subagent is configured, prior decisions and vault context were not consulted; note in Uncertainty that the synthesis pass was skipped and results may be shallower.**
+- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — prior UX decisions, design-system notes, brand/voice conventions in the project knowledge vault. **If no knowledge-synthesis subagent is configured, prior decisions and vault context were not consulted; note in Uncertainty that the synthesis pass was skipped and results may be shallower.**
 - **`doc-finder`** — specific platform API or accessibility guideline
 - **`Explore`** — find existing screens/components in the product that solve adjacent problems
 

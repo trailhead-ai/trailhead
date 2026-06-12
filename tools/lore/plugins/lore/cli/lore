@@ -1649,7 +1649,7 @@ def cmd_recall(args: argparse.Namespace) -> int:
     falls back to the zero-match banner on stdout.
 
     --json emits the structured RecallResult for programmatic callers
-    (e.g. the lore-librarian agent). JSON items carry source/layer (D-7).
+    (e.g. the librarian agent). JSON items carry source/layer (D-7).
     """
     import json as _json
 

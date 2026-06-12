@@ -383,9 +383,9 @@ class TestBuildRealAnchorSet:
         anchors = build_real_anchor_set()
         assert "recall" in anchors["lore"]["capabilities"]
 
-    def test_lore_loremaster_agent_present(self):
+    def test_lore_librarian_agent_present(self):
         anchors = build_real_anchor_set()
-        assert "agents/loremaster.md" in anchors["lore"]["agents"]
+        assert "agents/librarian.md" in anchors["lore"]["agents"]
 
     def test_forge_execute_capability_present(self):
         anchors = build_real_anchor_set()

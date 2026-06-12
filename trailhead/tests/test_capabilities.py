@@ -110,7 +110,7 @@ class TestLoreManifestParsesCorrectly:
         m = load_manifest(_LORE_MANIFEST)
         cap = m.capabilities["recall"]
         assert cap["skills"] == ["skills/tend", "skills/reflect"]
-        assert "agents/loremaster.md" in cap["agents"]
+        assert "agents/librarian.md" in cap["agents"]
 
     def test_lore_sessions_capability(self):
         m = load_manifest(_LORE_MANIFEST)
@@ -159,7 +159,7 @@ class TestLoreManifestValidatesAgainstDisk:
     def test_lore_recall_agent_file_exists(self):
         m = load_manifest(_LORE_MANIFEST)
         plugin_root = _LORE_MANIFEST.parent / "plugins" / m.tool_name
-        p = plugin_root / "agents/loremaster.md"
+        p = plugin_root / "agents/librarian.md"
         assert p.is_file(), f"agent file missing: {p}"
 
     def test_lore_hooks_json_exists_as_file(self):
