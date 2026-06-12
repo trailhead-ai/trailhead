@@ -48,51 +48,33 @@ them at.
 
 Per `_shared/circle.md`: make **four parallel `Agent` tool calls** — one each to
 `builder`, `breaker`, `attacker`, `advocate` — in a **single message** so they
-run concurrently in isolated contexts. Use the same prompt for every member,
-substituting only the lens label.
+run concurrently in isolated contexts. Use the **prompt template, per-lens
+Critical bars, and synthesis rules in `_shared/circle.md`** — do not re-inline
+them here. Fill the template's substitution tokens BEFORE sending each member its
+prompt (never ship a literal `<token>`):
 
-**Prompt template** (substitute `<lens>` with `Builder` / `Reliability` /
-`Security` / `Advocate`, and `<question>` / `<context-pointers>` with the framing
-from Step 1):
+- the context-pointer line → these two lines, with `<question>` and
+  `<context-pointers>` filled from the framing in Step 1:
+  ```text
+  Question: <question>
+  Context to read: <context-pointers>
+  ```
+- `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in
+  `_shared/circle.md`. Those bars are phrased for plan review; read each as
+  applying to the question / design / diff under review (map "slice" → the unit
+  under review) and skip any bar with no analogue for this question.
+- `<cross-cutting>` → the empty string (the cross-cutting plan-drift block is
+  planning-only; consult reviews a standalone question, not a plan)
 
-```text
-You are being dispatched by the consult skill to review a question as one lens of the circle panel (<lens>).
-
-Question: <question>
-Context to read: <context-pointers>
-
-Read the referenced context in full. Apply YOUR lens (<lens>) only. The other three members answer the same question in parallel from their lenses; you will not see their responses. Write in a voice that stands on its content — the synthesizer may strip your role label.
-
-Output shape:
-- ≤300 words total
-- Categorize findings as Critical / Important / Minor
-- ≤2 Critical findings (downgrade overflow to Important; forced prioritization is the point)
-- Every Critical includes a one-line "what concretely fails" (a specific failure scenario, not "this could be a problem") and a one-line suggested fix
-- No speculative Criticals — if it requires guessing about future state, scale, or user behavior, downgrade to Important
-- One-line Confidence at the end
-
-Required output format:
-
-## Findings
-- [Critical] <issue>: <one-line what concretely fails>. Suggested: <one-line fix>.
-- [Important] <issue>: <one-line>. Suggested: <one-line>.
-- [Minor] <issue>: <one-line>.
-
-## Confidence
-<one line — low | medium | high, with brief reason>
-```
+The shared template's "the synthesizer may strip your role label" line applies
+here: members write in a voice that stands on content, not on the role tag.
 
 ### 3. Synthesize (main session, NOT a subagent)
 
-After all four return:
-
-1. **De-duplicate by issue, not by member.** If two members raised the same
-   finding, present it once, noting which lenses raised it.
-2. **Auto-downgrade speculative Criticals.** A Critical that is vague, requires
-   guessing about scale / future state / user behavior, or names no concrete
-   failure scenario is reclassified Important — state which were downgraded and why.
-3. **Present the consolidated list** to the user, grouped Critical → Important →
-   Minor, noting the member count behind each multi-lens finding.
+Synthesize per `_shared/circle.md`: de-duplicate by issue (not by member),
+auto-downgrade speculative Criticals (stating which and why), and present the
+consolidated list grouped Critical → Important → Minor with the member count
+behind each multi-lens finding.
 
 The synthesis is the deliverable. Unlike the planning Circle Review there is no
 plan file to persist into and no disposition gate — `consult` answers a question

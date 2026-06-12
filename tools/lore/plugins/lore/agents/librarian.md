@@ -78,12 +78,12 @@ The vault is at the path stored in `$LORE_VAULT` (default `~/lore`). Resolve it 
 <1-4 sentences>
 
 ## Detail
-<bulleted synthesis with [[wikilinks]] to source notes>
+<≤8 bullets; prefer a [[wikilink]] over quoting >2 lines>
 
-## Related / adjacent
+## Related / adjacent  (omit if empty)
 <other notes that might be relevant, one line each with a wikilink>
 
-## Gaps
+## Gaps  (omit if empty)
 <anything I looked for and didn't find>
 ```
 

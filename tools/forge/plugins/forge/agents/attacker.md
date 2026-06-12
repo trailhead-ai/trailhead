@@ -63,7 +63,7 @@ Budget: at most 1–2 subagent dispatches. Stay in your lane — don't research 
 Use:
 - **`researcher`** — CVE / advisory research on a named dependency, known attack patterns for this shape (OWASP, recent writeups), threat-model precedent in similar systems
 - **`security-auditor`** — reserve for when your concern warrants a deeper audit of an existing module (not just the proposed change); heavier than `researcher`, use sparingly
-- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — prior security decisions, past vuln notes, PII/PHI handling conventions in the project knowledge vault. **If no knowledge-synthesis subagent is configured, prior decisions and vault context were not consulted; note in Uncertainty that the synthesis pass was skipped and results may be shallower.**
+- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — prior security decisions, past vuln notes, PII/PHI handling conventions in the project knowledge vault.
 - **`doc-finder`** — crypto library specifics, authn framework docs
 
 Only dispatch if the answer would materially change an attack path ranking or non-negotiable. Record what you dispatched and what it returned in your Uncertainty section.

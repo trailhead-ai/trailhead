@@ -146,99 +146,26 @@ After the plan is written and before presenting it for approval, dispatch a circ
 
 **Membership is defined in `_shared/circle.md`** — the single source of truth for who the circle is (`builder` / `breaker` / `attacker` / `advocate`) and the dispatch contract. Read it; do not hardcode the roster here. Planning dispatches the circle **directly** off that shared list — it does **not** call the `/forge:consult` skill (a skill→skill chain is unreliable). `consult` is the standalone-invocable form of this same panel for questions outside the planning flow.
 
-This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars below, not via per-invocation opt-outs.
+This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars in `_shared/circle.md`, not via per-invocation opt-outs.
 
-**Dispatch:** per `_shared/circle.md`, make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the same prompt template for every member, substituting the lens label and the lens-specific Critical bar block (defined below).
+**Dispatch:** per `_shared/circle.md`, make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the **prompt template, per-lens Critical bars, and synthesis rules in `_shared/circle.md`** — do not re-inline them here. Fill the template's substitution tokens BEFORE sending each member its prompt (never ship a literal `<token>`):
+- the context-pointer line → these two lines (substitute `<spec-path>` with the plan's linked spec absolute path; if the plan has no `related-spec` frontmatter, replace the whole `Spec:` line with `Spec: none — review against the plan's own Goal and Architecture blocks`):
+  ```text
+  Review the implementation plan and its linked spec against your lens.
+  Plan: <plan-path>
+  Spec: <spec-path>
+  ```
+- `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in `_shared/circle.md`
+- `<cross-cutting>` → this plan-specific extra Critical block:
+  ```text
 
-**Substitution rules** (apply BEFORE sending the prompt to each member; do not include these notes in the dispatched text):
-- `<plan-path>` — absolute path to the freshly-written plan file
-- `<spec-path>` — absolute path to the plan's linked spec. If the plan has no `related-spec` frontmatter, substitute the entire `Spec: <spec-path>` line with `Spec: none — review against the plan's own Goal and Architecture blocks`
-- `<lens>` — one of `Builder`, `Reliability`, `Security`, `Advocate` (one per dispatch)
-- `<lens-critical-bars>` — the matching block from "Per-lens Critical bars" below
+  Cross-cutting Critical you may also raise (any lens):
+  - Spec drift: plan's slices, summed, don't satisfy spec's acceptance criteria
+  - Hidden scope expansion: plan touches a subsystem the spec didn't claim
+  - Reversibility unnamed: plan deploys something hard to roll back without naming rollback path
+  ```
 
-**Prompt template:**
-
-```text
-You are being dispatched by the planning skill's mandatory circle review step. Review the implementation plan and its linked spec against your lens (<lens>).
-
-Plan: <plan-path>
-Spec: <spec-path>
-
-Read both files in full. Apply YOUR lens (<lens>) to identify gaps in the plan that should block approval (Critical), gaps that should be addressed but not block (Important), and observations worth noting (Minor).
-
-Output shape — REPLACE your usual ~400-600 word output with this constrained shape:
-- ≤300 words total
-- Categorize findings as Critical / Important / Minor
-- ≤2 Critical findings (downgrade overflow to Important; forced prioritization is the point)
-- Every Critical finding includes: a one-line "what concretely fails" (a specific failure scenario, not "this could be a problem"), and a one-line suggested fix
-- No speculative Critical findings — if the finding requires guessing about future state, user behavior, or scale, downgrade to Important
-- One-line Confidence at the end
-
-Your lens (<lens>) Critical bar:
-<lens-critical-bars>
-
-Cross-cutting Critical you may also raise (any lens):
-- Spec drift: plan's slices, summed, don't satisfy spec's acceptance criteria
-- Hidden scope expansion: plan touches a subsystem the spec didn't claim
-- Reversibility unnamed: plan deploys something hard to roll back without naming rollback path
-
-Required output format:
-
-## Findings
-- [Critical] <issue>: <one-line what concretely fails>. Suggested: <one-line fix>.
-- [Important] <issue>: <one-line>. Suggested: <one-line>.
-- [Minor] <issue>: <one-line>.
-
-## Confidence
-<one line — low | medium | high, with brief reason>
-
-Do not include sections you'd normally include in your usual full-length response. For this circle review the constrained output above is the whole response.
-```
-
-**Per-lens Critical bars** (paste the matching block into each member's dispatch):
-
-*Builder:*
-- Slice ordering creates a dependency that can't be tested
-- Architecture choice contradicts a declared axiom in the plan
-- Producer slice's contract isn't proven by tests but a consumer slice depends on it
-- Plan introduces a new abstraction layer for a single caller (premature)
-
-*Reliability:*
-- A slice has no test contract, OR test contract is vacuous
-- New code path's failure mode is invisible (no health check, metric, log, soak observable) AND the spec's Observability & Failure Visibility block says `n/a — soak-invisible` without substantive reason
-- Plan removes existing test coverage without replacement
-- A slice does irreversible work without dry-run / preview / staged rollout
-- A destructive migration or backfill runs without a gated, replayable console (the ORM / query layer or migration/backfill console) instead of an ad-hoc one-shot
-
-*Security:*
-- New authenticated endpoint without named authz check
-- New user-supplied input hitting the ORM / query layer without named sanitization
-- New log / event / metric containing PII or a user identifier without explicit redaction
-- Secret in source / config without using the existing secret-management pattern
-- Admin-only behavior exposed to non-admin paths
-
-*Advocate* — dual rule, apply the higher bar for internal admin UX:
-
-End-user-facing (the mobile client, the public web surface):
-- Stuck state with no escape
-- Primary flow 3+ clicks where 1 is industry-standard
-- Developer-jargon error messages
-- Missing empty / error / loading states
-- A change tested on only one platform but breaks an existing flow on another
-
-Internal admin UI — Critical ONLY when at least one holds:
-- (a) No workaround exists
-- (b) High-frequency daily workflow with compounding friction (e.g. 1-click → 10-click for a 50×-daily task)
-- (c) Feedback ambiguity that propagates bad decisions downstream
-
-Otherwise internal-admin findings are Important at most. Admin users tolerate friction; bikeshedding internal UX is high-cost.
-
-**Synthesis** (main session, NOT a subagent):
-
-After all four members return:
-1. **De-duplicate by issue, not by member.** If two members raised the same finding (e.g. Security and Reliability both flag a missing audit log), present it once, grouped by the issue, noting which lenses raised it.
-2. **Auto-downgrade speculative Criticals.** If a Critical finding is vague ("this could be a problem"), requires guessing about scale / future state / user behavior, or doesn't name a concrete failure scenario, reclassify it as Important during the consolidated presentation. State explicitly which findings were downgraded and why, both (a) in the user-facing message and (b) in the persisted `## Circle Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so future calibration audits can detect demote-heavy synthesizers.
-3. **Present the consolidated list** to the user, grouped by severity (Critical → Important → Minor). Briefly note total member count behind each finding when more than one member raised it.
+Then synthesize per `_shared/circle.md` (de-duplicate by issue, auto-downgrade speculative Criticals, present grouped by severity). When auto-downgrading, record the demotion in the persisted `## Circle Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so calibration audits can detect demote-heavy synthesizers.
 
 **Disposition (required for every Critical):**
 
@@ -250,25 +177,7 @@ For each Critical finding, the user assigns one of:
 
 Important and Minor findings do NOT require dispositions — they are logged for the audit trail only.
 
-**Persistence:** append a `## Circle Review` section to the plan file capturing all findings and the disposition for each Critical. Structure:
-
-```markdown
-## Circle Review
-
-*Reviewed at:* YYYY-MM-DDTHH:MM:SSZ
-*Members dispatched:* builder, breaker, attacker, advocate
-
-*Critical:*
-- <finding> (raised by: <lenses>) — *Disposition:* `<one of: resolved | bounced-back-to-spec | accepted-as-risk: <reason> | disputed: <reason>>`
-
-*Important:*
-- <finding> (raised by: <lenses>)
-
-*Minor:*
-- <finding> (raised by: <lenses>)
-```
-
-Concrete example (populated):
+**Persistence:** append a `## Circle Review` section to the plan file capturing all findings and the disposition for each Critical. Each Critical disposition is exactly one of `resolved` / `bounced-back-to-spec` / `accepted-as-risk: <reason>` / `disputed: <reason>`. Mirror this populated shape:
 
 ```markdown
 ## Circle Review
@@ -290,7 +199,7 @@ Concrete example (populated):
 
 If no Critical findings surfaced, the section still gets appended — record an empty Critical list explicitly (e.g. `*Critical:* none`) so future audits can distinguish "zero findings" from "review skipped."
 
-**Re-review:** no automatic re-review after the user resolves Critical findings inline. The user attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps mandatory-review cost bounded; if first-pass calibration is wrong, tune the per-lens bars in this file rather than adding iteration cycles.
+**Re-review:** no automatic re-review after the user resolves Critical findings inline. The user attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps mandatory-review cost bounded; if first-pass calibration is wrong, tune the per-lens bars in `_shared/circle.md` rather than adding iteration cycles.
 
 **Hard-floor gate:** the "reply `build` to hand off" prompt in Step 10 must NOT be printed until every Critical finding has a disposition. Important and Minor findings do not block.
 

@@ -82,57 +82,9 @@ If the idea has a user-facing surface, describe the visual direction before lock
 
 ### 5. Write the Spec
 
-Scaffold the spec with `lore new spec --title "<topic>"` — it renders the generic spec template into your vault's `specs/` directory with valid frontmatter (today's date, kebab-case slug). Then fill in the body sections with `Write`. If the `lore` CLI is not on PATH, write the spec to a `specs/` directory in your vault manually, mirroring the template shape below. The CLI infers `project:` from the git remote; if it can't, set it explicitly.
+Scaffold the spec with `lore new spec --title "<topic>"` — it renders the generic spec template into your vault's `specs/` directory with valid frontmatter (today's date, kebab-case slug). Then fill in the body sections with `Write`. The CLI infers `project:` from the git remote; if it can't, set it explicitly.
 
-```markdown
----
-type: spec
-project: <inferred from git remote, or set explicitly>
-status: draft
-subsystems: [a, b]
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
----
-
-# [Topic]
-
-## Problem
-[What's the real problem? Why now? What pain does it address?]
-
-## Objectives
-[Bulleted list of what this achieves, in user/outcome terms.]
-
-## Acceptance Criteria
-[Bulleted, testable, observable criteria. "Done" looks like this.]
-
-## Non-Goals
-[What we are explicitly NOT doing. Bounds scope and prevents drift.]
-
-## Constraints
-[Technical, business, timing, or organizational constraints.]
-
-## UI Direction
-[Verbal description + link to designs/ if mockups exist. Omit if no UI surface.]
-
-## Observability & Failure Visibility
-[Mandatory. Three sub-fields, each named or `n/a — <reason>`:
-- **Health check:** existing `<check>` covers the new code path | new `<check>` on the relevant surface(s) | extends `<check>` | `n/a — <reason>`.
-- **Metric:** `<metric name>` (labels), fires on every run including short-circuits | `n/a — <reason>`.
-- **Failure observable:** `<failure>` → `<signal change>` | `n/a — no monitored surface applies` | `n/a — observability-invisible: <what was considered and why rejected>`.
-
-Bare `n/a — observability-invisible` is not template-conformant — the reason must name what was considered.
-
-**Observability provider (extension point — `observability`):** if an observability provider is configured in your environment (metric store, alerting rules, health endpoints), use its naming conventions for the metric/check above. If none is configured — `no observability provider configured — see the extend guide` in `docs/DEGRADATION.md`; the decision above still happens, only the provider-specific metric naming and check wiring are skipped.]
-
-## Open Questions / Risks
-[Questions deferred or accepted as risk, with mitigation.]
-
-## Related
-- Prior specs: [...]
-- Subsystems: [...]
-- Decisions: [...]
-- Designs: [...]
-```
+Fill in: **Problem** (real problem, why now) · **Objectives** (bulleted, outcome-framed) · **Acceptance Criteria** (testable, observable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical/business/timing) · **UI Direction** (omit if no UI surface) · **Observability & Failure Visibility** (mandatory; health check + metric + failure observable, each named or `n/a — <reason>`; bare `n/a` non-conformant) · **Open Questions / Risks** · **Related**
 
 ### 6. Brainstorming Exit Gate
 
@@ -208,39 +160,22 @@ Every slice must include a test contract — the behaviors to prove with failing
 
 ### 8. Write the Plan
 
-Scaffold the plan with `lore new plan --title "<topic>"` — it renders the generic plan template into your vault's `plans/` directory with valid frontmatter (today's date, kebab-case slug). Then fill in the body sections with `Write`. If the `lore` CLI is not on PATH, write the plan to a `plans/` directory in your vault manually, mirroring the template shape below.
+Scaffold the plan with `lore new plan --title "<topic>"` — it renders the generic plan template into your vault's `plans/` directory with valid frontmatter (today's date, kebab-case slug). Then fill in the body sections with `Write`. If an upstream spec exists, reference it in the plan's `related-spec:` frontmatter and update the spec's `status: ready` → `status: planned`. The CLI infers `project:` from the git remote; if it can't, set it explicitly.
 
-If an upstream spec exists, reference it in the plan's `related-spec:` frontmatter and update the spec's `status: ready` → `status: planned`. The CLI infers `project:` from the git remote; if it can't, set it explicitly.
+Fill in: **Goal** (one sentence) · **Architecture** (2-3 sentences) · **Observability & Failure Visibility** (mirror spec; name slice ownership; `n/a — <reason>` if none) · **Known Unknowns** (checkbox per unknown, each names the slice it blocks) · **Rollout & Gating** (`n/a` if no runtime) · **Slices** (each: Delivers + Test contract + Observability signal + Files; test contract = behaviors to prove with failing tests before implementation).
+
+If the lore CLI is unavailable, write the plan to a `plans/` directory in your vault manually, mirroring this shape:
 
 ```markdown
 # [Feature Name] Implementation Plan
-
-**Goal:** [One sentence]
-
-**Architecture:** [2-3 sentences about approach]
-
-**Observability & Failure Visibility:** [Mirror spec verbatim. Either: check/metric/failure-observable named with slice ownership + (if new metric) the emission-site deliverable, OR `n/a — <reason from spec>`.]
-
-**Known Unknowns:**
-- [ ] [Unknown 1 — blocks Slice N]
-
+**Goal:**
+**Architecture:**
+**Observability & Failure Visibility:**
+**Known Unknowns:** - [ ] [unknown — blocks Slice N]
+**Rollout & Gating:**
 **Slices:**
-
-### Slice 1: [What it delivers]
-
-**Unknown to resolve first:** [description of what needs to be proven, if any]
-**Delivers:** [What's buildable]
-**Test contract:** [Behaviors to prove with failing tests before implementation]
-**Observability signal:** [Spec signal this slice contributes — "registers `<check>`", "emits `<metric>`", "extends `<check>`", or "none — UI / refactor / no monitored surface."]
-**Files:** [Expected files to touch]
-
-### Slice 2: [What it delivers]
-
-**Depends on:** Slice 1
-**Delivers:** [What this slice adds]
-**Test contract:** [Behaviors to prove with failing tests]
-**Observability signal:** [As above.]
-**Files:** [Expected files to touch]
+### Slice N: [Name]
+**Delivers:** **Test contract:** **Observability signal:** **Files:**
 ```
 
 ### 9. Present for Approval
