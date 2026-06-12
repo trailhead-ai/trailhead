@@ -76,11 +76,13 @@ def resolve(name: str) -> dict[str, set[str]]:
 
 
 def _compute_full() -> dict[str, set[str]]:
-    """Compute the full preset by loading all three tool manifests."""
+    """Compute the full preset by loading all five tool manifests."""
     tools = {
         "lore": _REPO_ROOT / "tools" / "lore" / "capabilities.toml",
         "camp": _REPO_ROOT / "tools" / "camp" / "capabilities.toml",
         "forge": _REPO_ROOT / "tools" / "forge" / "capabilities.toml",
+        "portage": _REPO_ROOT / "tools" / "portage" / "capabilities.toml",
+        "landing": _REPO_ROOT / "tools" / "landing" / "capabilities.toml",
     }
     result: dict[str, set[str]] = {}
     for tool_name, manifest_path in tools.items():

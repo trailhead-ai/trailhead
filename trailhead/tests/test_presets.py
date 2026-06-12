@@ -9,6 +9,10 @@ The preset table (spec §832-838):
   full     = every capability declared in each tool's capabilities.toml (computed at runtime)
 
 The "full" preset is computed from load_manifest — it can never drift from the manifests.
+
+Slice 5 additions:
+  portage and landing are full-only (not in standard). resolve("full") must include every
+  portage + landing capability; _STANDARD is unchanged.
 """
 
 from pathlib import Path
@@ -22,6 +26,8 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 _FORGE_MANIFEST = _REPO_ROOT / "tools" / "forge" / "capabilities.toml"
+_PORTAGE_MANIFEST = _REPO_ROOT / "tools" / "portage" / "capabilities.toml"
+_LANDING_MANIFEST = _REPO_ROOT / "tools" / "landing" / "capabilities.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -129,10 +135,14 @@ class TestFullPreset:
         lore_manifest = load_manifest(_LORE_MANIFEST)
         camp_manifest = load_manifest(_CAMP_MANIFEST)
         forge_manifest = load_manifest(_FORGE_MANIFEST)
+        portage_manifest = load_manifest(_PORTAGE_MANIFEST)
+        landing_manifest = load_manifest(_LANDING_MANIFEST)
         expected = {
             "lore": set(lore_manifest.capabilities.keys()),
             "camp": set(camp_manifest.capabilities.keys()),
             "forge": set(forge_manifest.capabilities.keys()),
+            "portage": set(portage_manifest.capabilities.keys()),
+            "landing": set(landing_manifest.capabilities.keys()),
         }
         result = resolve("full")
         assert result == expected
@@ -172,3 +182,68 @@ class TestUnknownPreset:
     def test_preset_names_are_case_sensitive(self):
         with pytest.raises(PresetError):
             resolve("Standard")
+
+
+# ---------------------------------------------------------------------------
+# Slice 5 — portage + landing in full only, not in standard (parity decision)
+# ---------------------------------------------------------------------------
+
+
+class TestPortageLandingFullOnly:
+    """portage and landing are full-only; _STANDARD is unchanged (user-confirmed parity)."""
+
+    def test_full_contains_all_portage_capabilities(self):
+        """resolve("full") must include every portage capability from its manifest."""
+        portage_manifest = load_manifest(_PORTAGE_MANIFEST)
+        result = resolve("full")
+        assert "portage" in result, "portage must be in full preset"
+        assert result["portage"] == set(portage_manifest.capabilities.keys())
+
+    def test_full_contains_all_landing_capabilities(self):
+        """resolve("full") must include every landing capability from its manifest."""
+        landing_manifest = load_manifest(_LANDING_MANIFEST)
+        result = resolve("full")
+        assert "landing" in result, "landing must be in full preset"
+        assert result["landing"] == set(landing_manifest.capabilities.keys())
+
+    def test_standard_does_not_contain_portage(self):
+        """portage must NOT appear in standard — full-only by parity decision."""
+        result = resolve("standard")
+        assert "portage" not in result, (
+            "portage must not be in the standard preset — "
+            "it is full-only (portage/landing depend on the trailhead install layout)"
+        )
+
+    def test_standard_does_not_contain_landing(self):
+        """landing must NOT appear in standard — full-only by parity decision."""
+        result = resolve("standard")
+        assert "landing" not in result, (
+            "landing must not be in the standard preset — "
+            "it is full-only (portage/landing depend on the trailhead install layout)"
+        )
+
+    def test_minimal_does_not_contain_portage(self):
+        """portage must NOT appear in minimal."""
+        result = resolve("minimal")
+        assert "portage" not in result
+
+    def test_minimal_does_not_contain_landing(self):
+        """landing must NOT appear in minimal."""
+        result = resolve("minimal")
+        assert "landing" not in result
+
+    def test_full_portage_includes_release_capability(self):
+        """The portage 'release' capability (its one named capability) is in full."""
+        result = resolve("full")
+        assert "portage" in result
+        assert "release" in result["portage"], (
+            "portage 'release' capability must be in full preset"
+        )
+
+    def test_full_landing_includes_deploy_capability(self):
+        """The landing 'deploy' capability (its one named capability) is in full."""
+        result = resolve("full")
+        assert "landing" in result
+        assert "deploy" in result["landing"], (
+            "landing 'deploy' capability must be in full preset"
+        )

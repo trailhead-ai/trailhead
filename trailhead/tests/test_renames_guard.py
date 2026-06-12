@@ -11,6 +11,10 @@ TDD contract (R-6 + Slice 7 test contract):
   5. lore finish skill dir exists and lore tend skill dir exists.
   6. Agent frontmatter name: fields match the new filenames.
 
+Slice 5 additions:
+  7. Old release identifiers are absent from tools/portage and tools/landing.
+     (They legitimately still exist in tools/forge until Slice 6.)
+
 Write BEFORE the renames — these tests must fail RED first, then green after.
 """
 
@@ -465,3 +469,69 @@ class TestFrontmatterNameMatchesFilename:
             f"{path.name} frontmatter name: is {name!r}, expected {stem!r}. "
             "Frontmatter name must match the filename stem after rename."
         )
+
+
+# ---------------------------------------------------------------------------
+# 7. Slice 5 — old release identifiers absent from portage + landing
+# ---------------------------------------------------------------------------
+
+# Old release identifiers that must not appear in tools/portage or tools/landing.
+# They legitimately still exist in tools/forge until Slice 6 deletes them — so
+# the scan roots here are scoped to portage and landing only.
+_RELEASE_OLD_IDENTIFIERS = [
+    "pr-summarizer",
+    "pr-updater",
+    "watch-pr",
+    "watch-preview",
+    "diagnose-preview",
+    "create-pr",
+    "update-pr",
+    "merge-pr",
+    "github-pr",
+    "post-merge-decide",
+]
+
+_PORTAGE_ROOT = _REPO_ROOT / "tools" / "portage"
+_LANDING_ROOT = _REPO_ROOT / "tools" / "landing"
+
+
+def _collect_portage_landing_files() -> list[Path]:
+    """Collect all relevant source files in portage + landing (not forge)."""
+    files: list[Path] = []
+    for root in (_PORTAGE_ROOT, _LANDING_ROOT):
+        if not root.exists():
+            continue
+        for f in root.rglob("*"):
+            if f.suffix not in _SCAN_SUFFIXES:
+                continue
+            if any(part in _EXCLUDE_DIRS for part in f.parts):
+                continue
+            if f.is_file():
+                files.append(f)
+    return files
+
+
+class TestOldReleaseIdentifiersAbsentFromPortageLanding:
+    """Old release identifiers must not appear in tools/portage or tools/landing.
+
+    These identifiers legitimately still exist in tools/forge (until Slice 6
+    deletes them). The assertions are scoped to portage+landing only so the
+    existing forge tests remain unaffected.
+
+    Identifiers checked: pr-summarizer, pr-updater, watch-pr, watch-preview,
+    diagnose-preview, create-pr, update-pr, merge-pr, github-pr, post-merge-decide.
+    """
+
+    @pytest.mark.parametrize("identifier", _RELEASE_OLD_IDENTIFIERS)
+    def test_old_identifier_absent_from_portage_and_landing(self, identifier: str):
+        """Old release identifier must not appear in tools/portage or tools/landing."""
+        files = _collect_portage_landing_files()
+        hits = _grep_files(re.escape(identifier), files)
+        if hits:
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of old release identifier "
+                f"{identifier!r} in portage/landing — must be absent:"
+            ]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
