@@ -391,9 +391,9 @@ class TestBuildRealAnchorSet:
         anchors = build_real_anchor_set()
         assert "execute" in anchors["forge"]["capabilities"]
 
-    def test_forge_scout_agent_present(self):
+    def test_forge_assumption_prover_agent_present(self):
         anchors = build_real_anchor_set()
-        assert "agents/scout.md" in anchors["forge"]["agents"]
+        assert "agents/assumption-prover.md" in anchors["forge"]["agents"]
 
     def test_forge_artist_agent_present(self):
         """forge design has agents/artist.md — verify it's in the anchor set."""
@@ -1346,7 +1346,7 @@ class TestLandingSurfaceLeakGate:
             "lore, forge, and camp are the three plugins.\n"
             "Run `trailhead install` to get started with the minimal or standard preset.\n"
             "Use `lore recall --areas <topic>` to load area memory.\n"
-            "Claude Code is the agent runtime. forge:trailblazer is a skill.\n"
+            "Claude Code is the agent runtime. forge:execute is a skill.\n"
             "Run `trailhead doctor` or `trailhead config` or `trailhead update`.\n"
             "The full preset wires all capabilities.\n",
             encoding="utf-8",

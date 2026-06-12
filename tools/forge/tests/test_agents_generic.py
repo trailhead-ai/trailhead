@@ -147,15 +147,15 @@ def test_agent_has_no_middle_band_tokens(agent_md: Path):
 
 # Agents that carry a harvest block and must retain lore-hook-compatible heading.
 # Extend this list as new harvest-bearing agents are genericized (P3A-3 adds
-# researcher, scout, and trailblazer).
+# researcher, assumption-prover, and executor).
 _HARVEST_BEARING_AGENTS: list[str] = [
     "architect",
     "code-reviewer",
     "security-auditor",
     "troubleshooter",
     "researcher",
-    "scout",
-    "trailblazer",
+    "assumption-prover",
+    "executor",
 ]
 
 # Agents that dispatched brain-librarian and must now carry a visible skip notice

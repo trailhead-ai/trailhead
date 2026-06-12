@@ -172,7 +172,7 @@ source = "forge"
 [[claim]]
 kind = "skill"
 tool = "forge"
-ref = "skills/subagent-driven-development"
+ref = "skills/execute"
 source = "forge"
 
 [[claim]]
@@ -188,13 +188,13 @@ source = "forge"
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/scout.md"
+ref = "agents/assumption-prover.md"
 source = "forge"
 
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/trailblazer.md"
+ref = "agents/executor.md"
 source = "forge"
 
 [[claim]]

@@ -68,7 +68,7 @@ If the design involves libraries, frameworks, or language features you haven't u
 
 This applies to new dependencies AND to unfamiliar parts of existing dependencies.
 
-Findings from this step (library version, API quirks, supported behaviors) feed directly into the plan template's **Given Axioms** block as cited ground truth. If something needs investigation to verify, leave it as a Known Unknown for the scout instead.
+Findings from this step (library version, API quirks, supported behaviors) feed directly into the plan template's **Given Axioms** block as cited ground truth. If something needs investigation to verify, leave it as a Known Unknown for the assumption-prover instead.
 
 ### 6. Identify Known Unknowns
 
@@ -292,7 +292,7 @@ If no Critical findings surfaced, the section still gets appended — record an 
 
 **Re-review:** no automatic re-review after the user resolves Critical findings inline. The user attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps mandatory-review cost bounded; if first-pass calibration is wrong, tune the per-lens bars in this file rather than adding iteration cycles.
 
-**Hard-floor gate:** the "reply `execute` to hand off" prompt in Step 10 must NOT be printed until every Critical finding has a disposition. Important and Minor findings do not block.
+**Hard-floor gate:** the "reply `build` to hand off" prompt in Step 10 must NOT be printed until every Critical finding has a disposition. Important and Minor findings do not block.
 
 ### 10. Present for Approval
 
@@ -302,9 +302,9 @@ Share the plan path and a short summary, then wait for explicit user approval be
 
 End the presentation with an explicit handoff prompt so the trigger is unambiguous, e.g.:
 
-> "Plan is written to your vault. Reply **execute** to hand off to `subagent-driven-development` and start building slice by slice, or call out anything that needs adjustment first."
+> "Plan is written to your vault. Reply **build** to hand off to `/forge:execute` and start building slice by slice, or call out anything that needs adjustment first."
 
-The word `execute` (or similar verbs: `build`, `start`, `go`, `ship it`) is what pulls in the `subagent-driven-development` skill — don't rely on implicit continuation.
+The continuation verb (`build`, `start`, `go`, `ship it`) is what pulls in the `/forge:execute` skill — don't rely on implicit continuation. Use a verb here rather than the bare skill name so the trigger word stays distinct from the `/forge:execute` command itself.
 
 ## Key Principles
 

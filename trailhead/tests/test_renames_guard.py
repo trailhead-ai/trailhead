@@ -125,11 +125,51 @@ class TestGrepGuard:
             pytest.fail("\n".join(msg_lines))
 
     def test_no_sdd_dash_references(self):
-        """sdd- prefix must not appear in tools/ source after rename to scout/trailblazer."""
+        """sdd- prefix must never reappear in tools/ source (we renamed away from it long ago)."""
         files = _collect_files()
         hits = _grep_files(r"sdd-", files)
         if hits:
             msg_lines = [f"Found {len(hits)} occurrence(s) of 'sdd-' — must be zero after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_scout_references(self):
+        """The `scout` agent token must not appear in tools/ source after rename to assumption-prover.
+
+        Word-boundary scoped so it matches the agent stem (`scout`, `scout.md`, `scout`'s)
+        but not hypothetical unrelated substrings. Verified RED-first: every current hit is
+        a reference to the old SDD agent name, none a legitimate English use.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"\bscout\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'scout' — must be 'assumption-prover' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_trailblazer_references(self):
+        """The `trailblazer` agent token must not appear in tools/ source after rename to executor.
+
+        Word-boundary scoped to the agent stem. Verified RED-first: every current hit is a
+        reference to the old SDD implementer agent, none a legitimate English use.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"\btrailblazer\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'trailblazer' — must be 'executor' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_subagent_driven_development_references(self):
+        """The `subagent-driven-development` skill dir/token must not appear in tools/ source
+        after rename to skills/execute."""
+        files = _collect_files()
+        hits = _grep_files(r"subagent-driven-development", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'subagent-driven-development' — must be 'execute' after rename:"]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -191,45 +231,53 @@ class TestGrepGuard:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
 
-    def test_no_assumption_prover_title_case_prose(self):
-        """'Assumption-Prover' Title-Case prose must not appear in SKILL.md bodies after rename to 'scout'.
+    def test_assumption_prover_agent_exists_with_matching_frontmatter(self):
+        """Spec A makes 'assumption-prover' the DESIRED agent name (was 'scout').
 
-        Excludes the experiments/ corpus (frozen).
-        The lowercase 'assumption-prover' identifier guard is already in test_no_sdd_dash_references
-        (via sdd-); this covers the prose Title-Case form which the identifier guard misses.
+        This inverts the prior WS-12 'Assumption-Prover must not appear' assertion:
+        the agent file must now exist and its frontmatter name: must match the stem.
         """
-        files = [
-            f for f in _collect_files()
-            if "experiments" not in f.parts and f.suffix == ".md"
-        ]
-        hits = _grep_files(r"Assumption-Prover", files)
-        if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'Assumption-Prover' Title-Case — must be 'scout' after rename:"]
-            for f, ln, line in hits[:10]:
-                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
-            pytest.fail("\n".join(msg_lines))
-
-    def test_no_implementer_role_prose_in_sdd_skill(self):
-        """Role-sense 'Implementer' (Title-Case section headers + 'Implementer returns' callouts)
-        must not appear in the SDD SKILL.md after rename to 'trailblazer'.
-
-        Scoped to the SDD skill file only — the most tightly constrained signal for the role label.
-        Generic uses of lowercase 'implementer' elsewhere (researcher.md, troubleshooter.md) are
-        NOT renamed and are not checked here.
-        """
-        sdd_skill = _FORGE_PLUGIN_ROOT / "skills" / "subagent-driven-development" / "SKILL.md"
-        if not sdd_skill.exists():
-            pytest.skip(f"SDD skill not found at {sdd_skill}")
-        text = sdd_skill.read_text()
-        # Check for the section-header form: "## Handling Implementer Status"
-        assert "## Handling Implementer Status" not in text, (
-            "SDD SKILL.md still has '## Handling Implementer Status' — "
-            "rename section header to '## Handling Trailblazer Status'"
+        path = _FORGE_PLUGIN_ROOT / "agents" / "assumption-prover.md"
+        assert path.exists(), (
+            f"agents/assumption-prover.md not found at {path} — rename from agents/scout.md"
         )
-        # Check for the "Implementer returns" callout form (Title-Case role label)
+        name = _parse_frontmatter_name(path)
+        assert name == "assumption-prover", (
+            f"agents/assumption-prover.md frontmatter name: is {name!r}, expected 'assumption-prover'"
+        )
+
+    def test_executor_role_prose_in_execute_skill(self):
+        """The execute SKILL.md must use the new 'Executor' role label and must NOT carry the
+        older 'Implementer' nor the now-old 'Trailblazer' role prose.
+
+        Scoped to the renamed skill file (skills/execute/SKILL.md) — the most tightly
+        constrained signal for the role label. Forbids:
+        - the older '## Handling Implementer Status' header / 'Implementer returns' callout
+        - the now-old '## Handling Trailblazer Status' header / 'Trailblazer returns' callout
+        and asserts the new 'Executor' role label is present.
+        """
+        execute_skill = _FORGE_PLUGIN_ROOT / "skills" / "execute" / "SKILL.md"
+        assert execute_skill.exists(), (
+            f"skills/execute/SKILL.md not found at {execute_skill} — "
+            "rename from skills/subagent-driven-development/"
+        )
+        text = execute_skill.read_text()
+        assert "## Handling Implementer Status" not in text, (
+            "execute SKILL.md still has the old '## Handling Implementer Status' header"
+        )
         assert "Implementer returns" not in text, (
-            "SDD SKILL.md still has 'Implementer returns' callouts — "
-            "rename to 'Trailblazer returns' after rename"
+            "execute SKILL.md still has old 'Implementer returns' callouts"
+        )
+        assert "## Handling Trailblazer Status" not in text, (
+            "execute SKILL.md still has the now-old '## Handling Trailblazer Status' header — "
+            "rename to '## Handling Executor Status'"
+        )
+        assert "Trailblazer returns" not in text, (
+            "execute SKILL.md still has now-old 'Trailblazer returns' callouts — "
+            "rename to 'Executor returns'"
+        )
+        assert "Executor" in text, (
+            "execute SKILL.md must carry the new 'Executor' role label"
         )
 
 
@@ -284,21 +332,27 @@ class TestManifestValidation:
             "lore sessions still references 'skills/finished' — update to 'skills/finish'"
         )
 
-    def test_forge_execute_references_scout_and_trailblazer(self):
-        """forge execute capability must reference scout.md and trailblazer.md."""
+    def test_forge_execute_references_assumption_prover_and_executor(self):
+        """forge execute capability must reference assumption-prover.md and executor.md."""
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["execute"]
-        assert "agents/scout.md" in cap["agents"], (
-            f"forge execute must reference 'agents/scout.md'; got {cap['agents']}"
+        assert "agents/assumption-prover.md" in cap["agents"], (
+            f"forge execute must reference 'agents/assumption-prover.md'; got {cap['agents']}"
         )
-        assert "agents/trailblazer.md" in cap["agents"], (
-            f"forge execute must reference 'agents/trailblazer.md'; got {cap['agents']}"
+        assert "agents/executor.md" in cap["agents"], (
+            f"forge execute must reference 'agents/executor.md'; got {cap['agents']}"
         )
-        assert "agents/sdd-assumption-prover.md" not in cap["agents"], (
-            "forge execute still references old 'sdd-assumption-prover.md'"
+        assert "agents/scout.md" not in cap["agents"], (
+            "forge execute still references old 'agents/scout.md'"
         )
-        assert "agents/sdd-implementer.md" not in cap["agents"], (
-            "forge execute still references old 'sdd-implementer.md'"
+        assert "agents/trailblazer.md" not in cap["agents"], (
+            "forge execute still references old 'agents/trailblazer.md'"
+        )
+        assert "skills/execute" in cap["skills"], (
+            f"forge execute must reference 'skills/execute'; got {cap['skills']}"
+        )
+        assert "skills/subagent-driven-development" not in cap["skills"], (
+            "forge execute still references old 'skills/subagent-driven-development'"
         )
 
     def test_forge_circle_references_circle_agents(self):
@@ -449,16 +503,16 @@ class TestNewAgentNamesInCompose:
                 f"compose_plan for forge 'circle' must include {name}; got {agent_srcs}"
             )
 
-    def test_forge_execute_compose_includes_scout_and_trailblazer(self, tmp_path):
-        """forge execute compose includes scout.md and trailblazer.md CopyOps."""
+    def test_forge_execute_compose_includes_assumption_prover_and_executor(self, tmp_path):
+        """forge execute compose includes assumption-prover.md and executor.md CopyOps."""
         m = load_manifest(_FORGE_MANIFEST)
         plan = compose_plan(m, {"execute"}, tmp_path / "dest")
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
-        assert "scout.md" in agent_srcs, (
-            f"compose_plan for forge 'execute' must include scout.md; got {agent_srcs}"
+        assert "assumption-prover.md" in agent_srcs, (
+            f"compose_plan for forge 'execute' must include assumption-prover.md; got {agent_srcs}"
         )
-        assert "trailblazer.md" in agent_srcs, (
-            f"compose_plan for forge 'execute' must include trailblazer.md; got {agent_srcs}"
+        assert "executor.md" in agent_srcs, (
+            f"compose_plan for forge 'execute' must include executor.md; got {agent_srcs}"
         )
 
     def test_lore_recall_compose_includes_loremaster(self, tmp_path):
@@ -537,8 +591,8 @@ class TestFrontmatterNameMatchesFilename:
         ("builder", _FORGE_PLUGIN_ROOT / "agents" / "builder.md"),
         ("breaker", _FORGE_PLUGIN_ROOT / "agents" / "breaker.md"),
         ("attacker", _FORGE_PLUGIN_ROOT / "agents" / "attacker.md"),
-        ("scout", _FORGE_PLUGIN_ROOT / "agents" / "scout.md"),
-        ("trailblazer", _FORGE_PLUGIN_ROOT / "agents" / "trailblazer.md"),
+        ("assumption-prover", _FORGE_PLUGIN_ROOT / "agents" / "assumption-prover.md"),
+        ("executor", _FORGE_PLUGIN_ROOT / "agents" / "executor.md"),
     ])
     def test_agent_frontmatter_name_matches_filename(self, stem: str, path: Path):
         """Agent frontmatter name: must match the new filename stem."""
@@ -704,4 +758,56 @@ class TestConsultSkillAndSharedCircle:
         skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
         assert "consult" in skill_srcs, (
             f"compose_plan for forge 'circle' must include the consult skill dir; got {skill_srcs}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 8. Slice 3 — planning Step-10 handoff names /forge:execute without a
+#    self-referential trigger-verb collision (KU — accept-as-risk, by test).
+# ---------------------------------------------------------------------------
+
+
+class TestPlanningExecuteHandoff:
+    """The reworded planning Step-10 handoff must keep pulling in the renamed
+    `/forge:execute` skill while NOT making the continuation trigger word identical
+    to the bare skill name (the old prompt said *reply **execute** to hand off to
+    subagent-driven-development* — post-rename the verb would collide with the
+    skill name `/forge:execute`).
+
+    These are meaningful WANT-artifact assertions, not vacuous absence checks:
+    the handoff target `/forge:execute` must be named, and the trigger phrasing
+    must be present in a non-self-referential form.
+    """
+
+    def test_planning_names_forge_execute_as_handoff_target(self):
+        """planning/SKILL.md must name `/forge:execute` as the skill the handoff pulls in."""
+        assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
+        text = _PLANNING_SKILL.read_text()
+        assert "/forge:execute" in text, (
+            "planning/SKILL.md Step-10 handoff must name `/forge:execute` as the "
+            "skill it hands off to (the renamed subagent-driven-development)."
+        )
+
+    def test_planning_handoff_trigger_is_not_self_referential(self):
+        """The continuation prompt must not instruct the user to reply with the bare
+        skill name as the trigger word (the old 'reply **execute**' collision).
+
+        After rename, 'execute' == the skill name `/forge:execute`. A self-referential
+        prompt (*reply execute to hand off to execute*) is ambiguous, so the bold
+        'reply **execute**' continuation token must be gone. We assert the OLD
+        self-referential token is absent AND a non-colliding continuation verb
+        (e.g. **build**) is present, so a regression that re-introduces the bare
+        'reply **execute**' phrasing fails.
+        """
+        assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
+        text = _PLANNING_SKILL.read_text()
+        assert "Reply **execute**" not in text and "reply **execute**" not in text, (
+            "planning/SKILL.md still uses the self-referential 'reply **execute**' "
+            "continuation token — after the rename the trigger word collides with the "
+            "skill name `/forge:execute`. Use a non-colliding verb (e.g. **build**)."
+        )
+        assert "**build**" in text, (
+            "planning/SKILL.md handoff must offer a non-colliding continuation verb "
+            "(e.g. **build**) so the trigger word is not identical to the `/forge:execute` "
+            "skill name."
         )

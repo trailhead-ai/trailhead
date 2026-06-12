@@ -2,7 +2,7 @@
 name: followup
 description: >
   Batch up post-implementation follow-up items, clarify any ambiguities inline, then dispatch
-  `trailblazer` to do the actual work in a cheaper subagent context — keeping mechanical
+  `executor` to do the actual work in a cheaper subagent context — keeping mechanical
   iteration off the main session's expensive tokens.
   TRIGGER when: user invokes `/followup`, OR provides a numbered/bulleted list of post-implementation
   changes that includes the words "follow up", "follow-up", "followup", "follow ups", "fix-ups",
@@ -20,7 +20,7 @@ Take a batch of post-implementation items, clarify ambiguities, hand off to a su
 
 Post-implementation iteration tends to come in batches: "the button needs to be larger, the empty state isn't handled, line 42 has a typo, and that helper should be extracted." Each item is small. The whole batch is mechanical. There is no reason to burn Opus tokens running the edits, the test re-runs, and the commits in the main session.
 
-This skill is the thin wrapper that turns the batch into a brief, dispatches `trailblazer`, and reports back.
+This skill is the thin wrapper that turns the batch into a brief, dispatches `executor`, and reports back.
 
 ## Skip Gate
 
@@ -76,10 +76,10 @@ If a clarifying answer reveals an item is much bigger than a follow-up (architec
 For each item, decide:
 
 - **Working directory** — which directory / worktree does this item touch? If your setup spans multiple repos, group items by directory.
-- **TDD applies?** — production code → yes; pure docs/config/comments → no. Mark explicitly so the trailblazer doesn't churn.
+- **TDD applies?** — production code → yes; pure docs/config/comments → no. Mark explicitly so the executor doesn't churn.
 - **Dependency order** — if item B depends on item A, note it.
 
-If items span multiple working directories, group them by directory. You will dispatch once per directory (trailblazer takes a single working directory per dispatch).
+If items span multiple working directories, group them by directory. You will dispatch once per directory (executor takes a single working directory per dispatch).
 
 ### 4. Write the brief
 
@@ -126,7 +126,7 @@ N. <Item N — ...>
 
 ### Test contract
 
-For each item that touches production code, the trailblazer must add or update tests covering:
+For each item that touches production code, the executor must add or update tests covering:
 
 - <test behavior for item 1, or "no test — docs/config only">
 - <test behavior for item 2, ...>
@@ -134,7 +134,7 @@ For each item that touches production code, the trailblazer must add or update t
 
 ### Expected files
 
-- <file:line ranges where known; "TBD by trailblazer" where not>
+- <file:line ranges where known; "TBD by executor" where not>
 
 ### Notes
 
@@ -143,16 +143,16 @@ For each item that touches production code, the trailblazer must add or update t
 - <Items explicitly marked "no TDD" with one-line reason>
 ```
 
-Keep the brief tight. The trailblazer reads it and works from it — verbosity here costs nothing in dispatch but slows the trailblazer's first read.
+Keep the brief tight. The executor reads it and works from it — verbosity here costs nothing in dispatch but slows the executor's first read.
 
-### 5. Dispatch trailblazer
+### 5. Dispatch executor
 
-One dispatch per brief (per working directory). Use the `Agent` tool with `subagent_type: trailblazer`. Pass:
+One dispatch per brief (per working directory). Use the `Agent` tool with `subagent_type: executor`. Pass:
 
 - **plan path** — absolute path to the brief you just wrote
 - **slice** — `Slice 1: Follow-ups batch`
 - **proven unknowns** — `None`
-- **scout tests to clean up** — `None`
+- **assumption-prover tests to clean up** — `None`
 - **working directory** — absolute path to the worktree for this brief
 
 Default model is Sonnet (the agent's frontmatter default). Override to Opus only if a follow-up is integration-heavy (3+ files, cross-module). Most follow-ups stay on Sonnet — that's the whole point.
@@ -161,10 +161,10 @@ If you have multiple briefs (multi-repo), dispatch them **serially**, not in par
 
 ### 6. Absorb the report
 
-The trailblazer returns DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
+The executor returns DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
 
 - **DONE:** Summarize for the user — items completed, files touched, tests added, commits made. Two or three sentences.
-- **DONE_WITH_CONCERNS:** Read the concerns. If the trailblazer fixed everything but flagged observations, note them. If the trailblazer left work undone (e.g. one item was unclear), surface it.
+- **DONE_WITH_CONCERNS:** Read the concerns. If the executor fixed everything but flagged observations, note them. If the executor left work undone (e.g. one item was unclear), surface it.
 - **NEEDS_CONTEXT:** Re-dispatch with the missing context, OR pull the unclear item out of the batch and ask the user.
 - **BLOCKED:** Do not retry blindly. Report to the user with the blocker; decide together whether to (a) re-dispatch with more context, (b) re-dispatch on Opus, (c) pull the item out and handle inline, or (d) drop it.
 
@@ -180,7 +180,7 @@ If items span multiple working directories:
 2. Dispatch serially in step 5.
 3. Aggregate the reports in step 6 — one user-facing summary covering all dispatches, organized by directory.
 
-Do NOT try to write a single brief that asks the trailblazer to operate on multiple working directories — trailblazer enforces worktree-only paths and will refuse.
+Do NOT try to write a single brief that asks the executor to operate on multiple working directories — executor enforces worktree-only paths and will refuse.
 
 ## Red Flags
 

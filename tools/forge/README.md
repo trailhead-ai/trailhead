@@ -27,8 +27,8 @@ forge ships seven capability groups, each with agents and skills:
 
 **Planning:** `forge:planner`, `forge:architect`
 
-**Execute:** `forge:scout` (assumption-prover), `forge:trailblazer` (TDD
-implementer)
+**Execute:** `forge:assumption-prover` (resolves unknowns via throwaway TDD
+tests), `forge:executor` (TDD implementer)
 
 **Review:** `forge:code-reviewer`
 
@@ -63,7 +63,7 @@ Base skills (always available): `/forge:handoff`, `/forge:pickup`,
 synthesize. The standalone form of the planning skill's circle-review step;
 membership is single-sourced from `skills/_shared/circle.md`.
 
-**Execute:** `/forge:subagent-driven-development`
+**Execute:** `/forge:execute`
 
 **Review:** `/forge:requesting-code-review`
 

@@ -9,7 +9,7 @@ Contract (B-1, R-7, S-4):
   - All git calls go through the injectable runner stub.
 
 Fixture pattern: write the camp manifest via the REAL write_central_manifest
-under CAMP_STATE_DIR+HOME env override (same as scout test).
+under CAMP_STATE_DIR+HOME env override (same as assumption-prover test).
 """
 from __future__ import annotations
 

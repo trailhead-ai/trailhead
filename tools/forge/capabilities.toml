@@ -1,5 +1,5 @@
-# Agent filenames reflect CURRENT on-disk names (advocate/builder/breaker/attacker, scout, trailblazer).
-# Circle agents renamed to bare names in Spec A / Slice 1.
+# Agent filenames reflect CURRENT on-disk names (advocate/builder/breaker/attacker, assumption-prover, executor).
+# Circle agents renamed to bare names in Spec A / Slice 1; SDD agents renamed in Slice 3.
 
 [tool]
 name = "forge"
@@ -11,9 +11,9 @@ skills = ["skills/planning"]
 agents = ["agents/planner.md", "agents/architect.md"]
 
 [capabilities.execute]
-description = "TDD subagent-driven implementation, slice by slice — scout and trailblazer subagents."
-skills = ["skills/subagent-driven-development"]
-agents = ["agents/scout.md", "agents/trailblazer.md"]
+description = "TDD subagent-driven implementation, slice by slice — assumption-prover and executor subagents."
+skills = ["skills/execute"]
+agents = ["agents/assumption-prover.md", "agents/executor.md"]
 
 [capabilities.review]
 description = "Structured code review of completed work — code-reviewer subagent dispatched after implementation."

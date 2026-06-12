@@ -200,9 +200,9 @@ class TestForgeManifestValidatesAgainstDisk:
     def test_forge_execute_capability(self):
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["execute"]
-        assert "skills/subagent-driven-development" in cap["skills"]
-        assert "agents/scout.md" in cap["agents"]
-        assert "agents/trailblazer.md" in cap["agents"]
+        assert "skills/execute" in cap["skills"]
+        assert "agents/assumption-prover.md" in cap["agents"]
+        assert "agents/executor.md" in cap["agents"]
 
     def test_forge_circle_capability_agents_exist(self):
         m = load_manifest(_FORGE_MANIFEST)

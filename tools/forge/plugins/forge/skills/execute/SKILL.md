@@ -1,8 +1,8 @@
 ---
-name: subagent-driven-development
+name: execute
 description: >
-  Use when executing an approved implementation plan slice-by-slice, dispatching `scout`
-  and `trailblazer` subagents for each slice rather than building inline. The controller (you)
+  Use when executing an approved implementation plan slice-by-slice, dispatching `assumption-prover`
+  and `executor` subagents for each slice rather than building inline. The controller (you)
   orchestrates; subagents do the work.
   TRIGGER when: user says "execute", "execute the plan", "start building", "let's build", "build it",
   "implement this", "run the plan", "work the slices", "start the slices", "go" (following plan approval),
@@ -13,7 +13,7 @@ description: >
   executing (use `systematic-debugging`).
 ---
 
-# Subagent-Driven Development
+# Execute
 
 Execute a plan slice-by-slice. For each slice, resolve unknowns first, then build.
 
@@ -21,8 +21,8 @@ Execute a plan slice-by-slice. For each slice, resolve unknowns first, then buil
 
 | Role | Agent | Purpose |
 |------|-------|---------|
-| Resolve unknowns | `scout` | Writes a TDD test that proves or disproves an assumption |
-| Build slices | `trailblazer` | Writes tests first, implements, self-reviews, commits |
+| Resolve unknowns | `assumption-prover` | Writes a TDD test that proves or disproves an assumption |
+| Build slices | `executor` | Writes tests first, implements, self-reviews, commits |
 | Review work | `code-reviewer` | Spec compliance + code quality in one pass |
 
 The controller decides which to dispatch and absorbs findings between iterations.
@@ -48,19 +48,19 @@ Before the first slice, read the plan's `Feature Flag` field.
 - **`n/a`:** skip — no flag work this loop.
 - **Field missing:** stop. The plan is non-conformant. Bounce back to `planning` (or `brainstorm` if the spec is also missing the rollout decision). Do not invent a flag and do not proceed flagless if the plan should have one.
 
-When the flag is declared, every slice that touches the gated path **must** include test cases for both flag states (on and off) in its test contract. The `trailblazer` is responsible for executing these via TDD; the controller verifies both states are covered before marking the slice DONE. Treat a slice that only tests the on-path as incomplete — bounce it back.
+When the flag is declared, every slice that touches the gated path **must** include test cases for both flag states (on and off) in its test contract. The `executor` is responsible for executing these via TDD; the controller verifies both states are covered before marking the slice DONE. Treat a slice that only tests the on-path as incomplete — bounce it back.
 
 ## The Loop
 
 ### Issue tracker — advance to "in progress"
 
-Before dispatching the first slice (whether scout or trailblazer for slice 1), advance the work item's status if an issue tracker is wired up. **Issue tracker (extension point — `issue_tracker`):** if an issue tracker is configured in your environment, advance the corresponding ticket to the in-progress status (e.g. "Code In Progress" or equivalent). **If no issue tracker configured — status transitions skipped**; proceed directly to slice 1.
+Before dispatching the first slice (whether assumption-prover or executor for slice 1), advance the work item's status if an issue tracker is wired up. **Issue tracker (extension point — `issue_tracker`):** if an issue tracker is configured in your environment, advance the corresponding ticket to the in-progress status (e.g. "Code In Progress" or equivalent). **If no issue tracker configured — status transitions skipped**; proceed directly to slice 1.
 
 For each slice in the plan:
 
 ### 1. Does this slice have an unresolved unknown?
 
-**Yes → dispatch `scout`.**
+**Yes → dispatch `assumption-prover`.**
 
 The agent expects: plan path, the unknown (specific and restated), why it matters (which slice is blocked), working directory.
 
@@ -70,11 +70,11 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 
 ### 2. Absorb findings
 
-- **VALIDATED:** update the plan, check off the unknown. Carry the **test files to clean up** from the prover's report into the trailblazer dispatch so it removes them after building proper tests.
-- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Scout Status](#handling-scout-status).
+- **VALIDATED:** update the plan, check off the unknown. Carry the **test files to clean up** from the prover's report into the executor dispatch so it removes them after building proper tests.
+- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status).
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they block the current slice or a future one.
 
-### 3. Dispatch `trailblazer`
+### 3. Dispatch `executor`
 
 The agent expects:
 - Plan path and slice number/name
@@ -82,13 +82,13 @@ The agent expects:
 - Assumption-prover tests to clean up (or "None")
 - Working directory
 
-Trailblazer figures out implementation steps — don't over-specify the *how*. Specify the *what*.
+Executor figures out implementation steps — don't over-specify the *how*. Specify the *what*.
 
 Default model is Sonnet. Override per-dispatch when needed:
 - `model: "opus"` for integration-heavy slices (3-5 files, cross-module coordination)
 - Re-dispatch with Opus if a Sonnet attempt returns BLOCKED with unclear cause and `troubleshooter` confirms the issue is reasoning capacity
 
-Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Trailblazer Status](#handling-trailblazer-status).
+Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Executor Status](#handling-executor-status).
 
 ### 4. Review (scaled to change size)
 
@@ -98,7 +98,7 @@ Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Trai
 | **Medium** (30-200 lines, 3-5 files) | Dispatch `code-reviewer` for combined spec + quality pass. |
 | **Large** (200+ lines or 5+ files) | Dispatch `code-reviewer` twice: once asking for spec compliance focus, once for code quality. Same agent, different framing. |
 
-When dispatching `code-reviewer`, give it: plan path + slice number, the trailblazer's status report (so it can verify the claim), and base/head SHAs for the diff.
+When dispatching `code-reviewer`, give it: plan path + slice number, the executor's status report (so it can verify the claim), and base/head SHAs for the diff.
 
 ### 5. Update the plan file
 
@@ -133,19 +133,19 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 
 | Role | Default | Escalate to |
 |------|---------|-------------|
-| `scout` | Sonnet | Sonnet/high if the unknown spans multiple subsystems or needs deeper code exploration |
-| `trailblazer` | Sonnet | `model: "opus"` per-dispatch for integration-heavy slices |
+| `assumption-prover` | Sonnet | Sonnet/high if the unknown spans multiple subsystems or needs deeper code exploration |
+| `executor` | Sonnet | `model: "opus"` per-dispatch for integration-heavy slices |
 | `code-reviewer` | Opus/high | (already pinned, no override needed) |
 
 **Escalation signals:**
 
-- Trailblazer returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the trailblazer.
-- Trailblazer returns `DONE_WITH_CONCERNS` repeatedly on the same slice → re-dispatch with `model: "opus"` or break the slice smaller.
-- Scout returns `NEEDS_CONTEXT` → it's not the model, it's the prompt. Give it more context and re-dispatch at the same tier.
+- Executor returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the executor.
+- Executor returns `DONE_WITH_CONCERNS` repeatedly on the same slice → re-dispatch with `model: "opus"` or break the slice smaller.
+- Assumption-prover returns `NEEDS_CONTEXT` → it's not the model, it's the prompt. Give it more context and re-dispatch at the same tier.
 
 **Why not Opus everywhere:** Opus is the most capable but also the slowest and most expensive. Sonnet is more than enough for mechanical TDD work. Reserve Opus for reasoning-heavy roles (review, troubleshooting, architecture) where fresh eyes matter.
 
-## Handling Scout Status
+## Handling Assumption-Prover Status
 
 **VALIDATED:** Proceed to build the slice.
 
@@ -160,7 +160,7 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 
 **BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user.
 
-## Handling Trailblazer Status
+## Handling Executor Status
 
 **DONE:** Proceed to review.
 
@@ -173,7 +173,7 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 2. Needs more reasoning → re-dispatch with `model: "opus"`
 3. Slice too large → break into smaller pieces
 4. Plan is wrong → escalate to user
-5. Cause unclear → dispatch `troubleshooter` to diagnose before re-dispatching the trailblazer. Don't keep re-dispatching the same prompt hoping for a different outcome.
+5. Cause unclear → dispatch `troubleshooter` to diagnose before re-dispatching the executor. Don't keep re-dispatching the same prompt hoping for a different outcome.
 
 ## Red Flags
 
@@ -181,6 +181,6 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 - Build a slice before its unknown is resolved
 - Proceed after an invalidated assumption without user input
 - Skip review for medium+ changes
-- Dispatch multiple *trailblazer* subagents in parallel on the same slice (they'll conflict on the same files). Parallel dispatch is fine when the agents operate on independent scopes — e.g. one checker per repo.
+- Dispatch multiple *executor* subagents in parallel on the same slice (they'll conflict on the same files). Parallel dispatch is fine when the agents operate on independent scopes — e.g. one checker per repo.
 - Ignore subagent questions or surprises
 - Start on main/master without explicit user consent

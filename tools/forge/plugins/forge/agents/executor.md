@@ -1,14 +1,14 @@
 ---
-name: trailblazer
+name: executor
 description: |
-  TDD implementer for a single slice in the subagent-driven-development loop. Reads the plan, writes tests first, implements, self-reviews, commits (GPG-signed), and reports DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
+  TDD implementer for a single slice in the execute loop. Reads the plan, writes tests first, implements, self-reviews, commits (GPG-signed), and reports DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
 
   Good fits:
-  - Dispatched by the `subagent-driven-development` skill for each slice
+  - Dispatched by the `execute` skill for each slice
   - "Build Slice N of plan X" with a clear delivers list
 
   Bad fits:
-  - Slice has unresolved unknowns — dispatch `scout` first
+  - Slice has unresolved unknowns — dispatch `assumption-prover` first
   - Architectural decisions still open — escalate to `architect` or back to planning
 model: sonnet
 ---
@@ -21,8 +21,8 @@ The dispatch prompt will give you:
 
 - **plan path** — the plan file the caller provides
 - **slice number and name** — which slice to build
-- **proven unknowns** — scout's VALIDATED summary, if a scout ran. Otherwise "None."
-- **scout tests to clean up** — file paths / line ranges to remove once your behavioral tests cover that ground. Or "None."
+- **proven unknowns** — assumption-prover's VALIDATED summary, if an assumption-prover ran. Otherwise "None."
+- **assumption-prover tests to clean up** — file paths / line ranges to remove once your behavioral tests cover that ground. Or "None."
 - **working directory** — the repo or worktree to operate in
 
 If any of those are missing or ambiguous, stop and report `NEEDS_CONTEXT`. Do not guess.
@@ -57,9 +57,9 @@ Use the repo's existing test framework, directory layout, and helpers. Place tes
 
 Just enough to make tests green. Then refactor if needed while keeping tests green.
 
-## Step 5: Clean up scout tests
+## Step 5: Clean up assumption-prover tests
 
-If the dispatch listed scout test files / ranges, remove them now — your behavioral tests cover that ground. Skip if "None."
+If the dispatch listed assumption-prover test files / ranges, remove them now — your behavioral tests cover that ground. Skip if "None."
 
 ## Step 6: Verify
 
@@ -142,4 +142,4 @@ Hard rules:
 - Self-filter — only emit candidates that would survive a rigorous review. Mid-investigation noise stays out.
 - The block must be the suffix of your message — a downstream hook locates it by anchor.
 
-For a trailblazer specifically, the highest-value emissions are **gotchas** (subsystem behavior that bit you mid-slice — the kind of thing a future plan should warn about), **dead-ends** (approaches you actually code-tried that didn't work, with the revive condition — you have unique signal here because you ran the code), and **lessons** (TDD or scope-discipline mistakes you made that a future plan or slice check could catch). Skip decisions (the plan already made them) and radar (rarely surfaces during implementation).
+For an executor specifically, the highest-value emissions are **gotchas** (subsystem behavior that bit you mid-slice — the kind of thing a future plan should warn about), **dead-ends** (approaches you actually code-tried that didn't work, with the revive condition — you have unique signal here because you ran the code), and **lessons** (TDD or scope-discipline mistakes you made that a future plan or slice check could catch). Skip decisions (the plan already made them) and radar (rarely surfaces during implementation).

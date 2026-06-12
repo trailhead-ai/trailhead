@@ -220,7 +220,7 @@ class TestStandardPreset:
         M-5 fix: design and release both have skills=[] and agents=[], making their
         absence loops vacuous.  circle has 4 real agents (advocate/builder/breaker/attacker) that are
         structurally excluded when circle is not in the selection.  execute also has
-        real agents (scout/trailblazer) — kept here for symmetry.
+        real agents (assumption-prover/executor) — kept here for symmetry.
         """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
