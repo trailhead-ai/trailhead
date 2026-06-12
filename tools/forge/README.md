@@ -21,7 +21,7 @@ forge ships six capability groups, each with agents and skills. forge owns the
 | `planning` | Turn fuzzy ideas into specs and implementation plans |
 | `execute` | TDD subagent-driven implementation, slice by slice |
 | `review` | Structured code review after implementation |
-| `circle` | Four-lens review panel (builder / reliability / security / advocate) |
+| `council` | Four-lens review panel (builder / reliability / security / advocate) |
 | `design` | Design-doc authoring and structured spec artifacts |
 | `helpers` | Cheap specialist subagents for docs, logs, research, tests, security |
 
@@ -34,8 +34,8 @@ tests), `forge:executor` (TDD implementer)
 
 **Review:** `forge:code-reviewer`
 
-**Circle** — four-lens review panel dispatched as a parallel quartet by a
-planning skill's circle review step, and each member is also dispatchable
+**Council** — four-lens review panel dispatched as a parallel quartet by a
+planning skill's council review step, and each member is also dispatchable
 standalone:
 - `forge:builder` (architecture)
 - `forge:breaker` (tests/failure modes)
@@ -57,9 +57,9 @@ Base skills (always available): `/forge:shelve`, `/forge:pickup`,
 
 **Planning:** `/forge:plan`
 
-**Circle:** `/forge:consult` — convene the four-lens panel on a question and
-synthesize. The standalone form of the planning skill's circle-review step;
-membership is single-sourced from `skills/_shared/circle.md`.
+**Council:** `/forge:consult` — convene the four-lens panel on a question and
+synthesize. The standalone form of the planning skill's council-review step;
+membership is single-sourced from `skills/_shared/council.md`.
 
 **Execute:** `/forge:execute`
 

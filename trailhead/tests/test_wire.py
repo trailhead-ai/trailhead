@@ -131,7 +131,7 @@ class TestMinimalPresetGating:
 
 
 # ---------------------------------------------------------------------------
-# T-W2: standard preset — lore + camp + forge dests; circle/design/release absent
+# T-W2: standard preset — lore + camp + forge dests; council/design/release absent
 # ---------------------------------------------------------------------------
 
 
@@ -184,11 +184,11 @@ class TestStandardPreset:
         )
         assert (tmp_path / "composed" / "forge" / "plugins" / "forge").exists()
 
-    def test_standard_forge_circle_agents_absent(self, tmp_path):
-        """circle capability agents absent when forge wired without circle.
+    def test_standard_forge_council_agents_absent(self, tmp_path):
+        """council capability agents absent when forge wired without council.
 
-        M-5 fix: circle has skills=[], so testing skill absence is vacuous.
-        circle DOES have 4 agents (advocate/builder/breaker/attacker) — assert none appear in dest.
+        M-5 fix: council has skills=[], so testing skill absence is vacuous.
+        council DOES have 4 agents (advocate/builder/breaker/attacker) — assert none appear in dest.
         """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
@@ -206,26 +206,26 @@ class TestStandardPreset:
         )
         forge_manifest = load_manifest(_FORGE_MANIFEST)
         forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
-        circle_agents = forge_manifest.capabilities["circle"]["agents"]
+        council_agents = forge_manifest.capabilities["council"]["agents"]
         # Confirm we're testing something real
-        assert len(circle_agents) > 0, "test is vacuous: circle has no agents"
-        for agent in circle_agents:
+        assert len(council_agents) > 0, "test is vacuous: council has no agents"
+        for agent in council_agents:
             assert not (forge_dest / agent).exists(), (
-                f"circle agent {agent!r} present in forge dest despite circle not selected"
+                f"council agent {agent!r} present in forge dest despite council not selected"
             )
 
-    def test_standard_forge_unselected_circle_and_execute_absent(self, tmp_path):
-        """Agents from unselected circle capability must not appear in the wired dest.
+    def test_standard_forge_unselected_council_and_execute_absent(self, tmp_path):
+        """Agents from unselected council capability must not appear in the wired dest.
 
         M-5 fix: design and release both have skills=[] and agents=[], making their
-        absence loops vacuous.  circle has 4 real agents (advocate/builder/breaker/attacker) that are
-        structurally excluded when circle is not in the selection.  execute also has
+        absence loops vacuous.  council has 4 real agents (advocate/builder/breaker/attacker) that are
+        structurally excluded when council is not in the selection.  execute also has
         real agents (assumption-prover/executor) — kept here for symmetry.
         """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
-        # Wire standard forge WITHOUT circle or execute
+        # Wire standard forge WITHOUT council or execute
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
@@ -239,7 +239,7 @@ class TestStandardPreset:
         )
         forge_manifest = load_manifest(_FORGE_MANIFEST)
         forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
-        for absent_cap in ("circle", "execute"):
+        for absent_cap in ("council", "execute"):
             agents = forge_manifest.capabilities[absent_cap]["agents"]
             assert len(agents) > 0, f"test is vacuous: {absent_cap} has no agents"
             for agent in agents:

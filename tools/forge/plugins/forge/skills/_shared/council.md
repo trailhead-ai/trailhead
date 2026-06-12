@@ -1,8 +1,8 @@
-# Circle membership — shared reference
+# Council membership — shared reference
 
-The **circle** is a four-agent review panel. This file is the single source of
+The **council** is a four-agent review panel. This file is the single source of
 truth for who the members are. Both `/forge:consult` and the `planning` skill's
-Circle Review step read membership from here and dispatch the agents **directly**
+Council Review step read membership from here and dispatch the agents **directly**
 via the Agent tool — neither delegates to the other.
 
 ## Members
@@ -42,7 +42,7 @@ pair for planning, a `Question:`/`Context to read:` pair for consult);
 consult substitutes the empty string).
 
 ```text
-You are dispatched as one lens of the circle panel (<lens>). <context-pointers>
+You are dispatched as one lens of the council panel (<lens>). <context-pointers>
 
 Read the referenced context in full. Apply YOUR lens (<lens>) only. The other three members answer the same question in parallel from their lenses; you will not see their responses. Write in a voice that stands on its content — the synthesizer may strip your role label.
 
@@ -115,4 +115,4 @@ After all four members return:
 2. **Auto-downgrade speculative Criticals.** A Critical that is vague ("this could be a problem"), requires guessing about scale / future state / user behavior, or names no concrete failure scenario is reclassified Important. State explicitly which findings were downgraded and why.
 3. **Present the consolidated list**, grouped Critical → Important → Minor, noting the member count behind each multi-lens finding.
 
-The planning Circle Review step adds a disposition gate and persists findings into the plan file; `consult` stops here and hands the synthesized view back to the user.
+The planning Council Review step adds a disposition gate and persists findings into the plan file; `consult` stops here and hands the synthesized view back to the user.

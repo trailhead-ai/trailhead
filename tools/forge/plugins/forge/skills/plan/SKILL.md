@@ -138,24 +138,24 @@ The plan template (`lore new plan`) renders these canonical sections — fill ea
 - **Known Unknowns** — checkbox list; each notes which slice it blocks.
 - **Slices** — each slice carries Delivers / Test contract / Files, plus "Unknown to resolve first" and "Depends on" where applicable.
 
-Leave the `## Circle Review` section for Step 9.5 to append — do not pre-fill it.
+Leave the `## Council Review` section for Step 9.5 to append — do not pre-fill it.
 
-### 9.5. Circle Review (mandatory)
+### 9.5. Council Review (mandatory)
 
-After the plan is written and before presenting it for approval, dispatch a circle review. The circle members review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
+After the plan is written and before presenting it for approval, dispatch a council review. The council members review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
 
-**Membership is defined in `_shared/circle.md`** — the single source of truth for who the circle is (`builder` / `breaker` / `attacker` / `advocate`) and the dispatch contract. Read it; do not hardcode the roster here. Planning dispatches the circle **directly** off that shared list — it does **not** call the `/forge:consult` skill (a skill→skill chain is unreliable). `consult` is the standalone-invocable form of this same panel for questions outside the planning flow.
+**Membership is defined in `_shared/council.md`** — the single source of truth for who the council is (`builder` / `breaker` / `attacker` / `advocate`) and the dispatch contract. Read it; do not hardcode the roster here. Planning dispatches the council **directly** off that shared list — it does **not** call the `/forge:consult` skill (a skill→skill chain is unreliable). `consult` is the standalone-invocable form of this same panel for questions outside the planning flow.
 
-This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars in `_shared/circle.md`, not via per-invocation opt-outs.
+This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars in `_shared/council.md`, not via per-invocation opt-outs.
 
-**Dispatch:** per `_shared/circle.md`, make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the **prompt template, per-lens Critical bars, and synthesis rules in `_shared/circle.md`** — do not re-inline them here. Fill the template's substitution tokens BEFORE sending each member its prompt (never ship a literal `<token>`):
+**Dispatch:** per `_shared/council.md`, make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the **prompt template, per-lens Critical bars, and synthesis rules in `_shared/council.md`** — do not re-inline them here. Fill the template's substitution tokens BEFORE sending each member its prompt (never ship a literal `<token>`):
 - the context-pointer line → these two lines (substitute `<spec-path>` with the plan's linked spec absolute path; if the plan has no `related-spec` frontmatter, replace the whole `Spec:` line with `Spec: none — review against the plan's own Goal and Architecture blocks`):
   ```text
   Review the implementation plan and its linked spec against your lens.
   Plan: <plan-path>
   Spec: <spec-path>
   ```
-- `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in `_shared/circle.md`
+- `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in `_shared/council.md`
 - `<cross-cutting>` → this plan-specific extra Critical block:
   ```text
 
@@ -165,7 +165,7 @@ This step is mandatory on every plan. There is no skip flag — calibration is t
   - Reversibility unnamed: plan deploys something hard to roll back without naming rollback path
   ```
 
-Then synthesize per `_shared/circle.md` (de-duplicate by issue, auto-downgrade speculative Criticals, present grouped by severity). When auto-downgrading, record the demotion in the persisted `## Circle Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so calibration audits can detect demote-heavy synthesizers.
+Then synthesize per `_shared/council.md` (de-duplicate by issue, auto-downgrade speculative Criticals, present grouped by severity). When auto-downgrading, record the demotion in the persisted `## Council Review` section under Important with a `(downgraded from Critical: <reason>)` parenthetical so calibration audits can detect demote-heavy synthesizers.
 
 **Disposition (required for every Critical):**
 
@@ -177,10 +177,10 @@ For each Critical finding, the user assigns one of:
 
 Important and Minor findings do NOT require dispositions — they are logged for the audit trail only.
 
-**Persistence:** append a `## Circle Review` section to the plan file capturing all findings and the disposition for each Critical. Each Critical disposition is exactly one of `resolved` / `bounced-back-to-spec` / `accepted-as-risk: <reason>` / `disputed: <reason>`. Mirror this populated shape:
+**Persistence:** append a `## Council Review` section to the plan file capturing all findings and the disposition for each Critical. Each Critical disposition is exactly one of `resolved` / `bounced-back-to-spec` / `accepted-as-risk: <reason>` / `disputed: <reason>`. Mirror this populated shape:
 
 ```markdown
-## Circle Review
+## Council Review
 
 *Reviewed at:* 2026-05-22T19:42:11Z
 *Members dispatched:* builder, breaker, attacker, advocate
@@ -199,7 +199,7 @@ Important and Minor findings do NOT require dispositions — they are logged for
 
 If no Critical findings surfaced, the section still gets appended — record an empty Critical list explicitly (e.g. `*Critical:* none`) so future audits can distinguish "zero findings" from "review skipped."
 
-**Re-review:** no automatic re-review after the user resolves Critical findings inline. The user attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps mandatory-review cost bounded; if first-pass calibration is wrong, tune the per-lens bars in `_shared/circle.md` rather than adding iteration cycles.
+**Re-review:** no automatic re-review after the user resolves Critical findings inline. The user attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps mandatory-review cost bounded; if first-pass calibration is wrong, tune the per-lens bars in `_shared/council.md` rather than adding iteration cycles.
 
 **Hard-floor gate:** the "reply `build` to hand off" prompt in Step 10 must NOT be printed until every Critical finding has a disposition. Important and Minor findings do not block.
 
@@ -207,7 +207,7 @@ If no Critical findings surfaced, the section still gets appended — record an 
 
 Share the plan path and a short summary, then wait for explicit user approval before writing any implementation code. Do **not** call `ExitPlanMode` — this skill runs outside plan mode so the plan can be written directly into the vault.
 
-**Before printing the handoff prompt, confirm every Critical finding from Step 9.5 has a disposition recorded in the plan's `## Circle Review` section.** If any Critical is undisposed, do not print the handoff prompt — return to disposition gathering with the user.
+**Before printing the handoff prompt, confirm every Critical finding from Step 9.5 has a disposition recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print the handoff prompt — return to disposition gathering with the user.
 
 End the presentation with an explicit handoff prompt so the trigger is unambiguous, e.g.:
 

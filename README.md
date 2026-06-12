@@ -44,7 +44,7 @@ the "where is the work happening" question, answered automatically.
 
 **→ Add forge** when you want the dev rituals: structured planning, TDD
 subagent-driven implementation slice by slice, assumption-proving scouts, and a
-four-lens circle review. forge owns *how you build*; lore owns *what you know*.
+four-lens council review. forge owns *how you build*; lore owns *what you know*.
 
 **You never have to adopt the whole suite.** lore, camp, and forge are each
 independently adoptable — wire only what you need. portage and landing depend

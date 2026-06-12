@@ -1,23 +1,23 @@
 ---
 name: consult
 description: >
-  Convene the four-lens circle panel (builder / breaker / attacker / advocate) on a question,
+  Convene the four-lens council panel (builder / breaker / attacker / advocate) on a question,
   decision, or design and synthesize their perspectives.
-  TRIGGER when: user says "convene the circle", "consult the circle", "get the panel on this",
-  "four-lens review", "run a circle review on", "what do builder/breaker/attacker/advocate think",
+  TRIGGER when: user says "convene the council", "consult the council", "get the panel on this",
+  "four-lens review", "run a council review on", "what do builder/breaker/attacker/advocate think",
   or wants buildability + reliability + security + UX weighed together on a specific question.
   DO NOT TRIGGER when: the question fits a single lens (dispatch that one agent directly —
   `architect`, `troubleshooter`, `security-auditor`), the user is running the planning skill
-  (its Circle Review step convenes the panel itself), or this is a code review (use review).
+  (its Council Review step convenes the panel itself), or this is a code review (use review).
 ---
 
-# Consult the circle
+# Consult the council
 
-Convene the four-lens **circle** on a specific question and synthesize what comes
-back. This is the circle-review step made standalone — dispatchable on any
+Convene the four-lens **council** on a specific question and synthesize what comes
+back. This is the council-review step made standalone — dispatchable on any
 decision, not just a freshly-written plan.
 
-The circle membership is defined once in `_shared/circle.md`. Read it — it names
+The council membership is defined once in `_shared/council.md`. Read it — it names
 the four agents and the dispatch contract. This skill does **not** redefine the
 roster; it reads it from there so `consult` and `planning` can never drift apart.
 
@@ -34,7 +34,7 @@ widens the prompt-injection surface; don't convene it for a single-lens question
 
 ### 1. Frame the question
 
-Pin down exactly what the circle is reviewing — a design, a decision between
+Pin down exactly what the council is reviewing — a design, a decision between
 options, a diff, a plan section. State it in one or two sentences the members can
 each answer from their own lens. If the framing is ambiguous, ask the user one
 clarifying question before dispatching; four agents on a vague question return
@@ -46,10 +46,10 @@ them at.
 
 ### 2. Dispatch the four members (parallel, isolated)
 
-Per `_shared/circle.md`: make **four parallel `Agent` tool calls** — one each to
+Per `_shared/council.md`: make **four parallel `Agent` tool calls** — one each to
 `builder`, `breaker`, `attacker`, `advocate` — in a **single message** so they
 run concurrently in isolated contexts. Use the **prompt template, per-lens
-Critical bars, and synthesis rules in `_shared/circle.md`** — do not re-inline
+Critical bars, and synthesis rules in `_shared/council.md`** — do not re-inline
 them here. Fill the template's substitution tokens BEFORE sending each member its
 prompt (never ship a literal `<token>`):
 
@@ -60,7 +60,7 @@ prompt (never ship a literal `<token>`):
   Context to read: <context-pointers>
   ```
 - `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in
-  `_shared/circle.md`. Those bars are phrased for plan review; read each as
+  `_shared/council.md`. Those bars are phrased for plan review; read each as
   applying to the question / design / diff under review (map "slice" → the unit
   under review) and skip any bar with no analogue for this question.
 - `<cross-cutting>` → the empty string (the cross-cutting plan-drift block is
@@ -71,11 +71,11 @@ here: members write in a voice that stands on content, not on the role tag.
 
 ### 3. Synthesize (main session, NOT a subagent)
 
-Synthesize per `_shared/circle.md`: de-duplicate by issue (not by member),
+Synthesize per `_shared/council.md`: de-duplicate by issue (not by member),
 auto-downgrade speculative Criticals (stating which and why), and present the
 consolidated list grouped Critical → Important → Minor with the member count
 behind each multi-lens finding.
 
-The synthesis is the deliverable. Unlike the planning Circle Review there is no
+The synthesis is the deliverable. Unlike the planning Council Review there is no
 plan file to persist into and no disposition gate — `consult` answers a question
 and hands the synthesized view back to the user to act on.
