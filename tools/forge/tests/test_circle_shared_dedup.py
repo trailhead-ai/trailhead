@@ -8,9 +8,11 @@ silently regress them:
 
 1. The shared scaffolding lives in `_shared/circle.md` (positive) and is no longer
    duplicated in the two skill bodies (negative).
-2. The four per-lens Critical bars and the four disposition option names appear in
-   `_shared/circle.md` BYTE-FOR-BYTE as they read before the hoist — proving the
-   compression touched only connective prose, never the bars (the spec's
+2. The four per-lens Critical bars appear in `_shared/circle.md` BYTE-FOR-BYTE as
+   they read before the hoist, and the four disposition option names survive
+   byte-for-byte in `plan/SKILL.md` (plan's retained delta — the disposition gate
+   stays with planning). Together this proves the compression touched only
+   connective prose, never the bars or the disposition set (the spec's
    no-behavior-change non-goal).
 3. Each skill keeps only its delta: `plan` retains the disposition gate +
    persistence schema + hard-floor `**build**`; `consult` carries no persistence.
