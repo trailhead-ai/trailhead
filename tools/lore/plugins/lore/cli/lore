@@ -1707,8 +1707,9 @@ def cmd_areas(args: argparse.Namespace) -> int:
     """Print the full area menu (names, one-liners, keywords) to stdout.
 
     Exit code is always 0 — must never fail a session (D-1).
-    Vault-resolution failure prints a one-line stderr signal and a degraded
-    stdout line.  Empty or absent areas/ dir prints a friendly "no areas" line.
+    Prints a one-line stderr signal and a degraded stdout "no areas" line when
+    the resolved vault path does not exist on disk, or when build_area_map
+    raises. Empty or absent areas/ dir prints a friendly "no areas" line.
     """
     _NO_AREAS_LINE = "No areas defined yet."
 

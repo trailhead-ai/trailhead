@@ -206,6 +206,24 @@ class TestRenderAreaPointer:
         result = recall.render_area_pointer(vault)
         assert len(result.strip().splitlines()) == 1
 
+    def test_propagates_build_area_map_exception(self, tmp_path):
+        """render_area_pointer propagates when build_area_map raises.
+
+        The inner try/except was removed (PR #3 item 1) so the sole caller
+        build_context can handle it via the outer D-8a guard. This pins the
+        new contract: render_area_pointer no longer swallows failures silently.
+        """
+        recall = load_recall()
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+
+        with mock.patch.object(recall, "build_area_map", side_effect=RuntimeError("boom")):
+            try:
+                recall.render_area_pointer(vault)
+                raise AssertionError("Expected RuntimeError to propagate but it was swallowed")
+            except RuntimeError as exc:
+                assert "boom" in str(exc)
+
 
 # ---------------------------------------------------------------------------
 # build_context hook-integration tests
@@ -331,12 +349,16 @@ class TestBuildContextMenu:
         assert "lore areas" in ctx
 
     def test_d8a_pointer_crash_leaves_vault_index_intact(self, tmp_path):
-        """D-8a CRITICAL: a pointer-build crash must leave the vault index, not {}.
+        """D-8a CRITICAL (OUTER guard): build_area_map raise propagates through
+        render_area_pointer and is caught by build_context's D-8a try/except,
+        leaving the vault index intact — NOT {}.
 
-        Monkeypatches recall.build_area_map to raise, then verifies build_context
-        still returns the vault index content (the session-note pointer / capture
-        reminder) — NOT an empty string, NOT the {} fallback that the outer
-        main() guard would emit on a genuine core failure.
+        After PR #3 item 1, render_area_pointer no longer swallows the exception
+        internally; the outer D-8a guard in build_context is what catches it and
+        emits the stderr diagnostic. This test exercises that outer guard path.
+        Monkeypatches build_area_map to raise and verifies build_context still
+        returns vault index content — NOT empty, NOT the {} fallback that main()'s
+        outer guard would emit on a genuine core failure.
         """
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"], summary="OAuth flows")

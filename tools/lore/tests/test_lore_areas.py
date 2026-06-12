@@ -261,3 +261,90 @@ class TestAreasUnresolvableVault:
         stdout, _, _ = _run_areas(bad_vault)
 
         assert "Traceback" not in stdout
+
+
+# ---------------------------------------------------------------------------
+# Tests: vault path exists but build_area_map raises
+# ---------------------------------------------------------------------------
+
+class TestAreasBuildAreaMapRaises:
+    """Cover the second never-fail branch in cmd_areas.
+
+    Vault exists on disk but build_area_map raises (e.g. unexpected I/O or
+    parse error). The command must still exit 0, emit a degraded 'no areas'
+    stdout line, and emit a single-line stderr signal.
+    """
+
+    def test_exit_code_is_zero(self, tmp_path):
+        """cmd_areas exits 0 even when build_area_map raises."""
+        vault = _make_vault(tmp_path)
+        cli = _load_cli()
+        import sys
+        from types import SimpleNamespace
+        from unittest import mock
+        import io
+
+        out = io.StringIO()
+        err = io.StringIO()
+        args = SimpleNamespace()
+
+        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault)}):
+            with mock.patch("sys.stdout", out):
+                with mock.patch("sys.stderr", err):
+                    with mock.patch.object(
+                        cli.recall_mod, "build_area_map",
+                        side_effect=RuntimeError("parse failure"),
+                    ):
+                        rc = cli.cmd_areas(args)
+
+        assert rc == 0
+
+    def test_stdout_contains_no_areas_line(self, tmp_path):
+        """Degraded stdout line conveys 'no areas' when build_area_map raises."""
+        vault = _make_vault(tmp_path)
+        cli = _load_cli()
+        import sys
+        from types import SimpleNamespace
+        from unittest import mock
+        import io
+
+        out = io.StringIO()
+        err = io.StringIO()
+        args = SimpleNamespace()
+
+        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault)}):
+            with mock.patch("sys.stdout", out):
+                with mock.patch("sys.stderr", err):
+                    with mock.patch.object(
+                        cli.recall_mod, "build_area_map",
+                        side_effect=RuntimeError("parse failure"),
+                    ):
+                        cli.cmd_areas(args)
+
+        assert "no areas" in out.getvalue().lower()
+
+    def test_stderr_contains_one_line_signal(self, tmp_path):
+        """A single-line stderr diagnostic is emitted when build_area_map raises."""
+        vault = _make_vault(tmp_path)
+        cli = _load_cli()
+        import sys
+        from types import SimpleNamespace
+        from unittest import mock
+        import io
+
+        out = io.StringIO()
+        err = io.StringIO()
+        args = SimpleNamespace()
+
+        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault)}):
+            with mock.patch("sys.stdout", out):
+                with mock.patch("sys.stderr", err):
+                    with mock.patch.object(
+                        cli.recall_mod, "build_area_map",
+                        side_effect=RuntimeError("parse failure"),
+                    ):
+                        cli.cmd_areas(args)
+
+        stderr = err.getvalue()
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
