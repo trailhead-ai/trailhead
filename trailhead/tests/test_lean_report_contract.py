@@ -84,91 +84,70 @@ def _durable_tail_template(text: str) -> str:
     return fence.group(1) if fence else ""
 
 
+def _head_template(text: str) -> str:
+    """Return ONLY the controller-facing head template — the fenced code block immediately
+    following the '### Controller-facing head' heading.
+
+    Same rationale as `_durable_tail_template`: the six head field keys (status/files/review/
+    blocking/unknowns/cleanup) must be matched inside the head's own code block, not via
+    scattered occurrences elsewhere in the head region (e.g. 'blocking'/'unknowns' in the
+    Step-8 security-escalation prose, or 'files' in the cleanup description). Bounding on the
+    fence makes a field's removal from the template go RED (PR #4 review hardening). Returns ""
+    if not found.
+    """
+    start = re.search(
+        r"^#{3,} .*controller-facing head.*$", text, re.MULTILINE | re.IGNORECASE
+    )
+    if start is None:
+        return ""
+    fence = re.search(r"```[^\n]*\n(.*?)\n```", text[start.end():], re.DOTALL)
+    return fence.group(1) if fence else ""
+
+
 # ---------------------------------------------------------------------------
 # Slice 1: controller-facing head
 # ---------------------------------------------------------------------------
 
 
 class TestExecutorHeadSection:
-    """The controller-facing head must name all six required fields."""
+    """The controller-facing head must name all six required fields, each as a key in the
+    head's own code block.
 
-    def test_head_names_status_field(self):
-        """Head section must name the 'status' field."""
-        text = _executor_text()
-        head, _tail = _split_at_tail_marker(text)
-        assert "status" in head.lower(), (
-            "executor.md controller-facing head must name the 'status' field"
+    Asserted against `_head_template` (the fenced head block) — NOT the broad head region —
+    so a field key removed from the template goes RED instead of passing via an incidental
+    mention elsewhere (e.g. 'blocking'/'unknowns' in the Step-8 prose, 'files' in the cleanup
+    description). This is the contiguity the block IS, not a 30-line line-window approximation
+    (PR #4 review hardening of the former sliding-window test)."""
+
+    # Each field appears as a "key:" line in the head code block.
+    _HEAD_FIELD_KEYS = ("status:", "files:", "review:", "blocking:", "unknowns:", "cleanup:")
+
+    @pytest.mark.parametrize("field_key", _HEAD_FIELD_KEYS)
+    def test_head_template_names_field(self, field_key: str):
+        """Each of the six fields must appear as a 'key:' in the head code block."""
+        template = _head_template(_executor_text())
+        assert template, (
+            "executor.md must have a controller-facing head subsection ('### Controller-facing "
+            "head …' heading followed by a fenced code block)"
+        )
+        assert field_key in template.lower(), (
+            f"executor.md controller-facing head code block must name the {field_key!r} field. "
+            "It was not found in the head template (an incidental mention in surrounding prose "
+            "does not count)."
         )
 
-    def test_head_names_files_field(self):
-        """Head section must name the 'files' field as a key in the head code block."""
-        text = _executor_text()
-        head, _tail = _split_at_tail_marker(text)
-        # The field appears as "files:" in the head code-block template (e.g. "files: <diff stat>")
-        assert "files:" in head.lower(), (
-            "executor.md controller-facing head must name the 'files:' field "
-            "(as a key in the head code-block template)"
-        )
+    def test_head_template_contains_all_six_fields(self):
+        """All six field keys must be present together in the single head code block.
 
-    def test_head_names_review_field(self):
-        """Head section must name the 'review: needed|skip' field."""
-        text = _executor_text()
-        head, _tail = _split_at_tail_marker(text)
-        assert "review: needed|skip" in head or ("review" in head.lower() and "needed" in head and "skip" in head), (
-            "executor.md controller-facing head must name the 'review: needed|skip' field"
-        )
-
-    def test_head_names_blocking_field(self):
-        """Head section must name the 'blocking' field."""
-        text = _executor_text()
-        head, _tail = _split_at_tail_marker(text)
-        assert "blocking" in head.lower(), (
-            "executor.md controller-facing head must name the 'blocking' field"
-        )
-
-    def test_head_names_unknowns_field(self):
-        """Head section must name the 'unknowns' field."""
-        text = _executor_text()
-        head, _tail = _split_at_tail_marker(text)
-        assert "unknowns" in head.lower(), (
-            "executor.md controller-facing head must name the 'unknowns' field"
-        )
-
-    def test_head_names_cleanup_field(self):
-        """Head section must name the 'cleanup' field."""
-        text = _executor_text()
-        head, _tail = _split_at_tail_marker(text)
-        assert "cleanup" in head.lower(), (
-            "executor.md controller-facing head must name the 'cleanup' field"
-        )
-
-    def test_head_contains_all_six_fields_as_contiguous_block(self):
-        """The six head fields must appear together in a contiguous block in the head section.
-
-        Asserts a distinctive, contiguous phrase that only the new head block would contain —
-        not scattered occurrences. We look for a block containing all six field names
-        within 30 lines of each other in the head region.
-        """
-        text = _executor_text()
-        head, _tail = _split_at_tail_marker(text)
-        lines = head.splitlines()
-        field_names = {"status", "files", "review", "blocking", "unknowns", "cleanup"}
-        # Slide a 30-line window, check that all six appear within it
-        found = False
-        for start in range(max(0, len(lines) - 30)):
-            window = "\n".join(lines[start:start + 30]).lower()
-            if all(f in window for f in field_names):
-                found = True
-                break
-        # Also check if they all appear in last 30 lines (window may extend past range start)
-        if not found and len(lines) >= 1:
-            window = "\n".join(lines[max(0, len(lines) - 30):]).lower()
-            if all(f in window for f in field_names):
-                found = True
-        assert found, (
-            "executor.md controller-facing head must contain all six fields "
-            "(status, files, review, blocking, unknowns, cleanup) as a contiguous block. "
-            "They were not found together within a 30-line window in the head region."
+        The head template IS one contiguous fenced block, so co-presence here is true
+        contiguity — no sliding window needed."""
+        template = _head_template(_executor_text()).lower()
+        assert template, "executor.md must have a controller-facing head code block"
+        missing = [k for k in self._HEAD_FIELD_KEYS if k not in template]
+        assert not missing, (
+            "executor.md controller-facing head code block is missing field key(s): "
+            f"{missing}. All six (status/files/review/blocking/unknowns/cleanup) must appear "
+            "as keys in the head block."
         )
 
 
