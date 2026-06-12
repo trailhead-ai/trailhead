@@ -11,7 +11,7 @@ assert:
   - (Slice-2 C-1) a non-404 gh failure raises DeployError rather than silently
     returning empty — doctor must never read an *uncheckable* deploy as *healthy*.
 
-Unique basename — no collision with forge's per-script tests.
+Unique basename — no collision with craft's per-script tests.
 """
 from __future__ import annotations
 

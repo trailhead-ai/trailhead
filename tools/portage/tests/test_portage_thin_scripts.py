@@ -1,15 +1,15 @@
 """Thin-script delegation tests: each portage script calls trailhead.vcs and
-reproduces the forge CLI's argv + output shape.
+reproduces the craft CLI's argv + output shape.
 
 The portage scripts are thin: bootstrap → from trailhead.vcs import get_provider
 → call the matching provider method → print the same JSON / exit code the old
-forge script did. These tests inject a fake provider (monkeypatching the script's
+craft script did. These tests inject a fake provider (monkeypatching the script's
 get_provider) so no network/gh/git is touched, and assert:
 
   - the right provider method is invoked with the right args (delegation), and
   - the CLI prints the same JSON shape and returns the same exit code.
 
-Scripts under test (CLI contract ported verbatim from forge):
+Scripts under test (CLI contract ported verbatim from craft):
   detect_repos.py        → provider.repos.detect(manifest)
   check_pr_status.py     → provider.pr.status(...)
   pr_evaluate_status.py  → provider.pr.evaluate(provider.pr.status(...))
@@ -17,7 +17,7 @@ Scripts under test (CLI contract ported verbatim from forge):
   wait_for_actionable.py → provider.ci.wait(pairs, ...)
   release_prs_sidecar.py → provider.pr.open(...) / provider.pr.read_sidecar(...)
 
-Unique basename — no collision with forge's per-script tests.
+Unique basename — no collision with craft's per-script tests.
 """
 from __future__ import annotations
 

@@ -5,7 +5,7 @@ Usage: detect_repos.py --manifest <path>
 
 Thin consumer of trailhead.vcs: bootstraps the shared library, then delegates to
 ``get_provider().repos.detect(manifest_path)``. The provider owns the git logic
-and the injectable runner seam; this script just reproduces the forge CLI's argv
+and the injectable runner seam; this script just reproduces the craft CLI's argv
 and JSON output shape.
 
 Output: a JSON array of {repo, path, branch, ahead, dirty} for active members.

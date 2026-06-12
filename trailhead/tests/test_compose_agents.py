@@ -11,7 +11,7 @@ Contract:
   - An escaping agent path in the manifest raises ConfineError at load time,
     so compose_plan never sees it (same posture as skills).
   - B-5: a minimal lore subset WITHOUT shared-vaults has no shared-vaults
-    agents in the tree; no camp/forge dest exists when only lore is selected.
+    agents in the tree; no camp/craft dest exists when only lore is selected.
   - S-2: apply_plan(plan, mode="copy") always — no symlinks in the composed tree.
 """
 
@@ -25,7 +25,7 @@ from trailhead.compose import CopyOp, Plan, apply_plan, compose_plan
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
-_FORGE_MANIFEST = _REPO_ROOT / "tools" / "forge" / "capabilities.toml"
+_CRAFT_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 
 
@@ -70,10 +70,10 @@ def _make_skill_dir(plugin_root: Path, skill: str) -> Path:
 
 
 class TestAgentCopyOpsIncluded:
-    def test_forge_planning_agents_in_plan(self, tmp_path):
-        """forge planning capability declares planner.md + architect.md agents;
+    def test_craft_planning_agents_in_plan(self, tmp_path):
+        """craft planning capability declares planner.md + architect.md agents;
         both must appear in compose_plan output."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"planning"}, dest)
         dest_paths = {op.dest for op in plan.ops}
@@ -84,7 +84,7 @@ class TestAgentCopyOpsIncluded:
 
     def test_agent_ops_are_file_ops_not_dir_ops(self, tmp_path):
         """Agent CopyOps must point at real .md files (not directories)."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"planning"}, dest)
         agent_dests = {
@@ -126,7 +126,7 @@ class TestAgentCopyOpsIncluded:
 
     def test_unselected_capability_agents_absent(self, tmp_path):
         """Agents from an unselected capability must NOT appear in the plan."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         # Select planning only — council agents (advocate/builder/breaker/attacker) must not appear
         plan = compose_plan(m, {"planning"}, dest)
@@ -138,7 +138,7 @@ class TestAgentCopyOpsIncluded:
 
     def test_empty_selection_no_agent_ops(self, tmp_path):
         """Empty selection → no agent CopyOps (agents only come from selected caps)."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, set(), dest)
         agent_ops = [
@@ -156,7 +156,7 @@ class TestAgentCopyOpsIncluded:
 class TestAgentApplyLanding:
     def test_agent_files_land_under_dest_agents(self, tmp_path):
         """After apply_plan, agent files exist under dest/agents/."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"planning"}, dest)
         apply_plan(plan, mode="copy")
@@ -191,7 +191,7 @@ class TestAgentApplyLanding:
 
     def test_s2_no_symlinks_in_composed_tree(self, tmp_path):
         """S-2: apply_plan(mode='copy') must produce real files, not symlinks."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"planning", "helpers"}, dest)
         apply_plan(plan, mode="copy")
@@ -268,7 +268,7 @@ agents = ["agents/helper.md"]
 
 # ---------------------------------------------------------------------------
 # T-A4: B-5 subset enforcement — minimal lore has no shared-vaults agents,
-#        no camp dest, no forge dest
+#        no camp dest, no craft dest
 # ---------------------------------------------------------------------------
 
 
@@ -307,8 +307,8 @@ class TestSubsetEnforcement:
             )
 
     def test_helpers_agents_all_present_when_selected(self, tmp_path):
-        """forge helpers capability has many agents — all must appear in plan."""
-        m = load_manifest(_FORGE_MANIFEST)
+        """craft helpers capability has many agents — all must appear in plan."""
+        m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"helpers"}, dest)
         dest_paths = {op.dest for op in plan.ops}

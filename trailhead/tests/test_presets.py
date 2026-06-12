@@ -5,7 +5,7 @@ trailhead/presets.py is implemented.
 
 The preset table (spec §832-838):
   minimal  = lore{capture, recall, sessions}
-  standard = minimal + camp{} (base only, empty cap set) + forge{planning, execute, review, helpers}
+  standard = minimal + camp{} (base only, empty cap set) + craft{planning, execute, review, helpers}
   full     = every capability declared in each tool's capabilities.toml (computed at runtime)
 
 The "full" preset is computed from load_manifest — it can never drift from the manifests.
@@ -25,7 +25,7 @@ from trailhead.presets import PresetError, resolve
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
-_FORGE_MANIFEST = _REPO_ROOT / "tools" / "forge" / "capabilities.toml"
+_FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 _PORTAGE_MANIFEST = _REPO_ROOT / "tools" / "portage" / "capabilities.toml"
 _LANDING_MANIFEST = _REPO_ROOT / "tools" / "landing" / "capabilities.toml"
 
@@ -48,9 +48,9 @@ class TestMinimalPreset:
         result = resolve("minimal")
         assert "camp" not in result
 
-    def test_minimal_has_no_forge(self):
+    def test_minimal_has_no_craft(self):
         result = resolve("minimal")
-        assert "forge" not in result
+        assert "craft" not in result
 
     def test_minimal_has_exactly_one_tool(self):
         result = resolve("minimal")
@@ -80,29 +80,29 @@ class TestStandardPreset:
         result = resolve("standard")
         assert result["camp"] == set()
 
-    def test_standard_includes_forge(self):
+    def test_standard_includes_craft(self):
         result = resolve("standard")
-        assert "forge" in result
+        assert "craft" in result
 
-    def test_standard_forge_capabilities_exact(self):
+    def test_standard_craft_capabilities_exact(self):
         result = resolve("standard")
-        assert result["forge"] == {"planning", "execute", "review", "helpers"}
+        assert result["craft"] == {"planning", "execute", "review", "helpers"}
 
     def test_standard_has_exactly_three_tools(self):
         result = resolve("standard")
-        assert set(result.keys()) == {"lore", "camp", "forge"}
+        assert set(result.keys()) == {"lore", "camp", "craft"}
 
-    def test_standard_forge_excludes_council(self):
+    def test_standard_craft_excludes_council(self):
         result = resolve("standard")
-        assert "council" not in result["forge"]
+        assert "council" not in result["craft"]
 
-    def test_standard_forge_excludes_design(self):
+    def test_standard_craft_excludes_design(self):
         result = resolve("standard")
-        assert "design" not in result["forge"]
+        assert "design" not in result["craft"]
 
-    def test_standard_forge_excludes_release(self):
+    def test_standard_craft_excludes_release(self):
         result = resolve("standard")
-        assert "release" not in result["forge"]
+        assert "release" not in result["craft"]
 
     def test_standard_lore_excludes_shared_vaults(self):
         result = resolve("standard")
@@ -125,22 +125,22 @@ class TestFullPreset:
         result = resolve("full")
         assert result["camp"] == set(camp_manifest.capabilities.keys())
 
-    def test_full_contains_all_forge_capabilities(self):
-        forge_manifest = load_manifest(_FORGE_MANIFEST)
+    def test_full_contains_all_craft_capabilities(self):
+        craft_manifest = load_manifest(_FORGE_MANIFEST)
         result = resolve("full")
-        assert result["forge"] == set(forge_manifest.capabilities.keys())
+        assert result["craft"] == set(craft_manifest.capabilities.keys())
 
     def test_full_tracks_manifests(self):
         """full is the union of every capability declared in each tool's manifest."""
         lore_manifest = load_manifest(_LORE_MANIFEST)
         camp_manifest = load_manifest(_CAMP_MANIFEST)
-        forge_manifest = load_manifest(_FORGE_MANIFEST)
+        craft_manifest = load_manifest(_FORGE_MANIFEST)
         portage_manifest = load_manifest(_PORTAGE_MANIFEST)
         landing_manifest = load_manifest(_LANDING_MANIFEST)
         expected = {
             "lore": set(lore_manifest.capabilities.keys()),
             "camp": set(camp_manifest.capabilities.keys()),
-            "forge": set(forge_manifest.capabilities.keys()),
+            "craft": set(craft_manifest.capabilities.keys()),
             "portage": set(portage_manifest.capabilities.keys()),
             "landing": set(landing_manifest.capabilities.keys()),
         }
@@ -154,7 +154,7 @@ class TestFullPreset:
 
     def test_full_includes_council(self):
         result = resolve("full")
-        assert "council" in result["forge"]
+        assert "council" in result["craft"]
 
 
 # ---------------------------------------------------------------------------

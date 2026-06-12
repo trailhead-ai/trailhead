@@ -7,7 +7,7 @@ Usage: wait_for_actionable.py [--since <iso>] [--timeout <secs>]
 
 Thin consumer of trailhead.vcs: delegates to ``get_provider().ci.wait(...)``.
 The provider owns the poll loop (status → evaluate until actionable/timeout).
-Reproduces the forge CLI's argv + JSON output + exit codes.
+Reproduces the craft CLI's argv + JSON output + exit codes.
 
 Output JSON:
   {"actionable": {...}, "waiting": {...}}  -- or {"timeout": true, "elapsed_seconds": N}

@@ -4,7 +4,7 @@ camp is an agent-native workflow plugin that gives Claude structured primitives 
 managing git worktrees across a configured group of repositories. It handles the
 "where is the work happening" question so agents don't have to.
 
-**Standalone use:** camp stands alone — adopt it without lore or forge if you only
+**Standalone use:** camp stands alone — adopt it without lore or craft if you only
 want the worktree orchestration.
 
 **Status:** Slice 0 (scaffold + worktree spine). Group config wiring is Slice 1;

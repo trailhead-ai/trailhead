@@ -18,7 +18,7 @@ packages = ["trailhead", "trailhead.vcs"]
 testpaths = [
     "trailhead/tests",
     "tools/lore/tests",
-    "tools/forge/tests",
+    "tools/craft/tests",
     "tools/camp/tests",
     "tools/portage/tests",
 ]

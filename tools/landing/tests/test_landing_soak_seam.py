@@ -1,6 +1,6 @@
 """Soak seam tests: landing's ported soak_health.py behavioral contract.
 
-Ported from forge's test_soak_seam.py, retargeted to landing's own copy of the
+Ported from craft's test_soak_seam.py, retargeted to landing's own copy of the
 probe (landing's soak is its OWN concern — it is NOT behind the provider
 abstraction). The probe is a verbatim port; these tests lock the load-bearing
 contract so a future edit can't regress it.

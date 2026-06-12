@@ -5,7 +5,7 @@ Usage: pr_evaluate_status.py <repo-path> <pr-number>
        [--since <iso>] [--fail-count <n>] [--review-bot-login <login>]
 
 Thin consumer of trailhead.vcs: fetches status via ``pr.status`` then classifies
-via ``pr.evaluate``. Reproduces the forge CLI's argv + JSON output shape.
+via ``pr.evaluate``. Reproduces the craft CLI's argv + JSON output shape.
 
 Output JSON:
   {action, reason, details}

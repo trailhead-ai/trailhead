@@ -91,7 +91,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "Portable worktree-orchestration plugin: group config, "
         "dev-env orchestration, and worktree management."
     ),
-    "forge": (
+    "craft": (
         "Portable software-development plugin: general-purpose dev "
         "agents and dev-ritual skills."
     ),
@@ -111,7 +111,7 @@ def generate_marketplace_json(tool: str, mkt_root: Path) -> None:
     """Write the Shape-A marketplace.json at <mkt_root>/.claude-plugin/.
 
     Args:
-        tool:     Tool name (e.g. "lore", "camp", "forge").
+        tool:     Tool name (e.g. "lore", "camp", "craft").
         mkt_root: Marketplace root directory.  ``plugins/<tool>/`` under this
                   root is where compose writes the plugin tree.
     """

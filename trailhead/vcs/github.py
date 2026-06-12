@@ -1,11 +1,11 @@
 """GitHubProvider — the GitHub backend for the VCS interface (repos/pr/ci).
 
-Ports the pure callables out of forge's release scripts, routing every gh/git
+Ports the pure callables out of craft's release scripts, routing every gh/git
 call through ``trailhead.vcs.runner`` (shell=False, injectable). camp stays the
 membership source of truth: ``repos.detect()`` consumes the manifest, it does
 not own membership.
 
-Ported sources (logic lifted, not imported — forge's copies stay in place until
+Ported sources (logic lifted, not imported — craft's copies stay in place until
 the release cluster is deleted):
   - detect_repos.py          → repos.detect()
   - release_prs_sidecar.py   → pr.open() / pr.read_sidecar()

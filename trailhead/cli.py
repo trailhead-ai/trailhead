@@ -48,7 +48,7 @@ _TRAILHEAD_ERRORS = (
 )
 
 _CURATED_HELP = """\
-trailhead {version} — manage and compose lore, forge, and camp plugins.
+trailhead {version} — manage and compose lore, craft, and camp plugins.
 
 Commands:
   install   Wire a preset of tools and capabilities into the Claude Code harness.
@@ -93,7 +93,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trailhead",
-        description="trailhead — manage and compose lore, forge, and camp plugins.",
+        description="trailhead — manage and compose lore, craft, and camp plugins.",
         add_help=True,
     )
     parser.add_argument(

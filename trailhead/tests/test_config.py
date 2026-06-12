@@ -107,7 +107,7 @@ class TestRoundTrip:
 
     def test_roundtrip_preserves_capabilities(self, tmp_path):
         env = _make_env(tmp_path)
-        caps = {"lore": ["capture", "recall"], "forge": ["planning"]}
+        caps = {"lore": ["capture", "recall"], "craft": ["planning"]}
         cfg = TrailheadConfig(
             registry=_DEFAULT_REGISTRY,
             path_integration=True,

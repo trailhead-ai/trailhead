@@ -3,7 +3,7 @@
 These tests assert that LORE_SIMULATE_TTY (or any other env-var) cannot be
 used to bypass the TTY gate on `lore promote`.  The gate must rely solely on
 sys.stdin.isatty() in the production process; an agent controlling the
-environment of a lore subprocess cannot forge a TTY.
+environment of a lore subprocess cannot spoof a TTY.
 
 Contract:
   1. With piped stdin AND any env-var manipulation, promote is still refused

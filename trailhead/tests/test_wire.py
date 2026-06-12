@@ -15,7 +15,7 @@ Contract:
     BaseException subclasses like KeyboardInterrupt.
   - C-1.2/I-1: WireError names tool + stage on per-tool failure; multi-tool
     wire is best-effort sequential (already-processed tools stay committed).
-  - B-5: minimal preset → no camp/forge dests.
+  - B-5: minimal preset → no camp/craft dests.
   - Re-wiring same selection is idempotent.
   - structural validity: dest/.claude-plugin/plugin.json parses.
   - Minor-2: cross-tool dest collision is structurally unreachable (each tool
@@ -34,7 +34,7 @@ import pytest
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
-_FORGE_MANIFEST = _REPO_ROOT / "tools" / "forge" / "capabilities.toml"
+_FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -56,12 +56,12 @@ def _manifest_paths() -> dict[str, Path]:
     return {
         "lore": _LORE_MANIFEST,
         "camp": _CAMP_MANIFEST,
-        "forge": _FORGE_MANIFEST,
+        "craft": _FORGE_MANIFEST,
     }
 
 
 # ---------------------------------------------------------------------------
-# T-W1: minimal preset — lore only, no camp/forge dests (B-5 enforcement)
+# T-W1: minimal preset — lore only, no camp/craft dests (B-5 enforcement)
 # ---------------------------------------------------------------------------
 
 
@@ -97,8 +97,8 @@ class TestMinimalPresetGating:
             "camp dest exists despite minimal preset (B-5 violation)"
         )
 
-    def test_minimal_no_forge_dest(self, tmp_path):
-        """wire with minimal preset creates NO forge dest (B-5)."""
+    def test_minimal_no_craft_dest(self, tmp_path):
+        """wire with minimal preset creates NO craft dest (B-5)."""
         from trailhead.wire import wire
 
         selection = {"lore": {"capture", "recall", "sessions"}}
@@ -108,9 +108,9 @@ class TestMinimalPresetGating:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
-        assert not forge_dest.exists(), (
-            "forge dest exists despite minimal preset (B-5 violation)"
+        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
+        assert not craft_dest.exists(), (
+            "craft dest exists despite minimal preset (B-5 violation)"
         )
 
     def test_empty_selection_for_tool_skips_it(self, tmp_path):
@@ -118,7 +118,7 @@ class TestMinimalPresetGating:
         (base-only), but a tool absent from selection is NOT created."""
         from trailhead.wire import wire
 
-        # Provide lore only — camp and forge are not in selection
+        # Provide lore only — camp and craft are not in selection
         selection = {"lore": {"capture"}}
         wire(
             selection,
@@ -127,11 +127,11 @@ class TestMinimalPresetGating:
             runner=_noop_runner,
         )
         assert not (tmp_path / "composed" / "camp").exists()
-        assert not (tmp_path / "composed" / "forge").exists()
+        assert not (tmp_path / "composed" / "craft").exists()
 
 
 # ---------------------------------------------------------------------------
-# T-W2: standard preset — lore + camp + forge dests; council/design/release absent
+# T-W2: standard preset — lore + camp + craft dests; council/design/release absent
 # ---------------------------------------------------------------------------
 
 
@@ -142,7 +142,7 @@ class TestStandardPreset:
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
-            "forge": {"planning", "execute", "review", "helpers"},
+            "craft": {"planning", "execute", "review", "helpers"},
         }
         wire(
             selection,
@@ -158,7 +158,7 @@ class TestStandardPreset:
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
-            "forge": {"planning", "execute", "review", "helpers"},
+            "craft": {"planning", "execute", "review", "helpers"},
         }
         wire(
             selection,
@@ -168,13 +168,13 @@ class TestStandardPreset:
         )
         assert (tmp_path / "composed" / "camp" / "plugins" / "camp").exists()
 
-    def test_standard_forge_dest_exists(self, tmp_path):
+    def test_standard_craft_dest_exists(self, tmp_path):
         from trailhead.wire import wire
 
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
-            "forge": {"planning", "execute", "review", "helpers"},
+            "craft": {"planning", "execute", "review", "helpers"},
         }
         wire(
             selection,
@@ -182,10 +182,10 @@ class TestStandardPreset:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        assert (tmp_path / "composed" / "forge" / "plugins" / "forge").exists()
+        assert (tmp_path / "composed" / "craft" / "plugins" / "craft").exists()
 
-    def test_standard_forge_council_agents_absent(self, tmp_path):
-        """council capability agents absent when forge wired without council.
+    def test_standard_craft_council_agents_absent(self, tmp_path):
+        """council capability agents absent when craft wired without council.
 
         M-5 fix: council has skills=[], so testing skill absence is vacuous.
         council DOES have 4 agents (advocate/builder/breaker/attacker) — assert none appear in dest.
@@ -196,7 +196,7 @@ class TestStandardPreset:
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
-            "forge": {"planning", "execute", "review", "helpers"},
+            "craft": {"planning", "execute", "review", "helpers"},
         }
         wire(
             selection,
@@ -204,17 +204,17 @@ class TestStandardPreset:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        forge_manifest = load_manifest(_FORGE_MANIFEST)
-        forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
-        council_agents = forge_manifest.capabilities["council"]["agents"]
+        craft_manifest = load_manifest(_FORGE_MANIFEST)
+        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
+        council_agents = craft_manifest.capabilities["council"]["agents"]
         # Confirm we're testing something real
         assert len(council_agents) > 0, "test is vacuous: council has no agents"
         for agent in council_agents:
-            assert not (forge_dest / agent).exists(), (
-                f"council agent {agent!r} present in forge dest despite council not selected"
+            assert not (craft_dest / agent).exists(), (
+                f"council agent {agent!r} present in craft dest despite council not selected"
             )
 
-    def test_standard_forge_unselected_council_and_execute_absent(self, tmp_path):
+    def test_standard_craft_unselected_council_and_execute_absent(self, tmp_path):
         """Agents from unselected council capability must not appear in the wired dest.
 
         M-5 fix: design and release both have skills=[] and agents=[], making their
@@ -225,11 +225,11 @@ class TestStandardPreset:
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
-        # Wire standard forge WITHOUT council or execute
+        # Wire standard craft WITHOUT council or execute
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
-            "forge": {"planning", "review", "helpers"},
+            "craft": {"planning", "review", "helpers"},
         }
         wire(
             selection,
@@ -237,14 +237,14 @@ class TestStandardPreset:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        forge_manifest = load_manifest(_FORGE_MANIFEST)
-        forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
+        craft_manifest = load_manifest(_FORGE_MANIFEST)
+        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
         for absent_cap in ("council", "execute"):
-            agents = forge_manifest.capabilities[absent_cap]["agents"]
+            agents = craft_manifest.capabilities[absent_cap]["agents"]
             assert len(agents) > 0, f"test is vacuous: {absent_cap} has no agents"
             for agent in agents:
-                assert not (forge_dest / agent).exists(), (
-                    f"{absent_cap} agent {agent!r} present in forge dest despite "
+                assert not (craft_dest / agent).exists(), (
+                    f"{absent_cap} agent {agent!r} present in craft dest despite "
                     f"{absent_cap} not being selected"
                 )
 
@@ -256,7 +256,7 @@ class TestStandardPreset:
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
-            "forge": {"planning", "execute", "review", "helpers"},
+            "craft": {"planning", "execute", "review", "helpers"},
         }
         wire(
             selection,
@@ -314,7 +314,7 @@ class TestStructuralValidity:
         """S-2: the composed tree must contain no symlinks."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall"}, "forge": {"planning", "helpers"}}
+        selection = {"lore": {"capture", "recall"}, "craft": {"planning", "helpers"}}
         wire(
             selection,
             manifest_paths=_manifest_paths(),
@@ -499,7 +499,7 @@ class TestRegistryRunnerArgs:
         """register() is called once per wired tool."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}, "forge": {"planning"}}
+        selection = {"lore": {"capture"}, "craft": {"planning"}}
         calls = []
 
         def stub_runner(args, **kwargs):
@@ -515,10 +515,10 @@ class TestRegistryRunnerArgs:
         marketplace_adds = [c for c in calls if "marketplace" in c and "add" in c]
         installs = [c for c in calls if "install" in c]
         assert len(marketplace_adds) == 2, (
-            f"expected 2 marketplace add calls (lore+forge), got {marketplace_adds}"
+            f"expected 2 marketplace add calls (lore+craft), got {marketplace_adds}"
         )
         assert len(installs) == 2, (
-            f"expected 2 install calls (lore+forge), got {installs}"
+            f"expected 2 install calls (lore+craft), got {installs}"
         )
 
     def test_runner_never_invokes_real_subprocess(self, tmp_path):
@@ -695,43 +695,43 @@ class TestWireErrorIsolation:
         call_count = {"n": 0}
         original_compose_plan = wire_mod.compose_plan
 
-        def forge_failing_plan(manifest, caps, dest):
+        def craft_failing_plan(manifest, caps, dest):
             call_count["n"] += 1
-            if manifest.tool_name == "forge":
-                raise RuntimeError("forge compose exploded")
+            if manifest.tool_name == "craft":
+                raise RuntimeError("craft compose exploded")
             return original_compose_plan(manifest, caps, dest)
 
-        with patch.object(wire_mod, "compose_plan", side_effect=forge_failing_plan):
+        with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError) as exc_info:
                 wire(
-                    {"lore": {"capture"}, "forge": {"planning"}},
+                    {"lore": {"capture"}, "craft": {"planning"}},
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
                 )
 
         err = exc_info.value
-        assert err.tool == "forge", f"WireError.tool should be 'forge', got {err.tool!r}"
+        assert err.tool == "craft", f"WireError.tool should be 'craft', got {err.tool!r}"
         assert err.stage == "compose", (
             f"WireError.stage should be 'compose', got {err.stage!r}"
         )
         assert isinstance(err.__cause__, RuntimeError)
 
     def test_already_wired_tool_stays_committed_after_later_failure(self, tmp_path):
-        """C-1.2/I-1: lore stays wired when forge fails — best-effort sequential."""
+        """C-1.2/I-1: lore stays wired when craft fails — best-effort sequential."""
         import trailhead.wire as wire_mod
         from trailhead.wire import WireError, wire
 
         original_compose_plan = wire_mod.compose_plan
 
-        def forge_failing_plan(manifest, caps, dest):
-            if manifest.tool_name == "forge":
-                raise RuntimeError("forge compose exploded")
+        def craft_failing_plan(manifest, caps, dest):
+            if manifest.tool_name == "craft":
+                raise RuntimeError("craft compose exploded")
             return original_compose_plan(manifest, caps, dest)
 
-        # Ensure lore is processed before forge by passing ordered dict
-        selection = {"lore": {"capture"}, "forge": {"planning"}}
-        with patch.object(wire_mod, "compose_plan", side_effect=forge_failing_plan):
+        # Ensure lore is processed before craft by passing ordered dict
+        selection = {"lore": {"capture"}, "craft": {"planning"}}
+        with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError):
                 wire(
                     selection,
@@ -743,35 +743,35 @@ class TestWireErrorIsolation:
         # lore dest must be fully wired (lore was processed first)
         lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
         assert lore_dest.exists(), (
-            "I-1: lore dest gone after forge failure — best-effort sequential violated"
+            "I-1: lore dest gone after craft failure — best-effort sequential violated"
         )
 
     def test_no_orphaned_staging_dir_after_wire_error(self, tmp_path):
-        """C-1.2: WireError raised after forge failure leaves no forge staging dir."""
+        """C-1.2: WireError raised after craft failure leaves no craft staging dir."""
         import trailhead.wire as wire_mod
         from trailhead.wire import WireError, wire
 
         original_compose_plan = wire_mod.compose_plan
 
-        def forge_failing_plan(manifest, caps, dest):
-            if manifest.tool_name == "forge":
-                raise RuntimeError("forge compose exploded")
+        def craft_failing_plan(manifest, caps, dest):
+            if manifest.tool_name == "craft":
+                raise RuntimeError("craft compose exploded")
             return original_compose_plan(manifest, caps, dest)
 
-        with patch.object(wire_mod, "compose_plan", side_effect=forge_failing_plan):
+        with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError):
                 wire(
-                    {"lore": {"capture"}, "forge": {"planning"}},
+                    {"lore": {"capture"}, "craft": {"planning"}},
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
                 )
 
-        forge_plugins_dir = tmp_path / "composed" / "forge" / "plugins"
-        if forge_plugins_dir.exists():
-            leftover = list(forge_plugins_dir.glob("_forge_staging_*"))
+        craft_plugins_dir = tmp_path / "composed" / "craft" / "plugins"
+        if craft_plugins_dir.exists():
+            leftover = list(craft_plugins_dir.glob("_craft_staging_*"))
             assert leftover == [], (
-                f"orphaned forge staging dirs after WireError: {leftover}"
+                f"orphaned craft staging dirs after WireError: {leftover}"
             )
 
     def test_wire_error_register_stage(self, tmp_path):
@@ -936,7 +936,7 @@ class TestCrossToolCollisionUnreachable:
 
         selection = {
             "lore": {"capture", "recall"},
-            "forge": {"planning", "helpers"},
+            "craft": {"planning", "helpers"},
         }
         wire(
             selection,
@@ -946,13 +946,13 @@ class TestCrossToolCollisionUnreachable:
         )
 
         lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        forge_dest = tmp_path / "composed" / "forge" / "plugins" / "forge"
+        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
         assert lore_dest.exists()
-        assert forge_dest.exists()
+        assert craft_dest.exists()
         # The two live dests are rooted under different mkt_roots — no collision possible
-        assert not lore_dest.is_relative_to(forge_dest), (
-            "Minor-2: lore dest is under forge dest (collision!)"
+        assert not lore_dest.is_relative_to(craft_dest), (
+            "Minor-2: lore dest is under craft dest (collision!)"
         )
-        assert not forge_dest.is_relative_to(lore_dest), (
-            "Minor-2: forge dest is under lore dest (collision!)"
+        assert not craft_dest.is_relative_to(lore_dest), (
+            "Minor-2: craft dest is under lore dest (collision!)"
         )

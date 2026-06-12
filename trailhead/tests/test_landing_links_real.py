@@ -273,9 +273,9 @@ class TestForwardCheckPositive:
         anchor_set = build_real_anchor_set()
         claim = {
             "kind": "agent",
-            "tool": "forge",
+            "tool": "craft",
             "ref": "agents/artist.md",
-            "source": "forge",
+            "source": "craft",
         }
         check_claim(claim, anchor_set)
 
@@ -376,7 +376,7 @@ class TestBuildRealAnchorSet:
 
     def test_known_tools_present(self):
         anchors = build_real_anchor_set()
-        for tool in ("lore", "forge", "camp"):
+        for tool in ("lore", "craft", "camp"):
             assert tool in anchors, f"tool {tool!r} missing from anchor set"
 
     def test_lore_recall_capability_present(self):
@@ -387,18 +387,18 @@ class TestBuildRealAnchorSet:
         anchors = build_real_anchor_set()
         assert "agents/librarian.md" in anchors["lore"]["agents"]
 
-    def test_forge_execute_capability_present(self):
+    def test_craft_execute_capability_present(self):
         anchors = build_real_anchor_set()
-        assert "execute" in anchors["forge"]["capabilities"]
+        assert "execute" in anchors["craft"]["capabilities"]
 
-    def test_forge_assumption_prover_agent_present(self):
+    def test_craft_assumption_prover_agent_present(self):
         anchors = build_real_anchor_set()
-        assert "agents/assumption-prover.md" in anchors["forge"]["agents"]
+        assert "agents/assumption-prover.md" in anchors["craft"]["agents"]
 
-    def test_forge_artist_agent_present(self):
-        """forge design has agents/artist.md — verify it's in the anchor set."""
+    def test_craft_artist_agent_present(self):
+        """craft design has agents/artist.md — verify it's in the anchor set."""
         anchors = build_real_anchor_set()
-        assert "agents/artist.md" in anchors["forge"]["agents"]
+        assert "agents/artist.md" in anchors["craft"]["agents"]
 
     def test_camp_dev_env_capability_present_and_not_filtered(self):
         """camp dev-env has empty skills/agents — must be present, not filtered (R-1)."""
@@ -505,7 +505,7 @@ README_INDEX: list[Path] = sorted(
     [
         _REPO_ROOT / "README.md",
         _REPO_ROOT / "tools" / "lore" / "README.md",
-        _REPO_ROOT / "tools" / "forge" / "README.md",
+        _REPO_ROOT / "tools" / "craft" / "README.md",
         _REPO_ROOT / "tools" / "camp" / "README.md",
         _REPO_ROOT / "tools" / "portage" / "README.md",
         _REPO_ROOT / "tools" / "landing" / "README.md",
@@ -513,7 +513,7 @@ README_INDEX: list[Path] = sorted(
 )
 
 # Tools whose fenced-block commands the gate tracks.
-_TRACKED_TOOLS = frozenset({"trailhead", "lore", "forge", "camp", "portage", "landing"})
+_TRACKED_TOOLS = frozenset({"trailhead", "lore", "craft", "camp", "portage", "landing"})
 
 # Fenced sh/bash block pattern (U-3: bounded to fenced blocks only).
 _FENCED_BLOCK_RE = re.compile(r"```(?:sh|bash)\n(.*?)```", re.DOTALL)
@@ -933,7 +933,7 @@ class TestRealReadmeInverseScan:
 _LORE_README = _REPO_ROOT / "tools" / "lore" / "README.md"
 _TOOL_READMES: list[Path] = [
     _REPO_ROOT / "tools" / "lore" / "README.md",
-    _REPO_ROOT / "tools" / "forge" / "README.md",
+    _REPO_ROOT / "tools" / "craft" / "README.md",
     _REPO_ROOT / "tools" / "camp" / "README.md",
 ]
 
@@ -1079,12 +1079,12 @@ class TestRootReadmeStructuralGuard:
     """A-3: the root README must NOT place a four-tool markdown table before the lore lead.
 
     The funnel rule: the lore use-case + first command must appear BEFORE any
-    multi-tool table that names lore, camp, and forge together in a single row.
+    multi-tool table that names lore, camp, and craft together in a single row.
     This prevents the 'concept-map first' anti-pattern the plan warns against.
 
     Implementation: find the character-offset of the first fenced sh/bash block
     (the lore lead's two commands) and the first multi-tool table row (a Markdown
-    table row containing at least two of: lore, camp, forge). Assert the fenced
+    table row containing at least two of: lore, camp, craft). Assert the fenced
     block comes first.
     """
 
@@ -1092,7 +1092,7 @@ class TestRootReadmeStructuralGuard:
         """The first fenced sh/bash block (lore lead) must precede any multi-tool table row.
 
         A multi-tool table row is any '| ... |' line that names at least two of the
-        three tools (lore, camp, forge) — the signal that a 'What's included' concept
+        three tools (lore, camp, craft) — the signal that a 'What's included' concept
         map has started. The lore use-case must come first (A-3).
         """
         assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
@@ -1106,11 +1106,11 @@ class TestRootReadmeStructuralGuard:
         )
         first_fenced_offset = fenced_match.start()
 
-        # Locate the first multi-tool table row: a '|' line naming ≥2 of lore/camp/forge
+        # Locate the first multi-tool table row: a '|' line naming ≥2 of lore/camp/craft
         multi_tool_table_offset: int | None = None
         for line_match in re.finditer(r"^\|.*\|.*$", text, re.MULTILINE):
             line_text = line_match.group(0).lower()
-            named_tools = sum(1 for t in ("lore", "camp", "forge") if t in line_text)
+            named_tools = sum(1 for t in ("lore", "camp", "craft") if t in line_text)
             if named_tools >= 2:
                 multi_tool_table_offset = line_match.start()
                 break
@@ -1137,7 +1137,7 @@ class TestRootReadmeStructuralGuard:
 _LANDING_FILES: list[Path] = [
     _REPO_ROOT / "README.md",
     _REPO_ROOT / "tools" / "lore" / "README.md",
-    _REPO_ROOT / "tools" / "forge" / "README.md",
+    _REPO_ROOT / "tools" / "craft" / "README.md",
     _REPO_ROOT / "tools" / "camp" / "README.md",
     _REPO_ROOT / "tools" / "portage" / "README.md",
     _REPO_ROOT / "tools" / "landing" / "README.md",
@@ -1146,7 +1146,7 @@ _LANDING_FILES: list[Path] = [
 
 # Path to the leak_gate.py script.
 _LEAK_GATE = (
-    _REPO_ROOT / "tools" / "forge" / "plugins" / "forge" / "scripts" / "leak_gate.py"
+    _REPO_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "leak_gate.py"
 )
 
 # Denylist token classes seeded into the ephemeral denylist (S-1).
@@ -1162,7 +1162,7 @@ _LEAK_GATE = (
 #   5CC67114CCF2B7B5 — the zenith work GPG key (internal signing key ID)
 #
 # Words that must NOT false-positive (legitimate landing vocabulary checked below):
-#   trailhead, lore, forge, camp, Claude Code, agent-native, recall, area, preset,
+#   trailhead, lore, craft, camp, Claude Code, agent-native, recall, area, preset,
 #   skill, agent, capability, install, doctor, config, update, minimal, standard, full
 #
 _DENYLIST_ENTRIES: list[str] = [
@@ -1207,7 +1207,7 @@ def _copy_landing_files_to_dir(dest: Path) -> Path:
     distinct-enough for error messages:
       README.md          → root-README.md
       tools/lore/README.md   → lore-README.md
-      tools/forge/README.md  → forge-README.md
+      tools/craft/README.md  → craft-README.md
       tools/camp/README.md   → camp-README.md
       trailhead/landing_claims.toml → landing_claims.toml
     """
@@ -1215,7 +1215,7 @@ def _copy_landing_files_to_dir(dest: Path) -> Path:
     name_map: list[tuple[Path, str]] = [
         (_REPO_ROOT / "README.md", "root-README.md"),
         (_REPO_ROOT / "tools" / "lore" / "README.md", "lore-README.md"),
-        (_REPO_ROOT / "tools" / "forge" / "README.md", "forge-README.md"),
+        (_REPO_ROOT / "tools" / "craft" / "README.md", "craft-README.md"),
         (_REPO_ROOT / "tools" / "camp" / "README.md", "camp-README.md"),
         (_REPO_ROOT / "tools" / "portage" / "README.md", "portage-README.md"),
         (_REPO_ROOT / "tools" / "landing" / "README.md", "landing-README.md"),
@@ -1342,7 +1342,7 @@ class TestLandingSurfaceLeakGate:
     def test_legitimate_vocabulary_not_flagged(self, tmp_path: Path) -> None:
         """Denylist must NOT false-positive on legitimate landing vocabulary.
 
-        Words that are valid in a public-facing landing: trailhead, lore, forge,
+        Words that are valid in a public-facing landing: trailhead, lore, craft,
         camp, Claude Code, agent-native, recall, area, preset, skill, agent,
         capability, install, doctor, config, update, minimal, standard, full.
         """
@@ -1351,10 +1351,10 @@ class TestLandingSurfaceLeakGate:
         (clean_dir / "vocab.md").write_text(
             "# trailhead\n\n"
             "Agent-native project memory that works with your existing setup.\n\n"
-            "lore, forge, and camp are the three plugins.\n"
+            "lore, craft, and camp are the three plugins.\n"
             "Run `trailhead install` to get started with the minimal or standard preset.\n"
             "Use `lore recall --areas <topic>` to load area memory.\n"
-            "Claude Code is the agent runtime. forge:execute is a skill.\n"
+            "Claude Code is the agent runtime. craft:execute is a skill.\n"
             "Run `trailhead doctor` or `trailhead config` or `trailhead update`.\n"
             "The full preset wires all capabilities.\n",
             encoding="utf-8",

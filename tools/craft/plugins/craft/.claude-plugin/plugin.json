@@ -1,0 +1,5 @@
+{
+  "name": "craft",
+  "version": "0.1.0",
+  "description": "Portable software-development plugin: general-purpose dev agents and dev-ritual skills for any Claude Code project."
+}

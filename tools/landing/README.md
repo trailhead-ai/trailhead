@@ -54,7 +54,7 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 
 landing ships inside the trailhead install layout and consumes the shared
 `trailhead.vcs` library; it is not independently adoptable. It sits alongside its
-sibling plugins — [lore](../lore) (knowledge management), [forge](../forge)
+sibling plugins — [lore](../lore) (knowledge management), [craft](../craft)
 (plan / execute / review), [camp](../camp) (group worktrees), and
-[portage](../portage) (PR lifecycle) — and reuses forge's general helper agents
+[portage](../portage) (PR lifecycle) — and reuses craft's general helper agents
 (`log-sifter`, `troubleshooter`, `researcher`) at runtime.

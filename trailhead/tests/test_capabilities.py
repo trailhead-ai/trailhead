@@ -29,7 +29,7 @@ from trailhead.capabilities import (
 # Paths to the real committed samples (relative to the repo root, written as absolute)
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
-_FORGE_MANIFEST = _REPO_ROOT / "tools" / "forge" / "capabilities.toml"
+_FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 
 
@@ -173,28 +173,28 @@ class TestLoreManifestValidatesAgainstDisk:
 
 
 # ---------------------------------------------------------------------------
-# T3: Real forge sample validates against the on-disk tree
+# T3: Real craft sample validates against the on-disk tree
 # ---------------------------------------------------------------------------
 
 
 class TestForgeManifestValidatesAgainstDisk:
-    def test_forge_manifest_validates_without_error(self):
+    def test_craft_manifest_validates_without_error(self):
         load_manifest(_FORGE_MANIFEST)
 
-    def test_forge_tool_name(self):
+    def test_craft_tool_name(self):
         m = load_manifest(_FORGE_MANIFEST)
-        assert m.tool_name == "forge"
+        assert m.tool_name == "craft"
 
-    def test_forge_has_no_hooks_json(self):
+    def test_craft_has_no_hooks_json(self):
         m = load_manifest(_FORGE_MANIFEST)
         assert m.hooks_json is None
 
-    def test_forge_base_dirs(self):
+    def test_craft_base_dirs(self):
         m = load_manifest(_FORGE_MANIFEST)
         # handoff→shelve, followup→polish renamed in Spec A / Slice 4 (pickup unchanged).
         assert set(m.base) == {"skills/shelve", "skills/pickup", "skills/polish"}
 
-    def test_forge_planning_capability(self):
+    def test_craft_planning_capability(self):
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["planning"]
         # planning→plan skill renamed in Spec A / Slice 4 (capability name unchanged).
@@ -202,14 +202,14 @@ class TestForgeManifestValidatesAgainstDisk:
         assert "agents/planner.md" in cap["agents"]
         assert "agents/architect.md" in cap["agents"]
 
-    def test_forge_execute_capability(self):
+    def test_craft_execute_capability(self):
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["execute"]
         assert "skills/execute" in cap["skills"]
         assert "agents/assumption-prover.md" in cap["agents"]
         assert "agents/executor.md" in cap["agents"]
 
-    def test_forge_council_capability_agents_exist(self):
+    def test_craft_council_capability_agents_exist(self):
         m = load_manifest(_FORGE_MANIFEST)
         plugin_root = _FORGE_MANIFEST.parent / "plugins" / m.tool_name
         cap = m.capabilities["council"]
@@ -217,7 +217,7 @@ class TestForgeManifestValidatesAgainstDisk:
             p = plugin_root / agent
             assert p.is_file(), f"agent file missing: {p}"
 
-    def test_forge_helpers_capability_agents_exist(self):
+    def test_craft_helpers_capability_agents_exist(self):
         m = load_manifest(_FORGE_MANIFEST)
         plugin_root = _FORGE_MANIFEST.parent / "plugins" / m.tool_name
         cap = m.capabilities["helpers"]
@@ -225,15 +225,15 @@ class TestForgeManifestValidatesAgainstDisk:
             p = plugin_root / agent
             assert p.is_file(), f"agent file missing: {p}"
 
-    def test_forge_design_capability_has_artist_agent(self):
-        """forge design has no skills and exactly one agent: agents/artist.md."""
+    def test_craft_design_capability_has_artist_agent(self):
+        """craft design has no skills and exactly one agent: agents/artist.md."""
         m = load_manifest(_FORGE_MANIFEST)
         cap = m.capabilities["design"]
         assert cap["skills"] == []
         assert cap["agents"] == ["agents/artist.md"]
 
-    def test_forge_has_no_release_capability(self):
-        """forge no longer ships a `release` capability — PR lifecycle moved to
+    def test_craft_has_no_release_capability(self):
+        """craft no longer ships a `release` capability — PR lifecycle moved to
         portage and post-merge soak moved to landing (Slice 6 hard cut)."""
         m = load_manifest(_FORGE_MANIFEST)
         assert "release" not in m.capabilities

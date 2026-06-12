@@ -1,0 +1,14 @@
+{
+  "name": "craft-local",
+  "owner": {
+    "name": "craft maintainers"
+  },
+  "description": "Local marketplace for the craft plugin during development.",
+  "plugins": [
+    {
+      "name": "craft",
+      "source": "./plugins/craft",
+      "description": "Portable software-development plugin: general-purpose dev agents and dev-ritual skills for any Claude Code project."
+    }
+  ]
+}

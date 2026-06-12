@@ -1,0 +1,48 @@
+# Agent filenames reflect CURRENT on-disk names (advocate/builder/breaker/attacker, assumption-prover, executor).
+# Council agents renamed to bare names in Spec A / Slice 1; SDD agents renamed in Slice 3.
+
+[tool]
+name = "craft"
+base = ["skills/shelve", "skills/pickup", "skills/polish"]
+
+[capabilities.planning]
+description = "Turn fuzzy ideas into specs and implementation plans — planner and architect subagents."
+skills = ["skills/plan"]
+agents = ["agents/planner.md", "agents/architect.md"]
+
+[capabilities.execute]
+description = "TDD subagent-driven implementation, slice by slice — assumption-prover and executor subagents."
+skills = ["skills/execute"]
+agents = ["agents/assumption-prover.md", "agents/executor.md"]
+
+[capabilities.review]
+description = "Structured code review of completed work — code-reviewer subagent dispatched after implementation."
+skills = ["skills/review"]
+agents = ["agents/code-reviewer.md"]
+
+[capabilities.council]
+description = "Four-lens review panel — builder, reliability, security, and user-advocate perspectives on a diff."
+skills = ["skills/consult"]
+agents = [
+  "agents/advocate.md",
+  "agents/builder.md",
+  "agents/breaker.md",
+  "agents/attacker.md",
+]
+
+[capabilities.design]
+description = "Design-doc authoring — structured spec and design artifacts."
+skills = []
+agents = ["agents/artist.md"]
+
+[capabilities.helpers]
+description = "Cheap specialist subagents for docs, logs, research, troubleshooting, tests, and security review."
+skills = []
+agents = [
+  "agents/doc-finder.md",
+  "agents/log-sifter.md",
+  "agents/researcher.md",
+  "agents/troubleshooter.md",
+  "agents/test-runner.md",
+  "agents/security-auditor.md",
+]

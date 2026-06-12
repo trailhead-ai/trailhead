@@ -4,7 +4,7 @@ Every gh/git call in trailhead.vcs goes through this module. Production code
 calls run(...) with no runner argument. Tests inject a stub callable to capture
 calls without touching real gh/git or the network.
 
-Copied (not moved) from forge's runner_protocol.py: forge's release scripts
+Copied (not moved) from craft's runner_protocol.py: craft's release scripts
 still import their own copy until the release cluster is deleted. This is the
 trailhead-package home of the same proven contract.
 

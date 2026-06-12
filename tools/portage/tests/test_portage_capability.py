@@ -1,8 +1,8 @@
 """B-4 analog: portage's capabilities.toml resolves to real on-disk skills/agents.
 
-Mirrors forge's test_release_capability.py contract for the new portage plugin:
+Mirrors craft's test_release_capability.py contract for the new portage plugin:
 
-  - capabilities.toml exists and parses (stdlib tomllib — the forge test harness
+  - capabilities.toml exists and parses (stdlib tomllib — the craft test harness
     cannot import trailhead.capabilities, same constraint here).
   - [tool] name == "portage" and matches the plugins/portage/ dir name.
   - Every skill listed in any [capabilities.*] group resolves to an existing

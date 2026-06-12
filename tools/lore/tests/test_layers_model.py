@@ -262,7 +262,7 @@ mod.ensure_trailhead_importable()
         emits the legible tier-4 error, not a raw ModuleNotFoundError."""
         bootstrap_path = SCRIPTS_DIR / "_bootstrap.py"
 
-        # Probe: forge __file__ to a path deep in tmp_path so walk-up never finds marker
+        # Probe: craft __file__ to a path deep in tmp_path so walk-up never finds marker
         # Then also clear TRAILHEAD_ROOT so tier-2 doesn't help
         probe_script = tmp_path / "probe_missing.py"
         fake_file = tmp_path / "deep" / "fake" / "scripts" / "_bootstrap.py"
@@ -277,7 +277,7 @@ spec = importlib.util.spec_from_file_location("_bootstrap", {str(bootstrap_path)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
-# Forge __file__ to somewhere with no trailhead marker
+# Craft __file__ to somewhere with no trailhead marker
 mod.__file__ = {str(fake_file)!r}
 import os
 env_backup = os.environ.pop("TRAILHEAD_ROOT", None)

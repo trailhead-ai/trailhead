@@ -109,8 +109,8 @@ Handle each actionable entry's `action` field:
 |            | reviewer feedback — it returns Critical/Important/Minor + pushback guidance.      |
 |            | Adopt per the `receiving-code-review` skill's pattern, push, then loop.           |
 
-`log-sifter` and `code-reviewer` are forge's general helper agents, dispatched by name. portage
-ships inside trailhead alongside forge, so these helpers are always co-installed (an accepted soft
+`log-sifter` and `code-reviewer` are craft's general helper agents, dispatched by name. portage
+ships inside trailhead alongside craft, so these helpers are always co-installed (an accepted soft
 dependency — not the library coupling the spec forbids).
 
 The optional configured review bot (from `[release].review_bot_login`, default: none) is the

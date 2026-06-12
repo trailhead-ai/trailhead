@@ -2,12 +2,12 @@
 
 TDD contract (R-6 + Slice 7 test contract):
   1. Suite-wide grep guard — zero occurrences of the old identifiers in the live
-     source tree under tools/{lore,forge}/ (excludes __pycache__, .pytest_cache,
-     .git; preserves forge's unrelated uses of "review" as a capability name).
-  2. load_manifest(validate=True) succeeds for both lore and forge post-rename.
+     source tree under tools/{lore,craft}/ (excludes __pycache__, .pytest_cache,
+     .git; preserves craft's unrelated uses of "review" as a capability name).
+  2. load_manifest(validate=True) succeeds for both lore and craft post-rename.
   3. R-6 resolve-all-capabilities oracle — compose_plan for every declared
-     capability across lore + forge; every CopyOp.src exists on disk.
-  4. New agent names appear in forge council/execute compose output.
+     capability across lore + craft; every CopyOp.src exists on disk.
+  4. New agent names appear in craft council/execute compose output.
   5. lore finish skill dir exists; lore tend skill dir is GONE (Slice 7 deletes tend/review).
   6. Agent frontmatter name: fields match the new filenames.
 
@@ -27,15 +27,15 @@ from trailhead.compose import compose_plan
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
-_FORGE_MANIFEST = _REPO_ROOT / "tools" / "forge" / "capabilities.toml"
+_CRAFT_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 
 _LORE_PLUGIN_ROOT = _REPO_ROOT / "tools" / "lore" / "plugins" / "lore"
-_FORGE_PLUGIN_ROOT = _REPO_ROOT / "tools" / "forge" / "plugins" / "forge"
+_CRAFT_PLUGIN_ROOT = _REPO_ROOT / "tools" / "craft" / "plugins" / "craft"
 
 # Directories to scan for stale identifiers
 _SCAN_ROOTS = [
     _REPO_ROOT / "tools" / "lore",
-    _REPO_ROOT / "tools" / "forge",
+    _REPO_ROOT / "tools" / "craft",
 ]
 
 # Suffixes to scan
@@ -258,7 +258,7 @@ class TestGrepGuard:
         This inverts the prior WS-12 'Assumption-Prover must not appear' assertion:
         the agent file must now exist and its frontmatter name: must match the stem.
         """
-        path = _FORGE_PLUGIN_ROOT / "agents" / "assumption-prover.md"
+        path = _CRAFT_PLUGIN_ROOT / "agents" / "assumption-prover.md"
         assert path.exists(), (
             f"agents/assumption-prover.md not found at {path} — rename from agents/scout.md"
         )
@@ -277,7 +277,7 @@ class TestGrepGuard:
         - the now-old '## Handling Trailblazer Status' header / 'Trailblazer returns' callout
         and asserts the new 'Executor' role label is present.
         """
-        execute_skill = _FORGE_PLUGIN_ROOT / "skills" / "execute" / "SKILL.md"
+        execute_skill = _CRAFT_PLUGIN_ROOT / "skills" / "execute" / "SKILL.md"
         assert execute_skill.exists(), (
             f"skills/execute/SKILL.md not found at {execute_skill} — "
             "rename from skills/subagent-driven-development/"
@@ -303,6 +303,73 @@ class TestGrepGuard:
 
 
 # ---------------------------------------------------------------------------
+# 1b. forge → craft rename forbids (RED until the plugin is renamed)
+#
+# The plugin `forge` is renamed to `craft`: directory `tools/forge` → `tools/craft`,
+# inner plugin `plugins/forge` → `plugins/craft`, namespace prefix `forge:` → `craft:`,
+# marketplace `forge-local` → `craft-local`, `[tool] name = "forge"` → "craft".
+# Hard cutover, no compat alias — matching the prior UX-rename precedent.
+#
+# CRITICAL scoping: the forbids target the forge IDENTITY only. The bare `\bforge\b`
+# forbid would match many lines today (the plugin isn't renamed yet) — that is the
+# intended RED. None of these forbids touch the legitimately surviving siblings
+# (`lore`/`camp`/`portage`/`landing`) or the `review` capability word.
+#
+# NOTE (false-GREEN trap): each test calls `_collect_files()` INSIDE the method, not
+# at module scope. `_SCAN_ROOTS` now points at `tools/craft`, which does not exist
+# until Slice 1 — a module-level file list would be silently empty and pass vacuously.
+# ---------------------------------------------------------------------------
+
+
+class TestForgeToCraftRenameForbids:
+    """Zero occurrences of the old `forge` plugin identifier in live craft+lore source.
+
+    Word-boundary / token scoped to the forge identity so it never flags the
+    surviving sibling plugins (lore/camp/portage/landing) or the `review`
+    capability word. RED on purpose until the plugin is renamed to `craft`.
+    """
+
+    def test_no_bare_forge_word(self):
+        """The bare token `forge` must not appear in tools/{lore,craft} source.
+
+        Word-boundary scoped (`\\bforge\\b`) so it matches the plugin name, the
+        `forge:` namespace stem, `forge-local`, `tools/forge`, `~/.forge`, etc.,
+        but not unrelated substrings. RED until the plugin dir + identity rename.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"\bforge\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the bare word 'forge' — must be 'craft' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_forge_namespace_prefix(self):
+        """The `forge:` namespace prefix must not appear after rename to `craft:`.
+
+        Targets the plugin invocation/namespace form (`forge:planner`, `/forge:plan`,
+        `forge:execute`, …). RED until every `forge:` reference is repointed to `craft:`.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"forge:", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the 'forge:' namespace prefix — must be 'craft:' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_forge_local_marketplace(self):
+        """The `forge-local` marketplace name must not appear after rename to `craft-local`."""
+        files = _collect_files()
+        hits = _grep_files(r"forge-local", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the 'forge-local' marketplace name — must be 'craft-local' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+
+# ---------------------------------------------------------------------------
 # 2. load_manifest(validate=True) post-rename
 # ---------------------------------------------------------------------------
 
@@ -315,10 +382,14 @@ class TestManifestValidation:
         m = load_manifest(_LORE_MANIFEST)
         assert m.tool_name == "lore"
 
-    def test_forge_manifest_validates_after_rename(self):
-        """forge capabilities.toml must load without error post-rename."""
-        m = load_manifest(_FORGE_MANIFEST)
-        assert m.tool_name == "forge"
+    def test_craft_manifest_validates_after_rename(self):
+        """craft capabilities.toml must load without error and report tool_name 'craft'.
+
+        RED until tools/craft exists (forge→craft rename, Slice 1). Asserts the
+        [tool] name flipped from 'forge' to 'craft'.
+        """
+        m = load_manifest(_CRAFT_MANIFEST)
+        assert m.tool_name == "craft"
 
     def test_lore_recall_references_tend_skill(self):
         """Slice 7 INVERSION: lore recall must NO LONGER reference skills/tend.
@@ -365,52 +436,52 @@ class TestManifestValidation:
             "lore sessions still references 'skills/finished' — update to 'skills/finish'"
         )
 
-    def test_forge_execute_references_assumption_prover_and_executor(self):
-        """forge execute capability must reference assumption-prover.md and executor.md."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_execute_references_assumption_prover_and_executor(self):
+        """craft execute capability must reference assumption-prover.md and executor.md."""
+        m = load_manifest(_CRAFT_MANIFEST)
         cap = m.capabilities["execute"]
         assert "agents/assumption-prover.md" in cap["agents"], (
-            f"forge execute must reference 'agents/assumption-prover.md'; got {cap['agents']}"
+            f"craft execute must reference 'agents/assumption-prover.md'; got {cap['agents']}"
         )
         assert "agents/executor.md" in cap["agents"], (
-            f"forge execute must reference 'agents/executor.md'; got {cap['agents']}"
+            f"craft execute must reference 'agents/executor.md'; got {cap['agents']}"
         )
         assert "agents/scout.md" not in cap["agents"], (
-            "forge execute still references old 'agents/scout.md'"
+            "craft execute still references old 'agents/scout.md'"
         )
         assert "agents/trailblazer.md" not in cap["agents"], (
-            "forge execute still references old 'agents/trailblazer.md'"
+            "craft execute still references old 'agents/trailblazer.md'"
         )
         assert "skills/execute" in cap["skills"], (
-            f"forge execute must reference 'skills/execute'; got {cap['skills']}"
+            f"craft execute must reference 'skills/execute'; got {cap['skills']}"
         )
         assert "skills/subagent-driven-development" not in cap["skills"], (
-            "forge execute still references old 'skills/subagent-driven-development'"
+            "craft execute still references old 'skills/subagent-driven-development'"
         )
 
-    def test_forge_council_references_council_agents(self):
-        """forge council capability must reference the bare-named council agents (advocate/builder/breaker/attacker)."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_council_references_council_agents(self):
+        """craft council capability must reference the bare-named council agents (advocate/builder/breaker/attacker)."""
+        m = load_manifest(_CRAFT_MANIFEST)
         cap = m.capabilities["council"]
         agents = cap["agents"]
         assert "agents/advocate.md" in agents, (
-            f"forge council must reference 'agents/advocate.md'; got {agents}"
+            f"craft council must reference 'agents/advocate.md'; got {agents}"
         )
         assert "agents/builder.md" in agents, (
-            f"forge council must reference 'agents/builder.md'; got {agents}"
+            f"craft council must reference 'agents/builder.md'; got {agents}"
         )
         assert "agents/breaker.md" in agents, (
-            f"forge council must reference 'agents/breaker.md'; got {agents}"
+            f"craft council must reference 'agents/breaker.md'; got {agents}"
         )
         assert "agents/attacker.md" in agents, (
-            f"forge council must reference 'agents/attacker.md'; got {agents}"
+            f"craft council must reference 'agents/attacker.md'; got {agents}"
         )
         for agent in agents:
             assert "council-" not in agent, (
-                f"forge council still references old council- agent: {agent}"
+                f"craft council still references old council- agent: {agent}"
             )
             assert "circle-" not in agent, (
-                f"forge council still references old circle- agent: {agent}"
+                f"craft council still references old circle- agent: {agent}"
             )
 
 
@@ -434,7 +505,7 @@ class TestCouncilAgentStandaloneDescriptions:
     def test_council_agents_drop_council_only_gate(self):
         """No renamed council agent may keep the 'use only when invoked' standalone-blocking clause."""
         for stem in ("advocate", "builder", "breaker", "attacker"):
-            path = _FORGE_PLUGIN_ROOT / "agents" / f"{stem}.md"
+            path = _CRAFT_PLUGIN_ROOT / "agents" / f"{stem}.md"
             assert path.exists(), f"renamed council agent not found: {path}"
             desc = _read_agent_text(path)
             assert "use only when invoked by a planning skill" not in desc, (
@@ -449,8 +520,8 @@ class TestCouncilAgentStandaloneDescriptions:
         troubleshooter diagnoses root cause of an *existing* failure. The differentiating
         phrase must live in breaker and not in troubleshooter.
         """
-        breaker = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "breaker.md")
-        troubleshooter = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "troubleshooter.md")
+        breaker = _read_agent_text(_CRAFT_PLUGIN_ROOT / "agents" / "breaker.md")
+        troubleshooter = _read_agent_text(_CRAFT_PLUGIN_ROOT / "agents" / "troubleshooter.md")
         phrase = "before building"
         assert phrase in breaker, (
             f"breaker.md description must carry the differentiating phrase {phrase!r}"
@@ -467,8 +538,8 @@ class TestCouncilAgentStandaloneDescriptions:
         audits an existing diff/PR/module against OWASP. The differentiating phrase must live in
         attacker and not in security-auditor.
         """
-        attacker = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "attacker.md")
-        auditor = _read_agent_text(_FORGE_PLUGIN_ROOT / "agents" / "security-auditor.md")
+        attacker = _read_agent_text(_CRAFT_PLUGIN_ROOT / "agents" / "attacker.md")
+        auditor = _read_agent_text(_CRAFT_PLUGIN_ROOT / "agents" / "security-auditor.md")
         phrase = "red-team a design"
         assert phrase in attacker, (
             f"attacker.md description must carry the differentiating phrase {phrase!r}"
@@ -509,11 +580,11 @@ class TestResolveAllCapabilitiesOracle:
             + "\n".join(missing)
         )
 
-    def test_forge_all_capabilities_resolve_to_existing_src(self, tmp_path):
-        """Every CopyOp.src for every forge capability must exist on disk."""
-        missing = self._check_manifest(_FORGE_MANIFEST, tmp_path)
+    def test_craft_all_capabilities_resolve_to_existing_src(self, tmp_path):
+        """Every CopyOp.src for every craft capability must exist on disk."""
+        missing = self._check_manifest(_CRAFT_MANIFEST, tmp_path)
         assert not missing, (
-            "R-6: forge capability compose_plan produced CopyOps with missing src:\n"
+            "R-6: craft capability compose_plan produced CopyOps with missing src:\n"
             + "\n".join(missing)
         )
 
@@ -524,28 +595,28 @@ class TestResolveAllCapabilitiesOracle:
 
 
 class TestNewAgentNamesInCompose:
-    """compose_plan for forge council/execute resolves new agent names."""
+    """compose_plan for craft council/execute resolves new agent names."""
 
-    def test_forge_council_compose_includes_council_agents(self, tmp_path):
-        """forge council compose includes the bare-named council agent CopyOps."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_council_compose_includes_council_agents(self, tmp_path):
+        """craft council compose includes the bare-named council agent CopyOps."""
+        m = load_manifest(_CRAFT_MANIFEST)
         plan = compose_plan(m, {"council"}, tmp_path / "dest")
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
         for name in ("advocate.md", "builder.md", "breaker.md", "attacker.md"):
             assert name in agent_srcs, (
-                f"compose_plan for forge 'council' must include {name}; got {agent_srcs}"
+                f"compose_plan for craft 'council' must include {name}; got {agent_srcs}"
             )
 
-    def test_forge_execute_compose_includes_assumption_prover_and_executor(self, tmp_path):
-        """forge execute compose includes assumption-prover.md and executor.md CopyOps."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_execute_compose_includes_assumption_prover_and_executor(self, tmp_path):
+        """craft execute compose includes assumption-prover.md and executor.md CopyOps."""
+        m = load_manifest(_CRAFT_MANIFEST)
         plan = compose_plan(m, {"execute"}, tmp_path / "dest")
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
         assert "assumption-prover.md" in agent_srcs, (
-            f"compose_plan for forge 'execute' must include assumption-prover.md; got {agent_srcs}"
+            f"compose_plan for craft 'execute' must include assumption-prover.md; got {agent_srcs}"
         )
         assert "executor.md" in agent_srcs, (
-            f"compose_plan for forge 'execute' must include executor.md; got {agent_srcs}"
+            f"compose_plan for craft 'execute' must include executor.md; got {agent_srcs}"
         )
 
     def test_lore_recall_compose_includes_librarian(self, tmp_path):
@@ -631,12 +702,12 @@ class TestFrontmatterNameMatchesFilename:
 
     @pytest.mark.parametrize("stem,path", [
         ("librarian", _LORE_PLUGIN_ROOT / "agents" / "librarian.md"),
-        ("advocate", _FORGE_PLUGIN_ROOT / "agents" / "advocate.md"),
-        ("builder", _FORGE_PLUGIN_ROOT / "agents" / "builder.md"),
-        ("breaker", _FORGE_PLUGIN_ROOT / "agents" / "breaker.md"),
-        ("attacker", _FORGE_PLUGIN_ROOT / "agents" / "attacker.md"),
-        ("assumption-prover", _FORGE_PLUGIN_ROOT / "agents" / "assumption-prover.md"),
-        ("executor", _FORGE_PLUGIN_ROOT / "agents" / "executor.md"),
+        ("advocate", _CRAFT_PLUGIN_ROOT / "agents" / "advocate.md"),
+        ("builder", _CRAFT_PLUGIN_ROOT / "agents" / "builder.md"),
+        ("breaker", _CRAFT_PLUGIN_ROOT / "agents" / "breaker.md"),
+        ("attacker", _CRAFT_PLUGIN_ROOT / "agents" / "attacker.md"),
+        ("assumption-prover", _CRAFT_PLUGIN_ROOT / "agents" / "assumption-prover.md"),
+        ("executor", _CRAFT_PLUGIN_ROOT / "agents" / "executor.md"),
     ])
     def test_agent_frontmatter_name_matches_filename(self, stem: str, path: Path):
         """Agent frontmatter name: must match the new filename stem."""
@@ -649,12 +720,12 @@ class TestFrontmatterNameMatchesFilename:
 
 
 # ---------------------------------------------------------------------------
-# 7. Slice 2 — forge:consult skill + single-source council membership
+# 7. Slice 2 — craft:consult skill + single-source council membership
 # ---------------------------------------------------------------------------
 
-_CONSULT_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "consult" / "SKILL.md"
-_COUNCIL_INCLUDE = _FORGE_PLUGIN_ROOT / "skills" / "_shared" / "council.md"
-_PLANNING_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
+_CONSULT_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "consult" / "SKILL.md"
+_COUNCIL_INCLUDE = _CRAFT_PLUGIN_ROOT / "skills" / "_shared" / "council.md"
+_PLANNING_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
 
 # The four council agent stems the membership single-source-of-truth must name,
 # each resolving to agents/<stem>.md.
@@ -681,25 +752,25 @@ def _has_registrable_frontmatter(skill_md: Path) -> bool:
 
 
 class TestConsultSkillAndSharedCouncil:
-    """Slice 2: the forge:consult skill and the single-source council membership include."""
+    """Slice 2: the craft:consult skill and the single-source council membership include."""
 
     def test_consult_skill_dir_exists_with_skill_md(self):
         """skills/consult/ must exist with a SKILL.md (new standalone-invocable council skill)."""
         assert _CONSULT_SKILL.exists(), (
             f"skills/consult/SKILL.md not found at {_CONSULT_SKILL} — "
-            "create the forge:consult skill that convenes the council panel."
+            "create the craft:consult skill that convenes the council panel."
         )
 
     def test_consult_skill_is_registrable(self):
         """skills/consult/SKILL.md must carry non-empty name: + description: frontmatter.
 
         Without registrable frontmatter Claude Code will not register it as a
-        /forge:consult command (same invariant as test_skills_registrable).
+        /craft:consult command (same invariant as test_skills_registrable).
         """
         assert _CONSULT_SKILL.exists(), f"skills/consult/SKILL.md not found at {_CONSULT_SKILL}"
         assert _has_registrable_frontmatter(_CONSULT_SKILL), (
             "skills/consult/SKILL.md must open with frontmatter carrying a non-empty "
-            "`name:` and `description:` or Claude Code will not register /forge:consult"
+            "`name:` and `description:` or Claude Code will not register /craft:consult"
         )
 
     def test_consult_frontmatter_name_is_consult(self):
@@ -739,7 +810,7 @@ class TestConsultSkillAndSharedCouncil:
             assert stem in text, (
                 f"council.md must name the {stem!r} agent (single source of truth)"
             )
-            agent_file = _FORGE_PLUGIN_ROOT / "agents" / f"{stem}.md"
+            agent_file = _CRAFT_PLUGIN_ROOT / "agents" / f"{stem}.md"
             assert agent_file.exists(), (
                 f"council.md names {stem!r} but {agent_file} does not exist — "
                 "the membership include drifted from the renamed agent files."
@@ -774,7 +845,7 @@ class TestConsultSkillAndSharedCouncil:
         Agent calls to the four members), NOT the absence of the string 'consult' — planning
         legitimately *mentions* consult to explain it must not delegate to it. We assert the
         direct-dispatch evidence (each member named for an Agent dispatch) so a future rewrite
-        that swaps direct dispatch for a `/forge:consult` call would drop these and fail.
+        that swaps direct dispatch for a `/craft:consult` call would drop these and fail.
         """
         assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
         text = _PLANNING_SKILL.read_text()
@@ -787,48 +858,48 @@ class TestConsultSkillAndSharedCouncil:
                 f"planning/SKILL.md must still name {stem!r} for direct council dispatch"
             )
 
-    def test_forge_council_capability_includes_consult_skill(self):
-        """forge council capability must list skills/consult."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_council_capability_includes_consult_skill(self):
+        """craft council capability must list skills/consult."""
+        m = load_manifest(_CRAFT_MANIFEST)
         cap = m.capabilities["council"]
         assert "skills/consult" in cap["skills"], (
-            f"forge council capability must reference 'skills/consult'; got {cap['skills']}"
+            f"craft council capability must reference 'skills/consult'; got {cap['skills']}"
         )
 
-    def test_forge_council_compose_includes_consult_skill(self, tmp_path):
+    def test_craft_council_compose_includes_consult_skill(self, tmp_path):
         """compose_plan({'council'}) must include the consult skill dir as a CopyOp."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         plan = compose_plan(m, {"council"}, tmp_path / "dest")
         skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
         assert "consult" in skill_srcs, (
-            f"compose_plan for forge 'council' must include the consult skill dir; got {skill_srcs}"
+            f"compose_plan for craft 'council' must include the consult skill dir; got {skill_srcs}"
         )
 
 
 # ---------------------------------------------------------------------------
-# 8. Slice 3 — planning Step-10 handoff names /forge:execute without a
+# 8. Slice 3 — planning Step-10 handoff names /craft:execute without a
 #    self-referential trigger-verb collision (KU — accept-as-risk, by test).
 # ---------------------------------------------------------------------------
 
 
 class TestPlanningExecuteHandoff:
     """The reworded planning Step-10 handoff must keep pulling in the renamed
-    `/forge:execute` skill while NOT making the continuation trigger word identical
+    `/craft:execute` skill while NOT making the continuation trigger word identical
     to the bare skill name (the old prompt said *reply **execute** to hand off to
     subagent-driven-development* — post-rename the verb would collide with the
-    skill name `/forge:execute`).
+    skill name `/craft:execute`).
 
     These are meaningful WANT-artifact assertions, not vacuous absence checks:
-    the handoff target `/forge:execute` must be named, and the trigger phrasing
+    the handoff target `/craft:execute` must be named, and the trigger phrasing
     must be present in a non-self-referential form.
     """
 
-    def test_planning_names_forge_execute_as_handoff_target(self):
-        """planning/SKILL.md must name `/forge:execute` as the skill the handoff pulls in."""
+    def test_planning_names_craft_execute_as_handoff_target(self):
+        """planning/SKILL.md must name `/craft:execute` as the skill the handoff pulls in."""
         assert _PLANNING_SKILL.exists(), f"planning/SKILL.md not found at {_PLANNING_SKILL}"
         text = _PLANNING_SKILL.read_text()
-        assert "/forge:execute" in text, (
-            "planning/SKILL.md Step-10 handoff must name `/forge:execute` as the "
+        assert "/craft:execute" in text, (
+            "planning/SKILL.md Step-10 handoff must name `/craft:execute` as the "
             "skill it hands off to (the renamed subagent-driven-development)."
         )
 
@@ -836,7 +907,7 @@ class TestPlanningExecuteHandoff:
         """The continuation prompt must not instruct the user to reply with the bare
         skill name as the trigger word (the old 'reply **execute**' collision).
 
-        After rename, 'execute' == the skill name `/forge:execute`. A self-referential
+        After rename, 'execute' == the skill name `/craft:execute`. A self-referential
         prompt (*reply execute to hand off to execute*) is ambiguous, so the bold
         'reply **execute**' continuation token must be gone. We assert the OLD
         self-referential token is absent AND a non-colliding continuation verb
@@ -848,35 +919,35 @@ class TestPlanningExecuteHandoff:
         assert "Reply **execute**" not in text and "reply **execute**" not in text, (
             "planning/SKILL.md still uses the self-referential 'reply **execute**' "
             "continuation token — after the rename the trigger word collides with the "
-            "skill name `/forge:execute`. Use a non-colliding verb (e.g. **build**)."
+            "skill name `/craft:execute`. Use a non-colliding verb (e.g. **build**)."
         )
         assert "**build**" in text, (
             "planning/SKILL.md handoff must offer a non-colliding continuation verb "
-            "(e.g. **build**) so the trigger word is not identical to the `/forge:execute` "
+            "(e.g. **build**) so the trigger word is not identical to the `/craft:execute` "
             "skill name."
         )
 
 
 # ---------------------------------------------------------------------------
-# 9. Slice 4 — forge skill renames: followup→polish, handoff→shelve,
+# 9. Slice 4 — craft skill renames: followup→polish, handoff→shelve,
 #    planning→plan, requesting-code-review→review.
 #
-# CRITICAL scoping (Builder/Advocate, per-slice green-bar rule): forge keeps a
+# CRITICAL scoping (Builder/Advocate, per-slice green-bar rule): craft keeps a
 # `review` *capability* name and the new `review` *skill* slots under it. The
 # `requesting-code-review` forbid greps the LITERAL old token / skill path,
 # never a bare `review`. Likewise `plan` is common English — assert the
 # `skills/plan/` dir/path, never a bare `plan` word. And `handoff`/`followup`
 # survive legitimately as the `lore handoff` CLI subcommand, the
-# `handoff_capture.py` script, `~/.forge/handoffs/`, and the plan-brief schema
+# `handoff_capture.py` script, `~/.craft/handoffs/`, and the plan-brief schema
 # tokens `followup-to:` / `-followup-<n>` — so those forbids target the skill
 # IDENTITY only (skill path, `name:` frontmatter, `/forge:` invocation), never
 # the bare word.
 # ---------------------------------------------------------------------------
 
-_POLISH_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "polish" / "SKILL.md"
-_SHELVE_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "shelve" / "SKILL.md"
-_PLAN_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
-_REVIEW_SKILL = _FORGE_PLUGIN_ROOT / "skills" / "review" / "SKILL.md"
+_POLISH_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "polish" / "SKILL.md"
+_SHELVE_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "shelve" / "SKILL.md"
+_PLAN_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
+_REVIEW_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "review" / "SKILL.md"
 
 
 class TestSlice4SkillRenameForbids:
@@ -903,7 +974,7 @@ class TestSlice4SkillRenameForbids:
 
         Token-scoped to the skill path so it does NOT flag the legitimately
         surviving `lore handoff` CLI subcommand, the `handoff_capture.py` script,
-        or the `~/.forge/handoffs/` degraded-write location.
+        or the `~/.craft/handoffs/` degraded-write location.
         """
         files = _collect_files()
         hits = _grep_files(r"skills/handoff", files)
@@ -927,7 +998,7 @@ class TestSlice4SkillRenameForbids:
         """The literal `requesting-code-review` token must not appear after rename to skills/review.
 
         Greps the LITERAL old token (path and skill stem) — NEVER a bare `review`,
-        which survives as the forge `review` capability name and elsewhere.
+        which survives as the craft `review` capability name and elsewhere.
         """
         files = _collect_files()
         hits = _grep_files(r"requesting-code-review", files)
@@ -938,7 +1009,7 @@ class TestSlice4SkillRenameForbids:
             pytest.fail("\n".join(msg_lines))
 
     def test_no_forge_handoff_command_invocation(self):
-        """The `/forge:handoff` skill invocation must not appear after rename to /forge:shelve.
+        """The `/forge:handoff` skill invocation must not appear after rename to /craft:shelve.
 
         Scoped to the slash-command form so it targets the skill identity, not the
         `lore handoff` subcommand or the `handoff_capture.py` helper name.
@@ -946,7 +1017,7 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"/forge:handoff", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of '/forge:handoff' — must be '/forge:shelve' after rename:"]
+            msg_lines = [f"Found {len(hits)} occurrence(s) of '/forge:handoff' — must be '/craft:shelve' after rename:"]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -997,9 +1068,9 @@ class TestSlice4SkillRenameForbids:
             pytest.fail("\n".join(msg_lines))
 
     def test_old_skill_dirs_gone(self):
-        """The four old skill directories must not exist under forge plugins."""
+        """The four old skill directories must not exist under craft plugins."""
         for old in ("followup", "handoff", "planning", "requesting-code-review"):
-            old_dir = _FORGE_PLUGIN_ROOT / "skills" / old
+            old_dir = _CRAFT_PLUGIN_ROOT / "skills" / old
             assert not old_dir.exists(), (
                 f"Old skills/{old}/ still exists at {old_dir} — rename it."
             )
@@ -1034,7 +1105,7 @@ class TestSlice4RenamedSkillsExistAndRegistrable:
         assert skill_md.exists(), f"skills/{stem}/SKILL.md not found at {skill_md}"
         assert _has_registrable_frontmatter(skill_md), (
             f"skills/{stem}/SKILL.md must open with non-empty name: + description: frontmatter "
-            f"or Claude Code will not register /forge:{stem}"
+            f"or Claude Code will not register /craft:{stem}"
         )
         name = _parse_frontmatter_name(skill_md)
         assert name == stem, (
@@ -1048,42 +1119,42 @@ class TestSlice4ManifestRepointed:
     def test_base_skills_repointed_to_shelve_and_polish(self):
         """[tool] base must list skills/shelve + skills/polish (pickup stays); the old
         skills/handoff + skills/followup must be gone."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         base = m.base
-        assert "skills/shelve" in base, f"forge base must reference 'skills/shelve'; got {base}"
-        assert "skills/polish" in base, f"forge base must reference 'skills/polish'; got {base}"
-        assert "skills/pickup" in base, f"forge base must keep 'skills/pickup'; got {base}"
-        assert "skills/handoff" not in base, "forge base still references old 'skills/handoff'"
-        assert "skills/followup" not in base, "forge base still references old 'skills/followup'"
+        assert "skills/shelve" in base, f"craft base must reference 'skills/shelve'; got {base}"
+        assert "skills/polish" in base, f"craft base must reference 'skills/polish'; got {base}"
+        assert "skills/pickup" in base, f"craft base must keep 'skills/pickup'; got {base}"
+        assert "skills/handoff" not in base, "craft base still references old 'skills/handoff'"
+        assert "skills/followup" not in base, "craft base still references old 'skills/followup'"
 
     def test_planning_capability_references_plan_skill(self):
-        """forge planning capability must reference skills/plan (not skills/planning)."""
-        m = load_manifest(_FORGE_MANIFEST)
+        """craft planning capability must reference skills/plan (not skills/planning)."""
+        m = load_manifest(_CRAFT_MANIFEST)
         cap = m.capabilities["planning"]
         assert "skills/plan" in cap["skills"], (
-            f"forge planning must reference 'skills/plan'; got {cap['skills']}"
+            f"craft planning must reference 'skills/plan'; got {cap['skills']}"
         )
         assert "skills/planning" not in cap["skills"], (
-            "forge planning still references old 'skills/planning'"
+            "craft planning still references old 'skills/planning'"
         )
 
     def test_review_capability_references_review_skill(self):
-        """forge review capability must reference skills/review (not skills/requesting-code-review).
+        """craft review capability must reference skills/review (not skills/requesting-code-review).
 
         The capability NAME stays `review`; only the skill path changes.
         """
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         cap = m.capabilities["review"]
         assert "skills/review" in cap["skills"], (
-            f"forge review must reference 'skills/review'; got {cap['skills']}"
+            f"craft review must reference 'skills/review'; got {cap['skills']}"
         )
         assert "skills/requesting-code-review" not in cap["skills"], (
-            "forge review still references old 'skills/requesting-code-review'"
+            "craft review still references old 'skills/requesting-code-review'"
         )
 
     def test_renamed_skills_compose_to_existing_src(self, tmp_path):
         """compose_plan for planning/review/base must resolve the renamed skill dirs on disk."""
-        m = load_manifest(_FORGE_MANIFEST)
+        m = load_manifest(_CRAFT_MANIFEST)
         for cap in ("planning", "review"):
             plan = compose_plan(m, {cap}, tmp_path / cap)
             skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
@@ -1313,7 +1384,7 @@ class TestSlice6ManifestAndTemplate:
 #     reflect outcomes", `/lore:monthly-reflection` ROADMAP idea) → forbid the
 #     skill-identity forms only: `skills/reflect`, `reflect_sessions`,
 #     `/lore:reflect`, `name: reflect`.
-#   - `review`/`tend` survive as forge's `review` *capability* + the new forge
+#   - `review`/`tend` survive as craft's `review` *capability* + the new craft
 #     `skills/review` (Slice 4) and as English ("weekly review", "review note")
 #     → forbid is PATH-SCOPED to tools/lore/ and targets the lore skill identity
 #     (`skills/review`/`skills/tend` dir, `review.py` helper, `/lore:review`/
@@ -1337,7 +1408,7 @@ class TestSlice7DeletionForbids:
     """Old reflect / tend-review / forge-ping / lore:ping identifiers must be GONE.
 
     Each forbid is identity-scoped so it can't trip a legitimate survivor (the
-    English verb `reflect`, forge's `review` capability + Slice-4 `skills/review`,
+    English verb `reflect`, craft's `review` capability + Slice-4 `skills/review`,
     network-`ping` prose).
     """
 
@@ -1383,7 +1454,7 @@ class TestSlice7DeletionForbids:
     def test_no_lore_skills_review_or_tend_path(self):
         """`skills/review` / `skills/tend` lore skill paths must be gone.
 
-        PATH-SCOPED to tools/lore/ so it does NOT flag forge's Slice-4 `skills/review`
+        PATH-SCOPED to tools/lore/ so it does NOT flag craft's Slice-4 `skills/review`
         (the renamed requesting-code-review skill, a legitimate survivor).
         """
         hits = _grep_files(r"skills/(review|tend)\b", _LORE_FILES)
@@ -1410,7 +1481,7 @@ class TestSlice7DeletionForbids:
         """`/lore:review` / `/lore:tend` invocations and `name: review`/`name: tend`
         frontmatter must be gone (the lore tend/review skill is deleted).
 
-        PATH-SCOPED to tools/lore/ — forge's `review` capability/skill is untouched.
+        PATH-SCOPED to tools/lore/ — craft's `review` capability/skill is untouched.
         """
         hits = _grep_files(r"/lore:(review|tend)\b|^name: (review|tend)\b", _LORE_FILES)
         if hits:
@@ -1486,7 +1557,7 @@ class TestSlice7DeletedSurfacesGone:
         )
 
     def test_forge_ping_agent_gone(self):
-        assert not (_FORGE_PLUGIN_ROOT / "agents" / "forge-ping.md").exists(), (
+        assert not (_CRAFT_PLUGIN_ROOT / "agents" / "forge-ping.md").exists(), (
             "agents/forge-ping.md still exists — Slice 7 deletes the forge-ping agent"
         )
 
@@ -1497,12 +1568,12 @@ class TestSlice7DeletedSurfacesGone:
             f"lore base still references deleted 'skills/ping'; got {m.base}"
         )
 
-    def test_forge_helpers_drops_forge_ping_agent(self):
-        """forge helpers capability must no longer list agents/forge-ping.md."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_helpers_drops_forge_ping_agent(self):
+        """craft helpers capability must no longer list agents/forge-ping.md."""
+        m = load_manifest(_CRAFT_MANIFEST)
         cap = m.capabilities["helpers"]
         assert "agents/forge-ping.md" not in cap["agents"], (
-            f"forge helpers still references deleted 'agents/forge-ping.md'; got {cap['agents']}"
+            f"craft helpers still references deleted 'agents/forge-ping.md'; got {cap['agents']}"
         )
 
     def test_landing_claims_has_no_dangling_deleted_entries(self):
@@ -1517,7 +1588,7 @@ class TestSlice7DeletedSurfacesGone:
 class TestSlice8ArtistCutover:
     """The artist brainstorm cutover has landed (Phase A, in-repo).
 
-    `brainstorm/SKILL.md`'s `design_mockup` extension point now names the forge
+    `brainstorm/SKILL.md`'s `design_mockup` extension point now names the craft
     `artist` agent as its concrete default provider, and `design-authoring.md`
     no longer marks the `design_mockup` seam RESERVED / not-yet-wired / a
     follow-up. (External `design-mockup-writer` retirement is Phase B and is
@@ -1528,7 +1599,7 @@ class TestSlice8ArtistCutover:
         _LORE_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
     )
     _DESIGN_AUTHORING = (
-        _FORGE_PLUGIN_ROOT / "docs" / "design-authoring.md"
+        _CRAFT_PLUGIN_ROOT / "docs" / "design-authoring.md"
     )
 
     def test_brainstorm_names_artist_as_design_mockup_provider(self):
@@ -1539,7 +1610,7 @@ class TestSlice8ArtistCutover:
         )
         assert "artist" in text, (
             "brainstorm/SKILL.md does not name the `artist` agent — the cutover "
-            "rewires design_mockup to dispatch the forge artist by default"
+            "rewires design_mockup to dispatch the craft artist by default"
         )
 
     def test_design_authoring_seam_no_longer_reserved(self):
@@ -1557,7 +1628,7 @@ class TestSlice8ArtistCutover:
 #
 # After Slice 6 (radar→follow-up data layer) and Slice 7 (reflect/tend/review
 # deletions), the LAST legitimate survivors of the word `radar` in tools/{lore,
-# forge} are the one-shot vault migration script + its test (the migration
+# craft} are the one-shot vault migration script + its test (the migration
 # FROM-side). Everything else — harvest emitters, dead command refs, taxonomy
 # prose, stale fixture dir names — must be gone. This consolidates the bare
 # `\bradar\b == 0` guard the earlier slices deferred, plus the dead-command and
@@ -1597,11 +1668,11 @@ def _scan_files_excluding_experiments() -> list[Path]:
 
 
 class TestSlice9RadarFullForbid:
-    """Comprehensive radar sweep — `\\bradar\\b == 0` across tools/{lore,forge}
+    """Comprehensive radar sweep — `\\bradar\\b == 0` across tools/{lore,craft}
     except the migration script + its test (the legit FROM-side)."""
 
     def test_no_bare_radar_word_anywhere(self):
-        """The bare word `radar` must not appear in tools/{lore,forge} source.
+        """The bare word `radar` must not appear in tools/{lore,craft} source.
 
         Token-scoped allowlist by FILENAME for the migration script + its test
         (legit FROM-side) and this guard file's own forbid lines. Everything
@@ -1689,7 +1760,7 @@ class TestSlice9DesignMockupWriterForbid:
 # ---------------------------------------------------------------------------
 
 # Old release identifiers that must not appear in tools/portage or tools/landing.
-# They legitimately still exist in tools/forge until Slice 6 deletes them — so
+# They legitimately still exist in tools/craft until Slice 6 deletes them — so
 # the scan roots here are scoped to portage and landing only.
 _RELEASE_OLD_IDENTIFIERS = [
     "pr-summarizer",
@@ -1709,7 +1780,7 @@ _LANDING_ROOT = _REPO_ROOT / "tools" / "landing"
 
 
 def _collect_portage_landing_files() -> list[Path]:
-    """Collect all relevant source files in portage + landing (not forge)."""
+    """Collect all relevant source files in portage + landing (not craft)."""
     files: list[Path] = []
     for root in (_PORTAGE_ROOT, _LANDING_ROOT):
         if not root.exists():
@@ -1727,9 +1798,9 @@ def _collect_portage_landing_files() -> list[Path]:
 class TestOldReleaseIdentifiersAbsentFromPortageLanding:
     """Old release identifiers must not appear in tools/portage or tools/landing.
 
-    These identifiers legitimately still exist in tools/forge (until Slice 6
+    These identifiers legitimately still exist in tools/craft (until Slice 6
     deletes them). The assertions are scoped to portage+landing only so the
-    existing forge tests remain unaffected.
+    existing craft tests remain unaffected.
 
     Identifiers checked: pr-summarizer, pr-updater, watch-pr, watch-preview,
     diagnose-preview, create-pr, update-pr, merge-pr, github-pr, post-merge-decide.
@@ -1751,11 +1822,11 @@ class TestOldReleaseIdentifiersAbsentFromPortageLanding:
 
 
 # ---------------------------------------------------------------------------
-# 14. Slice 6 (Spec B) — forge release cluster is GONE (the hard cut)
+# 14. Slice 6 (Spec B) — craft release cluster is GONE (the hard cut)
 # ---------------------------------------------------------------------------
 
 # The 8 release scripts moved to trailhead/vcs/ + landing — they must be ABSENT
-# from tools/forge after Slice 6's deletion.
+# from tools/craft after Slice 6's deletion.
 _MOVED_RELEASE_SCRIPTS = [
     "detect_repos.py",
     "check_pr_status.py",
@@ -1767,7 +1838,7 @@ _MOVED_RELEASE_SCRIPTS = [
     "soak_health.py",
 ]
 
-# The 7 release skill dirs deleted from forge.
+# The 7 release skill dirs deleted from craft.
 _DELETED_RELEASE_SKILLS = [
     "create-pr",
     "update-pr",
@@ -1778,7 +1849,7 @@ _DELETED_RELEASE_SKILLS = [
     "post-merge-decide",
 ]
 
-# The 5 release agents deleted from forge (incl. pr-summarizer → portage's summarizer).
+# The 5 release agents deleted from craft (incl. pr-summarizer → portage's summarizer).
 _DELETED_RELEASE_AGENTS = [
     "pr-updater.md",
     "watch-pr.md",
@@ -1788,54 +1859,54 @@ _DELETED_RELEASE_AGENTS = [
 ]
 
 
-class TestForgeReleaseClusterDeleted:
-    """Slice 6 hard cut: forge no longer exposes a `release` capability and the
-    moved release scripts/skills/agents are absent from tools/forge.
+class TestCraftReleaseClusterDeleted:
+    """Slice 6 hard cut: craft no longer exposes a `release` capability and the
+    moved release scripts/skills/agents are absent from tools/craft.
 
     portage + landing now own shipping + deploy; this locks the deletion so a
     revert (or a stray reintroduction) is caught by the suite.
     """
 
-    def test_forge_manifest_has_no_release_capability(self):
-        """forge capabilities.toml must not declare a `release` capability."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_manifest_has_no_release_capability(self):
+        """craft capabilities.toml must not declare a `release` capability."""
+        m = load_manifest(_CRAFT_MANIFEST)
         assert "release" not in m.capabilities, (
-            "forge still exposes a `release` capability — Slice 6 deletes it; "
+            "craft still exposes a `release` capability — Slice 6 deletes it; "
             "portage owns PR lifecycle and landing owns deploy soak now."
         )
 
-    def test_forge_helpers_no_longer_lists_pr_summarizer(self):
-        """forge helpers must not reference agents/pr-summarizer.md (→ portage summarizer)."""
-        m = load_manifest(_FORGE_MANIFEST)
+    def test_craft_helpers_no_longer_lists_pr_summarizer(self):
+        """craft helpers must not reference agents/pr-summarizer.md (→ portage summarizer)."""
+        m = load_manifest(_CRAFT_MANIFEST)
         helpers = m.capabilities["helpers"]
         assert "agents/pr-summarizer.md" not in helpers["agents"], (
-            "forge helpers still references agents/pr-summarizer.md — it became "
+            "craft helpers still references agents/pr-summarizer.md — it became "
             "portage's `summarizer`; remove it from [capabilities.helpers]."
         )
 
     @pytest.mark.parametrize("script", _MOVED_RELEASE_SCRIPTS)
-    def test_moved_release_script_absent_from_forge(self, script: str):
-        """Each moved release script must be absent from tools/forge."""
-        path = _FORGE_PLUGIN_ROOT / "scripts" / script
+    def test_moved_release_script_absent_from_craft(self, script: str):
+        """Each moved release script must be absent from tools/craft."""
+        path = _CRAFT_PLUGIN_ROOT / "scripts" / script
         assert not path.exists(), (
             f"{path.relative_to(_REPO_ROOT)} still exists — it moved to "
-            "trailhead/vcs/ (or landing) in the extraction; delete the forge copy."
+            "trailhead/vcs/ (or landing) in the extraction; delete the craft copy."
         )
 
     @pytest.mark.parametrize("skill", _DELETED_RELEASE_SKILLS)
-    def test_deleted_release_skill_dir_absent_from_forge(self, skill: str):
-        """Each deleted release skill directory must be absent from tools/forge."""
-        path = _FORGE_PLUGIN_ROOT / "skills" / skill
+    def test_deleted_release_skill_dir_absent_from_craft(self, skill: str):
+        """Each deleted release skill directory must be absent from tools/craft."""
+        path = _CRAFT_PLUGIN_ROOT / "skills" / skill
         assert not path.exists(), (
-            f"forge skills/{skill}/ still exists — Slice 6 deletes the release "
+            f"craft skills/{skill}/ still exists — Slice 6 deletes the release "
             "skill cluster (portage/landing own it now)."
         )
 
     @pytest.mark.parametrize("agent", _DELETED_RELEASE_AGENTS)
-    def test_deleted_release_agent_absent_from_forge(self, agent: str):
-        """Each deleted release agent file must be absent from tools/forge."""
-        path = _FORGE_PLUGIN_ROOT / "agents" / agent
+    def test_deleted_release_agent_absent_from_craft(self, agent: str):
+        """Each deleted release agent file must be absent from tools/craft."""
+        path = _CRAFT_PLUGIN_ROOT / "agents" / agent
         assert not path.exists(), (
-            f"forge agents/{agent} still exists — Slice 6 deletes the release "
+            f"craft agents/{agent} still exists — Slice 6 deletes the release "
             "agent cluster (portage/landing own it now)."
         )

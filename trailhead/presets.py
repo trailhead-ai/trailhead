@@ -3,7 +3,7 @@
 Preset table (spec §832-838):
 
   minimal  = lore{capture, recall, sessions}
-  standard = minimal + camp{} (base only) + forge{planning, execute, review, helpers}
+  standard = minimal + camp{} (base only) + craft{planning, execute, review, helpers}
   full     = every capability declared in each tool's capabilities.toml (computed at
              runtime from load_manifest — cannot drift from the manifests, D-2)
 
@@ -23,7 +23,7 @@ _MINIMAL: dict[str, set[str]] = {
 _STANDARD: dict[str, set[str]] = {
     "lore": {"capture", "recall", "sessions"},
     "camp": set(),
-    "forge": {"planning", "execute", "review", "helpers"},
+    "craft": {"planning", "execute", "review", "helpers"},
 }
 
 _STATIC_PRESETS = {
@@ -80,7 +80,7 @@ def _compute_full() -> dict[str, set[str]]:
     tools = {
         "lore": _REPO_ROOT / "tools" / "lore" / "capabilities.toml",
         "camp": _REPO_ROOT / "tools" / "camp" / "capabilities.toml",
-        "forge": _REPO_ROOT / "tools" / "forge" / "capabilities.toml",
+        "craft": _REPO_ROOT / "tools" / "craft" / "capabilities.toml",
         "portage": _REPO_ROOT / "tools" / "portage" / "capabilities.toml",
         "landing": _REPO_ROOT / "tools" / "landing" / "capabilities.toml",
     }

@@ -113,8 +113,8 @@ You receive a context dict from soaker with these keys:
 
 7. **Apply Rule 2** before finalising — list unexplained signals.
 
-`log-sifter`, `troubleshooter`, and `researcher` are forge's general helper agents,
-dispatched by name. landing ships inside trailhead alongside forge, so these helpers
+`log-sifter`, `troubleshooter`, and `researcher` are craft's general helper agents,
+dispatched by name. landing ships inside trailhead alongside craft, so these helpers
 are always co-installed (an accepted soft dependency — not the library coupling the
 spec forbids).
 

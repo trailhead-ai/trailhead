@@ -13,7 +13,7 @@ see [composition-seam.md](composition-seam.md) for that layer.
 name   = "trailhead"                       # unique repo identifier
 rev    = "<40-char-lowercase-hex-sha>"     # full commit SHA — see rules below
 source = "${registry}/trailhead"           # ${registry}-relative or fully-qualified URL
-tools  = ["trailhead", "lore", "camp", "forge"]  # tool set this repo provides
+tools  = ["trailhead", "lore", "camp", "craft"]  # tool set this repo provides
 ```
 
 Each manifest may contain one or more `[[repo]]` entries.  Duplicate `name`

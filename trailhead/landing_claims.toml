@@ -8,11 +8,11 @@
 #   kind    — one of: command | preset | skill | agent | capability | doc-link
 #             prose-assertion exceptions (not resolved by the gate):
 #               positioning | allowlisted-example
-#   tool    — trailhead | lore | forge | camp | portage | landing
+#   tool    — trailhead | lore | craft | camp | portage | landing
 #   ref     — the anchor to resolve (subcommand name, path, capability name, etc.)
-#   source  — which README/surface makes this claim: root | lore | forge | camp | portage | landing
+#   source  — which README/surface makes this claim: root | lore | craft | camp | portage | landing
 #
-# Slice 3 extended this with per-tool README anchors (lore/forge/portage).
+# Slice 3 extended this with per-tool README anchors (lore/craft/portage).
 # Slice 4 extended this with the landing tool README anchors.
 
 # ---------------------------------------------------------------------------
@@ -114,100 +114,100 @@ ref = "agents/librarian.md"
 source = "lore"
 
 # ---------------------------------------------------------------------------
-# forge capabilities (kind=capability)
+# craft capabilities (kind=capability)
 # ---------------------------------------------------------------------------
 
 [[claim]]
 kind = "capability"
-tool = "forge"
+tool = "craft"
 ref = "planning"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "capability"
-tool = "forge"
+tool = "craft"
 ref = "execute"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "capability"
-tool = "forge"
+tool = "craft"
 ref = "council"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "capability"
-tool = "forge"
+tool = "craft"
 ref = "design"
-source = "forge"
+source = "craft"
 
 # ---------------------------------------------------------------------------
-# forge skills (kind=skill)
+# craft skills (kind=skill)
 # ---------------------------------------------------------------------------
 
 [[claim]]
 kind = "skill"
-tool = "forge"
+tool = "craft"
 ref = "skills/consult"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "skill"
-tool = "forge"
+tool = "craft"
 ref = "skills/execute"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "skill"
-tool = "forge"
+tool = "craft"
 ref = "skills/plan"
-source = "forge"
+source = "craft"
 
 # ---------------------------------------------------------------------------
-# forge agents (kind=agent)
+# craft agents (kind=agent)
 # ---------------------------------------------------------------------------
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/assumption-prover.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/executor.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/artist.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/advocate.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/builder.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/breaker.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/attacker.md"
-source = "forge"
+source = "craft"
 
 # ---------------------------------------------------------------------------
 # camp capabilities (kind=capability)
@@ -249,7 +249,7 @@ source = "root"
 [[claim]]
 kind = "doc-link"
 tool = "trailhead"
-ref = "tools/forge/README.md"
+ref = "tools/craft/README.md"
 source = "root"
 
 [[claim]]
@@ -328,91 +328,91 @@ source = "lore"
 # (already present above — no duplicate needed)
 
 # ---------------------------------------------------------------------------
-# Slice 3 additions — forge tool README anchors
+# Slice 3 additions — craft tool README anchors
 # ---------------------------------------------------------------------------
 
-# forge capabilities named in the README capabilities table
+# craft capabilities named in the README capabilities table
 [[claim]]
 kind = "capability"
-tool = "forge"
+tool = "craft"
 ref = "review"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "capability"
-tool = "forge"
+tool = "craft"
 ref = "helpers"
-source = "forge"
+source = "craft"
 
-# Note: forge base skills (shelve, pickup, polish) are in [tool] base = [...] not a
+# Note: craft base skills (shelve, pickup, polish) are in [tool] base = [...] not a
 # capability group; build_real_anchor_set() enumerates only capability-grouped skills,
 # so these can't be claimed as kind="skill" — they are real on-disk but unverifiable by
 # the gate oracle. Prose mentions are fine; they are not shown in fenced sh/bash blocks.
 
-# forge capability skills named in the README
+# craft capability skills named in the README
 [[claim]]
 kind = "skill"
-tool = "forge"
+tool = "craft"
 ref = "skills/review"
-source = "forge"
+source = "craft"
 
-# forge agents named in the README
+# craft agents named in the README
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/planner.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/architect.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/code-reviewer.md"
-source = "forge"
+source = "craft"
 
 # council agents (advocate/builder/breaker/attacker) are registered once,
 # above in the council-capability block — not duplicated here.
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/researcher.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/troubleshooter.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/doc-finder.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/test-runner.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/log-sifter.md"
-source = "forge"
+source = "craft"
 
 [[claim]]
 kind = "agent"
-tool = "forge"
+tool = "craft"
 ref = "agents/security-auditor.md"
-source = "forge"
+source = "craft"
 
 # ---------------------------------------------------------------------------
 # Slice 3 additions — portage tool README anchors

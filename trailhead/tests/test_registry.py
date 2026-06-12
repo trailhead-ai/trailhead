@@ -71,9 +71,9 @@ class TestGenerateMarketplaceJson:
     def test_marketplace_json_parses_as_json(self, tmp_path):
         from trailhead.registry import generate_marketplace_json
 
-        mkt_root = tmp_path / "composed" / "forge"
+        mkt_root = tmp_path / "composed" / "craft"
         mkt_root.mkdir(parents=True)
-        generate_marketplace_json(tool="forge", mkt_root=mkt_root)
+        generate_marketplace_json(tool="craft", mkt_root=mkt_root)
         mkt_json = mkt_root / ".claude-plugin" / "marketplace.json"
         data = json.loads(mkt_json.read_text())
         assert isinstance(data, dict)
@@ -82,7 +82,7 @@ class TestGenerateMarketplaceJson:
         """marketplace name must be 'trailhead-<tool>'."""
         from trailhead.registry import generate_marketplace_json
 
-        for tool in ("lore", "camp", "forge"):
+        for tool in ("lore", "camp", "craft"):
             mkt_root = tmp_path / tool
             mkt_root.mkdir(parents=True)
             generate_marketplace_json(tool=tool, mkt_root=mkt_root)
@@ -95,7 +95,7 @@ class TestGenerateMarketplaceJson:
         """The plugin source must be './plugins/<tool>' (relative)."""
         from trailhead.registry import generate_marketplace_json
 
-        for tool in ("lore", "camp", "forge"):
+        for tool in ("lore", "camp", "craft"):
             mkt_root = tmp_path / tool
             mkt_root.mkdir(parents=True)
             generate_marketplace_json(tool=tool, mkt_root=mkt_root)
@@ -208,14 +208,14 @@ class TestRegisterInvokesCliArgs:
         """CLI args must be a list, never a shell string (injection safety)."""
         from trailhead.registry import register
 
-        mkt_root = tmp_path / "composed" / "forge"
+        mkt_root = tmp_path / "composed" / "craft"
         mkt_root.mkdir(parents=True)
         calls_seen = []
 
         def stub_runner(args, **kwargs):
             calls_seen.append(args)
 
-        register(tool="forge", mkt_root=mkt_root, runner=stub_runner)
+        register(tool="craft", mkt_root=mkt_root, runner=stub_runner)
 
         for call_args in calls_seen:
             assert isinstance(call_args, list), (

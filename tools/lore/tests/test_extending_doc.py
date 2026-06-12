@@ -1,20 +1,20 @@
 """Content-accuracy guard for docs/EXTENDING.md — the public adopter cookbook.
 
 The cookbook must document the REAL extension-point set, anchored to the actual
-shipped artifacts (the `extension point — X` tags in the lore/forge skills and
-agents + the forge DEGRADATION.md table), not the spec's aspirational list.
+shipped artifacts (the `extension point — X` tags in the lore/craft skills and
+agents + the craft DEGRADATION.md table), not the spec's aspirational list.
 
 Two failure modes this guard catches:
   1. The guide names an extension point that does NOT exist in any shipped
      skill/agent (an invented point) — e.g. `log_source` or `pr_review_bot`,
      which appear only as descriptive prose in the spec, never as a tagged seam.
   2. The guide OMITS a real, tagged extension point — every `extension point — X`
-     tag shipped in lore's skills or forge's skills/agents must be mentioned by
+     tag shipped in lore's skills or craft's skills/agents must be mentioned by
      name in the cookbook.
 
 The set of real extension points is DISCOVERED from the source tree at test time
 (not hard-coded), so adding or renaming a seam upstream forces the cookbook to
-keep pace. The forge tree is the dev-agent half; lore ships its own seamed
+keep pace. The craft tree is the dev-agent half; lore ships its own seamed
 skills (brainstorm/intake). Both are scanned.
 
 `design_mockup`, the `librarian` knowledge-synthesis seam, and other tokens
@@ -35,28 +35,28 @@ README = REPO_ROOT / "README.md"
 LORE_SKILLS = REPO_ROOT / "plugins" / "lore" / "skills"
 
 
-def _find_forge_plugin() -> Path | None:
-    """Locate the sibling forge plugin tree without embedding any machine- or
+def _find_craft_plugin() -> Path | None:
+    """Locate the sibling craft plugin tree without embedding any machine- or
     owner-specific literal (this file is itself scanned by the leak gate).
 
-    Honors $FORGE_PLUGIN_ROOT, else probes the conventional sibling checkout
-    under the user's code/ dir. Returns None if forge is not present, so the
-    forge-sourced extension points are skipped rather than failing the suite on
-    a machine without a forge clone.
+    Honors $CRAFT_PLUGIN_ROOT, else probes the conventional sibling checkout
+    under the user's code/ dir. Returns None if craft is not present, so the
+    craft-sourced extension points are skipped rather than failing the suite on
+    a machine without a craft clone.
     """
     import os
 
-    env = os.environ.get("FORGE_PLUGIN_ROOT")
+    env = os.environ.get("CRAFT_PLUGIN_ROOT")
     if env and Path(env).exists():
         return Path(env)
     for base in (Path.home() / "code", REPO_ROOT.parent.parent.parent):
-        candidate = base / "forge" / "plugins" / "forge"
+        candidate = base / "craft" / "plugins" / "craft"
         if candidate.exists():
             return candidate
     return None
 
 
-FORGE_PLUGIN = _find_forge_plugin()
+CRAFT_PLUGIN = _find_craft_plugin()
 
 # Matches `extension point — feature_flags` and `extension point — `feature_flags``
 _TAG_RE = re.compile(r"extension point\s*[—-]+\s*`?([a-z_]+)`?", re.IGNORECASE)
@@ -70,8 +70,8 @@ NON_EXTENSION_POINTS = ["log_source", "pr_review_bot"]
 def _discover_extension_points() -> set[str]:
     points: set[str] = set()
     roots = [LORE_SKILLS]
-    if FORGE_PLUGIN is not None:
-        roots += [FORGE_PLUGIN / "skills", FORGE_PLUGIN / "agents"]
+    if CRAFT_PLUGIN is not None:
+        roots += [CRAFT_PLUGIN / "skills", CRAFT_PLUGIN / "agents"]
     for root in roots:
         if not root.exists():
             continue
@@ -93,16 +93,16 @@ def test_real_extension_points_discovered():
     shrinks unexpectedly, the discovery regex broke (not the doc).
 
     `design_mockup` ships in lore's own skills and is always discoverable. The
-    forge-sourced seams are only asserted when a forge checkout is present."""
+    craft-sourced seams are only asserted when a craft checkout is present."""
     assert "design_mockup" in REAL_POINTS, (
         f"discovery did not find 'design_mockup' in lore's skills; "
         f"found: {REAL_POINTS}"
     )
-    if FORGE_PLUGIN is not None:
+    if CRAFT_PLUGIN is not None:
         for expected in ("feature_flags", "observability", "issue_tracker",
                          "build_test_commands"):
             assert expected in REAL_POINTS, (
-                f"discovery did not find {expected!r} in the forge tree; "
+                f"discovery did not find {expected!r} in the craft tree; "
                 f"found: {REAL_POINTS}"
             )
 
