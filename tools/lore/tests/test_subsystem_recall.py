@@ -1,15 +1,16 @@
 """Rederived recall + session-context integration tests (D23 area semantics).
 
 These tests cover the D23 recall API (build_area_map, recall_areas) and
-the session-context menu integration. The old subsystem-API tests
+the session-context pointer integration. The old subsystem-API tests
 (derive_subsystem_keywords, infer_subsystems, render_subsystem_block) were
 replaced by test_recall_core.py in Slice 0.
 
 This file is retained to assert the session-context.py integration contract:
-- The area MAP (menu) is emitted at SessionStart, not an auto-inject recall
-  block. The agent reads the menu and calls `lore recall --areas` explicitly.
+- A compact area POINTER (count + lore areas cue) is emitted at SessionStart,
+  not the full area map and not an auto-inject recall block. The agent calls
+  `lore areas` to list them, then `lore recall --areas` explicitly.
 - No automatic "Recalled (...)" block appears regardless of branch name.
-- A branch that contains an area keyword still only shows the menu, not
+- A branch that contains an area keyword still only shows the pointer, not
   matched content (the anti-injection regression guard).
 """
 from __future__ import annotations
@@ -127,13 +128,13 @@ class TestD23ApiShape:
 # ---------------------------------------------------------------------------
 
 class TestSessionContextWithSubsystemBlock:
-    def test_matching_branch_emits_area_menu_not_auto_inject(self, tmp_path):
-        """A branch whose name contains an area keyword must show the area MENU,
-        NOT an auto-injected 'Recalled (...)' block. The agent reads the menu
-        and calls 'lore recall --areas' explicitly.
+    def test_matching_branch_emits_area_pointer_not_auto_inject(self, tmp_path):
+        """A branch whose name contains an area keyword must show the area POINTER,
+        NOT an auto-injected 'Recalled (...)' block. The agent runs `lore areas`
+        to list them, then calls 'lore recall --areas' explicitly.
 
         This is the anti-injection regression guard (the noise that got the old
-        recall deleted) rederived for D23: menu ≠ matched content.
+        recall deleted) rederived for D23: pointer ≠ matched content.
         """
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"])
@@ -151,15 +152,13 @@ class TestSessionContextWithSubsystemBlock:
             out = _run_session_context({"session_id": "abc"}, env, cwd)
         data = json.loads(out)
         ctx = data["hookSpecificOutput"]["additionalContext"]
-        # The area MAP menu must be present (Areas (N) block)
-        assert "Areas (" in ctx, (
-            f"Area menu absent from context. Context:\n{ctx}"
+        # The area pointer must be present (count + lore areas cue)
+        assert "lore areas" in ctx, (
+            f"Area pointer absent from context. Context:\n{ctx}"
         )
-        # The area NAME must appear in the menu
-        assert "auth" in ctx
         # But NO auto-inject recall block — the agent must call lore recall explicitly
         assert "Recalled (" not in ctx, (
-            "Auto-inject recall block must not appear; only the menu should be "
+            "Auto-inject recall block must not appear; only the pointer should be "
             f"emitted at SessionStart. Context:\n{ctx}"
         )
 
@@ -182,8 +181,8 @@ class TestSessionContextWithSubsystemBlock:
         ctx = data["hookSpecificOutput"]["additionalContext"]
         # Baseline index should be present
         assert "/lore:defer" in ctx
-        # Area menu is still present (always loaded, regardless of branch)
-        assert "Areas (" in ctx
+        # Area pointer is still present (always loaded, regardless of branch)
+        assert "lore areas" in ctx
         # No auto-inject recall block
         assert "Recalled (" not in ctx
 

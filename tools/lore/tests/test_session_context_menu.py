@@ -1,31 +1,27 @@
-"""Slice 2 — session-context.py area-map menu integration.
+"""Slice 2 — session-context.py area pointer injection.
 
-TDD — written BEFORE render_area_menu exists and BEFORE build_context is wired.
-Every test here must go RED on first run.
+After Slice 2 the hook no longer inlines the full area menu. Instead it emits
+a single-line pointer (via render_area_pointer) that names the count and the
+trigger cue for running `lore areas`. The full menu is still available via
+`lore areas` (Slice 1) but is no longer injected at session start.
 
 Covers (rederived from D7/D8a/Slice-2 invariants):
 
-  render_area_menu:
-    - empty list -> empty string (hook omits block)
-    - non-empty  -> contains D-7 structural label (--- lore area map ---)
-    - non-empty  -> contains "match … then `lore recall`" instruction
-    - non-empty  -> contains each area name
-    - non-empty  -> does NOT contain "Recalled (" (not a recall banner)
+  render_area_pointer:
+    - 0 areas -> empty string (hook omits block)
+    - N areas -> contains count + "lore areas" cue + "lore recall" + trigger cue
 
   build_context (hook integration):
-    - with >=1 area in fixture vault: output contains the menu block (area names
-      present) and the D-7 area-map header label
-    - with >=1 area: block is labeled as the area map, NOT as "Recalled (...)"
-    - with zero areas: output contains the baseline vault index (session-note
-      pointer / capture reminder), no menu block, no raise
-    - malformed area file: does NOT crash build_context (menu degrades gracefully)
+    - with >=1 area in fixture vault: output contains the pointer (area count,
+      "lore areas" literal, trigger cue, "lore recall"); does NOT contain
+      "lore area map" nor any individual area one-liner
+    - count equals len(build_area_map(vault))
+    - with zero areas: output contains the baseline vault index, no pointer line
     - D-8a (CRITICAL): when build_area_map is monkeypatched to raise, build_context
-      still returns the vault index (NOT empty, NOT "{}"); menu failure must NOT
+      still returns the vault index (NOT empty, NOT "{}"); pointer failure must NOT
       propagate to main()'s outer guard
-    - no automatic Recalled (...) block on any branch (anti-regression: the noise
-      that got recall deleted — there is no match-inject path)
-    - main() still prints {} on a forced exception in the core path (the existing
-      never-raise contract is intact for genuine context failures)
+    - no automatic Recalled (...) block on any branch (anti-regression)
+    - main() still prints {} on a forced exception in the core path (outer guard intact)
 """
 from __future__ import annotations
 
@@ -137,66 +133,78 @@ def _base_env(vault: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# render_area_menu unit tests
+# render_area_pointer unit tests
 # ---------------------------------------------------------------------------
 
-class TestRenderAreaMenu:
-    def test_empty_list_returns_empty_string(self):
+class TestRenderAreaPointer:
+    def test_zero_areas_returns_empty_string(self, tmp_path):
+        """0-areas vault -> empty string so the hook omits the block."""
         recall = load_recall()
-        result = recall.render_area_menu([])
+        vault = _make_vault(tmp_path)
+        # No area files — just the empty dir
+        result = recall.render_area_pointer(vault)
         assert result == ""
 
-    def test_non_empty_contains_d7_structural_label(self):
+    def test_n_areas_contains_count(self, tmp_path):
+        """N-areas -> pointer contains the area count."""
         recall = load_recall()
-        entry = recall.AreaEntry(name="workflow-dev-env", one_liner="camp dev envs", keywords=["camp"])
-        result = recall.render_area_menu([entry])
-        assert "lore area map" in result
-
-    def test_non_empty_contains_match_instruction(self):
-        recall = load_recall()
-        entry = recall.AreaEntry(name="auth", one_liner="oauth flows", keywords=["oauth"])
-        result = recall.render_area_menu([entry])
-        assert "lore recall" in result
-
-    def test_non_empty_contains_area_names(self):
-        recall = load_recall()
-        entries = [
-            recall.AreaEntry(name="auth", one_liner="oauth flows", keywords=["oauth"]),
-            recall.AreaEntry(name="flow-penny", one_liner="conversation engine", keywords=["penny"]),
-        ]
-        result = recall.render_area_menu(entries)
-        assert "auth" in result
-        assert "flow-penny" in result
-
-    def test_non_empty_does_not_contain_recalled_prefix(self):
-        recall = load_recall()
-        entry = recall.AreaEntry(name="auth", one_liner="oauth flows", keywords=["oauth"])
-        result = recall.render_area_menu([entry])
-        assert "Recalled (" not in result
-
-    def test_contains_area_count(self):
-        recall = load_recall()
-        entries = [
-            recall.AreaEntry(name="auth", one_liner="one", keywords=[]),
-            recall.AreaEntry(name="billing", one_liner="two", keywords=[]),
-        ]
-        result = recall.render_area_menu(entries)
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        _write_area(vault, "billing", ["stripe"], summary="Payment processing")
+        result = recall.render_area_pointer(vault)
         assert "2" in result
 
-    def test_one_liner_present_in_output(self):
+    def test_n_areas_contains_lore_areas_command(self, tmp_path):
+        """N-areas -> pointer contains the literal 'lore areas'."""
         recall = load_recall()
-        entry = recall.AreaEntry(name="auth", one_liner="oauth and jwt flows", keywords=[])
-        result = recall.render_area_menu([entry])
-        assert "oauth and jwt flows" in result
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        result = recall.render_area_pointer(vault)
+        assert "lore areas" in result
 
-    def test_has_open_and_close_frame(self):
+    def test_n_areas_contains_trigger_cue(self, tmp_path):
+        """N-areas -> pointer contains the 'unfamiliar topic' trigger cue."""
         recall = load_recall()
-        entry = recall.AreaEntry(name="auth", one_liner="", keywords=[])
-        result = recall.render_area_menu([entry])
-        # Should have both an opening and closing fence
-        lines = result.splitlines()
-        assert any("lore area map" in l for l in lines)
-        assert any("end" in l for l in lines)
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        result = recall.render_area_pointer(vault)
+        assert "unfamiliar" in result
+
+    def test_n_areas_contains_lore_recall(self, tmp_path):
+        """N-areas -> pointer contains 'lore recall' so agent knows the follow-up."""
+        recall = load_recall()
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        result = recall.render_area_pointer(vault)
+        assert "lore recall" in result
+
+    def test_count_matches_build_area_map_length(self, tmp_path):
+        """Count in the pointer equals len(build_area_map(vault))."""
+        recall = load_recall()
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        _write_area(vault, "billing", ["stripe"], summary="Payments")
+        _write_area(vault, "devops", ["ci"], summary="CI/CD")
+        entries = recall.build_area_map(vault)
+        result = recall.render_area_pointer(vault)
+        assert str(len(entries)) in result
+
+    def test_does_not_contain_area_names(self, tmp_path):
+        """Pointer emits only the count — untrusted area names must not reach injection."""
+        recall = load_recall()
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        result = recall.render_area_pointer(vault)
+        # The pointer should NOT include area names (only count)
+        assert "auth" not in result
+
+    def test_is_single_line(self, tmp_path):
+        """Pointer is a single line (compact, not a menu block)."""
+        recall = load_recall()
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        result = recall.render_area_pointer(vault)
+        assert len(result.strip().splitlines()) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +212,8 @@ class TestRenderAreaMenu:
 # ---------------------------------------------------------------------------
 
 class TestBuildContextMenu:
-    def test_with_areas_contains_menu_block(self, tmp_path):
+    def test_with_areas_contains_pointer_not_full_menu(self, tmp_path):
+        """With areas: context has the pointer (lore areas + cue), not the full menu."""
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"], summary="OAuth and JWT flows")
         cwd = tmp_path / "worktree"
@@ -213,10 +222,64 @@ class TestBuildContextMenu:
         out = _run_session_context({"session_id": "s1"}, _base_env(vault), cwd)
         data = json.loads(out)
         ctx = data["hookSpecificOutput"]["additionalContext"]
-        assert "auth" in ctx
-        assert "lore area map" in ctx
+        assert "lore areas" in ctx
+        assert "unfamiliar" in ctx
+        # Full menu frame must NOT be present
+        assert "lore area map" not in ctx
 
-    def test_with_areas_block_labeled_as_menu_not_recalled(self, tmp_path):
+    def test_with_areas_context_contains_area_count(self, tmp_path):
+        """With areas: context includes the area count."""
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth and JWT flows")
+        cwd = tmp_path / "worktree"
+        cwd.mkdir()
+
+        out = _run_session_context({"session_id": "s1"}, _base_env(vault), cwd)
+        data = json.loads(out)
+        ctx = data["hookSpecificOutput"]["additionalContext"]
+        assert "1" in ctx
+
+    def test_with_areas_count_matches_build_area_map(self, tmp_path):
+        """Count in context equals len(build_area_map(vault))."""
+        recall_mod = load_recall()
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
+        _write_area(vault, "billing", ["stripe"], summary="Payments")
+        cwd = tmp_path / "worktree"
+        cwd.mkdir()
+
+        entries = recall_mod.build_area_map(vault)
+        out = _run_session_context({"session_id": "s1"}, _base_env(vault), cwd)
+        data = json.loads(out)
+        ctx = data["hookSpecificOutput"]["additionalContext"]
+        assert str(len(entries)) in ctx
+
+    def test_with_areas_context_contains_lore_recall(self, tmp_path):
+        """Pointer includes 'lore recall' so agent knows the follow-up command."""
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth and JWT flows")
+        cwd = tmp_path / "worktree"
+        cwd.mkdir()
+
+        out = _run_session_context({"session_id": "s1"}, _base_env(vault), cwd)
+        data = json.loads(out)
+        ctx = data["hookSpecificOutput"]["additionalContext"]
+        assert "lore recall" in ctx
+
+    def test_with_areas_does_not_contain_individual_area_one_liners(self, tmp_path):
+        """Individual area one-liners must NOT appear in the injection (pointer only)."""
+        vault = _make_vault(tmp_path)
+        _write_area(vault, "auth", ["oauth"], summary="OAuth and JWT flows")
+        cwd = tmp_path / "worktree"
+        cwd.mkdir()
+
+        out = _run_session_context({"session_id": "s1"}, _base_env(vault), cwd)
+        data = json.loads(out)
+        ctx = data["hookSpecificOutput"]["additionalContext"]
+        # The specific one-liner from the fixture must NOT appear inline
+        assert "OAuth and JWT flows" not in ctx
+
+    def test_with_areas_block_not_labeled_as_recalled(self, tmp_path):
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
         cwd = tmp_path / "worktree"
@@ -227,7 +290,7 @@ class TestBuildContextMenu:
         ctx = data["hookSpecificOutput"]["additionalContext"]
         assert "Recalled (" not in ctx
 
-    def test_zero_areas_emits_baseline_no_menu(self, tmp_path):
+    def test_zero_areas_emits_baseline_no_pointer(self, tmp_path):
         vault = _make_vault(tmp_path)
         # No areas/ files — just the empty dir
         cwd = tmp_path / "worktree"
@@ -238,7 +301,8 @@ class TestBuildContextMenu:
         ctx = data["hookSpecificOutput"]["additionalContext"]
         # Baseline must be present (the capture reminder is always emitted)
         assert "/lore:defer" in ctx or "lore" in ctx
-        # No menu block when zero areas
+        # No pointer and no menu when zero areas
+        assert "lore areas" not in ctx
         assert "lore area map" not in ctx
 
     def test_zero_areas_does_not_raise(self, tmp_path):
@@ -260,14 +324,14 @@ class TestBuildContextMenu:
         cwd = tmp_path / "worktree"
         cwd.mkdir()
 
-        # Should not crash; valid areas still appear
+        # Should not crash; pointer for valid areas still appears
         out = _run_session_context({"session_id": "s1"}, _base_env(vault), cwd)
         data = json.loads(out)
         ctx = data["hookSpecificOutput"]["additionalContext"]
-        assert "auth" in ctx
+        assert "lore areas" in ctx
 
-    def test_d8a_menu_crash_leaves_vault_index_intact(self, tmp_path):
-        """D-8a CRITICAL: a menu-build crash must leave the vault index, not {}.
+    def test_d8a_pointer_crash_leaves_vault_index_intact(self, tmp_path):
+        """D-8a CRITICAL: a pointer-build crash must leave the vault index, not {}.
 
         Monkeypatches recall.build_area_map to raise, then verifies build_context
         still returns the vault index content (the session-note pointer / capture
@@ -294,7 +358,7 @@ class TestBuildContextMenu:
                             # Patch build_area_map to raise inside the recall module
                             with mock.patch.object(
                                 recall_mod, "build_area_map",
-                                side_effect=RuntimeError("simulated menu crash")
+                                side_effect=RuntimeError("simulated pointer crash")
                             ):
                                 mod.main()
 
@@ -302,13 +366,13 @@ class TestBuildContextMenu:
         data = json.loads(raw)
 
         # Must NOT be {}
-        assert data != {}, "D-8a violated: menu crash caused {} fallback (cold session)"
+        assert data != {}, "D-8a violated: pointer crash caused {} fallback (cold session)"
         assert "hookSpecificOutput" in data, "D-8a violated: hookSpecificOutput missing"
 
         ctx = data["hookSpecificOutput"]["additionalContext"]
         # Vault index must be intact: capture reminder always present
-        assert ctx, "D-8a violated: context is empty after menu crash"
-        # The menu block itself should be absent (gracefully degraded)
+        assert ctx, "D-8a violated: context is empty after pointer crash"
+        # Neither pointer nor menu should be present (gracefully degraded)
         assert "lore area map" not in ctx
 
     def test_no_automatic_recalled_block(self, tmp_path):

@@ -660,6 +660,32 @@ def render_area_menu(entries: list[AreaEntry]) -> str:
     return "\n".join(lines)
 
 
+def render_area_pointer(vault: Path) -> str:
+    """Return a single-line pointer to `lore areas` for the SessionStart injection.
+
+    Emits the area count plus a trigger cue and the commands to use so the
+    agent knows when and how to discover areas without inlining the full menu.
+    Returns empty string when there are 0 areas (matching today's empty-menu
+    behavior — the hook then omits the block). Never raises.
+
+    Security: only the count is emitted, not area names, so untrusted
+    frontmatter does not reach the injection via this path.
+    """
+    vault = Path(vault)
+    try:
+        entries = build_area_map(vault)
+    except Exception:
+        return ""
+    if not entries:
+        return ""
+    n = len(entries)
+    return (
+        f"**Areas:** {n} profile{'s' if n != 1 else ''} — when starting on an"
+        " unfamiliar topic, run `lore areas` to list them,"
+        " then `lore recall --areas <names>`."
+    )
+
+
 def render_recall_banner(result: RecallResult, tty: bool | None = None) -> str:
     """Render the explainable recall banner with structural framing (D-7).
 
