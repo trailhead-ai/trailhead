@@ -112,19 +112,18 @@ def build_context(session_id: str) -> str | None:
         session_note_display=session_note_display,
     )
 
-    # D-8a: wrap menu build+render in a LOCAL try/except so a menu failure
-    # never propagates to main()'s outer guard (which would drop the entire
-    # context and emit {}, cold-starting the session).
-    menu_block = ""
+    # D-8a: wrap pointer build in a LOCAL try/except so a failure here never
+    # propagates to main()'s outer guard (which would drop the entire context
+    # and emit {}, cold-starting the session).
+    pointer = ""
     try:
-        entries = _recall_mod.build_area_map(vault)
-        menu_block = _recall_mod.render_area_menu(entries)
+        pointer = _recall_mod.render_area_pointer(vault)
     except Exception as e:  # noqa: BLE001
-        print(f"session-context: menu build failed (degraded): {type(e).__name__}: {e}",
+        print(f"session-context: area pointer build failed (degraded): {type(e).__name__}: {e}",
               file=sys.stderr)
 
-    if menu_block:
-        return index + "\n\n" + menu_block
+    if pointer:
+        return index + "\n\n" + pointer
     return index
 
 

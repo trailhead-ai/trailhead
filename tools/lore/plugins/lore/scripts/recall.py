@@ -1,12 +1,18 @@
 """D23 Tier-1 area-mediated recall for the lore vault.
 
-Three pure layers, each independently testable:
+Four pure layers, each independently testable:
 
   1. build_area_map(vault)          -> list[AreaEntry]
      Scans areas/*.md, reads name/keywords/one-liner per area, returns the
-     compact always-loaded menu (alpha order, hard caps applied).
+     on-demand area menu (alpha order, hard caps applied). Served by
+     `lore areas`; no longer always-loaded at session start.
 
-  2. recall_areas(vault, area_names, project, recency_days, layers)  -> RecallResult
+  2. render_area_pointer(vault)     -> str
+     Single-line pointer for the SessionStart injection: emits the area count
+     and a trigger cue so the agent knows when/how to run `lore areas` without
+     inlining the full menu. Returns "" for 0 areas.
+
+  3. recall_areas(vault, area_names, project, recency_days, layers)  -> RecallResult
      For each requested area: pulls every decision/lesson/dead-end/open-
      deferred whose areas/surfaces frontmatter overlaps the requested set
      (slug-reduced, list-aware via frontmatter.parse_frontmatter) plus
@@ -17,7 +23,7 @@ Three pure layers, each independently testable:
      per-layer (D-7: provenance, not precedence). When layers is None, falls
      back to the single vault arg — exact Step-3 behavior, untouched.
 
-  3. render_recall_banner(result, tty)   -> str
+  4. render_recall_banner(result, tty)   -> str
      Produces the explainable banner with structural framing label.
      Differentiated zero-match: bad-name vs valid-area-empty vs results.
 
@@ -628,10 +634,11 @@ def _xml_body_escape(text: str) -> str:
 
 
 def render_area_menu(entries: list[AreaEntry]) -> str:
-    """Render the always-loaded area-map menu block (D-7 structural label).
+    """Render the area-map menu block (D-7 structural label).
 
-    Returns empty string when entries is empty — the hook then emits no block.
-    Never raises (pure function over already-parsed entries).
+    Called by `lore areas` to render the full on-demand area menu.
+    Returns empty string when entries is empty (cmd_areas prints "no areas"
+    instead). Never raises (pure function over already-parsed entries).
     """
     if not entries:
         return ""
@@ -658,6 +665,33 @@ def render_area_menu(entries: list[AreaEntry]) -> str:
                 lines.append(name_part)
     lines.append("--- end lore area map ---")
     return "\n".join(lines)
+
+
+def render_area_pointer(vault: Path) -> str:
+    """Return a single-line pointer to `lore areas` for the SessionStart injection.
+
+    Emits the area count plus a trigger cue and the commands to use so the
+    agent knows when and how to discover areas without inlining the full menu.
+    Returns empty string when there are 0 areas (matching today's empty-menu
+    behavior — the hook then omits the block).
+
+    May raise (like build_area_map). The sole caller build_context wraps this
+    in a D-8a try/except that prints a stderr diagnostic and degrades gracefully
+    (pointer omitted, vault index intact).
+
+    Security: only the count is emitted, not area names, so untrusted
+    frontmatter does not reach the injection via this path.
+    """
+    vault = Path(vault)
+    entries = build_area_map(vault)
+    if not entries:
+        return ""
+    n = len(entries)
+    return (
+        f"**Areas:** {n} profile{'s' if n != 1 else ''} — when starting on an"
+        " unfamiliar topic, run `lore areas` to list them,"
+        " then `lore recall --areas <names>`."
+    )
 
 
 def render_recall_banner(result: RecallResult, tty: bool | None = None) -> str:

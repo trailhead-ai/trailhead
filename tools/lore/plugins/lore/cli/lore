@@ -14,6 +14,7 @@ Subcommands:
   lore shelved              List shelved/handoff session notes for pickup.
   lore resume [note|slug]   Flip a shelved/handoff note back to active
                             (omit the target to resume the current session).
+  lore areas                List all vault areas (names, one-liners, keywords).
   lore sync                 Stage, commit, and push the vault.
 
 Finds its sibling ../scripts modules at import time so it works whether run
@@ -1702,6 +1703,40 @@ def cmd_recall(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_areas(args: argparse.Namespace) -> int:
+    """Print the full area menu (names, one-liners, keywords) to stdout.
+
+    Exit code is always 0 — must never fail a session (D-1).
+    Prints a one-line stderr signal and a degraded stdout "no areas" line when
+    the resolved vault path does not exist on disk, or when build_area_map
+    raises. Empty or absent areas/ dir prints a friendly "no areas" line.
+    """
+    _NO_AREAS_LINE = "No areas defined yet."
+
+    try:
+        vault = Path(vault_mod.resolve_vault())
+        if not vault.exists():
+            raise FileNotFoundError(vault)
+    except Exception as exc:
+        print(f"lore areas: could not resolve vault ({exc})", file=sys.stderr)
+        print(_NO_AREAS_LINE)
+        return 0
+
+    try:
+        entries = recall_mod.build_area_map(vault)
+    except Exception as exc:
+        print(f"lore areas: could not build area map ({exc})", file=sys.stderr)
+        print(_NO_AREAS_LINE)
+        return 0
+
+    menu = recall_mod.render_area_menu(entries)
+    if menu:
+        print(menu)
+    else:
+        print(_NO_AREAS_LINE)
+    return 0
+
+
 # ---- argparse ---------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1887,6 +1922,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_session_selectors(p_resume)
     p_resume.set_defaults(func=cmd_resume)
+
+    p_areas = sub.add_parser(
+        "areas",
+        help="List all vault areas (names, one-liners, keywords) on demand",
+    )
+    p_areas.set_defaults(func=cmd_areas)
 
     p_recall = sub.add_parser(
         "recall",

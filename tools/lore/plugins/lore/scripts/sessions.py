@@ -533,20 +533,8 @@ def render_tool_notes(vault: Path) -> str | None:
     tools = list_tool_notes(vault)
     if not tools:
         return None
-    lines = [
-        "### Tool notes — read before first invocation",
-        "",
-        "Running mental models for specific tools. When about to use one "
-        "of these for the first time in this session, read the matching file.",
-        "",
-    ]
-    for name, summary in tools:
-        if summary:
-            lines.append(f"- **`{name}`** — {summary}")
-        else:
-            lines.append(f"- **`{name}`**")
-    lines.append("")
-    return "\n".join(lines)
+    names = ", ".join(name for name, _ in tools)
+    return f"**Tool notes** (read `tools/<name>.md` before first use): {names}"
 
 
 def _count(directory: Path, predicate, recursive: bool = False) -> int:
