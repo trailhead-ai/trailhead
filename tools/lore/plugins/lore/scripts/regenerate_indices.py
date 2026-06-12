@@ -3,7 +3,7 @@
 
 Folders covered:
   - deferred/  → sorted by value/effort/date (open), then closed section
-  - radar/     → sorted by revisit-after (then added, last-checked) descending
+  - follow-ups/ → sorted by revisit-after (then added, last-checked) descending
   - lessons/   → sorted by date descending; grouped by primary area
   - plans/     → grouped by status (in-progress / ready / completed / unknown)
   - specs/     → grouped by status
@@ -230,10 +230,10 @@ def _neg_date(d: str) -> str:
 
 
 def render_dated_index(folder_name: str, folder: Path, date_keys: list[str]) -> str:
-    """For radar: list sorted by chosen date desc.
+    """For follow-ups: list sorted by chosen date desc.
 
-    Radar is a date-bucketed living folder, so the scan recurses one level into
-    `YYYY-MM/` buckets while still listing any still-flat top-level notes.
+    follow-ups is a date-bucketed living folder, so the scan recurses one level
+    into `YYYY-MM/` buckets while still listing any still-flat top-level notes.
     """
     items = []
     for p, text, fm in load_md_files(folder, recursive=True):
@@ -459,7 +459,7 @@ def render_status_index(folder_name: str, folder: Path) -> str:
 
 JOBS = [
     ("deferred", "deferred", None),
-    ("radar", "dated", ["revisit-after", "added", "last-checked"]),
+    ("follow-ups", "dated", ["revisit-after", "added", "last-checked"]),
     ("lessons", "lessons", None),
     ("plans", "status", None),
     ("specs", "status", None),

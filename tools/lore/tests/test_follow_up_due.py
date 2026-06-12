@@ -1,6 +1,6 @@
 """Behavioral tests for the radar-due selection helper.
 
-The radar_due helper selects radar notes from a vault's ``radar/`` directory
+The follow_up_due helper selects follow-up notes from a vault's ``radar/`` directory
 that are due for polling, based on their status, source, check cadence, and
 last-checked date. It also collects manual-source items separately.
 
@@ -29,14 +29,14 @@ import pytest
 SCRIPTS_DIR = Path(__file__).parent.parent / "plugins" / "lore" / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from radar_due import RadarDueResult, radar_notes_due  # noqa: E402
+from follow_up_due import FollowUpDueResult, follow_up_notes_due  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-def _write_radar(path: Path, **fields) -> None:
+def _write_follow_up(path: Path, **fields) -> None:
     """Write a minimal synthetic radar note with the given frontmatter fields."""
     lines = ["---"]
     for k, v in fields.items():
@@ -48,8 +48,8 @@ def _write_radar(path: Path, **fields) -> None:
     path.write_text("\n".join(lines))
 
 
-def _radar_dir(tmp_path: Path) -> Path:
-    d = tmp_path / "radar"
+def _follow_up_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "follow-ups"
     d.mkdir()
     return d
 
@@ -69,12 +69,12 @@ def synthetic_vault(tmp_path: Path) -> Path:
     (e) dropped → SKIP
     (f) source: manual, status: active → MANUAL (not polled)
     """
-    radar = _radar_dir(tmp_path)
+    follow_ups = _follow_up_dir(tmp_path)
 
     # (a) active + stale: checked yesterday, daily cadence → due
-    _write_radar(
-        radar / "alpha.md",
-        type="radar",
+    _write_follow_up(
+        follow_ups / "alpha.md",
+        type="follow-up",
         project="acme",
         status="active",
         source="github-release",
@@ -84,9 +84,9 @@ def synthetic_vault(tmp_path: Path) -> Path:
         **{"last-checked": "2026-05-31", "last-state": "v1.0"},
     )
     # (b) active + fresh: checked today, daily cadence → not due
-    _write_radar(
-        radar / "beta.md",
-        type="radar",
+    _write_follow_up(
+        follow_ups / "beta.md",
+        type="follow-up",
         project="acme",
         status="active",
         source="npm",
@@ -96,9 +96,9 @@ def synthetic_vault(tmp_path: Path) -> Path:
         **{"last-checked": "2026-06-01", "last-state": "1.2.3"},
     )
     # (c) active + empty last-checked (bootstrap) → due
-    _write_radar(
-        radar / "gamma.md",
-        type="radar",
+    _write_follow_up(
+        follow_ups / "gamma.md",
+        type="follow-up",
         project="acme",
         status="active",
         source="github-issue",
@@ -108,9 +108,9 @@ def synthetic_vault(tmp_path: Path) -> Path:
         **{"last-checked": "", "last-state": ""},
     )
     # (d) resolved → always skip
-    _write_radar(
-        radar / "delta.md",
-        type="radar",
+    _write_follow_up(
+        follow_ups / "delta.md",
+        type="follow-up",
         project="acme",
         status="resolved",
         source="github-pr",
@@ -120,9 +120,9 @@ def synthetic_vault(tmp_path: Path) -> Path:
         **{"last-checked": "2026-05-01", "last-state": "merged"},
     )
     # (e) dropped → always skip
-    _write_radar(
-        radar / "epsilon.md",
-        type="radar",
+    _write_follow_up(
+        follow_ups / "epsilon.md",
+        type="follow-up",
         project="acme",
         status="dropped",
         source="url",
@@ -132,9 +132,9 @@ def synthetic_vault(tmp_path: Path) -> Path:
         **{"last-checked": "2026-04-01", "last-state": ""},
     )
     # (f) source: manual, status: active → list as manual, do not poll
-    _write_radar(
-        radar / "zeta.md",
-        type="radar",
+    _write_follow_up(
+        follow_ups / "zeta.md",
+        type="follow-up",
         project="acme",
         status="active",
         source="manual",
@@ -153,42 +153,42 @@ def synthetic_vault(tmp_path: Path) -> Path:
 
 def test_active_stale_is_selected(synthetic_vault: Path):
     """(a) active + stale last-checked → in due list."""
-    result = radar_notes_due(synthetic_vault, today=date(2026, 6, 1))
+    result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
     names = {p.name for p in result.due}
     assert "alpha.md" in names
 
 
 def test_active_fresh_is_skipped(synthetic_vault: Path):
     """(b) active + fresh last-checked (checked today) → not in due list."""
-    result = radar_notes_due(synthetic_vault, today=date(2026, 6, 1))
+    result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
     names = {p.name for p in result.due}
     assert "beta.md" not in names
 
 
 def test_active_empty_last_checked_is_selected(synthetic_vault: Path):
     """(c) active + empty last-checked (bootstrap) → in due list."""
-    result = radar_notes_due(synthetic_vault, today=date(2026, 6, 1))
+    result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
     names = {p.name for p in result.due}
     assert "gamma.md" in names
 
 
 def test_resolved_is_skipped(synthetic_vault: Path):
     """(d) resolved → not in due list and not in manual list."""
-    result = radar_notes_due(synthetic_vault, today=date(2026, 6, 1))
+    result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
     all_names = {p.name for p in result.due} | {p.name for p in result.manual}
     assert "delta.md" not in all_names
 
 
 def test_dropped_is_skipped(synthetic_vault: Path):
     """(e) dropped → not in due list and not in manual list."""
-    result = radar_notes_due(synthetic_vault, today=date(2026, 6, 1))
+    result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
     all_names = {p.name for p in result.due} | {p.name for p in result.manual}
     assert "epsilon.md" not in all_names
 
 
 def test_manual_source_is_listed_separately(synthetic_vault: Path):
     """(f) source: manual → in manual list, not in due list."""
-    result = radar_notes_due(synthetic_vault, today=date(2026, 6, 1))
+    result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
     due_names = {p.name for p in result.due}
     manual_names = {p.name for p in result.manual}
     assert "zeta.md" not in due_names
@@ -197,7 +197,7 @@ def test_manual_source_is_listed_separately(synthetic_vault: Path):
 
 def test_exact_due_set(synthetic_vault: Path):
     """Combined: only {a, c} are due; {f} is manual; {b, d, e} absent from both."""
-    result = radar_notes_due(synthetic_vault, today=date(2026, 6, 1))
+    result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
     due_names = {p.name for p in result.due}
     assert due_names == {"alpha.md", "gamma.md"}
 
@@ -208,12 +208,12 @@ def test_exact_due_set(synthetic_vault: Path):
 
 def test_weekly_stale_7_days_ago_is_due(tmp_path: Path):
     """Weekly item checked exactly 7 days ago is stale (older than 7 days: strictly > 7)."""
-    radar = _radar_dir(tmp_path)
+    follow_ups = _follow_up_dir(tmp_path)
     # last-checked 7 days ago: 2026-05-25, today: 2026-06-01 → 7 days → NOT due
     # (stale only if strictly more than 7 days old)
-    _write_radar(
-        radar / "watch.md",
-        type="radar",
+    _write_follow_up(
+        follow_ups / "watch.md",
+        type="follow-up",
         project="acme",
         status="active",
         source="npm",
@@ -222,7 +222,7 @@ def test_weekly_stale_7_days_ago_is_due(tmp_path: Path):
         added="2026-01-01",
         **{"last-checked": "2026-05-25", "last-state": "1.0"},
     )
-    result = radar_notes_due(tmp_path, today=date(2026, 6, 1))
+    result = follow_up_notes_due(tmp_path, today=date(2026, 6, 1))
     # 2026-05-25 is 7 days before 2026-06-01: not stale yet
     due_names = {p.name for p in result.due}
     assert "watch.md" not in due_names
@@ -230,10 +230,10 @@ def test_weekly_stale_7_days_ago_is_due(tmp_path: Path):
 
 def test_weekly_stale_8_days_ago_is_due(tmp_path: Path):
     """Weekly item checked 8 days ago is stale."""
-    radar = _radar_dir(tmp_path)
-    _write_radar(
-        radar / "watch.md",
-        type="radar",
+    follow_ups = _follow_up_dir(tmp_path)
+    _write_follow_up(
+        follow_ups / "watch.md",
+        type="follow-up",
         project="acme",
         status="active",
         source="npm",
@@ -242,14 +242,14 @@ def test_weekly_stale_8_days_ago_is_due(tmp_path: Path):
         added="2026-01-01",
         **{"last-checked": "2026-05-24", "last-state": "1.0"},
     )
-    result = radar_notes_due(tmp_path, today=date(2026, 6, 1))
+    result = follow_up_notes_due(tmp_path, today=date(2026, 6, 1))
     due_names = {p.name for p in result.due}
     assert "watch.md" in due_names
 
 
-def test_empty_radar_dir_returns_empty_result(tmp_path: Path):
+def test_empty_follow_up_dir_returns_empty_result(tmp_path: Path):
     """A vault with no radar/ directory returns empty result gracefully."""
-    result = radar_notes_due(tmp_path, today=date(2026, 6, 1))
+    result = follow_up_notes_due(tmp_path, today=date(2026, 6, 1))
     assert result.due == []
     assert result.manual == []
     assert result.skipped_legacy == []
@@ -264,11 +264,11 @@ def test_status_preserved_after_patch(tmp_path: Path):
     from pathlib import Path as P
     import frontmatter as fm
 
-    radar = _radar_dir(tmp_path)
-    note = radar / "track.md"
-    _write_radar(
+    follow_ups = _follow_up_dir(tmp_path)
+    note = follow_ups / "track.md"
+    _write_follow_up(
         note,
-        type="radar",
+        type="follow-up",
         project="acme",
         status="active",
         source="npm",
@@ -288,7 +288,7 @@ def test_status_preserved_after_patch(tmp_path: Path):
     from status_validator import is_valid_status
     meta = fm.parse_frontmatter(note)
     assert meta["status"] == "active"
-    assert is_valid_status("radar", meta["status"])
+    assert is_valid_status("follow-ups", meta["status"])
 
 
 # ---------------------------------------------------------------------------
@@ -297,10 +297,10 @@ def test_status_preserved_after_patch(tmp_path: Path):
 
 def test_snoozed_legacy_status_does_not_crash(tmp_path: Path):
     """A note with legacy status 'snoozed' (off lore vocab) does not crash and is not polled."""
-    radar = _radar_dir(tmp_path)
-    _write_radar(
-        radar / "legacy.md",
-        type="radar",
+    follow_ups = _follow_up_dir(tmp_path)
+    _write_follow_up(
+        follow_ups / "legacy.md",
+        type="follow-up",
         project="acme",
         status="snoozed",
         source="github-issue",
@@ -310,7 +310,7 @@ def test_snoozed_legacy_status_does_not_crash(tmp_path: Path):
         **{"last-checked": "2025-01-01", "last-state": "open"},
     )
     # Must not raise; the note must not appear in due or manual
-    result = radar_notes_due(tmp_path, today=date(2026, 6, 1))
+    result = follow_up_notes_due(tmp_path, today=date(2026, 6, 1))
     due_names = {p.name for p in result.due}
     manual_names = {p.name for p in result.manual}
     assert "legacy.md" not in due_names
@@ -326,11 +326,11 @@ def test_snoozed_legacy_status_does_not_crash(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_bucketed_radar_note_is_selected(tmp_path: Path):
-    radar = _radar_dir(tmp_path)
-    (radar / "2026-06").mkdir()
-    _write_radar(
-        radar / "2026-06" / "bucketed.md",
-        type="radar",
+    follow_ups = _follow_up_dir(tmp_path)
+    (follow_ups / "2026-06").mkdir()
+    _write_follow_up(
+        follow_ups / "2026-06" / "bucketed.md",
+        type="follow-up",
         project="acme",
         status="active",
         source="github-issue",
@@ -339,17 +339,17 @@ def test_bucketed_radar_note_is_selected(tmp_path: Path):
         added="2026-05-01",
         **{"last-checked": "", "last-state": "open"},
     )
-    result = radar_notes_due(tmp_path, today=date(2026, 6, 1))
+    result = follow_up_notes_due(tmp_path, today=date(2026, 6, 1))
     assert "bucketed.md" in {p.name for p in result.due}
 
 
 def test_flat_and_bucketed_radar_both_selected(tmp_path: Path):
-    radar = _radar_dir(tmp_path)
-    (radar / "2026-06").mkdir()
+    follow_ups = _follow_up_dir(tmp_path)
+    (follow_ups / "2026-06").mkdir()
     for rel in ("flat.md", "2026-06/bucketed.md"):
-        _write_radar(
-            radar / rel,
-            type="radar",
+        _write_follow_up(
+            follow_ups / rel,
+            type="follow-up",
             project="acme",
             status="active",
             source="github-issue",
@@ -358,5 +358,5 @@ def test_flat_and_bucketed_radar_both_selected(tmp_path: Path):
             added="2026-05-01",
             **{"last-checked": "", "last-state": "open"},
         )
-    result = radar_notes_due(tmp_path, today=date(2026, 6, 1))
+    result = follow_up_notes_due(tmp_path, today=date(2026, 6, 1))
     assert {p.name for p in result.due} == {"flat.md", "bucketed.md"}

@@ -302,7 +302,7 @@ source = "lore"
 [[claim]]
 kind = "skill"
 tool = "lore"
-ref = "skills/radar"
+ref = "skills/follow-up"
 source = "lore"
 
 [[claim]]

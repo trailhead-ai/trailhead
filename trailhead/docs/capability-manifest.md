@@ -30,7 +30,7 @@ validate = true                         # optional, default true — see validat
 
 ```toml
 [capabilities.capture]
-description = "Capture decisions, dead-ends, deferrals, radar items, area notes, and intake seeds into the vault."
+description = "Capture decisions, dead-ends, deferrals, follow-ups, area notes, and intake seeds into the vault."
 skills = ["skills/decision", "skills/dead-end", "skills/defer"]
 agents = []
 ```
@@ -154,13 +154,13 @@ base = ["skills/_shared", "skills/sync", "skills/ping"]
 hooks_json = "hooks/hooks.json"
 
 [capabilities.capture]
-description = "Capture decisions, dead-ends, deferrals, radar items, area notes, and intake seeds into the vault."
+description = "Capture decisions, dead-ends, deferrals, follow-ups, area notes, and intake seeds into the vault."
 skills = [
   "skills/decision",
   "skills/dead-end",
   "skills/defer",
-  "skills/radar",
-  "skills/check-radar",
+  "skills/follow-up",
+  "skills/check-in",
   "skills/area",
   "skills/seed",
   "skills/brainstorm",

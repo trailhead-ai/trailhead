@@ -15,7 +15,7 @@ and `Bash(git)` — tools every Claude Code session already has.
 | `/lore:defer` | Work chosen not to do now, with a trigger to revisit |
 | `/lore:dead-end` | Approaches tried that didn't work, with a revive condition |
 | `/lore:decision` | Non-obvious architectural choices and their reasoning |
-| `/lore:radar` | External things out of your control being watched |
+| `/lore:follow-up` | External things out of your control being watched |
 | `/lore:area` | Mental model of a codebase area (files, gotchas, conventions) |
 
 Session lifecycle is automatic: `/lore:checkpoint` snapshots in-flight state;
@@ -48,7 +48,8 @@ with the area map already included so the agent knows which areas exist.
 | `/lore:defer` | Capture a deferred item |
 | `/lore:dead-end` | Record a dead-end approach |
 | `/lore:decision` | Record an architectural decision |
-| `/lore:radar` | Add a radar watch item |
+| `/lore:follow-up` | Add a follow-up watch item |
+| `/lore:check-in` | Poll active follow-ups for movement |
 | `/lore:area` | Create or update an area profile |
 | `/lore:checkpoint` | Mid-session snapshot — harvest state into the session note |
 | `/lore:finished` | Canonical end-of-session finish — fill, finalize, expand harvest-pending, and commit |

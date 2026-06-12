@@ -200,7 +200,7 @@ class TestNewPlanSpecBucket:
 
 
 # ---------------------------------------------------------------------------
-# Slice 6: living folders (deferred/decision/radar/dead-end) bucket on create
+# Slice 6: living folders (deferred/decision/follow-up/dead-end) bucket on create
 # ---------------------------------------------------------------------------
 
 class TestNewLivingFolderBucket:
@@ -209,7 +209,7 @@ class TestNewLivingFolderBucket:
         [
             ("deferred", "deferred"),
             ("decision", "decisions"),
-            ("radar", "radar"),
+            ("follow-up", "follow-ups"),
             ("dead-end", "dead-ends"),
         ],
     )
@@ -233,7 +233,7 @@ class TestNewLivingFolderBucket:
         [
             ("deferred", "deferred"),
             ("decision", "decisions"),
-            ("radar", "radar"),
+            ("follow-up", "follow-ups"),
             ("dead-end", "dead-ends"),
         ],
     )

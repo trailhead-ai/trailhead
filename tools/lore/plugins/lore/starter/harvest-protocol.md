@@ -1,7 +1,7 @@
 # Harvest-candidates protocol
 
 When a subagent surfaces something worth keeping in the vault — a lesson,
-dead-end, deferred item, radar entry, decision, or gotcha — it appends a
+dead-end, deferred item, follow-up, decision, or gotcha — it appends a
 `## Harvest candidates` block to its final message. A PostToolUse hook routes
 the entries to `harvest-pending.md`, where the session wrap-up consumes them.
 
@@ -16,7 +16,7 @@ preserving**, append:
 - lesson: <one-line observation>. Why it matters: <constraint or invariant>. Confidence: high|medium.
 - dead-end: tried <approach>. Failed because <reason>. Revive if: <condition>.
 - deferred: <work item>. Trigger to revisit: <condition>.
-- radar: <external thing to watch>. Cadence: weekly|monthly. Why: <reason>.
+- follow-up: <external thing to watch>. Cadence: weekly|monthly. Why: <reason>.
 - decision: chose <X> over <Y> because <reason>. Reversibility: easy|hard.
 - gotcha: <area>: <surprising behavior>. Where it bit: <file:line or scenario>.
 ```
@@ -34,7 +34,7 @@ preserving**, append:
 - **lesson** — a mistake (technical, process, or judgment) plus a concrete prevention check a future plan phase could run. "We did X, it broke Y, the check that would have caught it is Z."
 - **dead-end** — an approach that didn't work, with the revive condition. No prevention check.
 - **deferred** — work intentionally set aside, with a clear trigger to revisit.
-- **radar** — external state to watch periodically (upstream issue, dependency release, vendor status).
+- **follow-up** — external state to watch periodically (upstream issue, dependency release, vendor status).
 - **decision** — a non-obvious architectural or design choice.
 - **gotcha** — surprising area behavior worth patching into an area profile.
 

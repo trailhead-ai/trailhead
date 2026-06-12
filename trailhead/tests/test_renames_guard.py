@@ -1075,3 +1075,213 @@ class TestSlice4ManifestRepointed:
                 assert "plan" in skill_srcs, f"compose({cap}) must include the plan skill dir; got {skill_srcs}"
             if cap == "review":
                 assert "review" in skill_srcs, f"compose({cap}) must include the review skill dir; got {skill_srcs}"
+
+
+# ---------------------------------------------------------------------------
+# 10. Slice 6 — lore radar→follow-up + check-radar→check-in skill-data layer.
+#
+# CRITICAL scoping (Slice 6 council + per-slice green-bar rule): `radar` survives
+# legitimately as a vault DATA-LAYER concept — the harvest `radar:` typed-prefix,
+# the `radar/` vault directory in agent/starter prose, the `harvest.py` /
+# `review.py` taxonomy maps, and figurative "on the radar" body prose. The guard
+# must therefore target the SKILL-DATA-LAYER IDENTITY only:
+#   - the skill dir paths `skills/radar` / `skills/check-radar`
+#   - the renamed helper `radar_due` (filename / import)
+#   - `type: radar` frontmatter ONLY inside skills/ and templates/ (the renamed
+#     surface), never in test fixtures or prose corpora
+#   - the `lore new radar` CLI invocation string
+# NEVER a bare `\bradar\b` global forbid (would flag the vault taxonomy, the
+# harvest layer, and the deletion-target review.py — all legitimately surviving
+# this slice).
+# ---------------------------------------------------------------------------
+
+_LORE_SKILLS = _LORE_PLUGIN_ROOT / "skills"
+_LORE_TEMPLATES = _LORE_PLUGIN_ROOT / "templates"
+_FOLLOW_UP_SKILL = _LORE_SKILLS / "follow-up" / "SKILL.md"
+_CHECK_IN_SKILL = _LORE_SKILLS / "check-in" / "SKILL.md"
+
+
+def _files_under(root: Path) -> list[Path]:
+    """Collect scannable source files under a single root (md/py/toml)."""
+    out: list[Path] = []
+    if not root.exists():
+        return out
+    for f in root.rglob("*"):
+        if f.suffix not in _SCAN_SUFFIXES:
+            continue
+        if any(part in _EXCLUDE_DIRS for part in f.parts):
+            continue
+        if f.is_file():
+            out.append(f)
+    return out
+
+
+class TestSlice6RadarSkillDataForbids:
+    """Old radar/check-radar SKILL-DATA-LAYER identifiers must be gone from tools/lore.
+
+    Each forbid is token/path-scoped to the skill identity so it never trips the
+    legitimately surviving vault-taxonomy uses (harvest `radar:` prefix, the
+    `radar/` vault dir prose, the Slice-7 deletion-target `review.py`).
+    """
+
+    def test_no_skills_radar_path(self):
+        """`skills/radar` skill path must not appear after rename to skills/follow-up."""
+        files = _collect_files()
+        hits = _grep_files(r"skills/radar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/radar' — must be 'skills/follow-up' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_skills_check_radar_path(self):
+        """`skills/check-radar` skill path must not appear after rename to skills/check-in."""
+        files = _collect_files()
+        hits = _grep_files(r"skills/check-radar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/check-radar' — must be 'skills/check-in' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_check_radar_command_token(self):
+        """`/lore:check-radar` and the `check-radar` skill `name:` must be gone.
+
+        Scoped to the slash-command invocation and the frontmatter `name:` — the
+        skill identity — not a bare `check-radar` (which is the same string but we
+        assert via the two identity-bearing forms so the intent is explicit).
+        """
+        files = _collect_files()
+        hits = _grep_files(r"/lore:check-radar|^name: check-radar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the check-radar skill identity — must be 'check-in' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_radar_due_helper_reference(self):
+        """The `radar_due` helper (filename / import) must be gone after rename to follow_up_due.
+
+        Token-scoped to the helper identity. The renamed helper is
+        `scripts/follow_up_due.py` exposing `follow_up_notes_due`.
+        """
+        files = _collect_files()
+        hits = _grep_files(r"radar_due", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'radar_due' — must be 'follow_up_due' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_type_radar_in_skills_or_templates(self):
+        """`type: radar` frontmatter must be gone from the renamed skill/template surface.
+
+        SCOPED to files under skills/ and templates/ ONLY — the migration target.
+        Test fixtures (test_harvest_expand, test_p1e/_p1f) and docs legitimately
+        still carry `type: radar` (vault-data / deletion-target taxonomy) this slice.
+        """
+        files = _files_under(_LORE_SKILLS) + _files_under(_LORE_TEMPLATES)
+        hits = _grep_files(r"^type: radar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'type: radar' in skills/templates — must be 'type: follow-up' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_lore_new_radar_invocation(self):
+        """The `lore new radar` CLI invocation must be gone after the bucket rename to follow-up."""
+        files = _collect_files()
+        hits = _grep_files(r"lore new radar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'lore new radar' — must be 'lore new follow-up' after rename:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_old_radar_skill_dirs_gone(self):
+        """The old skills/radar and skills/check-radar directories must not exist."""
+        for old in ("radar", "check-radar"):
+            old_dir = _LORE_SKILLS / old
+            assert not old_dir.exists(), (
+                f"Old skills/{old}/ still exists at {old_dir} — rename it."
+            )
+
+
+class TestSlice6RenamedSkillsExistAndRegistrable:
+    """The renamed follow-up + check-in skill dirs must exist + be registrable.
+
+    Assertions key on the exact skill DIR path / `name:` — never a bare
+    `follow-up`/`check-in` word — so they can't be falsely satisfied.
+    """
+
+    @pytest.mark.parametrize("stem,skill_md", [
+        ("follow-up", _FOLLOW_UP_SKILL),
+        ("check-in", _CHECK_IN_SKILL),
+    ])
+    def test_renamed_skill_dir_exists_with_skill_md(self, stem: str, skill_md: Path):
+        assert skill_md.exists(), (
+            f"skills/{stem}/SKILL.md not found at {skill_md} — rename the old skill dir."
+        )
+
+    @pytest.mark.parametrize("stem,skill_md", [
+        ("follow-up", _FOLLOW_UP_SKILL),
+        ("check-in", _CHECK_IN_SKILL),
+    ])
+    def test_renamed_skill_is_registrable_with_matching_name(self, stem: str, skill_md: Path):
+        assert skill_md.exists(), f"skills/{stem}/SKILL.md not found at {skill_md}"
+        assert _has_registrable_frontmatter(skill_md), (
+            f"skills/{stem}/SKILL.md must open with non-empty name: + description: frontmatter "
+            f"or Claude Code will not register /lore:{stem}"
+        )
+        name = _parse_frontmatter_name(skill_md)
+        assert name == stem, (
+            f"skills/{stem}/SKILL.md frontmatter name: is {name!r}, expected {stem!r}"
+        )
+
+
+class TestSlice6ManifestAndTemplate:
+    """lore capabilities.toml must repoint the two renamed skills + the template renamed."""
+
+    def test_capture_capability_references_follow_up_and_check_in(self):
+        """lore capture capability must reference skills/follow-up + skills/check-in,
+        not the old skills/radar + skills/check-radar."""
+        m = load_manifest(_LORE_MANIFEST)
+        cap = m.capabilities["capture"]
+        assert "skills/follow-up" in cap["skills"], (
+            f"lore capture must reference 'skills/follow-up'; got {cap['skills']}"
+        )
+        assert "skills/check-in" in cap["skills"], (
+            f"lore capture must reference 'skills/check-in'; got {cap['skills']}"
+        )
+        assert "skills/radar" not in cap["skills"], (
+            "lore capture still references old 'skills/radar'"
+        )
+        assert "skills/check-radar" not in cap["skills"], (
+            "lore capture still references old 'skills/check-radar'"
+        )
+
+    def test_follow_up_template_exists_with_type_follow_up(self):
+        """templates/follow-up.md must exist with `type: follow-up` (was templates/radar.md)."""
+        tmpl = _LORE_TEMPLATES / "follow-up.md"
+        assert tmpl.exists(), (
+            f"templates/follow-up.md not found at {tmpl} — rename from templates/radar.md"
+        )
+        text = tmpl.read_text()
+        assert re.search(r"^type: follow-up\b", text, re.MULTILINE), (
+            "templates/follow-up.md must carry `type: follow-up` frontmatter"
+        )
+        assert not (_LORE_TEMPLATES / "radar.md").exists(), (
+            "old templates/radar.md still exists — rename to follow-up.md"
+        )
+
+    def test_lore_manifest_validates_and_composes_capture(self, tmp_path):
+        """lore manifest validates and capture composes the renamed skill dirs on disk."""
+        m = load_manifest(_LORE_MANIFEST)
+        plan = compose_plan(m, {"capture"}, tmp_path / "capture")
+        skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
+        assert "follow-up" in skill_srcs, (
+            f"compose(capture) must include the follow-up skill dir; got {skill_srcs}"
+        )
+        assert "check-in" in skill_srcs, (
+            f"compose(capture) must include the check-in skill dir; got {skill_srcs}"
+        )

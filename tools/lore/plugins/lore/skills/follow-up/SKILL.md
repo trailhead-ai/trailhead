@@ -1,9 +1,9 @@
 ---
-name: radar
-description: Add a radar item — an external thing out of our control to check on periodically (GitHub issue, dependency release, upstream fix, vendor status). Use for /radar, "put this on my radar", "watch this issue", "track this release", "keep an eye on X".
+name: follow-up
+description: Add a follow-up — an external thing out of our control to check on periodically (GitHub issue, dependency release, upstream fix, vendor status). Use for /follow-up, "track this as a follow-up", "watch this issue", "track this release", "keep an eye on X".
 ---
 
-# /lore:radar — Add a radar watch item
+# /lore:follow-up — Add a follow-up watch item
 
 Gather the following from the user conversationally, asking only for what is missing:
 
@@ -18,7 +18,7 @@ Gather the following from the user conversationally, asking only for what is mis
 Once you have title and project at minimum, run:
 
 ```bash
-lore new radar \
+lore new follow-up \
   --title "<title>" \
   --project "<project>" \
   [--source "<url-or-feed>"] \
@@ -29,4 +29,4 @@ lore new radar \
 
 Then open the written file, fill in the body sections (What we're watching / Why we care / On change) with the user's answers, and confirm the note path.
 
-Radar items do not backlink to the session note.
+Follow-ups do not backlink to the session note.

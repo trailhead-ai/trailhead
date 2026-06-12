@@ -54,7 +54,7 @@ TEMPLATES_DIR = PLUGIN_ROOT / "templates"
 # The generic directory taxonomy every vault gets.
 TAXONOMY = [
     "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
-    "radar", "collaboration", "specs", "plans", "designs", "inbox",
+    "follow-ups", "collaboration", "specs", "plans", "designs", "inbox",
     "briefings", "reviews", "gotchas", "audits", "tools", "templates",
 ]
 
@@ -68,21 +68,21 @@ _NOTE_DIRS: dict[str, str] = {
     "deferred": "deferred",
     "dead-end": "dead-ends",
     "decision": "decisions",
-    "radar": "radar",
+    "follow-up": "follow-ups",
     "area": "areas",
     "spec": "specs",
     "plan": "plans",
 }
 
 # Types that carry a project: field. dead-end is intentionally absent.
-_PROJECT_BEARING: frozenset[str] = frozenset({"deferred", "decision", "radar", "area", "spec", "plan"})
+_PROJECT_BEARING: frozenset[str] = frozenset({"deferred", "decision", "follow-up", "area", "spec", "plan"})
 
 # Note types stored in date-bucketed YYYY-MM subdirs (the date-bucketed archive
-# layout). The date-based living folders (deferred/dead-ends/decisions/radar)
+# layout). The date-based living folders (deferred/dead-ends/decisions/follow-ups)
 # join the archive types; only singleton area profiles (name-keyed) stay
 # flat at the folder root.
 _BUCKETED_TYPES: frozenset[str] = frozenset(
-    {"spec", "plan", "deferred", "decision", "radar", "dead-end"}
+    {"spec", "plan", "deferred", "decision", "follow-up", "dead-end"}
 )
 
 # Which section of the session note gets the backlink (None = no backlink).
@@ -90,7 +90,7 @@ _BACKLINK_SECTIONS: dict[str, str | None] = {
     "deferred": "Deferred",
     "dead-end": "Learned",
     "decision": "Decided",
-    "radar": None,
+    "follow-up": None,
     "area": None,
     "spec": None,
     "plan": None,
@@ -259,7 +259,7 @@ def cmd_new(args: argparse.Namespace) -> int:
     elif note_type == "decision":
         subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
 
-    elif note_type == "radar":
+    elif note_type == "follow-up":
         subs["source"] = getattr(args, "source", None) or ""
         subs["target"] = getattr(args, "target", None) or ""
         subs["check"] = getattr(args, "check", None) or ""
@@ -1813,10 +1813,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--areas", default=None, help="CSV area names (dead-end, decision)")
     p_new.add_argument("--tried", default=None, help="Date the approach was tried (dead-end; defaults to today)")
     p_new.add_argument("--revive-condition", dest="revive_condition", default=None, help="Condition to retry (dead-end)")
-    # radar
-    p_new.add_argument("--source", default=None, help="Where updates appear (radar)")
-    p_new.add_argument("--target", default=None, help="Version or state being waited for (radar)")
-    p_new.add_argument("--check", default=None, help="Check cadence (radar)")
+    # follow-up
+    p_new.add_argument("--source", default=None, help="Where updates appear (follow-up)")
+    p_new.add_argument("--target", default=None, help="Version or state being waited for (follow-up)")
+    p_new.add_argument("--check", default=None, help="Check cadence (follow-up)")
     # area
     p_new.add_argument("--keywords", default=None, help="CSV keywords for branch-based recall (area)")
     p_new.add_argument("--key-files", dest="key_files", default=None, help="CSV key file paths (area)")

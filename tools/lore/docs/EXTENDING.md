@@ -192,7 +192,7 @@ in brief:
   classifier hook and flip the capability flag.
 - **`/lore:reflect`** does not gather app-layer ai-memory or daily briefings
   (those live outside the vault); it synthesizes vault content only.
-- **`/lore:check-radar`** skips legacy `snoozed` radar notes (not in lore's
+- **`/lore:check-in`** skips legacy `snoozed` follow-up notes (not in lore's
   canonical status vocabulary) and flags them for manual cleanup.
 
 Follow the linked DEGRADATION.md for the exact turn-on steps; this guide does not

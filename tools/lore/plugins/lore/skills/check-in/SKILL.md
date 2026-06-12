@@ -1,17 +1,17 @@
 ---
-name: check-radar
-description: Poll all active radar items in the lore vault, detect state changes, summarize what moved, and update last-checked / last-state. Use for /lore:check-radar, "check the radar", "any movement on my radar", "poll the watchlist", "what's new on my radar".
+name: check-in
+description: Poll all active follow-ups in the lore vault, detect state changes, summarize what moved, and update last-checked / last-state. Use for /lore:check-in, "check in on my follow-ups", "any movement on my follow-ups", "poll the watchlist", "what's new on my follow-ups".
 ---
 
-# /lore:check-radar — Poll active radar items
+# /lore:check-in — Poll active follow-ups
 
 **Recommended tier:** Sonnet/low — parallel polls + diff + note updates. No reasoning depth. (Advisory — no auto-switch.)
 
-Iterate through `$LORE_VAULT/radar/*.md`, poll each `active` item whose `last-checked` is older than its `check` interval (or has never been checked), diff the result against `last-state`, and produce a human-readable digest of what moved.
+Iterate through `$LORE_VAULT/follow-ups/*.md`, poll each `active` item whose `last-checked` is older than its `check` interval (or has never been checked), diff the result against `last-state`, and produce a human-readable digest of what moved.
 
 ## When to use
 
-- User says `/lore:check-radar`, "check the radar", "any movement?", "poll my watches"
+- User says `/lore:check-in`, "check in on my follow-ups", "any movement?", "poll my watches"
 - Start of a work session where the user wants to know if external blockers have cleared
 - On demand whenever the user is deciding what to work on next
 
@@ -29,11 +29,11 @@ print(vault)
 "
 ```
 
-Announce: "Checking radar in vault at `<vault>`."
+Announce: "Checking in on follow-ups in vault at `<vault>`."
 
 ### Step 1 — Select due items
 
-Use the `radar_due` helper (importable from `plugins/lore/scripts/radar_due.py`):
+Use the `follow_up_due` helper (importable from `plugins/lore/scripts/follow_up_due.py`):
 
 ```bash
 python3 -c "
@@ -41,8 +41,8 @@ import sys
 from datetime import date
 from pathlib import Path
 sys.path.insert(0, '<vault-plugins-scripts-path>')
-from radar_due import radar_notes_due
-result = radar_notes_due(Path('<vault>'), today=date.today())
+from follow_up_due import follow_up_notes_due
+result = follow_up_notes_due(Path('<vault>'), today=date.today())
 for p in result.due:
     print('DUE', p)
 for p in result.manual:
@@ -58,7 +58,7 @@ The helper applies the selection predicate:
 - `status: resolved` / `dropped` → silently skipped
 - Off-vocab status (e.g. legacy "snoozed") → skipped and flagged, never crashes
 
-If no items are due, tell the user: "Nothing due on the radar. N items active, next check `<date>`." and stop.
+If no items are due, tell the user: "Nothing due on your follow-ups. N items active, next check `<date>`." and stop.
 
 ### Step 2 — Poll each item
 
@@ -106,7 +106,7 @@ Path(note_path).write_text(text)
 Structure the user-facing report as:
 
 ```
-Radar digest — <today's date>
+Follow-up digest — <today's date>
 
 Moved (<N>):
   • <slug> — <old> → <new>
@@ -128,7 +128,7 @@ Skipped (off-vocab status) (<N>):
 
 Keep the "Moved" section rich — this is the whole point of running the skill. Keep "Quiet" as a one-line comma list. Only include sections that are non-empty.
 
-### Step 5 — Suggest follow-ups on movement
+### Step 5 — Suggest next steps on movement
 
 For each moved item, if its `## On change` block names a concrete action (reopen a deferred item, remove patches, bump a version), surface it as a suggested next step at the bottom of the digest. Do not take the action automatically — the user decides.
 
@@ -137,12 +137,12 @@ For each moved item, if its `## On change` block names a concrete action (reopen
 Use `/lore:sync`:
 
 ```
-lore sync --message "check-radar: <date>"
+lore sync --message "check-in: <date>"
 ```
 
 ## Key principles
 
-- **Parallel polls.** One radar check with 10 items should be one round-trip, not ten.
+- **Parallel polls.** One check-in with 10 items should be one round-trip, not ten.
 - **Failures don't advance `last-checked`.** A failed poll retries naturally on the next run.
 - **Only report the interesting stuff loudly.** Quiet items get one line. The signal is in what moved.
 - **Never mutate `last-state` without diffing against the old value first** — otherwise the next run misses the change.
@@ -153,6 +153,6 @@ lore sync --message "check-radar: <date>"
 
 - **Empty `last-checked` (bootstrap).** First poll ever — treat as stale and poll unconditionally. Write `last-checked: <today>` and `last-state: <result>` after the first successful poll.
 - **Unknown `check` cadence.** Treat as `daily` (conservative: poll frequently).
-- **No radar directory.** Tell the user "No `radar/` directory found in `<vault>`. Nothing to check." and stop.
+- **No follow-ups directory.** Tell the user "No `follow-ups/` directory found in `<vault>`. Nothing to check." and stop.
 - **All items quiet.** Emit the "Nothing due" message with the count and the next expected check date.
-- **Off-vocab status (e.g. "snoozed").** The `radar_due` helper places these in `skipped_legacy`. Report them in the "Skipped" section of the digest so the user knows to update or remove the note.
+- **Off-vocab status (e.g. "snoozed").** The `follow_up_due` helper places these in `skipped_legacy`. Report them in the "Skipped" section of the digest so the user knows to update or remove the note.

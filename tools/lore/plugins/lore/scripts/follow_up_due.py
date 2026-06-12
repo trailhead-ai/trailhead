@@ -1,8 +1,8 @@
-"""Radar-due selection helper for the check-radar ritual.
+"""Follow-up-due selection helper for the check-in ritual.
 
-Selects radar notes from a vault's ``radar/`` directory that are due for
-polling, based on status, source, check cadence, and last-checked date.
-Returns a :class:`RadarDueResult` with three sorted lists:
+Selects follow-up notes from a vault's ``follow-ups/`` directory that are due
+for polling, based on status, source, check cadence, and last-checked date.
+Returns a :class:`FollowUpDueResult` with three sorted lists:
 
 - ``due``            — notes to poll this run (active + stale or bootstrap)
 - ``manual``         — active notes with ``source: manual`` (need human check)
@@ -21,8 +21,8 @@ Cadence rules:
   - "weekly" → stale if last-checked is more than 7 days before today
   - unknown  → treated as daily (conservative)
 
-Canonical status vocab for radar notes: ``active | resolved | dropped``
-(from ``status_validator.CANONICAL["radar"]``). A note carrying any other
+Canonical status vocab for follow-up notes: ``active | resolved | dropped``
+(from ``status_validator.CANONICAL["follow-ups"]``). A note carrying any other
 status (e.g. a legacy "snoozed") is skipped and placed in
 ``skipped_legacy``; the helper never crashes on an unexpected value.
 """
@@ -35,7 +35,7 @@ from pathlib import Path
 import frontmatter
 from vault import iter_note_paths
 
-# Canonical lore radar statuses that are "closed" — always skip.
+# Canonical lore follow-up statuses that are "closed" — always skip.
 _CLOSED_STATUSES = frozenset({"resolved", "dropped"})
 
 # The one active status that drives polling.
@@ -46,11 +46,11 @@ _WEEKLY_THRESHOLD_DAYS = 7
 
 
 @dataclass
-class RadarDueResult:
-    """Outcome of a radar-due scan.
+class FollowUpDueResult:
+    """Outcome of a follow-up-due scan.
 
     Attributes:
-        due:            Paths of radar notes due for polling this run.
+        due:            Paths of follow-up notes due for polling this run.
         manual:         Paths of active ``source: manual`` notes (needs human
                         check — not polled by the skill).
         skipped_legacy: Paths of notes with an off-vocab status (e.g. "snoozed")
@@ -85,23 +85,24 @@ def _is_stale(last_checked: str, check: str, today: date) -> bool:
     return checked_date < today
 
 
-def radar_notes_due(vault: Path, *, today: date) -> RadarDueResult:
-    """Scan ``<vault>/radar/`` and return notes due for polling.
+def follow_up_notes_due(vault: Path, *, today: date) -> FollowUpDueResult:
+    """Scan ``<vault>/follow-ups/`` and return notes due for polling.
 
     Args:
-        vault: Root of the lore vault. The function reads ``<vault>/radar/*.md``.
+        vault: Root of the lore vault. The function reads
+            ``<vault>/follow-ups/*.md``.
         today: The reference date for cadence calculations (injectable for tests).
 
     Returns:
-        A :class:`RadarDueResult` with three sorted lists.
+        A :class:`FollowUpDueResult` with three sorted lists.
     """
-    radar_dir = Path(vault) / "radar"
-    result = RadarDueResult()
+    follow_up_dir = Path(vault) / "follow-ups"
+    result = FollowUpDueResult()
 
-    if not radar_dir.is_dir():
+    if not follow_up_dir.is_dir():
         return result
 
-    for note in sorted(iter_note_paths(radar_dir, recursive=True)):
+    for note in sorted(iter_note_paths(follow_up_dir, recursive=True)):
         fm = frontmatter.parse_frontmatter(note)
         status = fm.get("status", "")
         source = fm.get("source", "")

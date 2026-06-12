@@ -5,7 +5,7 @@ Covers:
 - find_session_note(): returns newest session note / None when absent.
 - `lore new <type>`: writes to correct dir, frontmatter passes status_validator,
   no literal {{user}}, backlinks in session note (deferred/dead-end/decision),
-  no backlink for radar/subsystem, no-session fallback (exit 0 + notice).
+  no backlink for follow-up/subsystem, no-session fallback (exit 0 + notice).
 - subsystem template keywords: round-trip through parse_frontmatter as list.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ def run_cli(args, env=None, input_text=None, cwd=None):
 def _make_vault(tmp_path: Path) -> Path:
     """Create a minimal vault directory structure."""
     vault = tmp_path / "vault"
-    for d in ("deferred", "dead-ends", "decisions", "radar", "areas", "sessions"):
+    for d in ("deferred", "dead-ends", "decisions", "follow-ups", "areas", "sessions"):
         (vault / d).mkdir(parents=True)
     return vault
 
@@ -148,7 +148,7 @@ class TestFindSessionNote:
 def _find_new_note(dir_path: Path) -> Path:
     """Return the single .md file written to a directory.
 
-    deferred/decision/radar/dead-end notes are date-bucketed into
+    deferred/decision/follow-up/dead-end notes are date-bucketed into
     <dir>/YYYY-MM/ (the date-bucketed archive layout), so search the bucket
     subdir too. subsystems (name-keyed) stay flat — also matched by *.md.
     """
@@ -468,67 +468,67 @@ class TestNewDecision:
 
 
 # ---------------------------------------------------------------------------
-# lore new radar
+# lore new follow-up
 # ---------------------------------------------------------------------------
 
-class TestNewRadar:
-    def test_writes_to_radar_dir(self, tmp_path):
+class TestNewFollowUp:
+    def test_writes_to_follow_ups_dir(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli(
-            ["new", "radar", "--vault", str(vault),
+            ["new", "follow-up", "--vault", str(vault),
              "--title", "Watch dependency X",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
-        assert len((list((vault / "radar").glob("*.md")) + list((vault / "radar").glob("*/*.md")))) == 1
+        assert len((list((vault / "follow-ups").glob("*.md")) + list((vault / "follow-ups").glob("*/*.md")))) == 1
 
     def test_frontmatter_type_and_status(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "radar", "--vault", str(vault),
+            ["new", "follow-up", "--vault", str(vault),
              "--title", "Watch dependency X",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
         fm_mod = load_script("frontmatter")
-        note = _find_new_note(vault / "radar")
+        note = _find_new_note(vault / "follow-ups")
         fm = fm_mod.parse_frontmatter(note)
-        assert fm["type"] == "radar"
+        assert fm["type"] == "follow-up"
         assert fm["status"] == "active"
 
     def test_status_is_valid(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "radar", "--vault", str(vault),
+            ["new", "follow-up", "--vault", str(vault),
              "--title", "Watch dependency X",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
         sv = load_script("status_validator")
         fm_mod = load_script("frontmatter")
-        note = _find_new_note(vault / "radar")
+        note = _find_new_note(vault / "follow-ups")
         fm = fm_mod.parse_frontmatter(note)
         assert sv.is_valid_status(fm["type"], fm["status"])
 
     def test_no_literal_user_placeholder(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "radar", "--vault", str(vault),
+            ["new", "follow-up", "--vault", str(vault),
              "--title", "Watch dependency X",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
-        note = _find_new_note(vault / "radar")
+        note = _find_new_note(vault / "follow-ups")
         assert "{{user}}" not in note.read_text()
 
     def test_no_backlink_attempted(self, tmp_path):
-        """Radar does NOT backlink to the session note."""
+        """Follow-ups do NOT backlink to the session note."""
         vault = _make_vault(tmp_path)
         session = _make_session_note(vault)
         original = session.read_text()
         run_cli(
-            ["new", "radar", "--vault", str(vault),
+            ["new", "follow-up", "--vault", str(vault),
              "--title", "Watch dependency X",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
@@ -671,15 +671,15 @@ class TestLeakGate:
         )
         self._check_note(_find_new_note(vault / "decisions"))
 
-    def test_radar_note_has_no_leaks(self, tmp_path):
+    def test_follow_up_note_has_no_leaks(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli(
-            ["new", "radar", "--vault", str(vault),
+            ["new", "follow-up", "--vault", str(vault),
              "--title", "No leaks please",
              "--project", "my-project"],
             env={"LORE_USER": "ada"},
         )
-        self._check_note(_find_new_note(vault / "radar"))
+        self._check_note(_find_new_note(vault / "follow-ups"))
 
     def test_area_note_has_no_leaks(self, tmp_path):
         vault = _make_vault(tmp_path)

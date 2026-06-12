@@ -1,5 +1,5 @@
 ---
-type: radar
+type: follow-up
 project: {{project}}
 status: active
 source: {{source}}
