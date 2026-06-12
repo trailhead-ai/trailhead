@@ -56,13 +56,13 @@ Hard caps: each option ≤80 words, recommendation ≤120 words. Total report �
 
 ## Harvest candidates (end-of-message)
 
-If your advisory work surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, radar entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
+If your advisory work surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
 
 Entry format: one entry per line with a typed prefix:
 - `lesson:` — durable invariants about the codebase's shape
 - `dead-end:` — approaches tried and ruled out, with the revive condition
 - `deferred:` — work set aside, with a trigger condition for revisiting
-- `radar:` — items to watch but not act on yet
+- `follow-up:` — items to watch but not act on yet
 - `decision:` — choices made, with the key reason and what was rejected
 - `gotcha:` — surprising constraints not visible in the code
 

@@ -1,6 +1,6 @@
-"""Behavioral tests for the radar-due selection helper.
+"""Behavioral tests for the follow-up-due selection helper.
 
-The follow_up_due helper selects follow-up notes from a vault's ``radar/`` directory
+The follow_up_due helper selects follow-up notes from a vault's ``follow-ups/`` directory
 that are due for polling, based on their status, source, check cadence, and
 last-checked date. It also collects manual-source items separately.
 
@@ -15,7 +15,7 @@ Cadence rules (daily / weekly):
   - "daily"  → stale if last-checked < today
   - "weekly" → stale if last-checked is older than 7 days
 
-These tests use SYNTHETIC radar fixtures (public repo — invented vocabulary,
+These tests use SYNTHETIC follow-up fixtures (public repo — invented vocabulary,
 never real brain content or real repo slugs).
 """
 from __future__ import annotations
@@ -37,7 +37,7 @@ from follow_up_due import FollowUpDueResult, follow_up_notes_due  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _write_follow_up(path: Path, **fields) -> None:
-    """Write a minimal synthetic radar note with the given frontmatter fields."""
+    """Write a minimal synthetic follow-up note with the given frontmatter fields."""
     lines = ["---"]
     for k, v in fields.items():
         lines.append(f"{k}: {v}")
@@ -55,12 +55,12 @@ def _follow_up_dir(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures — synthetic vault with radar notes
+# Fixtures — synthetic vault with follow-up notes
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
 def synthetic_vault(tmp_path: Path) -> Path:
-    """A vault with 6 radar notes covering all predicate branches.
+    """A vault with 6 follow-up notes covering all predicate branches.
 
     (a) active + stale last-checked (daily; checked yesterday) → DUE
     (b) active + fresh last-checked (daily; checked today) → SKIP
@@ -248,7 +248,7 @@ def test_weekly_stale_8_days_ago_is_due(tmp_path: Path):
 
 
 def test_empty_follow_up_dir_returns_empty_result(tmp_path: Path):
-    """A vault with no radar/ directory returns empty result gracefully."""
+    """A vault with no follow-ups/ directory returns empty result gracefully."""
     result = follow_up_notes_due(tmp_path, today=date(2026, 6, 1))
     assert result.due == []
     assert result.manual == []
@@ -321,7 +321,7 @@ def test_snoozed_legacy_status_does_not_crash(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 6: radar is a date-bucketed living folder — selection recurses into
+# Slice 6: follow-ups is a date-bucketed living folder — selection recurses into
 # YYYY-MM/ buckets while still finding flat notes.
 # ---------------------------------------------------------------------------
 

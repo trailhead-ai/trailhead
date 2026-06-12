@@ -3,7 +3,7 @@ name: finish
 description: "Canonical end-of-session finish — fill in the session note sections (What we did / Decided / Learned / Open questions), run `lore finish` to set status=complete, expand harvest-pending into vault notes, and commit. Use for /finish, \"I'm done\", \"wrap up\", \"close this out\", \"finalize the session\"."
 ---
 
-# Finished — canonical end-of-session finish
+# Finish — canonical end-of-session finish
 
 `lore:finish` is the canonical end-of-session finish. It fills the session
 note from in-context synthesis, then calls `lore finish`, which:
@@ -11,7 +11,7 @@ note from in-context synthesis, then calls `lore finish`, which:
 1. Sets `status: complete` and stamps `ended:`.
 2. Reads `harvest-pending.md` and the session note's `## Harvest candidates`
    block; expands each typed one-liner of the five in-scope types
-   (`deferred` / `decision` / `dead-end` / `radar` / `lesson`) into a full
+   (`deferred` / `decision` / `dead-end` / `follow-up` / `lesson`) into a full
    templated note in the matching vault directory.
 3. Surfaces `gotcha` entries in the finish report for manual
    `/lore:area` patching — they are NOT auto-expanded and remain in

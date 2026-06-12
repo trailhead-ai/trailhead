@@ -53,7 +53,7 @@ def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "synth-vault"
     vault.mkdir()
     for d in ("sessions", "deferred", "subsystems", "decisions", "dead-ends",
-              "lessons", "radar", "collaboration", "specs", "plans", "designs",
+              "lessons", "follow-ups", "collaboration", "specs", "plans", "designs",
               "inbox", "briefings", "reviews", "gotchas", "audits", "tools",
               "templates"):
         (vault / d).mkdir()

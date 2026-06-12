@@ -14,7 +14,7 @@ most-recent phase — same scalar, latest-wins semantics as `status:`.
 Entry to a session. "Where am I, what's on my plate?"
 
 **Signals:** fresh session, no explicit task engaged yet. Catching up on
-triage, handoffs, or the radar.
+triage, handoffs, or follow-ups.
 
 **Default at session start.** Every session begins here until an action
 transitions it.
@@ -70,7 +70,7 @@ active phase.
 ### Capture
 
 Knowledge-graph writes. Fires mid-session from Build, Debug, Review, or Close.
-The capture commands: defer, decision, dead-end, radar, area.
+The capture commands: defer, decision, dead-end, follow-up, area.
 
 ### Maintain
 

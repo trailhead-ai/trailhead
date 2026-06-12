@@ -3,7 +3,7 @@
 Every session/plan/spec/design enumeration must recurse exactly one level into
 ``<folder>/YYYY-MM/`` while still finding notes at the flat top level
 (behavior-neutral until the migration runs). The out-of-scope living folders
-(deferred/dead-ends/lessons/radar) must keep flat globbing.
+(deferred/dead-ends/lessons/follow-ups) must keep flat globbing.
 
 TDD: tests written before implementation. All fixtures are SYNTHETIC.
 """

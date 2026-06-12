@@ -48,7 +48,7 @@ files that the combine step assembles into the reference document.
 
 **Status:** LIVE. Lore's `brainstorm` skill (step 4, the `design_mockup`
 extension point) dispatches the `artist` as its default provider with the brief
-above. Retirement of the upstream `design-mockup-writer` agent (its external
+above. Retirement of the older upstream mockup-writer agent (its external
 copies) is tracked separately and is **not** complete as part of this wire — the
 in-repo path is the `artist`, and the external retirement is a follow-up.
 

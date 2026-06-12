@@ -40,7 +40,7 @@ def iter_note_paths(directory: Path, recursive: bool = False) -> Iterator[Path]:
     deeper or special dirs are never descended.
 
     The date-bucketed folders (sessions/plans/specs/designs and the living
-    folders deferred/dead-ends/lessons/decisions/radar) pass ``recursive=True``;
+    folders deferred/dead-ends/lessons/decisions/follow-ups) pass ``recursive=True``;
     the name-keyed folders (areas/tools/etc.) stay flat.
     """
     directory = Path(directory)

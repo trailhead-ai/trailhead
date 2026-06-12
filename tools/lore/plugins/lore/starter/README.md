@@ -8,7 +8,7 @@ lessons, and a running session log.
 The [lore](https://github.com) Claude Code plugin reads this vault at session
 start (recalling what's relevant to the branch you're on) and writes to it
 through capture commands (`/lore:defer`, `/lore:decision`, `/lore:dead-end`,
-`/lore:radar`, `/lore:area`) and the `lore` CLI.
+`/lore:follow-up`, `/lore:area`) and the `lore` CLI.
 
 ## Layout
 
@@ -20,7 +20,7 @@ through capture commands (`/lore:defer`, `/lore:decision`, `/lore:dead-end`,
 | `dead-ends/` | Approaches that didn't work, with a revive condition. |
 | `lessons/` | Mistakes plus a concrete prevention check. |
 | `deferred/` | Work set aside, with a trigger to revisit. |
-| `radar/` | External things to check on periodically. |
+| `follow-ups/` | External things to check on periodically. |
 | `collaboration/` | Working-style preferences and conventions. |
 | `specs/`, `plans/`, `designs/` | Spec → plan → design artifacts. |
 | `inbox/` | Raw, unprocessed captures awaiting triage. |

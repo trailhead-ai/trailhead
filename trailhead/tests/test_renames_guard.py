@@ -1550,3 +1550,134 @@ class TestSlice8ArtistCutover:
                 f"design-authoring.md still marks the seam {stale!r}; the brainstorm "
                 "cutover has landed — flip the seam to LIVE"
             )
+
+
+# ---------------------------------------------------------------------------
+# 12. Slice 9 — comprehensive cross-tool finisher.
+#
+# After Slice 6 (radar→follow-up data layer) and Slice 7 (reflect/tend/review
+# deletions), the LAST legitimate survivors of the word `radar` in tools/{lore,
+# forge} are the one-shot vault migration script + its test (the migration
+# FROM-side). Everything else — harvest emitters, dead command refs, taxonomy
+# prose, stale fixture dir names — must be gone. This consolidates the bare
+# `\bradar\b == 0` guard the earlier slices deferred, plus the dead-command and
+# harvest-typed-prefix forbids and the design-mockup-writer == 0 sweep.
+#
+# Allowlists are FILENAME-scoped (never bare-word), so the forbid stays a hard
+# zero everywhere it should:
+#   - `migrate_radar_to_follow_ups.py` + `test_migrate_radar_to_follow_ups.py`
+#     legitimately name `radar` (the migration FROM-side).
+#   - this guard file (`test_renames_guard.py`) names the forbidden tokens in
+#     its own forbid/allowlist lines.
+# The `/experiments/` frozen corpus is excluded defensively (mirrors
+# test_no_council_review_prose) though no such dir exists under tools/ today.
+# ---------------------------------------------------------------------------
+
+# Filenames that legitimately carry the forbidden `radar` token.
+_RADAR_ALLOWLIST_FILENAMES = {
+    "migrate_radar_to_follow_ups.py",
+    "test_migrate_radar_to_follow_ups.py",
+    "test_renames_guard.py",
+}
+
+# Filenames that legitimately carry the `design-mockup-writer` token: the
+# absence-assertion guard (a ref that asserts the name is GONE, not a live
+# routing ref) and the historical de-zenith test docstring.
+_DESIGN_MOCKUP_WRITER_ALLOWLIST_FILENAMES = {
+    "test_skills_generic.py",
+    "test_artist_dezenithed.py",
+    "test_renames_guard.py",
+}
+
+
+def _scan_files_excluding_experiments() -> list[Path]:
+    """Scannable tools/ source files, defensively excluding any frozen experiments corpus."""
+    return [f for f in _collect_files() if "experiments" not in f.parts]
+
+
+class TestSlice9RadarFullForbid:
+    """Comprehensive radar sweep — `\\bradar\\b == 0` across tools/{lore,forge}
+    except the migration script + its test (the legit FROM-side)."""
+
+    def test_no_bare_radar_word_anywhere(self):
+        """The bare word `radar` must not appear in tools/{lore,forge} source.
+
+        Token-scoped allowlist by FILENAME for the migration script + its test
+        (legit FROM-side) and this guard file's own forbid lines. Everything
+        else — harvest emitters, taxonomy prose, dead command refs, stale
+        fixture dir names — must read `follow-up`/`follow-ups` after Slice 9.
+        """
+        files = [
+            f for f in _scan_files_excluding_experiments()
+            if f.name not in _RADAR_ALLOWLIST_FILENAMES
+        ]
+        hits = _grep_files(r"\bradar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the bare word 'radar' — must be zero (→ follow-up):"]
+            for f, ln, line in hits[:20]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_lore_radar_command_ref(self):
+        """`/lore:radar` dead-command ref must be gone (repointed to /lore:follow-up)."""
+        files = _scan_files_excluding_experiments()
+        hits = _grep_files(r"/lore:radar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of dead command '/lore:radar' — must be '/lore:follow-up':"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_lore_check_radar_command_ref(self):
+        """`/lore:check-radar` dead-command ref must be gone (repointed to /lore:check-in).
+
+        (test_no_check_radar_command_token already forbids it via the same form;
+        this is the Slice-9 explicit dead-command sweep assertion.)
+        """
+        files = _scan_files_excluding_experiments()
+        hits = _grep_files(r"/lore:check-radar\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of dead command '/lore:check-radar' — must be '/lore:check-in':"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_radar_harvest_typed_prefix(self):
+        """The `radar:` harvest typed-prefix must be gone from agent/skill bodies.
+
+        lore drops the `radar` harvest type entirely (Slice 6); emitters must now
+        instruct `follow-up:`. Matches the typed-prefix forms the harvest parser
+        keys on — a backtick-wrapped or bare `radar:` list bullet — not arbitrary
+        prose ending in a colon.
+        """
+        files = _scan_files_excluding_experiments()
+        hits = _grep_files(r"`radar:`|^\s*-\s*\*\*radar\*\*|^\s*-\s*radar:", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the `radar:` harvest typed-prefix — must be `follow-up:`:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+
+class TestSlice9DesignMockupWriterForbid:
+    """design-mockup-writer == 0 across tools/ except the absence-assertion guard
+    (test_skills_generic.py) and the historical de-zenith test docstring."""
+
+    def test_no_design_mockup_writer_live_ref(self):
+        """`design-mockup-writer` must not appear as a live ref in tools/ source.
+
+        FILENAME-allowlisted: `test_skills_generic.py` (asserts the name is
+        ABSENT — a guard, not a routing ref) and `test_artist_dezenithed.py`
+        (historical docstring). Everything else — including any lingering
+        retirement prose in design-authoring.md — must drop the token.
+        """
+        files = [
+            f for f in _scan_files_excluding_experiments()
+            if f.name not in _DESIGN_MOCKUP_WRITER_ALLOWLIST_FILENAMES
+        ]
+        hits = _grep_files(r"design-mockup-writer", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of live 'design-mockup-writer' ref — must be zero:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))

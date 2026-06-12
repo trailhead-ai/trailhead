@@ -59,13 +59,13 @@ Hard cap: 600 words. Lead with the verified symptom + leading hypothesis; everyt
 
 ## Harvest candidates (end-of-message)
 
-If your diagnosis surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, radar entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
+If your diagnosis surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
 
 Entry format: one entry per line with a typed prefix:
 - `lesson:` — durable invariants like "X always fails when Y is set"
 - `dead-end:` — hypotheses you ruled out with evidence (saves future-you from re-running the same diagnosis)
 - `deferred:` — work set aside, with a trigger condition for revisiting
-- `radar:` — items to watch but not act on yet
+- `follow-up:` — items to watch but not act on yet
 - `decision:` — choices made, with the key reason and what was rejected
 - `gotcha:` — surprising subsystem behavior at the root of the bug
 

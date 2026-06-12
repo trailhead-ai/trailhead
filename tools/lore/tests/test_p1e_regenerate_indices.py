@@ -180,7 +180,7 @@ class TestBasicGeneration:
 
     def test_follow_up_index_created(self, tmp_path):
         vault = _make_vault(tmp_path, "follow-ups")
-        _write_follow_up(vault, "synth-radar-alpha")
+        _write_follow_up(vault, "synth-followup-alpha")
         rc = _run_main(vault)
         assert rc == 0
         assert (vault / "follow-ups" / "_index.md").exists()
@@ -334,12 +334,12 @@ class TestIdempotency:
 
     def test_follow_up_idempotent(self, tmp_path):
         vault = _make_vault(tmp_path, "follow-ups")
-        _write_follow_up(vault, "synth-idem-radar")
+        _write_follow_up(vault, "synth-idem-followup")
         _run_main(vault)
         first = (vault / "follow-ups" / "_index.md").read_text()
         _run_main(vault)
         second = (vault / "follow-ups" / "_index.md").read_text()
-        assert first == second, "radar _index.md not byte-identical on second run"
+        assert first == second, "follow-ups _index.md not byte-identical on second run"
 
     def test_lessons_idempotent(self, tmp_path):
         vault = _make_vault(tmp_path, "lessons")
@@ -595,15 +595,15 @@ class TestBucketedScan:
 
     def test_follow_up_index_recurses_into_buckets(self, tmp_path):
         vault = _make_vault(tmp_path, "follow-ups/2026-06")
-        _write_follow_up(vault, "synth-flat-radar")
-        (vault / "follow-ups" / "2026-06" / "synth-nested-radar.md").write_text(
+        _write_follow_up(vault, "synth-flat-followup")
+        (vault / "follow-ups" / "2026-06" / "synth-nested-followup.md").write_text(
             "---\ntype: follow-up\nstatus: open\nrevisit-after: 2099-06-01\n"
-            "added: 2099-01-01\n---\n\n# synth-nested-radar\n\nSynthetic.\n"
+            "added: 2099-01-01\n---\n\n# synth-nested-followup\n\nSynthetic.\n"
         )
         _run_main(vault)
         content = (vault / "follow-ups" / "_index.md").read_text()
-        assert "synth-flat-radar" in content
-        assert "synth-nested-radar" in content
+        assert "synth-flat-followup" in content
+        assert "synth-nested-followup" in content
 
     def test_lessons_index_recurses_into_buckets(self, tmp_path):
         vault = _make_vault(tmp_path, "lessons/2026-06")

@@ -55,7 +55,7 @@ makes them vault-generic.
 - **`/lore:pickup`** — load a shelved session note, restore context, flip status
   back to `active`.
 - **`/lore:morning-briefing`** — synthesize what changed in the vault since the
-  last session; surface open deferred items and active radar entries.
+  last session; surface open deferred items and active follow-up entries.
 - **`/lore:monthly-reflection`** — periodic review: what shipped, what's been
   deferred the longest, what patterns recur in lessons/dead-ends.
 - **`/lore:brain-review`** — quality review of a harvest candidate before

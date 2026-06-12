@@ -2,7 +2,7 @@
 
 Agent-native project memory that works with your existing setup. Lore captures
 the durable, non-obvious things worth remembering across sessions — decisions,
-dead-ends, deferrals, radar items, area mental models, and a running session
+dead-ends, deferrals, follow-up items, area mental models, and a running session
 log — and loads what's relevant automatically when a session starts.
 
 **No MCP required.** Lore uses only `Read`, `Write`, `Edit`, `Glob`, `Grep`,
@@ -113,7 +113,7 @@ Key transitions:
 
 - **sessions:** `active` → `complete` (or `shelved` for handoffs)
 - **deferred:** `open` → `resolved` / `dropped` / `graduated`
-- **radar:** `active` → `resolved` / `dropped`
+- **follow-ups:** `active` → `resolved` / `dropped`
 - **dead-ends:** `active` → `archived`
 
 ## Vault layout
@@ -126,7 +126,7 @@ lore/
   dead-ends/     Failed approaches with revive conditions
   lessons/       Mistakes plus prevention checks
   deferred/      Work set aside with revisit triggers
-  radar/         External things to watch
+  follow-ups/    External things to watch
   collaboration/ Working-style preferences
   specs/         Specification artifacts
   plans/         Implementation plans

@@ -49,7 +49,7 @@ def _run_subprocess(args, env=None, input_text=None, cwd=None):
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
-    for d in ("deferred", "dead-ends", "decisions", "radar", "areas",
+    for d in ("deferred", "dead-ends", "decisions", "follow-ups", "areas",
               "sessions", "plans", "specs"):
         (vault / d).mkdir(parents=True)
     return vault
