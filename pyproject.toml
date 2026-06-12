@@ -20,4 +20,5 @@ testpaths = [
     "tools/lore/tests",
     "tools/forge/tests",
     "tools/camp/tests",
+    "tools/portage/tests",
 ]

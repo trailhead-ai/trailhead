@@ -87,7 +87,7 @@ class TestProviderShape:
 
     def test_pr_methods(self) -> None:
         provider = get_provider("github")
-        for m in ("open", "status", "evaluate", "merge"):
+        for m in ("open", "read_sidecar", "status", "evaluate", "merge"):
             assert hasattr(provider.pr, m), f"pr.{m} missing"
 
     def test_ci_methods(self) -> None:
@@ -114,6 +114,7 @@ _DOC_PATH = (
 _INTERFACE_METHODS = [
     "repos.detect",
     "pr.open",
+    "pr.read_sidecar",
     "pr.status",
     "pr.evaluate",
     "pr.merge",

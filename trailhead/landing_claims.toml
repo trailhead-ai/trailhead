@@ -477,3 +477,58 @@ kind = "agent"
 tool = "forge"
 ref = "agents/forge-ping.md"
 source = "forge"
+
+# ---------------------------------------------------------------------------
+# Slice 3 additions — portage tool README anchors
+# ---------------------------------------------------------------------------
+
+# portage capability named in the README capabilities table
+[[claim]]
+kind = "capability"
+tool = "portage"
+ref = "release"
+source = "portage"
+
+# portage skills named in the README commands table (/portage:<name>)
+[[claim]]
+kind = "skill"
+tool = "portage"
+ref = "skills/open"
+source = "portage"
+
+[[claim]]
+kind = "skill"
+tool = "portage"
+ref = "skills/update"
+source = "portage"
+
+[[claim]]
+kind = "skill"
+tool = "portage"
+ref = "skills/monitor"
+source = "portage"
+
+[[claim]]
+kind = "skill"
+tool = "portage"
+ref = "skills/merge"
+source = "portage"
+
+# portage agents named in the README agents list
+[[claim]]
+kind = "agent"
+tool = "portage"
+ref = "agents/updater.md"
+source = "portage"
+
+[[claim]]
+kind = "agent"
+tool = "portage"
+ref = "agents/monitor.md"
+source = "portage"
+
+[[claim]]
+kind = "agent"
+tool = "portage"
+ref = "agents/summarizer.md"
+source = "portage"

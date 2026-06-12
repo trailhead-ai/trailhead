@@ -206,14 +206,14 @@ class TestPrOpenSidecar:
             {"repo": "beta", "pr_number": "7", "url": "https://gh.com/7", "branch": "feat"},
         ]
         provider.pr.open(path, prs)
-        result = provider.pr.status_sidecar(path)
+        result = provider.pr.read_sidecar(path)
         assert result["prs"] == prs
 
     def test_schema_version_and_external_tracker(self, tmp_path: Path) -> None:
         provider = get_provider("github", runner=lambda cmd, **kw: None)
         path = tmp_path / "prs.json"
         provider.pr.open(path, [])
-        result = provider.pr.status_sidecar(path)
+        result = provider.pr.read_sidecar(path)
         assert result["schema_version"] == 1
         assert result["external_tracker"] is None
 
@@ -229,7 +229,7 @@ class TestPrOpenSidecar:
         path = tmp_path / "prs.json"
         provider.pr.open(path, [{"repo": "a", "pr_number": "1", "url": "u", "branch": "b"}])
         provider.pr.open(path, [{"repo": "x", "pr_number": "99", "url": "v", "branch": "c"}])
-        result = provider.pr.status_sidecar(path)
+        result = provider.pr.read_sidecar(path)
         assert len(result["prs"]) == 1
         assert result["prs"][0]["repo"] == "x"
 
@@ -237,7 +237,7 @@ class TestPrOpenSidecar:
         provider = get_provider("github", runner=lambda cmd, **kw: None)
         absent = tmp_path / "nonexistent.json"
         with pytest.raises(SidecarError) as exc_info:
-            provider.pr.status_sidecar(absent)
+            provider.pr.read_sidecar(absent)
         assert str(absent) in str(exc_info.value)
 
     def test_malformed_sidecar_raises_named_error(self, tmp_path: Path) -> None:
@@ -245,5 +245,5 @@ class TestPrOpenSidecar:
         bad = tmp_path / "bad.json"
         bad.write_text("{ not valid json !!!")
         with pytest.raises(SidecarError) as exc_info:
-            provider.pr.status_sidecar(bad)
+            provider.pr.read_sidecar(bad)
         assert str(bad) in str(exc_info.value)

@@ -8,7 +8,7 @@ not own membership.
 Ported sources (logic lifted, not imported — forge's copies stay in place until
 the release cluster is deleted):
   - detect_repos.py          → repos.detect()
-  - release_prs_sidecar.py   → pr.open() / pr.status_sidecar()
+  - release_prs_sidecar.py   → pr.open() / pr.read_sidecar()
   - check_pr_status.py       → pr.status() + ci.checks()
   - pr_evaluate_status.py    → pr.evaluate()
   - merge_prs.py             → pr.merge() (ordered, R-6 safety gate)
@@ -631,7 +631,7 @@ class _GitHubPR(PRSurface):
     def open(self, sidecar_path: Path | str, prs: list[dict[str, str]]) -> None:
         _sidecar_write(sidecar_path, prs)
 
-    def status_sidecar(self, sidecar_path: Path | str) -> dict[str, Any]:
+    def read_sidecar(self, sidecar_path: Path | str) -> dict[str, Any]:
         """Read the prs.json sidecar (the read half of pr.open's write)."""
         return _sidecar_read(sidecar_path)
 

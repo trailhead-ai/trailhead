@@ -43,6 +43,15 @@ class PRSurface(ABC):
         """Record opened/stacked PRs to the prs.json sidecar (atomic, 0o600)."""
 
     @abstractmethod
+    def read_sidecar(self, sidecar_path: Path | str) -> dict[str, Any]:
+        """Read the prs.json sidecar back (the read half of open()'s write).
+
+        Symmetric seam: ``open()`` records, ``read_sidecar()`` reads. Promoted
+        onto the ABC so portage's monitor reads the sidecar through the typed
+        surface (resolves the Slice-1 review I-2 asymmetry).
+        """
+
+    @abstractmethod
     def status(
         self,
         repo_path: str,
