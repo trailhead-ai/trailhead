@@ -391,12 +391,10 @@ class TestIdempotency:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        # recall skills/agents must be gone
+        # recall's agent must be gone (recall is now a librarian-only capability;
+        # its skills/tend + skills/reflect were deleted in Slice 7).
         assert not (plugin_dest / "agents" / "librarian.md").exists(), (
             "librarian.md still present after rewiring without recall (S-4/R-1)"
-        )
-        assert not (plugin_dest / "skills" / "tend").exists(), (
-            "skills/tend still present after rewiring without recall"
         )
 
 

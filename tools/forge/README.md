@@ -47,7 +47,7 @@ standalone:
 
 **Helpers:** `forge:researcher`, `forge:troubleshooter`, `forge:doc-finder`,
 `forge:test-runner`, `forge:log-sifter`, `forge:pr-summarizer`,
-`forge:security-auditor`, `forge:forge-ping`
+`forge:security-auditor`
 
 Nothing app-specific belongs in forge; per-project automation stays in that
 project's own repo.
@@ -108,8 +108,9 @@ For local dev work on the plugin itself:
 /plugin install forge@forge-local
 ```
 
-Then restart the session and confirm with the `forge-ping` agent. See
-[`MANUAL-SMOKE.md`](MANUAL-SMOKE.md) for the full boundary smoke test.
+Then restart the session and confirm a forge agent dispatches as a
+`forge:<name>` subagent_type. See [`MANUAL-SMOKE.md`](MANUAL-SMOKE.md) for the
+full boundary smoke test.
 
 ## Leak gate
 

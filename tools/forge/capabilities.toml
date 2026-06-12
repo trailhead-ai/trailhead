@@ -64,5 +64,4 @@ agents = [
   "agents/troubleshooter.md",
   "agents/test-runner.md",
   "agents/security-auditor.md",
-  "agents/forge-ping.md",
 ]

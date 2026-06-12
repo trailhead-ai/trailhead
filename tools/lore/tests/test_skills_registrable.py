@@ -46,14 +46,14 @@ def test_all_capture_and_ritual_skills_present():
     """Guard against a skill dir silently disappearing.
 
     Note: 'subsystem' was renamed to 'area'; 'vault-sync' was renamed to 'sync';
-    'finished' was renamed to 'finish'; 'review' was renamed to 'tend';
-    'radar' was renamed to 'follow-up'; 'check-radar' was renamed to 'check-in'.
+    'finished' was renamed to 'finish'; 'radar' was renamed to 'follow-up';
+    'check-radar' was renamed to 'check-in'. Slice 7 DELETED the 'reflect',
+    'tend'/'review', and 'ping' skills entirely.
     """
     names = {p.parent.name for p in _skill_files()}
     expected = {
         "defer", "dead-end", "decision", "follow-up", "area",
-        "checkpoint", "finish", "sync", "ping",
-        "reflect", "check-in",
+        "checkpoint", "finish", "sync", "check-in",
     }
     missing = expected - names
     assert not missing, f"expected skills missing from the plugin: {sorted(missing)}"

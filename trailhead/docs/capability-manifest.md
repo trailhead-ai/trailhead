@@ -12,7 +12,7 @@ baseline skills are always active when the tool is installed.
 ```toml
 [tool]
 name = "lore"                           # required
-base = ["skills/_shared", "skills/sync", "skills/ping"]   # always-on dirs
+base = ["skills/_shared", "skills/sync"]   # always-on dirs
 hooks_json = "hooks/hooks.json"         # optional — see D-E
 validate = true                         # optional, default true — see validate=false
 ```
@@ -150,7 +150,7 @@ table in the same file.  The loader catches this and re-raises as
 ```toml
 [tool]
 name = "lore"
-base = ["skills/_shared", "skills/sync", "skills/ping"]
+base = ["skills/_shared", "skills/sync"]
 hooks_json = "hooks/hooks.json"
 
 [capabilities.capture]
@@ -168,8 +168,8 @@ skills = [
 agents = []
 
 [capabilities.recall]
-description = "Surface, re-justify, and synthesize accumulated vault memory."
-skills = ["skills/tend", "skills/reflect"]
+description = "Surface and synthesize accumulated vault memory via librarian lookups."
+skills = []
 agents = ["agents/librarian.md"]
 
 [capabilities.sessions]

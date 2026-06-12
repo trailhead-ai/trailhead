@@ -74,8 +74,8 @@ The capture commands: defer, decision, dead-end, radar, area.
 
 ### Maintain
 
-Vault upkeep. Usually scheduled or triggered off-cycle: periodic review,
-reflection, cleanup.
+Vault upkeep. Usually scheduled or triggered off-cycle: periodic cleanup and
+consolidation.
 
 ## Canonical constants
 

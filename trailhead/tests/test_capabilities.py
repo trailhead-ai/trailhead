@@ -80,7 +80,8 @@ class TestLoreManifestParsesCorrectly:
 
     def test_lore_base_dirs(self):
         m = load_manifest(_LORE_MANIFEST)
-        assert m.base == ["skills/_shared", "skills/sync", "skills/ping"]
+        # skills/ping deleted in Spec A / Slice 7.
+        assert m.base == ["skills/_shared", "skills/sync"]
 
     def test_lore_hooks_json(self):
         m = load_manifest(_LORE_MANIFEST)
@@ -109,7 +110,9 @@ class TestLoreManifestParsesCorrectly:
     def test_lore_recall_capability(self):
         m = load_manifest(_LORE_MANIFEST)
         cap = m.capabilities["recall"]
-        assert cap["skills"] == ["skills/tend", "skills/reflect"]
+        # skills/tend + skills/reflect deleted in Spec A / Slice 7; recall is
+        # now a librarian-agent-only capability.
+        assert cap["skills"] == []
         assert "agents/librarian.md" in cap["agents"]
 
     def test_lore_sessions_capability(self):

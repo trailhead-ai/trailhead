@@ -1,6 +1,6 @@
 [tool]
 name = "lore"
-base = ["skills/_shared", "skills/sync", "skills/ping"]
+base = ["skills/_shared", "skills/sync"]
 hooks_json = "hooks/hooks.json"
 
 [capabilities.capture]
@@ -18,8 +18,8 @@ skills = [
 agents = []
 
 [capabilities.recall]
-description = "Surface, re-justify, and synthesize accumulated vault memory — tend rituals, reflections, and librarian lookups."
-skills = ["skills/tend", "skills/reflect"]
+description = "Surface and synthesize accumulated vault memory via librarian lookups."
+skills = []
 agents = ["agents/librarian.md"]
 
 [capabilities.sessions]

@@ -19,7 +19,7 @@ and `Bash(git)` — tools every Claude Code session already has.
 | `/lore:area` | Mental model of a codebase area (files, gotchas, conventions) |
 
 Session lifecycle is automatic: `/lore:checkpoint` snapshots in-flight state;
-`/lore:finished` wraps the session. `/lore:sync` commits and pushes the vault at
+`/lore:finish` wraps the session. `/lore:sync` commits and pushes the vault at
 any point.
 
 ## Install
@@ -52,11 +52,8 @@ with the area map already included so the agent knows which areas exist.
 | `/lore:check-in` | Poll active follow-ups for movement |
 | `/lore:area` | Create or update an area profile |
 | `/lore:checkpoint` | Mid-session snapshot — harvest state into the session note |
-| `/lore:finished` | Canonical end-of-session finish — fill, finalize, expand harvest-pending, and commit |
-| `/lore:review` | Weekly vault migration — re-justify or close every open item |
-| `/lore:reflect` | Narrative synthesis of vault activity over a period |
+| `/lore:finish` | Canonical end-of-session finish — fill, finalize, expand harvest-pending, and commit |
 | `/lore:sync` | Commit and push the vault |
-| `/lore:ping` | Confirm the plugin is installed and show the resolved vault path |
 
 ## The `lore` CLI
 

@@ -8,18 +8,6 @@ Each entry states: what is off, why, how it surfaces, and how to turn it on.
 
 ---
 
-## /lore:reflect — ai-memory and daily briefings not gathered
-
-**What is off:** The reflect skill does not read ai-memory feedback files (app-layer, not stored in the lore vault) or daily briefings (a separate global artifact). The reflection synthesizes only lore vault content: sessions, decisions, deferred, dead-ends, radar, and subsystem updates.
-
-**Why:** These inputs are app-specific or global (outside `$LORE_VAULT`) and cannot be gathered in a generic, portable ritual. The brain `/monthly-reflection` original gathered them from machine-local paths.
-
-**How it surfaces:** The reflect SKILL.md opens with an explicit "Inputs NOT gathered" callout so the user is not silently surprised by a thinner reflection.
-
-**How to turn it on:** Not applicable for the generic skill. Wrap `/lore:reflect` in an app-layer skill that gathers the additional inputs and passes them to the subagent synthesis step.
-
----
-
 ## /lore:check-in — legacy "snoozed" status skipped, not polled
 
 Follow-up notes carrying `status: snoozed` (not in lore's canonical `active | resolved | dropped` vocab) are skipped and flagged in the digest's "Skipped" section; the user must update or remove them manually.

@@ -15,7 +15,6 @@ Subcommands:
   lore resume [note|slug]   Flip a shelved/handoff note back to active
                             (omit the target to resume the current session).
   lore sync                 Stage, commit, and push the vault.
-  lore review               Generate a vault migration-discipline report.
 
 Finds its sibling ../scripts modules at import time so it works whether run
 from the repo or from an installed plugin (${CLAUDE_PLUGIN_ROOT}/cli/lore).
@@ -42,7 +41,6 @@ import layers as layers_mod  # noqa: E402
 import link_server  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
-import review as review_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
@@ -1319,28 +1317,6 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---- review -----------------------------------------------------------------
-
-def cmd_review(args: argparse.Namespace) -> int:
-    """Generate a vault migration-discipline report.
-
-    Outputs a structured markdown report covering: git activity since the
-    last review, action taxonomy drift, graduation candidates, stale area
-    profiles, open deferred items, dead-ends, open radar items, and active
-    lessons. Read-only — the report never mutates the vault.
-    """
-    vault = Path(vault_mod.resolve_vault())
-
-    if not vault.exists():
-        print(f"error: vault not found: {vault}", file=sys.stderr)
-        return 1
-
-    since = review_mod.resolve_since(vault, getattr(args, "since", None))
-    report = review_mod.build_report(vault, since)
-    print(report)
-    return 0
-
-
 # ---- stats ------------------------------------------------------------------
 
 def _count(directory: Path, predicate, recursive: bool = False) -> int:
@@ -1911,18 +1887,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_session_selectors(p_resume)
     p_resume.set_defaults(func=cmd_resume)
-
-    p_review = sub.add_parser(
-        "review",
-        help="Generate a vault migration-discipline report",
-    )
-    p_review.add_argument(
-        "--since",
-        default=None,
-        help="Lookback window for activity section (e.g. 7d, 2026-04-01). "
-             "Default: since the most recent review note, or 7 days ago.",
-    )
-    p_review.set_defaults(func=cmd_review)
 
     p_recall = sub.add_parser(
         "recall",

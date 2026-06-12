@@ -1,11 +1,11 @@
 ---
-name: finished
-description: "Canonical end-of-session finish — fill in the session note sections (What we did / Decided / Learned / Open questions), run `lore finish` to set status=complete, expand harvest-pending into vault notes, and commit. Use for /finished, \"I'm done\", \"wrap up\", \"close this out\", \"finalize the session\"."
+name: finish
+description: "Canonical end-of-session finish — fill in the session note sections (What we did / Decided / Learned / Open questions), run `lore finish` to set status=complete, expand harvest-pending into vault notes, and commit. Use for /finish, \"I'm done\", \"wrap up\", \"close this out\", \"finalize the session\"."
 ---
 
 # Finished — canonical end-of-session finish
 
-`lore:finished` is the canonical end-of-session finish. It fills the session
+`lore:finish` is the canonical end-of-session finish. It fills the session
 note from in-context synthesis, then calls `lore finish`, which:
 
 1. Sets `status: complete` and stamps `ended:`.

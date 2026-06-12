@@ -190,8 +190,6 @@ in brief:
   deferred. Branch/keyword recall still fires at SessionStart; a banner
   announces that mid-conversation recall is off. Re-add path: port the
   classifier hook and flip the capability flag.
-- **`/lore:reflect`** does not gather app-layer ai-memory or daily briefings
-  (those live outside the vault); it synthesizes vault content only.
 - **`/lore:check-in`** skips legacy `snoozed` follow-up notes (not in lore's
   canonical status vocabulary) and flags them for manual cleanup.
 

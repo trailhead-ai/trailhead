@@ -94,18 +94,6 @@ source = "lore"
 [[claim]]
 kind = "skill"
 tool = "lore"
-ref = "skills/tend"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
-ref = "skills/reflect"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
 ref = "skills/area"
 source = "lore"
 
@@ -476,10 +464,4 @@ source = "forge"
 kind = "agent"
 tool = "forge"
 ref = "agents/security-auditor.md"
-source = "forge"
-
-[[claim]]
-kind = "agent"
-tool = "forge"
-ref = "agents/forge-ping.md"
 source = "forge"

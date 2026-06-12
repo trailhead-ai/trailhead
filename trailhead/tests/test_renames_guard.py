@@ -321,14 +321,22 @@ class TestManifestValidation:
         assert m.tool_name == "forge"
 
     def test_lore_recall_references_tend_skill(self):
-        """lore recall capability must reference skills/tend (not skills/review)."""
+        """Slice 7 INVERSION: lore recall must NO LONGER reference skills/tend.
+
+        Slice 4 (WS-12) renamed lore's review→tend; Slice 7 DELETES the tend skill
+        entirely (along with reflect). The recall capability's skills list must now
+        carry neither skills/tend nor the older skills/review.
+        """
         m = load_manifest(_LORE_MANIFEST)
         cap = m.capabilities["recall"]
-        assert "skills/tend" in cap["skills"], (
-            f"lore recall must reference 'skills/tend'; got {cap['skills']}"
+        assert "skills/tend" not in cap["skills"], (
+            f"lore recall still references deleted 'skills/tend'; got {cap['skills']}"
         )
         assert "skills/review" not in cap["skills"], (
-            "lore recall still references 'skills/review' — update to 'skills/tend'"
+            "lore recall still references 'skills/review' — the tend/review skill is deleted"
+        )
+        assert "skills/reflect" not in cap["skills"], (
+            f"lore recall still references deleted 'skills/reflect'; got {cap['skills']}"
         )
 
     def test_lore_recall_references_librarian_agent(self):
@@ -571,6 +579,17 @@ class TestSkillDirsExist:
             "skills/finish/SKILL.md missing after rename"
         )
 
+    def test_lore_finish_frontmatter_name_matches_dir(self):
+        """Slice 7 finish/finished fix: the finish skill dir is finish/ but its frontmatter
+        still said name: finished. Align it so dir↔name agree (registers as /lore:finish)."""
+        finish_skill = _LORE_PLUGIN_ROOT / "skills" / "finish" / "SKILL.md"
+        assert finish_skill.exists(), f"skills/finish/SKILL.md not found at {finish_skill}"
+        name = _parse_frontmatter_name(finish_skill)
+        assert name == "finish", (
+            f"skills/finish/SKILL.md frontmatter name: is {name!r}, expected 'finish' "
+            "(dir↔name must agree so it registers as /lore:finish)"
+        )
+
     def test_lore_finished_dir_gone(self):
         """skills/finished/ must not exist after rename."""
         old_dir = _LORE_PLUGIN_ROOT / "skills" / "finished"
@@ -579,13 +598,10 @@ class TestSkillDirsExist:
         )
 
     def test_lore_tend_skill_dir_exists(self):
-        """skills/tend/ must exist after rename from skills/review/."""
+        """Slice 7 INVERSION: skills/tend/ must be GONE (the tend/review skill is deleted)."""
         tend_dir = _LORE_PLUGIN_ROOT / "skills" / "tend"
-        assert tend_dir.exists() and tend_dir.is_dir(), (
-            f"skills/tend/ not found at {tend_dir} — rename from skills/review/"
-        )
-        assert (tend_dir / "SKILL.md").exists(), (
-            "skills/tend/SKILL.md missing after rename"
+        assert not tend_dir.exists(), (
+            f"skills/tend/ still exists at {tend_dir} — Slice 7 deletes the tend/review skill"
         )
 
 
@@ -1285,3 +1301,214 @@ class TestSlice6ManifestAndTemplate:
         assert "check-in" in skill_srcs, (
             f"compose(capture) must include the check-in skill dir; got {skill_srcs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 11. Slice 7 — FULL deletions: reflect, tend/review, forge-ping, lore:ping.
+#
+# CRITICAL scoping (Builder/Advocate, per-slice green-bar rule): each forbid
+# targets the SKILL/AGENT IDENTITY of the deleted surface so it never trips a
+# legitimate survivor:
+#   - `reflect` survives as an English verb ("filenames reflect", "update to
+#     reflect outcomes", `/lore:monthly-reflection` ROADMAP idea) → forbid the
+#     skill-identity forms only: `skills/reflect`, `reflect_sessions`,
+#     `/lore:reflect`, `name: reflect`.
+#   - `review`/`tend` survive as forge's `review` *capability* + the new forge
+#     `skills/review` (Slice 4) and as English ("weekly review", "review note")
+#     → forbid is PATH-SCOPED to tools/lore/ and targets the lore skill identity
+#     (`skills/review`/`skills/tend` dir, `review.py` helper, `/lore:review`/
+#     `/lore:tend`, `name: review`/`name: tend`), never a bare word.
+#   - `ping` survives in unrelated network/health contexts → forbid the lore
+#     skill identity only: `skills/ping`, `/lore:ping`, `name: ping`.
+#   - `forge-ping` is a distinctive token → forbid `forge-ping`,
+#     `agents/forge-ping.md`, `/forge:forge-ping`.
+# ---------------------------------------------------------------------------
+
+_LANDING_CLAIMS = _REPO_ROOT / "trailhead" / "landing_claims.toml"
+
+# Path-scoped file sets for the lore-only review/tend/ping/reflect forbids.
+_LORE_FILES = [
+    f for f in _collect_files()
+    if (_REPO_ROOT / "tools" / "lore") in f.parents or f.parent == (_REPO_ROOT / "tools" / "lore")
+]
+
+
+class TestSlice7DeletionForbids:
+    """Old reflect / tend-review / forge-ping / lore:ping identifiers must be GONE.
+
+    Each forbid is identity-scoped so it can't trip a legitimate survivor (the
+    English verb `reflect`, forge's `review` capability + Slice-4 `skills/review`,
+    network-`ping` prose).
+    """
+
+    # ---- reflect (lore) ----------------------------------------------------
+
+    def test_no_skills_reflect_path(self):
+        """`skills/reflect` skill path must be gone (skill deleted)."""
+        files = _collect_files()
+        hits = _grep_files(r"skills/reflect\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/reflect' — the reflect skill is deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_reflect_sessions_helper(self):
+        """The `reflect_sessions` backing script (filename / import) must be gone."""
+        files = _collect_files()
+        hits = _grep_files(r"reflect_sessions", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'reflect_sessions' — the script is deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_lore_reflect_command_or_name(self):
+        """`/lore:reflect` invocation and `name: reflect` frontmatter must be gone.
+
+        Scoped to the slash-command and frontmatter identity forms — never a bare
+        `reflect` (a common English verb; `/lore:monthly-reflection` is a separate
+        unrelated ROADMAP idea token).
+        """
+        files = _collect_files()
+        hits = _grep_files(r"/lore:reflect\b|^name: reflect\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the reflect skill identity — deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    # ---- tend / review (lore, PATH-SCOPED to tools/lore) -------------------
+
+    def test_no_lore_skills_review_or_tend_path(self):
+        """`skills/review` / `skills/tend` lore skill paths must be gone.
+
+        PATH-SCOPED to tools/lore/ so it does NOT flag forge's Slice-4 `skills/review`
+        (the renamed requesting-code-review skill, a legitimate survivor).
+        """
+        hits = _grep_files(r"skills/(review|tend)\b", _LORE_FILES)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of lore 'skills/review|skills/tend' — deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_review_helper_script(self):
+        """The lore `review.py` backing script (filename / import) must be gone.
+
+        PATH-SCOPED to tools/lore/. Matches the helper identity `review.py` /
+        `import review` / `load_script("review")` — not the English word.
+        """
+        hits = _grep_files(r"\breview\.py\b|import review\b|load_script\(\"review\"\)|from review import", _LORE_FILES)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the lore review.py helper — deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_lore_review_or_tend_command_or_name(self):
+        """`/lore:review` / `/lore:tend` invocations and `name: review`/`name: tend`
+        frontmatter must be gone (the lore tend/review skill is deleted).
+
+        PATH-SCOPED to tools/lore/ — forge's `review` capability/skill is untouched.
+        """
+        hits = _grep_files(r"/lore:(review|tend)\b|^name: (review|tend)\b", _LORE_FILES)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the lore review/tend skill identity — deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    # ---- forge-ping (forge agent) ------------------------------------------
+
+    def test_no_forge_ping_references(self):
+        """`forge-ping`, `agents/forge-ping.md`, `/forge:forge-ping` must all be gone."""
+        files = _collect_files()
+        hits = _grep_files(r"forge-ping", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of 'forge-ping' — the agent is deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    # ---- lore:ping (lore skill) --------------------------------------------
+
+    def test_no_lore_skills_ping_path(self):
+        """`skills/ping` lore skill path must be gone.
+
+        PATH-SCOPED to tools/lore/ — `ping` survives in unrelated network/health
+        contexts elsewhere; this targets the lore skill dir identity only.
+        """
+        hits = _grep_files(r"skills/ping\b", _LORE_FILES)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of lore 'skills/ping' — the skill is deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+    def test_no_lore_ping_command_or_name(self):
+        """`/lore:ping` invocation and `name: ping` frontmatter must be gone."""
+        files = _collect_files()
+        hits = _grep_files(r"/lore:ping\b|^name: ping\b", files)
+        if hits:
+            msg_lines = [f"Found {len(hits)} occurrence(s) of the lore ping skill identity — deleted:"]
+            for f, ln, line in hits[:10]:
+                msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
+            pytest.fail("\n".join(msg_lines))
+
+
+class TestSlice7DeletedSurfacesGone:
+    """All four deleted dirs/files are gone on disk and their manifest/claim entries removed."""
+
+    def test_reflect_skill_dir_gone(self):
+        assert not (_LORE_PLUGIN_ROOT / "skills" / "reflect").exists(), (
+            "skills/reflect/ still exists — Slice 7 deletes the reflect skill"
+        )
+
+    def test_reflect_sessions_script_gone(self):
+        assert not (_LORE_PLUGIN_ROOT / "scripts" / "reflect_sessions.py").exists(), (
+            "scripts/reflect_sessions.py still exists — Slice 7 deletes it"
+        )
+
+    def test_tend_skill_dir_gone(self):
+        assert not (_LORE_PLUGIN_ROOT / "skills" / "tend").exists(), (
+            "skills/tend/ still exists — Slice 7 deletes the tend/review skill"
+        )
+
+    def test_review_helper_script_gone(self):
+        assert not (_LORE_PLUGIN_ROOT / "scripts" / "review.py").exists(), (
+            "scripts/review.py still exists — Slice 7 deletes it"
+        )
+
+    def test_lore_ping_skill_dir_gone(self):
+        assert not (_LORE_PLUGIN_ROOT / "skills" / "ping").exists(), (
+            "skills/ping/ still exists — Slice 7 deletes the lore:ping skill"
+        )
+
+    def test_forge_ping_agent_gone(self):
+        assert not (_FORGE_PLUGIN_ROOT / "agents" / "forge-ping.md").exists(), (
+            "agents/forge-ping.md still exists — Slice 7 deletes the forge-ping agent"
+        )
+
+    def test_lore_base_drops_ping_skill(self):
+        """lore [tool] base must no longer list skills/ping."""
+        m = load_manifest(_LORE_MANIFEST)
+        assert "skills/ping" not in m.base, (
+            f"lore base still references deleted 'skills/ping'; got {m.base}"
+        )
+
+    def test_forge_helpers_drops_forge_ping_agent(self):
+        """forge helpers capability must no longer list agents/forge-ping.md."""
+        m = load_manifest(_FORGE_MANIFEST)
+        cap = m.capabilities["helpers"]
+        assert "agents/forge-ping.md" not in cap["agents"], (
+            f"forge helpers still references deleted 'agents/forge-ping.md'; got {cap['agents']}"
+        )
+
+    def test_landing_claims_has_no_dangling_deleted_entries(self):
+        """landing_claims.toml must carry no claim pointing at a deleted surface."""
+        text = _LANDING_CLAIMS.read_text()
+        for ref in ("skills/reflect", "skills/tend", "skills/ping", "agents/forge-ping.md"):
+            assert ref not in text, (
+                f"landing_claims.toml still has a dangling claim for deleted '{ref}'"
+            )
