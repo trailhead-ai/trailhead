@@ -365,37 +365,48 @@ class TestRenderToolNotes:
         result = sessions.render_tool_notes(vault)
         assert "synth-zeta-tool" in result
 
-    def test_output_contains_summary(self, tmp_path):
-        """The rendered string contains the summary text."""
+    def test_three_mixed_tools_single_line_names_only(self, tmp_path):
+        """3 tool notes (mixed: some with summaries, some without) → single line with all
+        names and no summary text, no >-, no per-tool bullet list."""
         vault = _make_vault(tmp_path)
-        _write_tool_note(vault, "synth-tool-g", "synth-eta-tool", "Eta synthetic summary text")
+        _write_tool_note(vault, "synth-tool-aa", "synth-alpha-tool", "Alpha summary text")
+        _write_tool_note(vault, "synth-tool-bb", "synth-beta-tool", "Beta summary text")
+        p = vault / "tools" / "synth-tool-cc.md"
+        p.write_text("---\nname: synth-gamma-tool\n---\n\nNo summary tool.\n")
         sessions = _load_sessions()
         result = sessions.render_tool_notes(vault)
-        assert "Eta synthetic summary text" in result
+        assert result is not None
+        # Must be a single line (no newlines in content)
+        assert "\n" not in result.strip()
+        # All three names present
+        assert "synth-alpha-tool" in result
+        assert "synth-beta-tool" in result
+        assert "synth-gamma-tool" in result
+        # No summary text
+        assert "Alpha summary text" not in result
+        assert "Beta summary text" not in result
+        # No >- artifact
+        assert ">-" not in result
+        # No per-tool bullet list markers
+        assert "- **`" not in result
 
-    def test_output_has_heading(self, tmp_path):
-        """The rendered block has a heading."""
+    def test_output_is_single_line_with_compact_prefix(self, tmp_path):
+        """Output uses the compact **Tool notes** (...): names format (no ### heading)."""
         vault = _make_vault(tmp_path)
         _write_tool_note(vault, "synth-tool-h", "synth-theta-tool", "Theta summary")
         sessions = _load_sessions()
         result = sessions.render_tool_notes(vault)
-        assert "### Tool notes" in result
+        assert "**Tool notes**" in result
+        assert "before first use" in result
+        assert "### Tool notes" not in result
 
-    def test_tool_without_summary_renders_without_dash(self, tmp_path):
-        """Tool with empty summary renders without the ' — <summary>' part on its line."""
+    def test_no_summary_text_in_output(self, tmp_path):
+        """Summary text from tool notes is NOT included in render output."""
         vault = _make_vault(tmp_path)
-        p = vault / "tools" / "synth-bare-tool.md"
-        p.write_text("---\nname: synth-bare-tool-name\n---\n\nBody.\n")
+        _write_tool_note(vault, "synth-tool-g", "synth-eta-tool", "Eta synthetic summary text")
         sessions = _load_sessions()
         result = sessions.render_tool_notes(vault)
-        assert "synth-bare-tool-name" in result
-        # The tool line itself (starts with "- **`...`**") must not have " — <summary>"
-        tool_line = next(
-            (line for line in result.splitlines() if "synth-bare-tool-name" in line),
-            None,
-        )
-        assert tool_line is not None
-        assert " — " not in tool_line
+        assert "Eta synthetic summary text" not in result
 
 
 # ---------------------------------------------------------------------------
