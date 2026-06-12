@@ -153,7 +153,7 @@ def test_validator_cli_mixed_valid_and_invalid(tmp_path):
     good = tmp_path / "good.md"
     bad = tmp_path / "bad.md"
     _make_note(good, "session", "active")
-    _make_note(bad, "radar", "nonexistent-status")
+    _make_note(bad, "follow-up", "nonexistent-status")
     r = run_validator([str(good), str(bad)])
     assert r.returncode != 0
     assert "bad.md" in r.stderr or "bad.md" in r.stdout

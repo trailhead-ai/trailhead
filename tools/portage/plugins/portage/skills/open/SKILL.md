@@ -27,7 +27,7 @@ Dispatch a **code-reviewer** subagent with:
 - `HEAD_SHA` = current HEAD
 - `WHAT_WAS_IMPLEMENTED` / `DESCRIPTION` = summary of changes on this branch
 
-Use the template at `skills/requesting-code-review/code-reviewer.md` for the prompt.
+Use the template at `skills/review/code-reviewer.md` for the prompt.
 
 Evaluate and act on feedback per the `receiving-code-review` skill:
 - Fix Critical and Important issues immediately

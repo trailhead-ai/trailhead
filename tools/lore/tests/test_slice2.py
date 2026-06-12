@@ -109,14 +109,14 @@ def test_skill_does_not_claim_skill_itself_expands():
 
 
 # ---------------------------------------------------------------------------
-# 3. lore:finished framed as the canonical end-of-session finish
+# 3. lore:finish framed as the canonical end-of-session finish
 # ---------------------------------------------------------------------------
 
 def test_skill_framed_as_canonical():
-    """The skill must describe lore:finished as the canonical end-of-session finish."""
+    """The skill must describe lore:finish as the canonical end-of-session finish."""
     text = _skill_text()
     assert "canonical" in text.lower(), (
-        "finish/SKILL.md should frame lore:finished as the canonical "
+        "finish/SKILL.md should frame lore:finish as the canonical "
         "end-of-session finish"
     )
 

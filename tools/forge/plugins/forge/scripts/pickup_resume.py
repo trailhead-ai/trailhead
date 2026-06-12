@@ -1,6 +1,6 @@
 """Deterministic helpers for the `/forge:pickup` dev ritual.
 
-`/forge:pickup` resumes work shelved by `/forge:handoff`: it surfaces the
+`/forge:pickup` resumes work shelved by `/forge:shelve`: it surfaces the
 recorded git state + pickup hints and (on the lore backend) flips the shelved
 session note back to active. The SKILL.md orchestrates; the testable logic
 lives here:

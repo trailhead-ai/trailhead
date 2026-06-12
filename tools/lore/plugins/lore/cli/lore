@@ -15,7 +15,6 @@ Subcommands:
   lore resume [note|slug]   Flip a shelved/handoff note back to active
                             (omit the target to resume the current session).
   lore sync                 Stage, commit, and push the vault.
-  lore review               Generate a vault migration-discipline report.
 
 Finds its sibling ../scripts modules at import time so it works whether run
 from the repo or from an installed plugin (${CLAUDE_PLUGIN_ROOT}/cli/lore).
@@ -42,7 +41,6 @@ import layers as layers_mod  # noqa: E402
 import link_server  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
-import review as review_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
@@ -54,7 +52,7 @@ TEMPLATES_DIR = PLUGIN_ROOT / "templates"
 # The generic directory taxonomy every vault gets.
 TAXONOMY = [
     "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
-    "radar", "collaboration", "specs", "plans", "designs", "inbox",
+    "follow-ups", "collaboration", "specs", "plans", "designs", "inbox",
     "briefings", "reviews", "gotchas", "audits", "tools", "templates",
 ]
 
@@ -68,21 +66,21 @@ _NOTE_DIRS: dict[str, str] = {
     "deferred": "deferred",
     "dead-end": "dead-ends",
     "decision": "decisions",
-    "radar": "radar",
+    "follow-up": "follow-ups",
     "area": "areas",
     "spec": "specs",
     "plan": "plans",
 }
 
 # Types that carry a project: field. dead-end is intentionally absent.
-_PROJECT_BEARING: frozenset[str] = frozenset({"deferred", "decision", "radar", "area", "spec", "plan"})
+_PROJECT_BEARING: frozenset[str] = frozenset({"deferred", "decision", "follow-up", "area", "spec", "plan"})
 
 # Note types stored in date-bucketed YYYY-MM subdirs (the date-bucketed archive
-# layout). The date-based living folders (deferred/dead-ends/decisions/radar)
+# layout). The date-based living folders (deferred/dead-ends/decisions/follow-ups)
 # join the archive types; only singleton area profiles (name-keyed) stay
 # flat at the folder root.
 _BUCKETED_TYPES: frozenset[str] = frozenset(
-    {"spec", "plan", "deferred", "decision", "radar", "dead-end"}
+    {"spec", "plan", "deferred", "decision", "follow-up", "dead-end"}
 )
 
 # Which section of the session note gets the backlink (None = no backlink).
@@ -90,7 +88,7 @@ _BACKLINK_SECTIONS: dict[str, str | None] = {
     "deferred": "Deferred",
     "dead-end": "Learned",
     "decision": "Decided",
-    "radar": None,
+    "follow-up": None,
     "area": None,
     "spec": None,
     "plan": None,
@@ -259,7 +257,7 @@ def cmd_new(args: argparse.Namespace) -> int:
     elif note_type == "decision":
         subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
 
-    elif note_type == "radar":
+    elif note_type == "follow-up":
         subs["source"] = getattr(args, "source", None) or ""
         subs["target"] = getattr(args, "target", None) or ""
         subs["check"] = getattr(args, "check", None) or ""
@@ -1319,28 +1317,6 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---- review -----------------------------------------------------------------
-
-def cmd_review(args: argparse.Namespace) -> int:
-    """Generate a vault migration-discipline report.
-
-    Outputs a structured markdown report covering: git activity since the
-    last review, action taxonomy drift, graduation candidates, stale area
-    profiles, open deferred items, dead-ends, open radar items, and active
-    lessons. Read-only — the report never mutates the vault.
-    """
-    vault = Path(vault_mod.resolve_vault())
-
-    if not vault.exists():
-        print(f"error: vault not found: {vault}", file=sys.stderr)
-        return 1
-
-    since = review_mod.resolve_since(vault, getattr(args, "since", None))
-    report = review_mod.build_report(vault, since)
-    print(report)
-    return 0
-
-
 # ---- stats ------------------------------------------------------------------
 
 def _count(directory: Path, predicate, recursive: bool = False) -> int:
@@ -1649,7 +1625,7 @@ def cmd_recall(args: argparse.Namespace) -> int:
     falls back to the zero-match banner on stdout.
 
     --json emits the structured RecallResult for programmatic callers
-    (e.g. the lore-librarian agent). JSON items carry source/layer (D-7).
+    (e.g. the librarian agent). JSON items carry source/layer (D-7).
     """
     import json as _json
 
@@ -1813,10 +1789,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--areas", default=None, help="CSV area names (dead-end, decision)")
     p_new.add_argument("--tried", default=None, help="Date the approach was tried (dead-end; defaults to today)")
     p_new.add_argument("--revive-condition", dest="revive_condition", default=None, help="Condition to retry (dead-end)")
-    # radar
-    p_new.add_argument("--source", default=None, help="Where updates appear (radar)")
-    p_new.add_argument("--target", default=None, help="Version or state being waited for (radar)")
-    p_new.add_argument("--check", default=None, help="Check cadence (radar)")
+    # follow-up
+    p_new.add_argument("--source", default=None, help="Where updates appear (follow-up)")
+    p_new.add_argument("--target", default=None, help="Version or state being waited for (follow-up)")
+    p_new.add_argument("--check", default=None, help="Check cadence (follow-up)")
     # area
     p_new.add_argument("--keywords", default=None, help="CSV keywords for branch-based recall (area)")
     p_new.add_argument("--key-files", dest="key_files", default=None, help="CSV key file paths (area)")
@@ -1911,18 +1887,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_session_selectors(p_resume)
     p_resume.set_defaults(func=cmd_resume)
-
-    p_review = sub.add_parser(
-        "review",
-        help="Generate a vault migration-discipline report",
-    )
-    p_review.add_argument(
-        "--since",
-        default=None,
-        help="Lookback window for activity section (e.g. 7d, 2026-04-01). "
-             "Default: since the most recent review note, or 7 days ago.",
-    )
-    p_review.set_defaults(func=cmd_review)
 
     p_recall = sub.add_parser(
         "recall",

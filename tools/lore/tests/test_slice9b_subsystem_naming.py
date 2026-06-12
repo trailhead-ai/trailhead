@@ -33,7 +33,7 @@ def run_cli(args, env=None, input_text=None, cwd=None):
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
-    for d in ("deferred", "dead-ends", "decisions", "radar", "areas", "sessions",
+    for d in ("deferred", "dead-ends", "decisions", "follow-ups", "areas", "sessions",
               "lessons"):
         (vault / d).mkdir(parents=True)
     return vault

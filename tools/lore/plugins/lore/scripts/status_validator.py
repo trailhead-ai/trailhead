@@ -15,7 +15,7 @@ CANONICAL: dict[str, frozenset[str]] = {
     "specs": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped", "shelved"}),
     "sessions": frozenset({"active", "complete", "shelved", "finalized", "handoff"}),
     "deferred": frozenset({"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}),
-    "radar": frozenset({"active", "resolved", "dropped"}),
+    "follow-ups": frozenset({"active", "resolved", "dropped"}),
     "lessons": frozenset({"active", "superseded"}),
     "dead-ends": frozenset({"active", "archived"}),
 }
@@ -36,7 +36,7 @@ _TYPE_ALIASES: dict[str, str] = {
     "spec": "specs",
     "session": "sessions",
     "deferred": "deferred",
-    "radar": "radar",
+    "follow-up": "follow-ups",
     "lesson": "lessons",
     "dead-end": "dead-ends",
 }

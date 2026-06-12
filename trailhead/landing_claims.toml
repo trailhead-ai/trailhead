@@ -94,18 +94,6 @@ source = "lore"
 [[claim]]
 kind = "skill"
 tool = "lore"
-ref = "skills/tend"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
-ref = "skills/reflect"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
 ref = "skills/area"
 source = "lore"
 
@@ -122,7 +110,7 @@ source = "lore"
 [[claim]]
 kind = "agent"
 tool = "lore"
-ref = "agents/loremaster.md"
+ref = "agents/librarian.md"
 source = "lore"
 
 # ---------------------------------------------------------------------------
@@ -160,13 +148,19 @@ source = "forge"
 [[claim]]
 kind = "skill"
 tool = "forge"
-ref = "skills/subagent-driven-development"
+ref = "skills/consult"
 source = "forge"
 
 [[claim]]
 kind = "skill"
 tool = "forge"
-ref = "skills/planning"
+ref = "skills/execute"
+source = "forge"
+
+[[claim]]
+kind = "skill"
+tool = "forge"
+ref = "skills/plan"
 source = "forge"
 
 # ---------------------------------------------------------------------------
@@ -176,13 +170,13 @@ source = "forge"
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/scout.md"
+ref = "agents/assumption-prover.md"
 source = "forge"
 
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/trailblazer.md"
+ref = "agents/executor.md"
 source = "forge"
 
 [[claim]]
@@ -194,25 +188,25 @@ source = "forge"
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/circle-advocate.md"
+ref = "agents/advocate.md"
 source = "forge"
 
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/circle-builder.md"
+ref = "agents/builder.md"
 source = "forge"
 
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/circle-reliability.md"
+ref = "agents/breaker.md"
 source = "forge"
 
 [[claim]]
 kind = "agent"
 tool = "forge"
-ref = "agents/circle-security.md"
+ref = "agents/attacker.md"
 source = "forge"
 
 # ---------------------------------------------------------------------------
@@ -316,7 +310,7 @@ source = "lore"
 [[claim]]
 kind = "skill"
 tool = "lore"
-ref = "skills/radar"
+ref = "skills/follow-up"
 source = "lore"
 
 [[claim]]
@@ -325,7 +319,7 @@ tool = "lore"
 ref = "skills/checkpoint"
 source = "lore"
 
-# Note: lore base skills (sync, ping) are in [tool] base = [...] not a capability group;
+# Note: lore base skills (sync) are in [tool] base = [...] not a capability group;
 # build_real_anchor_set() enumerates only capability-grouped skills, so these can't be
 # claimed as kind="skill" — they are real on-disk but unverifiable by the gate oracle.
 # Prose mentions are fine; they are not shown in fenced sh/bash blocks.
@@ -350,7 +344,7 @@ tool = "forge"
 ref = "helpers"
 source = "forge"
 
-# Note: forge base skills (handoff, pickup, followup) are in [tool] base = [...] not a
+# Note: forge base skills (shelve, pickup, polish) are in [tool] base = [...] not a
 # capability group; build_real_anchor_set() enumerates only capability-grouped skills,
 # so these can't be claimed as kind="skill" — they are real on-disk but unverifiable by
 # the gate oracle. Prose mentions are fine; they are not shown in fenced sh/bash blocks.
@@ -359,7 +353,7 @@ source = "forge"
 [[claim]]
 kind = "skill"
 tool = "forge"
-ref = "skills/requesting-code-review"
+ref = "skills/review"
 source = "forge"
 
 # forge agents named in the README
@@ -381,7 +375,7 @@ tool = "forge"
 ref = "agents/code-reviewer.md"
 source = "forge"
 
-# circle-* agents (advocate/builder/reliability/security) are registered once,
+# circle agents (advocate/builder/breaker/attacker) are registered once,
 # above in the circle-capability block — not duplicated here.
 
 [[claim]]
@@ -418,12 +412,6 @@ source = "forge"
 kind = "agent"
 tool = "forge"
 ref = "agents/security-auditor.md"
-source = "forge"
-
-[[claim]]
-kind = "agent"
-tool = "forge"
-ref = "agents/forge-ping.md"
 source = "forge"
 
 # ---------------------------------------------------------------------------

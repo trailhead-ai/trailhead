@@ -52,56 +52,56 @@ def test_skill_has_registrable_frontmatter(skill_md: Path):
 
 AGENTS_DIR = Path(__file__).parent.parent / "plugins" / "forge" / "agents"
 
-# Curated set of forge agents the subagent-driven-development controller
+# Curated set of forge agents the execute controller
 # dispatches by name. Kept explicit (not prose-parsed) to avoid false positives
 # on ordinary words. The test cross-checks two invariants: (a) every name here
 # actually appears in the skill text (so a controller-side rename that drops a
 # dispatch can't leave a stale expectation), and (b) every name resolves to an
 # installed forge agent file (so a dispatch can't silently dead-end).
-_SDD_DISPATCHED_AGENTS: list[str] = [
-    "scout",
-    "trailblazer",
+_EXECUTE_DISPATCHED_AGENTS: list[str] = [
+    "assumption-prover",
+    "executor",
     "code-reviewer",
     "test-runner",
     "troubleshooter",
 ]
 
 
-def test_sdd_dispatched_agents_resolve():
-    """Every forge agent the SDD skill dispatches must resolve to a file.
+def test_execute_dispatched_agents_resolve():
+    """Every forge agent the execute skill dispatches must resolve to a file.
 
     A future rename of a forge agent would otherwise silently dead-end a
-    dispatch in subagent-driven-development. This locks the cross-reference:
+    dispatch in execute. This locks the cross-reference:
     each dispatched agent name is both named in the skill AND installed as
     `plugins/forge/agents/<name>.md`.
     """
-    skill_md = SKILLS_DIR / "subagent-driven-development" / "SKILL.md"
+    skill_md = SKILLS_DIR / "execute" / "SKILL.md"
     assert skill_md.exists(), (
-        f"Expected subagent-driven-development/SKILL.md in {SKILLS_DIR}."
+        f"Expected execute/SKILL.md in {SKILLS_DIR}."
     )
     text = skill_md.read_text()
-    for agent in _SDD_DISPATCHED_AGENTS:
+    for agent in _EXECUTE_DISPATCHED_AGENTS:
         assert agent in text, (
-            f"subagent-driven-development/SKILL.md no longer dispatches "
-            f"{agent!r} — update _SDD_DISPATCHED_AGENTS if the dispatch was "
+            f"execute/SKILL.md no longer dispatches "
+            f"{agent!r} — update _EXECUTE_DISPATCHED_AGENTS if the dispatch was "
             "intentionally removed, or restore the dispatch."
         )
         agent_file = AGENTS_DIR / f"{agent}.md"
         assert agent_file.exists(), (
-            f"subagent-driven-development/SKILL.md dispatches {agent!r} but "
+            f"execute/SKILL.md dispatches {agent!r} but "
             f"{agent_file} does not exist. A dispatch must not dead-end — "
             "install the agent or rename the dispatch to an installed one."
         )
 
 
-def test_handoff_and_pickup_skills_present():
+def test_shelve_and_pickup_skills_present():
     """Guard against a dev-ritual skill dir silently disappearing.
 
-    handoff + pickup are the dev rituals forge owns (P3-B2). They are listed
-    here from the start so the expected-set is a stable contract even before
-    pickup lands.
+    shelve (renamed from handoff in Spec A / Slice 4) + pickup are the dev
+    rituals forge owns (P3-B2). They are listed here so the expected-set is a
+    stable contract.
     """
     names = {p.parent.name for p in _skill_files()}
-    expected = {"handoff", "pickup"}
+    expected = {"shelve", "pickup"}
     missing = expected - names
     assert not missing, f"expected forge skills missing from the plugin: {sorted(missing)}"

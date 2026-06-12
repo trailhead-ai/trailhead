@@ -61,13 +61,13 @@ End with a **summary table** of findings by severity and an overall **risk read*
 
 ## Harvest candidates (end-of-message)
 
-If your audit surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, radar entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
+If your audit surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
 
 Entry format: one entry per line with a typed prefix:
 - `lesson:` — recurring anti-patterns across audits worth recording as a prevention check
 - `dead-end:` — approaches tried and ruled out, with the revive condition
 - `deferred:` — work set aside, with a trigger condition for revisiting
-- `radar:` — known-CVE packages or upstream advisories to watch
+- `follow-up:` — known-CVE packages or upstream advisories to watch
 - `decision:` — choices made, with the key reason and what was rejected
 - `gotcha:` — platform-specific security pitfalls that surprised you
 
@@ -76,4 +76,4 @@ Hard rules:
 - Self-filter — only emit candidates that would survive a rigorous review. Mid-investigation noise stays out.
 - The block must be the suffix of your message — a downstream hook locates it by anchor.
 
-For a security auditor specifically, the highest-value emissions are **lessons** (recurring anti-patterns across audits — "we keep hardcoding X; the prevention check is Y" — these compound across reviews into a real defensive posture), **gotchas** (platform-specific security pitfalls in web frameworks, mobile bridges, deep links, or project-specific subsystems), and **radar** (known-CVE packages or upstream advisories the team should watch). Skip decisions (not your call to make) and dead-ends (you audit, you don't try); a single Critical finding belongs in the report body, not the harvest block — only emit a lesson if the pattern is durable across audits.
+For a security auditor specifically, the highest-value emissions are **lessons** (recurring anti-patterns across audits — "we keep hardcoding X; the prevention check is Y" — these compound across reviews into a real defensive posture), **gotchas** (platform-specific security pitfalls in web frameworks, mobile bridges, deep links, or project-specific subsystems), and **follow-ups** (known-CVE packages or upstream advisories the team should watch). Skip decisions (not your call to make) and dead-ends (you audit, you don't try); a single Critical finding belongs in the report body, not the harvest block — only emit a lesson if the pattern is durable across audits.

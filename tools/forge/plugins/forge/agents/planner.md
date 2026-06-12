@@ -35,7 +35,7 @@ Before anything else, determine where the idea sits on the spectrum:
 
 Check your vault's `specs/`, if present, for an existing `status: ready` spec on this topic. If one exists, read it fully — it defines the what and why. Skip brainstorming entirely and go straight to Planning.
 
-For cross-cutting topics with context spread across multiple specs, decisions, subsystems, and dead-ends, if a knowledge-synthesis subagent is available (such as `lore:loremaster`), dispatch it first to get a synthesized prior-art summary — cheaper than reading each note yourself and produces a better unified view. **If none is configured, search the vault directly with Read/Grep, and note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
+For cross-cutting topics with context spread across multiple specs, decisions, subsystems, and dead-ends, if a knowledge-synthesis subagent is available (such as `lore:librarian`), dispatch it first to get a synthesized prior-art summary — cheaper than reading each note yourself and produces a better unified view. **If none is configured, search the vault directly with Read/Grep, and note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
 
 If the idea is fuzzy and no spec exists, start with Brainstorming.
 

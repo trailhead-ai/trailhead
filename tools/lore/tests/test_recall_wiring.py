@@ -5,7 +5,7 @@ Asserts that:
    mechanism and no longer instructs manual decisions/ reads as the primary path.
 2. area/SKILL.md no longer contains "inactive" / "removed pending" recall language
    and describes agent-driven recall.
-3. agents/loremaster.md references `lore recall` with `--json`.
+3. agents/librarian.md references `lore recall` with `--json`.
 4. tools/forge/plugins/forge/agents/planner.md references `lore recall --areas`.
 
 These are anti-regression tests for D-9 (recall wired as primary, not advisory).
@@ -30,7 +30,7 @@ FORGE_AGENTS_DIR = (
 
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 _AREA_SKILL = SKILLS_DIR / "area" / "SKILL.md"
-_LORE_LIBRARIAN = AGENTS_DIR / "loremaster.md"
+_LORE_LIBRARIAN = AGENTS_DIR / "librarian.md"
 _FORGE_PLANNER = FORGE_AGENTS_DIR / "planner.md"
 
 
@@ -153,32 +153,32 @@ class TestAreaSkillRecallLanguage:
 
 
 # ---------------------------------------------------------------------------
-# loremaster agent — recall primitive
+# librarian agent — recall primitive
 # ---------------------------------------------------------------------------
 
 class TestLoreLibrarianRecallPrimitive:
     def test_lore_librarian_references_lore_recall_json(self):
-        """agents/loremaster.md must reference `lore recall` with `--json`
+        """agents/librarian.md must reference `lore recall` with `--json`
         as its area-scoped retrieval primitive."""
         text = _LORE_LIBRARIAN.read_text()
         assert "lore recall" in text, (
-            "agents/loremaster.md must reference `lore recall` as the "
+            "agents/librarian.md must reference `lore recall` as the "
             "area-scoped retrieval primitive (D-9, Slice 3)."
         )
 
     def test_lore_librarian_uses_json_flag(self):
-        """agents/loremaster.md must document `--json` for programmatic use."""
+        """agents/librarian.md must document `--json` for programmatic use."""
         text = _LORE_LIBRARIAN.read_text()
         assert "--json" in text, (
-            "agents/loremaster.md must document `lore recall --areas <names> --json` "
+            "agents/librarian.md must document `lore recall --areas <names> --json` "
             "for programmatic (structured) use. Add --json to the retrieval primitive."
         )
 
     def test_lore_librarian_uses_areas_flag(self):
-        """agents/loremaster.md must reference `--areas` in the recall call."""
+        """agents/librarian.md must reference `--areas` in the recall call."""
         text = _LORE_LIBRARIAN.read_text()
         assert "--areas" in text, (
-            "agents/loremaster.md must reference `lore recall --areas <names>` "
+            "agents/librarian.md must reference `lore recall --areas <names>` "
             "as the area-scoped retrieval call."
         )
 

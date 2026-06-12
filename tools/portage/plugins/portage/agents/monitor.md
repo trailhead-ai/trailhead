@@ -220,7 +220,7 @@ The fix-loop is dead-end goldmine territory. If across the watch you hit anythin
 non-obvious worth keeping in the project knowledge store, append a `## Harvest candidates` block
 as the LAST thing in your final summary.
 
-Format: one entry per line, typed prefix (`lesson:`, `dead-end:`, `deferred:`, `radar:`, `decision:`, `gotcha:`).
+Format: one entry per line, typed prefix (`lesson:`, `dead-end:`, `deferred:`, `follow-up:`, `decision:`, `gotcha:`).
 
 Hard rules:
 - Omit the section entirely if you have nothing. Empty headers are noise.
@@ -231,6 +231,6 @@ High-value emissions for monitor:
 - **dead-end** — fix attempts that didn't address the real cause ("retried, bumped timeout, added sleep — actual fix was X").
 - **gotcha** — recurring CI behavior worth knowing ("test suite Y is flaky on first-run when warmup task Z is skipped").
 - **lesson** — patterns a configured review bot flags repeatedly across PRs (worth surfacing proactively in future authoring).
-- **radar** — upstream issues blocking merges that should be tracked.
+- **follow-up** — upstream issues blocking merges that should be tracked.
 
 Skip decisions and deferred — those belong to authoring sessions, not the watch loop.

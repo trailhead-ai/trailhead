@@ -13,7 +13,7 @@ from conftest import CLI_PATH, SCRIPTS_DIR, load_script
 
 TAXONOMY = [
     "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
-    "radar", "collaboration", "specs", "plans", "designs", "inbox",
+    "follow-ups", "collaboration", "specs", "plans", "designs", "inbox",
     "briefings", "reviews", "gotchas", "audits", "tools", "templates",
 ]
 STARTER_DOCS = ["README.md", "glossary.md", "phases.md", "harvest-protocol.md"]

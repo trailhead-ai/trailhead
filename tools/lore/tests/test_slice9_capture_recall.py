@@ -36,13 +36,13 @@ def run_cli(args, env=None, input_text=None, cwd=None):
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
-    for d in ("deferred", "dead-ends", "decisions", "radar", "areas", "sessions"):
+    for d in ("deferred", "dead-ends", "decisions", "follow-ups", "areas", "sessions"):
         (vault / d).mkdir(parents=True)
     return vault
 
 
 def _find_note(dir_path: Path) -> Path:
-    # deferred/decision/radar/dead-end notes are date-bucketed into
+    # deferred/decision/follow-up/dead-end notes are date-bucketed into
     # <dir>/YYYY-MM/ (the date-bucketed archive layout), so search the bucket
     # subdir too.
     notes = list(dir_path.glob("*.md")) + list(dir_path.glob("*/*.md"))
@@ -338,62 +338,62 @@ class TestNewDecisionFlags:
 
 
 # ---------------------------------------------------------------------------
-# Radar: --source, --target, --check
+# Follow-up: --source, --target, --check
 # ---------------------------------------------------------------------------
 
-class TestNewRadarFlags:
+class TestNewFollowUpFlags:
     def test_source_set_when_provided(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
-            "new", "radar", "--vault", str(vault),
+            "new", "follow-up", "--vault", str(vault),
             "--title", "watch dep X",
             "--project", "demo",
             "--source", "https://github.com/dep/releases",
         ])
         assert r.returncode == 0, r.stderr
         fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "radar")
+        note = _find_note(vault / "follow-ups")
         fm = fm_mod.parse_frontmatter(note)
         assert fm.get("source") == "https://github.com/dep/releases"
 
     def test_target_set_when_provided(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
-            "new", "radar", "--vault", str(vault),
+            "new", "follow-up", "--vault", str(vault),
             "--title", "watch dep X",
             "--project", "demo",
             "--target", "v2.0",
         ])
         assert r.returncode == 0, r.stderr
         fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "radar")
+        note = _find_note(vault / "follow-ups")
         fm = fm_mod.parse_frontmatter(note)
         assert fm.get("target") == "v2.0"
 
     def test_check_set_when_provided(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
-            "new", "radar", "--vault", str(vault),
+            "new", "follow-up", "--vault", str(vault),
             "--title", "watch dep X",
             "--project", "demo",
             "--check", "monthly",
         ])
         assert r.returncode == 0, r.stderr
         fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "radar")
+        note = _find_note(vault / "follow-ups")
         fm = fm_mod.parse_frontmatter(note)
         assert fm.get("check") == "monthly"
 
     def test_scalars_empty_when_absent(self, tmp_path):
         vault = _make_vault(tmp_path)
         r = run_cli([
-            "new", "radar", "--vault", str(vault),
+            "new", "follow-up", "--vault", str(vault),
             "--title", "watch dep X",
             "--project", "demo",
         ])
         assert r.returncode == 0, r.stderr
         fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "radar")
+        note = _find_note(vault / "follow-ups")
         fm = fm_mod.parse_frontmatter(note)
         for field in ("source", "target", "check"):
             val = fm.get(field, "")
@@ -402,23 +402,23 @@ class TestNewRadarFlags:
     def test_no_placeholders_with_all_flags(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli([
-            "new", "radar", "--vault", str(vault),
-            "--title", "full radar",
+            "new", "follow-up", "--vault", str(vault),
+            "--title", "full follow-up",
             "--project", "demo",
             "--source", "https://example.com",
             "--target", "v2.0",
             "--check", "weekly",
         ])
-        _assert_no_placeholders(_find_note(vault / "radar"))
+        _assert_no_placeholders(_find_note(vault / "follow-ups"))
 
     def test_no_placeholders_with_no_flags(self, tmp_path):
         vault = _make_vault(tmp_path)
         run_cli([
-            "new", "radar", "--vault", str(vault),
-            "--title", "empty radar",
+            "new", "follow-up", "--vault", str(vault),
+            "--title", "empty follow-up",
             "--project", "demo",
         ])
-        _assert_no_placeholders(_find_note(vault / "radar"))
+        _assert_no_placeholders(_find_note(vault / "follow-ups"))
 
 
 # ---------------------------------------------------------------------------
@@ -432,7 +432,7 @@ class TestNoPlaceholdersAcrossAllTypes:
     def _run_and_check(self, vault, args):
         r = run_cli(args)
         assert r.returncode == 0, r.stderr
-        for subdir in ("deferred", "dead-ends", "decisions", "radar", "areas"):
+        for subdir in ("deferred", "dead-ends", "decisions", "follow-ups", "areas"):
             d = vault / subdir
             notes = list(d.glob("*.md")) + list(d.glob("*/*.md"))
             for note in notes:
@@ -456,10 +456,10 @@ class TestNoPlaceholdersAcrossAllTypes:
             "new", "decision", "--vault", str(vault), "--title", "test", "--project", "demo",
         ])
 
-    def test_radar_no_extra_flags(self, tmp_path):
+    def test_follow_up_no_extra_flags(self, tmp_path):
         vault = _make_vault(tmp_path)
         self._run_and_check(vault, [
-            "new", "radar", "--vault", str(vault), "--title", "test", "--project", "demo",
+            "new", "follow-up", "--vault", str(vault), "--title", "test", "--project", "demo",
         ])
 
     def test_area_no_extra_flags(self, tmp_path):
@@ -484,7 +484,7 @@ class TestCaptureRecallIntegration:
 
     def _make_full_vault(self, tmp_path: Path) -> Path:
         vault = tmp_path / "vault"
-        for d in ("deferred", "dead-ends", "decisions", "radar", "areas", "sessions",
+        for d in ("deferred", "dead-ends", "decisions", "follow-ups", "areas", "sessions",
                   "lessons"):
             (vault / d).mkdir(parents=True)
         return vault

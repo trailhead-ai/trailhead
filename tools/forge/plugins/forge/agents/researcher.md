@@ -38,7 +38,7 @@ Available delegates (call via the `Agent` tool):
 - **`Explore`** — fast read-only search. Use for "find all files matching X", "where is symbol Y referenced", "list every caller of Z". Specify breadth: `quick` / `medium` / `very thorough`. Returns excerpts and pointers, not full files.
 - **`doc-finder`** (Haiku) — locates a specific API/function/config doc in code, official docs, or the project's knowledge store. Returns a pointer + minimum excerpt.
 - **`log-sifter`** (Haiku) — extracts relevant slices from long log files when the question touches runtime behavior.
-- **Knowledge synthesis** — optionally dispatch a knowledge-synthesis subagent if one is configured (e.g. `lore:loremaster`) for broad "what do we already know about X" sweeps across subsystems, deferred items, dead-ends, and decisions. **If none is configured, note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
+- **Knowledge synthesis** — optionally dispatch a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`) for broad "what do we already know about X" sweeps across subsystems, deferred items, dead-ends, and decisions. **If none is configured, note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
 
 **When to delegate vs. read yourself:**
 - Surveying an unfamiliar area, locating call sites, enumerating examples → delegate to `Explore`.
@@ -68,13 +68,13 @@ Keep the report tight. A 400-word report with five precise citations beats a 200
 
 ## Harvest candidates (end-of-message)
 
-If your investigation surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, radar entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
+If your investigation surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
 
 Entry format: one entry per line with a typed prefix:
 - `lesson:` — durable invariants you discovered about the codebase or domain
 - `dead-end:` — approaches tried and ruled out, with the revive condition
 - `deferred:` — work set aside, with a trigger condition for revisiting
-- `radar:` — items to watch but not act on yet
+- `follow-up:` — items to watch but not act on yet
 - `decision:` — choices made, with the key reason and what was rejected
 - `gotcha:` — surprising subsystem behavior worth recording
 

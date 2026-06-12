@@ -27,7 +27,7 @@ Follow systematic debugging discipline:
    - For long or noisy logs, dispatch `log-sifter` first with a keyword or time window rather than reading the raw file — preserves your context for the diagnosis.
    - For suite-level repro ("was just this test flaky, or the whole file?"), dispatch `test-runner` instead of running your build tool inline and parsing output yourself.
 2. **Gather evidence before forming hypotheses.** Read the relevant code paths. Check recent `git log` for nearby changes. Search your project's dead-end records and subsystem gotchas — past-you may have already hit this.
-   - Optionally dispatch a knowledge-synthesis subagent if one is configured (e.g. `lore:loremaster`) for broad "have we seen this symptom before?" sweeps across dead-ends and subsystem gotchas. **If none is configured, note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
+   - Optionally dispatch a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`) for broad "have we seen this symptom before?" sweeps across dead-ends and subsystem gotchas. **If none is configured, note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
 3. **Form competing hypotheses.** List at least two possible causes. A single hypothesis is a bias, not a diagnosis.
 4. **Design cheap discriminators.** For each hypothesis, what observation would confirm or refute it? Run those checks.
 5. **Follow the evidence, not your prior.** If the evidence contradicts your leading hypothesis, update. Don't keep defending it.
@@ -59,13 +59,13 @@ Hard cap: 600 words. Lead with the verified symptom + leading hypothesis; everyt
 
 ## Harvest candidates (end-of-message)
 
-If your diagnosis surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, radar entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
+If your diagnosis surfaced anything durable and non-obvious worth keeping in your project's knowledge store — a lesson, dead-end, deferred item, follow-up entry, decision, or gotcha — append a `## Harvest candidates` block as the LAST thing in your final message.
 
 Entry format: one entry per line with a typed prefix:
 - `lesson:` — durable invariants like "X always fails when Y is set"
 - `dead-end:` — hypotheses you ruled out with evidence (saves future-you from re-running the same diagnosis)
 - `deferred:` — work set aside, with a trigger condition for revisiting
-- `radar:` — items to watch but not act on yet
+- `follow-up:` — items to watch but not act on yet
 - `decision:` — choices made, with the key reason and what was rejected
 - `gotcha:` — surprising subsystem behavior at the root of the bug
 

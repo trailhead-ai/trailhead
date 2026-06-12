@@ -12,7 +12,7 @@ baseline skills are always active when the tool is installed.
 ```toml
 [tool]
 name = "lore"                           # required
-base = ["skills/_shared", "skills/sync", "skills/ping"]   # always-on dirs
+base = ["skills/_shared", "skills/sync"]   # always-on dirs
 hooks_json = "hooks/hooks.json"         # optional — see D-E
 validate = true                         # optional, default true — see validate=false
 ```
@@ -30,7 +30,7 @@ validate = true                         # optional, default true — see validat
 
 ```toml
 [capabilities.capture]
-description = "Capture decisions, dead-ends, deferrals, radar items, area notes, and intake seeds into the vault."
+description = "Capture decisions, dead-ends, deferrals, follow-ups, area notes, and intake seeds into the vault."
 skills = ["skills/decision", "skills/dead-end", "skills/defer"]
 agents = []
 ```
@@ -150,17 +150,17 @@ table in the same file.  The loader catches this and re-raises as
 ```toml
 [tool]
 name = "lore"
-base = ["skills/_shared", "skills/sync", "skills/ping"]
+base = ["skills/_shared", "skills/sync"]
 hooks_json = "hooks/hooks.json"
 
 [capabilities.capture]
-description = "Capture decisions, dead-ends, deferrals, radar items, area notes, and intake seeds into the vault."
+description = "Capture decisions, dead-ends, deferrals, follow-ups, area notes, and intake seeds into the vault."
 skills = [
   "skills/decision",
   "skills/dead-end",
   "skills/defer",
-  "skills/radar",
-  "skills/check-radar",
+  "skills/follow-up",
+  "skills/check-in",
   "skills/area",
   "skills/seed",
   "skills/brainstorm",
@@ -168,9 +168,9 @@ skills = [
 agents = []
 
 [capabilities.recall]
-description = "Surface, re-justify, and synthesize accumulated vault memory."
-skills = ["skills/tend", "skills/reflect"]
-agents = ["agents/loremaster.md"]
+description = "Surface and synthesize accumulated vault memory via librarian lookups."
+skills = []
+agents = ["agents/librarian.md"]
 
 [capabilities.sessions]
 description = "Session lifecycle — checkpoint mid-session state and finalize on close."

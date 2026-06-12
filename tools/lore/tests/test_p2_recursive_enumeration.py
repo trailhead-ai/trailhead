@@ -3,7 +3,7 @@
 Every session/plan/spec/design enumeration must recurse exactly one level into
 ``<folder>/YYYY-MM/`` while still finding notes at the flat top level
 (behavior-neutral until the migration runs). The out-of-scope living folders
-(deferred/dead-ends/lessons/radar) must keep flat globbing.
+(deferred/dead-ends/lessons/follow-ups) must keep flat globbing.
 
 TDD: tests written before implementation. All fixtures are SYNTHETIC.
 """
@@ -25,7 +25,7 @@ def load_script(name: str):
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
     for cached in (name, "vault", "frontmatter", "status_validator", "sessions",
-                   "config", "recall", "reflect_sessions"):
+                   "config", "recall"):
         sys.modules.pop(cached, None)
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
@@ -370,34 +370,6 @@ class TestRecallRecursion:
         recall = _load_recall()
         entries = recall.build_area_map(vault)
         assert all(e.name != "widget-flow" for e in entries)
-
-
-# ---------------------------------------------------------------------------
-# reflect_sessions
-# ---------------------------------------------------------------------------
-
-class TestReflectSessions:
-    def test_finds_bucketed_in_window(self, vault):
-        _session_note(
-            vault, "2026-06/2026-06-15-1000-alpha-worktree.md",
-            status="complete", ended="2026-06-15T11:00:00Z",
-        )
-        rs = load_script("reflect_sessions")
-        result = rs.sessions_in_window(vault, "2026-06", "2026-06-01", "2026-06-30")
-        assert len(result) == 1
-
-    def test_finds_flat_and_bucketed_in_window(self, vault):
-        _session_note(
-            vault, "2026-06-10-0800-alpha-worktree.md",
-            status="complete", ended="2026-06-10T09:00:00Z",
-        )
-        _session_note(
-            vault, "2026-06/2026-06-15-1000-beta-worktree.md",
-            worktree="beta-worktree", status="complete", ended="2026-06-15T11:00:00Z",
-        )
-        rs = load_script("reflect_sessions")
-        result = rs.sessions_in_window(vault, "2026-06", "2026-06-01", "2026-06-30")
-        assert len(result) == 2
 
 
 # ---------------------------------------------------------------------------

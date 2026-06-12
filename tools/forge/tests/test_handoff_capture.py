@@ -1,6 +1,6 @@
 """Unit + integration tests for the handoff-capture helper.
 
-The deterministic logic behind `/forge:handoff` lives in
+The deterministic logic behind `/forge:shelve` lives in
 `plugins/forge/scripts/handoff_capture.py` so it can be tested without driving a
 live Claude Code session. Coverage:
 

@@ -47,7 +47,7 @@ development, and the helper agents (`test-runner`, `log-sifter`,
 `pr-summarizer`, `researcher`, the council). forge **may** use lore — several of
 its skills and agents write durable notes to the vault through the `lore` CLI,
 and the council agents will consult a knowledge-synthesis subagent
-(`lore:loremaster`) if one is installed. This dependency only ever points
+(`lore:librarian`) if one is installed. This dependency only ever points
 **down**.
 
 **The dependency rule:**
@@ -162,10 +162,10 @@ truth is the DEGRADATION reference, which you should link to and follow:**
 
 | Extension point | What it gates | Default when unconfigured (visible-skip) | How you fill it |
 |---|---|---|---|
-| **`feature_flags`** | Provider-specific flag naming + the flag-configuration dispatch in `planning` and `subagent-driven-development`. The flag-touchpoint *decision* still happens; only provider wire-up is skipped. | `no feature-flag provider configured — see the extend guide` / `flag setup skipped` | Add a flag-configuration skill to your app layer that knows your provider's SDK and naming conventions; dispatch it at the Pre-Loop flag-setup step. |
+| **`feature_flags`** | Provider-specific flag naming + the flag-configuration dispatch in `planning` and `execute`. The flag-touchpoint *decision* still happens; only provider wire-up is skipped. | `no feature-flag provider configured — see the extend guide` / `flag setup skipped` | Add a flag-configuration skill to your app layer that knows your provider's SDK and naming conventions; dispatch it at the Pre-Loop flag-setup step. |
 | **`observability`** | Provider-specific metric naming, alert-rule generation, and health-check wiring in `planning` and the `planner` agent. The Observability & Failure Visibility *decision* still happens. | `no observability provider configured — see the extend guide` | Add an alert/metric-configuration skill that knows your metrics/alerting provider's conventions; dispatch it at the provider step. |
-| **`issue_tracker`** | Advancing your work item's status (in-progress / complete transitions) from `planning`, `subagent-driven-development`, and `intake`. The plan is always written to the vault. | `no issue tracker configured — status sync skipped` / `status transitions skipped` | Add a tracker-sync skill that calls your tracker's API; hook it into the plan-write, loop-entry, and after-all-slices steps. |
-| **`design_mockup`** | The mockup-generation step in lore's `brainstorm` skill, for ideas with a user-facing surface. | `the mockup step is skipped` (announced when no `design-mockup tool is configured`) | Add a design-mockup tool/skill to your app layer; `brainstorm` dispatches it with a structured prompt when present. |
+| **`issue_tracker`** | Advancing your work item's status (in-progress / complete transitions) from `planning`, `execute`, and `intake`. The plan is always written to the vault. | `no issue tracker configured — status sync skipped` / `status transitions skipped` | Add a tracker-sync skill that calls your tracker's API; hook it into the plan-write, loop-entry, and after-all-slices steps. |
+| **`design_mockup`** | The mockup-generation step in lore's `brainstorm` skill, for ideas with a user-facing surface. With forge installed this is wired LIVE to the forge `artist` agent (its default provider). | `the mockup step is skipped` (announced when design work isn't applicable or no chrome catalog exists; or when no `design_mockup` provider is available because forge isn't installed) | Install forge — `brainstorm` dispatches its `artist` agent by default. Or add your own design-mockup tool/skill to your app layer as the provider; `brainstorm` dispatches it with a structured brief. |
 | **`build_test_commands`** | The exact build/test/lint command the `test-runner` agent runs. The agent is stack-agnostic — it runs whatever command it is given. | (no provider banner — the caller simply supplies the command per invocation) | Pass your project's test runner, lint tool, or CI script as the command when you dispatch `test-runner`, or wrap it in an app skill that always supplies your stack's commands. |
 
 Describe these generically for your own stack: `issue_tracker` → *your* tracker's
@@ -190,9 +190,7 @@ in brief:
   deferred. Branch/keyword recall still fires at SessionStart; a banner
   announces that mid-conversation recall is off. Re-add path: port the
   classifier hook and flip the capability flag.
-- **`/lore:reflect`** does not gather app-layer ai-memory or daily briefings
-  (those live outside the vault); it synthesizes vault content only.
-- **`/lore:check-radar`** skips legacy `snoozed` radar notes (not in lore's
+- **`/lore:check-in`** skips legacy `snoozed` follow-up notes (not in lore's
   canonical status vocabulary) and flags them for manual cleanup.
 
 Follow the linked DEGRADATION.md for the exact turn-on steps; this guide does not
@@ -225,7 +223,7 @@ What this adds, and where:
 
 - **`flag-config/`** — a project skill that knows the adopter's feature-flag
   provider SDK and naming conventions. Dispatched by `planning` /
-  `subagent-driven-development` at the `feature_flags` step. Without it, those
+  `execute` at the `feature_flags` step. Without it, those
   skills print `no feature-flag provider configured` and proceed.
 - **`tracker-sync/`** — a project skill that calls the adopter's issue tracker's
   API to advance ticket status. Hooked into the `issue_tracker` steps. Without

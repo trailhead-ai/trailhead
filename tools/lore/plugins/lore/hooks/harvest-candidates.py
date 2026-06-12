@@ -4,7 +4,7 @@
 
 Fires after a subagent (Agent) tool call. If the subagent's result contains a
 trailing `## Harvest candidates` section, append its typed entries
-(lesson/dead-end/deferred/radar/decision/gotcha) to
+(lesson/dead-end/deferred/follow-up/decision/gotcha) to
 `<vault>/harvest-pending.md`, deduped by content hash. No-op when the block is
 absent or the tool isn't a subagent.
 
@@ -31,7 +31,7 @@ SECTION_RE = re.compile(
     re.MULTILINE,
 )
 ENTRY_RE = re.compile(
-    r"^[ \t]*-[ \t]+(lesson|dead-end|deferred|radar|decision|gotcha):[ \t]*(.+?)[ \t]*$"
+    r"^[ \t]*-[ \t]+(lesson|dead-end|deferred|follow-up|decision|gotcha):[ \t]*(.+?)[ \t]*$"
 )
 
 # Tool names that denote a subagent invocation across Claude Code versions.

@@ -7,7 +7,7 @@ a tier are roughly ordered by value, not necessarily by implementation order.
 
 Session lifecycle, five capture skills, subsystem recall via branch-keyword
 matching, `lore` CLI, pre-commit status guard, vault-sync, and the
-loremaster agent. See the README for the full feature list.
+librarian agent. See the README for the full feature list.
 
 ## Tier 1.5 — Near-term additions
 
@@ -55,7 +55,7 @@ makes them vault-generic.
 - **`/lore:pickup`** — load a shelved session note, restore context, flip status
   back to `active`.
 - **`/lore:morning-briefing`** — synthesize what changed in the vault since the
-  last session; surface open deferred items and active radar entries.
+  last session; surface open deferred items and active follow-up entries.
 - **`/lore:monthly-reflection`** — periodic review: what shipped, what's been
   deferred the longest, what patterns recur in lessons/dead-ends.
 - **`/lore:brain-review`** — quality review of a harvest candidate before

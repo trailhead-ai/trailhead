@@ -45,7 +45,7 @@ Report the revert PR URLs for each repo.
 
 1. Note the causal chain from `doctor`'s recommendation.
 2. Apply the identified fix inline or dispatch a forge implementer subagent
-   (`subagent_type: "trailblazer"`) if multi-file.
+   (`subagent_type: "executor"`) if multi-file.
 3. Follow the normal `/portage:open` / `/portage:monitor` flow to ship the fix.
 
 ### `wait-and-recheck`

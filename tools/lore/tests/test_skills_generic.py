@@ -122,9 +122,14 @@ _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 # Advocate forge-handoff guard would pass even if the whole notice were deleted,
 # as long as "forge"/"plugin"/"planning" survived elsewhere). Each phrase below
 # is load-bearing — deleting the seam's notice deletes the only occurrence.
+#
+# design_mockup is no longer a stripped seam: the artist brainstorm cutover
+# (Slice 8) wires it LIVE, so brainstorm now dispatches the forge `artist` as the
+# DEFAULT provider rather than announcing the step's absence. Its assertion moved
+# to test_brainstorm_dispatches_artist below. The fallback ("note the mockup step
+# is skipped") still surfaces verbally when design work isn't applicable, but it
+# is no longer the default path, so it is not asserted as a stripped-seam notice.
 _BRAINSTORM_SKIP_PHRASES: list[tuple[str, str]] = [
-    ("design_mockup_skip", "design-mockup tool is configured"),
-    ("design_mockup_skip_not_configured", "the mockup step is skipped"),
     ("feature_flags_skip", "no feature-flag provider configured"),
     ("observability_skip", "no observability provider configured"),
     ("issue_tracker_skip", "no issue tracker configured"),
@@ -149,6 +154,25 @@ def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
         f"brainstorm/SKILL.md missing visible-skip phrase {phrase!r} "
         f"(test: {test_id}). Every stripped private seam must announce itself — "
         "a silent omission defeats the degradation contract."
+    )
+
+
+def test_brainstorm_dispatches_artist_as_design_mockup_provider():
+    """The design_mockup seam is LIVE: brainstorm names the forge `artist` as its
+    default provider (Slice 8 cutover). The genericized skill may name `artist`
+    (a forge agent stem, not a private app token) but never the retired
+    `design-mockup-writer`."""
+    assert _BRAINSTORM_SKILL.exists(), "brainstorm/SKILL.md does not exist"
+    text = _BRAINSTORM_SKILL.read_text()
+    assert "design_mockup" in text, (
+        "brainstorm/SKILL.md no longer documents the design_mockup extension point"
+    )
+    assert "artist" in text, (
+        "brainstorm/SKILL.md must name the forge `artist` as the design_mockup "
+        "provider — the cutover dispatches it by default"
+    )
+    assert "design-mockup-writer" not in text, (
+        "brainstorm/SKILL.md must not name the retired `design-mockup-writer`"
     )
 
 

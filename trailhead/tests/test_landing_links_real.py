@@ -264,8 +264,8 @@ class TestForwardCheckPositive:
     def test_real_skill_claim_passes(self):
         """A claim for a known skill resolves without error."""
         anchor_set = build_real_anchor_set()
-        # lore recall has skills/tend
-        claim = {"kind": "skill", "tool": "lore", "ref": "skills/tend", "source": "lore"}
+        # lore capture has skills/check-in (skills/tend was deleted in Slice 7)
+        claim = {"kind": "skill", "tool": "lore", "ref": "skills/check-in", "source": "lore"}
         check_claim(claim, anchor_set)
 
     def test_real_agent_claim_passes(self):
@@ -383,17 +383,17 @@ class TestBuildRealAnchorSet:
         anchors = build_real_anchor_set()
         assert "recall" in anchors["lore"]["capabilities"]
 
-    def test_lore_loremaster_agent_present(self):
+    def test_lore_librarian_agent_present(self):
         anchors = build_real_anchor_set()
-        assert "agents/loremaster.md" in anchors["lore"]["agents"]
+        assert "agents/librarian.md" in anchors["lore"]["agents"]
 
     def test_forge_execute_capability_present(self):
         anchors = build_real_anchor_set()
         assert "execute" in anchors["forge"]["capabilities"]
 
-    def test_forge_scout_agent_present(self):
+    def test_forge_assumption_prover_agent_present(self):
         anchors = build_real_anchor_set()
-        assert "agents/scout.md" in anchors["forge"]["agents"]
+        assert "agents/assumption-prover.md" in anchors["forge"]["agents"]
 
     def test_forge_artist_agent_present(self):
         """forge design has agents/artist.md — verify it's in the anchor set."""
@@ -1354,7 +1354,7 @@ class TestLandingSurfaceLeakGate:
             "lore, forge, and camp are the three plugins.\n"
             "Run `trailhead install` to get started with the minimal or standard preset.\n"
             "Use `lore recall --areas <topic>` to load area memory.\n"
-            "Claude Code is the agent runtime. forge:trailblazer is a skill.\n"
+            "Claude Code is the agent runtime. forge:execute is a skill.\n"
             "Run `trailhead doctor` or `trailhead config` or `trailhead update`.\n"
             "The full preset wires all capabilities.\n",
             encoding="utf-8",

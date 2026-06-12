@@ -24,7 +24,7 @@ invent statuses outside these sets — drift makes recall unreliable.
 ### Observation note types
 
 - **deferred/** — `open` → `resolved` / `dropped` / `graduated`. Variant: `scheduled` (date-bound `open` — resurface on/after a set date). Edge: `resurfaced` (trigger condition met, action pending).
-- **radar/** — `active` → `resolved` / `dropped`.
+- **follow-ups/** — `active` → `resolved` / `dropped`.
 - **lessons/** — `active` → `superseded` (when guarded structurally).
 - **dead-ends/** — `active` → `archived` (when the revive condition is obsolete).
 
