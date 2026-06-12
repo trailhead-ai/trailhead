@@ -1581,10 +1581,11 @@ _RADAR_ALLOWLIST_FILENAMES = {
 }
 
 # Filenames that legitimately carry the `design-mockup-writer` token: the
-# absence-assertion guard (a ref that asserts the name is GONE, not a live
-# routing ref) and the historical de-zenith test docstring.
+# absence-assertion guard (`test_lore_skills_generic.py` — a ref that asserts
+# the name is GONE, not a live routing ref) and the historical de-zenith test
+# docstring.
 _DESIGN_MOCKUP_WRITER_ALLOWLIST_FILENAMES = {
-    "test_skills_generic.py",
+    "test_lore_skills_generic.py",
     "test_artist_dezenithed.py",
     "test_renames_guard.py",
 }
@@ -1661,12 +1662,12 @@ class TestSlice9RadarFullForbid:
 
 class TestSlice9DesignMockupWriterForbid:
     """design-mockup-writer == 0 across tools/ except the absence-assertion guard
-    (test_skills_generic.py) and the historical de-zenith test docstring."""
+    (test_lore_skills_generic.py) and the historical de-zenith test docstring."""
 
     def test_no_design_mockup_writer_live_ref(self):
         """`design-mockup-writer` must not appear as a live ref in tools/ source.
 
-        FILENAME-allowlisted: `test_skills_generic.py` (asserts the name is
+        FILENAME-allowlisted: `test_lore_skills_generic.py` (asserts the name is
         ABSENT — a guard, not a routing ref) and `test_artist_dezenithed.py`
         (historical docstring). Everything else — including any lingering
         retirement prose in design-authoring.md — must drop the token.

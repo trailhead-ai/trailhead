@@ -123,19 +123,18 @@ def test_parse_pickup_hints_runs_to_eof_when_last_section():
 # ---------------------------------------------------------------------------
 
 def _resolve_lore_cli() -> list[str] | None:
-    """Locate a runnable lore CLI without hardcoding a machine path.
+    """Resolve the monorepo's own lore CLI (the sibling tool), run via python3.
 
-    Order: `lore` on PATH (preferred), else the local lore plugin's bin under
-    $HOME. Returns the argv prefix, or None when neither is available.
+    Post-monorepo, "the lore CLI" is the sibling ``tools/lore`` plugin — not
+    whatever ``lore`` happens to be on PATH, which on a dev machine may be a
+    divergent standalone checkout (the pre-monorepo ``~/code/lore``). Resolving
+    it relatively keeps the test hermetic and exercises the code in *this* repo.
+    Returns the argv prefix, or None when the CLI is absent.
     """
-    import shutil as _shutil
-
-    on_path = _shutil.which("lore")
-    if on_path:
-        return [on_path]
-    candidate = Path(os.environ["HOME"]) / "code" / "lore" / "plugins" / "lore" / "bin" / "lore"
-    if candidate.is_file() and os.access(candidate, os.X_OK):
-        return [str(candidate)]
+    repo_root = Path(__file__).resolve().parents[3]
+    cli = repo_root / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
+    if cli.is_file():
+        return [sys.executable, str(cli)]
     return None
 
 
@@ -171,6 +170,12 @@ def fixture_vault(tmp_path: Path) -> Path:
 def _run_lore(cli, args, vault, cwd):
     env = dict(os.environ)
     env["LORE_VAULT"] = str(vault)
+    # Pin worktree detection to the cwd basename so it matches the note slug,
+    # mirroring the real invariant: the SessionStart hook names the note from
+    # $CLAUDE_PROJECT_DIR basename, and resolution detects the same. Without
+    # this, detect_worktree_name() falls through to the vault's git-toplevel
+    # basename (``synthetic-vault``) and never matches the ``alpha-widget`` note.
+    env["CLAUDE_PROJECT_DIR"] = str(cwd)
     return subprocess.run(
         [*cli, *args], cwd=str(cwd), env=env, capture_output=True, text=True
     )

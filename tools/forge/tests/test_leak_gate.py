@@ -176,8 +176,11 @@ REAL_DENYLIST = Path.home() / ".claude" / "leak-gate.denylist"
 @pytest.mark.skipif(not REAL_DENYLIST.exists(), reason="machine-local denylist not present")
 @pytest.mark.parametrize(
     "surface",
-    [Path.home() / "code" / "forge" / "plugins" / "forge",
-     Path.home() / "code" / "lore" / "plugins" / "lore"],
+    # The monorepo's own shippable surfaces (REPO_ROOT is tools/forge) — not the
+    # pre-monorepo standalone ~/code/{forge,lore} checkouts, which may still
+    # carry tokens (e.g. the old 'zenith' group name) the monorepo has dropped.
+    [REPO_ROOT / "plugins" / "forge",
+     REPO_ROOT.parent / "lore" / "plugins" / "lore"],
     ids=["forge", "lore"],
 )
 def test_real_shippable_surface_is_clean(surface: Path):
