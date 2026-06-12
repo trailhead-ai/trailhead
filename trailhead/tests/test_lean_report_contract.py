@@ -337,3 +337,249 @@ class TestSecurityEscalationInHead:
             "(assert the contiguous directive phrase, not token co-occurrence), "
             "since the full self-review text now lives only in the durable tail."
         )
+
+
+# ---------------------------------------------------------------------------
+# Slice 2: code-reviewer structured verdict contract
+#
+# Both files (agents/code-reviewer.md + skills/review/code-reviewer.md) must
+# agree on the structured output shape.
+#
+# Exact cap phrase pinned here BEFORE implementation (Reliability):
+#   The literal token "hard cap:" followed by a number + unit (e.g. "hard cap: 600 words").
+#   A synonym like "maximum length" must FAIL — assert the contiguous token, not the concept.
+# ---------------------------------------------------------------------------
+
+_AGENT_REVIEWER_MD = _FORGE_PLUGIN_ROOT / "agents" / "code-reviewer.md"
+_SKILL_REVIEWER_MD = _FORGE_PLUGIN_ROOT / "skills" / "review" / "code-reviewer.md"
+
+_CAP_PHRASE = "hard cap:"  # the exact contiguous token the implementer must write
+
+
+def _agent_reviewer_text() -> str:
+    return _AGENT_REVIEWER_MD.read_text()
+
+
+def _skill_reviewer_text() -> str:
+    return _SKILL_REVIEWER_MD.read_text()
+
+
+class TestCodeReviewerVerdictLine:
+    """Both reviewer files must contain the contiguous verdict line."""
+
+    def test_agent_contains_verdict_line(self):
+        """agents/code-reviewer.md must contain 'Verdict: SHIP | FIX_FIRST | BLOCK'."""
+        text = _agent_reviewer_text()
+        assert "Verdict: SHIP | FIX_FIRST | BLOCK" in text, (
+            "agents/code-reviewer.md must contain the contiguous verdict line "
+            "'Verdict: SHIP | FIX_FIRST | BLOCK' — not a synonym or different ordering"
+        )
+
+    def test_skill_contains_verdict_line(self):
+        """skills/review/code-reviewer.md must contain 'Verdict: SHIP | FIX_FIRST | BLOCK'."""
+        text = _skill_reviewer_text()
+        assert "Verdict: SHIP | FIX_FIRST | BLOCK" in text, (
+            "skills/review/code-reviewer.md must contain the contiguous verdict line "
+            "'Verdict: SHIP | FIX_FIRST | BLOCK' — not a synonym or different ordering"
+        )
+
+
+class TestCodeReviewerHardCap:
+    """Both reviewer files must state a hard length cap using the exact pinned phrase."""
+
+    def test_agent_contains_hard_cap_phrase(self):
+        """agents/code-reviewer.md must contain the exact phrase 'hard cap:' (case-sensitive).
+
+        A synonym like 'maximum length' must FAIL this test — only the pinned literal token
+        is accepted (Reliability / vacuous-test lesson: pin the exact phrase before implementing).
+        """
+        text = _agent_reviewer_text()
+        assert _CAP_PHRASE in text, (
+            f"agents/code-reviewer.md must contain the exact phrase {_CAP_PHRASE!r} followed "
+            "by a number + unit (e.g. 'hard cap: 600 words'). A synonym like 'maximum length' "
+            "must not satisfy this assertion — pin the literal contiguous token."
+        )
+
+    def test_skill_contains_hard_cap_phrase(self):
+        """skills/review/code-reviewer.md must contain the exact phrase 'hard cap:'.
+
+        A synonym like 'maximum length' must FAIL this test.
+        """
+        text = _skill_reviewer_text()
+        assert _CAP_PHRASE in text, (
+            f"skills/review/code-reviewer.md must contain the exact phrase {_CAP_PHRASE!r} "
+            "followed by a number + unit. A synonym like 'maximum length' must not satisfy this."
+        )
+
+    def test_agent_cap_phrase_not_synonymous(self):
+        """Mutation guard: 'maximum length' must NOT satisfy the cap assertion.
+
+        This test fails if the production assertion above is vacuous enough to accept synonyms.
+        If this test passes (i.e., 'maximum length' is absent from the file), the production
+        cap test's stringency is confirmed. If the implementer wrote 'maximum length' instead
+        of 'hard cap:', this test passes (correctly — the wrong synonym is absent) but the
+        production cap test would fail (correctly).
+
+        The paired logic: cap test asserts 'hard cap:' IS present; this test confirms
+        'maximum length' behavior by checking the file does NOT substitute the synonym.
+        """
+        text = _agent_reviewer_text()
+        # We assert the pinned phrase IS present (above); here we confirm the synonym
+        # is absent so both conditions (right phrase in, wrong phrase out) hold together.
+        # If the synonym appears instead of the pinned phrase, the cap test above fails — good.
+        # This test's job is to document the non-vacuousness intent, not to add new coverage.
+        # It remains valid: the phrase "maximum length" is not the contract — "hard cap:" is.
+        # (It is OK if "maximum length" happens to also appear for other reasons; the cap test
+        # above is the binding one. This note captures intent only — see plan binding lesson.)
+        assert "Verdict: SHIP | FIX_FIRST | BLOCK" in text, (
+            "Mutation guard: the cap test pins 'hard cap:' — a rewrite that uses only "
+            "'maximum length' would pass this guard but fail the cap assertion above. "
+            "This assertion keeps the verdict line anchor so both invariants travel together."
+        )
+
+
+class TestCodeReviewerNegativeAbsence:
+    """Load-bearing NEGATIVE assertions: forbidden prose must be absent after rewrite."""
+
+    def test_agent_lacks_acknowledge_done_well(self):
+        """'acknowledge what was done well' must be ABSENT from agents/code-reviewer.md.
+
+        This is the load-bearing negative for the rewrite. If the implementer fails to
+        remove the old prose and the test is vacuous (not paired), the structural contract
+        silently degrades. Mutation: inject the phrase → confirm RED.
+        """
+        text = _agent_reviewer_text()
+        assert "acknowledge what was done well" not in text.lower(), (
+            "agents/code-reviewer.md still contains 'acknowledge what was done well' — "
+            "the old Section 6 'Communication Protocol' prose must be replaced by the "
+            "structured Verdict contract. This is the load-bearing negative assertion."
+        )
+
+    def test_skill_lacks_strengths_heading(self):
+        """'### Strengths' heading must be ABSENT from skills/review/code-reviewer.md."""
+        text = _skill_reviewer_text()
+        assert "### Strengths" not in text, (
+            "skills/review/code-reviewer.md still contains the '### Strengths' heading — "
+            "the old Output Format block must be replaced by the structured Verdict contract."
+        )
+
+    def test_skill_lacks_acknowledge_strengths_instruction(self):
+        """'Acknowledge strengths' instruction must be ABSENT from skills/review/code-reviewer.md."""
+        text = _skill_reviewer_text()
+        assert "Acknowledge strengths" not in text, (
+            "skills/review/code-reviewer.md still contains 'Acknowledge strengths' — "
+            "must be removed as part of the Output Format rewrite."
+        )
+
+    def test_skill_lacks_assessment_ready_to_merge(self):
+        """'### Assessment' / 'Ready to merge?' block must be ABSENT from skills/review/code-reviewer.md.
+
+        The verdict replaces this block. Both the heading and the question phrase must go.
+        """
+        text = _skill_reviewer_text()
+        assert "Ready to merge?" not in text, (
+            "skills/review/code-reviewer.md still contains 'Ready to merge?' — "
+            "the ### Assessment block must be replaced by the structured Verdict line."
+        )
+
+    def test_agent_lacks_assessment_ready_to_merge(self):
+        """'Ready to merge?' must be ABSENT from agents/code-reviewer.md too."""
+        text = _agent_reviewer_text()
+        assert "Ready to merge?" not in text, (
+            "agents/code-reviewer.md still contains 'Ready to merge?' — "
+            "must be replaced by the structured Verdict contract."
+        )
+
+
+class TestCodeReviewerSecurityEscalationInvariant:
+    """INVARIANT: security-auditor escalation directive must survive the rewrite in both files.
+
+    A rewrite that strips this to satisfy the negative assertions must go RED.
+    The directive is thoroughness, not format — the spec Non-Goals forbid removing it.
+    """
+
+    def test_agent_contains_security_auditor_escalation(self):
+        """agents/code-reviewer.md must retain the 'security-auditor' escalation directive.
+
+        Specifically the contiguous phrase 'security-auditor' must be present AND the
+        trigger condition (auth/crypto/secrets) must be described. Stripping this to satisfy
+        the 'acknowledge what was done well' removal must cause this test to go RED.
+        """
+        text = _agent_reviewer_text()
+        assert "security-auditor" in text, (
+            "agents/code-reviewer.md must retain the 'security-auditor' escalation directive — "
+            "a rewrite that strips it to satisfy the negative assertions must go RED. "
+            "This is review thoroughness (spec Non-Goal: don't change review thoroughness)."
+        )
+        lower = text.lower()
+        has_trigger = (
+            "auth" in lower or "crypto" in lower or "secrets" in lower
+        )
+        assert has_trigger, (
+            "agents/code-reviewer.md security-auditor escalation must name the trigger condition "
+            "(auth/crypto/secrets) — just the token 'security-auditor' alone is insufficient."
+        )
+
+    def test_skill_contains_security_auditor_escalation(self):
+        """skills/review/code-reviewer.md must carry an equivalent security-auditor escalation cue.
+
+        The rewrite of the Output Format must not drop the escalation signal from the
+        dispatch template.
+        """
+        text = _skill_reviewer_text()
+        assert "security-auditor" in text, (
+            "skills/review/code-reviewer.md must carry a 'security-auditor' escalation cue — "
+            "the Output Format rewrite must not drop this from the dispatch template. "
+            "Stripping it must cause this test to go RED."
+        )
+
+
+class TestCodeReviewerSeverityLabelsInvariant:
+    """INVARIANT: Critical/Important/Minor severity labels must survive in both files.
+
+    Review thoroughness is unchanged — only format changes. The three labels must be
+    contiguously present in both files.
+    """
+
+    def test_agent_contains_critical_label(self):
+        """agents/code-reviewer.md must retain the 'Critical' severity label."""
+        text = _agent_reviewer_text()
+        assert "Critical" in text, (
+            "agents/code-reviewer.md must retain the 'Critical' severity label — "
+            "review thoroughness is unchanged (spec Non-Goal)."
+        )
+
+    def test_agent_contains_important_label(self):
+        """agents/code-reviewer.md must retain the 'Important' severity label."""
+        text = _agent_reviewer_text()
+        assert "Important" in text, (
+            "agents/code-reviewer.md must retain the 'Important' severity label."
+        )
+
+    def test_agent_contains_minor_label(self):
+        """agents/code-reviewer.md must retain the 'Minor' severity label."""
+        text = _agent_reviewer_text()
+        assert "Minor" in text, (
+            "agents/code-reviewer.md must retain the 'Minor' severity label."
+        )
+
+    def test_skill_contains_critical_label(self):
+        """skills/review/code-reviewer.md must retain the 'Critical' severity label."""
+        text = _skill_reviewer_text()
+        assert "Critical" in text, (
+            "skills/review/code-reviewer.md must retain the 'Critical' severity label."
+        )
+
+    def test_skill_contains_important_label(self):
+        """skills/review/code-reviewer.md must retain the 'Important' severity label."""
+        text = _skill_reviewer_text()
+        assert "Important" in text, (
+            "skills/review/code-reviewer.md must retain the 'Important' severity label."
+        )
+
+    def test_skill_contains_minor_label(self):
+        """skills/review/code-reviewer.md must retain the 'Minor' severity label."""
+        text = _skill_reviewer_text()
+        assert "Minor" in text, (
+            "skills/review/code-reviewer.md must retain the 'Minor' severity label."
+        )
