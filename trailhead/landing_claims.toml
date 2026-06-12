@@ -287,6 +287,16 @@ ref = "tools/landing/README.md"
 source = "root"
 
 # ---------------------------------------------------------------------------
+# Slice 6a additions — portage MANUAL-SMOKE.md (parity gate doc-link)
+# ---------------------------------------------------------------------------
+
+[[claim]]
+kind = "doc-link"
+tool = "portage"
+ref = "tools/portage/MANUAL-SMOKE.md"
+source = "portage"
+
+# ---------------------------------------------------------------------------
 # Slice 3 additions — lore tool README anchors
 # ---------------------------------------------------------------------------
 

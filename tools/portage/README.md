@@ -52,6 +52,13 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 - `external_tracker` — an optional reserved seam for an issue-tracker connector
   (default: none — no connector is built).
 
+## Parity smoke
+
+The manual end-to-end parity gate — open → CI watch → merge (portage) plus
+soak → doctor (landing) — is documented in
+[`MANUAL-SMOKE.md`](MANUAL-SMOKE.md). Run it on a real PR before any deletion
+of the preceding forge `release` capability cluster.
+
 ## Relationship to the rest of trailhead
 
 portage ships inside the trailhead install layout and consumes the shared
