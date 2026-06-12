@@ -1,9 +1,11 @@
 """Lean execute-loop controller — prompt contract guards.
 
 Plan: 2026-06-12-trailhead-lean-execute-loop-controller
-Slice 1: Executor report head/tail split.
+- Slice 1: executor report head/tail split (agents/executor.md)
+- Slice 2: code-reviewer structured verdict (agents/code-reviewer.md + skills/review/code-reviewer.md)
+- Slice 3: execute SKILL §4 single-pass + §5 working set (skills/execute/SKILL.md)
 
-TDD contract: grep-style body guards on agents/executor.md.
+TDD contract: grep-style body guards on the forge agent/skill prompt files.
 
 Per the binding vacuous-test lesson: assert *distinctive, contiguous* phrases,
 and pair every "added" assertion with a "removed" / negative assertion. The
@@ -57,6 +59,29 @@ def _split_at_tail_marker(text: str) -> tuple[str, str]:
         return text, ""
     split_pos = match.start()
     return text[:split_pos], text[split_pos:]
+
+
+def _durable_tail_template(text: str) -> str:
+    """Return ONLY the durable-tail template — the fenced code block immediately following the
+    '### Durable tail' heading.
+
+    The broad `_split_at_tail_marker` tail runs to end-of-file and sweeps in the '## Rules' and
+    '## Harvest candidates' sections, where words like "Surprises" and "files" appear
+    incidentally. Positive "the template retains heading X" assertions must look only at the
+    template, or deleting a heading from the template still passes via a Rules mention (the
+    vacuity flagged in PR #4 review).
+
+    The template's own sub-headings are '## ' lines *inside* a fenced code block, so we cannot
+    bound on the next '## ' heading — we extract the code fence itself. Returns "" if not found.
+    """
+    start = re.search(
+        r"^#{3,} .*(durable tail|commit body).*$", text, re.MULTILINE | re.IGNORECASE
+    )
+    if start is None:
+        return ""
+    # The template is the first ``` … ``` fenced block after the heading.
+    fence = re.search(r"```[^\n]*\n(.*?)\n```", text[start.end():], re.DOTALL)
+    return fence.group(1) if fence else ""
 
 
 # ---------------------------------------------------------------------------
@@ -203,53 +228,34 @@ class TestExecutorSplitNegative:
         "Surprises",
     )
 
-    def test_what_i_built_not_in_head(self):
-        """'What I built' must appear only in the durable tail, not in the controller-facing head."""
-        text = _executor_text()
-        head, tail = _split_at_tail_marker(text)
-        assert "What I built" not in head, (
-            "executor.md has a malformed head/tail split: 'What I built' appears in "
-            "the controller-facing head. It must appear only in the durable tail."
-        )
-        assert "What I built" in tail, (
-            "executor.md durable tail must retain the 'What I built' sub-section heading "
-            "(for scannability in commit bodies and /pickup)"
+    @pytest.mark.parametrize("heading", _TAIL_SUBSECTION_HEADINGS)
+    def test_tail_heading_not_in_head(self, heading: str):
+        """NEGATIVE (load-bearing): a tail sub-section heading must NOT leak into the head.
+
+        A malformed split that leaves the heading in the returned head must go RED."""
+        head, _tail = _split_at_tail_marker(_executor_text())
+        assert heading not in head, (
+            f"executor.md has a malformed head/tail split: {heading!r} appears in the "
+            "controller-facing head. It must appear only in the durable tail."
         )
 
-    def test_self_review_findings_not_in_head(self):
-        """'Self-review findings' must appear only in the durable tail, not in the head."""
-        text = _executor_text()
-        head, tail = _split_at_tail_marker(text)
-        assert "Self-review findings" not in head, (
-            "executor.md has a malformed head/tail split: 'Self-review findings' appears in "
-            "the controller-facing head. It must appear only in the durable tail."
-        )
-        assert "Self-review findings" in tail, (
-            "executor.md durable tail must retain the 'Self-review findings' sub-section heading"
-        )
+    @pytest.mark.parametrize("heading", _TAIL_SUBSECTION_HEADINGS)
+    def test_durable_tail_template_retains_heading(self, heading: str):
+        """POSITIVE: the durable-tail TEMPLATE must retain the heading as a '## ' heading.
 
-    def test_files_changed_not_in_head(self):
-        """'Files changed' must appear only in the durable tail, not in the head."""
-        text = _executor_text()
-        head, tail = _split_at_tail_marker(text)
-        assert "Files changed" not in head, (
-            "executor.md has a malformed head/tail split: 'Files changed' appears in "
-            "the controller-facing head. It must appear only in the durable tail."
+        Scoped to the durable-tail subsection only — NOT the broad tail-to-EOF region, which
+        sweeps in '## Rules' / '## Harvest candidates' where words like 'Surprises' and 'files'
+        appear incidentally. Asserting the '## <heading>' form against the bounded template
+        means deleting the heading from the template goes RED (PR #4 review fix)."""
+        template = _durable_tail_template(_executor_text())
+        assert template, (
+            "executor.md must have a durable-tail subsection ('### Durable tail …' heading "
+            "followed by the template, bounded by the next '## ' heading)"
         )
-        assert "Files changed" in tail, (
-            "executor.md durable tail must retain the 'Files changed' sub-section heading"
-        )
-
-    def test_surprises_not_in_head(self):
-        """'Surprises' must appear only in the durable tail, not in the head."""
-        text = _executor_text()
-        head, tail = _split_at_tail_marker(text)
-        assert "Surprises" not in head, (
-            "executor.md has a malformed head/tail split: 'Surprises' appears in "
-            "the controller-facing head. It must appear only in the durable tail."
-        )
-        assert "Surprises" in tail, (
-            "executor.md durable tail must retain the 'Surprises' sub-section heading"
+        assert f"## {heading}" in template, (
+            f"executor.md durable-tail template must retain the '## {heading}' heading "
+            "(for scannability in commit bodies and /pickup). It was not found in the "
+            "durable-tail subsection (a Rules/Harvest mention elsewhere does not count)."
         )
 
     def test_tests_field_not_in_controller_head(self):
