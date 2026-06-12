@@ -1,0 +1,14 @@
+{
+  "name": "landing-local",
+  "owner": {
+    "name": "landing maintainers"
+  },
+  "description": "Local marketplace for the landing plugin during development.",
+  "plugins": [
+    {
+      "name": "landing",
+      "source": "./plugins/landing",
+      "description": "Get it deployed: post-merge deploy soak and deploy-health incident handling for a camp group, on the trailhead.vcs provider library."
+    }
+  ]
+}

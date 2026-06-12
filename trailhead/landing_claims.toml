@@ -8,12 +8,12 @@
 #   kind    — one of: command | preset | skill | agent | capability | doc-link
 #             prose-assertion exceptions (not resolved by the gate):
 #               positioning | allowlisted-example
-#   tool    — trailhead | lore | forge | camp
+#   tool    — trailhead | lore | forge | camp | portage | landing
 #   ref     — the anchor to resolve (subcommand name, path, capability name, etc.)
-#   source  — which README/surface makes this claim: root | lore | forge | camp
+#   source  — which README/surface makes this claim: root | lore | forge | camp | portage | landing
 #
-# Slice 3 extended this with per-tool README anchors.
-# Slice 4 will extend with root README anchors.
+# Slice 3 extended this with per-tool README anchors (lore/forge/portage).
+# Slice 4 extended this with the landing tool README anchors.
 
 # ---------------------------------------------------------------------------
 # CLI subcommands (kind=command)
@@ -532,3 +532,40 @@ kind = "agent"
 tool = "portage"
 ref = "agents/summarizer.md"
 source = "portage"
+
+# ---------------------------------------------------------------------------
+# Slice 4 additions — landing tool README anchors
+# ---------------------------------------------------------------------------
+
+# landing capability named in the README capabilities table
+[[claim]]
+kind = "capability"
+tool = "landing"
+ref = "deploy"
+source = "landing"
+
+# landing skills named in the README commands table (/landing:<name>)
+[[claim]]
+kind = "skill"
+tool = "landing"
+ref = "skills/soak"
+source = "landing"
+
+[[claim]]
+kind = "skill"
+tool = "landing"
+ref = "skills/resolve"
+source = "landing"
+
+# landing agents named in the README agents list
+[[claim]]
+kind = "agent"
+tool = "landing"
+ref = "agents/soaker.md"
+source = "landing"
+
+[[claim]]
+kind = "agent"
+tool = "landing"
+ref = "agents/doctor.md"
+source = "landing"

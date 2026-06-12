@@ -1,0 +1,16 @@
+# landing — get it deployed. Thin consumer of trailhead/vcs/ (deploy) + its own soak probe.
+# tool.name MUST equal the plugins/<name>/ dir ("landing").
+
+[tool]
+name = "landing"
+
+[capabilities.deploy]
+description = "Post-merge deploy soak + deploy-health incident handling for a camp group — a config-driven soak probe plus GHA deploy-log diagnosis on the trailhead.vcs provider library."
+skills = [
+  "skills/soak",
+  "skills/resolve",
+]
+agents = [
+  "agents/soaker.md",
+  "agents/doctor.md",
+]
