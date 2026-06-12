@@ -1512,3 +1512,41 @@ class TestSlice7DeletedSurfacesGone:
             assert ref not in text, (
                 f"landing_claims.toml still has a dangling claim for deleted '{ref}'"
             )
+
+
+class TestSlice8ArtistCutover:
+    """The artist brainstorm cutover has landed (Phase A, in-repo).
+
+    `brainstorm/SKILL.md`'s `design_mockup` extension point now names the forge
+    `artist` agent as its concrete default provider, and `design-authoring.md`
+    no longer marks the `design_mockup` seam RESERVED / not-yet-wired / a
+    follow-up. (External `design-mockup-writer` retirement is Phase B and is
+    deliberately out of this guard's scope.)
+    """
+
+    _BRAINSTORM_SKILL = (
+        _LORE_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
+    )
+    _DESIGN_AUTHORING = (
+        _FORGE_PLUGIN_ROOT / "docs" / "design-authoring.md"
+    )
+
+    def test_brainstorm_names_artist_as_design_mockup_provider(self):
+        """brainstorm/SKILL.md's design_mockup point must name `artist` as provider."""
+        text = self._BRAINSTORM_SKILL.read_text()
+        assert "design_mockup" in text, (
+            "brainstorm/SKILL.md no longer mentions the design_mockup extension point"
+        )
+        assert "artist" in text, (
+            "brainstorm/SKILL.md does not name the `artist` agent — the cutover "
+            "rewires design_mockup to dispatch the forge artist by default"
+        )
+
+    def test_design_authoring_seam_no_longer_reserved(self):
+        """design-authoring.md must not mark the design_mockup seam RESERVED/follow-up."""
+        text = self._DESIGN_AUTHORING.read_text()
+        for stale in ("RESERVED", "not yet wired", "cutover is a follow-up"):
+            assert stale not in text, (
+                f"design-authoring.md still marks the seam {stale!r}; the brainstorm "
+                "cutover has landed — flip the seam to LIVE"
+            )
