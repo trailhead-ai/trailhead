@@ -764,8 +764,11 @@ class _GitHubDeploy(DeploySurface):
     regression. Every gh call is list-form through ``trailhead.vcs.runner``
     (shell=False); the jq ``-q`` filter is a list element, not a shell pipe.
 
-    Uses ``_gh_or_raise`` (not the lossy ``_gh``) so a failed deploy query
-    surfaces a legible cause to doctor (M-4).
+    ``workflow_runs`` and ``status`` use ``_gh_or_raise`` (not the lossy
+    ``_gh``) so a failed deploy query surfaces a legible cause to doctor (M-4).
+    ``logs`` is the exception: it bypasses ``_gh_or_raise`` to special-case a
+    404 (not-found job) into ``[]`` so a missing job never false-alarms — any
+    *other* nonzero gh exit still raises (see ``logs``).
     """
 
     def __init__(self, runner: rp.Runner) -> None:
@@ -801,8 +804,10 @@ class _GitHubDeploy(DeploySurface):
         """List the latest deployment status per GitHub Deployment.
 
         Zero deployments is a valid steady state (the deployments API is opt-in
-        and trailhead-ai/trailhead deploys out-of-band) — return ``[]``, never
-        raise.
+        and some repos deploy out-of-band) — that case returns ``[]``, it does
+        not raise. A *failed* gh query (auth, rate-limit, non-JSON) still raises
+        ``DeployError`` via ``_gh_or_raise`` — a broken query is the doctor
+        signal (M-4), not a silent empty list.
         """
         owner_repo = _resolve_owner_repo(repo_path, self._runner)
         deployments = _gh_or_raise(
