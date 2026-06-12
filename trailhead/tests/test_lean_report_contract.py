@@ -577,3 +577,241 @@ class TestCodeReviewerSeverityLabelsInvariant:
         assert "Minor" in text, (
             "skills/review/code-reviewer.md must retain the 'Minor' severity label."
         )
+
+
+# ---------------------------------------------------------------------------
+# Slice 3: execute SKILL §4 single-pass + verdict-only absorb, §5 working set
+#
+# Plan: 2026-06-12-trailhead-lean-execute-loop-controller, Slice 3
+#
+# Test contract:
+#   POSITIVE §4: large-tier row has single-combined-pass directive + "second pass only
+#     when saturated/over-length"; absorb directive containing "verdict + Critical".
+#   NEGATIVE §4: "Dispatch `code-reviewer` twice" is ABSENT.
+#   POSITIVE §5: working-set directive naming "current slice" + "unknowns checklist"
+#     and contiguous "does not re-read the full plan".
+#   POSITIVE head/consumer cross-check: fields §4/§5 key on are present in executor head.
+#   INVARIANT §5: plan-file-as-source-of-truth + draft→in-progress still present.
+# ---------------------------------------------------------------------------
+
+_EXECUTE_SKILL_MD = _FORGE_PLUGIN_ROOT / "skills" / "execute" / "SKILL.md"
+
+
+def _execute_skill_text() -> str:
+    return _EXECUTE_SKILL_MD.read_text()
+
+
+def _split_execute_at_section(text: str, section_heading: str) -> str:
+    """Return the text of the named section (from the heading until the next same-level heading).
+
+    Handles headings that carry a numeric prefix, e.g. '### 4. Review (scaled to change size)'.
+    The pattern matches any heading that *contains* section_heading as a substring.
+    """
+    pattern = re.compile(
+        r"^(#{1,4}[^\n]*" + re.escape(section_heading) + r")(.+?)(?=^#{1,4} |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    m = pattern.search(text)
+    return m.group(0) if m else ""
+
+
+class TestExecuteSkillSection4SinglePass:
+    """§4 Review: large-tier must default to a single combined pass; no double-dispatch."""
+
+    def test_large_tier_single_combined_pass_directive(self):
+        """The large-tier row must contain a 'single combined' pass directive.
+
+        Asserts the contiguous phrase 'single combined' in the §4 Review section.
+        """
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Review (scaled to change size)")
+        assert "single combined" in section.lower(), (
+            "skills/execute/SKILL.md §4 large-tier row must contain 'single combined' "
+            "(a single-combined-pass directive for the 200+/5+ files tier). "
+            "This is a load-bearing POSITIVE assertion — the contiguous phrase must be present."
+        )
+
+    def test_large_tier_second_pass_only_when_saturated_or_over_length(self):
+        """The §4 large-tier row must include 'second pass only when saturated/over-length'.
+
+        Asserts the contiguous phrase spans the condition — this is what distinguishes
+        conditional second pass from unconditional double-dispatch.
+        """
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Review (scaled to change size)")
+        # Accept either 'saturated/over-length' or 'saturated or over-length'
+        has_phrase = (
+            "saturated/over-length" in section.lower()
+            or "saturated or over-length" in section.lower()
+        )
+        assert has_phrase, (
+            "skills/execute/SKILL.md §4 large-tier row must include the contiguous condition "
+            "'saturated/over-length' or 'saturated or over-length' — describing when a second "
+            "pass is dispatched. The unconditional double-dispatch must be replaced."
+        )
+
+    def test_section4_contains_verdict_plus_critical_absorb_directive(self):
+        """§4 must state the controller absorbs only 'verdict + Critical' findings.
+
+        Asserts the contiguous phrase 'verdict + Critical' in §4 (case-sensitive on capitals,
+        since these are proper terms from the structured reviewer contract).
+        """
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Review (scaled to change size)")
+        assert "verdict + Critical" in section, (
+            "skills/execute/SKILL.md §4 must contain an absorb directive with the contiguous "
+            "phrase 'verdict + Critical' — stating the controller absorbs only the reviewer's "
+            "verdict and Critical findings, not the full review."
+        )
+
+    def test_section4_lacks_dispatch_code_reviewer_twice(self):
+        """NEGATIVE (load-bearing): 'Dispatch `code-reviewer` twice' must be ABSENT from §4.
+
+        This is the paired negative for the single-combined-pass positive assertion.
+        If the old double-dispatch instruction remains, this test must go RED.
+        Mutation-verify: injecting 'Dispatch `code-reviewer` twice' must break this.
+        """
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Review (scaled to change size)")
+        assert "Dispatch `code-reviewer` twice" not in section, (
+            "skills/execute/SKILL.md §4 still contains 'Dispatch `code-reviewer` twice' — "
+            "the old unconditional double-dispatch instruction must be replaced by the single "
+            "combined pass with conditional second pass. This is the load-bearing NEGATIVE assertion."
+        )
+
+
+class TestExecuteSkillSection5WorkingSet:
+    """§5 Update the plan file: must name the per-cycle working set and no-full-reread."""
+
+    def test_section5_names_current_slice_in_working_set(self):
+        """§5 must reference 'current slice' as part of the working-set directive."""
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Update the plan file")
+        assert "current slice" in section.lower(), (
+            "skills/execute/SKILL.md §5 must name 'current slice' in the working-set directive — "
+            "the controller's per-cycle working set is the current slice section + unknowns checklist."
+        )
+
+    def test_section5_names_unknowns_checklist_in_working_set(self):
+        """§5 must reference 'unknowns checklist' as part of the working-set directive."""
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Update the plan file")
+        assert "unknowns checklist" in section.lower(), (
+            "skills/execute/SKILL.md §5 must name 'unknowns checklist' in the working-set directive."
+        )
+
+    def test_section5_states_does_not_reread_full_plan(self):
+        """§5 must contain the contiguous phrase 'does not re-read the full plan'.
+
+        This is the load-bearing POSITIVE that distinguishes a real working-set constraint
+        from prose that merely mentions 'plan'. The contiguous phrase must be present.
+        """
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Update the plan file")
+        assert "does not re-read the full plan" in section.lower(), (
+            "skills/execute/SKILL.md §5 must contain the contiguous phrase "
+            "'does not re-read the full plan' — asserting the controller pins its "
+            "working set to the current slice + unknowns checklist rather than re-reading "
+            "the entire plan each cycle."
+        )
+
+    def test_section5_preserves_source_of_truth_language(self):
+        """INVARIANT: §5 must retain plan-file-as-source-of-truth language.
+
+        The spec Constraint forbids regressing this invariant. A rewrite that strips
+        'source of truth' must go RED.
+        """
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Update the plan file")
+        assert "source of truth" in section.lower(), (
+            "skills/execute/SKILL.md §5 must retain 'source of truth' language — "
+            "spec Constraint: do not regress the plan-file-as-source-of-truth invariant."
+        )
+
+    def test_section5_preserves_draft_to_in_progress_status_flip(self):
+        """INVARIANT: §5 must retain the draft→in-progress status-flip behavior.
+
+        The spec Constraint requires this behavior to be preserved. Stripping 'draft' or
+        'in-progress' from §5 must cause this test to go RED.
+        """
+        text = _execute_skill_text()
+        section = _split_execute_at_section(text, "Update the plan file")
+        has_draft = "draft" in section.lower()
+        has_in_progress = "in-progress" in section.lower()
+        assert has_draft and has_in_progress, (
+            "skills/execute/SKILL.md §5 must retain the draft→in-progress status-flip behavior "
+            "(assert 'draft' and 'in-progress' both present). "
+            f"Found: draft={has_draft}, in-progress={has_in_progress}."
+        )
+
+
+class TestExecuteSkillHeadConsumerFieldCrossCheck:
+    """POSITIVE: §4/§5 consumer fields must be present in the executor head definition.
+
+    Closes the Slice 1 seam: enumerate every executor-report field §4 and §5 key on
+    (verdict-absorb maps to 'review' field, plus 'blocking', 'unknowns', 'cleanup')
+    and assert each is a field present in the executor.md controller-facing head.
+    If §4/§5 reference a field the head dropped, this test goes RED.
+    """
+
+    # Fields §4/§5 key on — this list is the seam cross-check.
+    # - verdict-absorb: §4 reads the reviewer verdict; the executor head has 'review: needed|skip'
+    # - blocking: §4/§5 check for blockers before advancing
+    # - unknowns: §5 checks off unknowns and carries them forward
+    # - cleanup: §2 absorbs assumption-prover cleanup from the executor head
+    _CONSUMER_FIELDS = ("review", "blocking", "unknowns", "cleanup")
+
+    def _executor_head_text(self) -> str:
+        """Return the controller-facing head section of executor.md."""
+        text = _EXECUTOR_MD.read_text()
+        head, _tail = _split_at_tail_marker(text)
+        return head
+
+    def test_review_field_in_executor_head(self):
+        """'review' field must be present in the executor.md controller-facing head.
+
+        §4 gates on 'review: needed|skip' from the executor report — if this field
+        is dropped from the head, the controller cannot decide whether to dispatch review.
+        """
+        head = self._executor_head_text()
+        assert "review" in head.lower(), (
+            "executor.md controller-facing head must contain the 'review' field — "
+            "§4 gates on 'review: needed|skip' to decide whether to dispatch code-reviewer. "
+            "Field is absent; the Slice 1 head definition must include it."
+        )
+
+    def test_blocking_field_in_executor_head(self):
+        """'blocking' field must be present in the executor.md controller-facing head.
+
+        §4/§5 check the blocking one-liner before advancing to the next slice.
+        """
+        head = self._executor_head_text()
+        assert "blocking" in head.lower(), (
+            "executor.md controller-facing head must contain the 'blocking' field — "
+            "§4/§5 check this before advancing. Field is absent from the head definition."
+        )
+
+    def test_unknowns_field_in_executor_head(self):
+        """'unknowns' field must be present in the executor.md controller-facing head.
+
+        §5 checks for new unknowns and adds them to the plan — it reads this from the executor head.
+        """
+        head = self._executor_head_text()
+        assert "unknowns" in head.lower(), (
+            "executor.md controller-facing head must contain the 'unknowns' field — "
+            "§5 reads new unknowns from the executor report and adds them to the plan. "
+            "Field is absent from the head definition."
+        )
+
+    def test_cleanup_field_in_executor_head(self):
+        """'cleanup' field must be present in the executor.md controller-facing head.
+
+        §2 absorbs the assumption-prover cleanup list from the executor head (the assumption-prover
+        tests the executor removed). If this field is absent, the controller cannot track cleanup.
+        """
+        head = self._executor_head_text()
+        assert "cleanup" in head.lower(), (
+            "executor.md controller-facing head must contain the 'cleanup' field — "
+            "§2 reads the assumption-prover test cleanup status from the executor report. "
+            "Field is absent from the head definition."
+        )

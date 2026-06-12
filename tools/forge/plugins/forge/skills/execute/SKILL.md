@@ -96,9 +96,11 @@ Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Exec
 |-------------|----------------|
 | **Small** (≤30 lines, 1-2 files) | Skip formal review. Review inline or one quick check. |
 | **Medium** (30-200 lines, 3-5 files) | Dispatch `code-reviewer` for combined spec + quality pass. |
-| **Large** (200+ lines or 5+ files) | Dispatch `code-reviewer` twice: once asking for spec compliance focus, once for code quality. Same agent, different framing. |
+| **Large** (200+ lines or 5+ files) | Dispatch `code-reviewer` for a single combined spec + quality pass. Dispatch a second pass only when the first returns saturated/over-length. |
 
 When dispatching `code-reviewer`, give it: plan path + slice number, the executor's status report (so it can verify the claim), and base/head SHAs for the diff.
+
+Absorb only the reviewer's verdict + Critical findings into your working context. Important and Minor findings are in the review tail — read them only if a Critical is ambiguous or you need to understand scope.
 
 ### 5. Update the plan file
 
@@ -109,6 +111,8 @@ After each slice completes (or each unknown resolves), update the plan file the 
 - Note any design changes forced by findings
 
 This is essential for session continuity — if context breaks (handoff, new session), the plan file is the source of truth for what's done and what's left.
+
+**Per-cycle working set:** the controller's working set is the current slice's section plus the unknowns checklist. The controller does not re-read the full plan each slice — the plan file is updated incrementally and the controller re-reads only what changed.
 
 **After the first slice lands:** if the plan's frontmatter `status` is `draft`, flip it to `in-progress` and bump `updated:` to today. This keeps the plans index honest — a plan with code shipped against it should not still show `draft`. Skip if `status` is already `in-progress`, `active`, `complete`, or `superseded`.
 
