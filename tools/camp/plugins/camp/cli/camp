@@ -573,22 +573,181 @@ def _cmd_rebase_group_cli(
     print(f"camp rebase: {slug!r} rebased onto {onto}")
 
 
+_INIT_HELP = """\
+usage: camp init <group> [options]
+
+Three modes (every non-default mode requires an explicit flag):
+
+  camp init <group>
+      Wire SessionStart + WorktreeRemove hook entries into each member's
+      .claude/settings.json for an already-configured group.
+
+  camp init <group> --member NAME=PATH [--member NAME=PATH ...] [options]
+      Author a group config TOML from flags (atomic write), then wire hooks.
+      Refuses to overwrite an existing config unless --force.
+
+  camp init <group> --scaffold
+      Write a commented stub config you edit by hand, then re-run with
+      --member. Does not wire hooks.
+
+Options:
+  --member NAME=PATH   Repeatable. Add a member (split on the first '=').
+  --branch-pattern P   Branch pattern for authored config (default
+                       'worktree-{slug}').
+  --force              Overwrite an existing config file.
+  --allow-missing      Skip the repo_root existence/git check when authoring.
+  --scaffold           Write a commented stub config and stop (no hooks).
+"""
+
+
+def _parse_init_args(args: list[str]) -> dict:
+    """Parse `camp init` args into {group_name, members, branch_pattern, force,
+    allow_missing, scaffold}. Exits non-zero on malformed input."""
+    members: list[dict[str, str]] = []
+    branch_pattern = "worktree-{slug}"
+    force = False
+    allow_missing = False
+    scaffold = False
+    group_name: str | None = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--member":
+            if i + 1 >= len(args):
+                print("camp init: --member requires a NAME=PATH value", file=sys.stderr)
+                sys.exit(1)
+            members.append(_parse_member(args[i + 1]))
+            i += 2
+        elif arg.startswith("--member="):
+            members.append(_parse_member(arg[len("--member="):]))
+            i += 1
+        elif arg == "--branch-pattern":
+            if i + 1 >= len(args):
+                print("camp init: --branch-pattern requires a value", file=sys.stderr)
+                sys.exit(1)
+            branch_pattern = args[i + 1]
+            i += 2
+        elif arg.startswith("--branch-pattern="):
+            branch_pattern = arg[len("--branch-pattern="):]
+            i += 1
+        elif arg == "--force":
+            force = True
+            i += 1
+        elif arg == "--allow-missing":
+            allow_missing = True
+            i += 1
+        elif arg == "--scaffold":
+            scaffold = True
+            i += 1
+        elif arg.startswith("-"):
+            print(f"camp init: unknown flag {arg!r}", file=sys.stderr)
+            sys.exit(1)
+        else:
+            if group_name is not None:
+                print(f"camp init: unexpected argument {arg!r}", file=sys.stderr)
+                sys.exit(1)
+            group_name = arg
+            i += 1
+
+    if group_name is None:
+        print("camp init: a group name is required", file=sys.stderr)
+        sys.exit(1)
+
+    return {
+        "group_name": group_name,
+        "members": members,
+        "branch_pattern": branch_pattern,
+        "force": force,
+        "allow_missing": allow_missing,
+        "scaffold": scaffold,
+    }
+
+
+def _parse_member(raw: str) -> dict[str, str]:
+    """Parse a NAME=PATH member spec, splitting on the FIRST '=' only.
+
+    Rejects empty NAME or empty PATH. Exits non-zero with a legible error.
+    """
+    if "=" not in raw:
+        print(
+            f"camp init: malformed --member {raw!r} — expected NAME=PATH",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    name, path = raw.split("=", 1)
+    if not name:
+        print(
+            f"camp init: malformed --member {raw!r} — member NAME must not be empty",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not path:
+        print(
+            f"camp init: malformed --member {raw!r} — member PATH must not be empty",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return {"name": name, "repo_root": path}
+
+
 def _cmd_init_cli(args: list[str]) -> None:
-    """camp init <group> — write hook entries into each member's .claude/settings.json."""
-    from group_config import load_all_groups, load_group, GroupConfigError, GroupConfigNotFound
-    from group_resolve import resolve_group_override, validate_no_overlap, GroupResolutionError
+    """camp init <group> — wire hooks, author a config from flags, or write a stub."""
+    from group_config import load_all_groups, GroupConfigError
+    from group_resolve import resolve_group_override, GroupResolutionError
     from init_cmd import run_init
+    import group_scaffold
     import trailhead.paths as _paths
 
     if not args or args[0] in ("--help", "-h"):
-        print("usage: camp init <group>")
-        print("  Writes SessionStart + WorktreeRemove hook entries into each member's")
-        print("  .claude/settings.json for the named group.")
+        print(_INIT_HELP)
         return
 
-    group_name = args[0]
-
+    parsed = _parse_init_args(args)
+    group_name = parsed["group_name"]
     config_dir = _paths.config_dir("camp") / "groups"
+    config_path = config_dir / f"{group_name}.toml"
+
+    # --- Mode (c): --scaffold (and no --member) → write a stub, stop ---
+    if parsed["scaffold"] and not parsed["members"]:
+        if config_path.exists() and not parsed["force"]:
+            print(
+                f"camp init: config {config_path!s} already exists — pass --force to overwrite",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(group_scaffold.build_stub_toml(group_name))
+        print(f"camp init: wrote stub {config_path!s}")
+        print(f"  edit this then re-run `camp init {group_name} --member NAME=PATH ...`")
+        return
+
+    # --- Mode (a): --member present → author config (atomic) then wire hooks ---
+    if parsed["members"]:
+        _author_group(
+            group_name,
+            parsed["members"],
+            parsed["branch_pattern"],
+            force=parsed["force"],
+            allow_missing=parsed["allow_missing"],
+            config_dir=config_dir,
+            config_path=config_path,
+        )
+        # Re-load all configs (now including the freshly written one) + wire hooks.
+        try:
+            all_configs = load_all_groups(config_dir)
+            group = resolve_group_override(group_name, all_configs)
+            run_init(group, str(_BIN_DIR / "camp"), group_configs=all_configs)
+        except (GroupResolutionError, GroupConfigError) as e:
+            print(f"camp init: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(
+            f"camp init: authored + wired group {group_name!r} "
+            f"({len(group['members'])} member(s))"
+        )
+        return
+
+    # --- Mode (b): no new flags → unchanged behavior (resolve + wire hooks) ---
     try:
         all_configs = load_all_groups(config_dir)
     except GroupConfigError as e:
@@ -608,6 +767,63 @@ def _cmd_init_cli(args: list[str]) -> None:
         sys.exit(1)
 
     print(f"camp init: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
+
+
+def _author_group(
+    group_name: str,
+    members: list[dict[str, str]],
+    branch_pattern: str,
+    *,
+    force: bool,
+    allow_missing: bool,
+    config_dir,
+    config_path,
+) -> None:
+    """Validate + atomically write a group config TOML. Exits non-zero on failure."""
+    from group_config import load_all_groups, load_group, GroupConfigError
+    from group_resolve import GroupConfinementError
+    import group_scaffold
+
+    if config_path.exists() and not force:
+        print(
+            f"camp init: config {config_path!s} already exists — pass --force to overwrite",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Load other groups, EXCLUDING the target group by name so a --force redefine
+    # does not self-collide against its own prior config in validate_no_overlap.
+    try:
+        all_configs = load_all_groups(config_dir)
+    except GroupConfigError as e:
+        print(f"camp init: {e}", file=sys.stderr)
+        sys.exit(1)
+    other_configs = [c for c in all_configs if c["group"]["name"] != group_name]
+
+    try:
+        group_scaffold.validate_scaffold(
+            group_name,
+            members,
+            other_configs=other_configs,
+            allow_missing=allow_missing,
+        )
+    except (group_scaffold.ScaffoldError, GroupConfinementError) as e:
+        print(f"camp init: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    rendered = group_scaffold.render_group_toml(group_name, members, branch_pattern)
+
+    # Atomic write: tmp → round-trip gate via load_group → os.replace.
+    config_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+    tmp_path.write_text(rendered)
+    try:
+        load_group(tmp_path)
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        print(f"camp init: rendered config failed round-trip validation: {e}", file=sys.stderr)
+        sys.exit(1)
+    os.replace(str(tmp_path), str(config_path))
 
 
 if __name__ == "__main__":
