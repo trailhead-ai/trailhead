@@ -176,6 +176,59 @@ def register(
     (mkt_root / _REGISTERED_MARKER).write_text("{}")
 
 
+def unregister(
+    tool: str,
+    mkt_root: Path,
+    *,
+    runner=None,
+) -> None:
+    """Uninstall and de-register a composed plugin via the harness CLI.
+
+    The inverse of ``register``.  Shells:
+      1. ``claude plugin uninstall <tool>@trailhead-<tool> --scope user
+         --keep-data --yes``
+      2. ``claude plugin marketplace remove trailhead-<tool> --scope user``
+
+    ``--keep-data`` preserves the plugin's persistent data directory
+    (``~/.claude/plugins/data/{id}/``) so an uninstall is "wiring only" — the
+    user's captured notes / group config survive a later reinstall.  ``--yes``
+    keeps the call non-interactive.
+
+    Removes the ``<mkt_root>/.trailhead-registered`` marker after both CLI
+    steps so a half-uninstalled tree is not later mistaken for registered.
+
+    Best-effort by contract: the caller is expected to tolerate a runner that
+    raises (e.g. the plugin was already uninstalled out-of-band) and continue
+    cleaning up local state.  This function itself does not swallow — it lets
+    the runner's exception propagate so the caller can decide.
+
+    Args:
+        tool:     Tool name.
+        mkt_root: Marketplace root directory (used to clear the marker).
+        runner:   Injectable runner (same contract as in ``register``).
+    """
+    if runner is None:
+        runner = lambda args, **kw: subprocess.run(args, check=True, **kw)  # noqa: E731
+
+    try:
+        runner([
+            "claude", "plugin", "uninstall",
+            f"{tool}@trailhead-{tool}",
+            "--scope", "user",
+            "--keep-data",
+            "--yes",
+        ])
+        runner([
+            "claude", "plugin", "marketplace", "remove",
+            f"trailhead-{tool}",
+            "--scope", "user",
+        ])
+    finally:
+        # Clear the marker regardless of CLI outcome — the local tree is being
+        # torn down, so it must never read as "registered" afterwards.
+        (mkt_root / _REGISTERED_MARKER).unlink(missing_ok=True)
+
+
 def rewire(
     tool: str,
     mkt_root: Path,

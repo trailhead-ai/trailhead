@@ -96,6 +96,10 @@ class TestCuratedHelp:
         exit_code, out, _ = _run(["--help"])
         assert "config" in out
 
+    def test_help_names_uninstall(self):
+        exit_code, out, _ = _run(["--help"])
+        assert "uninstall" in out
+
     def test_bare_trailhead_names_all_four_subcommands(self):
         exit_code, out, _ = _run([])
         assert "install" in out
@@ -142,8 +146,15 @@ class TestSubcommandStubs:
         # Either succeeds or fails with a message — never empty
         assert len(combined.strip()) > 0
 
-    def test_doctor_exits_zero_with_no_tools_wired(self):
-        """doctor runs successfully even with no tools wired."""
+    def test_doctor_exits_zero_with_no_tools_wired(self, tmp_path, monkeypatch):
+        """doctor runs successfully even with no tools wired.
+
+        Hermetic: point config/state at an empty tmp dir so "no tools wired"
+        actually holds.  Without this the test leaks the dev machine's real
+        state (e.g. registered-but-not-on-PATH tools → doctor exits 1).
+        """
+        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("TRAILHEAD_CONFIG_DIR", str(tmp_path / "config"))
         exit_code, out, err = _run(["doctor"])
         assert exit_code == 0
 
@@ -187,3 +198,11 @@ class TestSubcommandHelp:
     def test_config_help_exits_zero(self):
         exit_code, _, _ = _run(["config", "--help"])
         assert exit_code == 0
+
+    def test_uninstall_help_exits_zero(self):
+        exit_code, _, _ = _run(["uninstall", "--help"])
+        assert exit_code == 0
+
+    def test_uninstall_help_shows_yes_flag(self):
+        exit_code, out, err = _run(["uninstall", "--help"])
+        assert "--yes" in out or "-y" in out

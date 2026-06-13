@@ -158,6 +158,7 @@ class TestDoctorJsonAggregation:
             as_json=True,
             wired_tools={"camp": set()},
             doctor_runner=runner,
+            which_runner=lambda name: f"/fake/bin/{name}",
             env=env,
         )
         assert result.data["any_failed"] is False
@@ -186,6 +187,7 @@ class TestDoctorJsonAggregation:
             as_json=True,
             wired_tools={"camp": set()},
             doctor_runner=runner,
+            which_runner=lambda name: f"/fake/bin/{name}",
             env=env,
         )
         assert result.exit_code == 0
@@ -258,6 +260,7 @@ class TestNoDoctorTool:
         result = run_doctor(
             as_json=True,
             wired_tools={"lore": {"capture"}},
+            which_runner=lambda name: f"/fake/bin/{name}",
             env=env,
         )
         assert result.data["any_failed"] is False
@@ -635,6 +638,163 @@ class TestPythonVersionCheck:
                 break
         assert python_check is not None
         assert python_check.get("pass") is False
+
+
+# ---------------------------------------------------------------------------
+# T-D7b: PATH integration — front-door CLI (camp/lore) resolvable on PATH
+# ---------------------------------------------------------------------------
+
+
+class TestPathIntegrationCheck:
+    def _path_check(self, data, tool):
+        for c in data.get("checks", []):
+            if c.get("check") == f"path:{tool}":
+                return c
+        return None
+
+    def test_camp_not_on_path_flags_failure(self, tmp_path):
+        """The forcing case (gap 3): camp wired but not on PATH → doctor FAILS."""
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        result = run_doctor(
+            as_json=True,
+            wired_tools={"camp": set()},
+            doctor_runner=lambda args, **kw: (_ for _ in ()).throw(FileNotFoundError("no camp")),
+            which_runner=lambda name: None,  # nothing resolves on PATH
+            env=env,
+        )
+        check = self._path_check(result.data, "camp")
+        assert check is not None, f"no path:camp check found in {result.data}"
+        assert check["pass"] is False
+        assert result.data["any_failed"] is True
+
+    def test_camp_not_on_path_message_is_actionable(self, tmp_path):
+        """The failure must tell the user how to fix it."""
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        result = run_doctor(
+            as_json=True,
+            wired_tools={"camp": set()},
+            doctor_runner=lambda args, **kw: (_ for _ in ()).throw(FileNotFoundError("no camp")),
+            which_runner=lambda name: None,
+            env=env,
+        )
+        details = self._path_check(result.data, "camp")["details"].lower()
+        assert "path" in details
+        assert "path_integration" in details or "restart" in details or "shell" in details
+
+    def test_camp_on_path_passes(self, tmp_path):
+        """camp resolvable on PATH → path check passes."""
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        result = run_doctor(
+            as_json=True,
+            wired_tools={"camp": set()},
+            doctor_runner=_stub_doctor_runner_camp_pass(),
+            which_runner=lambda name: f"/fake/bin/{name}",
+            env=env,
+        )
+        check = self._path_check(result.data, "camp")
+        assert check is not None
+        assert check["pass"] is True
+
+    def test_path_check_skipped_when_integration_disabled(self, tmp_path):
+        """When path_integration is off in config, a missing shim is intentional."""
+        from trailhead.doctor import run_doctor
+        from trailhead.config import TrailheadConfig, save_config
+
+        env = _hermetic_env(tmp_path)
+        save_config(TrailheadConfig(path_integration=False, capabilities={"camp": []}), env=env)
+
+        result = run_doctor(
+            as_json=True,
+            wired_tools={"camp": set()},
+            doctor_runner=lambda args, **kw: (_ for _ in ()).throw(FileNotFoundError("no camp")),
+            which_runner=lambda name: None,
+            env=env,
+        )
+        # No per-tool path:camp failure, and PATH didn't drag any_failed true.
+        assert self._path_check(result.data, "camp") is None
+        assert result.data["any_failed"] is False
+
+    def test_not_on_path_probe_status_does_not_double_count(self, tmp_path):
+        """The probe's not_on_path status is informational; the PATH check owns the fail."""
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        result = run_doctor(
+            as_json=True,
+            wired_tools={"camp": set()},
+            doctor_runner=lambda args, **kw: (_ for _ in ()).throw(FileNotFoundError("no camp")),
+            which_runner=lambda name: None,
+            env=env,
+        )
+        # The camp probe entry reflects not_on_path, not a hard error/no_doctor.
+        assert result.data["tools"]["camp"]["status"] == "not_on_path"
+
+    def test_discovers_registered_tools_without_config(self, tmp_path):
+        """Config-less but camp registered (marker) → PATH check still fires.
+
+        Regression: doctor used to key 'what's wired' purely off config.toml, so
+        a directly-wired machine (no config) reported nothing and passed blind.
+        """
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        camp = tmp_path / "state" / "composed" / "camp"
+        (camp / "plugins" / "camp").mkdir(parents=True)
+        (camp / ".trailhead-registered").write_text("{}")
+
+        # wired_tools=None → default discovery (config ∪ registration markers)
+        result = run_doctor(
+            as_json=True,
+            doctor_runner=lambda args, **kw: (_ for _ in ()).throw(FileNotFoundError("no camp")),
+            which_runner=lambda name: None,
+            env=env,
+        )
+        check = self._path_check(result.data, "camp")
+        assert check is not None, f"camp not discovered from marker: {result.data}"
+        assert check["pass"] is False
+        assert result.data["any_failed"] is True
+
+    def test_registered_marker_tool_does_not_trigger_false_drift(self, tmp_path):
+        """A marker-discovered tool absent from config must not produce drift noise.
+
+        Drift is config↔filesystem; a tool with no config entry has nothing to
+        drift against, so the present skills must NOT read as 'undeclared'.
+        """
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        camp = tmp_path / "state" / "composed" / "camp"
+        (camp / "plugins" / "camp" / "skills" / "worktree").mkdir(parents=True)
+        (camp / ".trailhead-registered").write_text("{}")
+
+        result = run_doctor(
+            as_json=True,
+            doctor_runner=lambda args, **kw: (_ for _ in ()).throw(FileNotFoundError("no camp")),
+            which_runner=lambda name: f"/fake/bin/{name}",  # on PATH → PATH check passes
+            env=env,
+        )
+        # No drift failures should appear for camp.
+        drift_failures = [d for d in result.data.get("drift_checks", []) if not d.get("pass", True)]
+        assert drift_failures == [], f"unexpected drift: {drift_failures}"
+
+    def test_craft_has_no_path_check(self, tmp_path):
+        """craft ships no CLI wrapper → no path check generated for it."""
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        result = run_doctor(
+            as_json=True,
+            wired_tools={"craft": {"planning"}},
+            which_runner=lambda name: None,
+            env=env,
+        )
+        assert self._path_check(result.data, "craft") is None
 
 
 # ---------------------------------------------------------------------------

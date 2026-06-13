@@ -319,6 +319,23 @@ def _manifest_state_revs(manifest: InstallManifest, *, env: dict[str, str]) -> d
 # ---------------------------------------------------------------------------
 
 
+def _example_front_door_cli(selection: dict[str, set[str]]) -> str | None:
+    """Return a wired tool that ships a front-door CLI, to use as a verify hint.
+
+    Prefers camp (THE front door, run outside any session); otherwise the
+    first wired tool that has a bin/<tool> wrapper.  Returns None if no wired
+    tool ships a CLI (e.g. a craft-only selection).
+    """
+    front_door = [
+        tool
+        for tool in sorted(selection)
+        if (_REPO_ROOT / "tools" / tool / "plugins" / tool / "bin" / tool).exists()
+    ]
+    if "camp" in front_door:
+        return "camp"
+    return front_door[0] if front_door else None
+
+
 def _print_human_summary(
     *,
     preset_name: str,
@@ -342,15 +359,24 @@ def _print_human_summary(
         lines.append(f"  {tool} ({caps_str})")
     lines.append("")
 
-    # A-3: PATH integration line
+    # A-3: PATH integration line.  camp/lore are front-door CLIs run outside a
+    # Claude Code session, so the user must know how to activate + verify them.
+    # Name an actually-wired CLI as the verify example (camp is the canonical
+    # front door; fall back to whatever front-door tool this preset wired).
     if pathint_result is not None:
+        example_cli = _example_front_door_cli(selection)
         if pathint_result.skip_message:
             lines.append(f"PATH: {pathint_result.skip_message}")
-        elif pathint_result.rc_path is not None:
             lines.append(
-                f"PATH: added a shim dir to {pathint_result.rc_path} — "
-                f"remove with `trailhead config path_integration off`"
+                f"      or add this dir to your PATH manually: {pathint_result.shim_dir}"
             )
+        elif pathint_result.rc_path is not None:
+            lines.append(f"PATH: added {pathint_result.shim_dir} via {pathint_result.rc_path}")
+            verify = f", then `{example_cli} --help` should resolve" if example_cli else ""
+            lines.append(
+                f"      restart your shell (or `source {pathint_result.rc_path}`){verify}"
+            )
+            lines.append("      remove later with `trailhead config path_integration off`")
         lines.append("")
 
     # Config path

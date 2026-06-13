@@ -27,6 +27,7 @@ from trailhead.manifest import InstallManifestError
 from trailhead.pathint import PathIntegrationError
 from trailhead.paths import PathResolutionError
 from trailhead.presets import PresetError
+from trailhead.uninstall import run_uninstall
 from trailhead.update import run_update
 from trailhead.wire import LockError, WireError
 
@@ -51,10 +52,11 @@ _CURATED_HELP = """\
 trailhead {version} — manage and compose lore, craft, and camp plugins.
 
 Commands:
-  install   Wire a preset of tools and capabilities into the Claude Code harness.
-  update    Re-wire to the latest pinned manifest versions from the configured source.
-  doctor    Roll up health checks across all wired tools.
-  config    Read and write trailhead configuration (registry, preset, capabilities).
+  install     Wire a preset of tools and capabilities into the Claude Code harness.
+  uninstall   Remove all wired tools and trailhead's PATH integration (keeps your data).
+  update      Re-wire to the latest pinned manifest versions from the configured source.
+  doctor      Roll up health checks across all wired tools.
+  config      Read and write trailhead configuration (registry, preset, capabilities).
 
 Run `trailhead <command> --help` for details on each command.
 """
@@ -69,6 +71,14 @@ def _cmd_install(args: argparse.Namespace) -> int:
         args.preset,
         quiet=args.quiet,
         as_json=args.json,
+    )
+
+
+def _cmd_uninstall(args: argparse.Namespace) -> int:
+    return run_uninstall(
+        quiet=args.quiet,
+        as_json=args.json,
+        assume_yes=args.yes,
     )
 
 
@@ -127,6 +137,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print machine-readable JSON summary instead of human-readable output.",
     )
 
+    uninstall_p = subparsers.add_parser(
+        "uninstall",
+        help="Remove all wired tools and trailhead's PATH integration (keeps your data).",
+    )
+    uninstall_p.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        default=False,
+        help="Skip the confirmation prompt.",
+    )
+    uninstall_p.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress progress lines; summary is still printed.",
+    )
+    uninstall_p.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Print machine-readable JSON summary instead of human-readable output.",
+    )
+
     subparsers.add_parser(
         "update",
         help="Re-wire to the latest pinned manifest versions from the configured source.",
@@ -167,6 +201,7 @@ def main() -> int:
 
     dispatch = {
         "install": _cmd_install,
+        "uninstall": _cmd_uninstall,
         "update": _cmd_update,
         "doctor": _cmd_doctor,
         "config": _cmd_config,
