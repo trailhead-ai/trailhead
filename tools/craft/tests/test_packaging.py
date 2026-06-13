@@ -25,31 +25,7 @@ def test_plugin_json_parses_and_has_required_keys():
     assert data["name"] == "craft"
 
 
-def test_marketplace_json_parses_and_has_required_keys():
-    """marketplace.json is valid JSON with name, owner, and plugins entries."""
-    path = REPO_ROOT / ".claude-plugin" / "marketplace.json"
-    assert path.exists(), f"Expected {path} to exist"
-    data = json.loads(path.read_text())
-    assert "name" in data, "marketplace.json must have 'name'"
-    assert "owner" in data, "marketplace.json must have 'owner'"
-    assert "name" in data["owner"], "marketplace.json owner must have 'name'"
-    assert "plugins" in data, "marketplace.json must have 'plugins'"
-    assert len(data["plugins"]) >= 1
-    plugin = data["plugins"][0]
-    assert "name" in plugin, "Each plugin entry must have 'name'"
-    assert "source" in plugin, "Each plugin entry must have 'source'"
-
-
-def test_marketplace_source_resolves_to_plugin_dir():
-    """The marketplace `source` must point at an existing plugins/<name>/ dir
-    that contains a plugin.json. Guards against `source: "."` (rejected by
-    Claude Code) regressing back in."""
-    path = REPO_ROOT / ".claude-plugin" / "marketplace.json"
-    data = json.loads(path.read_text())
-    source = data["plugins"][0]["source"]
-    assert source != ".", 'source: "." is rejected by Claude Code; use "./plugins/<name>"'
-    resolved = (REPO_ROOT / source).resolve()
-    assert resolved.is_dir(), f"marketplace source {source!r} does not resolve to a dir"
-    assert (resolved / ".claude-plugin" / "plugin.json").exists(), (
-        f"plugin source {source!r} has no .claude-plugin/plugin.json"
-    )
+# NOTE: craft's per-tool .claude-plugin/marketplace.json was removed when the
+# dev marketplace consolidated into the repo-root `trailhead-local` marketplace.
+# The marketplace shape and the `source: "."` regression guard now live in
+# trailhead/tests/test_dev_marketplace.py at the monorepo level.

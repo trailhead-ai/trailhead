@@ -25,7 +25,6 @@ _PLUGIN_DIR = _TOOL_DIR / "plugins" / "camp"
 _BIN_CAMP = _PLUGIN_DIR / "bin" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 _CAPABILITIES_TOML = _TOOL_DIR / "capabilities.toml"
-_MARKETPLACE_JSON = _TOOL_DIR / ".claude-plugin" / "marketplace.json"
 
 
 # ---------------------------------------------------------------------------
@@ -158,31 +157,12 @@ def test_capabilities_toml_dev_env_capability_declared() -> None:
 
 
 # ---------------------------------------------------------------------------
-# marketplace.json source resolves
+# marketplace.json
 # ---------------------------------------------------------------------------
-
-
-def test_marketplace_json_exists() -> None:
-    assert _MARKETPLACE_JSON.is_file(), f"Missing: {_MARKETPLACE_JSON}"
-
-
-def test_marketplace_json_source_resolves() -> None:
-    data = json.loads(_MARKETPLACE_JSON.read_text())
-    plugins = data.get("plugins", [])
-    assert len(plugins) >= 1
-    source = plugins[0]["source"]
-    # source is relative to the tool dir (the parent of .claude-plugin/)
-    tool_dir = _MARKETPLACE_JSON.parent.parent
-    resolved = (tool_dir / source).resolve()
-    assert resolved.is_dir(), (
-        f"marketplace.json source {source!r} does not resolve to a directory: {resolved}"
-    )
-
-
-def test_marketplace_json_plugin_name_is_camp() -> None:
-    data = json.loads(_MARKETPLACE_JSON.read_text())
-    plugins = data.get("plugins", [])
-    assert plugins[0]["name"] == "camp"
+# NOTE: camp's per-tool .claude-plugin/marketplace.json was removed when the dev
+# marketplace consolidated into the repo-root `trailhead-local` marketplace.
+# The marketplace shape, source-resolution guard, and per-tool listing now live
+# in trailhead/tests/test_dev_marketplace.py at the monorepo level.
 
 
 # ---------------------------------------------------------------------------
