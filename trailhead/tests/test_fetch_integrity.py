@@ -86,22 +86,11 @@ def _git_init(path: Path) -> None:
     subprocess.run(["git", "-C", str(path), "config", "user.email", "fixture@test.example"], check=True, capture_output=True)
 
 
-def _make_signed_commit(repo: Path, filename: str = "file.txt", message: str = "signed commit") -> str:
-    """Create a file + GPG-signed commit; return the 40-char SHA."""
-    (repo / filename).write_text("content")
-    subprocess.run(["git", "-C", str(repo), "add", filename], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "--gpg-sign=74AEB40C93C4250A", "-m", message],
-        check=True,
-        capture_output=True,
-    )
-    result = subprocess.run(
-        ["git", "-C", str(repo), "log", "--format=%H", "-1"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
+# NOTE: there is intentionally no hardcoded-key signed-commit helper.  Tests
+# that need a signature use the ephemeral-key pattern (_make_gpg_key +
+# _make_signed_commit_with_key) so they stay hermetic — no release private key
+# is ever required.  Tests that exercise verify_present_repo (no GPG) or fail
+# before the GPG step use _make_unsigned_commit below.
 
 
 def _make_unsigned_commit(repo: Path, filename: str = "file.txt", message: str = "unsigned") -> str:
@@ -128,6 +117,10 @@ def _make_unsigned_commit(repo: Path, filename: str = "file.txt", message: str =
 
 def _make_repo_entry(name: str, rev: str, source: str, tools: list | None = None) -> RepoEntry:
     return RepoEntry(name=name, rev=rev, source=source, tools=tools or [])
+
+
+def _make_local_self_entry(name: str = "trailhead", tools: list | None = None) -> RepoEntry:
+    return RepoEntry(name=name, rev=None, source="local", tools=tools or [], is_local_self=True)
 
 
 def _make_install_manifest(repos: list[RepoEntry]) -> InstallManifest:
@@ -192,11 +185,15 @@ class TestAlreadyPresentRepo:
     """For a repo already on disk, fetch verifies HEAD == pinned rev."""
 
     def test_present_repo_at_pinned_sha_passes(self, tmp_path):
-        """A local checkout at exactly the pinned SHA passes verification."""
+        """A local checkout at exactly the pinned SHA passes verification.
+
+        verify_present_repo does no GPG check, so an unsigned fixture commit is
+        sufficient — keeping this test hermetic (no signing key required).
+        """
         fetch = _import_fetch()
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        sha = _make_signed_commit(repo)
+        sha = _make_unsigned_commit(repo)
         entry = _make_repo_entry("myrepo", sha, str(repo))
         env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
 
@@ -208,8 +205,8 @@ class TestAlreadyPresentRepo:
         fetch = _import_fetch()
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        sha1 = _make_signed_commit(repo, "file1.txt", "first")
-        sha2 = _make_signed_commit(repo, "file2.txt", "second")
+        sha1 = _make_unsigned_commit(repo, "file1.txt", "first")
+        sha2 = _make_unsigned_commit(repo, "file2.txt", "second")
         # HEAD is now sha2; pin sha1 — mismatch
         entry = _make_repo_entry("myrepo", sha1, str(repo))
         env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
@@ -227,8 +224,8 @@ class TestAlreadyPresentRepo:
         fetch = _import_fetch()
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        sha1 = _make_signed_commit(repo, "file1.txt", "first")
-        _make_signed_commit(repo, "file2.txt", "second")
+        sha1 = _make_unsigned_commit(repo, "file1.txt", "first")
+        _make_unsigned_commit(repo, "file2.txt", "second")
         entry = _make_repo_entry("myrepo", sha1, str(repo))
         env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
 
@@ -239,6 +236,61 @@ class TestAlreadyPresentRepo:
 
 
 # ---------------------------------------------------------------------------
+# L-1: local-self entry — verify "is a git checkout", not "HEAD == rev"
+# ---------------------------------------------------------------------------
+
+
+class TestLocalSelfVerify:
+    """A local-self entry (source 'local', no rev) skips the blessed-SHA gate.
+
+    Integrity for the working tree you're running from is "this is a real git
+    checkout", regardless of which commit HEAD points at.
+    """
+
+    def test_local_self_passes_at_any_head(self, tmp_path):
+        """A local-self entry verifies at whatever HEAD the checkout is on.
+
+        Uses unsigned commits on purpose: local-self skips the GPG gate, so the
+        signing key is irrelevant here (and it keeps this test runnable without
+        the trailhead secret key).
+        """
+        fetch = _import_fetch()
+        repo = tmp_path / "myrepo"
+        _git_init(repo)
+        _make_unsigned_commit(repo, "f1.txt", "first")
+        _make_unsigned_commit(repo, "f2.txt", "second")  # HEAD moves; no pinned rev to match
+        entry = _make_local_self_entry("myrepo")
+        env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+
+        assert fetch.verify_present_repo(entry, repo_path=repo, env=env) is True
+
+    def test_local_self_does_not_require_a_matching_sha(self, tmp_path):
+        """A commit verifies even though entry.rev is None — there is no SHA gate."""
+        fetch = _import_fetch()
+        repo = tmp_path / "myrepo"
+        _git_init(repo)
+        _make_unsigned_commit(repo)
+        entry = _make_local_self_entry("myrepo")
+        env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        # entry.rev is None — this must not raise a mismatch/None error.
+        assert fetch.verify_present_repo(entry, repo_path=repo, env=env) is True
+
+    def test_local_self_non_git_path_refused(self, tmp_path):
+        """A local-self entry pointed at a non-git directory is refused with a named message."""
+        fetch = _import_fetch()
+        not_a_repo = tmp_path / "plain_dir"
+        not_a_repo.mkdir()
+        entry = _make_local_self_entry("myrepo")
+        env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+
+        with pytest.raises(fetch.FetchError) as exc_info:
+            fetch.verify_present_repo(entry, repo_path=not_a_repo, env=env)
+        err = str(exc_info.value)
+        assert "git checkout" in err.lower() or "not a git" in err.lower()
+        assert "myrepo" in err
+
+
+# ---------------------------------------------------------------------------
 # GPG verification — hard-fail (S-1, the load-bearing security test)
 # ---------------------------------------------------------------------------
 
@@ -246,17 +298,22 @@ class TestAlreadyPresentRepo:
 class TestGPGVerification:
     """S-1: git verify-commit must hard-fail on unsigned or unimportable-key commits."""
 
-    def test_gpg_signed_commit_passes_verification(self, tmp_path):
-        """A fixture commit signed by the available key (74AEB40C93C4250A) passes."""
+    def test_gpg_signed_commit_passes_verification(self, tmp_path, short_gnupghome):
+        """A commit signed by the pinned key passes verification.
+
+        Hermetic: signs with an ephemeral key in an isolated GNUPGHOME and pins
+        that fingerprint via expected_key_fpr — no release private key required.
+        """
         fetch = _import_fetch()
+        fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        sha = _make_signed_commit(repo)
+        sha = _make_signed_commit_with_key(repo, fpr, short_gnupghome)
         entry = _make_repo_entry("myrepo", sha, str(repo))
-        env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
 
-        # Must NOT raise
-        fetch.verify_gpg(entry, sha, repo_path=repo, env=env)
+        # Must NOT raise — commit is signed by the pinned key
+        fetch.verify_gpg(entry, sha, repo_path=repo, env=env, expected_key_fpr=fpr)
 
     def test_unsigned_commit_raises_fetch_error_with_named_message(self, tmp_path):
         """An unsigned commit is a hard refusal (S-1); message names the key fingerprint."""
@@ -275,18 +332,20 @@ class TestGPGVerification:
         # S-7: must be a trailhead-authored message, not raw git output
         assert "gpg:" not in err
 
-    def test_key_not_in_keyring_raises_fetch_error(self, tmp_path):
+    def test_key_not_in_keyring_raises_fetch_error(self, tmp_path, short_gnupghome):
         """A commit signed by an unimported key → hard refusal with named remediation (S-1).
 
-        Uses an isolated GNUPGHOME so the real key appears absent, hermetically.
+        Hermetic: signs with an ephemeral key in one isolated GNUPGHOME, then
+        verifies in a *different* empty GNUPGHOME so the key appears unimported.
         """
         fetch = _import_fetch()
+        fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        sha = _make_signed_commit(repo)
+        sha = _make_signed_commit_with_key(repo, fpr, short_gnupghome)
         entry = _make_repo_entry("myrepo", sha, str(repo))
 
-        # Isolated GNUPGHOME: empty keyring → key appears unimported
+        # A different, empty GNUPGHOME: the signing key is absent → unimported
         isolated_gnupghome = tmp_path / "gnupg"
         isolated_gnupghome.mkdir(mode=0o700)
         env = {
@@ -295,10 +354,10 @@ class TestGPGVerification:
         }
 
         with pytest.raises(fetch.FetchError) as exc_info:
-            fetch.verify_gpg(entry, sha, repo_path=repo, env=env)
+            fetch.verify_gpg(entry, sha, repo_path=repo, env=env, expected_key_fpr=fpr)
         err = str(exc_info.value)
-        # S-1: must name the expected key and the remediation
-        assert "74AEB40C93C4250A" in err
+        # S-1: must name the expected key (short id) and the remediation
+        assert fpr[-16:] in err
         assert "import" in err.lower()
 
     def test_gpg_verification_uses_arg_list_not_shell(self, tmp_path):
@@ -442,32 +501,27 @@ class TestManifestSelfIntegrity:
     git object graph). A tampered/unsigned commit → refused.
     """
 
-    def test_manifest_in_gpg_verified_commit_passes(self, tmp_path):
-        """A manifest committed at a GPG-signed SHA passes integrity verification."""
+    def test_manifest_in_gpg_verified_commit_passes(self, tmp_path, short_gnupghome):
+        """A manifest committed at a GPG-signed SHA passes integrity verification.
+
+        Hermetic: the commit is signed by an ephemeral key (no release key needed).
+        verify_gpg covers the manifest because it is in the signed commit's object
+        graph; the file's contents are irrelevant to signature verification.
+        """
         fetch = _import_fetch()
+        fpr = _make_gpg_key(short_gnupghome, "Trusted Key <trusted@example.com>")
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        # Commit a manifest file
-        manifest_in_repo = repo / "install_manifest.toml"
-        manifest_in_repo.write_text(
-            '[[repo]]\nname = "test"\nrev = "' + "a" * 40 + '"\n'
-            'source = "https://github.com/example/test"\ntools = []\n'
+        # Commit a manifest file under an ephemeral-key signature.
+        sha = _make_signed_commit_with_key(
+            repo, fpr, short_gnupghome,
+            filename="install_manifest.toml", message="manifest commit",
         )
-        subprocess.run(["git", "-C", str(repo), "add", "install_manifest.toml"], check=True, capture_output=True)
-        result = subprocess.run(
-            ["git", "-C", str(repo), "commit", "--gpg-sign=74AEB40C93C4250A", "-m", "manifest commit"],
-            check=True,
-            capture_output=True,
-        )
-        sha = subprocess.run(
-            ["git", "-C", str(repo), "log", "--format=%H", "-1"],
-            check=True, capture_output=True, text=True,
-        ).stdout.strip()
         entry = _make_repo_entry("myrepo", sha, str(repo))
-        env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
+        env = {**os.environ, "GNUPGHOME": str(short_gnupghome), "TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
 
         # verify_gpg covers the manifest (it's in the commit object graph)
-        fetch.verify_gpg(entry, sha, repo_path=repo, env=env)  # must not raise
+        fetch.verify_gpg(entry, sha, repo_path=repo, env=env, expected_key_fpr=fpr)  # must not raise
 
     def test_tampered_manifest_commit_unsigned_is_refused(self, tmp_path):
         """A commit not GPG-signed (tampered/unsigned) is refused — covers manifest."""
@@ -536,7 +590,9 @@ class TestAtomicity:
         fetch = _import_fetch()
         source_repo = tmp_path / "source"
         _git_init(source_repo)
-        sha = _make_signed_commit(source_repo)
+        # The pinned SHA is absent from the repo, so clone_and_verify fails at
+        # checkout — before any GPG step — so an unsigned commit is sufficient.
+        _make_unsigned_commit(source_repo)
         # Pin a SHA that doesn't exist in the repo
         wrong_sha = "b" * 40
         entry = _make_repo_entry("myrepo", wrong_sha, str(source_repo))
@@ -594,7 +650,7 @@ class TestI1LocalRootConfinement:
         # rather than re-resolving bare paths — the I-1 confinement happens at load time.
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        sha = _make_signed_commit(repo)
+        sha = _make_unsigned_commit(repo)  # verify_present_repo does no GPG check
         entry = _make_repo_entry("myrepo", sha, str(repo))
         env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}
         # Must pass without error — the repo_path is the resolved, already-confined path
@@ -615,8 +671,8 @@ class TestA4MismatchMessage:
         fetch = _import_fetch()
         repo = tmp_path / "myrepo"
         _git_init(repo)
-        sha1 = _make_signed_commit(repo, "file1.txt", "first")
-        sha2 = _make_signed_commit(repo, "file2.txt", "second")
+        sha1 = _make_unsigned_commit(repo, "file1.txt", "first")
+        sha2 = _make_unsigned_commit(repo, "file2.txt", "second")
         # Pinned sha1 but HEAD is sha2
         entry = _make_repo_entry("myrepo", sha1, str(repo))
         env = {"TRAILHEAD_STATE_DIR": str(tmp_path / "state")}

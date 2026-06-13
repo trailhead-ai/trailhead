@@ -287,16 +287,19 @@ class TestI2UpdateEntryScoping:
         from trailhead.manifest import InstallManifest, RepoEntry
         from trailhead.fetch import FetchError
 
-        trailhead_rev = "a" * 40
         outpost_rev = "b" * 40  # different from trailhead checkout
 
         entries = [
+            # trailhead is the local-self entry (L-1): verified in place.
             RepoEntry(
                 name="trailhead",
-                rev=trailhead_rev,
-                source="https://example.com/trailhead",
+                rev=None,
+                source="local",
                 tools=["lore"],
+                is_local_self=True,
             ),
+            # outpost is a remote entry: its rev must NOT be checked against the
+            # trailhead checkout root (I2) — it is skipped here.
             RepoEntry(
                 name="outpost",
                 rev=outpost_rev,
@@ -340,7 +343,7 @@ class TestI2UpdateEntryScoping:
         )
 
     def test_trailhead_entry_still_verified(self, tmp_path):
-        """The trailhead entry itself must still be verified (not skipped)."""
+        """The local-self (trailhead) entry itself must still be verified (not skipped)."""
         env = _hermetic_env(tmp_path)
         _save_config(
             env,
@@ -351,14 +354,13 @@ class TestI2UpdateEntryScoping:
         from trailhead.manifest import InstallManifest, RepoEntry
         from trailhead.fetch import FetchError
 
-        trailhead_rev = "c" * 40
-
         entries = [
             RepoEntry(
                 name="trailhead",
-                rev=trailhead_rev,
-                source="https://example.com/trailhead",
+                rev=None,
+                source="local",
                 tools=["lore"],
+                is_local_self=True,
             ),
         ]
         manifest = InstallManifest(repos=entries)

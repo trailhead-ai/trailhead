@@ -309,6 +309,57 @@ class TestSourceAllowlistValidation:
 
 
 # ---------------------------------------------------------------------------
+# L-1: local-self source ("local") — installs the working tree, tracking HEAD
+# ---------------------------------------------------------------------------
+
+
+class TestLocalSelfSource:
+    """A source of "local" marks a local-self entry: no pinned rev, no fetch."""
+
+    def _local_toml(self, *, rev_line: str = "") -> str:
+        return (
+            '[[repo]]\n'
+            'name = "trailhead"\n'
+            f'{rev_line}'
+            'source = "local"\n'
+            'tools = ["trailhead", "lore"]\n'
+        )
+
+    def test_local_source_marks_entry_local_self_with_no_rev(self, tmp_path):
+        path = _write_manifest(tmp_path, self._local_toml())
+        result = load_install_manifest(path, registry=None, local_root=tmp_path)
+        entry = result.repos[0]
+        assert entry.is_local_self is True
+        assert entry.rev is None
+        assert entry.source == "local"
+
+    def test_remote_entry_is_not_local_self(self, tmp_path):
+        path = _write_manifest(tmp_path, _minimal_toml(source="https://github.com/org/trailhead"))
+        result = load_install_manifest(path, registry=None)
+        assert result.repos[0].is_local_self is False
+
+    def test_local_source_requires_local_root(self, tmp_path):
+        """Without a confinement root, 'local' has no defined meaning → refused."""
+        path = _write_manifest(tmp_path, self._local_toml())
+        with pytest.raises(InstallManifestError) as exc_info:
+            load_install_manifest(path, registry=None, local_root=None)
+        assert "local_root" in str(exc_info.value) or "local" in str(exc_info.value).lower()
+
+    def test_local_source_with_rev_is_rejected(self, tmp_path):
+        """A 'rev' on a local entry is a parse error (local installs track HEAD)."""
+        path = _write_manifest(tmp_path, self._local_toml(rev_line=f'rev = "{_GOOD_SHA}"\n'))
+        with pytest.raises(InstallManifestError) as exc_info:
+            load_install_manifest(path, registry=None, local_root=tmp_path)
+        assert "rev" in str(exc_info.value).lower()
+
+    def test_local_source_does_not_require_registry(self, tmp_path):
+        """'local' is not a ${registry} template, so a None registry is fine."""
+        path = _write_manifest(tmp_path, self._local_toml())
+        result = load_install_manifest(path, registry=None, local_root=tmp_path)
+        assert result.repos[0].is_local_self is True
+
+
+# ---------------------------------------------------------------------------
 # Structural smoke test: committed install_manifest.toml is well-formed
 # ---------------------------------------------------------------------------
 
@@ -319,30 +370,36 @@ class TestCommittedManifestWellFormed:
 
         We assert structure only (not specific SHA values, which would churn
         with every commit). The registry is passed in to resolve ${registry}
-        templates without requiring real config.
+        templates without requiring real config; local_root is the repo root so
+        the local-self ``source = "local"`` entry (L-1) is honored.
         """
         repo_root = Path(__file__).parent.parent.parent
         manifest_path = repo_root / "trailhead" / "install_manifest.toml"
         assert manifest_path.exists(), f"committed manifest not found: {manifest_path}"
         result = load_install_manifest(
-            manifest_path, registry="https://github.com/trailhead-ai"
+            manifest_path, registry="https://github.com/trailhead-ai", local_root=repo_root
         )
         assert isinstance(result, InstallManifest)
         assert len(result.repos) >= 1
 
-    def test_committed_manifest_trailhead_entry_has_valid_rev(self):
-        """The trailhead entry in the committed manifest must have a 40-char hex SHA."""
-        import re
+    def test_committed_manifest_trailhead_entry_is_local_self(self):
+        """The committed trailhead entry is a local-self entry (L-1): source 'local', no rev.
+
+        It installs the working tree, tracking HEAD — there is no blessed SHA to
+        pin (self-pinning is circular), so rev must be None.
+        """
         repo_root = Path(__file__).parent.parent.parent
         manifest_path = repo_root / "trailhead" / "install_manifest.toml"
         result = load_install_manifest(
-            manifest_path, registry="https://github.com/trailhead-ai"
+            manifest_path, registry="https://github.com/trailhead-ai", local_root=repo_root
         )
         trailhead_entry = next((r for r in result.repos if r.name == "trailhead"), None)
         assert trailhead_entry is not None, "no 'trailhead' entry in committed manifest"
-        assert re.fullmatch(r"[0-9a-f]{40}", trailhead_entry.rev), (
-            f"trailhead rev is not a 40-char lowercase hex SHA: {trailhead_entry.rev!r}"
+        assert trailhead_entry.is_local_self, "committed trailhead entry must be local-self"
+        assert trailhead_entry.rev is None, (
+            f"local-self trailhead entry must pin no rev; got {trailhead_entry.rev!r}"
         )
+        assert trailhead_entry.source == "local"
 
     def test_committed_manifest_trailhead_entry_includes_portage_and_landing(self):
         """The trailhead tools list in the committed manifest must include portage and landing.
@@ -352,7 +409,7 @@ class TestCommittedManifestWellFormed:
         repo_root = Path(__file__).parent.parent.parent
         manifest_path = repo_root / "trailhead" / "install_manifest.toml"
         result = load_install_manifest(
-            manifest_path, registry="https://github.com/trailhead-ai"
+            manifest_path, registry="https://github.com/trailhead-ai", local_root=repo_root
         )
         trailhead_entry = next((r for r in result.repos if r.name == "trailhead"), None)
         assert trailhead_entry is not None, "no 'trailhead' entry in committed manifest"

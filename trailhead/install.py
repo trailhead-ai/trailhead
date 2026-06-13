@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 
 from trailhead.config import TrailheadConfig, load_config, save_config
-from trailhead.fetch import FetchError, verify_present_repo
+from trailhead.fetch import FetchError, _get_head_sha, verify_present_repo
 from trailhead.manifest import InstallManifest, load_install_manifest
 from trailhead.pathint import PathIntegrationError, PathIntegrationResult, install_path_integration
 from trailhead.paths import config_dir, ensure_dir, state_dir
@@ -126,8 +126,10 @@ def run_install(
     verify_msg = ""
     if trailhead_entry is not None:
         if not quiet and not as_json:
-            sha_short = trailhead_entry.rev[:8]
-            print(f"verifying trailhead@{sha_short}…")
+            if trailhead_entry.is_local_self:
+                print("verifying trailhead (local checkout)…")
+            else:
+                print(f"verifying trailhead@{trailhead_entry.rev[:8]}…")
         try:
             verify_present_repo(trailhead_entry, repo_path=_REPO_ROOT)
             verify_msg = "verified in place (no download needed)"
@@ -293,8 +295,23 @@ def _seed_update_state(manifest: InstallManifest, *, env: dict[str, str]) -> Non
     _state_dir = state_dir("trailhead", env=env)
     ensure_dir(_state_dir)
     state_file = _state_dir / "update_state.json"
-    revs = {entry.name: entry.rev for entry in manifest.repos}
-    state_file.write_text(json.dumps(revs))
+    state_file.write_text(json.dumps(_manifest_state_revs(manifest, env=env)))
+
+
+def _manifest_state_revs(manifest: InstallManifest, *, env: dict[str, str]) -> dict[str, str]:
+    """Map each repo to the rev recorded in update_state.json.
+
+    A local-self entry pins no rev, so it records its current HEAD SHA — this
+    lets `trailhead update` detect a moved working tree (a new commit) and
+    re-wire, while an unchanged tree stays a no-op (M2).
+    """
+    revs: dict[str, str] = {}
+    for entry in manifest.repos:
+        if entry.is_local_self:
+            revs[entry.name] = _get_head_sha(_REPO_ROOT, env=env) or ""
+        else:
+            revs[entry.name] = entry.rev
+    return revs
 
 
 # ---------------------------------------------------------------------------
