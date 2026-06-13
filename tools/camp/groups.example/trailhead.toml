@@ -1,10 +1,17 @@
-# camp group config for the trailhead monorepo.
+# camp group config for the trailhead fleet.
 #
-# The trailhead group has one member: the trailhead repo itself.
-# lore, craft, and camp live inside it as tools/<name>/, not as separate member repos.
+# The trailhead group spans three sibling repos worked on together:
+#   - trailhead              the monorepo (lore, craft, camp live inside as tools/<name>/)
+#   - trailhead-ai.github.io the marketing / docs site
+#   - outpost               the companion app repo
 #
-# Multi-member lifecycle is validated via synthetic 2-member test fixtures (see
-# tools/camp/tests/). The 1-member trailhead group serves as the live smoke test.
+# This file is an EXAMPLE / template. The repo_root values below are
+# machine-specific absolute paths — customize each one to wherever you cloned
+# the repo before copying this into your live config
+# (config_dir("camp")/groups/trailhead.toml). camp also authors this file for
+# you: `camp init trailhead --member trailhead=~/code/trailhead --member ...`.
+#
+# Each repo must belong to exactly one group (camp enforces no-overlap).
 #
 # [dev_env] is intentionally absent — dev-env capability is deferred.
 # See deferred/2026-06/2026-06-09-camp-dev-env-engine-half for the revive trigger.
@@ -17,6 +24,16 @@ name = "trailhead"
 repo_root = "/Users/tduffield/code/trailhead"
 # trailhead is reached via sys.path (walk-up from cli/camp), not pip install.
 # No build step is needed for import resolution on a fresh git clone.
+bootstrap = []
+
+[[members]]
+name = "trailhead-ai.github.io"
+repo_root = "/Users/tduffield/code/trailhead-ai.github.io"
+bootstrap = []
+
+[[members]]
+name = "outpost"
+repo_root = "/Users/tduffield/code/outpost"
 bootstrap = []
 
 [branch]

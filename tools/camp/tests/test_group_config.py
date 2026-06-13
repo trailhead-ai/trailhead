@@ -286,7 +286,7 @@ def test_groups_example_trailhead_toml_exists() -> None:
 
 
 def test_groups_example_trailhead_toml_loads() -> None:
-    """The groups.example/trailhead.toml example file loads without error."""
+    """The groups.example/trailhead.toml example loads as the 3-member fleet group."""
     from group_config import load_group
 
     f = _GROUPS_EXAMPLE_DIR / "trailhead.toml"
@@ -294,10 +294,16 @@ def test_groups_example_trailhead_toml_loads() -> None:
         pytest.skip("groups.example/trailhead.toml not yet created")
     cfg = load_group(f)
     assert cfg["group"]["name"] == "trailhead"
-    # Must have at least one member
-    assert len(cfg["members"]) >= 1
-    # Must NOT have [dev_env] block (per D-D)
-    assert "dev_env" not in cfg
+    # The trailhead fleet group spans exactly three sibling repos.
+    member_names = {m["name"] for m in cfg["members"]}
+    assert member_names == {"trailhead", "trailhead-ai.github.io", "outpost"}
+    # Must NOT carry a [dev_env] block (per D-D). load_group strips dev_env via
+    # warn-and-continue, so `"dev_env" not in cfg` is trivially true — assert on
+    # the SOURCE TEXT instead so the check actually proves the block is absent.
+    # Match an actual table header (a line that is exactly `[dev_env]`), not the
+    # substring, which legitimately appears in the explanatory comment.
+    header_lines = {ln.strip() for ln in f.read_text().splitlines()}
+    assert "[dev_env]" not in header_lines
 
 
 # ---------------------------------------------------------------------------
