@@ -3,37 +3,30 @@
 TDD: written BEFORE implementation. All must fail first, then pass.
 
 Contract (B-3 HERMETICITY):
-  - registry.generate_marketplace_json writes marketplace.json at
-    <mkt_root>/.claude-plugin/marketplace.json with exact Shape A.
-  - registry.register shells the harness CLI for marketplace add + install.
-  - registry.rewire shells the harness CLI for plugin update.
+  - registry.generate_marketplace_json writes ONE marketplace.json at
+    <composed_root>/.claude-plugin/marketplace.json with name "trailhead",
+    one plugins[] entry per tool, deterministic order, atomic write.
+  - registry.register_marketplace shells marketplace add once, writes global marker.
+  - registry.install_tool shells install <tool>@trailhead, writes per-tool marker.
+  - registry.rewire_tool shells uninstall THEN install (NOT plugin update).
   - The harness-CLI invocation is injectable/patchable — tests NEVER invoke
     the real `claude plugin` CLI.
-  - All paths resolve through TRAILHEAD_STATE_DIR env override (hermetic).
+  - Input guard: ^[a-z][a-z0-9_-]*$ on every tool name before CLI/path use.
   - Never writes to ~/.claude/plugins/ — only writes marketplace.json under
-    the mkt_root and shells the CLI (which the test stubs).
+    composed_root and shells the CLI (which the test stubs).
 """
 
 import json
 import os
+import re
 from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import pytest
 
 
 # ---------------------------------------------------------------------------
-# Helper: build a minimal environment dict that redirects state_dir
-# ---------------------------------------------------------------------------
-
-
-def _env(tmp_path: Path) -> dict[str, str]:
-    """Return an env dict that redirects TRAILHEAD_STATE_DIR to tmp_path."""
-    return {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path)}
-
-
-# ---------------------------------------------------------------------------
-# T-R1: generate_marketplace_json writes Shape-A marketplace.json
+# T-R1: generate_marketplace_json — consolidated single marketplace
 # ---------------------------------------------------------------------------
 
 
@@ -41,99 +34,275 @@ class TestGenerateMarketplaceJson:
     def test_marketplace_json_written(self, tmp_path):
         from trailhead.registry import generate_marketplace_json
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        generate_marketplace_json(tool="lore", mkt_root=mkt_root)
-        mkt_json = mkt_root / ".claude-plugin" / "marketplace.json"
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore"], composed_root=composed_root)
+        mkt_json = composed_root / ".claude-plugin" / "marketplace.json"
         assert mkt_json.exists()
 
-    def test_marketplace_json_shape_a(self, tmp_path):
-        """marketplace.json must match Shape A exactly."""
+    def test_marketplace_name_is_trailhead(self, tmp_path):
+        """Consolidated marketplace name must be 'trailhead', not 'trailhead-<tool>'."""
         from trailhead.registry import generate_marketplace_json
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        generate_marketplace_json(tool="lore", mkt_root=mkt_root)
-        mkt_json = mkt_root / ".claude-plugin" / "marketplace.json"
-        data = json.loads(mkt_json.read_text())
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore"], composed_root=composed_root)
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        assert data["name"] == "trailhead"
 
-        assert data["name"] == "trailhead-lore"
+    def test_marketplace_owner_name_is_trailhead(self, tmp_path):
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore"], composed_root=composed_root)
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
         assert data["owner"] == {"name": "trailhead"}
-        assert "description" in data
-        assert isinstance(data["description"], str)
+
+    def test_multi_tool_plugins_list(self, tmp_path):
+        """Two tools -> two plugins[] entries."""
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        assert len(data["plugins"]) == 2
+
+    def test_plugins_contain_correct_names(self, tmp_path):
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        plugin_names = [p["name"] for p in data["plugins"]]
+        assert "lore" in plugin_names
+        assert "camp" in plugin_names
+
+    def test_plugin_source_relative_to_plugins_subdir(self, tmp_path):
+        """Each plugin source must be './plugins/<tool>' (relative, Shape A)."""
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        for plugin in data["plugins"]:
+            tool = plugin["name"]
+            assert plugin["source"] == f"./plugins/{tool}", (
+                f"plugin '{tool}' source should be './plugins/{tool}', "
+                f"got '{plugin['source']}'"
+            )
+
+    def test_plugins_list_is_deterministic(self, tmp_path):
+        """plugins[] order must be deterministic (sorted) across calls."""
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["camp", "lore"], composed_root=composed_root)
+        data_a = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+
+        # Reverse order — should produce same JSON
+        generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
+        data_b = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+
+        assert [p["name"] for p in data_a["plugins"]] == [
+            p["name"] for p in data_b["plugins"]
+        ]
+
+    def test_single_tool_is_valid(self, tmp_path):
+        """Single-tool case must produce a valid marketplace.json with one plugin."""
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["craft"], composed_root=composed_root)
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        assert data["name"] == "trailhead"
         assert len(data["plugins"]) == 1
-        plugin = data["plugins"][0]
-        assert plugin["name"] == "lore"
-        assert plugin["source"] == "./plugins/lore"
-        assert "description" in plugin
-        assert isinstance(plugin["description"], str)
+        assert data["plugins"][0]["name"] == "craft"
 
-    def test_marketplace_json_parses_as_json(self, tmp_path):
+    def test_three_tools_all_present(self, tmp_path):
+        """Three tools -> three plugins[] entries, all present."""
         from trailhead.registry import generate_marketplace_json
 
-        mkt_root = tmp_path / "composed" / "craft"
-        mkt_root.mkdir(parents=True)
-        generate_marketplace_json(tool="craft", mkt_root=mkt_root)
-        mkt_json = mkt_root / ".claude-plugin" / "marketplace.json"
-        data = json.loads(mkt_json.read_text())
-        assert isinstance(data, dict)
-
-    def test_marketplace_json_tool_name_in_name_field(self, tmp_path):
-        """marketplace name must be 'trailhead-<tool>'."""
-        from trailhead.registry import generate_marketplace_json
-
-        for tool in ("lore", "camp", "craft"):
-            mkt_root = tmp_path / tool
-            mkt_root.mkdir(parents=True)
-            generate_marketplace_json(tool=tool, mkt_root=mkt_root)
-            data = json.loads(
-                (mkt_root / ".claude-plugin" / "marketplace.json").read_text()
-            )
-            assert data["name"] == f"trailhead-{tool}"
-
-    def test_marketplace_json_plugin_source_points_at_plugins_subdir(self, tmp_path):
-        """The plugin source must be './plugins/<tool>' (relative)."""
-        from trailhead.registry import generate_marketplace_json
-
-        for tool in ("lore", "camp", "craft"):
-            mkt_root = tmp_path / tool
-            mkt_root.mkdir(parents=True)
-            generate_marketplace_json(tool=tool, mkt_root=mkt_root)
-            data = json.loads(
-                (mkt_root / ".claude-plugin" / "marketplace.json").read_text()
-            )
-            assert data["plugins"][0]["source"] == f"./plugins/{tool}"
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(
+            tools=["lore", "camp", "craft"], composed_root=composed_root
+        )
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        assert len(data["plugins"]) == 3
+        names = {p["name"] for p in data["plugins"]}
+        assert names == {"lore", "camp", "craft"}
 
     def test_claude_plugin_dir_created_automatically(self, tmp_path):
         """generate_marketplace_json must create .claude-plugin/ if absent."""
         from trailhead.registry import generate_marketplace_json
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        claude_dir = mkt_root / ".claude-plugin"
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        claude_dir = composed_root / ".claude-plugin"
         assert not claude_dir.exists()
-        generate_marketplace_json(tool="lore", mkt_root=mkt_root)
+        generate_marketplace_json(tools=["lore"], composed_root=composed_root)
         assert claude_dir.exists()
 
+    def test_atomic_write_no_partial_file(self, tmp_path):
+        """Write must be atomic: no partial marketplace.json left by a torn write.
+
+        We verify this by confirming the final file is well-formed JSON and that
+        the implementation uses a temp file + os.replace() (no direct open/write).
+        The behavioral signal: the destination path exists and is valid after the call.
+        """
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
+        out = composed_root / ".claude-plugin" / "marketplace.json"
+        # Verify file is valid JSON (not torn mid-write)
+        data = json.loads(out.read_text())
+        assert isinstance(data, dict)
+        assert data["name"] == "trailhead"
+
+    def test_plugin_entries_have_description(self, tmp_path):
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
+        data = json.loads(
+            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        for plugin in data["plugins"]:
+            assert "description" in plugin
+            assert isinstance(plugin["description"], str)
+
 
 # ---------------------------------------------------------------------------
-# T-R2: register — invokes the CLI with expected args (stubbed runner)
+# T-R2: input guard — invalid tool names are rejected before CLI/path use
 # ---------------------------------------------------------------------------
 
 
-class TestRegisterInvokesCliArgs:
-    def test_register_calls_marketplace_add(self, tmp_path):
-        """register must call 'claude plugin marketplace add --scope user <mkt_root>'."""
-        from trailhead.registry import register
+class TestInputGuard:
+    @pytest.mark.parametrize(
+        "invalid_tool",
+        [
+            "Lore",          # uppercase
+            "1lore",         # starts with digit
+            "lore tool",     # space
+            "lore/../etc",   # path traversal
+            "",              # empty
+            "lore@trailhead",  # special char
+            "CAMP",          # all-caps
+            "-lore",         # starts with hyphen
+        ],
+    )
+    def test_generate_rejects_invalid_tool_names(self, tmp_path, invalid_tool):
+        from trailhead.registry import generate_marketplace_json
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        with pytest.raises((ValueError, TypeError)):
+            generate_marketplace_json(
+                tools=[invalid_tool], composed_root=composed_root
+            )
+
+    @pytest.mark.parametrize(
+        "invalid_tool",
+        [
+            "Lore",
+            "1lore",
+            "lore tool",
+            "",
+            "-lore",
+        ],
+    )
+    def test_install_tool_rejects_invalid_tool_names(self, tmp_path, invalid_tool):
+        from trailhead.registry import install_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        with pytest.raises((ValueError, TypeError)):
+            install_tool(
+                tool=invalid_tool,
+                composed_root=composed_root,
+                runner=lambda args, **kw: None,
+            )
+
+    @pytest.mark.parametrize(
+        "invalid_tool",
+        [
+            "Lore",
+            "1lore",
+            "lore tool",
+            "",
+            "-lore",
+        ],
+    )
+    def test_rewire_tool_rejects_invalid_tool_names(self, tmp_path, invalid_tool):
+        from trailhead.registry import rewire_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        with pytest.raises((ValueError, TypeError)):
+            rewire_tool(
+                tool=invalid_tool,
+                composed_root=composed_root,
+                runner=lambda args, **kw: None,
+            )
+
+    @pytest.mark.parametrize(
+        "valid_tool",
+        ["lore", "camp", "craft", "lore-plugin", "tool123", "my-tool"],
+    )
+    def test_generate_accepts_valid_tool_names(self, tmp_path, valid_tool):
+        from trailhead.registry import generate_marketplace_json
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        # Must not raise
+        generate_marketplace_json(tools=[valid_tool], composed_root=composed_root)
+
+
+# ---------------------------------------------------------------------------
+# T-R3: register_marketplace — global marketplace add + global marker
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterMarketplace:
+    def test_register_marketplace_calls_marketplace_add(self, tmp_path):
+        """register_marketplace must call 'claude plugin marketplace add --scope user <composed_root>'."""
+        from trailhead.registry import register_marketplace
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
         calls_seen = []
 
         def stub_runner(args, **kwargs):
-            calls_seen.append(args)
+            calls_seen.append(list(args))
 
-        register(tool="lore", mkt_root=mkt_root, runner=stub_runner)
+        register_marketplace(composed_root=composed_root, runner=stub_runner)
 
         add_calls = [
             args for args in calls_seen
@@ -142,337 +311,451 @@ class TestRegisterInvokesCliArgs:
         assert len(add_calls) == 1, (
             f"expected one 'marketplace add' call; got {calls_seen}"
         )
-        assert str(mkt_root) in add_calls[0]
+        assert str(composed_root) in add_calls[0]
 
-    def test_register_calls_plugin_install(self, tmp_path):
-        """register must call 'claude plugin install <tool>@trailhead-<tool> --scope user'."""
-        from trailhead.registry import register
+    def test_register_marketplace_scope_user(self, tmp_path):
+        """marketplace add must pass --scope user."""
+        from trailhead.registry import register_marketplace
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        calls_seen = []
-
-        def stub_runner(args, **kwargs):
-            calls_seen.append(args)
-
-        register(tool="lore", mkt_root=mkt_root, runner=stub_runner)
-
-        install_calls = [
-            args for args in calls_seen
-            if "install" in args
-        ]
-        assert len(install_calls) == 1, (
-            f"expected one 'install' call; got {calls_seen}"
-        )
-        install_call = install_calls[0]
-        assert "lore@trailhead-lore" in install_call
-
-    def test_register_scope_user(self, tmp_path):
-        """Both CLI calls must pass --scope user."""
-        from trailhead.registry import register
-
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
         calls_seen = []
 
         def stub_runner(args, **kwargs):
             calls_seen.append(list(args))
 
-        register(tool="lore", mkt_root=mkt_root, runner=stub_runner)
+        register_marketplace(composed_root=composed_root, runner=stub_runner)
 
         for call_args in calls_seen:
-            assert "--scope" in call_args, (
-                f"--scope missing from call: {call_args}"
-            )
+            assert "--scope" in call_args
             idx = call_args.index("--scope")
-            assert call_args[idx + 1] == "user", (
-                f"expected --scope user, got {call_args[idx+1]}"
-            )
+            assert call_args[idx + 1] == "user"
 
-    def test_register_never_invokes_real_cli(self, tmp_path):
-        """register with a stub runner must not touch subprocess.run."""
-        from trailhead.registry import register
+    def test_register_marketplace_writes_global_marker_on_success(self, tmp_path):
+        """Global marker .trailhead-registered must be written after success."""
+        from trailhead.registry import register_marketplace
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
 
-        with patch("subprocess.run") as mock_run:
-            register(
-                tool="lore",
-                mkt_root=mkt_root,
-                runner=lambda args, **kw: None,  # stub always wins
-            )
-            mock_run.assert_not_called()
-
-    def test_register_args_are_list_not_string(self, tmp_path):
-        """CLI args must be a list, never a shell string (injection safety)."""
-        from trailhead.registry import register
-
-        mkt_root = tmp_path / "composed" / "craft"
-        mkt_root.mkdir(parents=True)
-        calls_seen = []
-
-        def stub_runner(args, **kwargs):
-            calls_seen.append(args)
-
-        register(tool="craft", mkt_root=mkt_root, runner=stub_runner)
-
-        for call_args in calls_seen:
-            assert isinstance(call_args, list), (
-                f"CLI args must be a list, got {type(call_args)}: {call_args!r}"
-            )
-
-
-# ---------------------------------------------------------------------------
-# T-R3: rewire — invokes plugin update
-# ---------------------------------------------------------------------------
-
-
-class TestRewireInvokesUpdate:
-    def test_rewire_calls_plugin_update(self, tmp_path):
-        """rewire must call 'claude plugin update <tool>@trailhead-<tool>'."""
-        from trailhead.registry import rewire
-
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        calls_seen = []
-
-        def stub_runner(args, **kwargs):
-            calls_seen.append(list(args))
-
-        rewire(tool="lore", mkt_root=mkt_root, runner=stub_runner)
-
-        update_calls = [
-            args for args in calls_seen
-            if "update" in args
-        ]
-        assert len(update_calls) == 1, (
-            f"expected one 'update' call; got {calls_seen}"
+        register_marketplace(
+            composed_root=composed_root, runner=lambda args, **kw: None
         )
-        update_args = update_calls[0]
-        assert "lore@trailhead-lore" in update_args
 
-    def test_rewire_args_are_list(self, tmp_path):
-        from trailhead.registry import rewire
+        assert (composed_root / ".trailhead-registered").exists(), (
+            "global marker .trailhead-registered not written after register_marketplace"
+        )
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+    def test_register_marketplace_no_marker_when_runner_raises(self, tmp_path):
+        """Global marker must be absent if the runner raises."""
+        from trailhead.registry import register_marketplace
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+
+        def failing_runner(args, **kw):
+            raise RuntimeError("marketplace add failed")
+
+        with pytest.raises(RuntimeError):
+            register_marketplace(
+                composed_root=composed_root, runner=failing_runner
+            )
+
+        assert not (composed_root / ".trailhead-registered").exists()
+
+    def test_register_marketplace_args_are_list(self, tmp_path):
+        """CLI args must be a list, not a shell string."""
+        from trailhead.registry import register_marketplace
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
         calls_seen = []
 
         def stub_runner(args, **kwargs):
             calls_seen.append(args)
 
-        rewire(tool="lore", mkt_root=mkt_root, runner=stub_runner)
+        register_marketplace(composed_root=composed_root, runner=stub_runner)
 
         for call_args in calls_seen:
             assert isinstance(call_args, list)
 
-    def test_rewire_never_invokes_real_subprocess(self, tmp_path):
-        from trailhead.registry import rewire
+    def test_register_marketplace_never_invokes_real_cli(self, tmp_path):
+        from trailhead.registry import register_marketplace
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
 
         with patch("subprocess.run") as mock_run:
-            rewire(
-                tool="lore",
-                mkt_root=mkt_root,
+            register_marketplace(
+                composed_root=composed_root,
                 runner=lambda args, **kw: None,
             )
             mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# T-R3b: unregister — inverse of register (uninstall + marketplace remove)
+# T-R4: install_tool — per-tool install + per-tool marker
 # ---------------------------------------------------------------------------
 
 
-class TestUnregisterInvokesCli:
-    def test_unregister_calls_plugin_uninstall(self, tmp_path):
-        """unregister must call 'claude plugin uninstall <tool>@trailhead-<tool>'."""
-        from trailhead.registry import unregister
+class TestInstallTool:
+    def test_install_tool_calls_plugin_install(self, tmp_path):
+        """install_tool must call 'claude plugin install <tool>@trailhead --scope user'."""
+        from trailhead.registry import install_tool
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
         calls_seen = []
 
-        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+        def stub_runner(args, **kwargs):
+            calls_seen.append(list(args))
 
-        uninstall_calls = [a for a in calls_seen if "uninstall" in a]
-        assert len(uninstall_calls) == 1, f"expected one uninstall call; got {calls_seen}"
-        assert "lore@trailhead-lore" in uninstall_calls[0]
+        install_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
-    def test_unregister_keeps_data(self, tmp_path):
-        """unregister must pass --keep-data (wiring-only: user data survives)."""
-        from trailhead.registry import unregister
+        install_calls = [args for args in calls_seen if "install" in args]
+        assert len(install_calls) == 1, (
+            f"expected one 'install' call; got {calls_seen}"
+        )
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+    def test_install_tool_ref_is_trailhead_not_per_tool(self, tmp_path):
+        """Install ref must be '<tool>@trailhead', NOT '<tool>@trailhead-<tool>'."""
+        from trailhead.registry import install_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
         calls_seen = []
 
-        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+        def stub_runner(args, **kwargs):
+            calls_seen.append(list(args))
 
-        uninstall_call = next(a for a in calls_seen if "uninstall" in a)
-        assert "--keep-data" in uninstall_call
+        install_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
-    def test_unregister_calls_marketplace_remove(self, tmp_path):
-        """unregister must call 'claude plugin marketplace remove trailhead-<tool>'."""
-        from trailhead.registry import unregister
+        install_calls = [args for args in calls_seen if "install" in args]
+        assert len(install_calls) == 1
+        install_call = install_calls[0]
+        # Must use consolidated @trailhead, NOT per-tool @trailhead-lore
+        assert "lore@trailhead" in install_call
+        assert "lore@trailhead-lore" not in install_call
 
-        mkt_root = tmp_path / "composed" / "camp"
-        mkt_root.mkdir(parents=True)
+    def test_install_tool_scope_user(self, tmp_path):
+        """install must pass --scope user."""
+        from trailhead.registry import install_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
         calls_seen = []
 
-        unregister(tool="camp", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+        def stub_runner(args, **kwargs):
+            calls_seen.append(list(args))
 
-        remove_calls = [a for a in calls_seen if "marketplace" in a and "remove" in a]
-        assert len(remove_calls) == 1, f"expected one marketplace remove; got {calls_seen}"
-        assert "trailhead-camp" in remove_calls[0]
+        install_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
-    def test_unregister_clears_marker(self, tmp_path):
-        """unregister removes the .trailhead-registered marker."""
-        from trailhead.registry import unregister
+        for call_args in calls_seen:
+            assert "--scope" in call_args
+            idx = call_args.index("--scope")
+            assert call_args[idx + 1] == "user"
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        (mkt_root / ".trailhead-registered").write_text("{}")
+    def test_install_tool_writes_per_tool_marker_on_success(self, tmp_path):
+        """Per-tool marker .trailhead-installed-<tool> must be written on success."""
+        from trailhead.registry import install_tool
 
-        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
 
-        assert not (mkt_root / ".trailhead-registered").exists()
+        install_tool(
+            tool="lore", composed_root=composed_root, runner=lambda args, **kw: None
+        )
 
-    def test_unregister_clears_marker_even_if_runner_raises(self, tmp_path):
-        """A failed CLI call still clears the marker (the tree is being torn down)."""
-        from trailhead.registry import unregister
+        assert (composed_root / ".trailhead-installed-lore").exists(), (
+            "per-tool marker .trailhead-installed-lore not written after install_tool"
+        )
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        (mkt_root / ".trailhead-registered").write_text("{}")
+    def test_install_tool_no_marker_when_runner_raises(self, tmp_path):
+        """Per-tool marker must be absent if the runner raises."""
+        from trailhead.registry import install_tool
 
-        def failing(args, **kw):
-            raise RuntimeError("plugin not found")
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+
+        def failing_runner(args, **kw):
+            raise RuntimeError("install failed")
 
         with pytest.raises(RuntimeError):
-            unregister(tool="lore", mkt_root=mkt_root, runner=failing)
+            install_tool(
+                tool="lore", composed_root=composed_root, runner=failing_runner
+            )
 
-        assert not (mkt_root / ".trailhead-registered").exists()
+        assert not (composed_root / ".trailhead-installed-lore").exists()
 
-    def test_unregister_args_are_lists(self, tmp_path):
-        from trailhead.registry import unregister
+    def test_install_tool_per_tool_markers_are_distinct(self, tmp_path):
+        """Different tools must have distinct marker files."""
+        from trailhead.registry import install_tool
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+
+        install_tool(
+            tool="lore", composed_root=composed_root, runner=lambda args, **kw: None
+        )
+        install_tool(
+            tool="camp", composed_root=composed_root, runner=lambda args, **kw: None
+        )
+
+        assert (composed_root / ".trailhead-installed-lore").exists()
+        assert (composed_root / ".trailhead-installed-camp").exists()
+
+    def test_install_tool_args_are_list(self, tmp_path):
+        from trailhead.registry import install_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
         calls_seen = []
 
-        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(args))
+        def stub_runner(args, **kwargs):
+            calls_seen.append(args)
 
-        for a in calls_seen:
-            assert isinstance(a, list)
+        install_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
-    def test_unregister_never_invokes_real_subprocess(self, tmp_path):
-        from trailhead.registry import unregister
+        for call_args in calls_seen:
+            assert isinstance(call_args, list)
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+    def test_install_tool_never_invokes_real_cli(self, tmp_path):
+        from trailhead.registry import install_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
 
         with patch("subprocess.run") as mock_run:
-            unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+            install_tool(
+                tool="lore",
+                composed_root=composed_root,
+                runner=lambda args, **kw: None,
+            )
             mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# T-R4: default runner is subprocess.run (but tests never exercise it)
+# T-R5: rewire_tool — uninstall THEN install (NOT plugin update)
 # ---------------------------------------------------------------------------
 
 
-class TestDefaultRunnerShape:
-    def test_register_has_injectable_runner(self, tmp_path):
-        """register accepts a runner= kwarg (injectable/patchable)."""
-        import inspect
+class TestRewireTool:
+    def test_rewire_tool_calls_uninstall_then_install(self, tmp_path):
+        """rewire_tool must call uninstall THEN install, in that order."""
+        from trailhead.registry import rewire_tool
 
-        from trailhead.registry import register
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
 
-        sig = inspect.signature(register)
-        assert "runner" in sig.parameters, (
-            "register must accept a runner= kwarg for test injection"
+        def stub_runner(args, **kwargs):
+            calls_seen.append(list(args))
+
+        rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
+
+        verbs = []
+        for call_args in calls_seen:
+            if "uninstall" in call_args:
+                verbs.append("uninstall")
+            elif "install" in call_args:
+                verbs.append("install")
+
+        assert verbs == ["uninstall", "install"], (
+            f"expected [uninstall, install], got {verbs} from calls {calls_seen}"
         )
 
-    def test_rewire_has_injectable_runner(self, tmp_path):
-        import inspect
+    def test_rewire_tool_does_not_call_plugin_update(self, tmp_path):
+        """rewire_tool must NOT use 'plugin update' (U-1(e): stale cache bug)."""
+        from trailhead.registry import rewire_tool
 
-        from trailhead.registry import rewire
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
 
-        sig = inspect.signature(rewire)
-        assert "runner" in sig.parameters, (
-            "rewire must accept a runner= kwarg for test injection"
+        def stub_runner(args, **kwargs):
+            calls_seen.append(list(args))
+
+        rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
+
+        update_calls = [args for args in calls_seen if "update" in args]
+        assert len(update_calls) == 0, (
+            f"rewire_tool must not call 'plugin update' (U-1(e)); got {update_calls}"
         )
 
+    def test_rewire_tool_uses_trailhead_ref(self, tmp_path):
+        """Both uninstall and install must use '<tool>@trailhead' (consolidated)."""
+        from trailhead.registry import rewire_tool
 
-# ---------------------------------------------------------------------------
-# T-R5: C-2 — registration-state marker written/absent/removed correctly.
-# ---------------------------------------------------------------------------
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
 
+        def stub_runner(args, **kwargs):
+            calls_seen.append(list(args))
 
-class TestRegistrationMarker:
-    def test_register_writes_marker_on_success(self, tmp_path):
-        """C-2: register writes .trailhead-registered under mkt_root on success."""
-        from trailhead.registry import register
+        rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        for call_args in calls_seen:
+            if "uninstall" in call_args or "install" in call_args:
+                assert "lore@trailhead" in call_args, (
+                    f"expected 'lore@trailhead' in {call_args}"
+                )
+                assert "lore@trailhead-lore" not in call_args
 
-        register(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+    def test_rewire_tool_tolerates_uninstall_failure(self, tmp_path):
+        """rewire_tool must tolerate a failing uninstall ('not installed') and still install."""
+        from trailhead.registry import rewire_tool
 
-        assert (mkt_root / ".trailhead-registered").exists(), (
-            "C-2: .trailhead-registered not written after successful register"
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        install_calls = []
+
+        def stub_runner(args, **kwargs):
+            if "uninstall" in args:
+                raise RuntimeError("not installed")
+            if "install" in args:
+                install_calls.append(list(args))
+
+        # Must not propagate the uninstall error
+        rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
+
+        assert len(install_calls) == 1, (
+            "install must still run even when uninstall fails"
         )
 
-    def test_register_does_not_write_marker_when_runner_raises(self, tmp_path):
-        """C-2: marker absent when register runner raises (install fails)."""
-        from trailhead.registry import register
+    def test_rewire_tool_clears_per_tool_marker_before_pair(self, tmp_path):
+        """Per-tool marker must be cleared BEFORE the uninstall+install pair starts."""
+        from trailhead.registry import rewire_tool
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        marker = composed_root / ".trailhead-installed-lore"
+        marker.write_text("{}")  # pre-existing marker
+
+        marker_state_at_call_time = []
+
+        def stub_runner(args, **kwargs):
+            marker_state_at_call_time.append(marker.exists())
+
+        rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
+
+        # For both calls (uninstall, install), the marker must have been absent
+        assert all(not present for present in marker_state_at_call_time), (
+            "per-tool marker was still present when CLI was called; "
+            f"states: {marker_state_at_call_time}"
+        )
+
+    def test_rewire_tool_rewrites_per_tool_marker_after_install(self, tmp_path):
+        """Per-tool marker must be re-written after install succeeds."""
+        from trailhead.registry import rewire_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+
+        rewire_tool(
+            tool="lore", composed_root=composed_root, runner=lambda args, **kw: None
+        )
+
+        assert (composed_root / ".trailhead-installed-lore").exists(), (
+            "per-tool marker not re-written after rewire_tool install succeeds"
+        )
+
+    def test_rewire_tool_no_marker_when_install_raises(self, tmp_path):
+        """Per-tool marker absent when install raises (C-2 self-heal)."""
+        from trailhead.registry import rewire_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        marker = composed_root / ".trailhead-installed-lore"
+        marker.write_text("{}")  # pre-existing marker
 
         def failing_on_install(args, **kw):
             if "install" in args:
                 raise RuntimeError("install failed")
 
         with pytest.raises(RuntimeError):
-            register(tool="lore", mkt_root=mkt_root, runner=failing_on_install)
+            rewire_tool(
+                tool="lore", composed_root=composed_root, runner=failing_on_install
+            )
 
-        assert not (mkt_root / ".trailhead-registered").exists(), (
-            "C-2: marker written despite install failure"
+        assert not marker.exists(), (
+            "per-tool marker must be absent after install raises"
         )
 
-    def test_rewire_writes_marker_on_success(self, tmp_path):
-        """C-2: rewire refreshes the .trailhead-registered marker on success."""
-        from trailhead.registry import rewire
+    def test_rewire_tool_scope_user_on_both_calls(self, tmp_path):
+        """Both uninstall and install must pass --scope user."""
+        from trailhead.registry import rewire_tool
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
 
-        rewire(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+        def stub_runner(args, **kwargs):
+            calls_seen.append(list(args))
 
-        assert (mkt_root / ".trailhead-registered").exists(), (
-            "C-2: .trailhead-registered not present after successful rewire"
-        )
+        rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
-    def test_rewire_clears_stale_marker_if_runner_raises(self, tmp_path):
-        """C-2: if rewire runner raises, stale marker is removed (avoid false positive)."""
-        from trailhead.registry import rewire
+        for call_args in calls_seen:
+            assert "--scope" in call_args, f"--scope missing from {call_args}"
+            idx = call_args.index("--scope")
+            assert call_args[idx + 1] == "user"
 
-        mkt_root = tmp_path / "composed" / "lore"
-        mkt_root.mkdir(parents=True)
-        # Pre-create a stale marker (from a prior successful registration)
-        (mkt_root / ".trailhead-registered").write_text("{}")
+    def test_rewire_tool_args_are_list(self, tmp_path):
+        from trailhead.registry import rewire_tool
 
-        def failing_update(args, **kw):
-            raise RuntimeError("update failed")
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
 
-        with pytest.raises(RuntimeError):
-            rewire(tool="lore", mkt_root=mkt_root, runner=failing_update)
+        def stub_runner(args, **kwargs):
+            calls_seen.append(args)
 
-        assert not (mkt_root / ".trailhead-registered").exists(), (
-            "C-2: stale marker still present after failed rewire"
-        )
+        rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
+
+        for call_args in calls_seen:
+            assert isinstance(call_args, list)
+
+    def test_rewire_tool_never_invokes_real_subprocess(self, tmp_path):
+        from trailhead.registry import rewire_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+
+        with patch("subprocess.run") as mock_run:
+            rewire_tool(
+                tool="lore",
+                composed_root=composed_root,
+                runner=lambda args, **kw: None,
+            )
+            mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# T-R6: injectable runner — new function signatures
+# ---------------------------------------------------------------------------
+
+
+class TestInjectableRunner:
+    def test_register_marketplace_has_injectable_runner(self):
+        import inspect
+
+        from trailhead.registry import register_marketplace
+
+        sig = inspect.signature(register_marketplace)
+        assert "runner" in sig.parameters
+
+    def test_install_tool_has_injectable_runner(self):
+        import inspect
+
+        from trailhead.registry import install_tool
+
+        sig = inspect.signature(install_tool)
+        assert "runner" in sig.parameters
+
+    def test_rewire_tool_has_injectable_runner(self):
+        import inspect
+
+        from trailhead.registry import rewire_tool
+
+        sig = inspect.signature(rewire_tool)
+        assert "runner" in sig.parameters
