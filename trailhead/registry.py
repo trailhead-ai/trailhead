@@ -291,3 +291,79 @@ def rewire_tool(
     ])
 
     marker.write_text("{}")
+
+
+def unregister_tool(
+    tool: str,
+    composed_root: Path,
+    *,
+    runner=None,
+) -> None:
+    """Uninstall ONE tool from the consolidated trailhead marketplace.
+
+    The per-tool inverse of ``install_tool``.  Shells:
+      ``claude plugin uninstall <tool>@trailhead --scope user --keep-data --yes``
+
+    ``--keep-data`` preserves the plugin's persistent data dir
+    (``~/.claude/plugins/data/{id}/``) so an uninstall is *wiring only* — the
+    user's captured notes / group config survive a later reinstall.  ``--yes``
+    keeps it non-interactive.
+
+    Does **NOT** remove the marketplace — that is shared across all tools and
+    is torn down once by ``unregister_marketplace`` after the last tool.  The
+    per-tool ``.trailhead-installed-<tool>`` marker is cleared in ``finally``
+    so a torn-down tree never reads as installed afterwards, even if the CLI
+    call raises.
+
+    Args:
+        tool:          Tool name (must match ^[a-z][a-z0-9_-]*$).
+        composed_root: Shared marketplace root directory.
+        runner:        Injectable runner (B-3 contract).
+    """
+    _validate_tool(tool)
+
+    if runner is None:
+        runner = _default_runner
+
+    try:
+        runner([
+            "claude", "plugin", "uninstall",
+            f"{tool}@trailhead",
+            "--scope", "user",
+            "--keep-data",
+            "--yes",
+        ])
+    finally:
+        (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").unlink(missing_ok=True)
+
+
+def unregister_marketplace(
+    composed_root: Path,
+    *,
+    runner=None,
+) -> None:
+    """Remove the shared ``trailhead`` marketplace (inverse of register_marketplace).
+
+    Called **once** after every tool has been uninstalled — NEVER per-tool, since
+    a single marketplace is shared across all tools (removing it per-tool would
+    de-register the others).  Shells:
+      ``claude plugin marketplace remove trailhead --scope user``
+
+    Clears the global ``.trailhead-registered`` marker in ``finally`` so a
+    half-removed state never reads as registered.
+
+    Args:
+        composed_root: Shared marketplace root directory.
+        runner:        Injectable runner (B-3 contract).
+    """
+    if runner is None:
+        runner = _default_runner
+
+    try:
+        runner([
+            "claude", "plugin", "marketplace", "remove",
+            "trailhead",
+            "--scope", "user",
+        ])
+    finally:
+        (composed_root / _REGISTERED_MARKER).unlink(missing_ok=True)

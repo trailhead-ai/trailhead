@@ -759,3 +759,142 @@ class TestInjectableRunner:
 
         sig = inspect.signature(rewire_tool)
         assert "runner" in sig.parameters
+
+
+# ---------------------------------------------------------------------------
+# Teardown — unregister_tool (per-tool) + unregister_marketplace (once, shared)
+# ---------------------------------------------------------------------------
+
+
+class TestUnregisterTool:
+    def test_calls_plugin_uninstall_consolidated_ref(self, tmp_path):
+        """unregister_tool must call 'claude plugin uninstall <tool>@trailhead'."""
+        from trailhead.registry import unregister_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
+        unregister_tool(
+            tool="lore", composed_root=composed_root,
+            runner=lambda args, **kw: calls_seen.append(list(args)),
+        )
+
+        uninstall_calls = [a for a in calls_seen if "uninstall" in a]
+        assert len(uninstall_calls) == 1
+        call = uninstall_calls[0]
+        assert "lore@trailhead" in call
+        assert "lore@trailhead-lore" not in call
+
+    def test_passes_keep_data_and_yes(self, tmp_path):
+        """--keep-data (wiring-only) and --yes (non-interactive) must be passed."""
+        from trailhead.registry import unregister_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
+        unregister_tool(
+            tool="lore", composed_root=composed_root,
+            runner=lambda args, **kw: calls_seen.append(list(args)),
+        )
+
+        call = calls_seen[0]
+        assert "--keep-data" in call
+        assert "--yes" in call
+        assert "--scope" in call and call[call.index("--scope") + 1] == "user"
+
+    def test_does_not_remove_marketplace(self, tmp_path):
+        """unregister_tool must NOT touch the shared marketplace (only the tool)."""
+        from trailhead.registry import unregister_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
+        unregister_tool(
+            tool="lore", composed_root=composed_root,
+            runner=lambda args, **kw: calls_seen.append(list(args)),
+        )
+
+        # No 'marketplace remove' may appear — that would de-register sibling tools.
+        for call in calls_seen:
+            assert not ("marketplace" in call and "remove" in call)
+
+    def test_clears_per_tool_marker(self, tmp_path):
+        from trailhead.registry import unregister_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        marker = composed_root / ".trailhead-installed-lore"
+        marker.write_text("{}")
+
+        unregister_tool(tool="lore", composed_root=composed_root, runner=lambda args, **kw: None)
+        assert not marker.exists()
+
+    def test_clears_per_tool_marker_even_if_runner_raises(self, tmp_path):
+        from trailhead.registry import unregister_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        marker = composed_root / ".trailhead-installed-lore"
+        marker.write_text("{}")
+
+        def failing(args, **kw):
+            raise RuntimeError("plugin not found")
+
+        with pytest.raises(RuntimeError):
+            unregister_tool(tool="lore", composed_root=composed_root, runner=failing)
+        assert not marker.exists(), "marker must be cleared in finally even on failure"
+
+    def test_validates_tool_name(self, tmp_path):
+        from trailhead.registry import unregister_tool
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        with pytest.raises(ValueError):
+            unregister_tool(tool="../evil", composed_root=composed_root, runner=lambda args, **kw: None)
+
+
+class TestUnregisterMarketplace:
+    def test_calls_marketplace_remove_trailhead(self, tmp_path):
+        """unregister_marketplace must call 'claude plugin marketplace remove trailhead'."""
+        from trailhead.registry import unregister_marketplace
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        calls_seen = []
+        unregister_marketplace(
+            composed_root=composed_root,
+            runner=lambda args, **kw: calls_seen.append(list(args)),
+        )
+
+        assert len(calls_seen) == 1
+        call = calls_seen[0]
+        assert call[:5] == ["claude", "plugin", "marketplace", "remove", "trailhead"]
+        assert "--scope" in call and call[call.index("--scope") + 1] == "user"
+        # Must remove the consolidated name, never a per-tool one.
+        assert "trailhead-lore" not in call
+
+    def test_clears_global_marker(self, tmp_path):
+        from trailhead.registry import unregister_marketplace
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        marker = composed_root / ".trailhead-registered"
+        marker.write_text("{}")
+
+        unregister_marketplace(composed_root=composed_root, runner=lambda args, **kw: None)
+        assert not marker.exists()
+
+    def test_clears_global_marker_even_if_runner_raises(self, tmp_path):
+        from trailhead.registry import unregister_marketplace
+
+        composed_root = tmp_path / "composed"
+        composed_root.mkdir(parents=True)
+        marker = composed_root / ".trailhead-registered"
+        marker.write_text("{}")
+
+        def failing(args, **kw):
+            raise RuntimeError("marketplace not found")
+
+        with pytest.raises(RuntimeError):
+            unregister_marketplace(composed_root=composed_root, runner=failing)
+        assert not marker.exists()

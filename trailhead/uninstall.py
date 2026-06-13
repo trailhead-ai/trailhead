@@ -48,10 +48,11 @@ from pathlib import Path
 from trailhead.config import load_config
 from trailhead.pathint import remove_path_integration, resolve_shim_dir
 from trailhead.paths import config_dir, state_dir
-from trailhead.registry import unregister
+from trailhead.registry import unregister_marketplace, unregister_tool
 from trailhead.wire import LockError, wire_lock
 
 _REGISTERED_MARKER = ".trailhead-registered"
+_INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 _STATE_FILES = ("update_state.json", "trailhead.lock")
 _CONFIG_FILENAME = "config.toml"
 
@@ -140,20 +141,30 @@ def run_uninstall(
     try:
         with wire_lock(env=_env):
             for tool in tools:
-                mkt_root = composed_root / tool
                 if not quiet and not as_json:
                     print(f"removing {tool}…")
 
                 try:
-                    unregister(tool, mkt_root, runner=runner)
+                    unregister_tool(tool, composed_root, runner=runner)
                 except Exception as exc:
                     # Best-effort: the plugin may already be gone, or the harness
                     # CLI may be unavailable.  Warn, but keep tearing down state.
                     warnings.append(f"{tool}: harness de-registration warning: {exc}")
 
-                if mkt_root.exists():
-                    shutil.rmtree(mkt_root, ignore_errors=True)
+                tree = composed_root / "plugins" / tool
+                if tree.exists():
+                    shutil.rmtree(tree, ignore_errors=True)
                 removed.append(tool)
+
+            # The marketplace is SHARED across all tools — remove it ONCE after
+            # the per-tool loop, never per-tool (per-tool removal would
+            # de-register the others).  Then drop the marketplace.json dir.
+            if removed:
+                try:
+                    unregister_marketplace(composed_root, runner=runner)
+                except Exception as exc:
+                    warnings.append(f"marketplace de-registration warning: {exc}")
+                shutil.rmtree(composed_root / ".claude-plugin", ignore_errors=True)
     except LockError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -214,7 +225,8 @@ def _discover_wired_tools(env: dict[str, str], composed_root: Path) -> list[str]
 
     Union of:
       - tools declared in config.capabilities, and
-      - composed/<tool>/ trees that carry a registration marker.
+      - tools carrying a per-tool ``.trailhead-installed-<tool>`` marker in
+        composed/ (the consolidated-marketplace install signal).
 
     The union matters: this machine may have a composed tree from a direct
     wire() with no config.toml, or a config with a composed tree already
@@ -227,8 +239,8 @@ def _discover_wired_tools(env: dict[str, str], composed_root: Path) -> list[str]
 
     if composed_root.is_dir():
         for child in composed_root.iterdir():
-            if child.is_dir() and (child / _REGISTERED_MARKER).exists():
-                tools.add(child.name)
+            if child.is_file() and child.name.startswith(_INSTALLED_MARKER_PREFIX):
+                tools.add(child.name[len(_INSTALLED_MARKER_PREFIX):])
 
     return sorted(tools)
 
@@ -242,7 +254,11 @@ def _remove_config_and_state(env: dict[str, str], composed_root: Path) -> None:
     for name in _STATE_FILES:
         (_state_dir / name).unlink(missing_ok=True)
 
-    # Drop composed/ if it's now empty (all tool trees removed).
+    # Drop composed/plugins then composed/ if now empty (all tool trees +
+    # marketplace removed).
+    plugins_dir = composed_root / "plugins"
+    if plugins_dir.is_dir() and not any(plugins_dir.iterdir()):
+        plugins_dir.rmdir()
     if composed_root.is_dir() and not any(composed_root.iterdir()):
         composed_root.rmdir()
 
