@@ -23,29 +23,29 @@ For an adopter quickstart, see the README instead.
 In a Claude Code session, run:
 
 ```
-/plugin marketplace add /path/to/lore
+/plugin marketplace add <repo-root>
 ```
 
 Expected output (approximately):
 
 ```
-Marketplace "lore-local" added successfully.
+Marketplace "trailhead-local" added successfully.
 ```
 
-Pass criteria: no error; the marketplace name `lore-local` is confirmed.
+Pass criteria: no error; the marketplace name `trailhead-local` is confirmed.
 
 ---
 
 ### 2. Install the lore plugin
 
 ```
-/plugin install lore@lore-local
+/plugin install lore@trailhead-local
 ```
 
 Expected output (approximately):
 
 ```
-Installing lore from lore-local...
+Installing lore from trailhead-local...
 Plugin "lore" installed successfully.
 ```
 
@@ -106,6 +106,6 @@ JSON output was populated (not `{}`).
 | Symptom | Likely cause |
 |---|---|
 | `/plugin marketplace add` fails | Wrong path; verify the repo root exists and has `.claude-plugin/marketplace.json` |
-| `lore@lore-local` not found | Marketplace not added, or `marketplace.json` `name`/`plugins[0].name` mismatch |
+| `lore@trailhead-local` not found | Marketplace not added, or `marketplace.json` `name`/`plugins[0].name` mismatch |
 | Hook fires but emits `{}` | Python error in `session-context.py`; run `python3 plugins/lore/hooks/session-context.py` manually with `echo '{}' | ...` to debug |
 | `${CLAUDE_PLUGIN_ROOT}` not expanded | Claude Code version too old; update Claude Code |

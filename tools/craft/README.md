@@ -95,7 +95,6 @@ and [landing](../landing) (get it deployed) plugins. If you reach for a removed
 ## Layout
 
 ```
-.claude-plugin/marketplace.json   # local dev marketplace (source: ./plugins/craft)
 plugins/craft/
   .claude-plugin/plugin.json      # plugin manifest
   agents/                         # dispatchable subagents
@@ -104,7 +103,7 @@ tests/                            # packaging + registrability invariants
 ```
 
 Claude Code rejects `source: "."` — the plugin must live in a `plugins/craft/`
-subdir referenced by `source: "./plugins/craft"` in the root marketplace.
+subdir referenced by `source: "./tools/craft/plugins/craft"` in the root marketplace.
 
 ## Install
 
@@ -114,8 +113,8 @@ for `trailhead install` instructions.
 For local dev work on the plugin itself:
 
 ```
-/plugin marketplace add /path/to/craft
-/plugin install craft@craft-local
+/plugin marketplace add <repo-root>
+/plugin install craft@trailhead-local
 ```
 
 Then restart the session and confirm a craft agent dispatches as a
