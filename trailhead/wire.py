@@ -6,10 +6,36 @@ logic of its own.  It sequences:
     for each tool in selection with at least one capability (or base-only):
         1. Load the tool's manifest.
         2. compose_plan (pure — no writes).
-        3. Compose into a staging dir under state_dir("trailhead")/composed/tmp/.
+        3. Compose into a staging dir under
+           state_dir("trailhead")/composed/plugins/.
         4. Atomic promote: replace the live dest with the staging dir.
-        5. generate_marketplace_json.
-        6. register (or rewire if already registered) via the harness CLI.
+        5. Record the tool as successfully promoted (on-disk truth).
+
+    Then, ONCE after the compose loop (Slice 3 structural inversion):
+        6. generate_marketplace_json(<promoted tools>, composed_root) — one
+           consolidated ``trailhead`` marketplace whose plugins[] is exactly the
+           set that promoted this run.
+        7. register_marketplace(composed_root) once (global-marker-gated, though
+           idempotent), then per promoted tool install_tool (per-tool marker
+           absent) or rewire_tool (per-tool marker present).
+
+Consolidated layout (Slice 3)
+-----------------------------
+All tools share ONE marketplace root: ``mkt_root = composed_root`` (computed
+once).  Each tool's plugin tree promotes independently into
+``composed_root/plugins/<tool>/``.  There is one
+``composed_root/.claude-plugin/marketplace.json`` named ``trailhead``.  The
+register/install markers split: a global
+``composed_root/.trailhead-registered`` plus per-tool
+``composed_root/.trailhead-installed-<tool>``.
+
+On-disk truth (blast-radius isolation)
+--------------------------------------
+``plugins[]`` lists only the tools that promoted SUCCESSFULLY this run
+(validity = ``live_dest/.claude-plugin/plugin.json`` exists).  A tool whose
+compose/promote raised is omitted; an unselected tool is never processed →
+omitted.  This guarantees one bad tool can never appear in the shared
+``marketplace.json`` and break ``claude plugin validate`` for the others.
 
 R-1 atomicity
 -------------
@@ -37,14 +63,15 @@ immediately; tools already processed (0…N-1) remain fully wired.  Tool N+1…
 are not attempted.  This is intentional — partial wiring is visible and named,
 not silently swallowed.  Full multi-tool rollback is out of scope.
 
-C-2 register-vs-rewire decision
+C-2 install-vs-rewire decision
 ---------------------------------
-The register-vs-rewire decision is keyed on the ``<mkt_root>/.trailhead-registered``
-sentinel file written by ``registry.register`` after both CLI steps succeed.
-This avoids the wedge where a prior ``register`` promoted the plugin tree but
-failed before ``install`` completed — in that case the dir exists but the
-marker does not, so the next ``wire`` call re-attempts ``register`` (self-
-healing) instead of calling ``plugin update`` on a never-installed plugin.
+The install-vs-rewire decision is keyed on the per-tool
+``composed_root/.trailhead-installed-<tool>`` marker written by
+``registry.install_tool``/``rewire_tool`` after the CLI steps succeed.  This
+avoids the wedge where a prior install promoted the plugin tree but failed
+before ``install`` completed — in that case the dir exists but the marker does
+not, so the next ``wire`` call re-attempts ``install_tool`` (self-healing)
+instead of an uninstall+install dance on a never-installed plugin.
 
 S-2
 ---
@@ -70,9 +97,15 @@ from pathlib import Path
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
 from trailhead.paths import ensure_dir, state_dir
-from trailhead.registry import generate_marketplace_json, register, rewire
+from trailhead.registry import (
+    generate_marketplace_json,
+    install_tool,
+    register_marketplace,
+    rewire_tool,
+)
 
 _REGISTERED_MARKER = ".trailhead-registered"
+_INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 _LOCK_FILENAME = "trailhead.lock"
 
 
@@ -138,7 +171,7 @@ class WireError(Exception):
     Attributes:
         tool:  The tool name that failed (e.g. ``"craft"``).
         stage: Which phase failed: ``"compose"``, ``"promote"``, or
-               ``"register"``/``"rewire"``.
+               ``"register"`` (the install/rewire CLI step).
         cause: The underlying exception (also chained via ``__cause__``).
     """
 
@@ -184,47 +217,78 @@ def wire(
     _environ = env if env is not None else dict(os.environ)
     _manifest_paths = manifest_paths or _default_manifest_paths()
 
+    # All tools share ONE marketplace root (Slice 3) — computed once.
     composed_root = state_dir("trailhead", env=_environ) / "composed"
+    ensure_dir(composed_root / "plugins")
 
-    for tool, caps in selection.items():
-        manifest_path = _manifest_paths[tool]
-        manifest = load_manifest(manifest_path)
-        mkt_root = composed_root / tool
-        live_dest = mkt_root / "plugins" / tool
+    # On-disk truth: the tools that promote successfully THIS run.  Only these
+    # land in plugins[]; a failed or unselected tool is omitted (blast-radius
+    # isolation).
+    promoted: list[str] = []
 
-        ensure_dir(mkt_root / "plugins")
+    try:
+        for tool, caps in selection.items():
+            manifest = load_manifest(_manifest_paths[tool])
+            live_dest = composed_root / "plugins" / tool
 
-        # C-2: key register-vs-rewire on the registration-state marker,
-        # not on dir existence — so a half-registered tool (dir exists, marker
-        # absent) self-heals via register instead of wedging on plugin update.
-        already_registered = (mkt_root / _REGISTERED_MARKER).exists()
+            _compose_tool(
+                tool=tool,
+                manifest=manifest,
+                caps=caps,
+                composed_root=composed_root,
+                live_dest=live_dest,
+            )
 
-        _compose_tool(
-            tool=tool,
-            manifest=manifest,
-            caps=caps,
-            mkt_root=mkt_root,
-            live_dest=live_dest,
-            runner=runner,
-            already_registered=already_registered,
-        )
+            # Validity check (on-disk truth): structurally-valid promoted tree.
+            if (live_dest / ".claude-plugin" / "plugin.json").exists():
+                promoted.append(tool)
+    finally:
+        # Regenerate the consolidated marketplace.json from whatever promoted —
+        # even after a per-tool failure, so the surviving tools stay registered
+        # and the failed tool is structurally excluded from plugins[].  Skip the
+        # write entirely if nothing promoted (nothing to register).
+        if promoted:
+            generate_marketplace_json(promoted, composed_root)
+
+    # ------------------------------------------------------------------
+    # Registration (Slice 3 structural inversion): runs ONCE after the
+    # compose loop, not per tool inside _compose_tool.
+    # ------------------------------------------------------------------
+    if not promoted:
+        return
+
+    # register_marketplace ONCE (global-marker-gated; idempotent per U-1(d)).
+    if not (composed_root / _REGISTERED_MARKER).exists():
+        register_marketplace(composed_root, runner=runner)
+
+    # Per-tool install (marker absent) or rewire (marker present, C-2 self-heal).
+    for tool in promoted:
+        installed = (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").exists()
+        try:
+            if installed:
+                rewire_tool(tool, composed_root, runner=runner)
+            else:
+                install_tool(tool, composed_root, runner=runner)
+        except BaseException as exc:
+            raise WireError(tool=tool, stage="register", cause=exc) from exc
 
 
 def _compose_tool(
     tool: str,
     manifest,
     caps: set[str],
-    mkt_root: Path,
+    composed_root: Path,
     live_dest: Path,
-    runner,
-    already_registered: bool,
 ) -> None:
     """Compose one tool into the live dest using staging + atomic promote (R-1).
+
+    Promote-only (Slice 3): this helper NO LONGER generates the marketplace.json
+    or registers the tool — those moved up to the ``wire()`` loop.
 
     Raises WireError (C-1.2) naming the tool and stage on any failure.
     Staging cleanup always runs via try/finally (C-1.1).
     """
-    staging_parent = mkt_root / "plugins"
+    staging_parent = composed_root / "plugins"
     staging_dir_path: Path | None = None
 
     try:
@@ -260,19 +324,6 @@ def _compose_tool(
         # promoted (staging_dir_path is set to None on success).
         if staging_dir_path is not None and staging_dir_path.exists():
             shutil.rmtree(staging_dir_path, ignore_errors=True)
-
-    # Generate marketplace.json under mkt_root/.claude-plugin/
-    generate_marketplace_json(tool=tool, mkt_root=mkt_root)
-
-    # Register or rewire via harness CLI (C-2: marker-keyed decision)
-    try:
-        if already_registered:
-            rewire(tool=tool, mkt_root=mkt_root, runner=runner)
-        else:
-            register(tool=tool, mkt_root=mkt_root, runner=runner)
-    except BaseException as exc:
-        stage = "rewire" if already_registered else "register"
-        raise WireError(tool=tool, stage=stage, cause=exc) from exc
 
 
 def default_manifest_paths() -> dict[str, Path]:

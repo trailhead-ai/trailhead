@@ -348,7 +348,7 @@ def _check_drift(
     drift_checks = []
 
     for tool, declared_caps in wired_tools.items():
-        dest = composed_root / tool / "plugins" / tool / "skills"
+        dest = composed_root / "plugins" / tool / "skills"
 
         # Skills present in the filesystem
         if dest.is_dir():
@@ -397,6 +397,64 @@ def _check_drift(
         drift_checks.append(check)
 
     return drift_checks
+
+
+# ---------------------------------------------------------------------------
+# Consolidated marketplace check (Slice 3)
+# ---------------------------------------------------------------------------
+
+
+def _check_marketplace(*, env: dict[str, str] | None) -> dict:
+    """Assert the consolidated marketplace signal.
+
+    Reads ``composed/.claude-plugin/marketplace.json`` (when present) and checks
+    that its ``name`` is ``"trailhead"``.  A half-migrated machine — where an old
+    per-tool ``trailhead-<tool>`` marketplace.json is still live at the
+    consolidated path — fails this check and so is visible in doctor.
+
+    When the file is absent (fresh / not yet wired) the check is a no-op pass.
+    A malformed/unreadable file fails the check.
+    """
+    _env = env if env is not None else dict(os.environ)
+    composed_root = state_dir("trailhead", env=_env) / "composed"
+    mkt_path = composed_root / ".claude-plugin" / "marketplace.json"
+
+    description = "consolidated 'trailhead' marketplace"
+
+    if not mkt_path.exists():
+        return {
+            "check": "marketplace_name",
+            "description": description,
+            "pass": True,
+            "details": "no composed marketplace.json yet (not wired)",
+        }
+
+    try:
+        data = json.loads(mkt_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "check": "marketplace_name",
+            "description": description,
+            "pass": False,
+            "details": f"could not read {mkt_path}: {exc}",
+        }
+
+    name = data.get("name")
+    ok = name == "trailhead"
+    return {
+        "check": "marketplace_name",
+        "description": description,
+        "pass": ok,
+        "details": (
+            f"name == {name!r}"
+            if ok
+            else (
+                f"marketplace.json name is {name!r}, expected 'trailhead' — "
+                "machine may be half-migrated (a stale per-tool 'trailhead-<tool>' "
+                "marketplace is still live)"
+            )
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +514,10 @@ def run_doctor(
     # Step 1: Global checks — python version (U-2) + PATH integration.
     # The PATH check owns the "front-door CLI (e.g. camp) not on PATH" signal.
     # ----------------------------------------------------------------
-    global_checks = [_check_python_version(_python_runner)]
+    global_checks = [
+        _check_python_version(_python_runner),
+        _check_marketplace(env=_env),
+    ]
     global_checks.extend(
         _check_path_integration(wired_tools, which_fn=_which_runner, env=_env)
     )
