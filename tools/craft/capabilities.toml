@@ -3,7 +3,11 @@
 
 [tool]
 name = "craft"
-base = ["skills/shelve", "skills/pickup", "skills/polish"]
+# skills/_shared holds council.md — the single source of truth for the review
+# panel roster + dispatch contract, read at runtime by the plan and consult
+# skills. It must ship with every craft install, so it lives in base (mirrors
+# how lore wires skills/_shared). Without it, plan/consult dangle on a missing file.
+base = ["skills/_shared", "skills/shelve", "skills/pickup", "skills/polish"]
 
 [capabilities.planning]
 description = "Turn fuzzy ideas into specs and implementation plans — planner and architect subagents."

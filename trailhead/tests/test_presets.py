@@ -5,7 +5,7 @@ trailhead/presets.py is implemented.
 
 The preset table (spec §832-838):
   minimal  = lore{capture, recall, sessions}
-  standard = minimal + camp{} (base only, empty cap set) + craft{planning, execute, review, helpers}
+  standard = minimal + camp{} (base only, empty cap set) + craft{planning, execute, review, helpers, council, design}
   full     = every capability declared in each tool's capabilities.toml (computed at runtime)
 
 The "full" preset is computed from load_manifest — it can never drift from the manifests.
@@ -86,19 +86,28 @@ class TestStandardPreset:
 
     def test_standard_craft_capabilities_exact(self):
         result = resolve("standard")
-        assert result["craft"] == {"planning", "execute", "review", "helpers"}
+        assert result["craft"] == {
+            "planning",
+            "execute",
+            "review",
+            "helpers",
+            "council",
+            "design",
+        }
 
     def test_standard_has_exactly_three_tools(self):
         result = resolve("standard")
         assert set(result.keys()) == {"lore", "camp", "craft"}
 
-    def test_standard_craft_excludes_council(self):
+    def test_standard_craft_includes_council(self):
+        """council was promoted into standard so a default install ships the review panel."""
         result = resolve("standard")
-        assert "council" not in result["craft"]
+        assert "council" in result["craft"]
 
-    def test_standard_craft_excludes_design(self):
+    def test_standard_craft_includes_design(self):
+        """design was promoted into standard so a default install ships the artist agent."""
         result = resolve("standard")
-        assert "design" not in result["craft"]
+        assert "design" in result["craft"]
 
     def test_standard_craft_excludes_release(self):
         result = resolve("standard")
