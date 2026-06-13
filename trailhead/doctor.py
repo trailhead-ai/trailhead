@@ -124,6 +124,8 @@ def _probe_tool_doctor(
     Returns a dict with at least a 'status' key:
       - {"status": "ok", "checks": [...], "any_failed": bool}
       - {"status": "no_doctor"}
+      - {"status": "not_on_path", "error": "..."}  (informational — the
+        PATH-integration check owns the pass/fail signal)
       - {"status": "timeout", "error": "..."}
       - {"status": "parse_error", "error": "..."}
       - {"status": "error", "error": "...", "returncode": int}

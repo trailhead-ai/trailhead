@@ -238,6 +238,47 @@ class TestConfirmation:
         )
         assert calls == ["lore"]
 
+    def test_non_tty_without_yes_refuses(self, tmp_path):
+        """Piped/non-interactive without --yes must refuse, not tear down silently."""
+        env = _hermetic_env(tmp_path)
+        mkt = _make_composed_tool(tmp_path, "lore")
+
+        code, out, err, calls = _run_uninstall(
+            env=env, is_tty=False, assume_yes=False,
+        )
+        assert code == 1
+        assert calls == []
+        assert mkt.exists()
+        assert "--yes" in err
+
+    def test_json_without_yes_refuses(self, tmp_path):
+        """--json can't prompt → refuse without --yes even on a TTY."""
+        env = _hermetic_env(tmp_path)
+        mkt = _make_composed_tool(tmp_path, "lore")
+
+        code, out, err, calls = _run_uninstall(
+            env=env, is_tty=True, assume_yes=False, as_json=True,
+        )
+        assert code == 1
+        assert calls == []
+        assert mkt.exists()
+
+
+class TestConcurrencyLock:
+    def test_held_lock_aborts_without_teardown(self, tmp_path):
+        """A concurrent operation holding wire_lock → uninstall refuses cleanly."""
+        env = _hermetic_env(tmp_path)
+        mkt = _make_composed_tool(tmp_path, "lore")
+        # Simulate the lock being held by another trailhead operation.
+        lock = tmp_path / "state" / "trailhead.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("locked by pid 99999\n")
+
+        code, out, err, calls = _run_uninstall(env=env, assume_yes=True)
+        assert code == 1
+        assert calls == []
+        assert mkt.exists(), "must not tear down while another op holds the lock"
+
 
 # ---------------------------------------------------------------------------
 # Best-effort de-registration

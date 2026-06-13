@@ -20,6 +20,17 @@ A-9 hygiene mirrors install:
   - nonzero exit only on a true failure (a best-effort harness warning is not one)
   - --json machine-readable, --quiet suppresses progress
 
+Concurrency:
+  The per-tool teardown mutates the composed/ trees, so it runs under the shared
+  `wire_lock` — the same guard update/config-toggle use for composed mutation.
+  PATH + config/state cleanup run after the lock is released (deleting the lock
+  file while holding it would be self-defeating).
+
+Confirmation:
+  Uninstall is destructive (de-registers live plugins, edits the shell rc), so it
+  never runs silently.  On an interactive TTY it prompts (bare-enter = No).  When
+  it cannot prompt — piped stdin or --json — it refuses unless --yes is passed.
+
 Hermeticity (B-3):
   unregister / remove_path_integration are imported at module level so tests can
   patch them.  The harness-CLI runner is injectable via `runner=`.  _is_tty is a
@@ -36,8 +47,9 @@ from pathlib import Path
 
 from trailhead.config import load_config
 from trailhead.pathint import remove_path_integration, resolve_shim_dir
-from trailhead.paths import state_dir
+from trailhead.paths import config_dir, state_dir
 from trailhead.registry import unregister
+from trailhead.wire import LockError, wire_lock
 
 _REGISTERED_MARKER = ".trailhead-registered"
 _STATE_FILES = ("update_state.json", "trailhead.lock")
@@ -90,42 +102,61 @@ def run_uninstall(
         return 0
 
     # ------------------------------------------------------------------
-    # Confirmation (destructive, outward-facing teardown of harness state)
+    # Confirmation (destructive, outward-facing teardown of harness state).
+    # Never run silently: prompt on a TTY; otherwise require explicit --yes.
     # ------------------------------------------------------------------
-    if not assume_yes and is_tty and not as_json:
-        tools_str = ", ".join(tools)
-        print(
-            f"This removes trailhead's wiring for: {tools_str}\n"
-            f"  - de-registers the plugins from Claude Code\n"
-            f"  - removes the PATH shim dir and shell-rc block\n"
-            f"  - deletes trailhead's config + composed trees\n"
-            f"Your data is kept (lore vault, camp groups, plugin data dirs).\n"
-        )
-        if not _confirm("Proceed? [y/N] "):
-            print("aborted — nothing was changed")
-            return 0
+    if not assume_yes:
+        if is_tty and not as_json:
+            tools_str = ", ".join(tools)
+            print(
+                f"This removes trailhead's wiring for: {tools_str}\n"
+                f"  - de-registers the plugins from Claude Code\n"
+                f"  - removes the PATH shim dir and shell-rc block\n"
+                f"  - deletes trailhead's config + composed trees\n"
+                f"Your data is kept (lore vault, camp groups, plugin data dirs).\n"
+            )
+            if not _confirm("Proceed? [y/N] "):
+                print("aborted — nothing was changed")
+                return 0
+        else:
+            # Can't prompt (piped stdin or --json) → refuse rather than tear
+            # down silently.  Nothing has been changed at this point.
+            print(
+                "trailhead: refusing to uninstall without confirmation — re-run "
+                "with --yes (uninstall de-registers plugins and removes PATH "
+                "integration; your data is kept)",
+                file=sys.stderr,
+            )
+            return 1
 
     # ------------------------------------------------------------------
-    # Per-tool teardown (best-effort harness de-registration)
+    # Per-tool teardown (best-effort harness de-registration).
+    # Under wire_lock: mutating composed/ races a concurrent update/config-toggle
+    # otherwise.  Config/state cleanup happens after the lock is released.
     # ------------------------------------------------------------------
     removed: list[str] = []
     warnings: list[str] = []
 
-    for tool in tools:
-        mkt_root = composed_root / tool
-        if not quiet and not as_json:
-            print(f"removing {tool}…")
+    try:
+        with wire_lock(env=_env):
+            for tool in tools:
+                mkt_root = composed_root / tool
+                if not quiet and not as_json:
+                    print(f"removing {tool}…")
 
-        try:
-            unregister(tool, mkt_root, runner=runner)
-        except Exception as exc:
-            # Best-effort: the plugin may already be gone, or the harness CLI
-            # may be unavailable.  Warn, but keep tearing down local state.
-            warnings.append(f"{tool}: harness de-registration warning: {exc}")
+                try:
+                    unregister(tool, mkt_root, runner=runner)
+                except Exception as exc:
+                    # Best-effort: the plugin may already be gone, or the harness
+                    # CLI may be unavailable.  Warn, but keep tearing down state.
+                    warnings.append(f"{tool}: harness de-registration warning: {exc}")
 
-        if mkt_root.exists():
-            shutil.rmtree(mkt_root, ignore_errors=True)
-        removed.append(tool)
+                if mkt_root.exists():
+                    shutil.rmtree(mkt_root, ignore_errors=True)
+                removed.append(tool)
+    except LockError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     # ------------------------------------------------------------------
     # PATH integration teardown (rc block + shim dir)
@@ -204,8 +235,6 @@ def _discover_wired_tools(env: dict[str, str], composed_root: Path) -> list[str]
 
 def _remove_config_and_state(env: dict[str, str], composed_root: Path) -> None:
     """Delete config.toml + state bookkeeping; remove composed/ if now empty."""
-    from trailhead.paths import config_dir
-
     config_path = config_dir("trailhead", env=env) / _CONFIG_FILENAME
     config_path.unlink(missing_ok=True)
 
