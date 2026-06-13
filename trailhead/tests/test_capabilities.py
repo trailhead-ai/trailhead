@@ -192,7 +192,14 @@ class TestForgeManifestValidatesAgainstDisk:
     def test_craft_base_dirs(self):
         m = load_manifest(_FORGE_MANIFEST)
         # handoff→shelve, followup→polish renamed in Spec A / Slice 4 (pickup unchanged).
-        assert set(m.base) == {"skills/shelve", "skills/pickup", "skills/polish"}
+        # skills/_shared (council.md) is base so the plan/consult skills' runtime
+        # reference to it ships with every craft install.
+        assert set(m.base) == {
+            "skills/_shared",
+            "skills/shelve",
+            "skills/pickup",
+            "skills/polish",
+        }
 
     def test_craft_planning_capability(self):
         m = load_manifest(_FORGE_MANIFEST)

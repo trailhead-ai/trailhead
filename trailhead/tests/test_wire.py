@@ -36,6 +36,7 @@ New to Slice 3:
 import json
 import os
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -56,6 +57,37 @@ _FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 def _noop_runner(args, **kwargs):
     """Stub harness-CLI runner that does nothing."""
     pass
+
+
+@contextmanager
+def _fail_first_copy(msg: str):
+    """Patch shutil.copy2 AND copytree to raise OSError on the FIRST copy of either.
+
+    apply_plan copies dirs via copytree and files via copy2; which runs first
+    depends on the composed plan (now all dirs for lore). A shared counter makes
+    the injected failure fire on whichever copy happens first, so these atomic-
+    promote tests don't depend on the file-vs-dir shape of the always-on set.
+    Note: the real shutil.copytree binds its internal copy_function default to the
+    original copy2 at definition time, so patching copy2 here does not perturb
+    copytree's per-file copies — the two patches are independent triggers.
+    """
+    original_copy2 = shutil.copy2
+    original_copytree = shutil.copytree
+    state = {"n": 0}
+
+    def _wrap(orig):
+        def _f(src, dst, **kwargs):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise OSError(msg)
+            return orig(src, dst, **kwargs)
+
+        return _f
+
+    with patch("shutil.copy2", side_effect=_wrap(original_copy2)), patch(
+        "shutil.copytree", side_effect=_wrap(original_copytree)
+    ):
+        yield
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -146,11 +178,17 @@ class TestMinimalPresetGating:
 
 
 # ---------------------------------------------------------------------------
-# T-W2: standard preset — lore + camp + craft dests under shared root
+# T-W2: wire mechanics on a synthetic craft SUBSET — dests created; agents of
+# unselected capabilities stay out of the composed tree.
+#
+# NOTE: the selection dicts below are HAND-BUILT, not resolve("standard"). They
+# deliberately omit council/design to exercise the "unselected capability ⇒ its
+# agents absent" path. The real standard preset now INCLUDES council+design
+# (see presets.py / test_presets.py) — do not treat these dicts as preset truth.
 # ---------------------------------------------------------------------------
 
 
-class TestStandardPreset:
+class TestCraftSubsetWiring:
     def _wire_standard(self, tmp_path):
         from trailhead.wire import wire
 
@@ -178,8 +216,13 @@ class TestStandardPreset:
         self._wire_standard(tmp_path)
         assert _live_dest(tmp_path, "craft").exists()
 
-    def test_standard_craft_council_agents_absent(self, tmp_path):
-        """council agents absent when craft wired without council."""
+    def test_unselected_council_agents_absent(self, tmp_path):
+        """council agents absent when craft is wired with a subset that excludes council.
+
+        (The real standard preset includes council; this is a synthetic subset.)
+        M-5 fix: council has skills=[], so testing skill absence is vacuous.
+        council DOES have 4 agents (advocate/builder/breaker/attacker) — assert none appear in dest.
+        """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
@@ -432,16 +475,10 @@ class TestAtomicPromote:
             if p.is_file()
         }
 
-        original_copy2 = shutil.copy2
-        call_count = {"n": 0}
-
-        def failing_copy2(src, dst, **kwargs):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                raise OSError("simulated disk-full mid-compose")
-            return original_copy2(src, dst, **kwargs)
-
-        with patch("shutil.copy2", side_effect=failing_copy2):
+        # Fail the first copy op — of EITHER primitive. The composed plan is now
+        # all dirs (copytree); patching only copy2 would never fire. Share one
+        # counter so whichever copy runs first raises, regardless of file-vs-dir.
+        with _fail_first_copy("simulated disk-full mid-compose"):
             with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(
                     selection,
@@ -469,16 +506,7 @@ class TestAtomicPromote:
         plugin_dest = _live_dest(tmp_path, "lore")
         assert not plugin_dest.exists()
 
-        original_copy2 = shutil.copy2
-        call_count = {"n": 0}
-
-        def failing_copy2(src, dst, **kwargs):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                raise OSError("simulated failure on first wire")
-            return original_copy2(src, dst, **kwargs)
-
-        with patch("shutil.copy2", side_effect=failing_copy2):
+        with _fail_first_copy("simulated failure on first wire"):
             with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(
                     selection,

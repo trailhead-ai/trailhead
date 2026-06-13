@@ -104,7 +104,9 @@ class TestLoreCaptureComposePlan:
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"capture"}, dest)
         dest_paths = {op.dest for op in plan.ops}
-        assert dest / m.hooks_json in dest_paths
+        # hooks_json is wired via its containing directory so the sibling hook
+        # scripts it invokes ship too; assert the hooks dir is in the plan.
+        assert dest / str(Path(m.hooks_json).parent) in dest_paths
 
     def test_plan_contains_all_capture_skill_dirs(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
@@ -359,17 +361,18 @@ class TestEmptySelection:
         dest = tmp_path / "dest"
         plan = compose_plan(m, set(), dest)
         dest_paths = {op.dest for op in plan.ops}
-        assert dest / m.hooks_json in dest_paths
+        # Wired via the containing hooks dir (see test_plan_contains_hooks_json).
+        assert dest / str(Path(m.hooks_json).parent) in dest_paths
 
     def test_empty_selection_contains_no_capability_dirs(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, set(), dest)
-        # Capability-only dirs: those NOT in base and NOT .claude-plugin / hooks_json
+        # Capability-only dirs: those NOT in base, NOT .claude-plugin, NOT the hooks dir.
         always_on_rel = (
             {".claude-plugin"}
             | set(m.base)
-            | ({m.hooks_json} if m.hooks_json else set())
+            | ({str(Path(m.hooks_json).parent)} if m.hooks_json else set())
         )
         for op in plan.ops:
             rel = str(op.dest.relative_to(dest))
@@ -553,6 +556,38 @@ class TestApplyRoundTripU3:
             plan = compose_plan(m, {"capture"}, dest)
             apply_plan(plan, mode="copy")
             assert (dest / ".claude-plugin" / "plugin.json").exists()
+
+    def test_apply_excludes_pycache_build_cruft(self, tmp_path):
+        """copytree must not ship __pycache__/*.pyc into the install.
+
+        Regression: wiring directories (e.g. the hooks/ dir, which sits beside
+        .py scripts) copies the source tree verbatim. Without an ignore filter a
+        stray __pycache__ would land in the user's install. Real source content
+        (.py / .sh / .md) must still ship.
+        """
+        plugin_root = _make_plugin_root(tmp_path, "mytool")
+        skill_dir = plugin_root / "skills" / "withcruft"
+        pycache = skill_dir / "__pycache__"
+        pycache.mkdir(parents=True)
+        (pycache / "mod.cpython-313.pyc").write_bytes(b"\x00cruft")
+        (skill_dir / "helper.py").write_text("x = 1\n")
+        (skill_dir / "loose.pyc").write_bytes(b"\x00loose")
+
+        content = """
+[tool]
+name = "mytool"
+base = ["skills/withcruft"]
+validate = false
+"""
+        manifest_path = _write_manifest(tmp_path, content)
+        m = load_manifest(manifest_path)
+        dest = tmp_path / "composed"
+        apply_plan(compose_plan(m, set(), dest), mode="copy")
+
+        landed = dest / "skills" / "withcruft"
+        assert (landed / "helper.py").is_file(), "real source must still ship"
+        assert not (landed / "__pycache__").exists(), "__pycache__ must not ship"
+        assert not (landed / "loose.pyc").exists(), "stray .pyc must not ship"
 
 
 # ---------------------------------------------------------------------------

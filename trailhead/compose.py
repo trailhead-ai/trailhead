@@ -204,8 +204,8 @@ def compose_plan(manifest: Manifest, selected: set[str] | list[str], dest: Path)
 
     Resolves the union of source directories to wire and returns a
     :class:`Plan` of :class:`CopyOp` objects.  The always-on set
-    (``.claude-plugin/``, base dirs, ``hooks_json``) is included
-    regardless of ``selected``.
+    (``.claude-plugin/``, base dirs, and the hooks directory containing
+    ``hooks_json``) is included regardless of ``selected``.
 
     Args:
         manifest:  Parsed :class:`~trailhead.capabilities.Manifest`.
@@ -262,9 +262,19 @@ def compose_plan(manifest: Manifest, selected: set[str] | list[str], dest: Path)
     for base_dir in manifest.base:
         _add_dir(base_dir)
 
-    # Always-on: hooks_json (if declared)
+    # Always-on: hooks (if declared).
+    # hooks.json shells out to sibling scripts (e.g. harvest-candidates.py) via
+    # ${CLAUDE_PLUGIN_ROOT}/hooks/<script>.  Wiring only the JSON file would land
+    # hooks.json but strip those scripts, so the hooks fail at runtime with
+    # FileNotFoundError.  Wire the whole directory that contains hooks_json so its
+    # scripts ship alongside it.  (Falls back to a bare file copy in the unusual
+    # case where hooks_json sits at the plugin root with no dedicated dir.)
     if manifest.hooks_json is not None:
-        _add_file(manifest.hooks_json)
+        hooks_dir = str(Path(manifest.hooks_json).parent)
+        if hooks_dir != ".":  # Path.parent is "." when hooks_json sits at the plugin root
+            _add_dir(hooks_dir)
+        else:
+            _add_file(manifest.hooks_json)
 
     # Selected capabilities: skills dirs + agent files
     for name in selected_names:
@@ -305,7 +315,16 @@ def apply_plan(plan: Plan, *, mode: str = "copy") -> None:
         op.dest.parent.mkdir(parents=True, exist_ok=True)
         if mode == "copy":
             if op.src.is_dir():
-                shutil.copytree(op.src, op.dest, symlinks=False, dirs_exist_ok=True)
+                # Skip Python build cruft — copytree copies the source tree verbatim,
+                # so without this a stray __pycache__/*.pyc (e.g. beside the hooks
+                # scripts) would ship into the user's install.
+                shutil.copytree(
+                    op.src,
+                    op.dest,
+                    symlinks=False,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                )
             else:
                 shutil.copy2(op.src, op.dest)
         else:
