@@ -38,12 +38,18 @@ def _hermetic_env(tmp_path: Path) -> dict[str, str]:
 
 
 def _make_composed_tool(tmp_path: Path, tool: str, *, registered: bool = True) -> Path:
-    """Create a composed/<tool> tree (optionally with a registration marker)."""
-    mkt_root = tmp_path / "state" / "composed" / tool
-    (mkt_root / "plugins" / tool).mkdir(parents=True, exist_ok=True)
+    """Create a composed/plugins/<tool> tree (optionally with an install marker).
+
+    Consolidated layout: the per-tool tree lives at composed/plugins/<tool>, and
+    the install signal is a per-tool composed/.trailhead-installed-<tool> marker
+    (sibling of plugins/, not inside the tree). Returns the per-tool tree path.
+    """
+    composed_root = tmp_path / "state" / "composed"
+    tree = composed_root / "plugins" / tool
+    tree.mkdir(parents=True, exist_ok=True)
     if registered:
-        (mkt_root / ".trailhead-registered").write_text("{}")
-    return mkt_root
+        (composed_root / f".trailhead-installed-{tool}").write_text("{}")
+    return tree
 
 
 def _run_uninstall(
@@ -64,7 +70,7 @@ def _run_uninstall(
 
     unregister_calls = []
 
-    def fake_unregister(tool, mkt_root, *, runner=None):
+    def fake_unregister(tool, composed_root, *, runner=None):
         unregister_calls.append(tool)
         if unregister_side_effect is not None:
             unregister_side_effect(tool)
@@ -73,7 +79,8 @@ def _run_uninstall(
     out_buf, err_buf = io.StringIO(), io.StringIO()
     try:
         sys.stdout, sys.stderr = out_buf, err_buf
-        with patch("trailhead.uninstall.unregister", side_effect=fake_unregister), \
+        with patch("trailhead.uninstall.unregister_tool", side_effect=fake_unregister), \
+             patch("trailhead.uninstall.unregister_marketplace"), \
              patch("trailhead.uninstall.remove_path_integration") as mock_rpi, \
              patch("trailhead.uninstall.sys.stdin", io.StringIO(stdin_text)), \
              patch("trailhead.uninstall._is_tty", return_value=is_tty):
@@ -174,7 +181,8 @@ class TestTeardown:
         _make_composed_tool(tmp_path, "lore")
 
         from trailhead import uninstall as uninstall_mod
-        with patch("trailhead.uninstall.unregister"), \
+        with patch("trailhead.uninstall.unregister_tool"), \
+             patch("trailhead.uninstall.unregister_marketplace"), \
              patch("trailhead.uninstall.remove_path_integration") as mock_rpi, \
              patch("trailhead.uninstall._is_tty", return_value=False):
             uninstall_mod.run_uninstall(env=env, assume_yes=True)

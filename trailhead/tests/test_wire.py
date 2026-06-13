@@ -1,25 +1,36 @@
-"""Tests for trailhead/wire.py — multi-tool orchestrator (Slice 3).
+"""Tests for trailhead/wire.py — shared-root multi-tool orchestrator (Slice 3).
 
-TDD: written BEFORE implementation. All must fail first, then pass.
+TDD: rewritten for the consolidated single-marketplace layout (Slice 3).
 
-Contract:
-  - wire(selection, *, env) composes and registers each tool in selection.
-  - A tool with zero selected capabilities is skipped (no dir created).
-  - Composed tree lands at <mkt_root>/plugins/<tool>/ via staging + atomic promote.
-  - marketplace.json is generated at <mkt_root>/.claude-plugin/.
+Consolidated layout (Slice 3):
+  - mkt_root = composed_root (shared across all tools), computed once.
+  - Each tool's plugin tree lands at composed_root/plugins/<tool>/ via
+    staging + atomic promote.
+  - ONE marketplace.json at composed_root/.claude-plugin/marketplace.json,
+    name == "trailhead", plugins[] = the tools that promoted SUCCESSFULLY
+    this run (on-disk truth).
+  - Split markers in composed_root: a global .trailhead-registered plus
+    per-tool .trailhead-installed-<tool>.
+  - Registration sequencing lives in the wire() loop, NOT in _compose_tool:
+    after the compose loop, generate_marketplace_json once, register_marketplace
+    once, then per-tool install_tool (marker absent) or rewire_tool (present).
+
+Contract preserved from prior slices:
   - The harness CLI runner is stubbed in all tests (B-3 hermeticity).
   - S-2: apply_plan(mode="copy") — no symlinks in composed tree.
   - R-1: staging-dir + atomic promote — a mid-compose failure leaves the
-    prior dest unchanged, not half-written.
-  - C-1.1: staging cleanup runs on ANY exception (try/finally), including
-    BaseException subclasses like KeyboardInterrupt.
-  - C-1.2/I-1: WireError names tool + stage on per-tool failure; multi-tool
-    wire is best-effort sequential (already-processed tools stay committed).
+    prior dest unchanged.
+  - C-1.1: staging cleanup runs on ANY exception (try/finally).
+  - C-1.2/I-1: WireError names tool + stage; multi-tool wire is best-effort
+    sequential.
   - B-5: minimal preset → no camp/craft dests.
-  - Re-wiring same selection is idempotent.
-  - structural validity: dest/.claude-plugin/plugin.json parses.
-  - Minor-2: cross-tool dest collision is structurally unreachable (each tool
-    composes into its own composed/<tool>/plugins/<tool> namespace).
+
+New to Slice 3:
+  - Consolidated marketplace.json content: name + multi-tool plugins[].
+  - On-disk-truth blast-radius: a failed tool is absent from plugins[] while
+    an earlier-wired tool is present (content-level assertion).
+  - register_marketplace invoked ONCE across a multi-tool wire; install/rewire
+    per tool; install-vs-rewire keyed on the per-tool marker.
 """
 
 import json
@@ -60,6 +71,15 @@ def _manifest_paths() -> dict[str, Path]:
     }
 
 
+def _live_dest(tmp_path: Path, tool: str) -> Path:
+    """Consolidated layout: composed/plugins/<tool>."""
+    return tmp_path / "composed" / "plugins" / tool
+
+
+def _marketplace_json(tmp_path: Path) -> Path:
+    return tmp_path / "composed" / ".claude-plugin" / "marketplace.json"
+
+
 # ---------------------------------------------------------------------------
 # T-W1: minimal preset — lore only, no camp/craft dests (B-5 enforcement)
 # ---------------------------------------------------------------------------
@@ -77,9 +97,7 @@ class TestMinimalPresetGating:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        mkt_root = tmp_path / "composed" / "lore"
-        plugin_dest = mkt_root / "plugins" / "lore"
-        assert plugin_dest.exists(), "lore plugin dest missing after minimal wire"
+        assert _live_dest(tmp_path, "lore").exists(), "lore plugin dest missing after minimal wire"
 
     def test_minimal_no_camp_dest(self, tmp_path):
         """wire with minimal preset creates NO camp dest (B-5)."""
@@ -92,8 +110,7 @@ class TestMinimalPresetGating:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        camp_dest = tmp_path / "composed" / "camp" / "plugins" / "camp"
-        assert not camp_dest.exists(), (
+        assert not _live_dest(tmp_path, "camp").exists(), (
             "camp dest exists despite minimal preset (B-5 violation)"
         )
 
@@ -108,17 +125,14 @@ class TestMinimalPresetGating:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
-        assert not craft_dest.exists(), (
+        assert not _live_dest(tmp_path, "craft").exists(), (
             "craft dest exists despite minimal preset (B-5 violation)"
         )
 
-    def test_empty_selection_for_tool_skips_it(self, tmp_path):
-        """A tool with an empty capability set but present in selection is still wired
-        (base-only), but a tool absent from selection is NOT created."""
+    def test_minimal_marketplace_lists_only_lore(self, tmp_path):
+        """plugins[] = the successfully-wired set; only lore here."""
         from trailhead.wire import wire
 
-        # Provide lore only — camp and craft are not in selection
         selection = {"lore": {"capture"}}
         wire(
             selection,
@@ -126,17 +140,18 @@ class TestMinimalPresetGating:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        assert not (tmp_path / "composed" / "camp").exists()
-        assert not (tmp_path / "composed" / "craft").exists()
+        data = json.loads(_marketplace_json(tmp_path).read_text())
+        names = {p["name"] for p in data["plugins"]}
+        assert names == {"lore"}, f"expected only lore in plugins[], got {names}"
 
 
 # ---------------------------------------------------------------------------
-# T-W2: standard preset — lore + camp + craft dests; council/design/release absent
+# T-W2: standard preset — lore + camp + craft dests under shared root
 # ---------------------------------------------------------------------------
 
 
 class TestStandardPreset:
-    def test_standard_lore_dest_exists(self, tmp_path):
+    def _wire_standard(self, tmp_path):
         from trailhead.wire import wire
 
         selection = {
@@ -150,46 +165,21 @@ class TestStandardPreset:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        assert (tmp_path / "composed" / "lore" / "plugins" / "lore").exists()
+
+    def test_standard_lore_dest_exists(self, tmp_path):
+        self._wire_standard(tmp_path)
+        assert _live_dest(tmp_path, "lore").exists()
 
     def test_standard_camp_dest_exists(self, tmp_path):
-        from trailhead.wire import wire
-
-        selection = {
-            "lore": {"capture", "recall", "sessions"},
-            "camp": set(),
-            "craft": {"planning", "execute", "review", "helpers"},
-        }
-        wire(
-            selection,
-            manifest_paths=_manifest_paths(),
-            env=_env(tmp_path),
-            runner=_noop_runner,
-        )
-        assert (tmp_path / "composed" / "camp" / "plugins" / "camp").exists()
+        self._wire_standard(tmp_path)
+        assert _live_dest(tmp_path, "camp").exists()
 
     def test_standard_craft_dest_exists(self, tmp_path):
-        from trailhead.wire import wire
-
-        selection = {
-            "lore": {"capture", "recall", "sessions"},
-            "camp": set(),
-            "craft": {"planning", "execute", "review", "helpers"},
-        }
-        wire(
-            selection,
-            manifest_paths=_manifest_paths(),
-            env=_env(tmp_path),
-            runner=_noop_runner,
-        )
-        assert (tmp_path / "composed" / "craft" / "plugins" / "craft").exists()
+        self._wire_standard(tmp_path)
+        assert _live_dest(tmp_path, "craft").exists()
 
     def test_standard_craft_council_agents_absent(self, tmp_path):
-        """council capability agents absent when craft wired without council.
-
-        M-5 fix: council has skills=[], so testing skill absence is vacuous.
-        council DOES have 4 agents (advocate/builder/breaker/attacker) — assert none appear in dest.
-        """
+        """council agents absent when craft wired without council."""
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
@@ -205,9 +195,8 @@ class TestStandardPreset:
             runner=_noop_runner,
         )
         craft_manifest = load_manifest(_FORGE_MANIFEST)
-        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
+        craft_dest = _live_dest(tmp_path, "craft")
         council_agents = craft_manifest.capabilities["council"]["agents"]
-        # Confirm we're testing something real
         assert len(council_agents) > 0, "test is vacuous: council has no agents"
         for agent in council_agents:
             assert not (craft_dest / agent).exists(), (
@@ -215,17 +204,10 @@ class TestStandardPreset:
             )
 
     def test_standard_craft_unselected_council_and_execute_absent(self, tmp_path):
-        """Agents from unselected council capability must not appear in the wired dest.
-
-        M-5 fix: design and release both have skills=[] and agents=[], making their
-        absence loops vacuous.  council has 4 real agents (advocate/builder/breaker/attacker) that are
-        structurally excluded when council is not in the selection.  execute also has
-        real agents (assumption-prover/executor) — kept here for symmetry.
-        """
+        """Agents from unselected council/execute must not appear in the wired dest."""
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
-        # Wire standard craft WITHOUT council or execute
         selection = {
             "lore": {"capture", "recall", "sessions"},
             "camp": set(),
@@ -238,7 +220,7 @@ class TestStandardPreset:
             runner=_noop_runner,
         )
         craft_manifest = load_manifest(_FORGE_MANIFEST)
-        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
+        craft_dest = _live_dest(tmp_path, "craft")
         for absent_cap in ("council", "execute"):
             agents = craft_manifest.capabilities[absent_cap]["agents"]
             assert len(agents) > 0, f"test is vacuous: {absent_cap} has no agents"
@@ -249,7 +231,7 @@ class TestStandardPreset:
                 )
 
     def test_lore_shared_vaults_absent_in_standard(self, tmp_path):
-        """lore shared-vaults absent in standard (not in lore standard caps)."""
+        """lore shared-vaults absent in standard."""
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
@@ -265,17 +247,17 @@ class TestStandardPreset:
             runner=_noop_runner,
         )
         lore_manifest = load_manifest(_LORE_MANIFEST)
-        lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        lore_dest = _live_dest(tmp_path, "lore")
         for skill in lore_manifest.capabilities["shared-vaults"]["skills"]:
             assert not (lore_dest / skill).exists()
 
 
 # ---------------------------------------------------------------------------
-# T-W3: structural validity — plugin.json parses; marketplace.json references tool
+# T-W3: consolidated marketplace.json — name == "trailhead", multi-tool plugins[]
 # ---------------------------------------------------------------------------
 
 
-class TestStructuralValidity:
+class TestConsolidatedMarketplace:
     def test_plugin_json_exists_and_parses(self, tmp_path):
         """Composed lore dest has a valid .claude-plugin/plugin.json."""
         from trailhead.wire import wire
@@ -287,14 +269,13 @@ class TestStructuralValidity:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        plugin_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        plugin_json = plugin_dest / ".claude-plugin" / "plugin.json"
+        plugin_json = _live_dest(tmp_path, "lore") / ".claude-plugin" / "plugin.json"
         assert plugin_json.exists()
         data = json.loads(plugin_json.read_text())
         assert isinstance(data, dict)
 
-    def test_marketplace_json_exists_and_references_tool(self, tmp_path):
-        """marketplace.json at mkt_root/.claude-plugin/ names the wired tool."""
+    def test_single_consolidated_marketplace_named_trailhead(self, tmp_path):
+        """ONE marketplace.json at composed/.claude-plugin/, name == 'trailhead'."""
         from trailhead.wire import wire
 
         selection = {"lore": {"capture"}}
@@ -304,11 +285,43 @@ class TestStructuralValidity:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        mkt_json = tmp_path / "composed" / "lore" / ".claude-plugin" / "marketplace.json"
+        mkt_json = _marketplace_json(tmp_path)
         assert mkt_json.exists()
         data = json.loads(mkt_json.read_text())
-        assert data["name"] == "trailhead-lore"
+        assert data["name"] == "trailhead"
         assert any(p["name"] == "lore" for p in data["plugins"])
+
+    def test_marketplace_lists_both_tools_after_multi_wire(self, tmp_path):
+        """After wiring {lore, camp}: plugins[] lists BOTH; trees exist for both."""
+        from trailhead.wire import wire
+
+        selection = {"lore": {"capture"}, "camp": set()}
+        wire(
+            selection,
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+        data = json.loads(_marketplace_json(tmp_path).read_text())
+        assert data["name"] == "trailhead"
+        names = {p["name"] for p in data["plugins"]}
+        assert names == {"lore", "camp"}, f"expected both lore+camp, got {names}"
+        assert _live_dest(tmp_path, "lore").exists()
+        assert _live_dest(tmp_path, "camp").exists()
+
+    def test_no_per_tool_marketplace_dirs(self, tmp_path):
+        """The old per-tool composed/<tool>/ marketplace dirs must NOT be created."""
+        from trailhead.wire import wire
+
+        selection = {"lore": {"capture"}, "camp": set()}
+        wire(
+            selection,
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+        assert not (tmp_path / "composed" / "lore" / ".claude-plugin").exists()
+        assert not (tmp_path / "composed" / "camp" / ".claude-plugin").exists()
 
     def test_s2_no_symlinks_in_wired_tree(self, tmp_path):
         """S-2: the composed tree must contain no symlinks."""
@@ -345,8 +358,7 @@ class TestIdempotency:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        # Capture tree state
-        plugin_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        plugin_dest = _live_dest(tmp_path, "lore")
         first_files = {
             str(p.relative_to(plugin_dest))
             for p in plugin_dest.rglob("*")
@@ -372,7 +384,6 @@ class TestIdempotency:
         """Re-wiring a narrower selection removes the previously-wired caps."""
         from trailhead.wire import wire
 
-        # First wire: lore with recall (has librarian agent)
         selection_full = {"lore": {"capture", "recall", "sessions"}}
         wire(
             selection_full,
@@ -380,10 +391,9 @@ class TestIdempotency:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        plugin_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        plugin_dest = _live_dest(tmp_path, "lore")
         assert (plugin_dest / "agents" / "librarian.md").exists()
 
-        # Re-wire: lore with capture only (no recall → no librarian agent)
         selection_narrow = {"lore": {"capture"}}
         wire(
             selection_narrow,
@@ -391,8 +401,6 @@ class TestIdempotency:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        # recall's agent must be gone (recall is now a librarian-only capability;
-        # its skills/tend + skills/reflect were deleted in Slice 7).
         assert not (plugin_dest / "agents" / "librarian.md").exists(), (
             "librarian.md still present after rewiring without recall (S-4/R-1)"
         )
@@ -408,7 +416,6 @@ class TestAtomicPromote:
         """R-1: if compose fails mid-way, the prior wired dest is untouched."""
         from trailhead.wire import wire
 
-        # First wire: establish a known-good dest
         selection = {"lore": {"capture"}}
         wire(
             selection,
@@ -416,17 +423,15 @@ class TestAtomicPromote:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        plugin_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        plugin_dest = _live_dest(tmp_path, "lore")
         assert plugin_dest.exists()
 
-        # Capture the set of files in the live dest
         before_files = {
             str(p.relative_to(plugin_dest))
             for p in plugin_dest.rglob("*")
             if p.is_file()
         }
 
-        # Patch shutil.copy2 to raise on the first call (simulates mid-copy failure)
         original_copy2 = shutil.copy2
         call_count = {"n": 0}
 
@@ -445,7 +450,6 @@ class TestAtomicPromote:
                     runner=_noop_runner,
                 )
 
-        # The live dest must be unchanged
         after_files = {
             str(p.relative_to(plugin_dest))
             for p in plugin_dest.rglob("*")
@@ -462,7 +466,7 @@ class TestAtomicPromote:
         from trailhead.wire import wire
 
         selection = {"lore": {"capture"}}
-        plugin_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        plugin_dest = _live_dest(tmp_path, "lore")
         assert not plugin_dest.exists()
 
         original_copy2 = shutil.copy2
@@ -483,20 +487,19 @@ class TestAtomicPromote:
                     runner=_noop_runner,
                 )
 
-        # No partial dest created
         assert not plugin_dest.exists(), (
             "R-1 violated: partial dest exists after failed first wire"
         )
 
 
 # ---------------------------------------------------------------------------
-# T-W6: registry runner called with expected args
+# T-W6: registry sequencing — register_marketplace ONCE, install/rewire per tool
 # ---------------------------------------------------------------------------
 
 
-class TestRegistryRunnerArgs:
-    def test_register_called_for_each_wired_tool(self, tmp_path):
-        """register() is called once per wired tool."""
+class TestRegistrySequencing:
+    def test_marketplace_add_invoked_once_across_multi_tool_wire(self, tmp_path):
+        """register_marketplace runs ONCE (global), not once per tool."""
         from trailhead.wire import wire
 
         selection = {"lore": {"capture"}, "craft": {"planning"}}
@@ -511,14 +514,37 @@ class TestRegistryRunnerArgs:
             env=_env(tmp_path),
             runner=stub_runner,
         )
-        # Each tool should produce a 'marketplace add' + 'install' call
         marketplace_adds = [c for c in calls if "marketplace" in c and "add" in c]
         installs = [c for c in calls if "install" in c]
-        assert len(marketplace_adds) == 2, (
-            f"expected 2 marketplace add calls (lore+craft), got {marketplace_adds}"
+        assert len(marketplace_adds) == 1, (
+            f"expected exactly ONE marketplace add across the wire, got {marketplace_adds}"
         )
         assert len(installs) == 2, (
             f"expected 2 install calls (lore+craft), got {installs}"
+        )
+
+    def test_install_references_tool_at_trailhead(self, tmp_path):
+        """install call references <tool>@trailhead (NOT @trailhead-<tool>)."""
+        from trailhead.wire import wire
+
+        selection = {"lore": {"capture"}}
+        calls = []
+
+        def stub_runner(args, **kwargs):
+            calls.append(list(args))
+
+        wire(
+            selection,
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=stub_runner,
+        )
+        installs = [c for c in calls if "install" in c]
+        assert any("lore@trailhead" in c for c in installs), (
+            f"expected 'lore@trailhead' in an install call, got {installs}"
+        )
+        assert not any("lore@trailhead-lore" in c for c in installs), (
+            f"unexpected per-tool marketplace ref in install: {installs}"
         )
 
     def test_runner_never_invokes_real_subprocess(self, tmp_path):
@@ -535,8 +561,8 @@ class TestRegistryRunnerArgs:
             )
             mock_run.assert_not_called()
 
-    def test_mkt_root_passed_to_marketplace_add(self, tmp_path):
-        """marketplace add call includes the correct mkt_root path."""
+    def test_marketplace_add_includes_composed_root(self, tmp_path):
+        """marketplace add call includes the shared composed_root path."""
         from trailhead.wire import wire
 
         selection = {"lore": {"capture"}}
@@ -553,10 +579,9 @@ class TestRegistryRunnerArgs:
         )
         add_calls = [c for c in calls if "marketplace" in c and "add" in c]
         assert len(add_calls) == 1
-        # mkt_root should be tmp_path/composed/lore
-        expected_mkt_root = str(tmp_path / "composed" / "lore")
-        assert expected_mkt_root in add_calls[0], (
-            f"expected mkt_root {expected_mkt_root!r} in add call: {add_calls[0]}"
+        expected_root = str(tmp_path / "composed")
+        assert expected_root in add_calls[0], (
+            f"expected composed_root {expected_root!r} in add call: {add_calls[0]}"
         )
 
 
@@ -578,7 +603,7 @@ class TestMinimalLoreContent:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        lore_dest = _live_dest(tmp_path, "lore")
         lore_manifest = load_manifest(_LORE_MANIFEST)
         for cap in ("capture", "recall", "sessions"):
             for skill in lore_manifest.capabilities[cap]["skills"]:
@@ -597,15 +622,14 @@ class TestMinimalLoreContent:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
+        lore_dest = _live_dest(tmp_path, "lore")
         assert (lore_dest / "agents" / "librarian.md").exists(), (
             "librarian.md missing from minimal lore dest"
         )
 
 
 # ---------------------------------------------------------------------------
-# T-W8: C-1.1 — staging cleanup runs on BaseException (try/finally), not
-#        just Exception, so KeyboardInterrupt orphans no staging dir.
+# T-W8: C-1.1 — staging cleanup runs on BaseException (try/finally)
 # ---------------------------------------------------------------------------
 
 
@@ -615,11 +639,9 @@ class TestStagingCleanupOnBaseException:
         import trailhead.wire as wire_mod
         from trailhead.wire import wire
 
-        staging_parent = tmp_path / "composed" / "lore" / "plugins"
+        staging_parent = tmp_path / "composed" / "plugins"
 
         def raising_compose_plan(manifest, caps, dest):
-            # Let staging dir creation happen inside _compose_tool first;
-            # raise KeyboardInterrupt to simulate interrupt mid-compose.
             raise KeyboardInterrupt("simulated interrupt")
 
         with patch.object(wire_mod, "compose_plan", side_effect=raising_compose_plan):
@@ -631,7 +653,6 @@ class TestStagingCleanupOnBaseException:
                     runner=_noop_runner,
                 )
 
-        # No _<tool>_staging_* dir should survive
         if staging_parent.exists():
             leftover = list(staging_parent.glob("_lore_staging_*"))
             assert leftover == [], (
@@ -643,7 +664,7 @@ class TestStagingCleanupOnBaseException:
         import trailhead.wire as wire_mod
         from trailhead.wire import wire
 
-        staging_parent = tmp_path / "composed" / "lore" / "plugins"
+        staging_parent = tmp_path / "composed" / "plugins"
 
         def raising_compose_plan(manifest, caps, dest):
             raise SystemExit(1)
@@ -673,7 +694,7 @@ class TestStagingCleanupOnBaseException:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        staging_parent = tmp_path / "composed" / "lore" / "plugins"
+        staging_parent = tmp_path / "composed" / "plugins"
         leftover = list(staging_parent.glob("_lore_staging_*"))
         assert leftover == [], (
             f"staging dir not cleaned after successful wire: {leftover}"
@@ -681,8 +702,8 @@ class TestStagingCleanupOnBaseException:
 
 
 # ---------------------------------------------------------------------------
-# T-W9: C-1.2/I-1 — WireError names the failing tool + stage; multi-tool
-#        best-effort sequential semantics (already-processed tools stay wired).
+# T-W9: C-1.2/I-1 — WireError names the failing tool + stage; best-effort
+#        sequential; on-disk-truth blast-radius isolation.
 # ---------------------------------------------------------------------------
 
 
@@ -692,11 +713,9 @@ class TestWireErrorIsolation:
         import trailhead.wire as wire_mod
         from trailhead.wire import WireError, wire
 
-        call_count = {"n": 0}
         original_compose_plan = wire_mod.compose_plan
 
         def craft_failing_plan(manifest, caps, dest):
-            call_count["n"] += 1
             if manifest.tool_name == "craft":
                 raise RuntimeError("craft compose exploded")
             return original_compose_plan(manifest, caps, dest)
@@ -729,7 +748,6 @@ class TestWireErrorIsolation:
                 raise RuntimeError("craft compose exploded")
             return original_compose_plan(manifest, caps, dest)
 
-        # Ensure lore is processed before craft by passing ordered dict
         selection = {"lore": {"capture"}, "craft": {"planning"}}
         with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError):
@@ -740,14 +758,12 @@ class TestWireErrorIsolation:
                     runner=_noop_runner,
                 )
 
-        # lore dest must be fully wired (lore was processed first)
-        lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        assert lore_dest.exists(), (
+        assert _live_dest(tmp_path, "lore").exists(), (
             "I-1: lore dest gone after craft failure — best-effort sequential violated"
         )
 
     def test_no_orphaned_staging_dir_after_wire_error(self, tmp_path):
-        """C-1.2: WireError raised after craft failure leaves no craft staging dir."""
+        """C-1.2: WireError after craft failure leaves no craft staging dir."""
         import trailhead.wire as wire_mod
         from trailhead.wire import WireError, wire
 
@@ -767,18 +783,59 @@ class TestWireErrorIsolation:
                     runner=_noop_runner,
                 )
 
-        craft_plugins_dir = tmp_path / "composed" / "craft" / "plugins"
-        if craft_plugins_dir.exists():
-            leftover = list(craft_plugins_dir.glob("_craft_staging_*"))
+        plugins_dir = tmp_path / "composed" / "plugins"
+        if plugins_dir.exists():
+            leftover = list(plugins_dir.glob("_craft_staging_*"))
             assert leftover == [], (
                 f"orphaned craft staging dirs after WireError: {leftover}"
             )
 
+    def test_failed_tool_absent_from_marketplace_but_earlier_tool_present(self, tmp_path):
+        """On-disk-truth blast-radius (content-level): a tool whose compose raises is
+        OMITTED from the regenerated marketplace.json plugins[], while an
+        earlier-wired tool IS listed.
+
+        This is the load-bearing isolation proof: one bad tool must never appear
+        in plugins[] and break validation for the others.
+        """
+        import trailhead.wire as wire_mod
+        from trailhead.wire import WireError, wire
+
+        original_compose_plan = wire_mod.compose_plan
+
+        def craft_failing_plan(manifest, caps, dest):
+            if manifest.tool_name == "craft":
+                raise RuntimeError("craft compose exploded")
+            return original_compose_plan(manifest, caps, dest)
+
+        # lore is processed before craft (ordered dict).
+        selection = {"lore": {"capture"}, "craft": {"planning"}}
+        with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
+            with pytest.raises(WireError):
+                wire(
+                    selection,
+                    manifest_paths=_manifest_paths(),
+                    env=_env(tmp_path),
+                    runner=_noop_runner,
+                )
+
+        mkt_json = _marketplace_json(tmp_path)
+        assert mkt_json.exists(), (
+            "marketplace.json must be regenerated even after a per-tool failure "
+            "so the surviving tool is registered"
+        )
+        data = json.loads(mkt_json.read_text())
+        names = {p["name"] for p in data["plugins"]}
+        assert "lore" in names, (
+            f"earlier-wired lore missing from plugins[] (blast-radius leaked): {names}"
+        )
+        assert "craft" not in names, (
+            f"failed craft present in plugins[] — would fail validation for ALL: {names}"
+        )
+
     def test_wire_error_register_stage(self, tmp_path):
         """WireError names stage='register' when the runner raises on install."""
         from trailhead.wire import WireError, wire
-
-        call_count = {"n": 0}
 
         def failing_on_install(args, **kwargs):
             if "install" in args:
@@ -799,14 +856,14 @@ class TestWireErrorIsolation:
 
 
 # ---------------------------------------------------------------------------
-# T-W10: C-2 — registration-state marker; re-attempt register (not rewire)
-#         for a tool whose dir exists but whose marker is absent.
+# T-W10: split markers — global register marker + per-tool install marker;
+#        install-vs-rewire keyed on the per-tool marker.
 # ---------------------------------------------------------------------------
 
 
-class TestRegistrationMarker:
-    def test_marker_written_after_successful_register(self, tmp_path):
-        """C-2: .trailhead-registered marker exists after a successful wire."""
+class TestSplitMarkers:
+    def test_global_and_per_tool_markers_written_after_success(self, tmp_path):
+        """Global .trailhead-registered + per-tool .trailhead-installed-<tool> present."""
         from trailhead.wire import wire
 
         wire(
@@ -815,13 +872,16 @@ class TestRegistrationMarker:
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        mkt_root = tmp_path / "composed" / "lore"
-        assert (mkt_root / ".trailhead-registered").exists(), (
-            "C-2: .trailhead-registered marker absent after successful wire"
+        composed_root = tmp_path / "composed"
+        assert (composed_root / ".trailhead-registered").exists(), (
+            "global .trailhead-registered marker absent after successful wire"
+        )
+        assert (composed_root / ".trailhead-installed-lore").exists(), (
+            "per-tool .trailhead-installed-lore marker absent after successful wire"
         )
 
-    def test_marker_absent_after_failed_register(self, tmp_path):
-        """C-2: marker is NOT written when register fails mid-way."""
+    def test_install_marker_absent_after_failed_install(self, tmp_path):
+        """Per-tool install marker is NOT written when install fails."""
         from trailhead.wire import WireError, wire
 
         def failing_on_install(args, **kwargs):
@@ -836,22 +896,15 @@ class TestRegistrationMarker:
                 runner=failing_on_install,
             )
 
-        mkt_root = tmp_path / "composed" / "lore"
-        assert not (mkt_root / ".trailhead-registered").exists(), (
-            "C-2: marker written despite register failure"
+        composed_root = tmp_path / "composed"
+        assert not (composed_root / ".trailhead-installed-lore").exists(), (
+            "per-tool install marker written despite install failure"
         )
 
-    def test_second_wire_without_marker_calls_register_not_rewire(self, tmp_path):
-        """C-2: dir exists but marker absent → register (not rewire) is called.
-
-        Simulates a partially-registered tool: promote succeeded, but register
-        failed before marker was written.  Next wire must self-heal via register,
-        not call `plugin update` (which would fail on a never-installed plugin).
-        """
+    def test_second_wire_without_marker_calls_install_not_rewire(self, tmp_path):
+        """Per-tool marker absent → install_tool (NOT rewire/uninstall) is called."""
         from trailhead.wire import wire
 
-        # First wire: succeed to create the dir, then wipe the marker to simulate
-        # a half-registered state.
         calls = []
 
         def recording_runner(args, **kwargs):
@@ -863,12 +916,11 @@ class TestRegistrationMarker:
             env=_env(tmp_path),
             runner=recording_runner,
         )
-        # Wipe the marker to simulate promote-succeeded-but-register-failed
-        marker = tmp_path / "composed" / "lore" / ".trailhead-registered"
+        # Wipe the per-tool marker to simulate promote-succeeded-but-install-failed.
+        marker = tmp_path / "composed" / ".trailhead-installed-lore"
         marker.unlink()
         calls.clear()
 
-        # Second wire: dir exists but no marker → must call register (add+install)
         wire(
             {"lore": {"capture"}},
             manifest_paths=_manifest_paths(),
@@ -876,17 +928,17 @@ class TestRegistrationMarker:
             runner=recording_runner,
         )
 
-        update_calls = [c for c in calls if "update" in c]
-        install_calls = [c for c in calls if "install" in c]
-        assert update_calls == [], (
-            f"C-2: rewire called on half-registered tool (should have called register): {update_calls}"
+        uninstall_calls = [c for c in calls if "uninstall" in c]
+        install_calls = [c for c in calls if "install" in c and "uninstall" not in c]
+        assert uninstall_calls == [], (
+            f"rewire (uninstall) called on un-installed tool; should have installed: {uninstall_calls}"
         )
         assert len(install_calls) >= 1, (
-            f"C-2: register (install) not called for half-registered tool: {calls}"
+            f"install not called for un-installed tool: {calls}"
         )
 
     def test_second_wire_with_marker_calls_rewire(self, tmp_path):
-        """C-2: dir + marker present → rewire (plugin update) is called."""
+        """Per-tool marker present → rewire_tool (uninstall + install) is called."""
         from trailhead.wire import wire
 
         calls = []
@@ -894,7 +946,6 @@ class TestRegistrationMarker:
         def recording_runner(args, **kwargs):
             calls.append(list(args))
 
-        # First wire: fully successful — dir + marker both created
         wire(
             {"lore": {"capture"}},
             manifest_paths=_manifest_paths(),
@@ -903,7 +954,6 @@ class TestRegistrationMarker:
         )
         calls.clear()
 
-        # Second wire: fully registered → rewire path
         wire(
             {"lore": {"capture"}},
             manifest_paths=_manifest_paths(),
@@ -911,48 +961,12 @@ class TestRegistrationMarker:
             runner=recording_runner,
         )
 
+        uninstall_calls = [c for c in calls if "uninstall" in c]
+        assert len(uninstall_calls) >= 1, (
+            f"rewire (uninstall+install) not called for installed tool: {calls}"
+        )
+        # And it must NOT use plugin update (U-1(e)).
         update_calls = [c for c in calls if "update" in c]
-        assert len(update_calls) >= 1, (
-            f"C-2: rewire (plugin update) not called for fully-registered tool: {calls}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# T-W11: Minor-2 — cross-tool dest collision is structurally unreachable.
-#         Each tool composes into composed/<tool>/plugins/<tool>, so two tools
-#         can never collide.  This test documents that structural guarantee.
-# ---------------------------------------------------------------------------
-
-
-class TestCrossToolCollisionUnreachable:
-    def test_each_tool_has_distinct_mkt_root(self, tmp_path):
-        """Minor-2: each tool's mkt_root is distinct (composed/<tool>/).
-
-        Cross-tool dest collision is structurally unreachable: tool A writes to
-        composed/A/plugins/A and tool B writes to composed/B/plugins/B.
-        Two different tools can never share the same dest path.
-        """
-        from trailhead.wire import wire
-
-        selection = {
-            "lore": {"capture", "recall"},
-            "craft": {"planning", "helpers"},
-        }
-        wire(
-            selection,
-            manifest_paths=_manifest_paths(),
-            env=_env(tmp_path),
-            runner=_noop_runner,
-        )
-
-        lore_dest = tmp_path / "composed" / "lore" / "plugins" / "lore"
-        craft_dest = tmp_path / "composed" / "craft" / "plugins" / "craft"
-        assert lore_dest.exists()
-        assert craft_dest.exists()
-        # The two live dests are rooted under different mkt_roots — no collision possible
-        assert not lore_dest.is_relative_to(craft_dest), (
-            "Minor-2: lore dest is under craft dest (collision!)"
-        )
-        assert not craft_dest.is_relative_to(lore_dest), (
-            "Minor-2: craft dest is under lore dest (collision!)"
+        assert update_calls == [], (
+            f"rewire must not use 'plugin update' (U-1(e)): {update_calls}"
         )

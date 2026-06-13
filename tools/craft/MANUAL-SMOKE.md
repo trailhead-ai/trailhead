@@ -52,15 +52,15 @@ a craft agent in a fresh session (steps below). Record PASS/FAIL here.
 ### 1. Add the local marketplace
 
 ```
-/plugin marketplace add /path/to/craft
+/plugin marketplace add <repo-root>
 ```
 
-Pass criteria: no error; the marketplace name `craft-local` is confirmed.
+Pass criteria: no error; the marketplace name `trailhead-local` is confirmed.
 
 ### 2. Install the craft plugin
 
 ```
-/plugin install craft@craft-local
+/plugin install craft@trailhead-local
 ```
 
 Pass criteria: no error; plugin named `craft` is listed as installed.
@@ -86,6 +86,6 @@ subagent types as `craft:doc-finder`) and returns a result.
 | Symptom | Likely cause |
 |---|---|
 | `/plugin marketplace add` fails | Wrong path; verify the repo root has `.claude-plugin/marketplace.json` |
-| `craft@craft-local` not found | Marketplace not added, or `marketplace.json` `name`/`plugins[0].name` mismatch |
+| `craft@trailhead-local` not found | Marketplace not added, or `marketplace.json` `name`/`plugins[0].name` mismatch |
 | `craft:doc-finder` not a known subagent_type | Plugin not installed, session not restarted, or agent missing valid frontmatter at `plugins/craft/agents/doc-finder.md` |
 | Agent dispatches but errors | Frontmatter `tools:`/`model:` invalid — check against `librarian` |

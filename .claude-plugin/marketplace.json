@@ -1,0 +1,34 @@
+{
+  "name": "trailhead-local",
+  "owner": {
+    "name": "trailhead"
+  },
+  "description": "Local dev marketplace for the trailhead plugin suite.",
+  "plugins": [
+    {
+      "name": "lore",
+      "source": "./tools/lore/plugins/lore",
+      "description": "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall for any Claude Code project."
+    },
+    {
+      "name": "camp",
+      "source": "./tools/camp/plugins/camp",
+      "description": "Group worktree orchestration: create, manage, and tear down multi-repo worktrees for any Claude Code project."
+    },
+    {
+      "name": "craft",
+      "source": "./tools/craft/plugins/craft",
+      "description": "Portable software-development plugin: general-purpose dev agents and dev-ritual skills for any Claude Code project."
+    },
+    {
+      "name": "portage",
+      "source": "./tools/portage/plugins/portage",
+      "description": "Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group, on the trailhead.vcs provider library."
+    },
+    {
+      "name": "landing",
+      "source": "./tools/landing/plugins/landing",
+      "description": "Get it deployed: post-merge deploy soak and deploy-health incident handling for a camp group, on the trailhead.vcs provider library."
+    }
+  ]
+}

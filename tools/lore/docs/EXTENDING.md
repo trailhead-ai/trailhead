@@ -73,15 +73,13 @@ craft plugins to do this — you add a project layer that fills their seams.
 ### 2.1 Add the marketplace and install the plugins
 
 ```
-/plugin marketplace add https://github.com/<lore-repo>
-/plugin install lore@lore-local
-
-/plugin marketplace add https://github.com/<craft-repo>
-/plugin install craft@craft-local
+/plugin marketplace add https://github.com/<trailhead-repo>
+/plugin install lore@trailhead-local
+/plugin install craft@trailhead-local
 ```
 
-Substitute the published repository URLs for your fork (or this repo). For local
-development, `add` a filesystem path instead of a URL — see the
+Substitute the published repository URL for your fork (or this repo). For local
+development, `add` a filesystem path to the repo root instead of a URL — see the
 [README](../README.md#install).
 
 ### 2.2 Point lore at a vault

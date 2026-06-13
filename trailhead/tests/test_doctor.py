@@ -458,17 +458,12 @@ class TestNonzeroExit:
 
 class TestDriftCheck:
     def _setup_composed_dest(self, tmp_path: Path, tool: str, caps: list[str]) -> Path:
-        """Create a minimal composed dest structure with given cap subdirs."""
-        from trailhead.paths import state_dir
-        env = {
-            **os.environ,
-            "TRAILHEAD_STATE_DIR": str(tmp_path / "state"),
-        }
-        from trailhead.paths import state_dir
-        composed_root = (tmp_path / "state" / "composed") if True else None
-        # Build it manually
+        """Create a minimal composed dest structure with given cap subdirs.
+
+        Consolidated layout (Slice 3): composed/plugins/<tool>/skills/<cap>.
+        """
         composed_root = tmp_path / "state" / "composed"
-        dest = composed_root / tool / "plugins" / tool
+        dest = composed_root / "plugins" / tool
         dest.mkdir(parents=True, exist_ok=True)
         for cap in caps:
             (dest / "skills" / cap).mkdir(parents=True, exist_ok=True)
@@ -800,6 +795,71 @@ class TestPathIntegrationCheck:
 # ---------------------------------------------------------------------------
 # T-D8: human output groups by tool
 # ---------------------------------------------------------------------------
+
+
+class TestConsolidatedMarketplaceCheck:
+    """T-D9: doctor asserts the consolidated 'trailhead' marketplace signal.
+
+    A half-migrated machine (old per-tool 'trailhead-<tool>' marketplace.json
+    still live at composed/.claude-plugin/) must be visible: the check fails
+    when name != 'trailhead'.  When marketplace.json is absent, the check is a
+    no-op pass (not yet wired).
+    """
+
+    def _composed_root(self, tmp_path: Path) -> Path:
+        return tmp_path / "state" / "composed"
+
+    def _write_marketplace(self, tmp_path: Path, name: str) -> None:
+        composed_root = self._composed_root(tmp_path)
+        cp_dir = composed_root / ".claude-plugin"
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        (cp_dir / "marketplace.json").write_text(
+            json.dumps({"name": name, "owner": {"name": "trailhead"}, "plugins": []})
+        )
+
+    def _marketplace_check(self, data: dict) -> dict | None:
+        for check in data.get("checks", []):
+            if "marketplace" in check.get("check", "").lower():
+                return check
+        return None
+
+    def test_marketplace_check_passes_when_name_is_trailhead(self, tmp_path):
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        self._write_marketplace(tmp_path, "trailhead")
+
+        result = run_doctor(as_json=True, wired_tools={}, env=env)
+        check = self._marketplace_check(result.data)
+        assert check is not None, f"no marketplace check found in: {result.data}"
+        assert check.get("pass") is True, f"expected pass, got: {check}"
+
+    def test_marketplace_check_fails_on_half_migrated_name(self, tmp_path):
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        # A stale per-tool marketplace still live at the consolidated path.
+        self._write_marketplace(tmp_path, "trailhead-lore")
+
+        result = run_doctor(as_json=True, wired_tools={}, env=env)
+        check = self._marketplace_check(result.data)
+        assert check is not None, f"no marketplace check found in: {result.data}"
+        assert check.get("pass") is False, (
+            f"half-migrated marketplace name must fail the check: {check}"
+        )
+        assert result.data["any_failed"] is True
+
+    def test_marketplace_check_passes_when_absent(self, tmp_path):
+        """No marketplace.json yet (fresh machine) → check is a no-op pass."""
+        from trailhead.doctor import run_doctor
+
+        env = _hermetic_env(tmp_path)
+        result = run_doctor(as_json=True, wired_tools={}, env=env)
+        check = self._marketplace_check(result.data)
+        assert check is not None, f"no marketplace check found in: {result.data}"
+        assert check.get("pass") is True, (
+            f"absent marketplace.json should not fail the check: {check}"
+        )
 
 
 class TestHumanOutput:
