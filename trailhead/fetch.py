@@ -44,12 +44,15 @@ Fresh clones go into a ``tmp`` staging dir under ``state_dir("trailhead")``;
 only on full verification success is the staging dir promoted (renamed) to the
 final dest.
 
-Self-referential manifest SHA
-------------------------------
-The committed ``install_manifest.toml`` pins a SHA that cannot equal the live
-repo's post-commit HEAD (circular).  Tests are against SYNTHETIC git repos.
-The live manifest is reconciled at dogfood/release time (bumped to the release
-SHA when an install is cut).  See docs/install-manifest.md.
+Local-self entries (L-1)
+------------------------
+A manifest entry with ``source == "local"`` (``entry.is_local_self``) installs
+the working tree being run from and pins **no** SHA.  Self-pinning a repo to
+its own post-commit HEAD is circular, and the blessed-SHA gate exists for the
+supply-chain (fetch-a-remote) case — not for a local checkout you control.  For
+such an entry ``verify_present_repo`` checks "is this a git checkout?" instead
+of "HEAD == rev".  Remote entries keep the full SHA + GPG gate below unchanged.
+Tests (other than the committed-manifest smoke test) use SYNTHETIC git repos.
 """
 
 import os
@@ -121,7 +124,12 @@ def verify_present_repo(
     repo_path: Path,
     env: dict[str, str] | None = None,
 ) -> bool:
-    """Verify a local checkout's HEAD matches the pinned rev.
+    """Verify a local checkout matches what the manifest expects.
+
+    For a remote entry this asserts ``HEAD == entry.rev`` (the pinned-SHA gate).
+    For a local-self entry (L-1, ``entry.is_local_self``) there is no pinned SHA
+    to gate on — it installs the working tree, tracking HEAD — so integrity is
+    "this is a git checkout" rather than a SHA match.
 
     Args:
         entry:      The manifest entry describing the expected state.
@@ -132,9 +140,20 @@ def verify_present_repo(
         True on success.
 
     Raises:
-        FetchError: HEAD != pinned rev, or git rev-parse failed.
+        FetchError: For a remote entry, HEAD != pinned rev or git rev-parse
+            failed.  For a local-self entry, repo_path is not a git checkout.
     """
     head_sha = _get_head_sha(repo_path, env=env)
+
+    if getattr(entry, "is_local_self", False):
+        # L-1: no blessed-SHA gate — just confirm we're inside a real checkout.
+        if head_sha is None:
+            raise FetchError(
+                f"trailhead: local source for '{entry.name}' at {repo_path} is not a "
+                f"git checkout — run trailhead from inside the cloned repository."
+            )
+        return True
+
     if head_sha is None:
         raise FetchError(
             f"trailhead: cannot read HEAD SHA for repo '{entry.name}' at {repo_path}"

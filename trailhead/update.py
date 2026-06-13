@@ -22,7 +22,7 @@ A-5 unreachable-source error:
   "trailhead: cannot reach update source
     source: <url>
   Check your connection, or confirm the source with `trailhead config registry`.
-  To use a local copy, set a file:// source."
+  To install from a working tree instead, set the repo's source to \"local\"."
 
 D-7: no hardcoded upstream URL in logic.  config.registry is the sole source.
 
@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 
 from trailhead.config import load_config, save_config
-from trailhead.fetch import FetchError, verify_present_repo
+from trailhead.fetch import FetchError, _get_head_sha, verify_present_repo
 from trailhead.manifest import InstallManifest, InstallManifestError, load_install_manifest
 from trailhead.paths import ensure_dir, state_dir
 from trailhead.presets import resolve as resolve_preset
@@ -153,6 +153,16 @@ def _run_update_locked(
     unchanged_entries = []
 
     for entry in manifest.repos:
+        if entry.is_local_self:
+            # L-1: a local-self entry pins no rev — it tracks the working tree.
+            # "Changed" means HEAD moved (a new commit) since the last wire, so
+            # an untouched checkout stays a no-op while a fresh commit re-wires.
+            current = _get_head_sha(_REPO_ROOT, env=_env) or ""
+            if last_state.get(entry.name) == current:
+                unchanged_entries.append(entry)
+            else:
+                changed_entries.append(entry)
+            continue
         last_rev = last_state.get(entry.name)
         if last_rev == entry.rev:
             unchanged_entries.append(entry)
@@ -165,13 +175,13 @@ def _run_update_locked(
 
     # ----------------------------------------------------------------
     # Step 4: Verify changed repos in place (already-present-repo case)
-    # I2: only verify entries whose local checkout root is known (trailhead).
-    # Other entries (e.g. outpost, future repos) are skipped here — verifying
+    # I2: only verify the local-self entry, whose checkout root is _REPO_ROOT.
+    # Remote entries (e.g. outpost, future repos) are skipped here — verifying
     # their pinned rev against the trailhead checkout root would always produce
-    # a false SHA mismatch.
+    # a false SHA mismatch (their fetch/clone path is a separate concern).
     # ----------------------------------------------------------------
     for entry in changed_entries:
-        if entry.name != "trailhead":
+        if not entry.is_local_self:
             continue
         try:
             verify_present_repo(entry, repo_path=_REPO_ROOT)
@@ -208,7 +218,13 @@ def _run_update_locked(
     # ----------------------------------------------------------------
     # Step 6: Save updated state
     # ----------------------------------------------------------------
-    new_state = {entry.name: entry.rev for entry in manifest.repos}
+    new_state: dict[str, str] = {}
+    for entry in manifest.repos:
+        if entry.is_local_self:
+            # Record HEAD so the next update detects a moved working tree (L-1).
+            new_state[entry.name] = _get_head_sha(_REPO_ROOT, env=_env) or ""
+        else:
+            new_state[entry.name] = entry.rev
     _save_update_state(state_file, new_state)
 
     # ----------------------------------------------------------------
@@ -235,7 +251,8 @@ def _print_update_summary(
     print("")
 
     for entry in changed_entries:
-        print(f"  updated: {entry.name}@{entry.rev[:8]}")
+        ref = "local" if entry.is_local_self else entry.rev[:8]
+        print(f"  updated: {entry.name}@{ref}")
 
     # R-8: newly wired summary
     if newly_wired:

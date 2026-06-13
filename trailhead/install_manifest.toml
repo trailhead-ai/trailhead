@@ -1,20 +1,21 @@
 # Trailhead install manifest
 #
-# Each [[repo]] entry pins a suite component at a full 40-char commit SHA.
-# Rules enforced at parse time:
-#   - rev must be exactly 40 lowercase hex chars (never a tag, short SHA, HEAD, or 'latest')
-#   - source may use ${registry} (resolved against `trailhead config registry`) or a
-#     fully-qualified https:// or git@host:path URL for per-repo mirrors
+# Each [[repo]] entry describes a suite component.  Two kinds:
+#   - remote: pinned at a full 40-char commit SHA, fetched + GPG-verified.
+#       * rev must be exactly 40 lowercase hex chars (never a tag, short SHA, HEAD, 'latest')
+#       * source may use ${registry} (resolved against `trailhead config registry`) or a
+#         fully-qualified https:// or git@host:path URL for per-repo mirrors
+#       * Integrity (Slice 2): the installed repo's HEAD must match the pinned rev, and
+#         git verify-commit is checked against the signing key (74AEB40C93C4250A) before wiring.
+#   - local-self (L-1): source = "local" installs the working tree you are running from,
+#       tracking HEAD.  It pins NO rev (a 'rev' on a local entry is a parse error) and is
+#       not fetched/SHA-gated — a checkout you control needs no blessed-SHA gate, and a repo
+#       cannot pin its own post-commit hash.  See docs/install-manifest.md.
 #   - duplicate repo names are rejected (no last-wins)
-#
-# Integrity verification (Slice 2): the installed repo's HEAD must match the pinned rev;
-# git verify-commit is checked against the configured signing key before wiring.
-# Key fingerprint: 74AEB40C93C4250A — see docs/install-manifest.md
 
 [[repo]]
 name = "trailhead"
-rev = "a47335d1d28baa368c9e13d078449ff8e209fb5f"
-source = "${registry}/trailhead"
+source = "local"   # install this working tree, tracking HEAD (no pinned rev — L-1)
 tools = ["trailhead", "lore", "camp", "craft", "portage", "landing"]
 
 # outpost is a personal dev tool (local PR / dev-env / deploy dashboard).

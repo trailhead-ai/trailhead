@@ -47,6 +47,26 @@ RCE), ``fd::``, ``file://``, ``http://``, and bare paths with no local_root.
 The allowlist replaces the previous denylist (shell-metachar check) which
 provided false confidence while allowing ``ext::`` through.
 
+Local-self source (L-1)
+-----------------------
+The reserved source value ``"local"`` marks a *local-self* entry: the install
+installs the working tree you are running ``trailhead`` from, tracking ``HEAD``
+rather than a pinned commit.  The pin/verify machinery exists for the
+supply-chain case (fetching a remote repo at an audited, GPG-signed SHA); a
+local checkout you already control and can read does not benefit from a
+blessed-SHA gate, and self-pinning is circular (a commit cannot pin its own
+hash).  So a local-self entry:
+  * is honored ONLY when ``local_root`` is provided (same trust boundary as a
+    local-path source — the caller has established where "local" resolves to);
+  * pins **no** ``rev`` (``rev`` is None) and MUST NOT carry one — a ``rev`` on
+    a ``"local"`` entry is a parse-time error, because it would be ignored and
+    re-introduce the staleness foot-gun the local source exists to remove;
+  * skips the remote/allowlist source validation (``"local"`` is neither a URL
+    nor a filesystem path to confine).
+At verify time (``fetch.verify_present_repo``) a local-self entry is checked
+for "is this a git checkout?" instead of "HEAD == rev".  Remote entries keep
+the full SHA + GPG gate unchanged.
+
 Name validation (S-path)
 ------------------------
 The ``name`` field must not contain path-traversal components (``/``, ``\\``,
@@ -88,12 +108,19 @@ class InstallManifestError(Exception):
 
 @dataclass
 class RepoEntry:
-    """A single pinned-repo entry in the install manifest."""
+    """A single repo entry in the install manifest.
+
+    A remote entry pins ``rev`` to a full 40-char SHA and carries a fetchable
+    ``source`` (URL or confined local path).  A *local-self* entry (L-1) has
+    ``source == LOCAL_SOURCE``, ``is_local_self == True``, and ``rev is None``:
+    it installs the working tree you are running from, tracking HEAD.
+    """
 
     name: str
-    rev: str
+    rev: str | None
     source: str
     tools: list
+    is_local_self: bool = False
 
 
 @dataclass
@@ -106,6 +133,10 @@ class InstallManifest:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+# Reserved source value marking a local-self entry (L-1): installs the working
+# tree being run from, tracking HEAD instead of a pinned SHA.
+LOCAL_SOURCE = "local"
 
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -311,7 +342,36 @@ def load_install_manifest(
             )
         seen_names.add(name)
 
-        # Required field: rev
+        # Required field: source (read first so the local-self sentinel can be
+        # detected before the remote-oriented rev + allowlist validation).
+        raw_source = entry.get("source")
+        if raw_source is None:
+            raise InstallManifestError(
+                f"install manifest {path}: repo {name!r} is missing required field 'source'"
+            )
+        raw_source = str(raw_source)
+        tools = list(entry.get("tools", []))
+
+        # L-1: local-self entry — installs the working tree, tracking HEAD.
+        if raw_source == LOCAL_SOURCE:
+            if local_root is None:
+                raise InstallManifestError(
+                    f"repo {name!r}: source = 'local' installs the checkout you are "
+                    f"running from and requires a confinement root (local_root) — "
+                    f"pass local_root to load_install_manifest; file: {path}"
+                )
+            if entry.get("rev") is not None:
+                raise InstallManifestError(
+                    f"repo {name!r}: source = 'local' installs the working tree and "
+                    f"does not take a 'rev' (local installs track HEAD); remove the "
+                    f"'rev' field; file: {path}"
+                )
+            repos.append(
+                RepoEntry(name=name, rev=None, source=LOCAL_SOURCE, tools=tools, is_local_self=True)
+            )
+            continue
+
+        # Remote entry: rev is required and strictly pinned (§1112 / §1115).
         rev = entry.get("rev")
         if rev is None:
             raise InstallManifestError(
@@ -319,20 +379,11 @@ def load_install_manifest(
             )
         _validate_rev(str(rev), name, path)
 
-        # Required field: source
-        source = entry.get("source")
-        if source is None:
-            raise InstallManifestError(
-                f"install manifest {path}: repo {name!r} is missing required field 'source'"
-            )
-
         # Resolve ${registry} before S-3 allowlist check
-        source = _resolve_registry(str(source), registry, name, path)
+        source = _resolve_registry(raw_source, registry, name, path)
 
         # S-3 source validation
         source = _validate_source(source, name, path, local_root=local_root)
-
-        tools = list(entry.get("tools", []))
 
         repos.append(RepoEntry(name=name, rev=str(rev), source=source, tools=tools))
 
