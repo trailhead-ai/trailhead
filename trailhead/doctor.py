@@ -1,34 +1,17 @@
-"""Doctor rollup for trailhead — aggregates per-tool doctor outputs.
+"""Read-only install-state report for `trailhead doctor`.
 
-D-6 design:
-  For each wired tool, run `<tool> doctor --json` if the tool exposes it
-  (camp does; lore does not today).  A tool with no doctor verb gets a
-  "no doctor — n/a" entry; the rollup never crashes on a missing verb.
+The doctor does NOT validate or gate (the design assumes users know what they're
+doing — there are no install-validity checks).  It simply reports what trailhead
+has installed, discovered from on-disk state:
 
-R-3 (binding):
-  Each per-tool subprocess gets a wall-clock timeout (5 s).  Both
-  subprocess.TimeoutExpired and json.JSONDecodeError are caught → a named
-  per-tool error entry.  The rollup always completes cleanly regardless of
-  individual tool failures.
+  - per harness: the registered marketplace + the installed tools (markers),
+  - the camp/lore CLI shim dir and whether `camp`/`lore` resolve on PATH,
+  - the python3 version on PATH (informational).
 
-R-2 drift check:
-  Compare the config's declared active capabilities against what skills dirs
-  are present in the composed dest.  Declared-but-absent and
-  present-but-undeclared both surface as doctor findings.
+``exit_code`` is always 0 unless the report itself crashes.
 
-U-2 python check:
-  Verify that the `python3` on PATH is ≥ 3.10 (trailhead/paths.py uses X|Y
-  union annotations which require 3.10+; macOS system python is 3.9.6).
-
-A-9 hygiene:
-  --json for machine reads; human output groups by tool.  Errors → stderr;
-  summary/values → stdout.
-
-Injectability (B-3 / hermeticity):
-  doctor_runner: Callable(args: list[str], *, timeout: int) → CompletedProcess
-    used to run `<tool> doctor --json`.  Tests always pass a stub.
-  python_version_runner: Callable(cmd: list[str]) → CompletedProcess
-    used to probe python3 --version.  Tests always pass a stub.
+Injectability (B-3): ``which_runner`` and ``python_version_runner`` are injectable
+so tests never shell out.
 """
 
 from __future__ import annotations
@@ -37,613 +20,115 @@ import json
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from trailhead.config import load_config
+from trailhead.pathint import resolve_shim_dir
 from trailhead.paths import state_dir
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-_DOCTOR_TIMEOUT = 5  # seconds per tool subprocess
-
-# Tools known to have a doctor verb
-_TOOLS_WITH_DOCTOR = frozenset({"camp"})
-
-_PYTHON_MIN_MAJOR = 3
-_PYTHON_MIN_MINOR = 10
-
-# Repo root — used to detect which wired tools ship a front-door CLI wrapper
-# (tools/<tool>/plugins/<tool>/bin/<tool>) that PATH integration shims onto PATH.
-_REPO_ROOT = Path(__file__).parent.parent
-
-
-# ---------------------------------------------------------------------------
-# Result type
-# ---------------------------------------------------------------------------
+_REGISTERED_MARKER = ".trailhead-registered"
+_INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
+_CLI_NAMES = ("camp", "lore")
 
 
 @dataclass
 class DoctorResult:
-    """Result of run_doctor().
-
-    Attributes:
-        data:         The aggregate JSON-friendly dict (for --json output).
-        human_output: The human-readable multiline string.
-        exit_code:    0 if all checks passed; 1 if any failed.
-    """
+    """Result of run_doctor()."""
 
     data: dict
     human_output: str
     exit_code: int
 
 
-# ---------------------------------------------------------------------------
-# Injectable defaults
-# ---------------------------------------------------------------------------
-
-
-def _default_doctor_runner(args: list[str], *, timeout: int) -> subprocess.CompletedProcess:
-    """Default per-tool doctor subprocess runner.
-
-    Runs `<tool> doctor --json` using subprocess.run with a wall-clock timeout.
-    """
-    return subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-
-
 def _default_python_version_runner(cmd: list[str]) -> subprocess.CompletedProcess:
-    """Default python3 --version runner."""
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-    )
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
-# ---------------------------------------------------------------------------
-# Per-tool doctor probe
-# ---------------------------------------------------------------------------
-
-
-def _probe_tool_doctor(
-    tool: str,
-    runner: Callable,
-    *,
-    tool_bin: Optional[str] = None,
-) -> dict:
-    """Run `<tool> doctor --json` and return a structured entry.
-
-    Returns a dict with at least a 'status' key:
-      - {"status": "ok", "checks": [...], "any_failed": bool}
-      - {"status": "no_doctor"}
-      - {"status": "not_on_path", "error": "..."}  (informational — the
-        PATH-integration check owns the pass/fail signal)
-      - {"status": "timeout", "error": "..."}
-      - {"status": "parse_error", "error": "..."}
-      - {"status": "error", "error": "...", "returncode": int}
-
-    Never raises — all failures are captured as named entries (R-3).
-    """
-    if tool not in _TOOLS_WITH_DOCTOR:
-        return {"status": "no_doctor"}
-
-    bin_name = tool_bin or tool
-    args = [bin_name, "doctor", "--json"]
-
-    try:
-        result = runner(args, timeout=_DOCTOR_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "timeout",
-            "error": f"{tool} doctor timed out after {_DOCTOR_TIMEOUT}s",
+def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    if not composed_base.is_dir():
+        return out
+    for hdir in sorted(composed_base.iterdir()):
+        if not hdir.is_dir():
+            continue
+        installed = sorted(
+            f.name[len(_INSTALLED_MARKER_PREFIX):]
+            for f in hdir.iterdir()
+            if f.is_file() and f.name.startswith(_INSTALLED_MARKER_PREFIX)
+        )
+        marketplace_name = None
+        mkt = hdir / ".claude-plugin" / "marketplace.json"
+        if mkt.exists():
+            try:
+                marketplace_name = json.loads(mkt.read_text()).get("name")
+            except (OSError, json.JSONDecodeError):
+                marketplace_name = "(unreadable)"
+        out[hdir.name] = {
+            "registered": (hdir / _REGISTERED_MARKER).exists(),
+            "installed": installed,
+            "marketplace": marketplace_name,
         }
-    except FileNotFoundError:
-        # The tool advertises a doctor verb but its binary isn't on PATH.
-        # Don't mask this as "no_doctor" (which reads as a pass) — surface it as
-        # not_on_path.  The dedicated PATH-integration check (gated on whether
-        # PATH integration is enabled) owns the pass/fail signal, so this entry
-        # stays informational to avoid double-counting one root cause.
-        return {
-            "status": "not_on_path",
-            "error": f"{tool} not found on PATH — its doctor checks were skipped",
-        }
-
-    # Try to parse the JSON regardless of returncode (a failing check may exit 1
-    # but still emit valid JSON with its checks array)
-    raw_stdout = result.stdout or ""
-    try:
-        parsed = json.loads(raw_stdout)
-    except json.JSONDecodeError as exc:
-        return {
-            "status": "parse_error",
-            "error": f"{tool} doctor returned malformed JSON: {exc}",
-            "returncode": result.returncode,
-        }
-
-    # Valid JSON parsed — extract checks and any_failed
-    checks = parsed.get("checks", [])
-    any_failed = not parsed.get("pass", True)
-
-    return {
-        "status": "ok",
-        "checks": checks,
-        "any_failed": any_failed,
-    }
+    return out
 
 
-# ---------------------------------------------------------------------------
-# Python version check (U-2)
-# ---------------------------------------------------------------------------
-
-
-def _check_python_version(python_runner: Callable) -> dict:
-    """Check that python3 on PATH is ≥ 3.10 (U-2).
-
-    Returns a doctor check dict:
-      {"check": "python3_version", "description": "...", "pass": bool, "details": "..."}
-    """
-    description = f"python3 ≥ {_PYTHON_MIN_MAJOR}.{_PYTHON_MIN_MINOR} on PATH"
-
+def _python_version(python_runner: Callable) -> str:
     try:
         result = python_runner(["python3", "--version"])
     except FileNotFoundError:
-        return {
-            "check": "python3_version",
-            "description": description,
-            "pass": False,
-            "details": (
-                "python3 not found on PATH — trailhead/paths.py requires Python ≥ "
-                f"{_PYTHON_MIN_MAJOR}.{_PYTHON_MIN_MINOR} (uses X|Y union annotations)"
-            ),
-        }
-
-    version_str = (result.stdout or "").strip()
-    # "Python 3.11.4" → parse version
-    try:
-        parts = version_str.replace("Python ", "").split(".")
-        major = int(parts[0])
-        minor = int(parts[1]) if len(parts) > 1 else 0
-    except (ValueError, IndexError):
-        return {
-            "check": "python3_version",
-            "description": description,
-            "pass": False,
-            "details": f"could not parse python3 version: {version_str!r}",
-        }
-
-    ok = (major, minor) >= (_PYTHON_MIN_MAJOR, _PYTHON_MIN_MINOR)
-    return {
-        "check": "python3_version",
-        "description": description,
-        "pass": ok,
-        "details": (
-            version_str
-            if ok
-            else (
-                f"{version_str} — trailhead/paths.py requires Python ≥ "
-                f"{_PYTHON_MIN_MAJOR}.{_PYTHON_MIN_MINOR} (uses X|Y union annotations); "
-                f"macOS system python3 (/usr/bin/python3) is often 3.9.x"
-            )
-        ),
-    }
-
-
-# ---------------------------------------------------------------------------
-# PATH-integration check (front-door CLIs resolvable on PATH)
-# ---------------------------------------------------------------------------
-
-
-_REGISTERED_MARKER = ".trailhead-registered"
-
-
-def _registered_tools(env: dict[str, str] | None) -> list[str]:
-    """Return tools registered with the harness, per composed/ markers.
-
-    A composed/<tool>/.trailhead-registered marker means trailhead wired and
-    registered that tool — independent of whether config.toml records it.  This
-    is the source of truth on a config-less machine (wired directly, no install).
-    """
-    composed_root = state_dir("trailhead", env=env) / "composed"
-    if not composed_root.is_dir():
-        return []
-    return sorted(
-        child.name
-        for child in composed_root.iterdir()
-        if child.is_dir() and (child / _REGISTERED_MARKER).exists()
-    )
-
-
-def _has_cli_wrapper(tool: str) -> bool:
-    """Return True if `tool` ships a front-door CLI wrapper in the repo.
-
-    Mirrors install.py's shim selection: only tools with
-    tools/<tool>/plugins/<tool>/bin/<tool> get a PATH shim, so only those are
-    expected to resolve as a bare command.
-    """
-    return (_REPO_ROOT / "tools" / tool / "plugins" / tool / "bin" / tool).exists()
-
-
-def _check_path_integration(
-    wired_tools: dict[str, set[str]],
-    *,
-    which_fn: Callable[[str], Optional[str]],
-    env: dict[str, str] | None,
-) -> list[dict]:
-    """Check that each wired front-door CLI resolves on PATH.
-
-    camp is the forcing case: it's run outside any Claude Code session, so a
-    bare `camp` must resolve.  lore ships a CLI too.  When PATH integration is
-    enabled but the shim isn't active (shell not restarted, rc not sourced, or
-    integration never ran), `which camp` returns None — that's a real, common
-    failure the user needs told about, not silently passed.
-
-    Returns a list of check dicts.  Empty when no wired tool ships a CLI.
-    When PATH integration is disabled in config, returns a single passing
-    informational check (a missing shim is then intentional, not a fault).
-    """
-    front_door = sorted(t for t in wired_tools if _has_cli_wrapper(t))
-    if not front_door:
-        return []
-
-    cfg = load_config(env=env)
-    if not cfg.path_integration:
-        return [{
-            "check": "path_integration",
-            "description": "PATH integration",
-            "pass": True,
-            "details": "disabled in config — front-door CLIs are not shimmed onto PATH",
-        }]
-
-    checks: list[dict] = []
-    for tool in front_door:
-        resolved = which_fn(tool)
-        ok = resolved is not None
-        check: dict = {
-            "check": f"path:{tool}",
-            "description": f"`{tool}` resolves on PATH",
-            "pass": ok,
-        }
-        if ok:
-            check["details"] = resolved
-        else:
-            shim_dir = state_dir("trailhead", env=env) / "bin"
-            check["details"] = (
-                f"`{tool}` not found on PATH — its shim isn't active. "
-                f"Restart your shell (or source your shell rc), or run "
-                f"`trailhead config path_integration on`. "
-                f"Manual fallback: add {shim_dir} to your PATH."
-            )
-        checks.append(check)
-    return checks
-
-
-# ---------------------------------------------------------------------------
-# R-2 drift check
-# ---------------------------------------------------------------------------
-
-
-def _check_drift(
-    wired_tools: dict[str, set[str]],
-    *,
-    env: dict[str, str] | None,
-) -> list[dict]:
-    """Compare config's declared capabilities against the composed dest dirs.
-
-    Returns a list of drift check dicts (one per tool that was examined).
-    Each entry: {"check": "drift:<tool>", "pass": bool, "declared": [...],
-                 "present": [...], "drift_absent": [...], "drift_extra": [...]}
-    """
-    _env = env if env is not None else dict(os.environ)
-    composed_root = state_dir("trailhead", env=_env) / "composed"
-
-    cfg = load_config(env=_env)
-    drift_checks = []
-
-    for tool, declared_caps in wired_tools.items():
-        dest = composed_root / "plugins" / tool / "skills"
-
-        # Skills present in the filesystem
-        if dest.is_dir():
-            present_caps = {d.name for d in dest.iterdir() if d.is_dir()}
-        else:
-            # No composed dest at all — not yet wired; skip drift check
-            # (drift is only meaningful after a successful wire has run)
-            present_caps = None
-
-        if present_caps is None:
-            # No dest → not yet composed; skip drift check.
-            # Trade-off (M3): this avoids false-positives on fresh installs but
-            # introduces a false-negative — a wired-then-deleted dest reads as
-            # "not yet composed", so genuine dest-deletion drift is invisible.
-            drift_checks.append({
-                "check": f"drift:{tool}",
-                "description": f"config↔filesystem coherence for {tool}",
-                "pass": True,
-                "declared": sorted(set(cfg.capabilities.get(tool, [])) | set(declared_caps)),
-                "present": [],
-                "note": "not yet composed",
-            })
-            continue
-
-        # Declared in config (may differ from wired_tools if config is stale)
-        config_caps = set(cfg.capabilities.get(tool, []))
-        # Use the union for comparison: anything declared in config or wired_tools
-        all_declared = config_caps | set(declared_caps)
-
-        drift_absent = sorted(all_declared - present_caps)
-        drift_extra = sorted(present_caps - all_declared)
-
-        has_drift = bool(drift_absent or drift_extra)
-        check: dict = {
-            "check": f"drift:{tool}",
-            "description": f"config↔filesystem coherence for {tool}",
-            "pass": not has_drift,
-            "declared": sorted(all_declared),
-            "present": sorted(present_caps),
-        }
-        if drift_absent:
-            check["drift_absent"] = drift_absent
-        if drift_extra:
-            check["drift_extra"] = drift_extra
-
-        drift_checks.append(check)
-
-    return drift_checks
-
-
-# ---------------------------------------------------------------------------
-# Consolidated marketplace check (Slice 3)
-# ---------------------------------------------------------------------------
-
-
-def _check_marketplace(*, env: dict[str, str] | None) -> dict:
-    """Assert the consolidated marketplace signal.
-
-    Reads ``composed/.claude-plugin/marketplace.json`` (when present) and checks
-    that its ``name`` is ``"trailhead"``.  A half-migrated machine — where an old
-    per-tool ``trailhead-<tool>`` marketplace.json is still live at the
-    consolidated path — fails this check and so is visible in doctor.
-
-    When the file is absent (fresh / not yet wired) the check is a no-op pass.
-    A malformed/unreadable file fails the check.
-    """
-    _env = env if env is not None else dict(os.environ)
-    composed_root = state_dir("trailhead", env=_env) / "composed"
-    mkt_path = composed_root / ".claude-plugin" / "marketplace.json"
-
-    description = "consolidated 'trailhead' marketplace"
-
-    if not mkt_path.exists():
-        return {
-            "check": "marketplace_name",
-            "description": description,
-            "pass": True,
-            "details": "no composed marketplace.json yet (not wired)",
-        }
-
-    try:
-        data = json.loads(mkt_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        return {
-            "check": "marketplace_name",
-            "description": description,
-            "pass": False,
-            "details": f"could not read {mkt_path}: {exc}",
-        }
-
-    name = data.get("name")
-    ok = name == "trailhead"
-    return {
-        "check": "marketplace_name",
-        "description": description,
-        "pass": ok,
-        "details": (
-            f"name == {name!r}"
-            if ok
-            else (
-                f"marketplace.json name is {name!r}, expected 'trailhead' — "
-                "machine may be half-migrated (a stale per-tool 'trailhead-<tool>' "
-                "marketplace is still live)"
-            )
-        ),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+        return "not found on PATH"
+    return (result.stdout or result.stderr or "").strip() or "unknown"
 
 
 def run_doctor(
     *,
     as_json: bool = False,
-    wired_tools: dict[str, set[str]] | None = None,
-    doctor_runner: Callable | None = None,
-    python_version_runner: Callable | None = None,
-    which_runner: Callable[[str], Optional[str]] | None = None,
     env: dict[str, str] | None = None,
+    which_runner: Callable[[str], Optional[str]] | None = None,
+    python_version_runner: Callable | None = None,
 ) -> DoctorResult:
-    """Aggregate per-tool doctor outputs into a rollup result.
-
-    Args:
-        as_json:               Whether to format output as JSON.
-        wired_tools:           Mapping of tool name → set of caps.  If None,
-                               loads from config.  Tools not in wired_tools are
-                               skipped.
-        doctor_runner:         Injectable subprocess runner for per-tool doctor
-                               calls.  Defaults to real subprocess.run.
-        python_version_runner: Injectable runner for `python3 --version`.
-                               Defaults to real subprocess.run.
-        env:                   Env dict for path resolution (hermeticity).
-
-    Returns:
-        DoctorResult with data (JSON-friendly dict), human_output, and exit_code.
-    """
+    """Build a read-only report of what trailhead has installed. exit_code is 0."""
     _env = env if env is not None else dict(os.environ)
-    _doctor_runner = doctor_runner or _default_doctor_runner
-    _python_runner = python_version_runner or _default_python_version_runner
-    _which_runner = which_runner or shutil.which
+    _which = which_runner or shutil.which
+    _pyrunner = python_version_runner or _default_python_version_runner
 
-    # Discover what's wired.  Config (config.toml) is the declared source, but a
-    # tree can be registered with the harness without a config entry (e.g. wired
-    # directly during dogfooding — no config.toml).  For the probes + PATH check
-    # we want the EFFECTIVE wired set: config ∪ registered composed trees, so a
-    # registered-but-not-on-PATH camp is still caught.  Drift, however, is a
-    # config↔filesystem comparison and is only meaningful for config-declared
-    # tools — feeding it marker-only tools would falsely flag every present skill
-    # as "undeclared".  So the two checks key off different sets.
-    if wired_tools is None:
-        cfg = load_config(env=_env)
-        config_tools = {tool: set(caps) for tool, caps in cfg.capabilities.items()}
-        wired_tools = dict(config_tools)
-        for tool in _registered_tools(_env):
-            wired_tools.setdefault(tool, set())
-        drift_tools = config_tools
-    else:
-        drift_tools = wired_tools
+    composed_base = state_dir("trailhead", env=_env) / "composed"
+    harnesses = _discover_harnesses(composed_base)
 
-    # ----------------------------------------------------------------
-    # Step 1: Global checks — python version (U-2) + PATH integration.
-    # The PATH check owns the "front-door CLI (e.g. camp) not on PATH" signal.
-    # ----------------------------------------------------------------
-    global_checks = [
-        _check_python_version(_python_runner),
-        _check_marketplace(env=_env),
-    ]
-    global_checks.extend(
-        _check_path_integration(wired_tools, which_fn=_which_runner, env=_env)
-    )
+    shim_dir = resolve_shim_dir(env=_env)
+    clis = {name: _which(name) for name in _CLI_NAMES}
 
-    # ----------------------------------------------------------------
-    # Step 2: Per-tool doctor probes
-    # ----------------------------------------------------------------
-    tools_data: dict[str, dict] = {}
-    any_failed = False
-
-    for tool in wired_tools:
-        entry = _probe_tool_doctor(tool, _doctor_runner)
-        tools_data[tool] = entry
-
-        status = entry.get("status")
-        if status == "no_doctor":
-            pass  # not a failure
-        elif status == "not_on_path":
-            # The PATH-integration check already owns this signal; don't
-            # double-count it as a per-tool failure here.
-            pass
-        elif status == "ok":
-            if entry.get("any_failed"):
-                any_failed = True
-        else:
-            # timeout, parse_error, error → counts as failure
-            any_failed = True
-
-    # ----------------------------------------------------------------
-    # Step 3: Drift check (R-2)
-    # ----------------------------------------------------------------
-    drift_checks = _check_drift(drift_tools, env=_env)
-    for dc in drift_checks:
-        if not dc.get("pass", True):
-            any_failed = True
-
-    # Propagate any_failed from global checks
-    for gc in global_checks:
-        if not gc.get("pass", True):
-            any_failed = True
-
-    # ----------------------------------------------------------------
-    # Step 4: Build result data
-    # ----------------------------------------------------------------
     data = {
-        "any_failed": any_failed,
-        "checks": global_checks,
-        "tools": tools_data,
-        "drift_checks": drift_checks,
+        "harnesses": harnesses,
+        "shim_dir": str(shim_dir),
+        "shim_dir_present": shim_dir.exists(),
+        "clis": clis,
+        "python3_version": _python_version(_pyrunner),
     }
 
-    human_lines = _build_human_output(data, global_checks, tools_data, drift_checks)
-    human_output = "\n".join(human_lines)
-
-    exit_code = 1 if any_failed else 0
-    return DoctorResult(data=data, human_output=human_output, exit_code=exit_code)
+    return DoctorResult(data=data, human_output=_build_human(data), exit_code=0)
 
 
-# ---------------------------------------------------------------------------
-# Human output builder
-# ---------------------------------------------------------------------------
+def _build_human(data: dict) -> str:
+    lines = ["trailhead doctor (read-only report):", ""]
 
-
-def _build_human_output(
-    data: dict,
-    global_checks: list[dict],
-    tools_data: dict[str, dict],
-    drift_checks: list[dict],
-) -> list[str]:
-    """Build a human-readable grouped output."""
-    lines = []
-
-    lines.append("trailhead doctor:")
+    harnesses = data["harnesses"]
+    if not harnesses:
+        lines.append("  no harnesses installed")
+    else:
+        for hname, info in harnesses.items():
+            lines.append(f"  {hname}:")
+            reg = "registered" if info["registered"] else "not registered"
+            lines.append(f"    marketplace: {info.get('marketplace') or '(none)'} ({reg})")
+            installed = ", ".join(info["installed"]) or "(none)"
+            lines.append(f"    installed: {installed}")
     lines.append("")
 
-    # Global checks
-    if global_checks:
-        lines.append("  global:")
-        for check in global_checks:
-            status = "PASS" if check.get("pass") else "FAIL"
-            lines.append(f"    [{status}] {check.get('description', check.get('check'))}")
-            if not check.get("pass") and check.get("details"):
-                lines.append(f"           {check['details']}")
-        lines.append("")
+    lines.append("  CLIs on PATH:")
+    for name, resolved in data["clis"].items():
+        lines.append(f"    {name}: {resolved or 'not on PATH'}")
+    lines.append(f"  shim dir: {data['shim_dir']} "
+                 f"({'present' if data['shim_dir_present'] else 'absent'})")
+    lines.append(f"  python3: {data['python3_version']}")
 
-    # Per-tool
-    for tool, entry in tools_data.items():
-        status = entry.get("status")
-        lines.append(f"  {tool}:")
-        if status == "no_doctor":
-            lines.append(f"    no doctor (n/a)")
-        elif status == "ok":
-            checks = entry.get("checks", [])
-            if not checks:
-                lines.append("    (no checks)")
-            for check in checks:
-                c_status = "PASS" if check.get("pass") else "FAIL"
-                lines.append(f"    [{c_status}] {check.get('description', check.get('check', '?'))}")
-                if not check.get("pass") and check.get("details"):
-                    lines.append(f"           {check['details']}")
-        elif status == "not_on_path":
-            lines.append(f"    [skip] {entry.get('error', 'not on PATH')}")
-        elif status == "timeout":
-            lines.append(f"    [ERROR] {entry.get('error', 'timed out')}")
-        elif status == "parse_error":
-            lines.append(f"    [ERROR] {entry.get('error', 'malformed JSON')}")
-        else:
-            lines.append(f"    [ERROR] {entry.get('error', 'unknown error')}")
-        lines.append("")
-
-    # Drift checks
-    if drift_checks:
-        drift_failures = [dc for dc in drift_checks if not dc.get("pass", True)]
-        if drift_failures:
-            lines.append("  drift (config↔filesystem):")
-            for dc in drift_failures:
-                tool = dc.get("check", "").replace("drift:", "")
-                absent = dc.get("drift_absent", [])
-                extra = dc.get("drift_extra", [])
-                if absent:
-                    lines.append(f"    [{tool}] declared-but-absent: {', '.join(absent)}")
-                if extra:
-                    lines.append(f"    [{tool}] present-but-undeclared: {', '.join(extra)}")
-            lines.append("")
-
-    overall = "PASS" if not data.get("any_failed") else "FAIL"
-    lines.append(f"overall: {overall}")
-
-    return lines
+    return "\n".join(lines)

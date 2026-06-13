@@ -1,0 +1,17 @@
+# Default trailhead install config — "install everything".
+#
+# `trailhead install` uses this when no --config is given. It installs both CLIs
+# and all agent-plugins into whatever harness is detected (or named with
+# --harness). Drop your own *.toml files in this directory to customize an
+# install; everything here except this file is gitignored, so your configs never
+# create git noise in a checkout.
+#
+# See trailhead/install_config.py for the full schema (per-harness blocks,
+# per-plugin subagent/skill selection, and file_path overrides).
+
+install_camp_cli = true
+install_lore_cli = true
+
+# Top-level default plugin set, applied to every detected/--harness harness.
+# A [[harness]] block (omitted here) can override this per harness.
+plugins = ["camp", "lore", "craft", "portage", "landing"]

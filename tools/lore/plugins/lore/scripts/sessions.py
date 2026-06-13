@@ -588,14 +588,8 @@ def render_vault_index(
     session_note: Path | None,
     session_created: bool,
     warning: str | None = None,
-    session_note_display: str | None = None,
 ) -> str:
-    """Build the always-emitted baseline context block.
-
-    ``session_note_display``: when provided, used verbatim as the session note
-    pointer in the banner instead of the vault-relative path. The hook supplies
-    a pre-rendered clickable URL here when the link server is active.
-    """
+    """Build the always-emitted baseline context block."""
     vault = Path(vault)
     stats = get_vault_stats(vault)
     lines: list[str] = [f"## Lore vault — {worktree_name} ({project})", ""]
@@ -605,13 +599,10 @@ def render_vault_index(
         lines.append("")
 
     if session_note is not None:
-        if session_note_display is not None:
-            display = session_note_display
-        else:
-            try:
-                display = str(session_note.relative_to(vault))
-            except ValueError:
-                display = session_note.name
+        try:
+            display = str(session_note.relative_to(vault))
+        except ValueError:
+            display = session_note.name
         verb = "created" if session_created else "resumed"
         lines.append(
             f"**Session note:** `{display}` ({verb} for this worktree). "

@@ -9,21 +9,23 @@ management). Where lore owns *what you know*, craft owns *how you build*:
 the reusable agents and rituals a developer reaches for regardless of which
 codebase they're in.
 
-## Capabilities
+## What craft covers
 
-craft ships six capability groups, each with agents and skills. craft owns the
+craft's agents and skills organize into six areas. craft owns the
 **plan → execute → review** development loop; shipping (PR lifecycle) and deploy
 (post-merge soak) live in the sibling [portage](../portage) and
-[landing](../landing) plugins.
+[landing](../landing) plugins. (These are conceptual areas, not install units —
+`trailhead install` selects individual subagents and skills, named below, by
+name; the default installs them all.)
 
-| Capability | What it covers |
+| Area | What it covers |
 |---|---|
-| `planning` | Turn fuzzy ideas into specs and implementation plans |
-| `execute` | TDD subagent-driven implementation, slice by slice |
-| `review` | Structured code review after implementation |
-| `council` | Four-lens review panel (builder / reliability / security / advocate) |
-| `design` | Design-doc authoring and structured spec artifacts |
-| `helpers` | Cheap specialist subagents for docs, logs, research, tests, security |
+| Planning | Turn fuzzy ideas into specs and implementation plans |
+| Execute | TDD subagent-driven implementation, slice by slice |
+| Review | Structured code review after implementation |
+| Council | Four-lens review panel (builder / reliability / security / advocate) |
+| Design | Design-doc authoring and structured spec artifacts |
+| Helpers | Cheap specialist subagents for docs, logs, research, tests, security |
 
 ## Agents
 
@@ -78,7 +80,7 @@ already has on lore (craft → lore is allowed; lore never depends on craft).
 
 ## Moved commands — shipping & deploy now live in portage / landing
 
-craft used to ship a `release` capability for the PR-lifecycle and post-merge
+craft used to ship `release` commands for the PR-lifecycle and post-merge
 soak. That surface moved to the sibling [portage](../portage) (get it merged)
 and [landing](../landing) (get it deployed) plugins. If you reach for a removed
 `craft` command, use its replacement:

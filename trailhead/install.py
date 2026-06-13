@@ -1,33 +1,26 @@
 """Install orchestrator for `trailhead install`.
 
-This module wires the pipeline:
-  1. Preset selection (--preset / interactive A-6 menu / non-TTY default)
-  2. Resolve preset → {tool: set[cap]} via presets.resolve
-  3. Verify the repo in place (already-present-repo case, A-7)
-  4. Wire the selection (wire.wire)
-  5. Persist config (config.save_config)
-  6. PATH integration (pathint.install_path_integration)
-  7. Print the summary (A-1, A-2, A-3, A-7, A-10)
+Config-driven, non-interactive, multi-harness:
 
-A-9 hygiene:
-  - progress/summary → stdout
-  - errors → stderr
-  - nonzero exit on failure
-  - NO_COLOR / --no-color honored (no ANSI used anywhere)
-  - --json for machine-readable output
-  - --quiet to suppress progress lines
+  1. Detect harnesses on the machine (e.g. ~/.claude → claude_code).
+  2. Resolve the effective config (config file + CLI overrides) → which harnesses,
+     which plugins (subagents/skills + overrides), and the camp/lore CLI flags.
+  3. For each resolved harness: compose the selected plugins and install them via
+     the harness (wire + harness registration tail), under the wire lock.
+  4. Build the camp/lore CLI shim dir (harness-independent, additive). trailhead
+     does NOT edit your shell rc — it tells you to add `eval "$(… shellenv)"`.
+  5. Print the summary.
 
-Hermeticity (B-3):
-  The real wire() and install_path_integration() are imported at module level so
-  tests can patch them via patch("trailhead.install.wire") and
-  patch("trailhead.install.install_path_integration").
+No presets, no interactive prompts, no remote fetch, no install manifest — the
+repo checkout IS the source ("install = clone the repo").
 
-  _is_tty() is a thin wrapper around sys.stdin.isatty() so tests can patch it
-  via patch("trailhead.install._is_tty", return_value=...).
+Upgrades are additive: re-running install only adds; it never removes a plugin
+or CLI shim that a previous run installed.
 
-U-1 / A-7: for the already-present-repo case (dogfood) we verify-in-place and
-  print "verified in place (no download needed)".  The fresh-clone path is not
-  reached in the current dogfood scenario but the error handling covers it.
+No harness found (and none named): warn, still build the CLI shims, exit non-zero.
+
+Hermeticity (B-3): detect_harnesses / wire / create_shims / get_harness are
+imported at module level so tests can patch them.
 """
 
 from __future__ import annotations
@@ -37,382 +30,164 @@ import os
 import sys
 from pathlib import Path
 
-from trailhead.config import TrailheadConfig, load_config, save_config
-from trailhead.fetch import FetchError, _get_head_sha, verify_present_repo
-from trailhead.manifest import InstallManifest, load_install_manifest
-from trailhead.pathint import PathIntegrationError, PathIntegrationResult, install_path_integration
-from trailhead.paths import config_dir, ensure_dir, state_dir
-from trailhead.presets import PresetError, resolve
-from trailhead.wire import WireError, wire
+from trailhead.compose import UnknownSkillError, UnknownSubagentError
+from trailhead.harness import detect_harnesses, get_harness
+from trailhead.install_config import (
+    ConfigResolveError,
+    resolve_config,
+    resolve_config_path,
+)
+from trailhead.pathint import create_shims, resolve_shim_dir
+from trailhead.wire import LockError, WireError, wire, wire_lock
 
-# ---------------------------------------------------------------------------
-# Injected-for-tests helpers
-# ---------------------------------------------------------------------------
-
-_MANIFEST_PATH = Path(__file__).parent / "install_manifest.toml"
 _REPO_ROOT = Path(__file__).parent.parent
+_TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 
-_A6_MENU = """\
-Preset? [minimal / standard / full] (default: standard)
-  minimal:  lore only — capture + recall (lowest buy-in)
-  standard: lore + camp + craft subset (the common loop)
-  full:     everything
-"""
-
-
-def _is_tty() -> bool:
-    """Return True if stdin is interactive. Thin wrapper so tests can patch it."""
-    return sys.stdin.isatty()
-
-
-# ---------------------------------------------------------------------------
-# Public API: run_install
-# ---------------------------------------------------------------------------
+# CLI binaries shipped by the camp/lore plugins, keyed by the install flag.
+_CAMP_BIN = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "bin" / "camp"
+_LORE_BIN = _REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "bin" / "lore"
 
 
 def run_install(
-    preset_arg: str | None,
     *,
+    config_arg: str | None = None,
+    harnesses: list[str] | None = None,
+    plugins: list[str] | None = None,
+    no_camp: bool = False,
+    no_lore: bool = False,
     env: dict[str, str] | None = None,
     quiet: bool = False,
     as_json: bool = False,
+    runner=None,
 ) -> int:
     """Execute the install pipeline. Returns an int exit code.
 
-    Args:
-        preset_arg:   The --preset value, or None for interactive/default.
-        env:          Env dict for path resolution (hermeticity).
-        quiet:        Suppress progress lines (summary still printed).
-        as_json:      Print machine-readable JSON instead of human summary.
-
-    Returns:
-        0 on success, nonzero on failure.
+    Returns 0 on success, 1 on failure or when no harness was found.
     """
     _env = env if env is not None else dict(os.environ)
-    is_tty = _is_tty()
 
     # ------------------------------------------------------------------
-    # Step 1: Resolve the preset name
+    # Resolve config (file + CLI overrides + detection)
     # ------------------------------------------------------------------
-    preset_name = _resolve_preset_name(preset_arg, is_tty=is_tty, quiet=quiet)
-    if preset_name is None:
-        return 1
-
-    # ------------------------------------------------------------------
-    # Step 2: Resolve preset → {tool: set[cap]}
-    # ------------------------------------------------------------------
+    detected = [h.name for h in detect_harnesses(_env)]
+    config_path = resolve_config_path(config_arg, _REPO_ROOT)
     try:
-        selection = resolve(preset_name)
-    except PresetError as exc:
+        cfg = resolve_config(
+            config_path=config_path,
+            cli_harnesses=harnesses,
+            cli_plugins=plugins,
+            no_camp=no_camp,
+            no_lore=no_lore,
+            detected_harnesses=detected,
+        )
+    except (ConfigResolveError, UnknownSubagentError, UnknownSkillError) as exc:
         print(f"trailhead: {exc}", file=sys.stderr)
         return 1
 
     # ------------------------------------------------------------------
-    # Step 3: Load install manifest + verify repo in place (A-7)
+    # Wire plugins into each resolved harness (under the shared lock)
     # ------------------------------------------------------------------
-    cfg = load_config(env=_env)
-    try:
-        manifest = load_install_manifest(
-            _MANIFEST_PATH,
-            cfg.registry,
-            local_root=_REPO_ROOT,
-        )
-    except Exception as exc:
-        print(f"trailhead: failed to load install manifest: {exc}", file=sys.stderr)
-        return 1
-
-    # Verify the repo entry (already-present-repo case)
-    trailhead_entry = _find_trailhead_entry(manifest)
-    verify_msg = ""
-    if trailhead_entry is not None:
-        if not quiet and not as_json:
-            if trailhead_entry.is_local_self:
-                print("verifying trailhead (local checkout)…")
-            else:
-                print(f"verifying trailhead@{trailhead_entry.rev[:8]}…")
+    wired: dict[str, list[str]] = {}
+    if cfg.harnesses:
         try:
-            verify_present_repo(trailhead_entry, repo_path=_REPO_ROOT)
-            verify_msg = "verified in place (no download needed)"
-        except FetchError as exc:
+            with wire_lock(env=_env):
+                for rh in cfg.harnesses:
+                    harness = get_harness(rh.name)
+                    plugin_names = [p.name for p in rh.plugins]
+                    if not quiet and not as_json:
+                        print(
+                            f"installing into {rh.name}: "
+                            f"{', '.join(plugin_names) or '(no plugins)'}…"
+                        )
+                    wire(rh.selection(), harness=harness, env=_env, runner=runner)
+                    wired[rh.name] = plugin_names
+        except LockError as exc:
             print(str(exc), file=sys.stderr)
             return 1
-    else:
-        verify_msg = "verified in place (no download needed)"
+        except WireError as exc:
+            print(f"trailhead: {exc}", file=sys.stderr)
+            return 1
 
     # ------------------------------------------------------------------
-    # Step 4: Wire the selection
+    # Build the camp/lore CLI shim dir (harness-independent, additive).
+    # The shim dir's contents encode the selection; `shellenv` adds it to PATH.
     # ------------------------------------------------------------------
-    if not quiet and not as_json:
-        for tool, caps in selection.items():
-            caps_str = ", ".join(sorted(caps)) if caps else "base"
-            print(f"wiring {tool} ({caps_str})…")
+    cli_tools: dict[str, Path] = {}
+    if cfg.install_camp_cli and _CAMP_BIN.exists():
+        cli_tools["camp"] = _CAMP_BIN
+    if cfg.install_lore_cli and _LORE_BIN.exists():
+        cli_tools["lore"] = _LORE_BIN
 
-    try:
-        wire(selection, env=_env)
-    except Exception as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-    # ------------------------------------------------------------------
-    # Step 5: Persist config (R-2: only after successful wire)
-    # ------------------------------------------------------------------
-    capabilities_dict: dict[str, list[str]] = {
-        tool: sorted(caps) for tool, caps in selection.items()
-    }
-    cfg.preset = preset_name
-    cfg.capabilities = capabilities_dict
-    save_config(cfg, env=_env)
-
-    # M2: seed update_state.json so the first `trailhead update` after install
-    # is a true no-op (wire not re-called for unchanged revs).
-    _seed_update_state(manifest, env=_env)
-
-    # ------------------------------------------------------------------
-    # Step 6: PATH integration
-    # ------------------------------------------------------------------
-    trailhead_root = str(_REPO_ROOT)
-    wired_tool_bins: dict[str, Path] = {}
-    for tool in selection:
-        bin_path = _REPO_ROOT / "tools" / tool / "plugins" / tool / "bin" / tool
-        if bin_path.exists():
-            wired_tool_bins[tool] = bin_path
-
-    pathint_result: PathIntegrationResult | None = None
-    if cfg.path_integration:
+    shim_dir = None
+    if cli_tools:
         try:
-            pathint_result = install_path_integration(
-                wired_tool_bins,
-                trailhead_root,
-                is_tty=is_tty,
-                env=_env,
-            )
+            shim_dir = create_shims(cli_tools, str(_REPO_ROOT), env=_env).shim_dir
         except Exception as exc:
-            # M1: pathint failure is a warning — the install (wire + config) succeeded.
-            # PATH is separately fixable; exiting nonzero would mislead the user.
-            shim_hint = state_dir("trailhead", env=_env) / "bin"
+            # M1: a shim-dir failure is a warning — wiring succeeded.
             print(
-                f"trailhead: could not write PATH block: {exc}\n"
-                f"  add {shim_hint} to your PATH manually, or run "
-                f"`trailhead config path_integration on`",
+                f"trailhead: could not build the CLI shim dir: {exc}\n"
+                f"  (the plugins are installed; the camp/lore CLIs just aren't shimmed)",
                 file=sys.stderr,
             )
 
-    # ------------------------------------------------------------------
-    # Step 7: Print the summary
-    # ------------------------------------------------------------------
-    config_path = config_dir("trailhead", env=_env) / "config.toml"
+    no_harness = not cfg.harnesses
 
     if as_json:
-        _print_json_summary(
-            preset_name=preset_name,
-            selection=selection,
-            config_path=config_path,
-            pathint_result=pathint_result,
-        )
+        _print_json_summary(cfg, wired, shim_dir, no_harness=no_harness)
     else:
-        _print_human_summary(
-            preset_name=preset_name,
-            selection=selection,
-            verify_msg=verify_msg,
-            config_path=config_path,
-            pathint_result=pathint_result,
-            quiet=quiet,
+        _print_human_summary(cfg, wired, shim_dir, no_harness=no_harness)
+
+    if no_harness:
+        print(
+            "trailhead: no code harness detected (looked for ~/.claude). "
+            "Built the CLI shims only — re-run with `--harness <name>` "
+            "(e.g. claude_code) to install the agent-plugins.",
+            file=sys.stderr,
         )
+        return 1
 
     return 0
 
 
 # ---------------------------------------------------------------------------
-# Internal: preset name resolution
+# Summaries
 # ---------------------------------------------------------------------------
 
 
-def _resolve_preset_name(
-    preset_arg: str | None,
-    *,
-    is_tty: bool,
-    quiet: bool,
-) -> str | None:
-    """Resolve the preset name from --preset, interactive prompt, or non-TTY default.
+def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
+    lines: list[str] = []
 
-    Returns the resolved preset name, or None on invalid input.
-    """
-    if preset_arg is not None:
-        # Validate explicitly: PresetError will be raised by resolve() later,
-        # but we want to fail fast for unknown names here too.
-        try:
-            resolve(preset_arg)
-        except PresetError as exc:
-            print(f"trailhead: {exc}", file=sys.stderr)
-            return None
-        return preset_arg
-
-    if is_tty:
-        return _interactive_preset_prompt()
-    else:
-        # A-8 / non-TTY default: never block on stdin
-        msg = "defaulting to standard preset (non-interactive)"
-        if not quiet:
-            print(msg)
-        return "standard"
-
-
-def _interactive_preset_prompt() -> str:
-    """Show the A-6 self-guiding preset menu and read user input.
-
-    Bare enter → "standard" (the default).
-    """
-    print(_A6_MENU, end="")
-    try:
-        raw = sys.stdin.readline()
-    except (EOFError, KeyboardInterrupt):
-        return "standard"
-    choice = raw.strip().lower()
-    if not choice:
-        return "standard"
-    return choice
-
-
-# ---------------------------------------------------------------------------
-# Internal: manifest helpers
-# ---------------------------------------------------------------------------
-
-
-def _find_trailhead_entry(manifest: InstallManifest):
-    """Return the 'trailhead' RepoEntry from the manifest, or None."""
-    for entry in manifest.repos:
-        if entry.name == "trailhead":
-            return entry
-    return None
-
-
-def _seed_update_state(manifest: InstallManifest, *, env: dict[str, str]) -> None:
-    """Write update_state.json seeded with the current manifest revs (M2).
-
-    Called at the end of a successful install so the first `trailhead update`
-    with unchanged revs is a true no-op rather than always re-wiring.
-    """
-    _state_dir = state_dir("trailhead", env=env)
-    ensure_dir(_state_dir)
-    state_file = _state_dir / "update_state.json"
-    state_file.write_text(json.dumps(_manifest_state_revs(manifest, env=env)))
-
-
-def _manifest_state_revs(manifest: InstallManifest, *, env: dict[str, str]) -> dict[str, str]:
-    """Map each repo to the rev recorded in update_state.json.
-
-    A local-self entry pins no rev, so it records its current HEAD SHA — this
-    lets `trailhead update` detect a moved working tree (a new commit) and
-    re-wire, while an unchanged tree stays a no-op (M2).
-    """
-    revs: dict[str, str] = {}
-    for entry in manifest.repos:
-        if entry.is_local_self:
-            revs[entry.name] = _get_head_sha(_REPO_ROOT, env=env) or ""
-        else:
-            revs[entry.name] = entry.rev
-    return revs
-
-
-# ---------------------------------------------------------------------------
-# Internal: summary printing (A-1, A-2, A-3, A-7, A-10)
-# ---------------------------------------------------------------------------
-
-
-def _example_front_door_cli(selection: dict[str, set[str]]) -> str | None:
-    """Return a wired tool that ships a front-door CLI, to use as a verify hint.
-
-    Prefers camp (THE front door, run outside any session); otherwise the
-    first wired tool that has a bin/<tool> wrapper.  Returns None if no wired
-    tool ships a CLI (e.g. a craft-only selection).
-    """
-    front_door = [
-        tool
-        for tool in sorted(selection)
-        if (_REPO_ROOT / "tools" / tool / "plugins" / tool / "bin" / tool).exists()
-    ]
-    if "camp" in front_door:
-        return "camp"
-    return front_door[0] if front_door else None
-
-
-def _print_human_summary(
-    *,
-    preset_name: str,
-    selection: dict[str, set[str]],
-    verify_msg: str,
-    config_path: Path,
-    pathint_result: PathIntegrationResult | None,
-    quiet: bool,
-) -> None:
-    """Print the A-10 multi-line grouped install summary."""
-    lines = []
-
-    # A-7: honest source line
-    lines.append(f"  {verify_msg}")
-    lines.append("")
-
-    # A-10: wired tools grouped
-    lines.append("wired:")
-    for tool, caps in sorted(selection.items()):
-        caps_str = ", ".join(sorted(caps)) if caps else "base"
-        lines.append(f"  {tool} ({caps_str})")
-    lines.append("")
-
-    # A-3: PATH integration line.  camp/lore are front-door CLIs run outside a
-    # Claude Code session, so the user must know how to activate + verify them.
-    # Name an actually-wired CLI as the verify example (camp is the canonical
-    # front door; fall back to whatever front-door tool this preset wired).
-    if pathint_result is not None:
-        example_cli = _example_front_door_cli(selection)
-        if pathint_result.skip_message:
-            lines.append(f"PATH: {pathint_result.skip_message}")
-            lines.append(
-                f"      or add this dir to your PATH manually: {pathint_result.shim_dir}"
-            )
-        elif pathint_result.rc_path is not None:
-            lines.append(f"PATH: added {pathint_result.shim_dir} via {pathint_result.rc_path}")
-            verify = f", then `{example_cli} --help` should resolve" if example_cli else ""
-            lines.append(
-                f"      restart your shell (or `source {pathint_result.rc_path}`){verify}"
-            )
-            lines.append("      remove later with `trailhead config path_integration off`")
+    if wired:
+        lines.append("installed plugins:")
+        for harness_name, plugin_names in wired.items():
+            lines.append(f"  {harness_name}: {', '.join(plugin_names) or '(none)'}")
         lines.append("")
 
-    # Config path
-    lines.append(f"config: {config_path}")
-    lines.append("")
+    clis = []
+    if cfg.install_camp_cli:
+        clis.append("camp")
+    if cfg.install_lore_cli:
+        clis.append("lore")
+    if shim_dir is not None and clis:
+        lines.append(f"CLIs ({', '.join(clis)}): shims in {shim_dir}")
+        lines.append("  to put them on your PATH, add this to your shell profile:")
+        lines.append(f'    eval "$({_TRAILHEAD_BIN} shellenv)"')
+        lines.append("  then restart your shell (or re-eval it in the current one)")
+        lines.append("")
 
-    # U-1 residual: session restart note
-    lines.append("start a fresh Claude Code session to load the wired tools")
-    lines.append("")
+    if not no_harness:
+        lines.append("start a fresh Claude Code session to load the installed plugins")
 
-    # A-1: next step
-    lines.append(
-        'next: run `lore capture "my first note"`, then start a Claude Code '
-        "session and `/lore:recall` to retrieve it"
-    )
-
-    print("\n".join(lines))
+    print("\n".join(lines).rstrip())
 
 
-def _print_json_summary(
-    *,
-    preset_name: str,
-    selection: dict[str, set[str]],
-    config_path: Path,
-    pathint_result: PathIntegrationResult | None,
-) -> None:
-    """Print the --json machine-readable summary (A-9)."""
-    wired = {tool: sorted(caps) for tool, caps in selection.items()}
-    shim_dir = str(pathint_result.shim_dir) if pathint_result else None
-    rc_path = str(pathint_result.rc_path) if pathint_result and pathint_result.rc_path else None
-
+def _print_json_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
     data = {
-        "preset": preset_name,
-        "wired": wired,
-        "config_path": str(config_path),
-        "shim_dir": shim_dir,
-        "rc_path": rc_path,
+        "harnesses": wired,
+        "install_camp_cli": cfg.install_camp_cli,
+        "install_lore_cli": cfg.install_lore_cli,
+        "shim_dir": str(shim_dir) if shim_dir else None,
+        "shellenv": f'eval "$({_TRAILHEAD_BIN} shellenv)"',
+        "no_harness": no_harness,
     }
     print(json.dumps(data))

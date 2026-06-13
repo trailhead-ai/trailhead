@@ -10,13 +10,11 @@ consumer of the `trailhead.vcs` provider library — the provider owns the GitHu
 Actions deploy-log interrogation (`deploy.logs`/`deploy.status`/`deploy.workflow_runs`),
 so the plugin's agents stay focused on the judgment calls.
 
-## Capabilities
+## What landing covers
 
-landing ships one capability group:
-
-| Capability | What it covers |
-|---|---|
-| `deploy` | Post-merge soak + deploy-health incident handling for a camp group |
+landing's agents and skills cover one area — post-merge soak + deploy-health
+incident handling for a camp group. (`trailhead install` selects the individual
+subagents/skills below by name; the default installs them all.)
 
 ## Commands
 

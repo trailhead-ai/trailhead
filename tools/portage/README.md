@@ -8,13 +8,12 @@ provider owns the deterministic plumbing (repo detection, PR status/evaluate/mer
 CI poll-to-actionable, and the `prs.json` sidecar), so the plugin's agents and
 skills stay focused on the judgment calls.
 
-## Capabilities
+## What portage covers
 
-portage ships one capability group:
-
-| Capability | What it covers |
-|---|---|
-| `release` | PR lifecycle for a camp group — open, update, watch CI, and merge in dependency order |
+portage's agents and skills cover one area — the PR lifecycle for a camp group:
+open, update, watch CI, and merge in dependency order. (`trailhead install`
+selects the individual subagents/skills below by name; the default installs
+them all.)
 
 ## Commands
 
@@ -57,7 +56,7 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 The manual end-to-end parity gate — open → CI watch → merge (portage) plus
 soak → doctor (landing) — is documented in
 [`MANUAL-SMOKE.md`](MANUAL-SMOKE.md). Run it on a real PR before any deletion
-of the preceding craft `release` capability cluster.
+of the preceding craft release-command cluster.
 
 ## Relationship to the rest of trailhead
 

@@ -1,33 +1,12 @@
+# lore — agent-native project memory.
+# Selectable skills are discovered from skills/*/ (those with a SKILL.md);
+# selectable subagents from agents/*.md. No capability groups — install selects
+# subagents/skills by name (see trailhead/install_config.py).
+#
+# skills/_shared ships always (base): it holds VAULT_WRITE_PATTERN.md, referenced
+# at runtime by the capture skills, and has no SKILL.md so it is never selectable.
+
 [tool]
 name = "lore"
-base = ["skills/_shared", "skills/sync"]
+base = ["skills/_shared"]
 hooks_json = "hooks/hooks.json"
-
-[capabilities.capture]
-description = "Capture decisions, dead-ends, deferrals, follow-ups, area notes, and intake seeds into the vault."
-skills = [
-  "skills/decision",
-  "skills/dead-end",
-  "skills/defer",
-  "skills/follow-up",
-  "skills/check-in",
-  "skills/area",
-  "skills/seed",
-  "skills/brainstorm",
-]
-agents = []
-
-[capabilities.recall]
-description = "Surface and synthesize accumulated vault memory via librarian lookups."
-skills = []
-agents = ["agents/librarian.md"]
-
-[capabilities.sessions]
-description = "Session lifecycle — checkpoint mid-session state and finalize on close."
-skills = ["skills/checkpoint", "skills/finish"]
-agents = []
-
-[capabilities.shared-vaults]
-description = "Layered personal + shared vaults — compose lore across team members (WS-9, not yet built)."
-skills = []
-agents = []

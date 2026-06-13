@@ -37,7 +37,7 @@ def _load_cli():
     for cached in list(sys.modules):
         if cached in ("recall", "vault", "frontmatter", "sessions", "layers",
                       "status_validator", "regenerate_indices", "harvest",
-                      "promote", "review", "link_server"):
+                      "promote", "review"):
             sys.modules.pop(cached, None)
     loader = SourceFileLoader("lore_cli_areas_test", str(CLI_PATH))
     spec = importlib.util.spec_from_loader("lore_cli_areas_test", loader)

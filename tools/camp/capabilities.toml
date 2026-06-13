@@ -1,8 +1,5 @@
+# camp — group worktree orchestration.
+# One selectable skill (worktree), no subagents. No always-on base.
+
 [tool]
 name = "camp"
-base = ["skills/worktree"]
-
-[capabilities.dev-env]
-description = "Provision and teardown local dev-env instances for a worktree group."
-skills = []
-agents = []

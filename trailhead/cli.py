@@ -1,15 +1,14 @@
 """trailhead management CLI.
 
-Subcommands: install / update / doctor / config
-Each subcommand body is a stub (exits 0, prints "not yet wired") for Slice 0.
-Later slices replace the bodies.
+Subcommands: install / uninstall / doctor / shellenv
+
+Everything is CLI/config-driven and non-interactive so an agent can run it.
 
 A-9 hygiene:
   - errors → stderr, normal output → stdout
   - main() returns an int exit code
-  - bare `trailhead` and `trailhead --help` print a curated grouped menu,
-    never a raw argparse dump
-  - no color output (NO_COLOR / --no-color honored by omission)
+  - bare `trailhead` and `trailhead --help` print a curated grouped menu
+  - no color output
 """
 
 import argparse
@@ -17,46 +16,54 @@ import sys
 
 from trailhead import __version__
 from trailhead.capabilities import ConfineError, ManifestError
-from trailhead.compose import CollisionError, DestConfinementError, UnknownCapabilityError
-from trailhead.config import ConfigError
-from trailhead.config_cmd import run_config
-from trailhead.doctor import run_doctor
-from trailhead.fetch import FetchError
-from trailhead.install import run_install
-from trailhead.manifest import InstallManifestError
-from trailhead.pathint import PathIntegrationError
-from trailhead.paths import PathResolutionError
-from trailhead.presets import PresetError
-from trailhead.uninstall import run_uninstall
-from trailhead.update import run_update
-from trailhead.wire import LockError, WireError
-
-# Named error family — maps to a clean 'trailhead: <message>' line (M5 / A-9).
-_TRAILHEAD_ERRORS = (
-    ConfigError,
-    InstallManifestError,
-    FetchError,
-    WireError,
-    PathIntegrationError,
-    PathResolutionError,
-    PresetError,
-    LockError,
-    ManifestError,
-    ConfineError,
-    UnknownCapabilityError,
+from trailhead.compose import (
     CollisionError,
     DestConfinementError,
+    OverrideError,
+    UnknownSkillError,
+    UnknownSubagentError,
+)
+from trailhead.doctor import run_doctor
+from trailhead.harness import HarnessError
+from trailhead.install import run_install
+from trailhead.install_config import ConfigResolveError
+from trailhead.pathint import PathIntegrationError, shellenv_lines
+from trailhead.paths import PathResolutionError
+from trailhead.uninstall import run_uninstall
+from trailhead.wire import LockError, WireError
+
+# Named error family — maps to a clean 'trailhead: <message>' line (A-9).
+_TRAILHEAD_ERRORS = (
+    ConfigResolveError,
+    ManifestError,
+    ConfineError,
+    UnknownSubagentError,
+    UnknownSkillError,
+    OverrideError,
+    CollisionError,
+    DestConfinementError,
+    HarnessError,
+    WireError,
+    LockError,
+    PathIntegrationError,
+    PathResolutionError,
 )
 
 _CURATED_HELP = """\
-trailhead {version} — manage and compose lore, craft, and camp plugins.
+trailhead {version} — install and manage the lore/camp/craft/portage/landing plugins.
 
 Commands:
-  install     Wire a preset of tools and capabilities into the Claude Code harness.
-  uninstall   Remove all wired tools and trailhead's PATH integration (keeps your data).
-  update      Re-wire to the latest pinned manifest versions from the configured source.
-  doctor      Roll up health checks across all wired tools.
-  config      Read and write trailhead configuration (registry, preset, capabilities).
+  install     Install agent-plugins into your code harness(es) + the camp/lore CLIs.
+  uninstall   Remove the entire trailhead install (all plugins + CLIs). Keeps your data.
+  doctor      Report what trailhead has installed (read-only).
+  shellenv    Print shell env to put the camp/lore CLIs on PATH (brew-style).
+
+Install is config-driven and non-interactive. By default it auto-detects your
+harness (e.g. ~/.claude → claude_code) and installs every plugin. Override with:
+  --harness <name>   target a harness explicitly (repeatable; e.g. claude_code)
+  --plugin <name>    install only these plugins (repeatable; default: all)
+  --no-camp/--no-lore  skip installing that CLI onto PATH
+  --config <path>    drive the install from a TOML config (see config/default.toml)
 
 Run `trailhead <command> --help` for details on each command.
 """
@@ -68,7 +75,11 @@ def _print_curated_help() -> None:
 
 def _cmd_install(args: argparse.Namespace) -> int:
     return run_install(
-        args.preset,
+        config_arg=args.config,
+        harnesses=args.harness or None,
+        plugins=args.plugin or None,
+        no_camp=args.no_camp,
+        no_lore=args.no_lore,
         quiet=args.quiet,
         as_json=args.json,
     )
@@ -82,13 +93,9 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
     )
 
 
-def _cmd_update(_args: argparse.Namespace) -> int:
-    return run_update()
-
-
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    result = run_doctor(as_json=getattr(args, "json", False))
-    if getattr(args, "json", False):
+    result = run_doctor(as_json=args.json)
+    if args.json:
         import json
         print(json.dumps(result.data))
     else:
@@ -96,95 +103,96 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
-def _cmd_config(args: argparse.Namespace) -> int:
-    return run_config(args.config_args)
+def _cmd_shellenv(args: argparse.Namespace) -> int:
+    # Print only — meant to be wrapped in `eval "$(trailhead shellenv)"`.
+    sys.stdout.write(shellenv_lines(shell=args.shell))
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trailhead",
-        description="trailhead — manage and compose lore, craft, and camp plugins.",
+        description="trailhead — install and manage the lore/camp/craft/portage/landing plugins.",
         add_help=True,
     )
     parser.add_argument(
-        "--version",
-        action="version",
-        version=f"trailhead {__version__}",
+        "--version", action="version", version=f"trailhead {__version__}"
     )
 
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
     install_p = subparsers.add_parser(
         "install",
-        help="Wire a preset of tools and capabilities into the Claude Code harness.",
+        help="Install agent-plugins into your code harness(es) + the camp/lore CLIs.",
     )
     install_p.add_argument(
-        "--preset",
-        metavar="PRESET",
-        default=None,
-        help="Preset to install: minimal, standard, or full. Default: standard (or prompts on TTY).",
+        "--harness",
+        action="append",
+        metavar="NAME",
+        default=[],
+        help="Target harness (repeatable; e.g. claude_code). Default: auto-detect.",
     )
     install_p.add_argument(
-        "--quiet",
-        action="store_true",
-        default=False,
+        "--plugin",
+        action="append",
+        metavar="NAME",
+        default=[],
+        help="Install only these agent-plugins (repeatable). Default: all.",
+    )
+    install_p.add_argument(
+        "--no-camp", action="store_true", default=False,
+        help="Skip installing/updating the camp CLI onto PATH.",
+    )
+    install_p.add_argument(
+        "--no-lore", action="store_true", default=False,
+        help="Skip installing/updating the lore CLI onto PATH.",
+    )
+    install_p.add_argument(
+        "--config", metavar="PATH", default=None,
+        help="Config TOML (absolute, or relative to the repo config/ dir). "
+             "Default: config/default.toml.",
+    )
+    install_p.add_argument(
+        "--quiet", action="store_true", default=False,
         help="Suppress progress lines; summary is still printed.",
     )
     install_p.add_argument(
-        "--json",
-        action="store_true",
-        default=False,
-        help="Print machine-readable JSON summary instead of human-readable output.",
+        "--json", action="store_true", default=False,
+        help="Print a machine-readable JSON summary.",
     )
 
     uninstall_p = subparsers.add_parser(
         "uninstall",
-        help="Remove all wired tools and trailhead's PATH integration (keeps your data).",
+        help="Remove the entire trailhead install (all plugins + CLIs). Keeps your data.",
     )
     uninstall_p.add_argument(
-        "--yes",
-        "-y",
-        action="store_true",
-        default=False,
+        "--yes", "-y", action="store_true", default=False,
         help="Skip the confirmation prompt.",
     )
     uninstall_p.add_argument(
-        "--quiet",
-        action="store_true",
-        default=False,
+        "--quiet", action="store_true", default=False,
         help="Suppress progress lines; summary is still printed.",
     )
     uninstall_p.add_argument(
-        "--json",
-        action="store_true",
-        default=False,
-        help="Print machine-readable JSON summary instead of human-readable output.",
-    )
-
-    subparsers.add_parser(
-        "update",
-        help="Re-wire to the latest pinned manifest versions from the configured source.",
+        "--json", action="store_true", default=False,
+        help="Print a machine-readable JSON summary.",
     )
 
     doctor_p = subparsers.add_parser(
-        "doctor",
-        help="Roll up health checks across all wired tools.",
+        "doctor", help="Report what trailhead has installed (read-only)."
     )
     doctor_p.add_argument(
-        "--json",
-        action="store_true",
-        default=False,
-        help="Print machine-readable JSON aggregate.",
+        "--json", action="store_true", default=False,
+        help="Print a machine-readable JSON report.",
     )
 
-    config_p = subparsers.add_parser(
-        "config",
-        help="Read and write trailhead configuration (registry, preset, capabilities).",
+    shellenv_p = subparsers.add_parser(
+        "shellenv",
+        help="Print shell env to put the camp/lore CLIs on PATH (brew-style).",
     )
-    config_p.add_argument(
-        "config_args",
-        nargs=argparse.REMAINDER,
-        help="Config subcommand and arguments (e.g. registry, path_integration, capabilities).",
+    shellenv_p.add_argument(
+        "--shell", choices=["fish", "zsh", "bash"], default=None,
+        help="Target shell. Default: detect from $SHELL.",
     )
 
     return parser
@@ -202,16 +210,15 @@ def main() -> int:
     dispatch = {
         "install": _cmd_install,
         "uninstall": _cmd_uninstall,
-        "update": _cmd_update,
         "doctor": _cmd_doctor,
-        "config": _cmd_config,
+        "shellenv": _cmd_shellenv,
     }
     handler = dispatch.get(args.command)
     if handler is None:
         print(f"trailhead: unknown command {args.command!r}", file=sys.stderr)
         return 1
 
-    # M5 / A-9: top-level error guard — named errors produce a clean
+    # A-9: top-level error guard — named errors produce a clean
     # 'trailhead: <message>' line on stderr + nonzero exit; no raw tracebacks.
     try:
         return handler(args)
