@@ -467,6 +467,27 @@ def test_atomicity_validation_failure_leaves_no_tmp(author_env):
     assert not list(g["groups_dir"].glob("*.tmp")), "no .tmp file should remain"
 
 
+def test_atomicity_roundtrip_gate_failure_unlinks_tmp(author_env):
+    """A failure at the post-write round-trip gate unlinks the .tmp and writes no config.
+
+    A whitespace-only member NAME passes _parse_member (non-empty) and
+    validate_scaffold (which does not inspect names), so the temp file IS written;
+    load_group then rejects the blank name, exercising the gate's unlink path —
+    not the upstream-validator path covered above.
+    """
+    g = author_env
+    repo = g["repos"]["alpha"]
+    result = _run_init(
+        ["mygroup", "--member", f"   ={repo}"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert result.returncode != 0, "round-trip gate should reject a blank member name"
+    assert "round-trip" in result.stderr, f"expected gate message, got: {result.stderr}"
+    assert not (g["groups_dir"] / "mygroup.toml").exists()
+    assert not list(g["groups_dir"].glob("*.tmp")), "no .tmp file should remain"
+
+
 def test_init_help_documents_new_flags() -> None:
     """`camp init --help` documents --member / --scaffold / --force modes."""
     result = subprocess.run(
