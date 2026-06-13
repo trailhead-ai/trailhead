@@ -1,19 +1,7 @@
 # portage — get the PR merged. Thin consumer of trailhead/vcs/ (repos/pr/ci).
 # tool.name MUST equal the plugins/<name>/ dir ("portage").
+# Selectable skills (skills/*/ with SKILL.md) and subagents (agents/*.md) are
+# discovered on disk; no always-on base.
 
 [tool]
 name = "portage"
-
-[capabilities.release]
-description = "PR lifecycle for a camp group — open, update, watch CI, and merge in dependency order, on the trailhead.vcs provider library."
-skills = [
-  "skills/open",
-  "skills/update",
-  "skills/monitor",
-  "skills/merge",
-]
-agents = [
-  "agents/summarizer.md",
-  "agents/updater.md",
-  "agents/monitor.md",
-]

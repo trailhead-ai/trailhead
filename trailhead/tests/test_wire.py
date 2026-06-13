@@ -1,9 +1,12 @@
-"""Tests for trailhead/wire.py — shared-root multi-tool orchestrator (Slice 3).
+"""Tests for trailhead/wire.py — per-harness multi-tool orchestrator.
 
-TDD: rewritten for the consolidated single-marketplace layout (Slice 3).
+TDD: rewritten for the per-harness composed root + name-based selection +
+injected harness.
 
-Consolidated layout (Slice 3):
-  - mkt_root = composed_root (shared across all tools), computed once.
+Per-harness layout:
+  - composed_root = harness.composed_root(state_dir) =
+    state_dir/composed/<harness.name>/  (here: composed/claude_code/).
+    Each harness gets its own tree + its own registration markers.
   - Each tool's plugin tree lands at composed_root/plugins/<tool>/ via
     staging + atomic promote.
   - ONE marketplace.json at composed_root/.claude-plugin/marketplace.json,
@@ -12,8 +15,14 @@ Consolidated layout (Slice 3):
   - Split markers in composed_root: a global .trailhead-registered plus
     per-tool .trailhead-installed-<tool>.
   - Registration sequencing lives in the wire() loop, NOT in _compose_tool:
-    after the compose loop, generate_marketplace_json once, register_marketplace
-    once, then per-tool install_tool (marker absent) or rewire_tool (present).
+    after the compose loop, generate_manifest once, register once, then
+    per-tool install_tool (marker absent) or rewire_tool (present).
+
+Selection shape:
+  - selection: dict[tool, (subagents, skills)] where each of subagents/skills
+    is a dict[name, override_path | None]. To select an in-repo entry, map
+    name -> None. Empty maps ({}, {}) = always-on set only.
+  - harness is REQUIRED — every wire() call passes harness=ClaudeCodeHarness().
 
 Contract preserved from prior slices:
   - The harness CLI runner is stubbed in all tests (B-3 hermeticity).
@@ -24,13 +33,11 @@ Contract preserved from prior slices:
   - C-1.2/I-1: WireError names tool + stage; multi-tool wire is best-effort
     sequential.
   - B-5: minimal preset → no camp/craft dests.
-
-New to Slice 3:
   - Consolidated marketplace.json content: name + multi-tool plugins[].
   - On-disk-truth blast-radius: a failed tool is absent from plugins[] while
     an earlier-wired tool is present (content-level assertion).
-  - register_marketplace invoked ONCE across a multi-tool wire; install/rewire
-    per tool; install-vs-rewire keyed on the per-tool marker.
+  - register invoked ONCE across a multi-tool wire; install/rewire per tool;
+    install-vs-rewire keyed on the per-tool marker.
 """
 
 import json
@@ -42,16 +49,37 @@ from unittest.mock import patch
 
 import pytest
 
+from trailhead.harness import ClaudeCodeHarness
+
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 _FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 
+# All capture + session skills for lore (the names a "minimal lore" picks).
+_LORE_CAPTURE_SESSION_SKILLS = {
+    "decision": None,
+    "dead-end": None,
+    "defer": None,
+    "follow-up": None,
+    "check-in": None,
+    "area": None,
+    "seed": None,
+    "brainstorm": None,
+    "checkpoint": None,
+    "finish": None,
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _harness():
+    """Fresh ClaudeCodeHarness instance passed to every wire() call."""
+    return ClaudeCodeHarness()
 
 
 def _noop_runner(args, **kwargs):
@@ -64,9 +92,9 @@ def _fail_first_copy(msg: str):
     """Patch shutil.copy2 AND copytree to raise OSError on the FIRST copy of either.
 
     apply_plan copies dirs via copytree and files via copy2; which runs first
-    depends on the composed plan (now all dirs for lore). A shared counter makes
-    the injected failure fire on whichever copy happens first, so these atomic-
-    promote tests don't depend on the file-vs-dir shape of the always-on set.
+    depends on the composed plan. A shared counter makes the injected failure
+    fire on whichever copy happens first, so these atomic-promote tests don't
+    depend on the file-vs-dir shape of the always-on set.
     Note: the real shutil.copytree binds its internal copy_function default to the
     original copy2 at definition time, so patching copy2 here does not perturb
     copytree's per-file copies — the two patches are independent triggers.
@@ -103,13 +131,18 @@ def _manifest_paths() -> dict[str, Path]:
     }
 
 
+def _composed_root(tmp_path: Path) -> Path:
+    """Per-harness composed root: composed/claude_code/."""
+    return tmp_path / "composed" / "claude_code"
+
+
 def _live_dest(tmp_path: Path, tool: str) -> Path:
-    """Consolidated layout: composed/plugins/<tool>."""
-    return tmp_path / "composed" / "plugins" / tool
+    """Per-harness layout: composed/claude_code/plugins/<tool>."""
+    return _composed_root(tmp_path) / "plugins" / tool
 
 
 def _marketplace_json(tmp_path: Path) -> Path:
-    return tmp_path / "composed" / ".claude-plugin" / "marketplace.json"
+    return _composed_root(tmp_path) / ".claude-plugin" / "marketplace.json"
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +155,10 @@ class TestMinimalPresetGating:
         """wire with minimal preset creates lore dest."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall", "sessions"}}
+        selection = {"lore": ({}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -135,9 +169,10 @@ class TestMinimalPresetGating:
         """wire with minimal preset creates NO camp dest (B-5)."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall", "sessions"}}
+        selection = {"lore": ({}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -150,9 +185,10 @@ class TestMinimalPresetGating:
         """wire with minimal preset creates NO craft dest (B-5)."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall", "sessions"}}
+        selection = {"lore": ({}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -165,9 +201,10 @@ class TestMinimalPresetGating:
         """plugins[] = the successfully-wired set; only lore here."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -178,13 +215,13 @@ class TestMinimalPresetGating:
 
 
 # ---------------------------------------------------------------------------
-# T-W2: wire mechanics on a synthetic craft SUBSET — dests created; agents of
-# unselected capabilities stay out of the composed tree.
+# T-W2: wire mechanics on a craft SUBSET — dests created; subagents of
+# unselected entries stay out of the composed tree.
 #
 # NOTE: the selection dicts below are HAND-BUILT, not resolve("standard"). They
-# deliberately omit council/design to exercise the "unselected capability ⇒ its
-# agents absent" path. The real standard preset now INCLUDES council+design
-# (see presets.py / test_presets.py) — do not treat these dicts as preset truth.
+# deliberately omit the council four (advocate/builder/breaker/attacker) and
+# execute (executor/assumption-prover) to exercise the "unselected ⇒ its agents
+# absent" path. Do not treat these dicts as preset truth.
 # ---------------------------------------------------------------------------
 
 
@@ -193,12 +230,16 @@ class TestCraftSubsetWiring:
         from trailhead.wire import wire
 
         selection = {
-            "lore": {"capture", "recall", "sessions"},
-            "camp": set(),
-            "craft": {"planning", "execute", "review", "helpers"},
+            "lore": ({"librarian": None}, dict(_LORE_CAPTURE_SESSION_SKILLS)),
+            "camp": ({}, {}),
+            "craft": (
+                {"planner": None, "architect": None, "code-reviewer": None},
+                {"plan": None, "review": None},
+            ),
         }
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -217,33 +258,36 @@ class TestCraftSubsetWiring:
         assert _live_dest(tmp_path, "craft").exists()
 
     def test_unselected_council_agents_absent(self, tmp_path):
-        """council agents absent when craft is wired with a subset that excludes council.
+        """The council four are absent when craft is wired with a subset that excludes them.
 
-        (The real standard preset includes council; this is a synthetic subset.)
-        M-5 fix: council has skills=[], so testing skill absence is vacuous.
-        council DOES have 4 agents (advocate/builder/breaker/attacker) — assert none appear in dest.
+        craft has 4 council agents (advocate/builder/breaker/attacker) — assert
+        none appear in the dest when not selected.
         """
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
         selection = {
-            "lore": {"capture", "recall", "sessions"},
-            "camp": set(),
-            "craft": {"planning", "execute", "review", "helpers"},
+            "lore": ({"librarian": None}, dict(_LORE_CAPTURE_SESSION_SKILLS)),
+            "camp": ({}, {}),
+            "craft": (
+                {"planner": None, "architect": None, "code-reviewer": None},
+                {"plan": None, "review": None},
+            ),
         }
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
         craft_manifest = load_manifest(_FORGE_MANIFEST)
         craft_dest = _live_dest(tmp_path, "craft")
-        council_agents = craft_manifest.capabilities["council"]["agents"]
-        assert len(council_agents) > 0, "test is vacuous: council has no agents"
-        for agent in council_agents:
-            assert not (craft_dest / agent).exists(), (
-                f"council agent {agent!r} present in craft dest despite council not selected"
+        council = ("advocate", "builder", "breaker", "attacker")
+        for name in council:
+            rel = craft_manifest.subagents[name]
+            assert not (craft_dest / rel).exists(), (
+                f"council agent {name!r} present in craft dest despite council not selected"
             )
 
     def test_standard_craft_unselected_council_and_execute_absent(self, tmp_path):
@@ -252,47 +296,36 @@ class TestCraftSubsetWiring:
         from trailhead.wire import wire
 
         selection = {
-            "lore": {"capture", "recall", "sessions"},
-            "camp": set(),
-            "craft": {"planning", "review", "helpers"},
+            "lore": ({"librarian": None}, dict(_LORE_CAPTURE_SESSION_SKILLS)),
+            "camp": ({}, {}),
+            "craft": (
+                {"planner": None, "code-reviewer": None},
+                {"plan": None, "review": None},
+            ),
         }
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
         craft_manifest = load_manifest(_FORGE_MANIFEST)
         craft_dest = _live_dest(tmp_path, "craft")
-        for absent_cap in ("council", "execute"):
-            agents = craft_manifest.capabilities[absent_cap]["agents"]
-            assert len(agents) > 0, f"test is vacuous: {absent_cap} has no agents"
-            for agent in agents:
-                assert not (craft_dest / agent).exists(), (
-                    f"{absent_cap} agent {agent!r} present in craft dest despite "
-                    f"{absent_cap} not being selected"
-                )
-
-    def test_lore_shared_vaults_absent_in_standard(self, tmp_path):
-        """lore shared-vaults absent in standard."""
-        from trailhead.capabilities import load_manifest
-        from trailhead.wire import wire
-
-        selection = {
-            "lore": {"capture", "recall", "sessions"},
-            "camp": set(),
-            "craft": {"planning", "execute", "review", "helpers"},
-        }
-        wire(
-            selection,
-            manifest_paths=_manifest_paths(),
-            env=_env(tmp_path),
-            runner=_noop_runner,
+        # council four + execute (executor, assumption-prover) all excluded.
+        excluded = (
+            "advocate",
+            "builder",
+            "breaker",
+            "attacker",
+            "executor",
+            "assumption-prover",
         )
-        lore_manifest = load_manifest(_LORE_MANIFEST)
-        lore_dest = _live_dest(tmp_path, "lore")
-        for skill in lore_manifest.capabilities["shared-vaults"]["skills"]:
-            assert not (lore_dest / skill).exists()
+        for name in excluded:
+            rel = craft_manifest.subagents[name]
+            assert not (craft_dest / rel).exists(), (
+                f"agent {name!r} present in craft dest despite not being selected"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -305,9 +338,10 @@ class TestConsolidatedMarketplace:
         """Composed lore dest has a valid .claude-plugin/plugin.json."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -318,12 +352,13 @@ class TestConsolidatedMarketplace:
         assert isinstance(data, dict)
 
     def test_single_consolidated_marketplace_named_trailhead(self, tmp_path):
-        """ONE marketplace.json at composed/.claude-plugin/, name == 'trailhead'."""
+        """ONE marketplace.json at composed/claude_code/.claude-plugin/, name == 'trailhead'."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -338,9 +373,10 @@ class TestConsolidatedMarketplace:
         """After wiring {lore, camp}: plugins[] lists BOTH; trees exist for both."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}, "camp": set()}
+        selection = {"lore": ({}, {"decision": None}), "camp": ({}, {})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -356,28 +392,34 @@ class TestConsolidatedMarketplace:
         """The old per-tool composed/<tool>/ marketplace dirs must NOT be created."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}, "camp": set()}
+        selection = {"lore": ({}, {"decision": None}), "camp": ({}, {})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        assert not (tmp_path / "composed" / "lore" / ".claude-plugin").exists()
-        assert not (tmp_path / "composed" / "camp" / ".claude-plugin").exists()
+        composed_root = _composed_root(tmp_path)
+        assert not (composed_root / "lore" / ".claude-plugin").exists()
+        assert not (composed_root / "camp" / ".claude-plugin").exists()
 
     def test_s2_no_symlinks_in_wired_tree(self, tmp_path):
         """S-2: the composed tree must contain no symlinks."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall"}, "craft": {"planning", "helpers"}}
+        selection = {
+            "lore": ({"librarian": None}, {"decision": None}),
+            "craft": ({"planner": None}, {"plan": None}),
+        }
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        composed_root = tmp_path / "composed"
+        composed_root = _composed_root(tmp_path)
         for path in composed_root.rglob("*"):
             assert not path.is_symlink(), (
                 f"symlink found in composed tree (S-2 violation): {path}"
@@ -394,9 +436,10 @@ class TestIdempotency:
         """Calling wire twice with the same selection produces the same tree."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall"}}
+        selection = {"lore": ({"librarian": None}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -410,6 +453,7 @@ class TestIdempotency:
 
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -424,12 +468,13 @@ class TestIdempotency:
         )
 
     def test_rewire_removes_previously_present_capability(self, tmp_path):
-        """Re-wiring a narrower selection removes the previously-wired caps."""
+        """Re-wiring a narrower selection removes the previously-wired entries."""
         from trailhead.wire import wire
 
-        selection_full = {"lore": {"capture", "recall", "sessions"}}
+        selection_full = {"lore": ({"librarian": None}, {"decision": None})}
         wire(
             selection_full,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -437,15 +482,16 @@ class TestIdempotency:
         plugin_dest = _live_dest(tmp_path, "lore")
         assert (plugin_dest / "agents" / "librarian.md").exists()
 
-        selection_narrow = {"lore": {"capture"}}
+        selection_narrow = {"lore": ({}, {"decision": None})}
         wire(
             selection_narrow,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
         assert not (plugin_dest / "agents" / "librarian.md").exists(), (
-            "librarian.md still present after rewiring without recall (S-4/R-1)"
+            "librarian.md still present after rewiring without librarian (S-4/R-1)"
         )
 
 
@@ -459,9 +505,10 @@ class TestAtomicPromote:
         """R-1: if compose fails mid-way, the prior wired dest is untouched."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -475,13 +522,13 @@ class TestAtomicPromote:
             if p.is_file()
         }
 
-        # Fail the first copy op — of EITHER primitive. The composed plan is now
-        # all dirs (copytree); patching only copy2 would never fire. Share one
-        # counter so whichever copy runs first raises, regardless of file-vs-dir.
+        # Fail the first copy op — of EITHER primitive. Share one counter so
+        # whichever copy runs first raises, regardless of file-vs-dir.
         with _fail_first_copy("simulated disk-full mid-compose"):
             with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(
                     selection,
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
@@ -502,7 +549,7 @@ class TestAtomicPromote:
         """R-1: if the very first wire fails, no partial dest is left."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         plugin_dest = _live_dest(tmp_path, "lore")
         assert not plugin_dest.exists()
 
@@ -510,6 +557,7 @@ class TestAtomicPromote:
             with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(
                     selection,
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
@@ -521,16 +569,19 @@ class TestAtomicPromote:
 
 
 # ---------------------------------------------------------------------------
-# T-W6: registry sequencing — register_marketplace ONCE, install/rewire per tool
+# T-W6: registry sequencing — register ONCE, install/rewire per tool
 # ---------------------------------------------------------------------------
 
 
 class TestRegistrySequencing:
     def test_marketplace_add_invoked_once_across_multi_tool_wire(self, tmp_path):
-        """register_marketplace runs ONCE (global), not once per tool."""
+        """register runs ONCE (global), not once per tool."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}, "craft": {"planning"}}
+        selection = {
+            "lore": ({}, {"decision": None}),
+            "craft": ({"planner": None}, {"plan": None}),
+        }
         calls = []
 
         def stub_runner(args, **kwargs):
@@ -538,6 +589,7 @@ class TestRegistrySequencing:
 
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=stub_runner,
@@ -555,7 +607,7 @@ class TestRegistrySequencing:
         """install call references <tool>@trailhead (NOT @trailhead-<tool>)."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         calls = []
 
         def stub_runner(args, **kwargs):
@@ -563,6 +615,7 @@ class TestRegistrySequencing:
 
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=stub_runner,
@@ -579,10 +632,11 @@ class TestRegistrySequencing:
         """wire with a stub runner must not touch subprocess.run."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         with patch("subprocess.run") as mock_run:
             wire(
                 selection,
+                harness=_harness(),
                 manifest_paths=_manifest_paths(),
                 env=_env(tmp_path),
                 runner=_noop_runner,
@@ -590,10 +644,10 @@ class TestRegistrySequencing:
             mock_run.assert_not_called()
 
     def test_marketplace_add_includes_composed_root(self, tmp_path):
-        """marketplace add call includes the shared composed_root path."""
+        """marketplace add call includes the shared per-harness composed_root path."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture"}}
+        selection = {"lore": ({}, {"decision": None})}
         calls = []
 
         def stub_runner(args, **kwargs):
@@ -601,13 +655,14 @@ class TestRegistrySequencing:
 
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=stub_runner,
         )
         add_calls = [c for c in calls if "marketplace" in c and "add" in c]
         assert len(add_calls) == 1
-        expected_root = str(tmp_path / "composed")
+        expected_root = str(tmp_path / "composed" / "claude_code")
         assert expected_root in add_calls[0], (
             f"expected composed_root {expected_root!r} in add call: {add_calls[0]}"
         )
@@ -620,32 +675,37 @@ class TestRegistrySequencing:
 
 class TestMinimalLoreContent:
     def test_lore_minimal_skills_present(self, tmp_path):
-        """Minimal lore selection: capture/recall/sessions skills are in dest."""
+        """Minimal lore selection: all capture/session skills land in dest."""
         from trailhead.capabilities import load_manifest
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall", "sessions"}}
+        skills = dict(_LORE_CAPTURE_SESSION_SKILLS)
+        selection = {"lore": ({"librarian": None}, skills)}
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
         lore_dest = _live_dest(tmp_path, "lore")
         lore_manifest = load_manifest(_LORE_MANIFEST)
-        for cap in ("capture", "recall", "sessions"):
-            for skill in lore_manifest.capabilities[cap]["skills"]:
-                assert (lore_dest / skill).exists(), (
-                    f"skill {skill!r} missing from minimal lore dest"
-                )
+        for name in skills:
+            rel = lore_manifest.skills[name]
+            assert (lore_dest / rel).exists(), (
+                f"skill {name!r} missing from minimal lore dest"
+            )
 
     def test_lore_minimal_lore_librarian_agent_present(self, tmp_path):
-        """Minimal lore includes recall → librarian.md agent in dest."""
+        """Minimal lore includes the librarian subagent → librarian.md in dest."""
         from trailhead.wire import wire
 
-        selection = {"lore": {"capture", "recall", "sessions"}}
+        selection = {
+            "lore": ({"librarian": None}, dict(_LORE_CAPTURE_SESSION_SKILLS)),
+        }
         wire(
             selection,
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
@@ -667,15 +727,16 @@ class TestStagingCleanupOnBaseException:
         import trailhead.wire as wire_mod
         from trailhead.wire import wire
 
-        staging_parent = tmp_path / "composed" / "plugins"
+        staging_parent = _composed_root(tmp_path) / "plugins"
 
-        def raising_compose_plan(manifest, caps, dest):
+        def raising_compose_plan(manifest, subagents, skills, dest):
             raise KeyboardInterrupt("simulated interrupt")
 
         with patch.object(wire_mod, "compose_plan", side_effect=raising_compose_plan):
             with pytest.raises((KeyboardInterrupt, Exception)):
                 wire(
-                    {"lore": {"capture"}},
+                    {"lore": ({}, {"decision": None})},
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
@@ -692,15 +753,16 @@ class TestStagingCleanupOnBaseException:
         import trailhead.wire as wire_mod
         from trailhead.wire import wire
 
-        staging_parent = tmp_path / "composed" / "plugins"
+        staging_parent = _composed_root(tmp_path) / "plugins"
 
-        def raising_compose_plan(manifest, caps, dest):
+        def raising_compose_plan(manifest, subagents, skills, dest):
             raise SystemExit(1)
 
         with patch.object(wire_mod, "compose_plan", side_effect=raising_compose_plan):
             with pytest.raises((SystemExit, Exception)):
                 wire(
-                    {"lore": {"capture"}},
+                    {"lore": ({}, {"decision": None})},
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
@@ -717,12 +779,13 @@ class TestStagingCleanupOnBaseException:
         from trailhead.wire import wire
 
         wire(
-            {"lore": {"capture"}},
+            {"lore": ({}, {"decision": None})},
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        staging_parent = tmp_path / "composed" / "plugins"
+        staging_parent = _composed_root(tmp_path) / "plugins"
         leftover = list(staging_parent.glob("_lore_staging_*"))
         assert leftover == [], (
             f"staging dir not cleaned after successful wire: {leftover}"
@@ -743,15 +806,19 @@ class TestWireErrorIsolation:
 
         original_compose_plan = wire_mod.compose_plan
 
-        def craft_failing_plan(manifest, caps, dest):
+        def craft_failing_plan(manifest, subagents, skills, dest):
             if manifest.tool_name == "craft":
                 raise RuntimeError("craft compose exploded")
-            return original_compose_plan(manifest, caps, dest)
+            return original_compose_plan(manifest, subagents, skills, dest)
 
         with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError) as exc_info:
                 wire(
-                    {"lore": {"capture"}, "craft": {"planning"}},
+                    {
+                        "lore": ({}, {"decision": None}),
+                        "craft": ({"planner": None}, {"plan": None}),
+                    },
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
@@ -771,16 +838,20 @@ class TestWireErrorIsolation:
 
         original_compose_plan = wire_mod.compose_plan
 
-        def craft_failing_plan(manifest, caps, dest):
+        def craft_failing_plan(manifest, subagents, skills, dest):
             if manifest.tool_name == "craft":
                 raise RuntimeError("craft compose exploded")
-            return original_compose_plan(manifest, caps, dest)
+            return original_compose_plan(manifest, subagents, skills, dest)
 
-        selection = {"lore": {"capture"}, "craft": {"planning"}}
+        selection = {
+            "lore": ({}, {"decision": None}),
+            "craft": ({"planner": None}, {"plan": None}),
+        }
         with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError):
                 wire(
                     selection,
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
@@ -797,21 +868,25 @@ class TestWireErrorIsolation:
 
         original_compose_plan = wire_mod.compose_plan
 
-        def craft_failing_plan(manifest, caps, dest):
+        def craft_failing_plan(manifest, subagents, skills, dest):
             if manifest.tool_name == "craft":
                 raise RuntimeError("craft compose exploded")
-            return original_compose_plan(manifest, caps, dest)
+            return original_compose_plan(manifest, subagents, skills, dest)
 
         with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError):
                 wire(
-                    {"lore": {"capture"}, "craft": {"planning"}},
+                    {
+                        "lore": ({}, {"decision": None}),
+                        "craft": ({"planner": None}, {"plan": None}),
+                    },
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
                 )
 
-        plugins_dir = tmp_path / "composed" / "plugins"
+        plugins_dir = _composed_root(tmp_path) / "plugins"
         if plugins_dir.exists():
             leftover = list(plugins_dir.glob("_craft_staging_*"))
             assert leftover == [], (
@@ -831,17 +906,21 @@ class TestWireErrorIsolation:
 
         original_compose_plan = wire_mod.compose_plan
 
-        def craft_failing_plan(manifest, caps, dest):
+        def craft_failing_plan(manifest, subagents, skills, dest):
             if manifest.tool_name == "craft":
                 raise RuntimeError("craft compose exploded")
-            return original_compose_plan(manifest, caps, dest)
+            return original_compose_plan(manifest, subagents, skills, dest)
 
         # lore is processed before craft (ordered dict).
-        selection = {"lore": {"capture"}, "craft": {"planning"}}
+        selection = {
+            "lore": ({}, {"decision": None}),
+            "craft": ({"planner": None}, {"plan": None}),
+        }
         with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
             with pytest.raises(WireError):
                 wire(
                     selection,
+                    harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
                     runner=_noop_runner,
@@ -871,7 +950,8 @@ class TestWireErrorIsolation:
 
         with pytest.raises(WireError) as exc_info:
             wire(
-                {"lore": {"capture"}},
+                {"lore": ({}, {"decision": None})},
+                harness=_harness(),
                 manifest_paths=_manifest_paths(),
                 env=_env(tmp_path),
                 runner=failing_on_install,
@@ -895,12 +975,13 @@ class TestSplitMarkers:
         from trailhead.wire import wire
 
         wire(
-            {"lore": {"capture"}},
+            {"lore": ({}, {"decision": None})},
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=_noop_runner,
         )
-        composed_root = tmp_path / "composed"
+        composed_root = _composed_root(tmp_path)
         assert (composed_root / ".trailhead-registered").exists(), (
             "global .trailhead-registered marker absent after successful wire"
         )
@@ -918,13 +999,14 @@ class TestSplitMarkers:
 
         with pytest.raises(WireError):
             wire(
-                {"lore": {"capture"}},
+                {"lore": ({}, {"decision": None})},
+                harness=_harness(),
                 manifest_paths=_manifest_paths(),
                 env=_env(tmp_path),
                 runner=failing_on_install,
             )
 
-        composed_root = tmp_path / "composed"
+        composed_root = _composed_root(tmp_path)
         assert not (composed_root / ".trailhead-installed-lore").exists(), (
             "per-tool install marker written despite install failure"
         )
@@ -939,18 +1021,20 @@ class TestSplitMarkers:
             calls.append(list(args))
 
         wire(
-            {"lore": {"capture"}},
+            {"lore": ({}, {"decision": None})},
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=recording_runner,
         )
         # Wipe the per-tool marker to simulate promote-succeeded-but-install-failed.
-        marker = tmp_path / "composed" / ".trailhead-installed-lore"
+        marker = _composed_root(tmp_path) / ".trailhead-installed-lore"
         marker.unlink()
         calls.clear()
 
         wire(
-            {"lore": {"capture"}},
+            {"lore": ({}, {"decision": None})},
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=recording_runner,
@@ -975,7 +1059,8 @@ class TestSplitMarkers:
             calls.append(list(args))
 
         wire(
-            {"lore": {"capture"}},
+            {"lore": ({}, {"decision": None})},
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=recording_runner,
@@ -983,7 +1068,8 @@ class TestSplitMarkers:
         calls.clear()
 
         wire(
-            {"lore": {"capture"}},
+            {"lore": ({}, {"decision": None})},
+            harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
             runner=recording_runner,

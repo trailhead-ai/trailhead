@@ -146,32 +146,27 @@ def test_artist_frontmatter_has_description(artist_text: str):
 
 
 # ---------------------------------------------------------------------------
-# Capability manifest: design capability resolves artist.md to an existing file
+# Inventory: artist is a discoverable subagent (capability groups were removed)
 # ---------------------------------------------------------------------------
 
-def test_design_capability_lists_artist_agent():
-    """capabilities.toml [capabilities.design] must list agents/artist.md."""
+def test_artist_is_a_selectable_subagent():
+    """artist.md is discovered as a selectable subagent by convention."""
+    artist_path = REPO_ROOT / "plugins" / "craft" / "agents" / "artist.md"
+    assert artist_path.exists(), (
+        f"craft must ship agents/artist.md but {artist_path} does not exist"
+    )
+
+
+def test_capabilities_toml_has_no_capability_groups():
+    """The manifest no longer declares [capabilities.*] groups."""
     try:
         import tomllib
     except ImportError:
         import tomli as tomllib  # type: ignore
 
-    text = CAPABILITIES_TOML.read_text(encoding="utf-8")
-    data = tomllib.loads(text)
-
-    design = data.get("capabilities", {}).get("design", {})
-    agents = design.get("agents", [])
-    assert "agents/artist.md" in agents, (
-        f"[capabilities.design] agents must include 'agents/artist.md', got {agents!r}"
-    )
-
-
-def test_design_capability_artist_file_exists():
-    """The agents/artist.md reference in capabilities.toml must resolve to an existing file."""
-    plugin_root = REPO_ROOT / "plugins" / "craft"
-    artist_path = plugin_root / "agents" / "artist.md"
-    assert artist_path.exists(), (
-        f"capabilities.toml references agents/artist.md but {artist_path} does not exist"
+    data = tomllib.loads(CAPABILITIES_TOML.read_text(encoding="utf-8"))
+    assert "capabilities" not in data, (
+        "capability groups were removed — install selects subagents/skills by name"
     )
 
 

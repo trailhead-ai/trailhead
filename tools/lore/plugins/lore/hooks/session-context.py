@@ -26,7 +26,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import sessions  # noqa: E402
-import link_server  # noqa: E402
 import recall as _recall_mod  # noqa: E402
 from vault import resolve_project, resolve_vault  # noqa: E402
 
@@ -89,19 +88,6 @@ def build_context(session_id: str) -> str | None:
         session_id=session_id,
     )
 
-    session_note_display: str | None = None
-    if session_note is not None:
-        try:
-            vault_rel = str(session_note.relative_to(vault))
-            state_dir_env = os.environ.get("LORE_LINK_STATE_DIR", "")
-            state_dir = (
-                Path(state_dir_env) if state_dir_env
-                else link_server.DEFAULT_STATE_DIR
-            )
-            session_note_display = link_server.note_link(vault_rel, state_dir=state_dir)
-        except Exception:
-            pass
-
     index = sessions.render_vault_index(
         vault=vault,
         worktree_name=worktree_name,
@@ -109,7 +95,6 @@ def build_context(session_id: str) -> str | None:
         session_note=session_note,
         session_created=created,
         warning=warning,
-        session_note_display=session_note_display,
     )
 
     # D-8a: wrap pointer build in a LOCAL try/except so a failure here never

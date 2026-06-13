@@ -1,13 +1,13 @@
-"""B-4 analog: landing's capabilities.toml resolves to real on-disk skills/agents.
+"""landing's plugin surface is discoverable by convention.
 
-Mirrors portage's test_portage_capability.py contract for the landing plugin:
+The capability-GROUP model was removed — install now selects subagents/skills by
+name from the inventory discovered on disk (skills/<name>/SKILL.md + agents/*.md).
+This test pins the new contract for landing:
 
-  - capabilities.toml exists and parses (stdlib tomllib).
-  - [tool] name == "landing" and matches the plugins/landing/ dir name.
-  - Every skill listed in any [capabilities.*] group resolves to an existing
-    SKILL.md under the plugin root.
-  - Every agent listed in any [capabilities.*] group resolves to an existing
-    .md file under the plugin root.
+  - capabilities.toml exists, parses, and [tool] name == "landing" (matches dir).
+  - it declares NO [capabilities.*] groups (the schema dropped them).
+  - the expected skills (soak/resolve) exist as skills/<name>/SKILL.md.
+  - the expected agents (soaker/doctor) exist as agents/<name>.md.
 
 Hermeticity: pure path-existence checks; no network.
 """
@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CAPABILITIES_TOML = REPO_ROOT / "capabilities.toml"
@@ -28,81 +26,45 @@ def _load_caps() -> dict:
         return tomllib.load(f)
 
 
+def _on_disk_skills() -> set[str]:
+    skills = PLUGIN_ROOT / "skills"
+    return {
+        d.name for d in skills.iterdir()
+        if d.is_dir() and (d / "SKILL.md").is_file()
+    } if skills.is_dir() else set()
+
+
+def _on_disk_agents() -> set[str]:
+    agents = PLUGIN_ROOT / "agents"
+    return {
+        p.stem for p in agents.glob("*.md") if p.is_file()
+    } if agents.is_dir() else set()
+
+
 def test_capabilities_toml_exists():
-    assert CAPABILITIES_TOML.exists(), (
-        f"capabilities.toml not found at {CAPABILITIES_TOML}"
-    )
+    assert CAPABILITIES_TOML.exists(), f"capabilities.toml not found at {CAPABILITIES_TOML}"
 
 
 def test_tool_name_is_landing_and_matches_dir():
     caps = _load_caps()
-    assert caps.get("tool", {}).get("name") == "landing", (
-        "[tool] name must be 'landing'"
+    assert caps.get("tool", {}).get("name") == "landing", "[tool] name must be 'landing'"
+    assert PLUGIN_ROOT.is_dir(), f"plugins/landing/ dir missing at {PLUGIN_ROOT}"
+
+
+def test_no_capability_groups():
+    caps = _load_caps()
+    assert "capabilities" not in caps, (
+        "capability groups were removed — install selects subagents/skills by name"
     )
-    assert PLUGIN_ROOT.is_dir(), (
-        f"[tool] name='landing' must match the plugins/landing/ dir at {PLUGIN_ROOT}"
-    )
 
 
-def test_has_at_least_one_capability_group():
-    caps = _load_caps()
-    groups = caps.get("capabilities", {})
-    assert groups, "capabilities.toml must declare at least one [capabilities.*] group"
-
-
-def _all_skills(caps: dict) -> list[str]:
-    out: list[str] = []
-    for group in caps.get("capabilities", {}).values():
-        out.extend(group.get("skills", []))
-    return out
-
-
-def _all_agents(caps: dict) -> list[str]:
-    out: list[str] = []
-    for group in caps.get("capabilities", {}).values():
-        out.extend(group.get("agents", []))
-    return out
-
-
-def test_all_capability_skills_resolve_to_existing_skill_md():
-    caps = _load_caps()
-    skills = _all_skills(caps)
-    assert skills, "landing must declare at least one skill across its capabilities"
-    for skill_rel in skills:
-        skill_md = PLUGIN_ROOT / skill_rel / "SKILL.md"
-        assert skill_md.exists(), (
-            f"capability skill {skill_rel!r} resolves to {skill_md} which does NOT "
-            "exist (dangling reference)"
-        )
-
-
-def test_all_capability_agents_resolve_to_existing_files():
-    caps = _load_caps()
-    agents = _all_agents(caps)
-    assert agents, "landing must declare at least one agent across its capabilities"
-    for agent_rel in agents:
-        resolved = PLUGIN_ROOT / agent_rel
-        assert resolved.exists(), (
-            f"capability agent {agent_rel!r} resolves to {resolved} which does NOT "
-            "exist (dangling reference)"
-        )
-
-
-def test_expected_landing_skills_declared():
-    """Both landing skills (soak/resolve) are in a capability group."""
-    caps = _load_caps()
-    skills = set(_all_skills(caps))
+def test_expected_landing_skills_present():
+    skills = _on_disk_skills()
     for name in ("soak", "resolve"):
-        assert f"skills/{name}" in skills, (
-            f"landing capability must declare skills/{name} — declared: {sorted(skills)}"
-        )
+        assert name in skills, f"landing skill {name!r} missing — found: {sorted(skills)}"
 
 
-def test_expected_landing_agents_declared():
-    """Both landing agents (soaker/doctor) are in a capability group."""
-    caps = _load_caps()
-    agents = set(_all_agents(caps))
+def test_expected_landing_agents_present():
+    agents = _on_disk_agents()
     for name in ("soaker", "doctor"):
-        assert f"agents/{name}.md" in agents, (
-            f"landing capability must declare agents/{name}.md — declared: {sorted(agents)}"
-        )
+        assert name in agents, f"landing agent {name!r} missing — found: {sorted(agents)}"

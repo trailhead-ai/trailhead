@@ -10,22 +10,17 @@ want the worktree orchestration.
 **Status:** Slice 0 (scaffold + worktree spine). Group config wiring is Slice 1;
 full multi-member lifecycle is Slice 2. See the root README for install instructions.
 
-## PATH setup (until `trailhead install` automates it)
+## PATH setup
 
-Add camp's `bin/` to your shell PATH so `camp <slug>` works from a plain shell:
+`trailhead install` builds a shim for the `camp` CLI. To put it on your PATH, add
+the brew-style `shellenv` line to your shell profile (fish/zsh/bash all handled):
 
-**fish:**
-```fish
-fish_add_path ~/code/trailhead/tools/camp/plugins/camp/bin
+```sh
+eval "$(/path/to/trailhead/bin/trailhead shellenv)"
 ```
 
-**bash/zsh:**
-```bash
-export PATH="$HOME/code/trailhead/tools/camp/plugins/camp/bin:$PATH"
-```
-
-Add the appropriate line to your shell rc file (`~/.config/fish/config.fish`,
-`~/.bashrc`, or `~/.zshrc`).
+Then `camp <slug>` works from a plain shell. See the [root README](../../README.md)
+for the full install flow.
 
 ## Quick start
 
@@ -40,5 +35,5 @@ camp --version       # show version + resolved binary path
 
 ## Dev-env commands
 
-`camp fire` (dev-env management) is deferred — the `dev-env` capability will cover
-provision and teardown of local dev-env instances once the engine ships.
+`camp fire` (dev-env management) is deferred — it will cover provision and
+teardown of local dev-env instances once the engine ships.

@@ -1,208 +1,106 @@
-"""Tests for trailhead/cli.py — subcommand tree skeleton + curated help.
+"""Tests for trailhead/cli.py — subcommand tree + curated help.
 
-TDD: these tests are written BEFORE the implementation. All must pass after
-trailhead/cli.py is updated.
+The CLI exposes three commands: install / uninstall / doctor. (update + config
+were removed in the config-driven rewrite.)
 
-A-9 hygiene:
-  - errors → stderr, normal output → stdout
-  - main() returns an int exit code
-  - bare `trailhead` and `trailhead --help` print a CURATED, grouped menu
-    naming the four subcommands — NEVER a raw argparse dump
+A-9 hygiene: bare `trailhead` and `--help` print a curated grouped menu, never a
+raw argparse dump; main() returns an int exit code.
 """
 
 import sys
 from io import StringIO
 
-import pytest
 
-from trailhead.cli import main
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _run(args: list[str], *, capture_stdout: bool = True, capture_stderr: bool = True):
+def _run(args: list[str]):
     """Run main() with sys.argv set to args; return (exit_code, stdout, stderr)."""
-    old_argv = sys.argv
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    stdout_buf = StringIO()
-    stderr_buf = StringIO()
+    old_argv, old_stdout, old_stderr = sys.argv, sys.stdout, sys.stderr
+    stdout_buf, stderr_buf = StringIO(), StringIO()
     try:
         sys.argv = ["trailhead"] + args
-        if capture_stdout:
-            sys.stdout = stdout_buf
-        if capture_stderr:
-            sys.stderr = stderr_buf
+        sys.stdout, sys.stderr = stdout_buf, stderr_buf
+        from trailhead.cli import main
         try:
             exit_code = main()
         except SystemExit as e:
             exit_code = e.code if isinstance(e.code, int) else 0
     finally:
-        sys.argv = old_argv
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+        sys.argv, sys.stdout, sys.stderr = old_argv, old_stdout, old_stderr
     return exit_code, stdout_buf.getvalue(), stderr_buf.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# main() return type
-# ---------------------------------------------------------------------------
-
-
-class TestMainReturnsInt:
-    def test_main_returns_int_on_help(self):
-        try:
-            result = main.__wrapped__() if hasattr(main, "__wrapped__") else None
-        except Exception:
-            result = None
-        # The real check: main() must return int (or SystemExit with int code)
-        old_argv = sys.argv
-        sys.argv = ["trailhead", "--help"]
-        try:
-            ret = main()
-            assert isinstance(ret, int) or ret is None
-        except SystemExit as e:
-            assert isinstance(e.code, int)
-        finally:
-            sys.argv = old_argv
-
-    def test_main_returns_zero_for_help(self):
-        exit_code, _, _ = _run(["--help"])
-        assert exit_code == 0
-
-
-# ---------------------------------------------------------------------------
-# Curated help: bare trailhead + --help print grouped menu
-# ---------------------------------------------------------------------------
-
-
 class TestCuratedHelp:
-    def test_help_names_install(self):
-        exit_code, out, _ = _run(["--help"])
-        assert "install" in out
-
-    def test_help_names_update(self):
-        exit_code, out, _ = _run(["--help"])
-        assert "update" in out
-
-    def test_help_names_doctor(self):
-        exit_code, out, _ = _run(["--help"])
-        assert "doctor" in out
-
-    def test_help_names_config(self):
-        exit_code, out, _ = _run(["--help"])
-        assert "config" in out
-
-    def test_help_names_uninstall(self):
-        exit_code, out, _ = _run(["--help"])
-        assert "uninstall" in out
-
-    def test_bare_trailhead_names_all_four_subcommands(self):
-        exit_code, out, _ = _run([])
-        assert "install" in out
-        assert "update" in out
-        assert "doctor" in out
-        assert "config" in out
-
     def test_bare_trailhead_exits_zero(self):
-        exit_code, _, _ = _run([])
-        assert exit_code == 0
+        assert _run([])[0] == 0
 
-    def test_help_has_one_line_descriptions(self):
-        """Each subcommand must have a short description, not just a name."""
-        exit_code, out, _ = _run(["--help"])
-        # Check that at least one description-like word appears near each subcommand
-        # (the curated menu contract — not a raw argparse dump)
-        assert len(out.strip()) > len("install\nupdate\ndoctor\nconfig")
+    def test_help_exits_zero(self):
+        assert _run(["--help"])[0] == 0
 
-    def test_help_is_not_raw_argparse_dump(self):
-        """Curated help must NOT contain 'usage: trailhead [-h]' raw argparse header."""
-        exit_code, out, _ = _run(["--help"])
-        # Curated help doesn't expose raw argparse formatting as the primary output
-        # (it may show it, but it must show the grouped menu prominently)
-        # The key invariant: the four subcommands appear
-        assert "install" in out and "update" in out and "doctor" in out and "config" in out
+    def test_bare_names_the_commands(self):
+        _, out, _ = _run([])
+        for cmd in ("install", "uninstall", "doctor", "shellenv"):
+            assert cmd in out
 
+    def test_help_does_not_name_removed_commands(self):
+        # The curated menu (bare invocation) must not list update/config commands.
+        _, out, _ = _run([])
+        assert "update" not in out
+        # 'config' may appear as "--config"/"config/default.toml" guidance, but
+        # never as a standalone command line.
+        assert "\n  config " not in out
 
-# ---------------------------------------------------------------------------
-# Subcommand integration: update, doctor, config are now wired (Slice 5)
-# (The old "stub" tests tested Slice-0 "not yet wired" stubs; those are
-# superseded by Slice 5 behavioral contracts in test_doctor.py,
-# test_config_cmd.py, and test_update.py.)
-# ---------------------------------------------------------------------------
-
-
-class TestSubcommandStubs:
-    # install is fully implemented (Slice 4).
-    # update, doctor, config are fully implemented (Slice 5).
-
-    def test_update_produces_output(self):
-        """update runs and produces some output (may fail, but not silently)."""
-        exit_code, out, err = _run(["update"])
-        combined = out + err
-        # Either succeeds or fails with a message — never empty
-        assert len(combined.strip()) > 0
-
-    def test_doctor_exits_zero_with_no_tools_wired(self, tmp_path, monkeypatch):
-        """doctor runs successfully even with no tools wired.
-
-        Hermetic: point config/state at an empty tmp dir so "no tools wired"
-        actually holds.  Without this the test leaks the dev machine's real
-        state (e.g. registered-but-not-on-PATH tools → doctor exits 1).
-        """
-        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
-        monkeypatch.setenv("TRAILHEAD_CONFIG_DIR", str(tmp_path / "config"))
-        exit_code, out, err = _run(["doctor"])
-        assert exit_code == 0
-
-    def test_doctor_produces_output(self):
-        """doctor produces health output."""
-        exit_code, out, err = _run(["doctor"])
-        combined = out + err
-        assert len(combined.strip()) > 0
-
-    def test_config_no_args_returns_usage(self):
-        """config with no args returns nonzero and shows usage."""
-        exit_code, out, err = _run(["config"])
-        combined = out + err
-        assert "config" in combined.lower() or "subcommand" in combined.lower() or "usage" in combined.lower()
-
-    def test_install_has_preset_flag(self):
-        """Slice 4: install now accepts --preset; --help must show it."""
-        exit_code, out, err = _run(["install", "--help"])
-        assert exit_code == 0
-        assert "preset" in out.lower() or "preset" in err.lower()
-
-
-# ---------------------------------------------------------------------------
-# Subcommand --help works
-# ---------------------------------------------------------------------------
+    def test_help_mentions_config_flag(self):
+        _, out, _ = _run([])
+        assert "--config" in out
 
 
 class TestSubcommandHelp:
-    def test_install_help_exits_zero(self):
-        exit_code, _, _ = _run(["install", "--help"])
-        assert exit_code == 0
+    def test_install_help_shows_new_flags(self):
+        ec, out, err = _run(["install", "--help"])
+        assert ec == 0
+        text = out + err
+        for flag in ("--harness", "--plugin", "--no-camp", "--no-lore", "--config"):
+            assert flag in text
 
-    def test_update_help_exits_zero(self):
-        exit_code, _, _ = _run(["update", "--help"])
-        assert exit_code == 0
-
-    def test_doctor_help_exits_zero(self):
-        exit_code, _, _ = _run(["doctor", "--help"])
-        assert exit_code == 0
-
-    def test_config_help_exits_zero(self):
-        exit_code, _, _ = _run(["config", "--help"])
-        assert exit_code == 0
-
-    def test_uninstall_help_exits_zero(self):
-        exit_code, _, _ = _run(["uninstall", "--help"])
-        assert exit_code == 0
+    def test_install_help_has_no_preset_flag(self):
+        _, out, err = _run(["install", "--help"])
+        assert "--preset" not in (out + err)
 
     def test_uninstall_help_shows_yes_flag(self):
-        exit_code, out, err = _run(["uninstall", "--help"])
+        ec, out, _ = _run(["uninstall", "--help"])
+        assert ec == 0
         assert "--yes" in out or "-y" in out
+
+    def test_doctor_help_exits_zero(self):
+        assert _run(["doctor", "--help"])[0] == 0
+
+    def test_update_command_is_gone(self):
+        # argparse: unknown subcommand → exit code 2 on stderr.
+        ec, _, _ = _run(["update"])
+        assert ec != 0
+
+    def test_config_command_is_gone(self):
+        ec, _, _ = _run(["config"])
+        assert ec != 0
+
+
+class TestDoctorRuns:
+    def test_doctor_exits_zero_with_empty_state(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
+        ec, out, _ = _run(["doctor"])
+        assert ec == 0
+        assert "doctor" in out.lower()
+
+
+class TestShellenv:
+    def test_shellenv_zsh_prints_exports(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
+        ec, out, _ = _run(["shellenv", "--shell", "zsh"])
+        assert ec == 0
+        assert "export TRAILHEAD_ROOT=" in out
+        assert "export PATH=" in out
+
+    def test_shellenv_fish(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
+        ec, out, _ = _run(["shellenv", "--shell", "fish"])
+        assert ec == 0
+        assert "fish_add_path" in out

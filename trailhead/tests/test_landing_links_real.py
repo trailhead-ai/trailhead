@@ -10,14 +10,13 @@ Slice 1 — forward check:
 3. Prose-assertion kinds (positioning / allowlisted-example) are explicitly skipped
    by the resolver — tested contract of the U-1 boundary.
 4. Forward check: for every [[claim]], resolve ref against its oracle:
-   - capability / skill / agent  → build_real_anchor_set()
-   - command                     → _KNOWN_COMMANDS
-   - preset                      → preset names from trailhead.presets
-   - doc-link                    → (REPO_ROOT / ref).exists()
+   - skill / agent  → build_real_anchor_set() (per-tool selectable inventory)
+   - command        → _KNOWN_COMMANDS ({install, uninstall, doctor})
+   - doc-link       → (REPO_ROOT / ref).exists()
    Fails closed with a named assertion on mismatch.
 5. build_real_anchor_set() enumerates from sorted glob of tools/*/capabilities.toml (R-1),
-   asserts m.validate is True for each (R-2), includes empty caps (don't filter), is
-   deterministic (R-5).
+   asserts m.validate is True for each (R-2), reads the convention-discovered subagents/
+   skills inventory off each Manifest, is deterministic (R-5).
 6. Hermeticity: only in-repo manifests + tmp_path synthetics; no network / ~/.claude/ / vault.
 
 Slice 2 — inverse anti-rot check (D-5, U-3, S-2, R-4, R-5):
@@ -45,17 +44,20 @@ from pathlib import Path
 import pytest
 
 from trailhead.capabilities import load_manifest
-from trailhead.presets import _STATIC_PRESETS
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _CLAIMS_FILE = _REPO_ROOT / "trailhead" / "landing_claims.toml"
 
 # CLI subcommands — hardcoded closed set (B-1).
+# The config-driven CLI has exactly three commands: install / uninstall / doctor.
+# (The old preset/capability model and the update/config commands were removed.)
 # add new subcommands here
-_KNOWN_COMMANDS: frozenset[str] = frozenset({"install", "update", "doctor", "config"})
+_KNOWN_COMMANDS: frozenset[str] = frozenset({"install", "uninstall", "doctor"})
 
 # Valid kind values — closed set (S-5).
-_RESOLVABLE_KINDS = frozenset({"command", "preset", "skill", "agent", "capability", "doc-link"})
+# The capability-GROUP and preset concepts were removed; install selects subagents
+# and skills by name, so only command / skill / agent / doc-link resolve.
+_RESOLVABLE_KINDS = frozenset({"command", "skill", "agent", "doc-link"})
 # Prose-assertion kinds: explicitly skipped by the resolver (U-1 / S-5 named exception list).
 _PROSE_KINDS = frozenset({"positioning", "allowlisted-example"})
 _ALL_VALID_KINDS = _RESOLVABLE_KINDS | _PROSE_KINDS
@@ -67,11 +69,16 @@ _ALL_VALID_KINDS = _RESOLVABLE_KINDS | _PROSE_KINDS
 
 
 def build_real_anchor_set(root: Path = _REPO_ROOT) -> dict[str, dict[str, set[str]]]:
-    """Enumerate {tool: {capabilities: set, skills: set, agents: set}} from manifests.
+    """Enumerate {tool: {skills: set, agents: set}} from manifests.
 
     Discovers manifests from sorted(root.glob("tools/*/capabilities.toml")) (R-1).
     Asserts m.validate is True for each manifest before trusting its anchors (R-2).
-    Includes capabilities with empty skills/agents — do not filter (R-5, deterministic).
+
+    The selectable inventory is read off the Manifest's convention-discovered
+    subagents/skills (the capability-GROUP concept was removed). Anchors are stored
+    in the claim-ref vocabulary so a claim's `ref` compares directly:
+      * skills → "skills/<name>" for every name in m.skills
+      * agents → "agents/<name>.md" for every name in m.subagents
 
     `root` defaults to the repo root; tests inject a tmp_path tools tree to exercise
     the R-2 guard against the REAL code path (not a hand-copied assertion).
@@ -83,26 +90,11 @@ def build_real_anchor_set(root: Path = _REPO_ROOT) -> dict[str, dict[str, set[st
             f"manifest {path} has validate=false; gate requires validate=true — "
             "the gate's oracle contract depends on load_manifest having validated all paths"
         )
-        tool_anchors: dict[str, set[str]] = {
-            "capabilities": set(m.capabilities.keys()),
-            "skills": set(),
-            "agents": set(),
+        anchors[m.tool_name] = {
+            "skills": {f"skills/{name}" for name in m.skills},
+            "agents": {f"agents/{name}.md" for name in m.subagents},
         }
-        for cap in m.capabilities.values():
-            tool_anchors["skills"].update(cap["skills"])
-            tool_anchors["agents"].update(cap["agents"])
-        anchors[m.tool_name] = tool_anchors
     return anchors
-
-
-def _preset_names() -> frozenset[str]:
-    """Return the set of valid preset names.
-
-    Enumerated from the same source of truth the installer uses
-    (presets._STATIC_PRESETS + the runtime-computed "full"), so it can't drift
-    as presets are added (mirrors R-1's discovery philosophy; M-1).
-    """
-    return frozenset(set(_STATIC_PRESETS.keys()) | {"full"})
 
 
 # ---------------------------------------------------------------------------
@@ -140,20 +132,13 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
             f"not found in _KNOWN_COMMANDS {sorted(_KNOWN_COMMANDS)}"
         )
 
-    elif kind == "preset":
-        presets = _preset_names()
-        assert ref in presets, (
-            f"landing_claims.toml claims preset {ref!r}; "
-            f"not found in preset names {sorted(presets)}"
-        )
-
-    elif kind in ("capability", "skill", "agent"):
+    elif kind in ("skill", "agent"):
         tool_anchors = anchor_set.get(tool)
         assert tool_anchors is not None, (
             f"landing_claims.toml claims {kind} {ref!r} for tool={tool!r}; "
             f"tool not found in anchor set (known tools: {sorted(anchor_set)})"
         )
-        plural = kind + "s" if kind != "capability" else "capabilities"
+        plural = kind + "s"
         ref_set = tool_anchors[plural]
         assert ref in ref_set, (
             f"landing_claims.toml claims {kind} {ref!r} for tool={tool!r}; "
@@ -250,21 +235,10 @@ class TestForwardCheckPositive:
         claim = {"kind": "command", "tool": "trailhead", "ref": "install", "source": "root"}
         check_claim(claim, {})
 
-    def test_real_preset_claim_passes(self):
-        """A claim for a known preset resolves without error."""
-        claim = {"kind": "preset", "tool": "trailhead", "ref": "minimal", "source": "root"}
-        check_claim(claim, {})
-
-    def test_real_capability_claim_passes(self):
-        """A claim for a known capability resolves without error."""
-        anchor_set = build_real_anchor_set()
-        claim = {"kind": "capability", "tool": "lore", "ref": "recall", "source": "lore"}
-        check_claim(claim, anchor_set)
-
     def test_real_skill_claim_passes(self):
         """A claim for a known skill resolves without error."""
         anchor_set = build_real_anchor_set()
-        # lore capture has skills/check-in (skills/tend was deleted in Slice 7)
+        # lore has skills/check-in (skills/tend was deleted in Slice 7)
         claim = {"kind": "skill", "tool": "lore", "ref": "skills/check-in", "source": "lore"}
         check_claim(claim, anchor_set)
 
@@ -307,27 +281,6 @@ class TestForwardCheckNegative:
         }
         with pytest.raises(AssertionError, match="frobnicate"):
             check_claim(claim, {})
-
-    def test_nonexistent_preset_fails_with_named_assertion(self):
-        claim = {
-            "kind": "preset",
-            "tool": "trailhead",
-            "ref": "everything",
-            "source": "root",
-        }
-        with pytest.raises(AssertionError, match="everything"):
-            check_claim(claim, {})
-
-    def test_nonexistent_capability_fails_with_named_assertion(self):
-        anchor_set = build_real_anchor_set()
-        claim = {
-            "kind": "capability",
-            "tool": "lore",
-            "ref": "ghost-capability",
-            "source": "lore",
-        }
-        with pytest.raises(AssertionError, match="ghost-capability"):
-            check_claim(claim, anchor_set)
 
     def test_nonexistent_skill_fails_with_named_assertion(self):
         anchor_set = build_real_anchor_set()
@@ -379,39 +332,33 @@ class TestBuildRealAnchorSet:
         for tool in ("lore", "craft", "camp"):
             assert tool in anchors, f"tool {tool!r} missing from anchor set"
 
-    def test_lore_recall_capability_present(self):
+    def test_lore_finish_skill_present(self):
         anchors = build_real_anchor_set()
-        assert "recall" in anchors["lore"]["capabilities"]
+        assert "skills/finish" in anchors["lore"]["skills"]
 
     def test_lore_librarian_agent_present(self):
         anchors = build_real_anchor_set()
         assert "agents/librarian.md" in anchors["lore"]["agents"]
 
-    def test_craft_execute_capability_present(self):
+    def test_craft_execute_skill_present(self):
         anchors = build_real_anchor_set()
-        assert "execute" in anchors["craft"]["capabilities"]
+        assert "skills/execute" in anchors["craft"]["skills"]
 
     def test_craft_assumption_prover_agent_present(self):
         anchors = build_real_anchor_set()
         assert "agents/assumption-prover.md" in anchors["craft"]["agents"]
 
     def test_craft_artist_agent_present(self):
-        """craft design has agents/artist.md — verify it's in the anchor set."""
+        """craft has agents/artist.md — verify it's in the anchor set."""
         anchors = build_real_anchor_set()
         assert "agents/artist.md" in anchors["craft"]["agents"]
 
-    def test_camp_dev_env_capability_present_and_not_filtered(self):
-        """camp dev-env has empty skills/agents — must be present, not filtered (R-1)."""
+    def test_camp_worktree_skill_present(self):
+        """camp has a single selectable skill (skills/worktree) and no agents (R-1)."""
         anchors = build_real_anchor_set()
-        assert "dev-env" in anchors["camp"]["capabilities"]
-        # empty skills/agents for camp is valid; sets just happen to be empty
+        assert "skills/worktree" in anchors["camp"]["skills"]
         assert isinstance(anchors["camp"]["skills"], set)
         assert isinstance(anchors["camp"]["agents"], set)
-
-    def test_lore_shared_vaults_capability_present_and_not_filtered(self):
-        """lore shared-vaults has empty skills/agents — must be present, not filtered."""
-        anchors = build_real_anchor_set()
-        assert "shared-vaults" in anchors["lore"]["capabilities"]
 
     def test_result_is_stable_across_calls(self):
         """Repeated calls return the same set (deterministic — R-5)."""
@@ -433,11 +380,7 @@ class TestBuildRealAnchorSet:
             "[tool]\n"
             'name = "testtool"\n'
             "validate = false\n"
-            "\n"
-            "[capabilities.dev-env]\n"
-            'description = "provision/teardown dev-env instances"\n'
-            "skills = []\n"
-            "agents = []\n"
+            'base = ["skills/_shared"]\n'  # missing dir — only an unvalidated manifest tolerates it
         )
         with pytest.raises(AssertionError, match="validate=false"):
             build_real_anchor_set(root=tmp_path)
@@ -445,22 +388,20 @@ class TestBuildRealAnchorSet:
     def test_build_real_anchor_set_accepts_injected_root(self, tmp_path):
         """A valid validate=true manifest under an injected root is enumerated (positive twin).
 
-        Empty skill/agent lists keep validate=true honest — there are no paths to resolve.
+        The selectable inventory is discovered on disk: an agents/<name>.md file under the
+        plugin root becomes an "agents/<name>.md" anchor.
         """
+        plugin_root = tmp_path / "tools" / "testtool" / "plugins" / "testtool"
+        (plugin_root / "agents").mkdir(parents=True)
+        (plugin_root / "agents" / "solo.md").write_text("# solo agent\n")
         manifest_path = tmp_path / "tools" / "testtool" / "capabilities.toml"
-        manifest_path.parent.mkdir(parents=True)
         manifest_path.write_text(
             "[tool]\n"
             'name = "testtool"\n'
             "validate = true\n"
-            "\n"
-            "[capabilities.solo]\n"
-            'description = "a lone capability"\n'
-            "skills = []\n"
-            "agents = []\n"
         )
         anchors = build_real_anchor_set(root=tmp_path)
-        assert anchors["testtool"]["capabilities"] == {"solo"}
+        assert anchors["testtool"]["agents"] == {"agents/solo.md"}
 
 
 # ---------------------------------------------------------------------------
@@ -559,12 +500,12 @@ def _is_command_registered(
 
     Matching rule (Slice 2 contract):
     - kind="allowlisted-example" with ref="<tool> <subcommand>" — escape hatch (R-4)
-    - kind="command"     with tool=<tool> and ref=<subcommand>
-    - kind="capability"  with tool=<tool> and ref starts with <subcommand>
-                         (ref == subcommand, OR ref.startswith(subcommand + "/"))
-    - kind="skill"       same prefix rule as capability
-    - kind="agent"       same prefix rule
-    The prefix rule lets a fenced `lore recall` match kind=capability ref="recall".
+    - kind="command"  with tool=<tool> and ref=<subcommand>
+    - kind="skill"    with tool=<tool> and ref starts with <subcommand>
+                      (ref == subcommand, OR ref.startswith(subcommand + "/"))
+    - kind="agent"    same prefix rule as skill
+    The prefix rule lets a fenced `lore finish` match kind=skill ref="skills/finish"
+    only when the subcommand matches; a bare subcommand also matches ref==subcommand.
     """
     allowlist_key = f"{tool} {subcommand}"
     for claim in claims:
@@ -576,7 +517,7 @@ def _is_command_registered(
             return True
         if kind == "command" and ref == subcommand:
             return True
-        if kind in ("capability", "skill", "agent"):
+        if kind in ("skill", "agent"):
             if ref == subcommand or ref.startswith(subcommand + "/"):
                 return True
     return False
@@ -821,11 +762,15 @@ class TestCheckInverseFixtures:
         # frobnicate is not in claims, but prose mentions are not extracted → must not raise
         check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
 
-    def test_capability_claim_satisfies_fenced_command(self, tmp_path):
-        """A kind=capability claim with ref=<subcommand> satisfies a fenced lore <subcommand>."""
+    def test_skill_claim_satisfies_fenced_command(self, tmp_path):
+        """A kind=skill claim with ref=<subcommand> satisfies a fenced `lore <subcommand>`.
+
+        The prefix rule matches ref==subcommand (and ref.startswith(subcommand + "/")),
+        so a bare-name skill ref satisfies a fenced command of the same name.
+        """
         claims = [
             {
-                "kind": "capability",
+                "kind": "skill",
                 "tool": "lore",
                 "ref": "recall",
                 "source": "lore",
@@ -833,7 +778,7 @@ class TestCheckInverseFixtures:
         ]
         readme = tmp_path / "README.md"
         readme.write_text("```bash\nlore recall --areas auth\n```\n")
-        # must not raise — the capability claim satisfies the lore recall command
+        # must not raise — the skill claim satisfies the lore recall command
         check_inverse(readme, claims, tmp_path)
 
     def test_existing_relative_link_passes(self, tmp_path):
@@ -1154,7 +1099,7 @@ _LEAK_GATE = (
 # Regex design rationale:
 #   brain/ path tokens — brain/ prefix catches vault path references in any context
 #   ~/code/brain — absolute brain path (home-relative form)
-#   localhost:7777 — the lore-link-server port (internal tooling URL)
+#   localhost:7777 — an internal tooling URL (kept in the leak denylist defensively)
 #   \bzenith\b — bare word; the company/product name; NOT "zenithhealth" (contained)
 #   \bpenny\b — the internal product name
 #   WS-\d+ — internal workstream IDs

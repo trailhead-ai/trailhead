@@ -399,15 +399,14 @@ class TestManifestValidation:
         carry neither skills/tend nor the older skills/review.
         """
         m = load_manifest(_LORE_MANIFEST)
-        cap = m.capabilities["recall"]
-        assert "skills/tend" not in cap["skills"], (
-            f"lore recall still references deleted 'skills/tend'; got {cap['skills']}"
+        assert "tend" not in m.skills, (
+            f"lore still ships a deleted 'tend' skill; got {sorted(m.skills)}"
         )
-        assert "skills/review" not in cap["skills"], (
-            "lore recall still references 'skills/review' — the tend/review skill is deleted"
+        assert "review" not in m.skills, (
+            "lore still ships a 'review' skill — the tend/review skill is deleted"
         )
-        assert "skills/reflect" not in cap["skills"], (
-            f"lore recall still references deleted 'skills/reflect'; got {cap['skills']}"
+        assert "reflect" not in m.skills, (
+            f"lore still ships a deleted 'reflect' skill; got {sorted(m.skills)}"
         )
 
     def test_lore_recall_references_librarian_agent(self):
@@ -417,71 +416,55 @@ class TestManifestValidation:
         The old agents/loremaster.md must be gone from the manifest.
         """
         m = load_manifest(_LORE_MANIFEST)
-        cap = m.capabilities["recall"]
-        assert "agents/librarian.md" in cap["agents"], (
-            f"lore recall must reference 'agents/librarian.md'; got {cap['agents']}"
+        assert "librarian" in m.subagents, (
+            f"lore must ship the 'librarian' subagent; got {sorted(m.subagents)}"
         )
-        assert "agents/loremaster.md" not in cap["agents"], (
-            "lore recall still references old 'agents/loremaster.md' — update to 'agents/librarian.md'"
+        assert "loremaster" not in m.subagents, (
+            "lore still ships old 'loremaster' subagent — renamed to 'librarian'"
         )
 
     def test_lore_sessions_references_finish_skill(self):
         """lore sessions capability must reference skills/finish (not skills/finished)."""
         m = load_manifest(_LORE_MANIFEST)
-        cap = m.capabilities["sessions"]
-        assert "skills/finish" in cap["skills"], (
-            f"lore sessions must reference 'skills/finish'; got {cap['skills']}"
+        assert "finish" in m.skills, (
+            f"lore must ship the 'finish' skill; got {sorted(m.skills)}"
         )
-        assert "skills/finished" not in cap["skills"], (
-            "lore sessions still references 'skills/finished' — update to 'skills/finish'"
+        assert "finished" not in m.skills, (
+            "lore still ships 'finished' skill — renamed to 'finish'"
         )
 
     def test_craft_execute_references_assumption_prover_and_executor(self):
         """craft execute capability must reference assumption-prover.md and executor.md."""
         m = load_manifest(_CRAFT_MANIFEST)
-        cap = m.capabilities["execute"]
-        assert "agents/assumption-prover.md" in cap["agents"], (
-            f"craft execute must reference 'agents/assumption-prover.md'; got {cap['agents']}"
+        assert {"assumption-prover", "executor"} <= set(m.subagents), (
+            f"craft must ship 'assumption-prover' + 'executor' subagents; got {sorted(m.subagents)}"
         )
-        assert "agents/executor.md" in cap["agents"], (
-            f"craft execute must reference 'agents/executor.md'; got {cap['agents']}"
+        assert "scout" not in m.subagents, (
+            "craft still ships old 'scout' subagent — renamed to 'assumption-prover'"
         )
-        assert "agents/scout.md" not in cap["agents"], (
-            "craft execute still references old 'agents/scout.md'"
+        assert "trailblazer" not in m.subagents, (
+            "craft still ships old 'trailblazer' subagent — renamed to 'executor'"
         )
-        assert "agents/trailblazer.md" not in cap["agents"], (
-            "craft execute still references old 'agents/trailblazer.md'"
+        assert "execute" in m.skills, (
+            f"craft must ship the 'execute' skill; got {sorted(m.skills)}"
         )
-        assert "skills/execute" in cap["skills"], (
-            f"craft execute must reference 'skills/execute'; got {cap['skills']}"
-        )
-        assert "skills/subagent-driven-development" not in cap["skills"], (
-            "craft execute still references old 'skills/subagent-driven-development'"
+        assert "subagent-driven-development" not in m.skills, (
+            "craft still ships old 'subagent-driven-development' skill — renamed to 'execute'"
         )
 
     def test_craft_council_references_council_agents(self):
         """craft council capability must reference the bare-named council agents (advocate/builder/breaker/attacker)."""
         m = load_manifest(_CRAFT_MANIFEST)
-        cap = m.capabilities["council"]
-        agents = cap["agents"]
-        assert "agents/advocate.md" in agents, (
-            f"craft council must reference 'agents/advocate.md'; got {agents}"
-        )
-        assert "agents/builder.md" in agents, (
-            f"craft council must reference 'agents/builder.md'; got {agents}"
-        )
-        assert "agents/breaker.md" in agents, (
-            f"craft council must reference 'agents/breaker.md'; got {agents}"
-        )
-        assert "agents/attacker.md" in agents, (
-            f"craft council must reference 'agents/attacker.md'; got {agents}"
-        )
-        for agent in agents:
-            assert "council-" not in agent, (
-                f"craft council still references old council- agent: {agent}"
+        for stem in ("advocate", "builder", "breaker", "attacker"):
+            assert stem in m.subagents, (
+                f"craft must ship the {stem!r} council subagent; got {sorted(m.subagents)}"
             )
-            assert "circle-" not in agent, (
-                f"craft council still references old circle- agent: {agent}"
+        for agent in m.subagents:
+            assert not agent.startswith("council-"), (
+                f"craft still ships old council- agent: {agent}"
+            )
+            assert not agent.startswith("circle-"), (
+                f"craft still ships old circle- agent: {agent}"
             )
 
 
@@ -559,32 +542,30 @@ class TestResolveAllCapabilitiesOracle:
     """After rename, compose_plan for every capability must have all CopyOp.src on disk."""
 
     def _check_manifest(self, manifest_path: Path, tmp_path: Path) -> list[str]:
-        """Return list of missing src paths for all capabilities in manifest."""
+        """Return list of missing src paths for the full composed inventory."""
         m = load_manifest(manifest_path)
-        missing: list[str] = []
-        for cap_name in m.capabilities:
-            dest = tmp_path / cap_name
-            plan = compose_plan(m, {cap_name}, dest)
-            for op in plan.ops:
-                if not op.src.exists():
-                    missing.append(
-                        f"  {manifest_path.name}::{cap_name}: {op.src} does not exist"
-                    )
+        plan = compose_plan(
+            m,
+            {n: None for n in m.subagents},
+            {n: None for n in m.skills},
+            tmp_path / "all",
+        )
+        missing = [str(op.src) for op in plan.ops if not op.src.exists()]
         return missing
 
     def test_lore_all_capabilities_resolve_to_existing_src(self, tmp_path):
-        """Every CopyOp.src for every lore capability must exist on disk."""
+        """Every CopyOp.src for the full lore inventory must exist on disk."""
         missing = self._check_manifest(_LORE_MANIFEST, tmp_path)
         assert not missing, (
-            "R-6: lore capability compose_plan produced CopyOps with missing src:\n"
+            "R-6: lore compose_plan produced CopyOps with missing src:\n"
             + "\n".join(missing)
         )
 
     def test_craft_all_capabilities_resolve_to_existing_src(self, tmp_path):
-        """Every CopyOp.src for every craft capability must exist on disk."""
+        """Every CopyOp.src for the full craft inventory must exist on disk."""
         missing = self._check_manifest(_CRAFT_MANIFEST, tmp_path)
         assert not missing, (
-            "R-6: craft capability compose_plan produced CopyOps with missing src:\n"
+            "R-6: craft compose_plan produced CopyOps with missing src:\n"
             + "\n".join(missing)
         )
 
@@ -600,7 +581,12 @@ class TestNewAgentNamesInCompose:
     def test_craft_council_compose_includes_council_agents(self, tmp_path):
         """craft council compose includes the bare-named council agent CopyOps."""
         m = load_manifest(_CRAFT_MANIFEST)
-        plan = compose_plan(m, {"council"}, tmp_path / "dest")
+        plan = compose_plan(
+            m,
+            {"advocate": None, "builder": None, "breaker": None, "attacker": None},
+            {},
+            tmp_path / "dest",
+        )
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
         for name in ("advocate.md", "builder.md", "breaker.md", "attacker.md"):
             assert name in agent_srcs, (
@@ -610,7 +596,12 @@ class TestNewAgentNamesInCompose:
     def test_craft_execute_compose_includes_assumption_prover_and_executor(self, tmp_path):
         """craft execute compose includes assumption-prover.md and executor.md CopyOps."""
         m = load_manifest(_CRAFT_MANIFEST)
-        plan = compose_plan(m, {"execute"}, tmp_path / "dest")
+        plan = compose_plan(
+            m,
+            {"assumption-prover": None, "executor": None},
+            {"execute": None},
+            tmp_path / "dest",
+        )
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
         assert "assumption-prover.md" in agent_srcs, (
             f"compose_plan for craft 'execute' must include assumption-prover.md; got {agent_srcs}"
@@ -622,7 +613,7 @@ class TestNewAgentNamesInCompose:
     def test_lore_recall_compose_includes_librarian(self, tmp_path):
         """lore recall compose includes librarian.md CopyOp (was loremaster.md)."""
         m = load_manifest(_LORE_MANIFEST)
-        plan = compose_plan(m, {"recall"}, tmp_path / "dest")
+        plan = compose_plan(m, {"librarian": None}, {}, tmp_path / "dest")
         agent_srcs = {op.src.name for op in plan.ops if op.src.is_file()}
         assert "librarian.md" in agent_srcs, (
             f"compose_plan for lore 'recall' must include librarian.md; got {agent_srcs}"
@@ -859,17 +850,16 @@ class TestConsultSkillAndSharedCouncil:
             )
 
     def test_craft_council_capability_includes_consult_skill(self):
-        """craft council capability must list skills/consult."""
+        """craft must ship the consult skill."""
         m = load_manifest(_CRAFT_MANIFEST)
-        cap = m.capabilities["council"]
-        assert "skills/consult" in cap["skills"], (
-            f"craft council capability must reference 'skills/consult'; got {cap['skills']}"
+        assert "consult" in m.skills, (
+            f"craft must ship the 'consult' skill; got {sorted(m.skills)}"
         )
 
     def test_craft_council_compose_includes_consult_skill(self, tmp_path):
-        """compose_plan({'council'}) must include the consult skill dir as a CopyOp."""
+        """compose_plan of the consult skill must include its dir as a CopyOp."""
         m = load_manifest(_CRAFT_MANIFEST)
-        plan = compose_plan(m, {"council"}, tmp_path / "dest")
+        plan = compose_plan(m, {}, {"consult": None}, tmp_path / "dest")
         skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
         assert "consult" in skill_srcs, (
             f"compose_plan for craft 'council' must include the consult skill dir; got {skill_srcs}"
@@ -1117,51 +1107,54 @@ class TestSlice4ManifestRepointed:
     """capabilities.toml must repoint the four renamed skills atomically."""
 
     def test_base_skills_repointed_to_shelve_and_polish(self):
-        """[tool] base must list skills/shelve + skills/polish (pickup stays); the old
-        skills/handoff + skills/followup must be gone."""
+        """craft must ship the renamed shelve + polish skills (pickup stays); the old
+        handoff + followup skills must be gone."""
         m = load_manifest(_CRAFT_MANIFEST)
-        base = m.base
-        assert "skills/shelve" in base, f"craft base must reference 'skills/shelve'; got {base}"
-        assert "skills/polish" in base, f"craft base must reference 'skills/polish'; got {base}"
-        assert "skills/pickup" in base, f"craft base must keep 'skills/pickup'; got {base}"
-        assert "skills/handoff" not in base, "craft base still references old 'skills/handoff'"
-        assert "skills/followup" not in base, "craft base still references old 'skills/followup'"
+        skills = m.skills
+        assert "shelve" in skills, f"craft must ship the 'shelve' skill; got {sorted(skills)}"
+        assert "polish" in skills, f"craft must ship the 'polish' skill; got {sorted(skills)}"
+        assert "pickup" in skills, f"craft must keep the 'pickup' skill; got {sorted(skills)}"
+        assert "handoff" not in skills, "craft still ships old 'handoff' skill"
+        assert "followup" not in skills, "craft still ships old 'followup' skill"
 
     def test_planning_capability_references_plan_skill(self):
-        """craft planning capability must reference skills/plan (not skills/planning)."""
+        """craft must ship the planner + architect subagents and the plan skill (not planning)."""
         m = load_manifest(_CRAFT_MANIFEST)
-        cap = m.capabilities["planning"]
-        assert "skills/plan" in cap["skills"], (
-            f"craft planning must reference 'skills/plan'; got {cap['skills']}"
+        assert {"planner", "architect"} <= set(m.subagents), (
+            f"craft must ship 'planner' + 'architect' subagents; got {sorted(m.subagents)}"
         )
-        assert "skills/planning" not in cap["skills"], (
-            "craft planning still references old 'skills/planning'"
+        assert "plan" in m.skills, (
+            f"craft must ship the 'plan' skill; got {sorted(m.skills)}"
+        )
+        assert "planning" not in m.skills, (
+            "craft still ships old 'planning' skill — renamed to 'plan'"
         )
 
     def test_review_capability_references_review_skill(self):
-        """craft review capability must reference skills/review (not skills/requesting-code-review).
+        """craft must ship the code-reviewer subagent and the review skill (not requesting-code-review).
 
-        The capability NAME stays `review`; only the skill path changes.
+        The skill NAME stays `review`; only the old skill path changes.
         """
         m = load_manifest(_CRAFT_MANIFEST)
-        cap = m.capabilities["review"]
-        assert "skills/review" in cap["skills"], (
-            f"craft review must reference 'skills/review'; got {cap['skills']}"
+        assert "code-reviewer" in m.subagents, (
+            f"craft must ship the 'code-reviewer' subagent; got {sorted(m.subagents)}"
         )
-        assert "skills/requesting-code-review" not in cap["skills"], (
-            "craft review still references old 'skills/requesting-code-review'"
+        assert "review" in m.skills, (
+            f"craft must ship the 'review' skill; got {sorted(m.skills)}"
+        )
+        assert "requesting-code-review" not in m.skills, (
+            "craft still ships old 'requesting-code-review' skill — renamed to 'review'"
         )
 
     def test_renamed_skills_compose_to_existing_src(self, tmp_path):
-        """compose_plan for planning/review/base must resolve the renamed skill dirs on disk."""
+        """compose_plan for the plan + review skills must resolve the renamed dirs on disk."""
         m = load_manifest(_CRAFT_MANIFEST)
-        for cap in ("planning", "review"):
-            plan = compose_plan(m, {cap}, tmp_path / cap)
+        for skill in ("plan", "review"):
+            plan = compose_plan(m, {}, {skill: None}, tmp_path / skill)
             skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
-            if cap == "planning":
-                assert "plan" in skill_srcs, f"compose({cap}) must include the plan skill dir; got {skill_srcs}"
-            if cap == "review":
-                assert "review" in skill_srcs, f"compose({cap}) must include the review skill dir; got {skill_srcs}"
+            assert skill in skill_srcs, (
+                f"compose({skill}) must include the {skill} skill dir; got {skill_srcs}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1333,18 +1326,17 @@ class TestSlice6ManifestAndTemplate:
         """lore capture capability must reference skills/follow-up + skills/check-in,
         not the old skills/radar + skills/check-radar."""
         m = load_manifest(_LORE_MANIFEST)
-        cap = m.capabilities["capture"]
-        assert "skills/follow-up" in cap["skills"], (
-            f"lore capture must reference 'skills/follow-up'; got {cap['skills']}"
+        assert "follow-up" in m.skills, (
+            f"lore must ship the 'follow-up' skill; got {sorted(m.skills)}"
         )
-        assert "skills/check-in" in cap["skills"], (
-            f"lore capture must reference 'skills/check-in'; got {cap['skills']}"
+        assert "check-in" in m.skills, (
+            f"lore must ship the 'check-in' skill; got {sorted(m.skills)}"
         )
-        assert "skills/radar" not in cap["skills"], (
-            "lore capture still references old 'skills/radar'"
+        assert "radar" not in m.skills, (
+            "lore still ships old 'radar' skill — renamed to 'follow-up'"
         )
-        assert "skills/check-radar" not in cap["skills"], (
-            "lore capture still references old 'skills/check-radar'"
+        assert "check-radar" not in m.skills, (
+            "lore still ships old 'check-radar' skill — renamed to 'check-in'"
         )
 
     def test_follow_up_template_exists_with_type_follow_up(self):
@@ -1364,7 +1356,9 @@ class TestSlice6ManifestAndTemplate:
     def test_lore_manifest_validates_and_composes_capture(self, tmp_path):
         """lore manifest validates and capture composes the renamed skill dirs on disk."""
         m = load_manifest(_LORE_MANIFEST)
-        plan = compose_plan(m, {"capture"}, tmp_path / "capture")
+        plan = compose_plan(
+            m, {}, {"follow-up": None, "check-in": None}, tmp_path / "capture"
+        )
         skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
         assert "follow-up" in skill_srcs, (
             f"compose(capture) must include the follow-up skill dir; got {skill_srcs}"
@@ -1569,11 +1563,10 @@ class TestSlice7DeletedSurfacesGone:
         )
 
     def test_craft_helpers_drops_forge_ping_agent(self):
-        """craft helpers capability must no longer list agents/forge-ping.md."""
+        """craft must no longer ship the forge-ping subagent."""
         m = load_manifest(_CRAFT_MANIFEST)
-        cap = m.capabilities["helpers"]
-        assert "agents/forge-ping.md" not in cap["agents"], (
-            f"craft helpers still references deleted 'agents/forge-ping.md'; got {cap['agents']}"
+        assert "forge-ping" not in m.subagents, (
+            f"craft still ships deleted 'forge-ping' subagent; got {sorted(m.subagents)}"
         )
 
     def test_landing_claims_has_no_dangling_deleted_entries(self):
@@ -1868,20 +1861,19 @@ class TestCraftReleaseClusterDeleted:
     """
 
     def test_craft_manifest_has_no_release_capability(self):
-        """craft capabilities.toml must not declare a `release` capability."""
+        """craft must not ship a `release` skill or subagent."""
         m = load_manifest(_CRAFT_MANIFEST)
-        assert "release" not in m.capabilities, (
-            "craft still exposes a `release` capability — Slice 6 deletes it; "
+        assert "release" not in m.skills and "release" not in m.subagents, (
+            "craft still ships a `release` skill/agent — Slice 6 deletes it; "
             "portage owns PR lifecycle and landing owns deploy soak now."
         )
 
     def test_craft_helpers_no_longer_lists_pr_summarizer(self):
-        """craft helpers must not reference agents/pr-summarizer.md (→ portage summarizer)."""
+        """craft must not ship the pr-summarizer subagent (→ portage summarizer)."""
         m = load_manifest(_CRAFT_MANIFEST)
-        helpers = m.capabilities["helpers"]
-        assert "agents/pr-summarizer.md" not in helpers["agents"], (
-            "craft helpers still references agents/pr-summarizer.md — it became "
-            "portage's `summarizer`; remove it from [capabilities.helpers]."
+        assert "pr-summarizer" not in m.subagents, (
+            "craft still ships the 'pr-summarizer' subagent — it became "
+            "portage's `summarizer`; remove agents/pr-summarizer.md."
         )
 
     @pytest.mark.parametrize("script", _MOVED_RELEASE_SCRIPTS)

@@ -1,168 +1,157 @@
 # trailhead
 
-Agent-native project memory that works with your existing setup.
+An AI-native installer for a suite of agent-plugins — **lore** (project memory),
+**camp** (worktree orchestration), **craft** (dev rituals), **portage** (PR
+lifecycle), and **landing** (deploy soak) — into your AI code harness.
+
+trailhead is designed to be driven by an agent. There is no package to download:
+you clone the repo and run one command (or hand the repo to your agent and point
+it at this README). Everything is CLI- and config-driven, so an agent can install
+exactly the pieces you want, into exactly the harness you use.
 
 ---
 
-## Start with lore — change nothing about how you work
+## Quick start (humans)
 
-Most knowledge management tools ask you to change your workflow to get value.
-**lore doesn't.** It hooks into the Claude Code sessions you're already running
-and captures the things that matter — decisions, dead-ends, work set aside,
-codebase mental models — then loads what's relevant the next time you open the
-project.
-
-Your next session starts warm. The agent recalls what it needs without you
-asking. You get compounding memory across sessions without a new ritual or a
-new tool to learn.
+Clone the repo and run the installer. It auto-detects your harness (e.g. a
+`~/.claude` directory → Claude Code), installs every agent-plugin, and puts the
+`camp` and `lore` CLIs on your PATH — no prompts:
 
 ```sh
-# confirm lore is wired and your vault is ready
-trailhead doctor
+git clone <this-repo> trailhead
+cd trailhead
+./bin/trailhead install
 ```
 
-Then open any project in Claude Code. Run:
+`bin/trailhead` runs straight from the checkout — no `pip install` needed
+(Python ≥ 3.11, zero third-party dependencies).
+
+After install, **restart your shell** (so `camp`/`lore` resolve) and **start a
+fresh Claude Code session** (so the plugins load).
+
+If trailhead can't find any harness, it still installs the CLIs, warns you, and
+exits non-zero — re-run with `--harness <name>` to install the plugins.
+
+---
+
+## Quick start (agents)
+
+If you're an agent setting trailhead up for a user: clone the repo, then run
+`./bin/trailhead install` with the flags below. Everything you need is here — no
+hidden interactive steps.
+
+- **Install everything into the detected harness:** `./bin/trailhead install`
+- **Target a specific harness:** `./bin/trailhead install --harness claude_code`
+  (repeatable; canonical names come from `trailhead/harness/`).
+- **Install a subset of plugins:** `./bin/trailhead install --plugin lore --plugin craft`
+- **Fine-grained control** (which subagents/skills, local overrides, multiple
+  harnesses): write a config file and pass `--config` (see *Config files* below).
+- **Add support for a new harness** (Codex, OpenCode, …): implement the
+  `Harness` interface in [`trailhead/harness/base.py`](trailhead/harness/base.py)
+  and register it in [`trailhead/harness/__init__.py`](trailhead/harness/__init__.py).
+  `install`/`uninstall` are harness-agnostic; they compose generic plugin trees
+  and delegate the harness-specific registration to your implementation.
+
+---
+
+## CLI
 
 ```sh
-# pull area-scoped memory into the session when starting a task
-lore recall --areas <topic>
+trailhead install      # install plugins into your harness(es) + the camp/lore CLIs
+trailhead uninstall    # remove the ENTIRE install (all plugins + CLIs); keeps your data
+trailhead doctor       # read-only report of what's installed
 ```
 
-The agent loads decisions, dead-ends, and open deferred items from that area —
-giving it the non-obvious context that usually lives only in your head.
+### `install` flags
 
----
-
-## The opt-in growth arc
-
-lore is the lowest-buy-in entry point. Once it's part of how you work, two
-siblings are available when you're ready:
-
-**→ Add camp** when you have multiple repos to coordinate. camp gives Claude
-structured primitives for managing git worktrees across a group of repositories —
-the "where is the work happening" question, answered automatically.
-
-**→ Add craft** when you want the dev rituals: structured planning, TDD
-subagent-driven implementation slice by slice, assumption-proving scouts, and a
-four-lens council review. craft owns *how you build*; lore owns *what you know*.
-
-**You never have to adopt the whole suite.** lore, camp, and craft are each
-independently adoptable — wire only what you need. portage and landing depend
-on the trailhead install layout (the `trailhead.vcs` library) and are available
-in the `full` preset for teams that want automated merge and deploy soak.
-
----
-
-## What makes lore different
-
-lore is positioned against the other lightweight memory tools for Claude Code —
-Basic Memory, claude-mem, native Claude Code memory:
-
-| What                     | How lore handles it                              |
+| Flag | Meaning |
 |---|---|
-| **Git-native versioning** | Every capture is a vault commit — PR-reviewable, diffable, rollbackable |
-| **Typed taxonomy**        | `dead-end` / `deferred` / `follow-up` capture negative + future-conditional knowledge that pure text search misses |
-| **Multi-repo scoping**    | A single vault tracks memory across however many repos your project spans |
-| **Local / no-egress**     | The vault is a plain git repo on your machine; no data leaves without a push |
-| **Explainable recall**    | Area-mediated: the agent says *why* it recalled, not just "here is some context" |
+| `--harness <name>` | Target a harness explicitly (repeatable). Default: auto-detect. |
+| `--plugin <name>` | Install only these agent-plugins (repeatable). Default: all. |
+| `--no-camp` / `--no-lore` | Skip installing/updating that CLI onto PATH. |
+| `--config <path>` | Drive the install from a TOML config (absolute, or relative to the repo `config/` dir). Default: `config/default.toml`. |
+| `--quiet` / `--json` | Suppress progress / emit a machine-readable summary. |
 
-**Not trying to replace your note app.** lore is your agent's working memory,
-not a personal knowledge base. It captures what the *agent* needs to remember
-across sessions, in a form the agent can reason about.
+CLI flags are **runtime overrides** of the config file. `--plugin` replaces the
+resolved plugin set; `--harness` overrides detection.
 
-**Semantic (embedding) recall** is planned as an opt-in Tier-2 layer — not yet
-built. Today's recall is area-mediated: fast, explainable, and zero
-infrastructure.
+**Upgrades are additive.** Re-running `install` only adds — removing something
+from your config never removes it from the install. To remove pieces, run
+`uninstall` and re-install with a narrower config.
+
+**`uninstall` is all-or-nothing.** It removes every plugin from every harness and
+both CLIs. Your data is kept (the lore vault, camp groups, and each plugin's
+harness data dir survive a later re-install).
+
+---
+
+## Config files
+
+The `install` step is driven under the covers by a resolved config.
+The shipped default, [`config/default.toml`](config/default.toml), installs
+everything. Drop your own `*.toml` files in `config/` — everything there except
+`default.toml` is gitignored, so your configs never create noise in a checkout.
+
+A config can pick harnesses, plugins, and — going further than the CLI — the
+exact subagents/skills per plugin, plus local file overrides:
+
+```toml
+install_camp_cli = true
+install_lore_cli = false
+
+# Top-level default plugin set, applied to every detected/--harness harness.
+plugins = ["camp", "lore", "craft", "portage", "landing"]
+
+[[harness]]
+name = "claude_code"
+plugins = ["camp", "lore", "craft", "portage", "landing"]
+
+[[harness]]
+name = "codex"
+
+    # Map form: pick specific subagents/skills (omit a key to mean "all").
+    [[harness.plugins]]
+    name = "craft"
+    subagents = ["advocate", "artist"]
+    skills = ["execute"]
+
+    # Override form: point a subagent/skill at your own file or directory.
+    [[harness.plugins]]
+    name = "landing"
+        [[harness.plugins.subagents]]
+        name = "doctor"
+        file_path = "/path/to/custom/doctor.md"
+        [[harness.plugins.skills]]
+        name = "resolve"
+        file_path = "/path/to/custom/resolve"
+```
+
+A plugin written as a bare string (`plugins = ["camp"]`) expands to **all** of its
+subagents and skills. The full schema and resolution rules live in
+[`trailhead/install_config.py`](trailhead/install_config.py).
 
 ---
 
 ## What's included
 
-One `trailhead` repo ships all six tools, pinned at a single commit SHA:
-
-| Tool         | What it covers |
+| Tool | What it covers |
 |---|---|
-| `trailhead`  | Management CLI — install, update, doctor, config |
-| `lore`       | Agent-native project memory — capture, recall, sessions |
-| `camp`       | Worktree + group orchestration across repos |
-| `craft`      | Dev rituals — planning, TDD execute, review, release |
-| `portage`    | PR lifecycle — open, update, watch CI, and merge in dependency order (`full` preset) |
-| `landing`    | Post-merge deploy soak and deploy-health diagnosis (`full` preset) |
+| `lore` | Agent-native project memory — capture, recall, sessions |
+| `camp` | Worktree + group orchestration across repos |
+| `craft` | Dev rituals — planning, TDD execute, review, council |
+| `portage` | PR lifecycle — open, update, watch CI, merge |
+| `landing` | Post-merge deploy soak and deploy-health diagnosis |
 
-**outpost** (a personal dev-env and PR review dashboard) is a companion tool
-in its own repo — forward-declared in the install manifest for a future install
-step, not wired today.
-
----
-
-## Install
-
-### Try it today (from a local checkout)
-
-The tools are real and run today. From your checkout of the repo, do an
-editable install:
-
-```sh
-pip install -e .
-trailhead install
-```
-
-`trailhead install` prompts for a preset and prints what it wired, where config
-lives, and the next command to run. Pick a preset:
-
-```sh
-# minimal: lore only — lowest buy-in
-trailhead install --preset minimal
-
-# standard: lore + camp + craft subset — the common loop
-trailhead install --preset standard
-
-# full: every capability in every tool
-trailhead install --preset full
-```
-
-After install, start a fresh Claude Code session to load the wired tools.
-
-### When the public registry lands
-
-The public home for this repo lands with the org/repo-homing work. Once it's
-live, the canonical install path will be:
-
-```sh
-trailhead config registry <registry-url>
-trailhead install
-```
-
-The tools are real now; the public registry address is the only thing that isn't
-wired yet. Install notes are an invitation to what you can do today from a
-checkout, not an apology for what's missing.
-
----
-
-## Start here
-
-Once install finishes, your first lore moment:
-
-```sh
-lore recall --areas <topic>
-```
-
-Open Claude Code in a project, describe your task, and ask the agent to recall
-the relevant area. It loads what it knows — decisions made, approaches that
-didn't work, work set aside — and starts warm.
-
-The first time you `/lore:decision` something that saves you half an hour of
-re-investigation, lore has paid for itself.
-
----
+`camp` and `lore` also ship standalone CLIs (`camp`, `lore`) that trailhead puts
+on your PATH.
 
 ## Tool READMEs
 
-- [lore](./tools/lore/README.md) — skills, recall mechanics, vault layout
-- [craft](./tools/craft/README.md) — agents, skills, capability groups
-- [camp](./tools/camp/README.md) — worktree commands, group config
-- [portage](./tools/portage/README.md) — PR lifecycle agents and skills
-- [landing](./tools/landing/README.md) — deploy soak and health-diagnosis agents and skills
+- [lore](tools/lore/README.md) — skills, recall mechanics, vault layout
+- [craft](tools/craft/README.md) — agents and skills
+- [camp](tools/camp/README.md) — worktree commands, group config
+- [portage](tools/portage/README.md) — PR lifecycle agents and skills
+- [landing](tools/landing/README.md) — deploy soak and health-diagnosis agents and skills
 
 ## License
 

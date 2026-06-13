@@ -1,20 +1,19 @@
-"""Coverage guard: every on-disk skill/agent must be wired by SOME manifest entry.
+"""Coverage guard: every on-disk skill/agent must be base or selectable.
 
 The bug this prevents
 ---------------------
-`trailhead install` only wires what a tool's ``capabilities.toml`` references —
-``base`` dirs plus the ``skills`` / ``agents`` of selected capabilities. A skill
-dir or agent file that lands on disk but is named by NO capability (and is not in
-``base``) is invisible to the installer: even ``--preset full`` skips it. That is
-exactly how ``skills/_shared`` (craft's ``council.md``) went un-wired while the
-``plan`` skill read it at runtime.
+``trailhead install`` only wires a plugin's ``base`` (always-on) set plus the
+subagents/skills selected by name from the discovered inventory.  A skill dir or
+agent file that lands on disk but is neither in ``base`` nor discoverable as a
+selectable entry is invisible to the installer — even a full "install everything"
+config skips it.  That is exactly how ``skills/_shared`` (craft's ``council.md``)
+went un-wired while the ``plan`` skill read it at runtime; it is now ``base``.
 
 This test asserts the closure: for every tool, every ``skills/<dir>`` and every
-``agents/<x>.md`` on disk is referenced by ``base`` or by at least one capability.
-If you add a new skill/agent, you must also wire it — or this guard fails RED.
-
-The inverse direction (referenced-but-missing) is already enforced by
-``load_manifest(validate=True)``; we call it here too so a typo'd path fails loudly.
+``agents/<x>.md`` on disk is either listed in ``base`` or appears in the
+discovered selectable inventory.  A skill dir with no ``SKILL.md`` that is not in
+``base`` fails RED (add a ``SKILL.md`` to make it selectable, or list it in
+``base`` to always ship it).
 """
 
 from __future__ import annotations
@@ -43,13 +42,12 @@ def _plugin_root(tool: str) -> Path:
     return _REPO_ROOT / "tools" / tool / "plugins" / tool
 
 
-def _referenced(tool: str) -> set[str]:
-    """All skill/agent paths a manifest wires: base + every capability's skills/agents."""
-    manifest = load_manifest(_manifest_path(tool))
-    refs: set[str] = set(manifest.base)
-    for cap in manifest.capabilities.values():
-        refs.update(cap["skills"])
-        refs.update(cap["agents"])
+def _wired(tool: str) -> set[str]:
+    """All skill/agent rel-paths the installer can wire: base + selectable inventory."""
+    m = load_manifest(_manifest_path(tool))
+    refs: set[str] = set(m.base)
+    refs.update(m.subagents.values())
+    refs.update(m.skills.values())
     return refs
 
 
@@ -72,19 +70,19 @@ def _on_disk(tool: str) -> set[str]:
 
 @pytest.mark.parametrize("tool", _TOOLS)
 def test_every_on_disk_skill_and_agent_is_wired(tool: str):
-    """No orphans: every skill dir / agent file on disk is referenced by the manifest."""
-    orphans = sorted(_on_disk(tool) - _referenced(tool))
+    """No orphans: every skill dir / agent file on disk is base or selectable."""
+    orphans = sorted(_on_disk(tool) - _wired(tool))
     assert not orphans, (
-        f"{tool}: these skills/agents exist on disk but no capability or base "
-        f"references them, so `trailhead install` will never wire them: {orphans}. "
-        f"Add each to base or a capability in tools/{tool}/capabilities.toml."
+        f"{tool}: these skills/agents exist on disk but are neither in `base` nor "
+        f"discoverable as selectable, so `trailhead install` will never wire them: "
+        f"{orphans}. Add a SKILL.md (to make a skill selectable) or list it in "
+        f"`base` in tools/{tool}/capabilities.toml."
     )
 
 
 @pytest.mark.parametrize("tool", _TOOLS)
-def test_manifest_paths_all_exist_on_disk(tool: str):
-    """No dangling references: load_manifest(validate=True) proves every wired path exists."""
-    # Raises ManifestError if any referenced skill/agent/base/hooks path is missing.
+def test_manifest_validates_against_disk(tool: str):
+    """load_manifest(validate=True) proves base/hooks paths exist."""
     load_manifest(_manifest_path(tool))
 
 
@@ -93,11 +91,8 @@ def test_hooks_scripts_referenced_by_hooks_json_get_wired(tool: str, tmp_path: P
     """Every script a hooks.json shells out to must land in the composed install.
 
     Regression guard: compose once wired only hooks.json (the file), stripping the
-    sibling scripts it invokes via ${CLAUDE_PLUGIN_ROOT}/hooks/<script>. The hooks
-    then failed at runtime with FileNotFoundError. This composes the tool's
-    always-on set and asserts each referenced script exists in the wired tree.
-
-    Tools that declare no hooks_json are a vacuous pass.
+    sibling scripts it invokes via ${CLAUDE_PLUGIN_ROOT}/hooks/<script>. Tools that
+    declare no hooks_json are a vacuous pass.
     """
     manifest = load_manifest(_manifest_path(tool))
     if manifest.hooks_json is None:
@@ -111,7 +106,7 @@ def test_hooks_scripts_referenced_by_hooks_json_get_wired(tool: str, tmp_path: P
     )
 
     dest = tmp_path / tool
-    plan = compose_plan(manifest, set(), dest)  # always-on set only
+    plan = compose_plan(manifest, {}, {}, dest)  # always-on set only
     apply_plan(plan, mode="copy")
 
     missing = [rel for rel in referenced if not (dest / rel).exists()]

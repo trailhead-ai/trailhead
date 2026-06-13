@@ -144,16 +144,13 @@ def test_capabilities_toml_loads_and_validates() -> None:
     assert manifest.validate is True
 
 
-def test_capabilities_toml_base_has_worktree_skill() -> None:
+def test_capabilities_toml_worktree_skill_selectable() -> None:
+    # worktree is now a selectable skill (discovered by convention), not a base
+    # dir; camp declares no always-on base.
     from trailhead.capabilities import load_manifest
     manifest = load_manifest(_CAPABILITIES_TOML)
-    assert "skills/worktree" in manifest.base
-
-
-def test_capabilities_toml_dev_env_capability_declared() -> None:
-    from trailhead.capabilities import load_manifest
-    manifest = load_manifest(_CAPABILITIES_TOML)
-    assert "dev-env" in manifest.capabilities
+    assert manifest.base == []
+    assert "worktree" in manifest.skills
 
 
 # ---------------------------------------------------------------------------

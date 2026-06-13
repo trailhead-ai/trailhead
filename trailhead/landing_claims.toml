@@ -5,18 +5,19 @@
 # the real source of truth and fails closed if any anchor is unresolved or stale.
 #
 # Schema: array-of-tables [[claim]] with four required fields:
-#   kind    — one of: command | preset | skill | agent | capability | doc-link
+#   kind    — one of: command | skill | agent | doc-link
 #             prose-assertion exceptions (not resolved by the gate):
 #               positioning | allowlisted-example
 #   tool    — trailhead | lore | craft | camp | portage | landing
-#   ref     — the anchor to resolve (subcommand name, path, capability name, etc.)
+#   ref     — the anchor to resolve (subcommand name, path, etc.)
 #   source  — which README/surface makes this claim: root | lore | craft | camp | portage | landing
 #
-# Slice 3 extended this with per-tool README anchors (lore/craft/portage).
-# Slice 4 extended this with the landing tool README anchors.
+# The capability-GROUP and install-PRESET concepts were removed: install is now
+# config-driven and selects subagents/skills by name. Skill/agent anchors resolve
+# against the convention-discovered plugin inventory (Manifest.skills / .subagents).
 
 # ---------------------------------------------------------------------------
-# CLI subcommands (kind=command)
+# CLI subcommands (kind=command) — the three real commands: install/uninstall/doctor
 # ---------------------------------------------------------------------------
 
 [[claim]]
@@ -28,7 +29,7 @@ source = "root"
 [[claim]]
 kind = "command"
 tool = "trailhead"
-ref = "update"
+ref = "uninstall"
 source = "root"
 
 [[claim]]
@@ -36,56 +37,6 @@ kind = "command"
 tool = "trailhead"
 ref = "doctor"
 source = "root"
-
-[[claim]]
-kind = "command"
-tool = "trailhead"
-ref = "config"
-source = "root"
-
-# ---------------------------------------------------------------------------
-# Presets (kind=preset)
-# ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "preset"
-tool = "trailhead"
-ref = "minimal"
-source = "root"
-
-[[claim]]
-kind = "preset"
-tool = "trailhead"
-ref = "standard"
-source = "root"
-
-[[claim]]
-kind = "preset"
-tool = "trailhead"
-ref = "full"
-source = "root"
-
-# ---------------------------------------------------------------------------
-# lore capabilities (kind=capability)
-# ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "capability"
-tool = "lore"
-ref = "capture"
-source = "lore"
-
-[[claim]]
-kind = "capability"
-tool = "lore"
-ref = "recall"
-source = "lore"
-
-[[claim]]
-kind = "capability"
-tool = "lore"
-ref = "sessions"
-source = "lore"
 
 # ---------------------------------------------------------------------------
 # lore skills (kind=skill)
@@ -112,34 +63,6 @@ kind = "agent"
 tool = "lore"
 ref = "agents/librarian.md"
 source = "lore"
-
-# ---------------------------------------------------------------------------
-# craft capabilities (kind=capability)
-# ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "capability"
-tool = "craft"
-ref = "planning"
-source = "craft"
-
-[[claim]]
-kind = "capability"
-tool = "craft"
-ref = "execute"
-source = "craft"
-
-[[claim]]
-kind = "capability"
-tool = "craft"
-ref = "council"
-source = "craft"
-
-[[claim]]
-kind = "capability"
-tool = "craft"
-ref = "design"
-source = "craft"
 
 # ---------------------------------------------------------------------------
 # craft skills (kind=skill)
@@ -210,16 +133,6 @@ ref = "agents/attacker.md"
 source = "craft"
 
 # ---------------------------------------------------------------------------
-# camp capabilities (kind=capability)
-# ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "capability"
-tool = "camp"
-ref = "dev-env"
-source = "camp"
-
-# ---------------------------------------------------------------------------
 # doc-links (kind=doc-link) — real files that the landing references
 # ---------------------------------------------------------------------------
 
@@ -235,9 +148,30 @@ tool = "trailhead"
 ref = "trailhead/docs/paths.md"
 source = "root"
 
-# ---------------------------------------------------------------------------
-# Slice 4 additions — root README anchors
-# ---------------------------------------------------------------------------
+# Root README links to the new config-driven model surfaces (relative doc-links)
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "config/default.toml"
+source = "root"
+
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "trailhead/harness/base.py"
+source = "root"
+
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "trailhead/harness/__init__.py"
+source = "root"
+
+[[claim]]
+kind = "doc-link"
+tool = "trailhead"
+ref = "trailhead/install_config.py"
+source = "root"
 
 # Root README links to the five tool READMEs (relative doc-links)
 [[claim]]
@@ -258,10 +192,6 @@ tool = "trailhead"
 ref = "tools/camp/README.md"
 source = "root"
 
-# ---------------------------------------------------------------------------
-# Slice 5 additions — root README doc-links for portage + landing
-# ---------------------------------------------------------------------------
-
 [[claim]]
 kind = "doc-link"
 tool = "trailhead"
@@ -275,7 +205,7 @@ ref = "tools/landing/README.md"
 source = "root"
 
 # ---------------------------------------------------------------------------
-# Slice 6a additions — portage MANUAL-SMOKE.md (parity gate doc-link)
+# portage MANUAL-SMOKE.md (parity gate doc-link)
 # ---------------------------------------------------------------------------
 
 [[claim]]
@@ -285,10 +215,9 @@ ref = "tools/portage/MANUAL-SMOKE.md"
 source = "portage"
 
 # ---------------------------------------------------------------------------
-# Slice 3 additions — lore tool README anchors
+# lore tool README anchors — skills (kind=skill)
 # ---------------------------------------------------------------------------
 
-# lore capture skills (named in the skills table, all in capabilities.capture)
 [[claim]]
 kind = "skill"
 tool = "lore"
@@ -319,44 +248,20 @@ tool = "lore"
 ref = "skills/checkpoint"
 source = "lore"
 
-# Note: lore base skills (sync) are in [tool] base = [...] not a capability group;
-# build_real_anchor_set() enumerates only capability-grouped skills, so these can't be
-# claimed as kind="skill" — they are real on-disk but unverifiable by the gate oracle.
-# Prose mentions are fine; they are not shown in fenced sh/bash blocks.
-
-# lore capability: capture (named in the what-it-captures table)
-# (already present above — no duplicate needed)
-
 # ---------------------------------------------------------------------------
-# Slice 3 additions — craft tool README anchors
+# craft tool README anchors — skills (kind=skill)
 # ---------------------------------------------------------------------------
 
-# craft capabilities named in the README capabilities table
-[[claim]]
-kind = "capability"
-tool = "craft"
-ref = "review"
-source = "craft"
-
-[[claim]]
-kind = "capability"
-tool = "craft"
-ref = "helpers"
-source = "craft"
-
-# Note: craft base skills (shelve, pickup, polish) are in [tool] base = [...] not a
-# capability group; build_real_anchor_set() enumerates only capability-grouped skills,
-# so these can't be claimed as kind="skill" — they are real on-disk but unverifiable by
-# the gate oracle. Prose mentions are fine; they are not shown in fenced sh/bash blocks.
-
-# craft capability skills named in the README
 [[claim]]
 kind = "skill"
 tool = "craft"
 ref = "skills/review"
 source = "craft"
 
-# craft agents named in the README
+# ---------------------------------------------------------------------------
+# craft tool README anchors — agents (kind=agent)
+# ---------------------------------------------------------------------------
+
 [[claim]]
 kind = "agent"
 tool = "craft"
@@ -374,9 +279,6 @@ kind = "agent"
 tool = "craft"
 ref = "agents/code-reviewer.md"
 source = "craft"
-
-# council agents (advocate/builder/breaker/attacker) are registered once,
-# above in the council-capability block — not duplicated here.
 
 [[claim]]
 kind = "agent"
@@ -415,17 +317,9 @@ ref = "agents/security-auditor.md"
 source = "craft"
 
 # ---------------------------------------------------------------------------
-# Slice 3 additions — portage tool README anchors
+# portage tool README anchors — skills (kind=skill)
 # ---------------------------------------------------------------------------
 
-# portage capability named in the README capabilities table
-[[claim]]
-kind = "capability"
-tool = "portage"
-ref = "release"
-source = "portage"
-
-# portage skills named in the README commands table (/portage:<name>)
 [[claim]]
 kind = "skill"
 tool = "portage"
@@ -450,7 +344,10 @@ tool = "portage"
 ref = "skills/merge"
 source = "portage"
 
-# portage agents named in the README agents list
+# ---------------------------------------------------------------------------
+# portage tool README anchors — agents (kind=agent)
+# ---------------------------------------------------------------------------
+
 [[claim]]
 kind = "agent"
 tool = "portage"
@@ -470,17 +367,9 @@ ref = "agents/summarizer.md"
 source = "portage"
 
 # ---------------------------------------------------------------------------
-# Slice 4 additions — landing tool README anchors
+# landing tool README anchors — skills (kind=skill)
 # ---------------------------------------------------------------------------
 
-# landing capability named in the README capabilities table
-[[claim]]
-kind = "capability"
-tool = "landing"
-ref = "deploy"
-source = "landing"
-
-# landing skills named in the README commands table (/landing:<name>)
 [[claim]]
 kind = "skill"
 tool = "landing"
@@ -493,7 +382,10 @@ tool = "landing"
 ref = "skills/resolve"
 source = "landing"
 
-# landing agents named in the README agents list
+# ---------------------------------------------------------------------------
+# landing tool README anchors — agents (kind=agent)
+# ---------------------------------------------------------------------------
+
 [[claim]]
 kind = "agent"
 tool = "landing"

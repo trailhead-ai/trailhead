@@ -5,3 +5,8 @@ build/
 dist/
 .pytest_cache/
 *.pyc
+
+# User/agent-authored install configs live in config/ but must not be committed.
+# Only the shipped defaults are tracked.
+config/*
+!config/default.toml

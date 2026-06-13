@@ -4,7 +4,7 @@
 Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
   lore new <type>           Render a template and write a new vault note.
-  lore seed <name>          Scaffold an inbox capture + open it in Obsidian.
+  lore seed <name>          Scaffold an inbox capture under inbox/.
   lore patch <file> <sec>   Append text under a section (--text or stdin).
   lore set-status <f> <v>   Validate + set a note's frontmatter status.
   lore stats                Print counts for the resolved vault.
@@ -32,14 +32,12 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
-from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import frontmatter  # noqa: E402
 import harvest as harvest_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
-import link_server  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
@@ -616,43 +614,13 @@ def _resolve_token_dir() -> Path:
 
 # ---- seed -------------------------------------------------------------------
 
-def _obsidian_open_uri(abs_path: Path) -> str:
-    """Return an obsidian://open?path=<abs> URI for an absolute note path.
-
-    Mirrors lore-link-server's uri_for(): percent-encodes the path with
-    forward-slashes preserved (safe='/') so the URI is directly openable by
-    macOS `open`.
-    """
-    return "obsidian://open?path=" + quote(str(abs_path), safe="/")
-
-
-def _open_in_obsidian(abs_path: Path) -> tuple[bool, str]:
-    """Hand an obsidian:// URI to the opener. Returns (launched, detail).
-
-    The opener is $LORE_OPEN_BIN (for tests) else macOS `open`. The default
-    `open` is gated to darwin; an explicit override is trusted on any platform
-    so the launch path stays testable. When the opener is unavailable the note
-    is still on disk — we never fail the command over a missed launch.
-    """
-    opener = os.environ.get("LORE_OPEN_BIN", "").strip() or "open"
-    uri = _obsidian_open_uri(abs_path)
-
-    if opener == "open" and sys.platform != "darwin":
-        return False, f"not darwin ({sys.platform}); open it manually: {abs_path}"
-    if shutil.which(opener) is None and not Path(opener).is_file():
-        return False, f"opener {opener!r} not found; open it manually: {abs_path}"
-
-    subprocess.run([opener, uri], shell=False, check=False)
-    return True, uri
-
-
 def cmd_seed(args: argparse.Namespace) -> int:
-    """Scaffold an inbox capture named <slug> and open it in Obsidian.
+    """Scaffold an inbox capture named <slug> under inbox/.
 
     Idempotent: the note is keyed by name alone (no date prefix), so if a note
-    for this name already exists it is opened as-is, never overwritten. The
-    note carries minimal frontmatter (type: inbox, date, status: new) and an H1
-    of the human-readable name.
+    for this name already exists it is left as-is, never overwritten. The note
+    carries minimal frontmatter (type: inbox, date, status: new) and an H1 of
+    the human-readable name.
     """
     vault = Path(args.vault).expanduser().resolve() if args.vault else Path(vault_mod.resolve_vault())
     today = _today()
@@ -663,23 +631,15 @@ def cmd_seed(args: argparse.Namespace) -> int:
 
     if note_path.exists():
         print(f"Exists: {note_path}")
-    else:
-        template_path = TEMPLATES_DIR / "inbox.md"
-        if not template_path.is_file():
-            print(f"error: template not found: {template_path}", file=sys.stderr)
-            return 1
-        rendered = _render_template(template_path, {"date": today, "name": args.name})
-        note_path.write_text(rendered)
-        print(f"Created: {note_path}")
-
-    if args.no_open:
         return 0
 
-    launched, detail = _open_in_obsidian(note_path)
-    if launched:
-        print(f"Opened in Obsidian: {detail}")
-    else:
-        print(f"note: {detail}", file=sys.stderr)
+    template_path = TEMPLATES_DIR / "inbox.md"
+    if not template_path.is_file():
+        print(f"error: template not found: {template_path}", file=sys.stderr)
+        return 1
+    rendered = _render_template(template_path, {"date": today, "name": args.name})
+    note_path.write_text(rendered)
+    print(f"Created: {note_path}")
     return 0
 
 
@@ -1406,216 +1366,6 @@ def cmd_session_note(args: argparse.Namespace) -> int:
     return 1
 
 
-# ---- link-server ------------------------------------------------------------
-
-LINK_SERVER_LABEL = "com.lore.link-server"
-_DEFAULT_LINK_PORT = 7777
-_LINK_SERVER_PYTHON = "/usr/bin/python3"
-_LINK_OUT_LOG = "/tmp/lore-link-server.out.log"
-_LINK_ERR_LOG = "/tmp/lore-link-server.err.log"
-
-
-def _link_server_port() -> int:
-    """Resolve the link-server port — $LORE_LINK_PORT (valid int) else 7777.
-
-    Mirrors lore-link-server's resolve_port() convention.
-    """
-    raw = os.environ.get("LORE_LINK_PORT", "").strip()
-    if not raw:
-        return _DEFAULT_LINK_PORT
-    try:
-        return int(raw)
-    except ValueError:
-        return _DEFAULT_LINK_PORT
-
-
-def _link_server_guards_ok() -> tuple[bool, str]:
-    """Verify darwin + `open` + Obsidian presence.
-
-    Returns (ok, message). On failure the message is actionable and the caller
-    refuses the install without writing anything.
-    """
-    if sys.platform != "darwin":
-        return False, (
-            f"link-server: requires macOS (darwin); current platform is {sys.platform!r}"
-        )
-    if shutil.which("open") is None:
-        return False, "link-server: `open` not found in PATH; cannot open Obsidian URIs"
-    if not Path("/Applications/Obsidian.app").exists():
-        return False, (
-            "link-server: Obsidian not found at /Applications/Obsidian.app — "
-            "install Obsidian before installing the link-server"
-        )
-    return True, ""
-
-
-def _agent_running(label: str) -> bool:
-    """True iff `launchctl list` shows the agent label."""
-    result = subprocess.run(
-        ["launchctl", "list"], capture_output=True, text=True, check=False
-    )
-    if result.returncode != 0:
-        return False
-    return any(label in line for line in result.stdout.splitlines())
-
-
-def _link_server_install(args: argparse.Namespace) -> int:
-    port = _link_server_port()
-
-    # (a) port-in-use precheck FIRST — refuse before writing anything.
-    if link_server.port_in_use(port):
-        # A legacy per-user agent on the same port is the usual culprit; let the
-        # operator name it via $LORE_LINK_OLD_AGENT so the message stays
-        # actionable without baking a machine-specific label into the source.
-        old_agent = os.environ.get("LORE_LINK_OLD_AGENT", "").strip()
-        culprit = (
-            f"a previously-loaded launchd agent ({old_agent})"
-            if old_agent
-            else "another process (e.g. a legacy link-server launchd agent)"
-        )
-        unload_hint = (
-            f"\n  launchctl unload -w ~/Library/LaunchAgents/{old_agent}.plist"
-            if old_agent
-            else "\n  launchctl list   # find what holds the port, then unload it"
-        )
-        print(
-            f"link-server: port {port} in use — likely {culprit} still holding it. Run:"
-            f"{unload_hint}\n"
-            "then re-run `lore link-server install`.",
-            file=sys.stderr,
-        )
-        return 1
-
-    # (b) darwin + open + Obsidian guards — hard refuse, no partial install.
-    ok, msg = _link_server_guards_ok()
-    if not ok:
-        print(msg, file=sys.stderr)
-        return 1
-
-    vault = vault_mod.resolve_vault()
-    plugin_root = str(PLUGIN_ROOT)
-    server_script = str(PLUGIN_ROOT / "bin" / "lore-link-server")
-
-    launch_agents_dir = Path(args.launch_agents_dir).expanduser()
-    state_dir = Path(args.state_dir).expanduser()
-    plist_path = launch_agents_dir / f"{LINK_SERVER_LABEL}.plist"
-
-    existing = link_server.read_state(state_dir)
-    if existing and existing.get("vault") == vault and existing.get("port") == port:
-        print(f"link-server: already installed (vault {vault}, port {port}); nothing to do.")
-        return 0
-
-    # (c) render + write plist, then load it.
-    xml = link_server.render_plist(
-        label=LINK_SERVER_LABEL,
-        python=_LINK_SERVER_PYTHON,
-        server_script=server_script,
-        vault=vault,
-        port=port,
-        out_log=_LINK_OUT_LOG,
-        err_log=_LINK_ERR_LOG,
-    )
-    launch_agents_dir.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(xml)
-
-    # A changed-config re-run must drop the old agent before loading the new one.
-    if existing:
-        subprocess.run(
-            ["launchctl", "unload", "-w", str(plist_path)],
-            capture_output=True, text=True, check=False,
-        )
-    load = subprocess.run(
-        ["launchctl", "load", "-w", str(plist_path)],
-        capture_output=True, text=True, check=False,
-    )
-    if load.returncode != 0:
-        print(
-            f"link-server: launchctl load failed: {load.stderr.strip()}",
-            file=sys.stderr,
-        )
-        return 1
-
-    # (d) write state ONLY after a successful load.
-    link_server.write_state(state_dir, {
-        "schema": link_server.STATE_SCHEMA,
-        "port": port,
-        "plist_path": str(plist_path),
-        "vault": vault,
-        "plugin_root": plugin_root,
-    })
-    print(f"link-server: installed and loaded ({LINK_SERVER_LABEL}, vault {vault}, port {port}).")
-    return 0
-
-
-def _link_server_uninstall(args: argparse.Namespace) -> int:
-    state_dir = Path(args.state_dir).expanduser()
-    launch_agents_dir = Path(args.launch_agents_dir).expanduser()
-
-    state = link_server.read_state(state_dir)
-    plist_path = (
-        Path(state["plist_path"])
-        if state and state.get("plist_path")
-        else launch_agents_dir / f"{LINK_SERVER_LABEL}.plist"
-    )
-
-    if plist_path.exists():
-        subprocess.run(
-            ["launchctl", "unload", "-w", str(plist_path)],
-            capture_output=True, text=True, check=False,
-        )
-        plist_path.unlink()
-
-    link_server.clear_state(state_dir)
-    print("link-server: uninstalled.")
-    return 0
-
-
-def _link_server_status(args: argparse.Namespace) -> int:
-    state_dir = Path(args.state_dir).expanduser()
-    state = link_server.read_state(state_dir)
-
-    if state is None:
-        # No trustworthy state — fall back to the env-resolved port for the hint.
-        print(f"link-server: not installed (resolved port {_link_server_port()}, no state file).")
-        return 0
-
-    # Prefer the installed port from state; $LORE_LINK_PORT in the current shell
-    # may differ from what the agent was actually installed with.
-    port = state.get("port", _link_server_port())
-    print(f"link-server: installed port {port}")
-    print(f"  state: {link_server.state_path(state_dir)}")
-    for key in ("schema", "port", "plist_path", "vault", "plugin_root"):
-        print(f"    {key}: {state.get(key)}")
-
-    current_root = str(PLUGIN_ROOT)
-    if state.get("plugin_root") != current_root:
-        print(
-            f"link-server: STALE — state plugin_root {state.get('plugin_root')!r} "
-            f"!= current {current_root!r}; reinstall with `lore link-server install`.",
-            file=sys.stderr,
-        )
-        return 1
-
-    if not _agent_running(LINK_SERVER_LABEL):
-        print(
-            f"link-server: WARNING — state file present but agent {LINK_SERVER_LABEL} "
-            "is NOT running; reinstall with `lore link-server install`.",
-            file=sys.stderr,
-        )
-        return 1
-
-    print("link-server: running.")
-    return 0
-
-
-def cmd_link_server(args: argparse.Namespace) -> int:
-    if args.action == "install":
-        return _link_server_install(args)
-    if args.action == "uninstall":
-        return _link_server_uninstall(args)
-    return _link_server_status(args)
-
-
 # ---- recall -----------------------------------------------------------------
 
 def cmd_recall(args: argparse.Namespace) -> int:
@@ -1764,29 +1514,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats = sub.add_parser("stats", help="Print counts for the resolved vault")
     p_stats.set_defaults(func=cmd_stats)
 
-    p_link = sub.add_parser(
-        "link-server",
-        help="Manage the localhost Obsidian link bridge launchd agent",
-    )
-    p_link.add_argument(
-        "action",
-        choices=["install", "uninstall", "status"],
-        help="install / uninstall / status of the com.lore.link-server agent",
-    )
-    p_link.add_argument(
-        "--launch-agents-dir",
-        dest="launch_agents_dir",
-        default="~/Library/LaunchAgents",
-        help="Directory to write the launchd plist into (default: ~/Library/LaunchAgents)",
-    )
-    p_link.add_argument(
-        "--state-dir",
-        dest="state_dir",
-        default="~/.config/lore",
-        help="Directory for the install-state file (default: ~/.config/lore)",
-    )
-    p_link.set_defaults(func=cmd_link_server)
-
     p_session_note = sub.add_parser(
         "session-note",
         help="Print the session note path for this session (id-first, worktree fallback)",
@@ -1859,11 +1586,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_seed = sub.add_parser(
         "seed",
-        help="Scaffold an inbox capture (named <name>) and open it in Obsidian",
+        help="Scaffold an inbox capture (named <name>) under inbox/",
     )
     p_seed.add_argument("name", help="Human-readable name; slugified for the filename")
     p_seed.add_argument("--vault", default=None, help="Vault path (overrides $LORE_VAULT)")
-    p_seed.add_argument("--no-open", dest="no_open", action="store_true", help="Create the note but don't open Obsidian")
     p_seed.set_defaults(func=cmd_seed)
 
     def _add_session_selectors(p: argparse.ArgumentParser) -> None:
