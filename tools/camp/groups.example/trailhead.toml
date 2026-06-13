@@ -6,10 +6,10 @@
 #   - outpost               the companion app repo
 #
 # This file is an EXAMPLE / template. The repo_root values below are
-# machine-specific absolute paths — customize each one to wherever you cloned
-# the repo before copying this into your live config
+# placeholders — replace each `/path/to/<repo>` with the absolute path to your
+# own clone before copying this into your live config
 # (config_dir("camp")/groups/trailhead.toml). camp also authors this file for
-# you: `camp init trailhead --member trailhead=~/code/trailhead --member ...`.
+# you: `camp init trailhead --member trailhead=/path/to/trailhead --member ...`.
 #
 # Each repo must belong to exactly one group (camp enforces no-overlap).
 #
@@ -21,19 +21,19 @@ name = "trailhead"
 
 [[members]]
 name = "trailhead"
-repo_root = "/Users/tduffield/code/trailhead"
+repo_root = "/path/to/trailhead"
 # trailhead is reached via sys.path (walk-up from cli/camp), not pip install.
 # No build step is needed for import resolution on a fresh git clone.
 bootstrap = []
 
 [[members]]
 name = "trailhead-ai.github.io"
-repo_root = "/Users/tduffield/code/trailhead-ai.github.io"
+repo_root = "/path/to/trailhead-ai.github.io"
 bootstrap = []
 
 [[members]]
 name = "outpost"
-repo_root = "/Users/tduffield/code/outpost"
+repo_root = "/path/to/outpost"
 bootstrap = []
 
 [branch]
