@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +55,10 @@ _TOOLS_WITH_DOCTOR = frozenset({"camp"})
 
 _PYTHON_MIN_MAJOR = 3
 _PYTHON_MIN_MINOR = 10
+
+# Repo root — used to detect which wired tools ship a front-door CLI wrapper
+# (tools/<tool>/plugins/<tool>/bin/<tool>) that PATH integration shims onto PATH.
+_REPO_ROOT = Path(__file__).parent.parent
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +144,15 @@ def _probe_tool_doctor(
             "error": f"{tool} doctor timed out after {_DOCTOR_TIMEOUT}s",
         }
     except FileNotFoundError:
-        return {"status": "no_doctor"}
+        # The tool advertises a doctor verb but its binary isn't on PATH.
+        # Don't mask this as "no_doctor" (which reads as a pass) — surface it as
+        # not_on_path.  The dedicated PATH-integration check (gated on whether
+        # PATH integration is enabled) owns the pass/fail signal, so this entry
+        # stays informational to avoid double-counting one root cause.
+        return {
+            "status": "not_on_path",
+            "error": f"{tool} not found on PATH — its doctor checks were skipped",
+        }
 
     # Try to parse the JSON regardless of returncode (a failing check may exit 1
     # but still emit valid JSON with its checks array)
@@ -219,6 +232,95 @@ def _check_python_version(python_runner: Callable) -> dict:
             )
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# PATH-integration check (front-door CLIs resolvable on PATH)
+# ---------------------------------------------------------------------------
+
+
+_REGISTERED_MARKER = ".trailhead-registered"
+
+
+def _registered_tools(env: dict[str, str] | None) -> list[str]:
+    """Return tools registered with the harness, per composed/ markers.
+
+    A composed/<tool>/.trailhead-registered marker means trailhead wired and
+    registered that tool — independent of whether config.toml records it.  This
+    is the source of truth on a config-less machine (wired directly, no install).
+    """
+    composed_root = state_dir("trailhead", env=env) / "composed"
+    if not composed_root.is_dir():
+        return []
+    return sorted(
+        child.name
+        for child in composed_root.iterdir()
+        if child.is_dir() and (child / _REGISTERED_MARKER).exists()
+    )
+
+
+def _has_cli_wrapper(tool: str) -> bool:
+    """Return True if `tool` ships a front-door CLI wrapper in the repo.
+
+    Mirrors install.py's shim selection: only tools with
+    tools/<tool>/plugins/<tool>/bin/<tool> get a PATH shim, so only those are
+    expected to resolve as a bare command.
+    """
+    return (_REPO_ROOT / "tools" / tool / "plugins" / tool / "bin" / tool).exists()
+
+
+def _check_path_integration(
+    wired_tools: dict[str, set[str]],
+    *,
+    which_fn: Callable[[str], Optional[str]],
+    env: dict[str, str] | None,
+) -> list[dict]:
+    """Check that each wired front-door CLI resolves on PATH.
+
+    camp is the forcing case: it's run outside any Claude Code session, so a
+    bare `camp` must resolve.  lore ships a CLI too.  When PATH integration is
+    enabled but the shim isn't active (shell not restarted, rc not sourced, or
+    integration never ran), `which camp` returns None — that's a real, common
+    failure the user needs told about, not silently passed.
+
+    Returns a list of check dicts.  Empty when no wired tool ships a CLI.
+    When PATH integration is disabled in config, returns a single passing
+    informational check (a missing shim is then intentional, not a fault).
+    """
+    front_door = sorted(t for t in wired_tools if _has_cli_wrapper(t))
+    if not front_door:
+        return []
+
+    cfg = load_config(env=env)
+    if not cfg.path_integration:
+        return [{
+            "check": "path_integration",
+            "description": "PATH integration",
+            "pass": True,
+            "details": "disabled in config — front-door CLIs are not shimmed onto PATH",
+        }]
+
+    checks: list[dict] = []
+    for tool in front_door:
+        resolved = which_fn(tool)
+        ok = resolved is not None
+        check: dict = {
+            "check": f"path:{tool}",
+            "description": f"`{tool}` resolves on PATH",
+            "pass": ok,
+        }
+        if ok:
+            check["details"] = resolved
+        else:
+            shim_dir = state_dir("trailhead", env=env) / "bin"
+            check["details"] = (
+                f"`{tool}` not found on PATH — its shim isn't active. "
+                f"Restart your shell (or source your shell rc), or run "
+                f"`trailhead config path_integration on`. "
+                f"Manual fallback: add {shim_dir} to your PATH."
+            )
+        checks.append(check)
+    return checks
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +408,7 @@ def run_doctor(
     wired_tools: dict[str, set[str]] | None = None,
     doctor_runner: Callable | None = None,
     python_version_runner: Callable | None = None,
+    which_runner: Callable[[str], Optional[str]] | None = None,
     env: dict[str, str] | None = None,
 ) -> DoctorResult:
     """Aggregate per-tool doctor outputs into a rollup result.
@@ -327,15 +430,34 @@ def run_doctor(
     _env = env if env is not None else dict(os.environ)
     _doctor_runner = doctor_runner or _default_doctor_runner
     _python_runner = python_version_runner or _default_python_version_runner
+    _which_runner = which_runner or shutil.which
 
+    # Discover what's wired.  Config (config.toml) is the declared source, but a
+    # tree can be registered with the harness without a config entry (e.g. wired
+    # directly during dogfooding — no config.toml).  For the probes + PATH check
+    # we want the EFFECTIVE wired set: config ∪ registered composed trees, so a
+    # registered-but-not-on-PATH camp is still caught.  Drift, however, is a
+    # config↔filesystem comparison and is only meaningful for config-declared
+    # tools — feeding it marker-only tools would falsely flag every present skill
+    # as "undeclared".  So the two checks key off different sets.
     if wired_tools is None:
         cfg = load_config(env=_env)
-        wired_tools = {tool: set(caps) for tool, caps in cfg.capabilities.items()}
+        config_tools = {tool: set(caps) for tool, caps in cfg.capabilities.items()}
+        wired_tools = dict(config_tools)
+        for tool in _registered_tools(_env):
+            wired_tools.setdefault(tool, set())
+        drift_tools = config_tools
+    else:
+        drift_tools = wired_tools
 
     # ----------------------------------------------------------------
-    # Step 1: Python version check (U-2)
+    # Step 1: Global checks — python version (U-2) + PATH integration.
+    # The PATH check owns the "front-door CLI (e.g. camp) not on PATH" signal.
     # ----------------------------------------------------------------
     global_checks = [_check_python_version(_python_runner)]
+    global_checks.extend(
+        _check_path_integration(wired_tools, which_fn=_which_runner, env=_env)
+    )
 
     # ----------------------------------------------------------------
     # Step 2: Per-tool doctor probes
@@ -350,6 +472,10 @@ def run_doctor(
         status = entry.get("status")
         if status == "no_doctor":
             pass  # not a failure
+        elif status == "not_on_path":
+            # The PATH-integration check already owns this signal; don't
+            # double-count it as a per-tool failure here.
+            pass
         elif status == "ok":
             if entry.get("any_failed"):
                 any_failed = True
@@ -360,7 +486,7 @@ def run_doctor(
     # ----------------------------------------------------------------
     # Step 3: Drift check (R-2)
     # ----------------------------------------------------------------
-    drift_checks = _check_drift(wired_tools, env=_env)
+    drift_checks = _check_drift(drift_tools, env=_env)
     for dc in drift_checks:
         if not dc.get("pass", True):
             any_failed = True
@@ -429,6 +555,8 @@ def _build_human_output(
                 lines.append(f"    [{c_status}] {check.get('description', check.get('check', '?'))}")
                 if not check.get("pass") and check.get("details"):
                     lines.append(f"           {check['details']}")
+        elif status == "not_on_path":
+            lines.append(f"    [skip] {entry.get('error', 'not on PATH')}")
         elif status == "timeout":
             lines.append(f"    [ERROR] {entry.get('error', 'timed out')}")
         elif status == "parse_error":

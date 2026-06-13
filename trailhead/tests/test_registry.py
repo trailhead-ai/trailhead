@@ -283,6 +283,104 @@ class TestRewireInvokesUpdate:
 
 
 # ---------------------------------------------------------------------------
+# T-R3b: unregister — inverse of register (uninstall + marketplace remove)
+# ---------------------------------------------------------------------------
+
+
+class TestUnregisterInvokesCli:
+    def test_unregister_calls_plugin_uninstall(self, tmp_path):
+        """unregister must call 'claude plugin uninstall <tool>@trailhead-<tool>'."""
+        from trailhead.registry import unregister
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+        calls_seen = []
+
+        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+
+        uninstall_calls = [a for a in calls_seen if "uninstall" in a]
+        assert len(uninstall_calls) == 1, f"expected one uninstall call; got {calls_seen}"
+        assert "lore@trailhead-lore" in uninstall_calls[0]
+
+    def test_unregister_keeps_data(self, tmp_path):
+        """unregister must pass --keep-data (wiring-only: user data survives)."""
+        from trailhead.registry import unregister
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+        calls_seen = []
+
+        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+
+        uninstall_call = next(a for a in calls_seen if "uninstall" in a)
+        assert "--keep-data" in uninstall_call
+
+    def test_unregister_calls_marketplace_remove(self, tmp_path):
+        """unregister must call 'claude plugin marketplace remove trailhead-<tool>'."""
+        from trailhead.registry import unregister
+
+        mkt_root = tmp_path / "composed" / "camp"
+        mkt_root.mkdir(parents=True)
+        calls_seen = []
+
+        unregister(tool="camp", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+
+        remove_calls = [a for a in calls_seen if "marketplace" in a and "remove" in a]
+        assert len(remove_calls) == 1, f"expected one marketplace remove; got {calls_seen}"
+        assert "trailhead-camp" in remove_calls[0]
+
+    def test_unregister_clears_marker(self, tmp_path):
+        """unregister removes the .trailhead-registered marker."""
+        from trailhead.registry import unregister
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+        (mkt_root / ".trailhead-registered").write_text("{}")
+
+        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+
+        assert not (mkt_root / ".trailhead-registered").exists()
+
+    def test_unregister_clears_marker_even_if_runner_raises(self, tmp_path):
+        """A failed CLI call still clears the marker (the tree is being torn down)."""
+        from trailhead.registry import unregister
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+        (mkt_root / ".trailhead-registered").write_text("{}")
+
+        def failing(args, **kw):
+            raise RuntimeError("plugin not found")
+
+        with pytest.raises(RuntimeError):
+            unregister(tool="lore", mkt_root=mkt_root, runner=failing)
+
+        assert not (mkt_root / ".trailhead-registered").exists()
+
+    def test_unregister_args_are_lists(self, tmp_path):
+        from trailhead.registry import unregister
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+        calls_seen = []
+
+        unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: calls_seen.append(args))
+
+        for a in calls_seen:
+            assert isinstance(a, list)
+
+    def test_unregister_never_invokes_real_subprocess(self, tmp_path):
+        from trailhead.registry import unregister
+
+        mkt_root = tmp_path / "composed" / "lore"
+        mkt_root.mkdir(parents=True)
+
+        with patch("subprocess.run") as mock_run:
+            unregister(tool="lore", mkt_root=mkt_root, runner=lambda args, **kw: None)
+            mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # T-R4: default runner is subprocess.run (but tests never exercise it)
 # ---------------------------------------------------------------------------
 

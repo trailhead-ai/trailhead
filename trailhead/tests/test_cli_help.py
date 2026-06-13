@@ -96,6 +96,10 @@ class TestCuratedHelp:
         exit_code, out, _ = _run(["--help"])
         assert "config" in out
 
+    def test_help_names_uninstall(self):
+        exit_code, out, _ = _run(["--help"])
+        assert "uninstall" in out
+
     def test_bare_trailhead_names_all_four_subcommands(self):
         exit_code, out, _ = _run([])
         assert "install" in out
@@ -187,3 +191,11 @@ class TestSubcommandHelp:
     def test_config_help_exits_zero(self):
         exit_code, _, _ = _run(["config", "--help"])
         assert exit_code == 0
+
+    def test_uninstall_help_exits_zero(self):
+        exit_code, _, _ = _run(["uninstall", "--help"])
+        assert exit_code == 0
+
+    def test_uninstall_help_shows_yes_flag(self):
+        exit_code, out, err = _run(["uninstall", "--help"])
+        assert "--yes" in out or "-y" in out
