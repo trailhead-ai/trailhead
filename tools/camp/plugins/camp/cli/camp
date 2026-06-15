@@ -174,16 +174,28 @@ def main() -> None:
         cmd_worktree_cleanup(force=force)
         return
 
-    if first == "init":
-        _cmd_init_cli(argv[1:])
+    # Slice 1: 'group' is the new name for 'init'; 'init' redirects to 'group'.
+    if first == "group":
+        _cmd_group_cli(argv[1:])
         return
+
+    if first == "init":
+        # Legacy redirect: init → group
+        print(
+            "camp init: this command has been renamed — use 'camp group' instead.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # ---------------------------------------------------------------------------
     # Slice 2: group-aware command routing
     # ---------------------------------------------------------------------------
-    if first and first not in ("help", "--help", "-h", "doctor", "code",
-                                "foreach", "sweep", "path", "open", "which",
-                                "--version", "version"):
+    _SKIP_GROUP_RESOLVE = frozenset({
+        "help", "--help", "-h", "doctor",
+        "foreach", "path", "which",
+        "--version", "version",
+    })
+    if first and first not in _SKIP_GROUP_RESOLVE:
         group, group_env = _resolve_group_for_command(argv)
         if group is not None:
             _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
@@ -207,16 +219,43 @@ def _dispatch_group_command(
         _die,
         cmd_help,
         cmd_path,
-        cmd_code,
         cmd_foreach,
-        cmd_sweep,
         cmd_doctor,
+        cmd_disabled,
+        cmd_legacy_redirect,
         RESERVED,
     )
 
-    # Handle slug command (camp <slug>)
+    # Slice 1: disabled verbs — hidden from help, legible error + non-zero exit.
+    if cmd in ("restock", "sweep", "code", "fire"):
+        cmd_disabled(cmd)
+        return
+
+    # Slice 1: legacy verb redirects.
+    if cmd == "open":
+        cmd_legacy_redirect("open", "ai")
+        return
+    if cmd == "break":
+        cmd_legacy_redirect("break", "rm")
+        return
+
+    # Slice 1: new verb surface.
+    if cmd == "ai":
+        _cmd_ai_group_cli(rest, group, group_env, dry_run)
+        return
+    if cmd == "rm":
+        _cmd_rm_group_cli(rest, group, group_env, dry_run)
+        return
+    if cmd in ("cd", "enter", "setup"):
+        _spine_main()
+        return
+
+    # Bare slug removed: any non-RESERVED token that isn't a known verb → error.
     if cmd not in RESERVED:
-        _cmd_slug_group(cmd, rest, group, group_env, dry_run)
+        _die(
+            f"camp: bare slug dispatch is no longer supported.\n"
+            f"  Use 'camp ai {cmd}' to create or resume a workspace."
+        )
         return
 
     if cmd == "status":
@@ -225,10 +264,6 @@ def _dispatch_group_command(
         _cmd_ls_group_cli(rest, group, group_env)
     elif cmd == "sync":
         _cmd_sync_group_cli(rest, group, group_env, dry_run)
-    elif cmd == "break":
-        _cmd_break_group_cli(rest, group, group_env, dry_run)
-    elif cmd == "restock":
-        _cmd_restock_group_cli(rest, group, group_env, dry_run)
     elif cmd == "rebase":
         _cmd_rebase_group_cli(rest, group, group_env, dry_run)
     else:
@@ -573,20 +608,20 @@ def _cmd_rebase_group_cli(
     print(f"camp rebase: {slug!r} rebased onto {onto}")
 
 
-_INIT_HELP = """\
-usage: camp init <group> [options]
+_GROUP_HELP = """\
+usage: camp group <name> [options]
 
 Three modes (every non-default mode requires an explicit flag):
 
-  camp init <group>
-      Wire SessionStart + WorktreeRemove hook entries into each member's
+  camp group <name>
+      Wire SessionStart hook entries into each member's
       .claude/settings.json for an already-configured group.
 
-  camp init <group> --member NAME=PATH [--member NAME=PATH ...] [options]
+  camp group <name> --member NAME=PATH [--member NAME=PATH ...] [options]
       Author a group config TOML from flags (atomic write), then wire hooks.
       Refuses to overwrite an existing config unless --force.
 
-  camp init <group> --scaffold
+  camp group <name> --scaffold
       Write a commented stub config you edit by hand, then re-run with
       --member. Does not wire hooks.
 
@@ -598,6 +633,9 @@ Options:
   --allow-missing      Skip the repo_root existence/git check when authoring.
   --scaffold           Write a commented stub config and stop (no hooks).
 """
+
+# Backward-compat alias (for internal callers; user-facing is _GROUP_HELP)
+_INIT_HELP = _GROUP_HELP
 
 
 def _parse_init_args(args: list[str]) -> dict:
@@ -691,8 +729,8 @@ def _parse_member(raw: str) -> dict[str, str]:
     return {"name": name, "repo_root": path}
 
 
-def _cmd_init_cli(args: list[str]) -> None:
-    """camp init <group> — wire hooks, author a config from flags, or write a stub."""
+def _cmd_group_cli(args: list[str]) -> None:
+    """camp group <name> — wire hooks, author a config from flags, or write a stub."""
     from group_config import load_all_groups, GroupConfigError
     from group_resolve import resolve_group_override, GroupResolutionError
     from init_cmd import run_init
@@ -700,7 +738,7 @@ def _cmd_init_cli(args: list[str]) -> None:
     import trailhead.paths as _paths
 
     if not args or args[0] in ("--help", "-h"):
-        print(_INIT_HELP)
+        print(_GROUP_HELP)
         return
 
     parsed = _parse_init_args(args)
@@ -712,14 +750,14 @@ def _cmd_init_cli(args: list[str]) -> None:
     if parsed["scaffold"] and not parsed["members"]:
         if config_path.exists() and not parsed["force"]:
             print(
-                f"camp init: config {config_path!s} already exists — pass --force to overwrite",
+                f"camp group: config {config_path!s} already exists — pass --force to overwrite",
                 file=sys.stderr,
             )
             sys.exit(1)
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path.write_text(group_scaffold.build_stub_toml(group_name))
-        print(f"camp init: wrote stub {config_path!s}")
-        print(f"  edit this then re-run `camp init {group_name} --member NAME=PATH ...`")
+        print(f"camp group: wrote stub {config_path!s}")
+        print(f"  edit this then re-run `camp group {group_name} --member NAME=PATH ...`")
         return
 
     # --- Mode (a): --member present → author config (atomic) then wire hooks ---
@@ -739,10 +777,10 @@ def _cmd_init_cli(args: list[str]) -> None:
             group = resolve_group_override(group_name, all_configs)
             run_init(group, str(_BIN_DIR / "camp"), group_configs=all_configs)
         except (GroupResolutionError, GroupConfigError) as e:
-            print(f"camp init: {e}", file=sys.stderr)
+            print(f"camp group: {e}", file=sys.stderr)
             sys.exit(1)
         print(
-            f"camp init: authored + wired group {group_name!r} "
+            f"camp group: authored + wired group {group_name!r} "
             f"({len(group['members'])} member(s))"
         )
         return
@@ -751,22 +789,66 @@ def _cmd_init_cli(args: list[str]) -> None:
     try:
         all_configs = load_all_groups(config_dir)
     except GroupConfigError as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
         group = resolve_group_override(group_name, all_configs)
     except GroupResolutionError as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
         run_init(group, str(_BIN_DIR / "camp"), group_configs=all_configs)
     except (GroupResolutionError, GroupConfigError) as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"camp init: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
+    print(f"camp group: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
+
+
+def _cmd_init_cli(args: list[str]) -> None:
+    """camp init — legacy entry point; behavior preserved for internal callers.
+
+    External users should use 'camp group' (Slice 1 rename). This function
+    continues to exist so tests and internal callers that invoke it directly
+    still work. The user-facing routing in main() now sends 'init' to the
+    legacy-redirect error.
+    """
+    _cmd_group_cli(args)
+
+
+def _cmd_ai_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp ai <slug> — create or resume a workspace.
+
+    Replaces bare-slug dispatch and 'camp open'. Full provisioning in Slice 3.
+    Slice 1: delegates to the existing _cmd_slug_group logic to preserve
+    behavior through the transition; Slice 3 will replace this with async
+    provisioning + workspace-dir layout + harness-launch seam.
+    """
+    if not args:
+        print("camp ai: a slug is required\n  usage: camp ai <slug>", file=sys.stderr)
+        sys.exit(1)
+    _cmd_slug_group(args[0], args[1:], group, env, dry_run)
+
+
+def _cmd_rm_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp rm [--force] [--name <slug>] — tear down a worktree.
+
+    Replaces 'camp break'. Delegates to existing _cmd_break_group_cli.
+    Slice 2 will repoint to the new workspace-dir layout.
+    """
+    _cmd_break_group_cli(args, group, env, dry_run)
 
 
 def _author_group(
@@ -786,7 +868,7 @@ def _author_group(
 
     if config_path.exists() and not force:
         print(
-            f"camp init: config {config_path!s} already exists — pass --force to overwrite",
+            f"camp group: config {config_path!s} already exists — pass --force to overwrite",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -796,7 +878,7 @@ def _author_group(
     try:
         all_configs = load_all_groups(config_dir)
     except GroupConfigError as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
     other_configs = [c for c in all_configs if c["group"]["name"] != group_name]
 
@@ -808,7 +890,7 @@ def _author_group(
             allow_missing=allow_missing,
         )
     except (group_scaffold.ScaffoldError, GroupConfinementError) as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
     rendered = group_scaffold.render_group_toml(group_name, members, branch_pattern)
@@ -821,7 +903,7 @@ def _author_group(
         load_group(tmp_path)
     except Exception as e:
         tmp_path.unlink(missing_ok=True)
-        print(f"camp init: rendered config failed round-trip validation: {e}", file=sys.stderr)
+        print(f"camp group: rendered config failed round-trip validation: {e}", file=sys.stderr)
         sys.exit(1)
     os.replace(str(tmp_path), str(config_path))
 

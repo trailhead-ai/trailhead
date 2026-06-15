@@ -1,7 +1,7 @@
 ---
 name: worktree
 description: "Create, manage, and tear down git worktrees across a camp group."
-version: "0.1.0"
+version: "0.2.0"
 ---
 
 # camp worktree skill
@@ -11,13 +11,20 @@ using `camp`. It covers the full worktree lifecycle for a configured group.
 
 ## Commands
 
-### Create or resume a worktree
+### Create or resume a workspace
 ```
-camp <slug>
+camp ai <slug>
 ```
-Creates a new worktree named `worktree-<slug>` across all group members, or
+Creates a new workspace named `worktree-<slug>` across all group members, or
 resumes an existing one. Prints a one-line success summary (members · bootstrap
 status · manifest path).
+
+### Navigate to a workspace
+```
+camp cd <slug>
+```
+Prints the resolved workspace path on stdout for shell cd integration.
+Fish shell integration available via `camp shellenv` (see PATH setup below).
 
 ### List all worktrees
 ```
@@ -26,15 +33,27 @@ camp ls [--json]
 
 ### Show worktree status
 ```
-camp status [--name <slug>] [--json] [--stale [--days N]]
+camp status [--name <slug>] [--json]
 ```
-Reconciles manifest membership, per-member git state (branch / dirty / unpushed),
-and drift detection. Retains `dev_env_instance` / `fire_state` keys as null
-when no dev-env registry exists (contract stability for future dev-env half).
+Reconciles manifest membership and per-member git state (branch / dirty / unpushed).
 
-### Break down a worktree
+### Activate a member
 ```
-camp break [--force] [--name <slug>]
+camp enter <member>
+```
+Fires the member's activation hooks (idempotent) and prints its `CLAUDE.md`
+to stdout so the calling agent ingests it.
+
+### Provision member worktrees
+```
+camp setup [--retry]
+```
+Provisions or retries pending/failed member worktrees. Runs synchronously;
+`--retry` re-runs only non-ready members.
+
+### Tear down a worktree
+```
+camp rm [--force] [--name <slug>]
 ```
 Tears down the worktree. `--force` discards uncommitted changes.
 
@@ -50,12 +69,6 @@ default (skips dirty / off-main members). `--force` resets.
 camp rebase [--onto <branch>] [--name <slug>]
 ```
 
-### Refresh dep caches
-```
-camp restock [--json]
-```
-Runs each member's configured bootstrap commands against the canonical checkout.
-
 ### Run a command in each member
 ```
 camp foreach [--name <slug>] [--fail-fast] [--json] <cmd…>
@@ -63,19 +76,16 @@ camp foreach [--name <slug>] [--fail-fast] [--json] <cmd…>
 Executes `<cmd>` in each member worktree (shell=False; metacharacters are
 literal).
 
-### Report / prune orphan worktrees
-```
-camp sweep [--prune [--force]] [--json]
-```
-Reports orphaned `.claude/worktrees/<slug>` dirs with no manifest entry
-(classified SAFE / DIRTY / UNMERGED). `--prune` removes SAFE orphans.
-Note: dev-env instance teardown in `--prune` is deferred to a future slice.
-
 ## Configuration
 
 A camp group is defined by a TOML config at
 `trailhead.paths.config_dir("camp")/groups/<group>.toml`. See
 `groups.example/trailhead.toml` for the schema.
+
+Author a group config:
+```
+camp group <name> --member NAME=PATH [--member NAME=PATH ...]
+```
 
 ## PATH setup (interim, until `trailhead install` automates it)
 

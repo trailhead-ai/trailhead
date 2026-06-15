@@ -9,7 +9,7 @@
 # placeholders — replace each `/path/to/<repo>` with the absolute path to your
 # own clone before copying this into your live config
 # (config_dir("camp")/groups/trailhead.toml). camp also authors this file for
-# you: `camp init trailhead --member trailhead=/path/to/trailhead --member ...`.
+# you: `camp group trailhead --member trailhead=/path/to/trailhead --member ...`.
 #
 # Each repo must belong to exactly one group (camp enforces no-overlap).
 #

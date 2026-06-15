@@ -42,6 +42,8 @@ RESERVED = frozenset({
     "foreach", "code", "sweep", "sync", "restock", "doctor", "help",
     "version", "which",
     "init", "session-bootstrap", "worktree-cleanup",
+    # Slice 1: new verb surface
+    "group", "ai", "rm", "cd", "enter", "setup",
 })
 
 # ---------------------------------------------------------------------------
@@ -396,29 +398,24 @@ def cmd_help(_args: list[str]) -> None:
         "camp — group worktree orchestration\n"
         "\n"
         "Usage:\n"
-        "  camp <slug>                       Create or resume a worktree\n"
-        "  camp open <slug>                  Reach a worktree with a reserved-word slug\n"
+        "  camp ai <slug>                    Create or resume a workspace for a slug\n"
+        "  camp cd <slug>                    Print workspace path (shell cd integration)\n"
         "\n"
         "Setup:\n"
-        "  camp init <group>                 Wire SessionStart/WorktreeRemove hooks into each member repo\n"
+        "  camp group <name> [options]       Wire hooks and author a group config\n"
         "\n"
-        "Worktree commands:\n"
+        "Workspace commands:\n"
         "  camp ls [--json]                  List all worktrees\n"
         "  camp status [--name <slug>]       Show worktree status (git + drift)\n"
-        "  camp path [--name <slug>]         Print worktree directory path\n"
-        "  camp break [--force]              Teardown worktree (--force discards changes)\n"
+        "  camp enter <member>               Activate a member and print its CLAUDE.md\n"
+        "  camp setup [--retry]              Provision or retry member worktrees\n"
+        "  camp rm [--force] [--name <slug>] Tear down a worktree\n"
         "  camp sync [--force]               Fast-forward canonical siblings to origin/main\n"
         "  camp rebase [--onto <branch>]     Rebase worktree branches onto origin/main\n"
-        "  camp restock                      Refresh canonical sibling dep caches\n"
         "  camp foreach [--fail-fast] <cmd>  Run a command in each member worktree\n"
-        "  camp sweep [--prune [--force]]    Report/clean orphan worktrees\n"
-        "  camp code [--name <slug>]         Open worktree as VSCode multi-root workspace\n"
         "\n"
         "Health:\n"
         "  camp doctor [--json]              Read-only workspace health check\n"
-        "\n"
-        "Dev-env (deferred):\n"
-        "  camp fire <subcommand>            Dev-env management (not yet available)\n"
         "\n"
         "Flags:\n"
         "  --name <slug>    Target a specific worktree from any cwd\n"
@@ -1529,6 +1526,113 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Slice 1: new verb handlers
+# ---------------------------------------------------------------------------
+
+_DISABLED_MESSAGE = (
+    "temporarily disabled while the worktree flow stabilizes.\n"
+    "  Use 'camp ai <slug>' to work with worktrees."
+)
+
+
+def cmd_group(args: list[str], dry_run: bool = False) -> None:
+    """camp group <name> [options] — wire hooks and author a group config.
+
+    Delegates to the init logic (behavior preserved from 'camp init').
+    Full implementation completed in cli/camp._cmd_init_cli.
+    """
+    # Dispatch to spine's main for now — cli/camp routes this to _cmd_init_cli.
+    # This handler exists so RESERVED includes 'group' and help is correct.
+    # The actual routing from cli/camp bypasses spine for group-aware commands.
+    _die(
+        "camp group: use 'camp group <name> [options]' — "
+        "this command routes through the group-aware CLI.\n"
+        "  Run 'camp group --help' for usage."
+    )
+
+
+def cmd_ai(args: list[str], dry_run: bool = False) -> None:
+    """camp ai <slug> — create or resume a workspace for a slug.
+
+    Replaces bare-slug dispatch and 'camp open'. Full provisioning in Slice 3.
+    Slice 1: stub that acknowledges the verb and exits clearly.
+    """
+    if not args:
+        _die("camp ai: a slug is required\n  usage: camp ai <slug>")
+    raw_slug = args[0]
+    extra = args[1:]
+    slug = _resolve_slug(raw_slug, context="ai")
+    # Slice 3 will wire reconcile + detached provisioner + harness launch here.
+    _die(
+        f"camp ai: not yet implemented in this slice — "
+        f"provisioning for {slug!r} will be wired in Slice 3."
+    )
+
+
+def cmd_rm(args: list[str], dry_run: bool = False) -> None:
+    """camp rm [--force] [--name <slug>] — tear down a worktree.
+
+    Replaces 'camp break'. Full implementation in Slice 2.
+    """
+    # Slice 2 will wire reconcile_break with the new layout here.
+    _die(
+        "camp rm: not yet implemented in this slice — "
+        "worktree teardown will be wired in Slice 2."
+    )
+
+
+def cmd_cd(args: list[str], dry_run: bool = False) -> None:
+    """camp cd <slug> — print workspace path for shell cd integration.
+
+    Full implementation in Slice 7.
+    """
+    _die(
+        "camp cd: not yet implemented in this slice — "
+        "shell integration will be wired in Slice 7."
+    )
+
+
+def cmd_enter(args: list[str], dry_run: bool = False) -> None:
+    """camp enter <member> — activate a member and print its CLAUDE.md.
+
+    Full implementation in Slice 5.
+    """
+    _die(
+        "camp enter: not yet implemented in this slice — "
+        "member activation will be wired in Slice 5."
+    )
+
+
+def cmd_setup(args: list[str], dry_run: bool = False) -> None:
+    """camp setup [--retry] — provision or retry member worktrees.
+
+    Full implementation in Slice 3.
+    """
+    _die(
+        "camp setup: not yet implemented in this slice — "
+        "worktree provisioning will be wired in Slice 3."
+    )
+
+
+def cmd_disabled(verb: str) -> None:
+    """Print the standard disabled message and exit non-zero."""
+    print(
+        f"camp {verb}: {_DISABLED_MESSAGE}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def cmd_legacy_redirect(old_verb: str, new_verb: str) -> None:
+    """Print a redirect message for a renamed verb and exit non-zero."""
+    print(
+        f"camp {old_verb}: this command has been renamed — use 'camp {new_verb}' instead.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1548,33 +1652,49 @@ def main() -> None:
 
     if first == "ls":
         cmd_ls(rest)
-    elif first == "code":
-        cmd_code(rest, dry_run=dry_run)
     elif first == "foreach":
         cmd_foreach(rest, dry_run=dry_run)
-    elif first == "sweep":
-        cmd_sweep(rest, dry_run=dry_run)
     elif first == "sync":
         cmd_sync(rest, dry_run=dry_run)
-    elif first == "restock":
-        cmd_restock(rest, dry_run=dry_run)
     elif first == "doctor":
         cmd_doctor(rest, dry_run=dry_run)
     elif first == "status":
         cmd_status(rest, dry_run=dry_run)
-    elif first == "break":
-        cmd_break(rest, dry_run=dry_run)
     elif first == "rebase":
         cmd_rebase(rest, dry_run=dry_run)
     elif first == "path":
         cmd_path(rest, dry_run=dry_run)
-    elif first == "open":
-        cmd_open(rest, dry_run=dry_run)
     elif first in ("help", "--help", "-h"):
         cmd_help(rest)
+    # Slice 1: new verb surface
+    elif first == "ai":
+        cmd_ai(rest, dry_run=dry_run)
+    elif first == "rm":
+        cmd_rm(rest, dry_run=dry_run)
+    elif first == "cd":
+        cmd_cd(rest, dry_run=dry_run)
+    elif first == "enter":
+        cmd_enter(rest, dry_run=dry_run)
+    elif first == "setup":
+        cmd_setup(rest, dry_run=dry_run)
+    elif first == "group":
+        cmd_group(rest, dry_run=dry_run)
+    # Slice 1: disabled verbs (hidden from help, legible error)
+    elif first in ("restock", "sweep", "code", "fire"):
+        cmd_disabled(first)
+    # Slice 1: legacy verb redirects
+    elif first == "open":
+        cmd_legacy_redirect("open", "ai")
+    elif first == "break":
+        cmd_legacy_redirect("break", "rm")
+    elif first == "init":
+        cmd_legacy_redirect("init", "group")
     else:
-        slug = _resolve_slug(first, context="argument")
-        cmd_slug(slug, rest, dry_run=dry_run)
+        # Bare slug removed: print legible error pointing at camp ai.
+        _die(
+            f"camp: bare slug dispatch is no longer supported.\n"
+            f"  Use 'camp ai {first}' to create or resume a workspace."
+        )
 
 
 if __name__ == "__main__":

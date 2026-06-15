@@ -911,17 +911,17 @@ bootstrap = []
 
 
 # ---------------------------------------------------------------------------
-# Refinement 2: camp --help lists init
+# Refinement 2: camp --help lists group (renamed from init in Slice 1)
 # ---------------------------------------------------------------------------
 
 
 class TestHelpMenuInit:
-    """camp --help output contains 'init' with a description, exits 0, is
-    not an argparse dump.
+    """camp --help output contains 'group' (renamed from 'init') with a description,
+    exits 0, is not an argparse dump.
     """
 
     def test_help_contains_init(self):
-        """camp --help output contains 'init' with a description."""
+        """camp --help output contains 'group' (renamed from 'init') with a description."""
         result = subprocess.run(
             [str(_BIN_CAMP), "--help"],
             capture_output=True,
@@ -931,24 +931,25 @@ class TestHelpMenuInit:
             f"Expected exit 0 from --help, got {result.returncode}: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "init" in combined, (
-            f"'init' not found in --help output:\n{combined}"
+        # Slice 1: 'init' renamed to 'group'.
+        assert "group" in combined, (
+            f"'group' not found in --help output:\n{combined}"
         )
 
     def test_help_init_has_description(self):
-        """camp --help output describes what init does."""
+        """camp --help output describes what group (formerly init) does."""
         result = subprocess.run(
             [str(_BIN_CAMP), "--help"],
             capture_output=True,
             text=True,
         )
         combined = result.stdout + result.stderr
-        # Should have some descriptive text adjacent to 'init'
-        assert "init" in combined
+        # Slice 1: 'init' renamed to 'group'.
+        assert "group" in combined
         # Check for keywords that would appear in a one-liner description
-        init_description_words = ["Wire", "wire", "hook", "Hook", "Setup", "setup"]
+        init_description_words = ["Wire", "wire", "hook", "Hook", "Setup", "setup", "config"]
         assert any(w in combined for w in init_description_words), (
-            f"Expected a description near 'init' in --help, "
+            f"Expected a description near 'group' in --help, "
             f"but none of {init_description_words} found:\n{combined}"
         )
 
