@@ -9,6 +9,8 @@ Contract:
 - removed verbs init/open/break → legible error pointing at new verb.
 - camp help: golden-structure assert (new verbs, none disabled) — per lesson
   [[2026-06-04-port-parity-golden-structure-not-substring]].
+- group-aware path (_dispatch_group_command): disabled verbs, ai, rm all stub
+  correctly when a group resolves (exercised via CAMP_CONFIG_DIR + --group flag).
 """
 from __future__ import annotations
 
@@ -116,7 +118,7 @@ def test_camp_group_dispatches_not_bare_slug_error() -> None:
     result = _run(["group", "my-group"])
     # Should NOT produce the "use camp ai" bare-slug error
     combined = result.stdout + result.stderr
-    assert "camp ai" not in combined or "camp group" in combined, (
+    assert "camp ai" not in combined, (
         f"camp group should not route to bare-slug error path.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
@@ -336,5 +338,122 @@ def test_stub_verb_prints_not_implemented_message(verb: str) -> None:
     combined = result.stdout + result.stderr
     assert "not yet" in combined.lower() or "slice" in combined.lower() or "implement" in combined.lower(), (
         f"Stub verb {verb!r} must print 'not yet implemented' message.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Group-aware path: _dispatch_group_command exercised via CAMP_CONFIG_DIR +
+# --group flag. This ensures the group-aware routing is tested separately from
+# the spine fallback path.
+#
+# Reviewer gotcha: inside a real worktree the cwd itself resolves a group, so
+# we control CAMP_CONFIG_DIR and use --group to deterministically reach
+# _dispatch_group_command on both the group and no-group branches.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def stub_group_env(tmp_path: Path) -> dict[str, str]:
+    """Return env overrides that point CAMP_CONFIG_DIR at a tmp dir with a stub group.
+
+    The stub group 'testgrp' has one member with a non-existent repo_root —
+    sufficient for load_group (which validates schema, not disk presence) to
+    parse and for _resolve_group_for_command to return a group dict.
+    """
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "testgrp.toml").write_text(
+        '[group]\nname = "testgrp"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    return {"CAMP_CONFIG_DIR": str(tmp_path)}
+
+
+def _run_group(args: list[str], *, group_env: dict[str, str]) -> subprocess.CompletedProcess:
+    """Run camp with --group testgrp prepended to args, using the stub group env."""
+    return _run(args + ["--group", "testgrp"], env=group_env)
+
+
+# Disabled verbs via group-aware path
+
+
+@pytest.mark.parametrize("verb", ["code", "sweep", "restock", "fire"])
+def test_group_path_disabled_verb_exits_nonzero(
+    verb: str, stub_group_env: dict[str, str]
+) -> None:
+    """_dispatch_group_command routes disabled verbs to cmd_disabled → non-zero exit."""
+    result = _run_group([verb], group_env=stub_group_env)
+    assert result.returncode != 0, (
+        f"Disabled verb {verb!r} must exit non-zero via group-aware path.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+@pytest.mark.parametrize("verb", ["code", "sweep", "restock", "fire"])
+def test_group_path_disabled_verb_prints_stabilizes_message(
+    verb: str, stub_group_env: dict[str, str]
+) -> None:
+    """_dispatch_group_command disabled verbs print the 'stabilizes' message."""
+    result = _run_group([verb], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert "stabiliz" in combined.lower() or "temporarily" in combined.lower(), (
+        f"Disabled verb {verb!r} must mention 'stabilizes' or 'temporarily' via group path.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+# camp ai via group-aware path → stub (not real reconcile/execvp)
+
+
+def test_group_path_ai_is_stubbed(stub_group_env: dict[str, str]) -> None:
+    """camp ai <slug> via group-aware path exits non-zero (Slice 1 stub)."""
+    result = _run_group(["ai", "my-slug"], group_env=stub_group_env)
+    assert result.returncode != 0, (
+        f"camp ai via group-aware path must exit non-zero (stub in Slice 1).\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+def test_group_path_ai_stub_mentions_slice3(stub_group_env: dict[str, str]) -> None:
+    """camp ai stub message mentions Slice 3."""
+    result = _run_group(["ai", "my-slug"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert "slice 3" in combined.lower() or "not yet" in combined.lower(), (
+        f"camp ai stub must mention Slice 3 or 'not yet implemented'.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+def test_group_path_ai_does_not_launch_claude(stub_group_env: dict[str, str]) -> None:
+    """camp ai via group path must not run reconcile or exec claude (no manifest written)."""
+    result = _run_group(["ai", "my-slug"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    # If reconcile ran, it would fail trying to create git worktrees in /tmp/fake-member-a.
+    # The stub should exit before touching anything — verify no reconcile error appears.
+    assert "worktree creation failed" not in combined, (
+        f"camp ai via group path must not call reconcile_worktree.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+# camp rm via group-aware path → stub (not real reconcile_break)
+
+
+def test_group_path_rm_is_stubbed(stub_group_env: dict[str, str]) -> None:
+    """camp rm via group-aware path exits non-zero (Slice 1 stub)."""
+    result = _run_group(["rm", "--name", "my-slug"], group_env=stub_group_env)
+    assert result.returncode != 0, (
+        f"camp rm via group-aware path must exit non-zero (stub in Slice 1).\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+
+
+def test_group_path_rm_stub_mentions_slice2(stub_group_env: dict[str, str]) -> None:
+    """camp rm stub message mentions Slice 2."""
+    result = _run_group(["rm", "--name", "my-slug"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert "slice 2" in combined.lower() or "not yet" in combined.lower(), (
+        f"camp rm stub must mention Slice 2 or 'not yet implemented'.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )

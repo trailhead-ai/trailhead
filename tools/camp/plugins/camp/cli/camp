@@ -180,12 +180,9 @@ def main() -> None:
         return
 
     if first == "init":
-        # Legacy redirect: init → group
-        print(
-            "camp init: this command has been renamed — use 'camp group' instead.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        from spine import cmd_legacy_redirect
+        cmd_legacy_redirect("init", "group")
+        return
 
     # ---------------------------------------------------------------------------
     # Slice 2: group-aware command routing
@@ -827,14 +824,18 @@ def _cmd_ai_group_cli(
     """camp ai <slug> — create or resume a workspace.
 
     Replaces bare-slug dispatch and 'camp open'. Full provisioning in Slice 3.
-    Slice 1: delegates to the existing _cmd_slug_group logic to preserve
-    behavior through the transition; Slice 3 will replace this with async
-    provisioning + workspace-dir layout + harness-launch seam.
+    Slice 1: stub — Slice 3 wires async provisioning + workspace-dir layout +
+    harness-launch seam.
     """
+    from spine import _die
     if not args:
         print("camp ai: a slug is required\n  usage: camp ai <slug>", file=sys.stderr)
         sys.exit(1)
-    _cmd_slug_group(args[0], args[1:], group, env, dry_run)
+    slug = args[0]
+    _die(
+        f"camp ai: not yet implemented in this slice — "
+        f"provisioning for {slug!r} will be wired in Slice 3."
+    )
 
 
 def _cmd_rm_group_cli(
@@ -845,10 +846,14 @@ def _cmd_rm_group_cli(
 ) -> None:
     """camp rm [--force] [--name <slug>] — tear down a worktree.
 
-    Replaces 'camp break'. Delegates to existing _cmd_break_group_cli.
-    Slice 2 will repoint to the new workspace-dir layout.
+    Replaces 'camp break'. Slice 2 wires reconcile_break with the new
+    workspace-dir layout.
     """
-    _cmd_break_group_cli(args, group, env, dry_run)
+    from spine import _die
+    _die(
+        "camp rm: not yet implemented in this slice — "
+        "worktree teardown will be wired in Slice 2."
+    )
 
 
 def _author_group(

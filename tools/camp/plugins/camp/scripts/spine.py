@@ -1536,17 +1536,15 @@ _DISABLED_MESSAGE = (
 
 
 def cmd_group(args: list[str], dry_run: bool = False) -> None:
-    """camp group <name> [options] — wire hooks and author a group config.
+    """RESERVED — this handler is unreachable via normal dispatch.
 
-    Delegates to the init logic (behavior preserved from 'camp init').
-    Full implementation completed in cli/camp._cmd_init_cli.
+    cli/camp.main() intercepts 'group' before spine.main() is called, routing
+    it to _cmd_group_cli. This stub exists only so that direct calls to
+    spine.main() (e.g. from tests) produce a legible error rather than
+    falling into the bare-slug handler.
     """
-    # Dispatch to spine's main for now — cli/camp routes this to _cmd_init_cli.
-    # This handler exists so RESERVED includes 'group' and help is correct.
-    # The actual routing from cli/camp bypasses spine for group-aware commands.
     _die(
-        "camp group: use 'camp group <name> [options]' — "
-        "this command routes through the group-aware CLI.\n"
+        "camp group: this verb routes through the group-aware CLI entry point.\n"
         "  Run 'camp group --help' for usage."
     )
 
