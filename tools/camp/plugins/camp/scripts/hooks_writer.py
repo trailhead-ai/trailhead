@@ -58,6 +58,11 @@ def _session_start_command(camp_bin: str) -> str:
     return f"${{CAMP_BIN:-{camp_bin}}} session-bootstrap"
 
 
+def _workspace_session_start_command(camp_bin: str) -> str:
+    """Return the workspace SessionStart hook command string."""
+    return f"${{CAMP_BIN:-{camp_bin}}} setup --status"
+
+
 def _has_command(hook_list: list, command: str) -> bool:
     """Return True if `command` already appears in any hook entry in hook_list."""
     for entry in hook_list:
@@ -89,6 +94,28 @@ def _upsert_hook(data: dict, event: str, command: str) -> None:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def write_workspace_hooks(workspace_dir: Path, camp_bin: str) -> None:
+    """Write/update the workspace-dir SessionStart hook in <workspace_dir>/.claude/settings.json.
+
+    The SessionStart hook fires `camp setup --status` so every (re)entry to the
+    workspace dir makes the agent aware of in-flight/failed member provisioning.
+
+    Idempotent: re-running adds NO duplicate entries.
+    Existing unrelated keys are preserved.
+
+    Args:
+        workspace_dir: Absolute path to the workspace root directory.
+        camp_bin:      Absolute path to the camp binary.
+    """
+    settings_path = workspace_dir / ".claude" / "settings.json"
+    data = _load_settings(settings_path)
+
+    ss_cmd = _workspace_session_start_command(camp_bin)
+    _upsert_hook(data, "SessionStart", ss_cmd)
+
+    _save_settings(settings_path, data)
 
 
 def write_hooks_for_member(repo_root: Path, camp_bin: str) -> None:

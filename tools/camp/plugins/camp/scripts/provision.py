@@ -164,13 +164,26 @@ def bring_up_workspace(
     *,
     env: dict[str, str] | None = None,
 ) -> Path:
-    """camp ai bring-up: seed pending members + spawn the detached provisioner.
+    """camp ai bring-up: seed pending members + write workspace docs + spawn provisioner.
+
+    Synchronous steps (fast, before harness launch):
+      1. Seed the manifest with every member pending.
+      2. Write CLAUDE.md + AGENT.md at the workspace root (idempotent).
+      3. Write workspace .claude/settings.json with SessionStart→camp setup --status.
+      4. Spawn the detached background provisioner.
 
     Returns the manifest path. The harness launch (Slice 6) follows this call.
     """
+    from workspace_doc import write_workspace_doc
+    from hooks_writer import write_workspace_hooks
+
     group_name = group["group"]["name"]
     mpath = seed_pending_workspace(group, slug, env=env)
     ws_dir = _workspace_dir(group_name, slug, env=env)
+
+    write_workspace_doc(ws_dir, group, slug)
+    write_workspace_hooks(ws_dir, str(_CAMP_BIN))
+
     spawn_detached_provisioner(
         group_name=group_name,
         slug=slug,
