@@ -323,7 +323,9 @@ def test_camp_break_gives_legible_redirect() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("verb", ["cd", "enter", "setup"])
+# NOTE: 'setup' graduated from a stub to real behavior in Slice 3 (and 'ai' too);
+# only 'cd' (Slice 7) and 'enter' (Slice 5) remain stubs here.
+@pytest.mark.parametrize("verb", ["cd", "enter"])
 def test_stub_verb_exits_nonzero(verb: str) -> None:
     result = _run([verb, "dummy"])
     assert result.returncode != 0, (
@@ -332,7 +334,7 @@ def test_stub_verb_exits_nonzero(verb: str) -> None:
     )
 
 
-@pytest.mark.parametrize("verb", ["cd", "enter", "setup"])
+@pytest.mark.parametrize("verb", ["cd", "enter"])
 def test_stub_verb_prints_not_implemented_message(verb: str) -> None:
     result = _run([verb, "dummy"])
     combined = result.stdout + result.stderr
@@ -403,36 +405,33 @@ def test_group_path_disabled_verb_prints_stabilizes_message(
     )
 
 
-# camp ai via group-aware path → stub (not real reconcile/execvp)
+# camp ai via group-aware path → real (Slice 3): seeds pending + spawns provisioner.
+# CAMP_NO_LAUNCH suppresses the placeholder claude exec (the real launch is Slice 6).
 
 
-def test_group_path_ai_is_stubbed(stub_group_env: dict[str, str]) -> None:
-    """camp ai <slug> via group-aware path exits non-zero (Slice 1 stub)."""
-    result = _run_group(["ai", "my-slug"], group_env=stub_group_env)
-    assert result.returncode != 0, (
-        f"camp ai via group-aware path must exit non-zero (stub in Slice 1).\n"
+def test_group_path_ai_seeds_and_exits_zero(
+    stub_group_env: dict[str, str], tmp_path: Path
+) -> None:
+    """camp ai <slug> via group path seeds the workspace and exits 0 (no claude)."""
+    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"),
+           "CAMP_NO_LAUNCH": "1"}
+    result = _run_group(["ai", "my-slug"], group_env=env)
+    assert result.returncode == 0, (
+        f"camp ai via group path should seed + exit 0 with CAMP_NO_LAUNCH.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
 
-def test_group_path_ai_stub_mentions_slice3(stub_group_env: dict[str, str]) -> None:
-    """camp ai stub message mentions Slice 3."""
-    result = _run_group(["ai", "my-slug"], group_env=stub_group_env)
-    combined = result.stdout + result.stderr
-    assert "slice 3" in combined.lower() or "not yet" in combined.lower(), (
-        f"camp ai stub must mention Slice 3 or 'not yet implemented'.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-def test_group_path_ai_does_not_launch_claude(stub_group_env: dict[str, str]) -> None:
-    """camp ai via group path must not run reconcile or exec claude (no manifest written)."""
-    result = _run_group(["ai", "my-slug"], group_env=stub_group_env)
-    combined = result.stdout + result.stderr
-    # If reconcile ran, it would fail trying to create git worktrees in /tmp/fake-member-a.
-    # The stub should exit before touching anything — verify no reconcile error appears.
-    assert "worktree creation failed" not in combined, (
-        f"camp ai via group path must not call reconcile_worktree.\n"
+def test_group_path_ai_announces_background_provisioning(
+    stub_group_env: dict[str, str], tmp_path: Path
+) -> None:
+    """camp ai reports that provisioning runs in the background."""
+    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"),
+           "CAMP_NO_LAUNCH": "1"}
+    result = _run_group(["ai", "my-slug"], group_env=env)
+    combined = (result.stdout + result.stderr).lower()
+    assert "background" in combined or "camp status" in combined, (
+        f"camp ai must announce background provisioning.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 

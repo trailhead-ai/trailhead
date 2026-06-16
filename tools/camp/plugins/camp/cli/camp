@@ -243,7 +243,10 @@ def _dispatch_group_command(
     if cmd == "rm":
         _cmd_rm_group_cli(rest, group, group_env, dry_run)
         return
-    if cmd in ("cd", "enter", "setup"):
+    if cmd == "setup":
+        _cmd_setup_group_cli(rest, group, group_env, dry_run)
+        return
+    if cmd in ("cd", "enter"):
         _spine_main()
         return
 
@@ -268,78 +271,58 @@ def _dispatch_group_command(
         _spine_main()
 
 
-def _cmd_slug_group(
-    slug_raw: str,
-    extra: list[str],
-    group: dict,
-    env: dict[str, str] | None,
-    dry_run: bool,
-) -> None:
-    """camp <slug>: reconcile worktrees then exec claude.
-
-    Decision (D-I integration): camp <slug> calls reconcile_worktree DIRECTLY
-    (so Slice 2 is harness-independent + unit-testable), then execs claude into
-    the primary member's already-created worktree using `claude -r <slug>`.
-    The idempotent reconcile means Slice 3's hook calling it again is a safe no-op.
-    """
-    from spine import _resolve_slug, _dry_run_print
-    from reconcile import reconcile_worktree, format_success_summary
-    from manifest import ManifestError
-
-    slug = _resolve_slug(slug_raw, context="argument")
-    group_name = group["group"]["name"]
-
-    # Primary member = first member in the config
-    members = group["members"]
-    if not members:
-        print(f"camp: group {group_name!r} has no members", file=sys.stderr)
-        sys.exit(1)
-
-    primary = members[0]
-    primary_wt = Path(primary["repo_root"]) / ".claude" / "worktrees" / slug
-
-    if dry_run:
-        print(
-            f"[dry-run] would reconcile_worktree({group_name!r}, {slug!r}) "
-            f"then exec claude in {primary_wt}",
-            file=sys.stderr,
-        )
-        return
-
-    # Reconcile (idempotent create-or-complete)
-    try:
-        result = reconcile_worktree(group, slug, env=env)
-    except Exception as e:
-        print(f"camp: worktree creation failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # D-I: print success summary
-    summary = format_success_summary(result)
-    print(f"camp: {summary}", file=sys.stderr)
-
-    # Exec claude into the primary member's worktree
-    os.chdir(str(primary_wt))
-    cmd = ["claude", "-r", slug, *extra]
-    os.execvp("claude", cmd)
-
-
 def _cmd_status_group_cli(
     args: list[str],
     group: dict,
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp status [--name <slug>] [--json]"""
+    """camp status [--name <slug>] [--json]
+
+    Scoped (a slug resolvable via --name or cwd): emit the per-member
+    provision-state report with STRUCTURED EXIT CODES so the in-session agent can
+    branch programmatically — 0=all ready, 2=some pending, 3=some failed. --json
+    prints the stable report shape on stdout.
+
+    Fleet view (no slug): the git-status table across all worktrees (exit 0).
+    """
     import json as _json
-    from lifecycle_cmds import cmd_status_group
+    from lifecycle_cmds import cmd_status_group, provision_status_code
     from spine import _consume_flag_value
 
     as_json = "--json" in args
     filtered = [a for a in args if a != "--json"]
     name = _consume_flag_value(filtered, "--name")
 
+    # Resolve a slug from --name or cwd; if found, emit the provision-state view.
+    slug = name
+    if slug is None:
+        try:
+            from group_resolve import resolve_from_cwd
+            _, slug = resolve_from_cwd(Path.cwd(), [group])
+        except Exception:
+            slug = None
+
+    if slug is not None:
+        try:
+            code, report = provision_status_code(group, slug, env=env)
+        except Exception as e:
+            print(f"camp status: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if as_json:
+            print(_json.dumps(report))
+        else:
+            print(f"camp status: {slug} — provisioning")
+            for m in report["members"]:
+                line = f"  {m['name']}: {m['provision_state']}"
+                if m.get("reason"):
+                    line += f" ({m['reason']})"
+                print(line)
+        sys.exit(code)
+
     try:
-        result = cmd_status_group(group, slug=name, env=env)
+        result = cmd_status_group(group, slug=None, env=env)
     except Exception as e:
         print(f"camp status: {e}", file=sys.stderr)
         sys.exit(1)
@@ -403,6 +386,68 @@ def _cmd_ls_group_cli(
     print("-" * len(header))
     for e in entries:
         print(f"{e['slug']:<24}  {e.get('branch',''):<36}  {e.get('group','')}")
+
+
+def _cmd_setup_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp setup [<slug>] [--retry] [--background] [--json]
+
+    ONE code path for foreground completion and the detached provisioner:
+    --background is what `camp ai` spawns (start_new_session, log → setup.log); it
+    runs the same per-member provisioning as the foreground invocation, flipping
+    each member pending→ready or →failed under the slug-scoped .reconcile.lock.
+    --retry re-runs only non-ready members. The slug is resolved from the
+    positional arg, --name, or cwd.
+    """
+    import json as _json
+    from lifecycle_cmds import cmd_setup_group
+    from spine import _consume_flag_value, _resolve_slug, _die
+    from group_resolve import resolve_from_cwd
+
+    retry = "--retry" in args
+    background = "--background" in args
+    as_json = "--json" in args
+    filtered = [a for a in args if a not in ("--retry", "--background", "--json")]
+    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
+    name = _consume_flag_value(filtered, "--name")
+
+    if name is not None:
+        slug = _resolve_slug(name, context="--name")
+    elif filtered:
+        slug = _resolve_slug(filtered[0], context="argument")
+    else:
+        try:
+            _, slug = resolve_from_cwd(Path.cwd(), [group])
+        except Exception:
+            slug = None
+        if slug is None:
+            _die("camp setup: could not determine slug from cwd — pass a slug or --name <slug>")
+
+    if dry_run:
+        print(f"[dry-run] would provision worktree {slug!r}", file=sys.stderr)
+        return
+
+    try:
+        result = cmd_setup_group(group, slug, retry=retry, env=env)
+    except Exception as e:
+        _die(f"camp setup: {e}")
+
+    if as_json:
+        print(_json.dumps(result))
+        return
+
+    members = result.get("members", {})
+    label = "provisioned (background)" if background else "provisioned"
+    print(f"camp setup: {slug} — {label}", file=sys.stderr)
+    for nm, info in members.items():
+        line = f"  {nm}: {info.get('provision_state', '?')}"
+        if info.get("reason"):
+            line += f" ({info['reason']})"
+        print(line, file=sys.stderr)
 
 
 def _cmd_sync_group_cli(
@@ -823,19 +868,56 @@ def _cmd_ai_group_cli(
 ) -> None:
     """camp ai <slug> — create or resume a workspace.
 
-    Replaces bare-slug dispatch and 'camp open'. Full provisioning in Slice 3.
-    Slice 1: stub — Slice 3 wires async provisioning + workspace-dir layout +
-    harness-launch seam.
+    Slice 3: synchronous seed (workspace dir + manifest with each member pending)
+    then a DETACHED provisioner (camp setup --background) that survives the harness
+    launch. The launch itself is the placeholder claude exec until Slice 6 wires the
+    session lock + harness-launch seam; CAMP_NO_LAUNCH suppresses it (tests).
     """
-    from spine import _die
-    if not args:
+    from spine import _resolve_slug, _consume_flag_value, _die
+    from provision import bring_up_workspace
+
+    rest = list(args)
+    _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+
+    if not rest:
         print("camp ai: a slug is required\n  usage: camp ai <slug>", file=sys.stderr)
         sys.exit(1)
-    slug = args[0]
-    _die(
-        f"camp ai: not yet implemented in this slice — "
-        f"provisioning for {slug!r} will be wired in Slice 3."
+
+    slug = _resolve_slug(rest[0], context="ai")
+    extra = rest[1:]
+
+    group_name = group["group"]["name"]
+    if not group["members"]:
+        _die(f"camp ai: group {group_name!r} has no members")
+
+    if dry_run:
+        print(
+            f"[dry-run] would seed + spawn detached provisioner for {slug!r} "
+            f"then launch the harness",
+            file=sys.stderr,
+        )
+        return
+
+    try:
+        bring_up_workspace(group, slug, env=env)
+    except Exception as e:
+        _die(f"camp ai: workspace bring-up failed: {e}")
+
+    print(
+        f"camp ai: provisioning {slug!r} in the background "
+        f"(run 'camp status' / 'camp setup --retry' to track)",
+        file=sys.stderr,
     )
+
+    # Slice 6 owns the session lock + harness-launch seam. For now the launch is
+    # the placeholder claude exec; CAMP_NO_LAUNCH short-circuits it for tests.
+    if os.environ.get("CAMP_NO_LAUNCH"):
+        return
+
+    from provision import _workspace_dir
+    ws_dir = _workspace_dir(group_name, slug, env=env)
+    os.chdir(str(ws_dir))
+    os.execvp("claude", ["claude", "-r", slug, *extra])
 
 
 def _cmd_rm_group_cli(

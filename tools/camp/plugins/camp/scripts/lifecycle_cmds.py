@@ -20,7 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from group_resolve import central_state_dir
-from manifest import ManifestError, read_central_manifest
+from manifest import (
+    ManifestError,
+    manifest_path_for,
+    read_central_manifest,
+    reconcile_lock,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +191,110 @@ def cmd_ls_group(
         except ManifestError:
             pass
     return entries
+
+
+def cmd_setup_group(
+    group: dict[str, Any],
+    slug: str,
+    *,
+    retry: bool = False,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Foreground provisioning: complete/restart member worktrees idempotently.
+
+    Holds the slug-scoped .reconcile.lock for the whole operation so a concurrent
+    background provisioner or another `camp setup --retry` serializes (no torn
+    manifest, no double-add). For each non-ready member it runs the per-member
+    provision (fetch+add+bootstrap) and flips the manifest pending→ready or
+    →failed+reason. A ready member is left untouched. Best-effort: one member
+    failing never blocks the others.
+
+    retry=False: process pending + failed members (the default after camp ai).
+    retry=True:  same selection (only non-ready) — the flag is explicit-intent
+                 (re-run after a failure) and never re-touches a ready member.
+
+    Returns {"slug", "members": {name: {"provision_state", "reason"?}}}.
+    """
+    from manifest import flip_member_state_unlocked
+    import provision
+
+    group_name = group["group"]["name"]
+    mpath = manifest_path_for(group_name, slug, env=env)
+    member_by_name = {m["name"]: m for m in group["members"]}
+
+    results: dict[str, Any] = {}
+
+    with reconcile_lock(mpath.parent):
+        data = read_central_manifest(mpath)
+        for entry in data.get("members", []):
+            name = entry["name"]
+            if entry.get("provision_state") == "ready":
+                results[name] = {"provision_state": "ready"}
+                continue
+
+            member = member_by_name.get(name)
+            if member is None:
+                # Manifest lists a member no longer in the group config.
+                continue
+
+            try:
+                provision.provision_member(group, slug, member, env=env)
+            except subprocess.TimeoutExpired as e:
+                reason = f"git fetch timeout after {e.timeout}s"
+                flip_member_state_unlocked(mpath, name, "failed", reason=reason)
+                results[name] = {"provision_state": "failed", "reason": reason}
+            except Exception as e:
+                reason = str(e)
+                flip_member_state_unlocked(mpath, name, "failed", reason=reason)
+                results[name] = {"provision_state": "failed", "reason": reason}
+            else:
+                flip_member_state_unlocked(mpath, name, "ready")
+                results[name] = {"provision_state": "ready"}
+
+    return {"slug": slug, "members": results}
+
+
+def provision_status_code(
+    group: dict[str, Any],
+    slug: str,
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Return (exit_code, report) for the provision state of a workspace.
+
+    Exit codes (so the in-session agent can branch programmatically):
+        0  all members ready
+        2  some members pending (none failed)
+        3  any member failed (failed takes precedence over pending)
+
+    report = {"slug", "code", "members": [{"name", "provision_state", "reason"?}]}.
+    """
+    group_name = group["group"]["name"]
+    mpath = manifest_path_for(group_name, slug, env=env)
+    data = read_central_manifest(mpath)
+
+    members = []
+    any_failed = False
+    any_pending = False
+    for entry in data.get("members", []):
+        state = entry.get("provision_state", "pending")
+        m: dict[str, Any] = {"name": entry["name"], "provision_state": state}
+        if state == "failed":
+            any_failed = True
+            if entry.get("reason"):
+                m["reason"] = entry["reason"]
+        elif state != "ready":
+            any_pending = True
+        members.append(m)
+
+    if any_failed:
+        code = 3
+    elif any_pending:
+        code = 2
+    else:
+        code = 0
+
+    return code, {"slug": slug, "code": code, "members": members}
 
 
 def cmd_sync_group(

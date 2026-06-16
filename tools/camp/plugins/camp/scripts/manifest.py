@@ -19,6 +19,11 @@ Schema (v1):
                 # Unified workspace layout (Slice 2):
                 #   central_state_dir(group)/worktrees/<slug>/<name>
                 "worktree_path": "/abs/.../worktrees/<slug>/<name>",
+                # Async provisioning state (Slice 3): "pending" | "ready" | "failed".
+                # Seeded "pending" by camp ai; flipped by the (foreground or
+                # background) provisioner. A "failed" member also carries "reason".
+                "provision_state": "pending",
+                "reason": "<failure reason — present only when failed>",
             },
             ...
         ]
@@ -26,9 +31,11 @@ Schema (v1):
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +123,74 @@ def remove_central_manifest(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+@contextmanager
+def reconcile_lock(manifest_dir: Path):
+    """Acquire the slug-scoped .reconcile.lock guarding manifest mutations.
+
+    All status flips (background provisioner + foreground `camp setup --retry`)
+    serialize on this lock, the same lock reconcile_worktree uses, so concurrent
+    writers never tear the whole-manifest temp+rename write.
+    """
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = manifest_dir / ".reconcile.lock"
+    lock_fd = open(str(lock_path), "w")
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock_fd.close()
+
+
+def flip_member_state_unlocked(
+    path: Path,
+    member_name: str,
+    state: str,
+    *,
+    reason: str | None = None,
+) -> None:
+    """Read-mutate-write one member's provision_state WITHOUT acquiring the lock.
+
+    The caller MUST already hold the .reconcile.lock (re-acquiring flock on a
+    second fd in the same process deadlocks). Use update_member_state for the
+    self-locking variant.
+    """
+    data = read_central_manifest(path)
+    for member in data.get("members", []):
+        if member.get("name") == member_name:
+            member["provision_state"] = state
+            if state == "failed" and reason is not None:
+                member["reason"] = reason
+            elif state != "failed":
+                member.pop("reason", None)
+            break
+    write_central_manifest(path, data)
+
+
+def update_member_state(
+    path: Path,
+    member_name: str,
+    state: str,
+    *,
+    reason: str | None = None,
+    env: dict[str, str] | None = None,
+    group_name: str | None = None,
+    slug: str | None = None,
+) -> None:
+    """Atomically flip one member's provision_state under the .reconcile.lock.
+
+    Reads the whole manifest, mutates the named member's provision_state (and
+    reason when failing / clearing it when not), and writes the whole manifest
+    back via the atomic temp+rename in write_central_manifest. The .reconcile.lock
+    serializes concurrent flips so no write is torn.
+    """
+    with reconcile_lock(path.parent):
+        flip_member_state_unlocked(path, member_name, state, reason=reason)
 
 
 def manifest_path_for(group: str, slug: str, *, env: dict[str, str] | None = None) -> Path:

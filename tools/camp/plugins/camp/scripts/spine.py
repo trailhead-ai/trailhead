@@ -1552,18 +1552,17 @@ def cmd_group(args: list[str], dry_run: bool = False) -> None:
 def cmd_ai(args: list[str], dry_run: bool = False) -> None:
     """camp ai <slug> — create or resume a workspace for a slug.
 
-    Replaces bare-slug dispatch and 'camp open'. Full provisioning in Slice 3.
-    Slice 1: stub that acknowledges the verb and exits clearly.
+    The real bring-up (seed + detached provisioner + launch) lives on the
+    group-aware path in cli/camp (_cmd_ai_group_cli). This spine fallback is only
+    reached when no group config resolves from cwd or --group — so it points the
+    user at configuring a group.
     """
     if not args:
         _die("camp ai: a slug is required\n  usage: camp ai <slug>")
-    raw_slug = args[0]
-    extra = args[1:]
-    slug = _resolve_slug(raw_slug, context="ai")
-    # Slice 3 will wire reconcile + detached provisioner + harness launch here.
     _die(
-        f"camp ai: not yet implemented in this slice — "
-        f"provisioning for {slug!r} will be wired in Slice 3."
+        "camp ai: no camp group resolves from this directory.\n"
+        "  Run 'camp group <name> --member NAME=PATH ...' to configure one, "
+        "or pass --group <name>."
     )
 
 
@@ -1604,11 +1603,14 @@ def cmd_enter(args: list[str], dry_run: bool = False) -> None:
 def cmd_setup(args: list[str], dry_run: bool = False) -> None:
     """camp setup [--retry] — provision or retry member worktrees.
 
-    Full implementation in Slice 3.
+    The real provisioning lives on the group-aware path in cli/camp
+    (_cmd_setup_group_cli). This spine fallback is only reached when no group
+    config resolves — so it points the user at configuring a group.
     """
     _die(
-        "camp setup: not yet implemented in this slice — "
-        "worktree provisioning will be wired in Slice 3."
+        "camp setup: no camp group resolves from this directory.\n"
+        "  Run 'camp group <name> --member NAME=PATH ...' to configure one, "
+        "or pass --group <name>."
     )
 
 

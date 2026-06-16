@@ -74,6 +74,10 @@ class LegacyLayoutError(Exception):
 # Default branch base for new worktree branches (per-member overridable).
 DEFAULT_BASE = "origin/main"
 
+# Per-member git fetch timeout (seconds) for the async provisioner. An
+# unreachable remote fails that member instead of hanging the whole bring-up.
+FETCH_TIMEOUT_SECONDS = 120
+
 # Consecutive path segments that mark the retired per-repo worktree layout
 # (<repo_root>/.claude/worktrees/<slug>). The unified workspace layout never has
 # ".claude" immediately followed by "worktrees", so this pair only appears in an
@@ -166,6 +170,28 @@ def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
             except Exception:
                 pass
     return False
+
+
+def _fetch_base(
+    repo_root: Path, base: str, *, timeout: float = FETCH_TIMEOUT_SECONDS
+) -> None:
+    """Fetch the member's base ref under a timeout (Slice 3 async provisioner).
+
+    The base looks like "origin/main"; the remote is the part before the first
+    "/". A non-remote base (no "/") is a local ref and skips the fetch. A
+    subprocess.TimeoutExpired propagates so the caller fails that member rather
+    than hanging on an unreachable remote.
+    """
+    remote, _, ref = base.partition("/")
+    if not ref:
+        return  # local ref — nothing to fetch
+    subprocess.run(
+        ["git", "-C", str(repo_root), "fetch", remote, ref],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
 
 
 def _add_worktree_for_member(
