@@ -10,6 +10,7 @@ Schema:
   name = "<repo-name>"
   repo_root = "/absolute/path/to/repo"
   bootstrap = ["cmd", "arg1", "arg2"]   # list for subprocess shell=False; optional
+  base = "origin/main"                  # branch start-point; optional, default origin/main
 
   [branch]
   pattern = "worktree-{slug}"            # optional; default "worktree-{slug}"
@@ -135,11 +136,19 @@ def load_group(path: Path) -> dict[str, Any]:
                     f"bootstrap[{j}] must be a string, got {type(cmd_part).__name__!r}"
                 )
 
+        base = m.get("base", "origin/main")
+        if not isinstance(base, str) or not base.strip():
+            raise GroupConfigError(
+                f"{path}: members[{i}] ('{member_name}'): field 'base' must be a "
+                "non-empty string (the branch start-point, e.g. 'origin/main')"
+            )
+
         members.append(
             {
                 "name": member_name,
                 "repo_root": repo_root,
                 "bootstrap": list(bootstrap_raw),
+                "base": base,
             }
         )
 

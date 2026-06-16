@@ -16,7 +16,9 @@ Schema (v1):
             {
                 "name": "<repo-name>",
                 "repo_root": "/absolute/path/to/canonical/repo",
-                "worktree_path": "/absolute/path/to/worktree",
+                # Unified workspace layout (Slice 2):
+                #   central_state_dir(group)/worktrees/<slug>/<name>
+                "worktree_path": "/abs/.../worktrees/<slug>/<name>",
             },
             ...
         ]

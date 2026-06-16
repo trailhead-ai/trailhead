@@ -1,15 +1,23 @@
-"""Worktree lifecycle reconciler for camp — Slice 2.
+"""Worktree lifecycle reconciler for camp — Slice 2 (unified workspace layout).
 
 reconcile_worktree(group, slug):
     Idempotent create-or-reconcile. For each group member:
-    - Ensures <repo_root>/.claude/worktrees/<slug> exists on branch worktree-<slug>.
+    - Ensures central_state_dir(group)/worktrees/<slug>/<member> exists on branch
+      worktree-<slug>, branched off the member's configured `base` (default
+      origin/main). The base ref is only used when it already resolves locally;
+      the actual `git fetch` is deferred to the Slice 3 async provisioner, so a
+      missing base falls back to HEAD rather than failing synchronous bring-up.
     - Existence-guard before git worktree add (never blindly re-add).
     - Bootstraps each member's configured bootstrap list in parallel (shell=False).
     - Writes the central manifest atomically only after ALL members succeed.
 
 reconcile_break(group, slug):
     Removes each member's worktree + the central manifest.
-    - D-E removal confinement: target path must be is_relative_to(repo_root).
+    - Removal confinement: BOTH the manifest-supplied target AND the workspace dir
+      (central_state_dir(group)/worktrees/<slug>) are .resolve()'d before the check,
+      then the target must be is_relative_to the resolved workspace dir. A
+      symlink-escaping worktree_path is rejected. An old-layout path (outside the
+      workspace dir) raises a legible legacy-layout error rather than half-applying.
     - Dirty worktree blocks break unless force=True.
     - Break atomicity symmetry: manifest is not left listing a removed member.
 
@@ -51,7 +59,33 @@ class ReconcileError(Exception):
 
 
 class ConfinementError(Exception):
-    """Raised when a worktree path is outside the member's declared repo_root (D-E)."""
+    """Raised when a worktree path is outside the resolved workspace dir."""
+
+
+class LegacyLayoutError(Exception):
+    """Raised when a manifest carries an old-layout worktree_path.
+
+    Old layout: <repo_root>/.claude/worktrees/<slug> (outside the unified
+    workspace dir). camp cannot safely remove it; the message points the user at
+    a manual `git worktree remove`.
+    """
+
+
+# Default branch base for new worktree branches (per-member overridable).
+DEFAULT_BASE = "origin/main"
+
+# Consecutive path segments that mark the retired per-repo worktree layout
+# (<repo_root>/.claude/worktrees/<slug>). The unified workspace layout never has
+# ".claude" immediately followed by "worktrees", so this pair only appears in an
+# old-layout manifest path (and won't false-positive on a state dir nested under
+# some ".claude" ancestor).
+_OLD_LAYOUT_MARKER = (".claude", "worktrees")
+
+
+def _is_old_layout_path(path: Path) -> bool:
+    parts = path.parts
+    a, b = _OLD_LAYOUT_MARKER
+    return any(parts[i] == a and parts[i + 1] == b for i in range(len(parts) - 1))
 
 
 # ---------------------------------------------------------------------------
@@ -72,9 +106,25 @@ def _branch_name(slug: str, branch_pattern: str) -> str:
     return branch_pattern.format(slug=slug)
 
 
-def _worktree_path(repo_root: Path, slug: str) -> Path:
-    """Return the worktree path for the slug under repo_root."""
-    return repo_root / ".claude" / "worktrees" / slug
+def _workspace_dir(
+    group_name: str, slug: str, *, env: dict[str, str] | None = None
+) -> Path:
+    """Return the unified workspace dir: central_state_dir(group)/worktrees/<slug>."""
+    from group_resolve import central_state_dir
+
+    return central_state_dir(group_name, env=env) / "worktrees" / slug
+
+
+def _worktree_path(
+    group_name: str,
+    slug: str,
+    member_name: str,
+    *,
+    env: dict[str, str] | None = None,
+) -> Path:
+    """Return the member's worktree path under the unified workspace dir:
+    central_state_dir(group)/worktrees/<slug>/<member>."""
+    return _workspace_dir(group_name, slug, env=env) / member_name
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -94,6 +144,12 @@ def _git_is_dirty(path: Path) -> bool:
 def _branch_exists_locally(repo_root: Path, branch: str) -> bool:
     result = _git(repo_root, "branch", "--list", branch)
     return bool(result.stdout.strip())
+
+
+def _ref_resolves(repo_root: Path, ref: str) -> bool:
+    """Return True if `ref` resolves to a commit in repo_root (local clone)."""
+    result = _git(repo_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+    return result.returncode == 0
 
 
 def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
@@ -117,11 +173,19 @@ def _add_worktree_for_member(
     wt_path: Path,
     branch: str,
     repo_root: Path,
+    *,
+    base: str = DEFAULT_BASE,
 ) -> None:
-    """Add a git worktree for one member.
+    """Add a git worktree for one member, branched off `base`.
 
     Existence-guard: if wt_path already exists (directory present OR already
     registered with git), skip the add — idempotent re-run.
+
+    Branch-base policy: a new branch is created off `base` (default origin/main,
+    per-member overridable). Because the `git fetch` is deferred to the Slice 3
+    async provisioner, the base ref is only used when it already resolves in the
+    local clone; otherwise it falls back to HEAD so synchronous bring-up never
+    fails on a not-yet-fetched remote ref.
 
     Raises ReconcileError on git failure.
     """
@@ -133,7 +197,10 @@ def _add_worktree_for_member(
     if _branch_exists_locally(repo_root, branch):
         result = _git(repo_root, "worktree", "add", str(wt_path), branch)
     else:
-        result = _git(repo_root, "worktree", "add", "-b", branch, str(wt_path), "HEAD")
+        start_point = base if _ref_resolves(repo_root, base) else "HEAD"
+        result = _git(
+            repo_root, "worktree", "add", "-b", branch, str(wt_path), start_point
+        )
 
     if result.returncode != 0:
         raise ReconcileError(
@@ -180,24 +247,27 @@ def _remove_worktree_for_member(
     member: dict[str, Any],
     wt_path: Path,
     repo_root: Path,
+    workspace_dir: Path,
     *,
     force: bool,
 ) -> None:
     """Remove a git worktree for one member.
 
-    D-E confinement: assert wt_path is_relative_to repo_root before removal.
-    Raises ConfinementError if the path is outside the repo_root.
+    Confinement: BOTH wt_path and workspace_dir are .resolve()'d before the check,
+    then wt_path must be is_relative_to the resolved workspace_dir — so a
+    symlink-escaping worktree_path is rejected.
+
+    Raises ConfinementError if the path escapes the workspace dir.
     Raises ReconcileError if git worktree remove fails.
     """
-    # D-E: path confinement check
     try:
         wt_resolved = wt_path.resolve()
-        root_resolved = repo_root.resolve()
-        wt_resolved.relative_to(root_resolved)
+        ws_resolved = workspace_dir.resolve()
+        wt_resolved.relative_to(ws_resolved)
     except ValueError:
         raise ConfinementError(
-            f"camp: worktree path {wt_path} is outside the member {member['name']!r} "
-            f"repo_root {repo_root} — refusing removal (D-E confinement)"
+            f"camp: worktree path {wt_path} resolves outside the workspace dir "
+            f"{workspace_dir} for member {member['name']!r} — refusing removal"
         )
 
     if not wt_path.is_dir():
@@ -268,8 +338,13 @@ def reconcile_worktree(
             member_results: list[dict[str, Any]] = []
             for member in members:
                 repo_root = Path(member["repo_root"])
-                wt_path = _worktree_path(repo_root, slug)
-                _add_worktree_for_member(member, wt_path, branch, repo_root)
+                wt_path = _worktree_path(
+                    group_name, slug, member["name"], env=env
+                )
+                base = member.get("base") or DEFAULT_BASE
+                _add_worktree_for_member(
+                    member, wt_path, branch, repo_root, base=base
+                )
                 member_results.append({
                     "name": member["name"],
                     "repo_root": str(repo_root),
@@ -335,7 +410,12 @@ def reconcile_break(
     Algorithm:
       1. Read the central manifest to get member worktree paths.
       2. Check all members for dirty trees (abort unless force=True).
-      3. D-E confinement: assert each worktree path is_relative_to its repo_root.
+      3. Confinement pre-check (BEFORE any removal): each worktree_path must
+         resolve inside the resolved workspace dir
+         (central_state_dir(group)/worktrees/<slug>). A symlink-escaping path is
+         rejected (ConfinementError); an old-layout path under a repo_root is
+         rejected with a legible LegacyLayoutError. The pre-check aborts the whole
+         break — never a half-applied removal.
       4. Remove each member worktree via git worktree remove.
       5. Remove the central manifest ONLY if all removals succeeded (break
          atomicity symmetry — never leave a manifest listing a removed member).
@@ -344,11 +424,14 @@ def reconcile_break(
 
     Raises:
         ManifestError: If the manifest is malformed.
-        ConfinementError: If a worktree path is outside its repo_root (D-E).
+        ConfinementError: If a worktree path resolves outside the workspace dir.
+        LegacyLayoutError: If a worktree path uses the retired per-repo layout.
         ReconcileError: If a member worktree is dirty and force=False.
     """
     group_name: str = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
+    workspace_dir = _workspace_dir(group_name, slug, env=env)
+    ws_resolved = workspace_dir.resolve()
 
     # Read current manifest
     manifest_data = read_central_manifest(mpath)
@@ -367,17 +450,27 @@ def reconcile_break(
                 "(pass force=True to discard changes)"
             )
 
-    # D-E confinement pre-check: validate all paths BEFORE removing anything
+    # Confinement pre-check: validate all paths BEFORE removing anything.
     for entry in member_entries:
         wt_path = Path(entry["worktree_path"])
-        repo_root = Path(entry["repo_root"])
         try:
-            wt_path.resolve().relative_to(repo_root.resolve())
+            wt_path.resolve().relative_to(ws_resolved)
+            continue  # inside the workspace dir — OK
         except ValueError:
-            raise ConfinementError(
-                f"camp: worktree path {wt_path} is outside the member {entry['name']!r} "
-                f"repo_root {repo_root} — refusing removal (D-E confinement)"
+            pass
+
+        # Outside the workspace dir. Distinguish a retired per-repo layout path
+        # (legible legacy error) from an arbitrary/symlink-escaping path.
+        if _is_old_layout_path(wt_path):
+            raise LegacyLayoutError(
+                f"camp: member {entry['name']!r} worktree_path {wt_path} uses the "
+                f"retired per-repo layout (outside the workspace dir {workspace_dir}). "
+                f"camp will not remove it — run `git worktree remove {wt_path}` manually."
             )
+        raise ConfinementError(
+            f"camp: worktree path {wt_path} resolves outside the workspace dir "
+            f"{workspace_dir} for member {entry['name']!r} — refusing removal"
+        )
 
     # Remove each member worktree; track removals for atomicity symmetry
     removed: list[str] = []
@@ -395,9 +488,11 @@ def reconcile_break(
         member = member_for_entry.get(name, {"name": name})
 
         try:
-            _remove_worktree_for_member(member, wt_path, repo_root, force=force)
+            _remove_worktree_for_member(
+                member, wt_path, repo_root, workspace_dir, force=force
+            )
             removed.append(name)
-        except ConfinementError:
+        except (ConfinementError, LegacyLayoutError):
             raise
         except Exception as e:
             errors.append(f"{name}: {e}")

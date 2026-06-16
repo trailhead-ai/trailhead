@@ -1,9 +1,16 @@
-"""Tests for Slice 3: camp init + SessionStart/WorktreeRemove hook wiring.
+"""Tests for camp init + SessionStart hook wiring.
+
+Slice 2 drops the WorktreeRemove hook wiring (camp owns teardown via `camp rm`);
+only the SessionStart hook is written into each member's .claude/settings.json.
+The `worktree-cleanup` handler itself is retained (still invocable) but no longer
+auto-wired. Member worktrees now live under the unified workspace layout
+central_state_dir(group)/worktrees/<slug>/<member>.
 
 Test contract (all must RED before implementation, GREEN after):
 
-1. init on a fake group writes the two hook entries (SessionStart + WorktreeRemove)
-   + the env.CAMP_BIN block into each member's .claude/settings.json.
+1. init on a fake group writes the SessionStart hook entry (and NOT a
+   WorktreeRemove entry) + the env.CAMP_BIN block into each member's
+   .claude/settings.json.
 
 2. Re-running init produces NO duplicate hook entries — idempotent.
 
@@ -97,6 +104,14 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_STATE_DIR": str(state_root)}
 
 
+def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> Path:
+    """Return the unified-layout worktree path:
+    central_state_dir(group)/worktrees/<slug>/<member>."""
+    from group_resolve import central_state_dir
+
+    return central_state_dir(group_name, env=env) / "worktrees" / slug / member
+
+
 # ---------------------------------------------------------------------------
 # Fixture: 2-member synthetic group with real git repos
 # ---------------------------------------------------------------------------
@@ -159,8 +174,11 @@ class TestHooksWriter:
         ]
         assert any("session-bootstrap" in cmd for cmd in commands)
 
-    def test_writes_worktree_remove_hook(self, two_member_group):
-        """init writes a WorktreeRemove hook for worktree-cleanup into each member's settings.json."""
+    def test_does_not_write_worktree_remove_hook(self, two_member_group):
+        """Slice 2 drops WorktreeRemove wiring — camp owns teardown via `camp rm`.
+
+        No WorktreeRemove entry must be written into the member's settings.json.
+        """
         from hooks_writer import write_hooks_for_member
 
         g = two_member_group
@@ -173,15 +191,11 @@ class TestHooksWriter:
         data = json.loads(settings_path.read_text())
 
         hooks = data.get("hooks", {})
-        wr_hooks = hooks.get("WorktreeRemove", [])
-        assert len(wr_hooks) >= 1
-
-        commands = [
-            h.get("command", "")
-            for entry in wr_hooks
-            for h in entry.get("hooks", [])
-        ]
-        assert any("worktree-cleanup" in cmd for cmd in commands)
+        assert "WorktreeRemove" not in hooks, (
+            f"WorktreeRemove wiring should be dropped, got: {hooks!r}"
+        )
+        # The SessionStart wiring is retained.
+        assert "SessionStart" in hooks
 
     def test_writes_env_camp_bin(self, two_member_group):
         """init writes the env.CAMP_BIN key into the settings.json."""
@@ -241,28 +255,20 @@ class TestHooksWriter:
 
         hooks = data.get("hooks", {})
         ss_hooks = hooks.get("SessionStart", [])
-        wr_hooks = hooks.get("WorktreeRemove", [])
 
         ss_commands = [
             h.get("command", "")
             for entry in ss_hooks
             for h in entry.get("hooks", [])
         ]
-        wr_commands = [
-            h.get("command", "")
-            for entry in wr_hooks
-            for h in entry.get("hooks", [])
-        ]
 
         expected_ss = f"${{CAMP_BIN:-{camp_bin}}} session-bootstrap"
-        expected_wr = f"${{CAMP_BIN:-{camp_bin}}} worktree-cleanup"
 
         assert ss_commands.count(expected_ss) == 1, (
             f"Duplicate session-bootstrap entries: {ss_commands}"
         )
-        assert wr_commands.count(expected_wr) == 1, (
-            f"Duplicate worktree-cleanup entries: {wr_commands}"
-        )
+        # WorktreeRemove wiring is dropped in Slice 2.
+        assert "WorktreeRemove" not in hooks
 
     def test_preserves_existing_unrelated_keys(self, two_member_group):
         """An existing settings.json with unrelated keys is preserved after write."""
@@ -358,7 +364,7 @@ class TestInitCmd:
             data = json.loads(settings_path.read_text())
             assert "hooks" in data
             assert "SessionStart" in data["hooks"]
-            assert "WorktreeRemove" in data["hooks"]
+            assert "WorktreeRemove" not in data["hooks"]
 
     def test_init_idempotent(self, two_member_group):
         """Re-running init produces no duplicate hook entries for any member."""
@@ -533,15 +539,17 @@ bootstrap = []
 """
         (groups_dir / "mygroup.toml").write_text(toml_content)
 
-        # Create the worktree first so the first bootstrap already succeeded
-        wt_path = member_repo / ".claude" / "worktrees" / "feat-x"
+        # Unified layout: the workspace member dir exists so cwd resolves to a
+        # real (group, slug); the existence-guarded reconcile is a no-op.
+        state_dir = tmp_path / "state"
+        wt_path = state_dir / "mygroup" / "worktrees" / "feat-x" / "member"
         wt_path.mkdir(parents=True, exist_ok=True)
 
-        # Run from inside the worktree
+        # Run from inside the workspace member dir
         result = _run_session_bootstrap(
             cwd=str(wt_path),
             extra_env={
-                "CAMP_STATE_DIR": str(tmp_path / "state"),
+                "CAMP_STATE_DIR": str(state_dir),
                 "CAMP_CONFIG_DIR": str(camp_config_dir),
             },
         )
@@ -644,10 +652,11 @@ class TestWorktreeCleanup:
         )
 
         # Create worktrees via reconcile (using the module, not the CLI)
-        reconcile_worktree(group, "feat-y", env={"CAMP_STATE_DIR": str(tmp_path / "camp-state")})
+        state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
+        reconcile_worktree(group, "feat-y", env=state_env)
 
-        wt_a = repo_a / ".claude" / "worktrees" / "feat-y"
-        wt_b = repo_b / ".claude" / "worktrees" / "feat-y"
+        wt_a = _member_wt("cleanup_group", "feat-y", "repo_a", state_env)
+        wt_b = _member_wt("cleanup_group", "feat-y", "repo_b", state_env)
         assert wt_a.is_dir()
         assert wt_b.is_dir()
 
@@ -707,9 +716,10 @@ bootstrap = []
             [{"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []}],
         )
 
-        reconcile_worktree(group, "feat-dirty", env={"CAMP_STATE_DIR": str(tmp_path / "camp-state")})
+        state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
+        reconcile_worktree(group, "feat-dirty", env=state_env)
 
-        wt_a = repo_a / ".claude" / "worktrees" / "feat-dirty"
+        wt_a = _member_wt("dirty_group", "feat-dirty", "repo_a", state_env)
         assert wt_a.is_dir()
 
         # Make the worktree dirty
@@ -758,9 +768,10 @@ bootstrap = []
             [{"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []}],
         )
 
-        reconcile_worktree(group, "feat-force", env={"CAMP_STATE_DIR": str(tmp_path / "camp-state")})
+        state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
+        reconcile_worktree(group, "feat-force", env=state_env)
 
-        wt_a = repo_a / ".claude" / "worktrees" / "feat-force"
+        wt_a = _member_wt("force_group", "feat-force", "repo_a", state_env)
         assert wt_a.is_dir()
 
         # Make it dirty
@@ -843,6 +854,7 @@ class TestSessionBootstrapGenuineFailure:
         member_repo = tmp_path / "member_repo"
         _init_git_repo(member_repo)
 
+        # A bootstrap that always fails → reconcile raises naming the member/slug.
         toml_content = f"""
 [group]
 name = "warngroup"
@@ -850,24 +862,21 @@ name = "warngroup"
 [[members]]
 name = "member"
 repo_root = "{member_repo!s}"
-bootstrap = []
+bootstrap = ["false"]
 """
         (groups_dir / "warngroup.toml").write_text(toml_content)
 
-        # Create the worktree dir so cwd resolves to a real (group, slug) pair.
-        wt_path = member_repo / ".claude" / "worktrees" / "feat-warn"
+        # Unified layout: the workspace member dir exists so cwd resolves to a
+        # real (group, slug) pair. The existence-guarded `git worktree add` is a
+        # no-op; the failing bootstrap is what triggers the reconcile failure.
+        state_dir = tmp_path / "state"
+        wt_path = state_dir / "warngroup" / "worktrees" / "feat-warn" / "member"
         wt_path.mkdir(parents=True, exist_ok=True)
-
-        # Poison the CAMP_STATE_DIR so reconcile_worktree tries to write into a
-        # file (not a directory) — this triggers an OS-level exception.
-        # We create a regular FILE at the state path so mkdir fails inside reconcile.
-        bad_state = tmp_path / "bad-state"
-        bad_state.write_text("not a directory")  # file, not dir
 
         result = _run_session_bootstrap(
             cwd=str(wt_path),
             extra_env={
-                "CAMP_STATE_DIR": str(bad_state),
+                "CAMP_STATE_DIR": str(state_dir),
                 "CAMP_CONFIG_DIR": str(camp_config_dir),
             },
         )

@@ -1,4 +1,4 @@
-"""Write/update SessionStart and WorktreeRemove hook entries in .claude/settings.json.
+"""Write/update the SessionStart hook entry in .claude/settings.json.
 
 All writes use json.load/json.dump (never f-strings) so:
   - Paths containing spaces or quotes round-trip correctly.
@@ -7,8 +7,11 @@ All writes use json.load/json.dump (never f-strings) so:
 
 Hook entries written:
   SessionStart  → "${CAMP_BIN:-<abs_camp_bin>} session-bootstrap"
-  WorktreeRemove → "${CAMP_BIN:-<abs_camp_bin>} worktree-cleanup"
   env.CAMP_BIN   → <abs_camp_bin>  (absolute default; ${CAMP_BIN:-…} lets user override)
+
+The WorktreeRemove wiring was dropped in Slice 2: camp owns teardown via
+`camp rm`, per the unified-workspace ADR. The `worktree-cleanup` handler is
+retained (still invocable) but no longer auto-wired into member settings.
 """
 from __future__ import annotations
 
@@ -53,11 +56,6 @@ def _save_settings(settings_path: Path, data: dict) -> None:
 def _session_start_command(camp_bin: str) -> str:
     """Return the SessionStart hook command string."""
     return f"${{CAMP_BIN:-{camp_bin}}} session-bootstrap"
-
-
-def _worktree_remove_command(camp_bin: str) -> str:
-    """Return the WorktreeRemove hook command string."""
-    return f"${{CAMP_BIN:-{camp_bin}}} worktree-cleanup"
 
 
 def _has_command(hook_list: list, command: str) -> bool:
@@ -107,10 +105,7 @@ def write_hooks_for_member(repo_root: Path, camp_bin: str) -> None:
     data = _load_settings(settings_path)
 
     ss_cmd = _session_start_command(camp_bin)
-    wr_cmd = _worktree_remove_command(camp_bin)
-
     _upsert_hook(data, "SessionStart", ss_cmd)
-    _upsert_hook(data, "WorktreeRemove", wr_cmd)
 
     # Write env.CAMP_BIN (absolute default path; ${CAMP_BIN:-…} lets user override)
     env_block = data.setdefault("env", {})

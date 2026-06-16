@@ -97,6 +97,60 @@ def test_load_branch_pattern_defaults(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Per-member branch base (Slice 2)
+# ---------------------------------------------------------------------------
+
+
+def test_member_base_defaults_to_origin_main(tmp_path: Path) -> None:
+    """When a member omits `base`, it defaults to 'origin/main'."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_NO_BOOTSTRAP)
+    cfg = load_group(f)
+    assert cfg["members"][0]["base"] == "origin/main"
+
+
+def test_member_base_override_honored(tmp_path: Path) -> None:
+    """A per-member `base` string overrides the default."""
+    from group_config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+base = "origin/trunk"
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    assert cfg["members"][0]["base"] == "origin/trunk"
+
+
+def test_member_base_non_string_errors(tmp_path: Path) -> None:
+    """A non-string `base` → error naming the file + field."""
+    from group_config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+base = 42
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    assert "base" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
 # Malformed config → field-named errors
 # ---------------------------------------------------------------------------
 

@@ -1,44 +1,45 @@
-"""Tests for Slice 2: worktree lifecycle + central manifest on the resolver.
+"""Tests for Slice 2: unified-layout worktree lifecycle + central manifest.
+
+Slice 2 relocates member worktrees from the OLD per-repo layout
+    <repo_root>/.claude/worktrees/<slug>/
+to the unified workspace layout
+    central_state_dir(group)/worktrees/<slug>/<member>/
 
 Test contract (all must RED before implementation, GREEN after):
 
-1. Creating a worktree for the 2-member fake group produces both member worktrees
-   on worktree-<slug> + a central manifest listing both; the configured bootstrap
-   command (not a hardcoded one) runs per member.
+1. reconcile creates …/worktrees/<slug>/<member> for each member on
+   worktree-<slug>; the central manifest lists both with worktree_path under the
+   workspace dir; the configured bootstrap command runs per member.
 
-2. sync/status/break/ls operate across config members; subset selection works;
-   fleet view (slug=None from repo root) lists the group's worktrees.
+2. status/break/ls operate across config members; fleet view (slug=None) works.
 
-3. Partial-creation atomicity: create member-1, simulate a crash before member-2
-   / before the manifest write, re-run reconcile_worktree → completes the set
-   (existence-guard means no 'git worktree add: already exists' fatal) and the
-   manifest is NEVER left listing a partial set.
+3. Partial-creation atomicity: re-run completes the set; manifest never lists a
+   partial set.
 
-4. Real bootstrap FAILURE on member-2 (a bootstrap that exits non-zero) →
-   atomicity holds: no manifest written / first worktree cleaned-or-reconcilable,
-   legible error naming the member.
+4. Real bootstrap FAILURE on member-2 → atomicity holds, legible error names the
+   member, no manifest written.
 
-5. break removal confinement (D-E): a manifest whose member path points outside
-   the member repo_root → named error, no deletion.
+5. break removal confinement: resolves BOTH the manifest worktree_path AND the
+   workspace dir before the is_relative_to check. A symlink-escaping path is
+   REJECTED; an OLD-layout path (outside the workspace dir) → legible
+   schema_version/legacy-layout error, not a half-applied break.
 
-6. Break atomicity symmetry: simulate a mid-break failure → manifest not left
-   listing a removed member.
+6. Break atomicity symmetry: a mid-break failure → manifest not left listing a
+   removed member.
 
-7. Concurrent-run guard: two reconciles racing the same slug don't both add the
-   same worktree (lock or pre-check holds).
+7. Concurrent-run guard: two reconciles racing the same slug don't both add.
 
-8. Malformed/truncated central manifest → legible error from status/break, not
-   a Python traceback.
+8. Malformed/truncated central manifest → legible error, not a traceback.
 
-9. Central manifest path = central_state_dir(group)/worktrees/<slug>/manifest.json
-   under a CAMP_STATE_DIR-injected fixture (resolver env= injection; never touch
-   real ~).
+9. Branch-base policy: default base origin/main; per-member `base` override
+   honored. Asserts the `git worktree add -b <branch> <wt> <base>` invocation on
+   a fake (the fetch is deferred to the Slice 3 async provisioner).
 
-10. Success summary (D-I): camp <slug> prints a one-line summary on success.
+10. Success summary (D-I): a one-line summary on success.
 
 Fixtures use synthetic git repos in tmp_path (real git init + commit so
-git worktree add actually works). The resolver's env= injection is used for all
-state paths.
+git worktree add actually works) plus fake-git assertions for the branch-base
+invocation shape. The resolver's env= injection is used for all state paths.
 """
 from __future__ import annotations
 
@@ -106,6 +107,14 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_STATE_DIR": str(state_root)}
 
 
+def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> Path:
+    """Return the unified-layout worktree path for a member:
+    central_state_dir(group)/worktrees/<slug>/<member>."""
+    from group_resolve import central_state_dir
+
+    return central_state_dir(group_name, env=env) / "worktrees" / slug / member
+
+
 # ---------------------------------------------------------------------------
 # Fixture: 2-member synthetic group
 # ---------------------------------------------------------------------------
@@ -157,7 +166,7 @@ def two_member_group(tmp_path: Path):
 
 class TestReconcileWorktreeCreates:
     def test_creates_both_worktrees_on_correct_branch(self, two_member_group):
-        """Both member worktrees land under <repo>/.claude/worktrees/<slug>."""
+        """Both member worktrees land under …/worktrees/<slug>/<member>."""
         from manifest import read_central_manifest
         from reconcile import reconcile_worktree
 
@@ -166,8 +175,8 @@ class TestReconcileWorktreeCreates:
 
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
-        wt_b = g["repo_b"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        wt_b = _member_wt("testgroup", slug, "repo_b", g["env"])
         assert wt_a.is_dir(), f"worktree for repo_a not found at {wt_a}"
         assert wt_b.is_dir(), f"worktree for repo_b not found at {wt_b}"
 
@@ -213,8 +222,8 @@ class TestReconcileWorktreeCreates:
         manifest_path = state_dir / "worktrees" / slug / "manifest.json"
         data = read_central_manifest(manifest_path)
 
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
-        wt_b = g["repo_b"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        wt_b = _member_wt("testgroup", slug, "repo_b", g["env"])
 
         by_name = {m["name"]: m for m in data["members"]}
         assert Path(by_name["repo_a"]["worktree_path"]) == wt_a
@@ -294,7 +303,7 @@ class TestPartialCreationAtomicity:
         slug = "feat-partial"
 
         # Manually create only the first member's worktree (simulate crash after member-1)
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
         wt_a.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             ["git", "-C", str(g["repo_a"]), "worktree", "add",
@@ -310,7 +319,7 @@ class TestPartialCreationAtomicity:
         # Re-run reconcile → must complete the set
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        wt_b = g["repo_b"] / ".claude" / "worktrees" / slug
+        wt_b = _member_wt("testgroup", slug, "repo_b", g["env"])
         assert wt_b.is_dir(), "member-2 worktree not created on re-run"
         assert manifest_path.is_file(), "manifest not written after completing partial creation"
 
@@ -418,46 +427,237 @@ class TestBootstrapFailureAtomicity:
 
 
 # ---------------------------------------------------------------------------
+# Test: branch-base policy (fake git — fetch deferred to Slice 3)
+# ---------------------------------------------------------------------------
+
+
+class _FakeGit:
+    """Records git invocations and returns canned results.
+
+    By default reports the worktree branch as absent (so the create path
+    `worktree add -b <branch> <wt> <base>` runs) and the base ref as resolvable.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def __call__(self, repo_root, *args):
+        self.calls.append(list(args))
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        res = _Result()
+        # `branch --list <branch>` → empty (branch does not exist locally).
+        if args and args[0] == "branch":
+            res.stdout = ""
+        # `rev-parse --verify <base>` → success (base resolves).
+        if args and args[0] == "rev-parse":
+            res.stdout = "deadbeef"
+        # `worktree list --porcelain` → empty (not registered).
+        return res
+
+    def worktree_add_calls(self) -> list[list[str]]:
+        return [c for c in self.calls if c[:2] == ["worktree", "add"]]
+
+
+class TestBranchBasePolicy:
+    def test_default_base_origin_main_in_worktree_add(self, monkeypatch, tmp_path):
+        """Default base origin/main is the start-point of `worktree add -b`."""
+        import reconcile
+        from reconcile import _add_worktree_for_member
+
+        fake = _FakeGit()
+        monkeypatch.setattr(reconcile, "_git", fake)
+
+        member = {"name": "repo_a", "repo_root": str(tmp_path / "repo_a")}
+        wt_path = tmp_path / "ws" / "feat" / "repo_a"
+        _add_worktree_for_member(
+            member, wt_path, "worktree-feat", Path(member["repo_root"]),
+            base="origin/main",
+        )
+
+        adds = fake.worktree_add_calls()
+        assert len(adds) == 1, f"expected one worktree add, got: {fake.calls}"
+        argv = adds[0]
+        assert "-b" in argv
+        assert "worktree-feat" in argv
+        # The start-point (last positional) is the configured base.
+        assert argv[-1] == "origin/main", f"base not honored: {argv}"
+
+    def test_per_member_base_override_honored(self, monkeypatch, tmp_path):
+        """A per-member `base` overrides the default in `worktree add -b`."""
+        import reconcile
+        from reconcile import _add_worktree_for_member
+
+        fake = _FakeGit()
+        monkeypatch.setattr(reconcile, "_git", fake)
+
+        member = {"name": "repo_a", "repo_root": str(tmp_path / "repo_a")}
+        wt_path = tmp_path / "ws" / "feat" / "repo_a"
+        _add_worktree_for_member(
+            member, wt_path, "worktree-feat", Path(member["repo_root"]),
+            base="origin/trunk",
+        )
+
+        argv = fake.worktree_add_calls()[0]
+        assert argv[-1] == "origin/trunk", f"per-member base not honored: {argv}"
+
+    def test_reconcile_reads_member_base_from_config(self, monkeypatch, tmp_path):
+        """reconcile_worktree threads each member's `base` into the add invocation."""
+        import reconcile
+
+        captured: dict[str, str] = {}
+
+        def fake_add(member, wt_path, branch, repo_root, *, base):
+            captured[member["name"]] = base
+
+        monkeypatch.setattr(reconcile, "_add_worktree_for_member", fake_add)
+
+        env = _camp_state_env(tmp_path)
+        group = _make_group_config(
+            "basegroup",
+            [
+                {"name": "repo_a", "repo_root": str(tmp_path / "a"), "bootstrap": []},
+                {
+                    "name": "repo_b",
+                    "repo_root": str(tmp_path / "b"),
+                    "bootstrap": [],
+                    "base": "origin/trunk",
+                },
+            ],
+        )
+
+        reconcile.reconcile_worktree(group, "feat-base", env=env)
+
+        assert captured["repo_a"] == "origin/main"
+        assert captured["repo_b"] == "origin/trunk"
+
+
+# ---------------------------------------------------------------------------
 # Test 5: break removal confinement (D-E)
 # ---------------------------------------------------------------------------
 
 
 class TestBreakRemovalConfinement:
-    def test_break_rejects_path_outside_repo_root(self, two_member_group, tmp_path):
-        """break: manifest member path outside repo_root → named error, no deletion."""
-        from manifest import write_central_manifest
+    """Confinement anchors on the resolved workspace dir
+    (central_state_dir(group)/worktrees/<slug>), NOT the repo_root.
+
+    Both the manifest-supplied target and the workspace dir are .resolve()'d
+    BEFORE the is_relative_to check, so a symlink-escaping path is rejected.
+    """
+
+    def test_break_rejects_path_outside_workspace_dir(self, two_member_group, tmp_path):
+        """A manifest worktree_path outside the workspace dir → named error, no deletion."""
         from group_resolve import central_state_dir
-        from reconcile import reconcile_break
+        from reconcile import reconcile_break, reconcile_worktree
 
         g = two_member_group
-
-        # Create the real worktrees first
-        from reconcile import reconcile_worktree
         slug = "confinement-test"
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        # Now tamper: replace repo_b's worktree_path with a path OUTSIDE its repo_root
         state_dir = central_state_dir("testgroup", env=g["env"])
         manifest_path = state_dir / "worktrees" / slug / "manifest.json"
         data = json.loads(manifest_path.read_text())
 
-        # Point repo_b's worktree_path outside repo_b's root
+        # Point repo_b's worktree_path at an unrelated dir outside the workspace.
         evil_path = str(tmp_path / "outside" / "evil_dir")
         for m in data["members"]:
             if m["name"] == "repo_b":
                 m["worktree_path"] = evil_path
-                m["repo_root"] = str(g["repo_b"])  # keep original root
         manifest_path.write_text(json.dumps(data))
 
         with pytest.raises(Exception) as exc_info:
             reconcile_break(g["group"], slug, env=g["env"])
 
-        # Error must be named (not a KeyError or AttributeError traceback)
-        err_msg = str(exc_info.value)
-        assert "confinement" in err_msg.lower() or "outside" in err_msg.lower() or \
-               "not relative" in err_msg.lower() or "repo_root" in err_msg.lower(), (
-            f"confinement error message unclear: {err_msg}"
+        err_msg = str(exc_info.value).lower()
+        assert any(
+            tok in err_msg
+            for tok in ("confinement", "outside", "not relative", "workspace")
+        ), f"confinement error message unclear: {exc_info.value}"
+
+    def test_break_rejects_symlink_escaping_workspace_dir(
+        self, two_member_group, tmp_path
+    ):
+        """A worktree_path that is a symlink escaping the workspace dir → rejected.
+
+        The target lexically sits inside the workspace dir but resolves outside
+        it; resolve-before-check must catch this.
+        """
+        from group_resolve import central_state_dir
+        from reconcile import reconcile_break, reconcile_worktree
+
+        g = two_member_group
+        slug = "confinement-symlink"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        state_dir = central_state_dir("testgroup", env=g["env"])
+        workspace_dir = state_dir / "worktrees" / slug
+
+        # An escape target outside the workspace dir.
+        escape_target = tmp_path / "escape_target"
+        escape_target.mkdir(parents=True, exist_ok=True)
+
+        # A symlink that lives inside the workspace dir but points outside it.
+        sneaky_link = workspace_dir / "sneaky"
+        sneaky_link.symlink_to(escape_target, target_is_directory=True)
+
+        manifest_path = workspace_dir / "manifest.json"
+        data = json.loads(manifest_path.read_text())
+        for m in data["members"]:
+            if m["name"] == "repo_b":
+                m["worktree_path"] = str(sneaky_link)
+        manifest_path.write_text(json.dumps(data))
+
+        with pytest.raises(Exception) as exc_info:
+            reconcile_break(g["group"], slug, env=g["env"])
+
+        err_msg = str(exc_info.value).lower()
+        assert any(
+            tok in err_msg
+            for tok in ("confinement", "outside", "not relative", "workspace")
+        ), f"symlink-escape error message unclear: {exc_info.value}"
+
+        # The escape target must NOT have been removed.
+        assert escape_target.is_dir(), "symlink-escaping break removed the escape target"
+
+    def test_break_legacy_layout_path_legible_error(self, two_member_group, tmp_path):
+        """An OLD-layout manifest path (under repo_root, outside the workspace dir)
+        → legible legacy-layout error, NOT a half-applied break."""
+        from group_resolve import central_state_dir
+        from reconcile import reconcile_break, reconcile_worktree
+
+        g = two_member_group
+        slug = "legacy-layout"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        state_dir = central_state_dir("testgroup", env=g["env"])
+        workspace_dir = state_dir / "worktrees" / slug
+        manifest_path = workspace_dir / "manifest.json"
+        data = json.loads(manifest_path.read_text())
+
+        # Rewrite repo_b to the OLD per-repo layout path (outside the workspace dir).
+        old_layout = g["repo_b"] / ".claude" / "worktrees" / slug
+        old_layout.mkdir(parents=True, exist_ok=True)
+        for m in data["members"]:
+            if m["name"] == "repo_b":
+                m["worktree_path"] = str(old_layout)
+        manifest_path.write_text(json.dumps(data))
+
+        with pytest.raises(Exception) as exc_info:
+            reconcile_break(g["group"], slug, env=g["env"])
+
+        err_msg = str(exc_info.value).lower()
+        assert "legacy" in err_msg or "git worktree remove" in err_msg, (
+            f"legacy-layout error must be legible, got: {exc_info.value}"
         )
+
+        # No half-applied break: repo_a's (valid) worktree must still be present
+        # because the pre-check aborts before any removal.
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        assert wt_a.is_dir(), "legacy-layout abort must not remove the valid member worktree"
 
 
 # ---------------------------------------------------------------------------
@@ -483,13 +683,13 @@ class TestBreakAtomicitySymmetry:
         slug = "break-atomic"
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
-        wt_b = g["repo_b"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        wt_b = _member_wt("testgroup", slug, "repo_b", g["env"])
 
         # Simulate mid-break failure: remove repo_a's worktree but then fail on repo_b
         call_count = [0]
 
-        def patched_remove(member, wt_path, repo_root, *, force):
+        def patched_remove(member, wt_path, repo_root, workspace_dir, *, force):
             call_count[0] += 1
             if call_count[0] == 1:
                 # First member (repo_a): remove for real
@@ -563,8 +763,8 @@ class TestConcurrentRunGuard:
             )
 
         # The worktrees should exist and be valid
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
-        wt_b = g["repo_b"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        wt_b = _member_wt("testgroup", slug, "repo_b", g["env"])
         assert wt_a.is_dir()
         assert wt_b.is_dir()
 
@@ -763,8 +963,8 @@ class TestCmdBreak:
         slug = "break-me"
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
-        wt_b = g["repo_b"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        wt_b = _member_wt("testgroup", slug, "repo_b", g["env"])
         assert wt_a.is_dir()
         assert wt_b.is_dir()
 
@@ -799,7 +999,7 @@ class TestCmdBreak:
         reconcile_worktree(g["group"], slug, env=g["env"])
 
         # Make repo_a worktree dirty
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
         (wt_a / "dirty_file.txt").write_text("uncommitted change")
 
         with pytest.raises(Exception) as exc_info:
@@ -815,7 +1015,7 @@ class TestCmdBreak:
         slug = "break-force"
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        wt_a = g["repo_a"] / ".claude" / "worktrees" / slug
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
         (wt_a / "dirty_file.txt").write_text("uncommitted change")
 
         # Should not raise
