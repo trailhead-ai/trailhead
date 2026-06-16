@@ -246,7 +246,10 @@ def _dispatch_group_command(
     if cmd == "setup":
         _cmd_setup_group_cli(rest, group, group_env, dry_run)
         return
-    if cmd in ("cd", "enter"):
+    if cmd == "enter":
+        _cmd_enter_group_cli(rest, group, group_env)
+        return
+    if cmd == "cd":
         _spine_main()
         return
 
@@ -918,6 +921,54 @@ def _cmd_ai_group_cli(
     ws_dir = _workspace_dir(group_name, slug, env=env)
     os.chdir(str(ws_dir))
     os.execvp("claude", ["claude", "-r", slug, *extra])
+
+
+def _cmd_enter_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+) -> None:
+    """camp enter <member> [--name <slug>] — activate a member for the current session.
+
+    Fires the member's activation hooks idempotently, then prints the member's
+    CLAUDE.md to stdout so the calling agent ingests it as context.
+    """
+    from spine import _consume_flag_value, _die, _resolve_slug
+    from group_resolve import resolve_from_cwd
+    from activation import enter_member, MemberNotReadyError
+    from group_config import GroupConfigError
+
+    filtered = list(args)
+    name_flag = _consume_flag_value(filtered, "--name")
+
+    if name_flag is not None:
+        slug = _resolve_slug(name_flag, context="--name")
+    else:
+        try:
+            _, slug = resolve_from_cwd(Path.cwd(), [group])
+        except Exception:
+            slug = None
+        if slug is None:
+            _die(
+                "camp enter: could not determine slug from cwd — "
+                "pass --name <slug> or run from inside a workspace directory"
+            )
+
+    if not filtered:
+        _die("camp enter: a member name is required\n  usage: camp enter <member>")
+
+    member_name = filtered[0]
+
+    try:
+        enter_member(group, slug, member_name, env=env)
+    except MemberNotReadyError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    except GroupConfigError as e:
+        print(f"camp enter: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        _die(f"camp enter: {e}")
 
 
 def _cmd_rm_group_cli(

@@ -324,8 +324,9 @@ def test_camp_break_gives_legible_redirect() -> None:
 
 
 # NOTE: 'setup' graduated from a stub to real behavior in Slice 3 (and 'ai' too);
-# only 'cd' (Slice 7) and 'enter' (Slice 5) remain stubs here.
-@pytest.mark.parametrize("verb", ["cd", "enter"])
+# 'enter' graduated from a stub to real behavior in Slice 5;
+# only 'cd' (Slice 7) remains a stub here.
+@pytest.mark.parametrize("verb", ["cd"])
 def test_stub_verb_exits_nonzero(verb: str) -> None:
     result = _run([verb, "dummy"])
     assert result.returncode != 0, (
@@ -334,7 +335,7 @@ def test_stub_verb_exits_nonzero(verb: str) -> None:
     )
 
 
-@pytest.mark.parametrize("verb", ["cd", "enter"])
+@pytest.mark.parametrize("verb", ["cd"])
 def test_stub_verb_prints_not_implemented_message(verb: str) -> None:
     result = _run([verb, "dummy"])
     combined = result.stdout + result.stderr

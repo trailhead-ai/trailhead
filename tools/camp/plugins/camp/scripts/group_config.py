@@ -12,15 +12,22 @@ Schema:
   bootstrap = ["cmd", "arg1", "arg2"]   # list for subprocess shell=False; optional
   base = "origin/main"                  # branch start-point; optional, default origin/main
 
+  [[members.hooks]]
+  kind = "dep-install"                  # keyed activation hook kind; required
+  cmd = ["cmd", "arg1", "arg2"]        # list for subprocess shell=False; required
+
   [branch]
   pattern = "worktree-{slug}"            # optional; default "worktree-{slug}"
 
   [dev_env]                              # optional; warn-and-continue (deferred)
   ...
 
-Bootstrap commands are author-trusted local input. camp runs them list-mode
-(subprocess, shell=False). Sharing group configs from untrusted authors is
-explicitly out of scope (see D-F in the Step-2 plan).
+Bootstrap and hook commands are author-trusted local input. camp runs them
+list-mode (subprocess, shell=False). Sharing group configs from untrusted
+authors is explicitly out of scope (see D-F in the Step-2 plan).
+
+Activation hook kinds:
+  "dep-install"   Run a dependency installation command in the worktree.
 """
 from __future__ import annotations
 
@@ -44,6 +51,13 @@ class GroupConfigNotFound(Exception):
 
     The message includes a first-run hint pointing at groups.example/trailhead.toml.
     """
+
+
+# ---------------------------------------------------------------------------
+# Known activation hook kinds
+# ---------------------------------------------------------------------------
+
+KNOWN_HOOK_KINDS = frozenset({"dep-install"})
 
 
 # ---------------------------------------------------------------------------
@@ -143,12 +157,70 @@ def load_group(path: Path) -> dict[str, Any]:
                 "non-empty string (the branch start-point, e.g. 'origin/main')"
             )
 
+        # --- [[members.hooks]] section (optional) ---
+        hooks_raw = m.get("hooks", [])
+        if hooks_raw is None:
+            hooks_raw = []
+        if not isinstance(hooks_raw, list):
+            raise GroupConfigError(
+                f"{path}: members[{i}] ('{member_name}'): field 'hooks' must be a list "
+                "of hook tables"
+            )
+        hooks: list[dict] = []
+        for k, hook in enumerate(hooks_raw):
+            if not isinstance(hook, dict):
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}] must be a table"
+                )
+
+            hook_kind = hook.get("kind")
+            if not isinstance(hook_kind, str) or not hook_kind.strip():
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}].kind is required "
+                    "and must be a non-empty string"
+                )
+            if hook_kind not in KNOWN_HOOK_KINDS:
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}].kind "
+                    f"{hook_kind!r} is not a known hook kind — "
+                    f"supported kinds: {sorted(KNOWN_HOOK_KINDS)}"
+                )
+
+            cmd_raw = hook.get("cmd")
+            if cmd_raw is None:
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}] "
+                    f"(kind={hook_kind!r}) is missing required field 'cmd'"
+                )
+            if not isinstance(cmd_raw, list):
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}].cmd must be a "
+                    "list of strings (for subprocess shell=False), not a shell string"
+                )
+            for j, token in enumerate(cmd_raw):
+                if not isinstance(token, str):
+                    raise GroupConfigError(
+                        f"{path}: members[{i}] ('{member_name}'): "
+                        f"hooks[{k}].cmd[{j}] must be a string, "
+                        f"got {type(token).__name__!r}"
+                    )
+                if not token.strip():
+                    raise GroupConfigError(
+                        f"{path}: members[{i}] ('{member_name}'): "
+                        f"hooks[{k}].cmd[{j}] is empty or whitespace-only — "
+                        "empty argv tokens are undefined in shell=False mode and "
+                        "mask misconfiguration"
+                    )
+
+            hooks.append({"kind": hook_kind, "cmd": list(cmd_raw)})
+
         members.append(
             {
                 "name": member_name,
                 "repo_root": repo_root,
                 "bootstrap": list(bootstrap_raw),
                 "base": base,
+                "hooks": hooks,
             }
         )
 
