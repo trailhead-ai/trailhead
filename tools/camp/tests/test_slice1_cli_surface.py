@@ -407,7 +407,7 @@ def test_group_path_disabled_verb_prints_stabilizes_message(
 
 
 # camp ai via group-aware path → real (Slice 3): seeds pending + spawns provisioner.
-# CAMP_NO_LAUNCH suppresses the placeholder claude exec (the real launch is Slice 6).
+# CAMP_TEST_NO_EXEC suppresses the placeholder claude exec (the real launch is Slice 6).
 
 
 def test_group_path_ai_seeds_and_exits_zero(
@@ -415,10 +415,10 @@ def test_group_path_ai_seeds_and_exits_zero(
 ) -> None:
     """camp ai <slug> via group path seeds the workspace and exits 0 (no claude)."""
     env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"),
-           "CAMP_NO_LAUNCH": "1"}
+           "CAMP_TEST_NO_EXEC": "1"}
     result = _run_group(["ai", "my-slug"], group_env=env)
     assert result.returncode == 0, (
-        f"camp ai via group path should seed + exit 0 with CAMP_NO_LAUNCH.\n"
+        f"camp ai via group path should seed + exit 0 with CAMP_TEST_NO_EXEC.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
@@ -428,7 +428,7 @@ def test_group_path_ai_announces_background_provisioning(
 ) -> None:
     """camp ai reports that provisioning runs in the background."""
     env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"),
-           "CAMP_NO_LAUNCH": "1"}
+           "CAMP_TEST_NO_EXEC": "1"}
     result = _run_group(["ai", "my-slug"], group_env=env)
     combined = (result.stdout + result.stderr).lower()
     assert "background" in combined or "camp status" in combined, (

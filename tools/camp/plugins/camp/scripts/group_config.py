@@ -232,6 +232,9 @@ def load_group(path: Path) -> dict[str, Any]:
             f"{path}: field 'branch.pattern' must be a string"
         )
 
+    # --- [harness] section (optional) — launch seam config (Slice 6) ---
+    harness = _parse_harness(raw.get("harness"), path)
+
     # --- [dev_env] section — warn-and-continue (deferred) ---
     if "dev_env" in raw:
         print(
@@ -271,13 +274,80 @@ def load_group(path: Path) -> dict[str, Any]:
 
         shared_vaults.append({"name": sv_name, "root": sv_root})
 
-    return {
+    result: dict[str, Any] = {
         "group": {"name": group_name},
         "members": members,
         "branch_pattern": branch_pattern,
         "shared_vaults": shared_vaults,
         "_toml_path": str(path),
     }
+    if harness is not None:
+        result["harness"] = harness
+    return result
+
+
+# ---------------------------------------------------------------------------
+# [harness] launch-seam block (Slice 6)
+# ---------------------------------------------------------------------------
+
+# Placeholders the launch templates / cwd may reference. Any other {token} is a
+# misconfiguration (would KeyError at substitution time) → rejected at load.
+_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace"})
+
+
+def _reject_unknown_placeholders(value: str, *, path: Path, where: str) -> None:
+    """Reject any {placeholder} not in the known set so a typo'd template fails
+    legibly at load instead of with a KeyError at launch time."""
+    import string
+
+    for _, field, _, _ in string.Formatter().parse(value):
+        if field is not None and field not in _HARNESS_PLACEHOLDERS:
+            raise GroupConfigError(
+                f"{path}: {where} references unknown placeholder {{{field}}} — "
+                f"supported placeholders: {sorted(_HARNESS_PLACEHOLDERS)}"
+            )
+
+
+def _validate_argv_template(raw: Any, *, path: Path, where: str) -> list[str]:
+    """Validate a launch argv template: a non-empty list of strings, each
+    stripped-and-rejected if empty, each with only known placeholders."""
+    if not isinstance(raw, list) or len(raw) == 0:
+        raise GroupConfigError(
+            f"{path}: {where} must be a non-empty list of strings "
+            "(for subprocess shell=False), not a shell string"
+        )
+    for i, token in enumerate(raw):
+        if not isinstance(token, str):
+            raise GroupConfigError(
+                f"{path}: {where}[{i}] must be a string, got {type(token).__name__!r}"
+            )
+        if not token.strip():
+            raise GroupConfigError(
+                f"{path}: {where}[{i}] is empty or whitespace-only — empty argv "
+                "tokens are undefined in shell=False mode and mask misconfiguration"
+            )
+        _reject_unknown_placeholders(token, path=path, where=f"{where}[{i}]")
+    return list(raw)
+
+
+def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
+    """Parse + validate the optional [harness] block. Returns None when absent."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise GroupConfigError(f"{path}: [harness] must be a table")
+
+    new = _validate_argv_template(raw.get("new"), path=path, where="harness.new")
+    resume = _validate_argv_template(raw.get("resume"), path=path, where="harness.resume")
+
+    cwd = raw.get("cwd", "{workspace}")
+    if not isinstance(cwd, str) or not cwd.strip():
+        raise GroupConfigError(
+            f"{path}: harness.cwd must be a non-empty string"
+        )
+    _reject_unknown_placeholders(cwd, path=path, where="harness.cwd")
+
+    return {"new": new, "resume": resume, "cwd": cwd}
 
 
 def load_all_groups(groups_dir: Path) -> list[dict[str, Any]]:

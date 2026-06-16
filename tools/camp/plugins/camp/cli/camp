@@ -887,11 +887,18 @@ def _cmd_ai_group_cli(
 
     Slice 3: synchronous seed (workspace dir + manifest with each member pending)
     then a DETACHED provisioner (camp setup --background) that survives the harness
-    launch. The launch itself is the placeholder claude exec until Slice 6 wires the
-    session lock + harness-launch seam; CAMP_NO_LAUNCH suppresses it (tests).
+    launch.
+
+    Slice 6: the launch tail acquires a workspace session lock (refuse-concurrent;
+    a live PID holding the lock → refuse, naming workspace + PID + timestamp; a
+    stale/dead-PID lock → reclaimed) and dispatches the config-driven harness-launch
+    seam. First-ever launch uses the `new` template; an existing workspace uses
+    `resume`. The seam os.execvp's the harness (claude default) — tests stub it.
     """
     from spine import _resolve_slug, _consume_flag_value, _die
-    from provision import bring_up_workspace
+    from provision import bring_up_workspace, _workspace_dir
+    import harness_launch
+    from session_lock import acquire_session_lock, SessionLockHeld
 
     rest = list(args)
     _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
@@ -901,7 +908,6 @@ def _cmd_ai_group_cli(
         sys.exit(1)
 
     slug = _resolve_slug(rest[0], context="ai")
-    extra = rest[1:]
 
     group_name = group["group"]["name"]
     if not group["members"]:
@@ -915,6 +921,20 @@ def _cmd_ai_group_cli(
         )
         return
 
+    # New-vs-resume is decided BEFORE bring-up creates the workspace dir: a
+    # first-ever launch (no workspace) uses the `new` template; an existing
+    # workspace uses `resume`.
+    ws_dir = _workspace_dir(group_name, slug, env=env)
+    is_resume = ws_dir.exists()
+
+    # Refuse-concurrent FIRST, before any provisioning: a live PID holding the
+    # lock → refuse (naming workspace + PID + timestamp). Stale/dead → reclaimed.
+    try:
+        acquire_session_lock(ws_dir)
+    except SessionLockHeld as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
     try:
         bring_up_workspace(group, slug, env=env)
     except Exception as e:
@@ -926,15 +946,7 @@ def _cmd_ai_group_cli(
         file=sys.stderr,
     )
 
-    # Slice 6 owns the session lock + harness-launch seam. For now the launch is
-    # the placeholder claude exec; CAMP_NO_LAUNCH short-circuits it for tests.
-    if os.environ.get("CAMP_NO_LAUNCH"):
-        return
-
-    from provision import _workspace_dir
-    ws_dir = _workspace_dir(group_name, slug, env=env)
-    os.chdir(str(ws_dir))
-    os.execvp("claude", ["claude", "-r", slug, *extra])
+    harness_launch.launch(group, slug, ws_dir, is_resume=is_resume)
 
 
 def _cmd_enter_group_cli(

@@ -2,7 +2,7 @@
 
 Exercises the real cli/camp dispatch through CAMP_CONFIG_DIR + CAMP_STATE_DIR
 overrides (no real ~/.claude, no real claude exec). camp ai's harness launch is
-suppressed via CAMP_NO_LAUNCH so the test can assert the seed+spawn without the
+suppressed via CAMP_TEST_NO_EXEC so the test can assert the seed+spawn without the
 os.execvp into claude (the real launch lands in Slice 6).
 
 Test contract:
@@ -100,7 +100,7 @@ class TestCampAi:
         """camp ai seeds pending, spawns the detached provisioner, which drives
         every member to ready. The workspace dir + setup.log exist."""
         r = _camp(cli_env, "ai", "feat-x", "--group", "mygroup",
-                  extra_env={"CAMP_NO_LAUNCH": "1"})
+                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
         assert r.returncode == 0, f"camp ai failed: {r.stderr}"
 
         ws = cli_env["state_dir"] / "mygroup" / "worktrees" / "feat-x"
@@ -120,7 +120,7 @@ class TestCampAi:
 
     def test_ai_requires_slug(self, cli_env):
         r = _camp(cli_env, "ai", "--group", "mygroup",
-                  extra_env={"CAMP_NO_LAUNCH": "1"})
+                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
         assert r.returncode != 0
         assert "slug" in r.stderr.lower()
 
@@ -129,10 +129,10 @@ class TestCampSetup:
     def test_foreground_setup_drives_ready(self, cli_env):
         """camp setup (foreground) completes provisioning of a seeded workspace."""
         # Seed only (no background provisioner) via a hidden seam: camp ai with
-        # CAMP_NO_LAUNCH still spawns the bg provisioner, so instead drive setup
+        # CAMP_TEST_NO_EXEC still spawns the bg provisioner, so instead drive setup
         # directly on a fresh slug by seeding through camp ai then setup --retry.
         r = _camp(cli_env, "ai", "feat-s", "--group", "mygroup",
-                  extra_env={"CAMP_NO_LAUNCH": "1"})
+                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
         assert r.returncode == 0, r.stderr
 
         # Foreground setup is idempotent with the bg provisioner — both land ready.
