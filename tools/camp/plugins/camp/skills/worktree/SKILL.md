@@ -23,8 +23,16 @@ status · manifest path).
 ```
 camp cd <slug>
 ```
-Prints the resolved workspace path on stdout for shell cd integration.
-Fish shell integration available via `camp shellenv` (see PATH setup below).
+Prints the resolved workspace path on stdout as **exactly one line** (no diagnostics
+on stdout — the shell integration cd's to this line verbatim).
+
+**Fish shell integration (fish only — no bash/zsh shim this pass):**
+```fish
+# Add to ~/.config/fish/config.fish
+camp shellenv | source
+```
+This defines `camp_cd <slug>` which changes the current directory.
+In bash/zsh, use `cd "$(camp cd <slug>)"` directly.
 
 ### List all worktrees
 ```

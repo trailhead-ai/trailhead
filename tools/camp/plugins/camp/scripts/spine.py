@@ -44,6 +44,8 @@ RESERVED = frozenset({
     "init", "session-bootstrap", "worktree-cleanup",
     # Slice 1: new verb surface
     "group", "ai", "rm", "cd", "enter", "setup",
+    # Slice 7: shell integration
+    "shellenv",
 })
 
 # ---------------------------------------------------------------------------
@@ -1581,11 +1583,12 @@ def cmd_rm(args: list[str], dry_run: bool = False) -> None:
 def cmd_cd(args: list[str], dry_run: bool = False) -> None:
     """camp cd <slug> — print workspace path for shell cd integration.
 
-    Full implementation in Slice 7.
+    Reached only when no group resolves from cwd (no --group flag and cwd is
+    outside any member dir). Emits the standard "pass --group" error.
     """
     _die(
-        "camp cd: not yet implemented in this slice — "
-        "shell integration will be wired in Slice 7."
+        "camp cd: no group resolved from cwd — "
+        "pass --group <name> or run from inside a group member directory"
     )
 
 

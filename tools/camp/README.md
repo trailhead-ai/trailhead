@@ -7,7 +7,7 @@ managing git worktrees across a configured group of repositories. It handles the
 **Standalone use:** camp stands alone — adopt it without lore or craft if you only
 want the worktree orchestration.
 
-**Status:** Slice 1 (command skeleton). Full provisioning is Slice 3;
+**Status:** Slice 7 (shell integration). Full provisioning is Slice 3;
 session attach + harness launch is Slice 6. See the root README for install instructions.
 
 ## PATH setup
@@ -26,12 +26,28 @@ for the full install flow.
 
 ```
 camp ai <slug>       # create or resume a workspace
+camp cd <slug>       # print workspace path (see shell integration below)
 camp ls              # list all worktrees
 camp status          # show git + drift status
 camp rm              # tear down a worktree
 camp --help          # full command reference
 camp --version       # show version + resolved binary path
 ```
+
+## Shell integration (fish only)
+
+`camp cd <slug>` prints the resolved workspace path on stdout (exactly one line).
+A fish shell function wraps this to `cd` the caller's shell:
+
+```fish
+# Add to ~/.config/fish/config.fish
+camp shellenv | source
+```
+
+After sourcing, `camp_cd <slug>` changes the current directory to the workspace.
+
+**Fish-only constraint:** bash/zsh shell integration is not provided this pass.
+Use `cd (camp cd <slug>)` directly in bash/zsh.
 
 ## Group setup
 
