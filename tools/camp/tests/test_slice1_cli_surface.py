@@ -438,23 +438,29 @@ def test_group_path_ai_announces_background_provisioning(
     )
 
 
-# camp rm via group-aware path → stub (not real reconcile_break)
+# camp rm via group-aware path → real (graduated from Slice 1 stub in cleanup pass)
+# camp rm now routes to reconcile_break; it exits non-zero for an unknown slug
+# (no manifest present), NOT with a "not yet implemented" stub message.
 
 
-def test_group_path_rm_is_stubbed(stub_group_env: dict[str, str]) -> None:
-    """camp rm via group-aware path exits non-zero (Slice 1 stub)."""
+def test_group_path_rm_no_longer_stubbed(stub_group_env: dict[str, str]) -> None:
+    """camp rm via group-aware path no longer says 'not yet implemented' (stub graduated)."""
     result = _run_group(["rm", "--name", "my-slug"], group_env=stub_group_env)
-    assert result.returncode != 0, (
-        f"camp rm via group-aware path must exit non-zero (stub in Slice 1).\n"
+    combined = result.stdout + result.stderr
+    assert "not yet implemented" not in combined.lower(), (
+        f"camp rm must not return the Slice-1 stub message (it has graduated).\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert "slice 2" not in combined.lower(), (
+        f"camp rm must not mention 'Slice 2' (stub message removed).\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
 
-def test_group_path_rm_stub_mentions_slice2(stub_group_env: dict[str, str]) -> None:
-    """camp rm stub message mentions Slice 2."""
+def test_group_path_rm_unknown_slug_exits_nonzero(stub_group_env: dict[str, str]) -> None:
+    """camp rm with an unknown slug exits non-zero (manifest not found), not stub."""
     result = _run_group(["rm", "--name", "my-slug"], group_env=stub_group_env)
-    combined = result.stdout + result.stderr
-    assert "slice 2" in combined.lower() or "not yet" in combined.lower(), (
-        f"camp rm stub must mention Slice 2 or 'not yet implemented'.\n"
+    assert result.returncode != 0, (
+        f"camp rm with an unknown slug should exit non-zero (no manifest).\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )

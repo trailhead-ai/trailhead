@@ -260,7 +260,7 @@ def _dispatch_group_command(
         _cmd_ai_group_cli(rest, group, group_env, dry_run)
         return
     if cmd == "rm":
-        _cmd_rm_group_cli(rest, group, group_env, dry_run)
+        _cmd_break_group_cli(rest, group, group_env, dry_run)
         return
     if cmd == "setup":
         _cmd_setup_group_cli(rest, group, group_env, dry_run)
@@ -508,7 +508,7 @@ def _cmd_break_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp break [--force] [--name <slug>]"""
+    """camp rm [--force] [--name <slug>]"""
     from reconcile import reconcile_break
     from spine import _consume_flag_value, _resolve_slug, _die
     from group_resolve import central_state_dir
@@ -532,27 +532,27 @@ def _cmd_break_group_cli(
             configs = load_all_groups(config_dir)
             _, slug = resolve_from_cwd(Path.cwd(), configs)
             if slug is None:
-                _die("camp break: could not determine slug from cwd, pass --name <slug>")
+                _die("camp rm: could not determine slug from cwd, pass --name <slug>")
         except Exception as e:
-            _die(f"camp break: {e}")
+            _die(f"camp rm: {e}")
 
     if dry_run:
-        print(f"[dry-run] would break worktree {slug!r} for group {group['group']['name']!r}",
+        print(f"[dry-run] would remove worktree {slug!r} for group {group['group']['name']!r}",
               file=sys.stderr)
         return
 
     try:
         result = reconcile_break(group, slug, env=env, force=force)
     except ManifestError as e:
-        _die(f"camp break: {e}")
+        _die(f"camp rm: {e}")
     except Exception as e:
-        _die(f"camp break: {e}")
+        _die(f"camp rm: {e}")
 
     status = result.get("status", "ok")
     removed = result.get("removed", [])
-    print(f"camp break: removed worktree {slug!r} ({', '.join(removed)})")
+    print(f"camp rm: removed worktree {slug!r} ({', '.join(removed)})")
     if result.get("errors"):
-        print(f"camp break: errors: {result['errors']}", file=sys.stderr)
+        print(f"camp rm: errors: {result['errors']}", file=sys.stderr)
 
 
 def _cmd_restock_group_cli(
@@ -1010,24 +1010,6 @@ def _cmd_enter_group_cli(
         sys.exit(1)
     except ValueError as e:
         _die(f"camp enter: {e}")
-
-
-def _cmd_rm_group_cli(
-    args: list[str],
-    group: dict,
-    env: dict[str, str] | None,
-    dry_run: bool,
-) -> None:
-    """camp rm [--force] [--name <slug>] — tear down a worktree.
-
-    Replaces 'camp break'. Slice 2 wires reconcile_break with the new
-    workspace-dir layout.
-    """
-    from spine import _die
-    _die(
-        "camp rm: not yet implemented in this slice — "
-        "worktree teardown will be wired in Slice 2."
-    )
 
 
 def _cmd_cd_group_cli(

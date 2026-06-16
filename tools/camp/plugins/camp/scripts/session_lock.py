@@ -10,7 +10,18 @@ threshold (naming workspace + PID + timestamp). A dead-PID lock is reclaimed
 immediately; a live-PID lock older than the threshold is reclaimed too — the
 age-bound fallback against PID recycling (psutil is absent from the venv, so we
 cannot compare a process create_time; the timestamp is the only recycling guard).
-Lock cleared on normal exit via release_session_lock.
+
+The lock is held for the session's lifetime and reclaimed on the NEXT
+acquire_session_lock call via dead-PID liveness detection. It is intentionally
+never released during the process: camp ai ends in os.execvp into the harness,
+so no Python exit path runs and no finalizer/atexit can clear it. A subsequent
+camp ai call detects the dead PID (ProcessLookupError from os.kill) and reclaims
+the lock before acquiring a new one. The age-bound timestamp covers the rare
+edge case of PID recycling within the threshold window.
+
+release_session_lock is defined for completeness and test use; production code
+does not call it (the execvp contract means there is no point in the call chain
+where it would run reliably).
 
 Liveness (U2, validated): os.kill(pid, 0) → ProcessLookupError means dead;
 PermissionError means alive-but-not-ours (macOS DOES raise EPERM for cross-user

@@ -1571,12 +1571,12 @@ def cmd_ai(args: list[str], dry_run: bool = False) -> None:
 def cmd_rm(args: list[str], dry_run: bool = False) -> None:
     """camp rm [--force] [--name <slug>] — tear down a worktree.
 
-    Replaces 'camp break'. Full implementation in Slice 2.
+    Reached only when no group resolves from cwd (no --group flag and cwd is
+    outside any member dir). Emits the standard "pass --group" error.
     """
-    # Slice 2 will wire reconcile_break with the new layout here.
     _die(
-        "camp rm: not yet implemented in this slice — "
-        "worktree teardown will be wired in Slice 2."
+        "camp rm: no group resolved from cwd — "
+        "pass --group <name> or run from inside a group member directory"
     )
 
 
