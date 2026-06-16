@@ -145,6 +145,13 @@ subagents and skills. The full schema and resolution rules live in
 `camp` and `lore` also ship standalone CLIs (`camp`, `lore`) that trailhead puts
 on your PATH.
 
+## Design axioms
+
+trailhead is built on a small set of binding design axioms — harness-agnostic core,
+full basedir/XDG paths, vanilla-usage fallbacks, agent-first code. If you (or your
+agent) are contributing, read [`docs/vision.md`](docs/vision.md) first; it's the
+canonical statement the seam docs defer to.
+
 ## Tool READMEs
 
 - [lore](tools/lore/README.md) — skills, recall mechanics, vault layout
