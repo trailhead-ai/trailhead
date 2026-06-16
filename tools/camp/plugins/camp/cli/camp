@@ -91,6 +91,11 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
     """Attempt to load the group config for the current cwd or --group flag.
 
     Returns (group_config_dict, env) or (None, None) if not resolvable.
+
+    Raises GroupConfigError if a config file is present but malformed — this is a
+    hard failure that must surface to the user, not a silent fall-through to spine.
+    A GroupResolutionError or missing config (no group resolves from cwd) returns
+    (None, None) and lets spine handle the command.
     """
     if not _TRAILHEAD_PATHS_OK:
         return None, None
@@ -134,7 +139,11 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
                 return None, None
 
         return group, None  # env=None → use os.environ (resolver's default)
+    except GroupConfigError:
+        # Config exists but is malformed — re-raise so the caller can surface it.
+        raise
     except Exception:
+        # GroupResolutionError, no config, import errors, etc. — fall through to spine.
         return None, None
 
 
@@ -193,7 +202,12 @@ def main() -> None:
         "--version", "version",
     })
     if first and first not in _SKIP_GROUP_RESOLVE:
-        group, group_env = _resolve_group_for_command(argv)
+        try:
+            group, group_env = _resolve_group_for_command(argv)
+        except Exception as _cfg_err:
+            # GroupConfigError: config is present but malformed — surface and exit.
+            print(f"camp: config error: {_cfg_err}", file=sys.stderr)
+            sys.exit(1)
         if group is not None:
             _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
             return
@@ -959,6 +973,7 @@ def _cmd_enter_group_cli(
 
     member_name = filtered[0]
 
+    import subprocess as _subprocess
     try:
         enter_member(group, slug, member_name, env=env)
     except MemberNotReadyError as e:
@@ -966,6 +981,15 @@ def _cmd_enter_group_cli(
         sys.exit(1)
     except GroupConfigError as e:
         print(f"camp enter: {e}", file=sys.stderr)
+        sys.exit(1)
+    except _subprocess.CalledProcessError as e:
+        cmd_str = " ".join(str(t) for t in e.cmd) if isinstance(e.cmd, (list, tuple)) else str(e.cmd)
+        print(
+            f"camp enter: activation hook failed for member {member_name!r}\n"
+            f"  command: {cmd_str}\n"
+            f"  exit code: {e.returncode}",
+            file=sys.stderr,
+        )
         sys.exit(1)
     except ValueError as e:
         _die(f"camp enter: {e}")

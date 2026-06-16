@@ -14,6 +14,8 @@ Test contract:
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -693,3 +695,188 @@ kind = "dep-install"
         load_group(f)
     msg = str(exc_info.value)
     assert "cmd" in msg
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: GroupConfigError from the REAL CLI entrypoint (not just load_group).
+#
+# Regression: _resolve_group_for_command had a bare `except Exception: return
+# (None, None)` that swallowed GroupConfigError.  A malformed config (unknown
+# hook kind) caused `camp enter <member>` to fall through to spine and print an
+# unrelated error instead of naming the member + kind.
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT_FOR_CLI = Path(__file__).resolve().parents[3]
+_CLI_CAMP = _REPO_ROOT_FOR_CLI / "tools" / "camp" / "plugins" / "camp" / "cli" / "camp"
+
+
+def _run_cli(args: list[str], *, env: dict[str, str]) -> subprocess.CompletedProcess:
+    base = {**os.environ}
+    base.update(env)
+    return subprocess.run(
+        [sys.executable, str(_CLI_CAMP), *args],
+        capture_output=True,
+        text=True,
+        env=base,
+    )
+
+
+def test_cli_enter_unknown_hook_kind_exits_nonzero_with_legible_message(
+    tmp_path: Path,
+) -> None:
+    """camp enter <member> against a config with an unknown hook kind must exit
+    non-zero and name both the member and the unknown kind in the error output.
+
+    Regression: _resolve_group_for_command swallowed GroupConfigError via a bare
+    `except Exception`, causing this to fall through to an unrelated error.
+    """
+    # Write a config with an unknown hook kind.
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "badgroup.toml").write_text(
+        "[group]\nname = \"badgroup\"\n\n"
+        "[[members]]\nname = \"myrepo\"\nrepo_root = \"/tmp/fake-myrepo\"\n\n"
+        "[[members.hooks]]\nkind = \"not-a-valid-kind\"\ncmd = [\"echo\", \"hi\"]\n"
+    )
+
+    env = {
+        "CAMP_CONFIG_DIR": str(tmp_path),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+    }
+
+    result = _run_cli(
+        ["enter", "myrepo", "--group", "badgroup", "--name", "any-slug"],
+        env=env,
+    )
+
+    assert result.returncode != 0, (
+        "camp enter with an unknown hook kind must exit non-zero.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    combined = result.stdout + result.stderr
+    assert "not-a-valid-kind" in combined, (
+        "Error output must name the unknown hook kind.\n"
+        f"combined: {combined}"
+    )
+    assert "myrepo" in combined, (
+        "Error output must name the member.\n"
+        f"combined: {combined}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: Failing activation hook — legible error, activated stays UNSET.
+# ---------------------------------------------------------------------------
+
+
+def test_failing_hook_does_not_mark_activated(tmp_path: Path) -> None:
+    """When an activation hook exits non-zero, activated must NOT be set in the
+    manifest, and a CalledProcessError must propagate (not be swallowed)."""
+    from activation import enter_member
+    from manifest import read_central_manifest
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+    wt_path = tmp_path / "camp" / group_name / "worktrees" / slug / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    mpath = _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(wt_path),
+                "provision_state": "ready",
+            }
+        ],
+    )
+
+    hooks = [{"kind": "dep-install", "cmd": ["false"]}]
+    group = _make_group(group_name, member_name, hooks=hooks)
+    env = _env(tmp_path)
+
+    # Simulate a hook that exits non-zero via a CalledProcessError.
+    import subprocess as _subprocess
+    fake_error = _subprocess.CalledProcessError(1, ["false"])
+    with patch("subprocess.run", side_effect=fake_error):
+        with pytest.raises(_subprocess.CalledProcessError):
+            enter_member(group, slug, member_name, env=env)
+
+    # activated must NOT be set after the hook failure.
+    data = read_central_manifest(mpath)
+    member_entry = next(m for m in data["members"] if m["name"] == member_name)
+    assert not member_entry.get("activated", False), (
+        "activated must NOT be set when an activation hook fails"
+    )
+
+
+def test_failing_hook_surfaces_legibly_via_cli(tmp_path: Path) -> None:
+    """camp enter <member> when an activation hook fails must exit non-zero and
+    name the member + failing command in the error; no raw Python traceback."""
+    import json as _json
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+
+    # Build state dir layout.
+    state_dir = tmp_path / "state"
+    wt_path = state_dir / group_name / "worktrees" / slug / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    manifest_dir = state_dir / group_name / "worktrees" / slug
+    manifest_path = manifest_dir / "manifest.json"
+    manifest_path.write_text(
+        _json.dumps(
+            {
+                "schema_version": 1,
+                "group": group_name,
+                "slug": slug,
+                "branch": f"worktree-{slug}",
+                "members": [
+                    {
+                        "name": member_name,
+                        "repo_root": "/tmp/fake-repo",
+                        "worktree_path": str(wt_path),
+                        "provision_state": "ready",
+                    }
+                ],
+            }
+        )
+    )
+
+    # Write a config with a hook that will legitimately fail (cmd = ["false"]).
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / f"{group_name}.toml").write_text(
+        f"[group]\nname = \"{group_name}\"\n\n"
+        f"[[members]]\nname = \"{member_name}\"\nrepo_root = \"/tmp/fake-repo\"\n\n"
+        f"[[members.hooks]]\nkind = \"dep-install\"\ncmd = [\"false\"]\n"
+    )
+
+    env = {
+        "CAMP_CONFIG_DIR": str(tmp_path),
+        "CAMP_STATE_DIR": str(state_dir),
+    }
+
+    result = _run_cli(
+        ["enter", member_name, "--group", group_name, "--name", slug],
+        env=env,
+    )
+
+    assert result.returncode != 0, (
+        "camp enter with a failing hook must exit non-zero.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    combined = result.stdout + result.stderr
+    # Must name the member and the failing command; must NOT be a raw traceback.
+    assert member_name in combined or "hook" in combined.lower(), (
+        f"Error must reference the member or hook. combined: {combined}"
+    )
+    assert "Traceback" not in combined, (
+        f"Must not dump a raw Python traceback. combined: {combined}"
+    )
