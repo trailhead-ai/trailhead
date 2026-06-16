@@ -27,15 +27,33 @@ from pathlib import Path
 # cli/camp → parent is cli/ → parent is plugins/camp/ → scripts/ is a sibling.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+# FIX 6: the hidden `camp inject --drain` PostToolUse hook fires on EVERY Bash
+# tool call. It resolves the workspace from cwd and never touches spine or
+# trailhead.paths, so it must stay near-free: detect the inject route here —
+# BEFORE the cold-subprocess ensure_trailhead_importable() walk and BEFORE the
+# ~1700-line spine module-load — and skip both for it. The bootstrap + spine load
+# still happen unconditionally for every OTHER command (their behavior is
+# unchanged). _spine_main is imported lazily inside the fallback dispatch.
+_INJECT_ROUTE = len(sys.argv) > 1 and sys.argv[1] == "inject"
+
 # (b) D-H guard: bootstrap trailhead.paths before any command code runs.
 # _bootstrap walks up from this file to the monorepo root automatically,
-# so this works on a fresh git clone without any pip install.
-from _bootstrap import ensure_trailhead_importable  # noqa: E402
+# so this works on a fresh git clone without any pip install. Skipped for the
+# inject route (drain resolves from cwd; no trailhead.paths dependency).
+if not _INJECT_ROUTE:
+    from _bootstrap import ensure_trailhead_importable  # noqa: E402
 
-ensure_trailhead_importable()
-_TRAILHEAD_PATHS_OK = True
+    ensure_trailhead_importable()
 
-from spine import main as _spine_main  # noqa: E402
+_TRAILHEAD_PATHS_OK = not _INJECT_ROUTE
+
+# Single source of truth for the verb dispatch tables (FIX 9). verb_taxonomy is a
+# tiny pure-data module (no regex/subprocess/spine), so importing it here keeps
+# the inject route light while letting both entry points share the same tables.
+from verb_taxonomy import (  # noqa: E402
+    DISABLED_VERBS as _DISABLED_VERBS,
+    LEGACY_REDIRECTS as _LEGACY_REDIRECTS,
+)
 
 _SELF = Path(__file__).resolve()
 _BIN_DIR = _SELF.parent.parent / "bin"
@@ -223,7 +241,10 @@ def main() -> None:
             _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
             return
 
-    # Delegate everything else to the spine dispatcher (fallback / non-group cmds)
+    # Delegate everything else to the spine dispatcher (fallback / non-group cmds).
+    # Imported lazily (FIX 6) so the early-returning inject route never pays the
+    # spine module-load cost.
+    from spine import main as _spine_main
     _spine_main()
 
 
@@ -248,17 +269,16 @@ def _dispatch_group_command(
         RESERVED,
     )
 
-    # Slice 1: disabled verbs — hidden from help, legible error + non-zero exit.
-    if cmd in ("restock", "sweep", "code", "fire"):
+    # Slice 1: disabled verbs — hidden from help, legible error + non-zero exit
+    # (FIX 9: sourced from the single verb_taxonomy definition via spine).
+    if cmd in _DISABLED_VERBS:
         cmd_disabled(cmd)
         return
 
-    # Slice 1: legacy verb redirects.
-    if cmd == "open":
-        cmd_legacy_redirect("open", "ai")
-        return
-    if cmd == "break":
-        cmd_legacy_redirect("break", "rm")
+    # Slice 1: legacy verb redirects. 'init' is intercepted earlier in main();
+    # 'open'/'break' are the redirects reachable on the group-aware path.
+    if cmd in _LEGACY_REDIRECTS:
+        cmd_legacy_redirect(cmd, _LEGACY_REDIRECTS[cmd])
         return
 
     # Slice 1: new verb surface.
@@ -296,6 +316,7 @@ def _dispatch_group_command(
         _cmd_rebase_group_cli(rest, group, group_env, dry_run)
     else:
         # Fall through to spine for non-group commands
+        from spine import main as _spine_main
         _spine_main()
 
 
@@ -306,6 +327,7 @@ def _slug_from_args_or_cwd(
     verb: str,
     consume_positional: bool = False,
     allow_none: bool = False,
+    env: dict[str, str] | None = None,
 ) -> str | None:
     """Resolve a slug from --name, an optional positional, or cwd.
 
@@ -325,7 +347,10 @@ def _slug_from_args_or_cwd(
         return _resolve_slug(args[0], context="argument")
 
     try:
-        _, slug = resolve_from_cwd(Path.cwd(), [group])
+        # Thread env so the cwd slug resolution derives camp_state_dir from the
+        # SAME env as the downstream manifest/workspace ops (FIX 7). resolve_from_cwd
+        # derives state_dir("camp", env=env) when camp_state_dir is not supplied.
+        _, slug = resolve_from_cwd(Path.cwd(), [group], env=env)
     except Exception:
         slug = None
     if slug is None and not allow_none:
@@ -358,7 +383,7 @@ def _cmd_status_group_cli(
     filtered = [a for a in args if a != "--json"]
 
     # Resolve a slug from --name or cwd; if found, emit the provision-state view.
-    slug = _slug_from_args_or_cwd(filtered, group, verb="status", allow_none=True)
+    slug = _slug_from_args_or_cwd(filtered, group, verb="status", allow_none=True, env=env)
 
     if slug is not None:
         try:
@@ -483,7 +508,7 @@ def _cmd_setup_group_cli(
     filtered = [a for a in args if a not in ("--background", "--json")]
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
     slug = _slug_from_args_or_cwd(
-        filtered, group, verb="setup", consume_positional=True
+        filtered, group, verb="setup", consume_positional=True, env=env
     )
 
     if dry_run:
@@ -529,7 +554,7 @@ def _cmd_setup_status_cli(
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
 
     slug = _slug_from_args_or_cwd(
-        filtered, group, verb="setup", consume_positional=True, allow_none=True
+        filtered, group, verb="setup", consume_positional=True, allow_none=True, env=env
     )
 
     if slug is None:
@@ -597,7 +622,7 @@ def _cmd_break_group_cli(
     force = "--force" in args
     filtered = [a for a in args if a != "--force"]
     slug = _slug_from_args_or_cwd(
-        filtered, group, verb="rm", consume_positional=True
+        filtered, group, verb="rm", consume_positional=True, env=env
     )
 
     if dry_run:
@@ -685,7 +710,7 @@ def _cmd_rebase_group_cli(
 
     filtered = list(args)
     onto = _consume_flag_value(filtered, "--onto") or "origin/main"
-    slug = _slug_from_args_or_cwd(filtered, group, verb="rebase")
+    slug = _slug_from_args_or_cwd(filtered, group, verb="rebase", env=env)
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -1009,7 +1034,7 @@ def _cmd_enter_group_cli(
     from harness_launch import resolve_harness_profile
 
     filtered = list(args)
-    slug = _slug_from_args_or_cwd(filtered, group, verb="enter")
+    slug = _slug_from_args_or_cwd(filtered, group, verb="enter", env=env)
 
     if not filtered:
         _die("camp enter: a member name is required\n  usage: camp enter <member>")
@@ -1085,11 +1110,19 @@ def _cmd_inject_cli(args: list[str]) -> None:
     current cwd, which may be a member worktree (<workspace>/<member>) rather than
     the workspace root. If no `.camp/` ancestor is found, the cwd is drained as-is
     (no-op safe). Resilient: never crashes a tool call — any error → exit 0.
-    """
-    from spine import _consume_flag_value
 
-    rest = list(args)
-    workspace = _consume_flag_value(rest, "--workspace")
+    FIX 6: the --workspace parse is inlined here (rather than reusing
+    spine._consume_flag_value) so the per-Bash-call drain path never imports the
+    heavy spine module.
+    """
+    workspace: str | None = None
+    for i, arg in enumerate(args):
+        if arg == "--workspace" and i + 1 < len(args):
+            workspace = args[i + 1]
+            break
+        if arg.startswith("--workspace="):
+            workspace = arg[len("--workspace="):]
+            break
 
     try:
         from inject import drain_queue, find_workspace_root

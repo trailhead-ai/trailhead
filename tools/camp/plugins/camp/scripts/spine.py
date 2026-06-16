@@ -28,6 +28,13 @@ import time
 from pathlib import Path
 from typing import IO, Any, NoReturn
 
+from verb_taxonomy import (  # noqa: E402 — single source of truth (FIX 9)
+    DISABLED_VERBS,
+    LEGACY_REDIRECTS,
+    NEEDS_GROUP_VERBS,
+    needs_group_message,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -1551,72 +1558,16 @@ def cmd_group(args: list[str], dry_run: bool = False) -> None:
     )
 
 
-def cmd_ai(args: list[str], dry_run: bool = False) -> None:
-    """camp ai <slug> — create or resume a workspace for a slug.
+def cmd_needs_group(verb: str) -> None:
+    """Spine fallback for a NEEDS_GROUP verb (ai/rm/cd/enter/setup).
 
-    The real bring-up (seed + detached provisioner + launch) lives on the
-    group-aware path in cli/camp (_cmd_ai_group_cli). This spine fallback is only
-    reached when no group config resolves from cwd or --group — so it points the
-    user at configuring a group.
+    These verbs' real behavior lives on the group-aware path in cli/camp; reaching
+    spine.main for one of them means no group resolved (no --group flag and cwd is
+    outside any member dir). Emit the per-verb "needs a group" error and exit
+    non-zero. The exact message text is owned by verb_taxonomy (FIX 9), collapsing
+    the five formerly-duplicated per-verb stubs into one helper.
     """
-    if not args:
-        _die("camp ai: a slug is required\n  usage: camp ai <slug>")
-    _die(
-        "camp ai: no camp group resolves from this directory.\n"
-        "  Run 'camp group <name> --member NAME=PATH ...' to configure one, "
-        "or pass --group <name>."
-    )
-
-
-def cmd_rm(args: list[str], dry_run: bool = False) -> None:
-    """camp rm [--force] [--name <slug>] — tear down a worktree.
-
-    Reached only when no group resolves from cwd (no --group flag and cwd is
-    outside any member dir). Emits the standard "pass --group" error.
-    """
-    _die(
-        "camp rm: no group resolved from cwd — "
-        "pass --group <name> or run from inside a group member directory"
-    )
-
-
-def cmd_cd(args: list[str], dry_run: bool = False) -> None:
-    """camp cd <slug> — print workspace path for shell cd integration.
-
-    Reached only when no group resolves from cwd (no --group flag and cwd is
-    outside any member dir). Emits the standard "pass --group" error.
-    """
-    _die(
-        "camp cd: no group resolved from cwd — "
-        "pass --group <name> or run from inside a group member directory"
-    )
-
-
-def cmd_enter(args: list[str], dry_run: bool = False) -> None:
-    """camp enter <member> — activate a member and print its CLAUDE.md.
-
-    Reached only when no group resolves from cwd (no --group flag and cwd is
-    outside any member dir). The real implementation lives on the group-aware
-    path in cli/camp (_cmd_enter_group_cli). Emits the standard "pass --group" error.
-    """
-    _die(
-        "camp enter: no group resolved from cwd — "
-        "pass --group <name> or run from inside a group member directory"
-    )
-
-
-def cmd_setup(args: list[str], dry_run: bool = False) -> None:
-    """camp setup — provision or retry member worktrees.
-
-    The real provisioning lives on the group-aware path in cli/camp
-    (_cmd_setup_group_cli). This spine fallback is only reached when no group
-    config resolves — so it points the user at configuring a group.
-    """
-    _die(
-        "camp setup: no camp group resolves from this directory.\n"
-        "  Run 'camp group <name> --member NAME=PATH ...' to configure one, "
-        "or pass --group <name>."
-    )
+    _die(needs_group_message(verb))
 
 
 def cmd_disabled(verb: str) -> None:
@@ -1671,29 +1622,18 @@ def main() -> None:
         cmd_path(rest, dry_run=dry_run)
     elif first in ("help", "--help", "-h"):
         cmd_help(rest)
-    # Slice 1: new verb surface
-    elif first == "ai":
-        cmd_ai(rest, dry_run=dry_run)
-    elif first == "rm":
-        cmd_rm(rest, dry_run=dry_run)
-    elif first == "cd":
-        cmd_cd(rest, dry_run=dry_run)
-    elif first == "enter":
-        cmd_enter(rest, dry_run=dry_run)
-    elif first == "setup":
-        cmd_setup(rest, dry_run=dry_run)
+    # Slice 1: new verb surface — these need a resolved group; reaching spine
+    # means none resolved (FIX 9: single NEEDS_GROUP_VERBS source of truth).
+    elif first in NEEDS_GROUP_VERBS:
+        cmd_needs_group(first)
     elif first == "group":
         cmd_group(rest, dry_run=dry_run)
     # Slice 1: disabled verbs (hidden from help, legible error)
-    elif first in ("restock", "sweep", "code", "fire"):
+    elif first in DISABLED_VERBS:
         cmd_disabled(first)
     # Slice 1: legacy verb redirects
-    elif first == "open":
-        cmd_legacy_redirect("open", "ai")
-    elif first == "break":
-        cmd_legacy_redirect("break", "rm")
-    elif first == "init":
-        cmd_legacy_redirect("init", "group")
+    elif first in LEGACY_REDIRECTS:
+        cmd_legacy_redirect(first, LEGACY_REDIRECTS[first])
     else:
         # Bare slug removed: print legible error pointing at camp ai.
         _die(

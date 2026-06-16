@@ -215,12 +215,7 @@ def provision_member(
     isolated to this member by the caller.
     """
     import reconcile
-    from reconcile import (
-        DEFAULT_BASE,
-        FETCH_TIMEOUT_SECONDS,
-        _add_worktree_for_member,
-        _run_bootstrap,
-    )
+    from reconcile import DEFAULT_BASE, FETCH_TIMEOUT_SECONDS
 
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")
@@ -235,5 +230,5 @@ def provision_member(
     # (raising ReconcileError) — otherwise branching off HEAD would silently put
     # the member on the wrong base; a cached, locally-resolving base proceeds.
     reconcile._fetch_base(repo_root, base, timeout=FETCH_TIMEOUT_SECONDS)
-    _add_worktree_for_member(member, wt_path, branch, repo_root, base=base)
-    _run_bootstrap(member, wt_path)
+    reconcile._add_worktree_for_member(member, wt_path, branch, repo_root, base=base)
+    reconcile._run_bootstrap(member, wt_path)

@@ -269,7 +269,7 @@ class TestBug2RmRemovesWorkspaceDir:
 
         monkeypatch.setattr(reconcile, "workspace_dir", fake_workspace_dir)
 
-        with pytest.raises((ConfinementError, Exception)):
+        with pytest.raises(ConfinementError):
             reconcile_break(g["group"], "feat-conf", env=g["env"])
         assert sentinel.exists(), "confinement must reject rmtree of an out-of-tree path"
 
