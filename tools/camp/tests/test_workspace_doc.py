@@ -456,6 +456,79 @@ class TestWorkspaceHooks:
 
 
 # ---------------------------------------------------------------------------
+# Slice 9: PostToolUse → camp inject --drain workspace hook
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceInjectHook:
+    def _commands(self, data: dict, event: str) -> list[str]:
+        return [
+            h.get("command", "")
+            for entry in data.get("hooks", {}).get(event, [])
+            for h in entry.get("hooks", [])
+        ]
+
+    def _matchers(self, data: dict, event: str) -> list[str]:
+        return [entry.get("matcher", "") for entry in data.get("hooks", {}).get(event, [])]
+
+    def test_inject_hook_written(self, tmp_path: Path):
+        """write_workspace_inject_hook writes a PostToolUse → inject --drain hook."""
+        from hooks_writer import write_workspace_inject_hook
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        camp_bin = "/usr/local/bin/camp"
+        write_workspace_inject_hook(ws_dir, camp_bin)
+
+        data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
+        commands = self._commands(data, "PostToolUse")
+        expected = f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
+        assert expected in commands, (
+            f"Expected {expected!r} in PostToolUse, got: {commands}"
+        )
+
+    def test_inject_hook_matcher_is_bash(self, tmp_path: Path):
+        """The PostToolUse inject hook uses the Bash matcher."""
+        from hooks_writer import write_workspace_inject_hook
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        write_workspace_inject_hook(ws_dir, "/usr/local/bin/camp")
+
+        data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
+        assert "Bash" in self._matchers(data, "PostToolUse")
+
+    def test_inject_hook_idempotent(self, tmp_path: Path):
+        """Re-running write_workspace_inject_hook adds NO duplicate entries."""
+        from hooks_writer import write_workspace_inject_hook
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        camp_bin = "/usr/local/bin/camp"
+        write_workspace_inject_hook(ws_dir, camp_bin)
+        write_workspace_inject_hook(ws_dir, camp_bin)
+
+        data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
+        commands = self._commands(data, "PostToolUse")
+        expected = f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
+        assert commands.count(expected) == 1, f"Duplicate inject hook: {commands}"
+
+    def test_inject_hook_preserves_session_start(self, tmp_path: Path):
+        """Writing the inject hook does not clobber an existing SessionStart hook."""
+        from hooks_writer import write_workspace_hooks, write_workspace_inject_hook
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        camp_bin = "/usr/local/bin/camp"
+        write_workspace_hooks(ws_dir, camp_bin)
+        write_workspace_inject_hook(ws_dir, camp_bin)
+
+        data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
+        assert any("setup --status" in c for c in self._commands(data, "SessionStart"))
+        assert any("inject --drain" in c for c in self._commands(data, "PostToolUse"))
+
+
+# ---------------------------------------------------------------------------
 # Test 4: bring_up_workspace integration
 # ---------------------------------------------------------------------------
 

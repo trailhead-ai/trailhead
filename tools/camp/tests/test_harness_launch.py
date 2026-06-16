@@ -182,6 +182,31 @@ class TestHarnessConfigValidation:
             )
         assert "nope" in str(exc.value)
 
+    def test_harness_inject_stdout_parses(self, tmp_path):
+        cfg = self._load(tmp_path, "[harness]\ninject = \"stdout\"\n")
+        assert cfg["harness"]["inject"] == "stdout"
+
+    def test_harness_inject_claude_hook_parses(self, tmp_path):
+        cfg = self._load(tmp_path, "[harness]\ninject = \"claude-hook\"\n")
+        assert cfg["harness"]["inject"] == "claude-hook"
+
+    def test_harness_inject_absent_not_in_parsed(self, tmp_path):
+        cfg = self._load(tmp_path, "[harness]\ndoc_files = [\"AGENTS.md\"]\n")
+        assert "inject" not in cfg["harness"]
+
+    def test_harness_inject_unknown_value_rejected(self, tmp_path):
+        from group_config import GroupConfigError
+
+        with pytest.raises(GroupConfigError) as exc:
+            self._load(tmp_path, "[harness]\ninject = \"telepathy\"\n")
+        assert "telepathy" in str(exc.value)
+
+    def test_harness_inject_non_string_rejected(self, tmp_path):
+        from group_config import GroupConfigError
+
+        with pytest.raises(GroupConfigError):
+            self._load(tmp_path, "[harness]\ninject = 42\n")
+
 
 # ---------------------------------------------------------------------------
 # launch() — resolves then os.execvp (stubbed)
@@ -265,3 +290,40 @@ class TestPartialHarnessMerge:
         group = _group({"new": ["myharness"]})
         argv, _ = resolve_launch(group, "feat-x", ws, is_resume=False)
         assert argv == ["myharness"]
+
+
+# ---------------------------------------------------------------------------
+# resolve_inject — mid-session context-injection strategy (Slice 9)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveInject:
+    """resolve_inject mirrors resolve_launch/resolve_doc_files per-field merge.
+
+    - no [harness] block (claude default) → "claude-hook".
+    - [harness] block WITHOUT inject → "stdout" (safe default).
+    - configured inject value honored when present.
+    """
+
+    def test_no_harness_block_defaults_to_claude_hook(self):
+        from harness_launch import resolve_inject
+
+        assert resolve_inject(_group()) == "claude-hook"
+
+    def test_harness_block_without_inject_defaults_to_stdout(self):
+        from harness_launch import resolve_inject
+
+        group = _group({"doc_files": ["AGENTS.md"]})
+        assert resolve_inject(group) == "stdout"
+
+    def test_configured_stdout_honored(self):
+        from harness_launch import resolve_inject
+
+        group = _group({"inject": "stdout"})
+        assert resolve_inject(group) == "stdout"
+
+    def test_configured_claude_hook_honored(self):
+        from harness_launch import resolve_inject
+
+        group = _group({"inject": "claude-hook"})
+        assert resolve_inject(group) == "claude-hook"

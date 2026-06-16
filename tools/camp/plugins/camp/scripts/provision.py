@@ -168,14 +168,17 @@ def bring_up_workspace(
 
     Synchronous steps (fast, before harness launch):
       1. Seed the manifest with every member pending.
-      2. Write CLAUDE.md + AGENT.md at the workspace root (idempotent).
+      2. Write the workspace doc(s) at the workspace root (idempotent).
       3. Write workspace .claude/settings.json with SessionStart→camp setup --status.
-      4. Spawn the detached background provisioner.
+      4. When the inject strategy is "claude-hook", also wire the PostToolUse →
+         `camp inject --drain` hook (idempotent); not for "stdout".
+      5. Spawn the detached background provisioner.
 
     Returns the manifest path. The harness launch (Slice 6) follows this call.
     """
     from workspace_doc import write_workspace_doc
-    from hooks_writer import write_workspace_hooks
+    from hooks_writer import write_workspace_hooks, write_workspace_inject_hook
+    from harness_launch import resolve_inject
 
     group_name = group["group"]["name"]
     mpath = seed_pending_workspace(group, slug, env=env)
@@ -183,6 +186,9 @@ def bring_up_workspace(
 
     write_workspace_doc(ws_dir, group, slug)
     write_workspace_hooks(ws_dir, str(_CAMP_BIN))
+
+    if resolve_inject(group) == "claude-hook":
+        write_workspace_inject_hook(ws_dir, str(_CAMP_BIN))
 
     spawn_detached_provisioner(
         group_name=group_name,

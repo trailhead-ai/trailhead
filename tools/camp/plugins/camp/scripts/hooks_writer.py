@@ -63,6 +63,11 @@ def _workspace_session_start_command(camp_bin: str) -> str:
     return f"${{CAMP_BIN:-{camp_bin}}} setup --status"
 
 
+def _workspace_inject_drain_command(camp_bin: str) -> str:
+    """Return the workspace PostToolUse inject-drain hook command string."""
+    return f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
+
+
 def _has_command(hook_list: list, command: str) -> bool:
     """Return True if `command` already appears in any hook entry in hook_list."""
     for entry in hook_list:
@@ -72,11 +77,13 @@ def _has_command(hook_list: list, command: str) -> bool:
     return False
 
 
-def _upsert_hook(data: dict, event: str, command: str) -> None:
+def _upsert_hook(data: dict, event: str, command: str, *, matcher: str | None = None) -> None:
     """Ensure `command` appears exactly once under hooks[event].
 
     If an entry with this exact command already exists, leave it untouched.
     Otherwise, append a new entry { "hooks": [ { "type": "command", "command": <cmd> } ] }.
+    When `matcher` is given (e.g. PostToolUse → "Bash"), it is set on the new
+    entry; idempotency keys on the command string regardless of matcher.
     """
     hooks = data.setdefault("hooks", {})
     hook_list = hooks.setdefault(event, [])
@@ -84,11 +91,10 @@ def _upsert_hook(data: dict, event: str, command: str) -> None:
     if _has_command(hook_list, command):
         return  # Already present — idempotent
 
-    hook_list.append({
-        "hooks": [
-            {"type": "command", "command": command},
-        ]
-    })
+    entry: dict = {"hooks": [{"type": "command", "command": command}]}
+    if matcher is not None:
+        entry["matcher"] = matcher
+    hook_list.append(entry)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +120,29 @@ def write_workspace_hooks(workspace_dir: Path, camp_bin: str) -> None:
 
     ss_cmd = _workspace_session_start_command(camp_bin)
     _upsert_hook(data, "SessionStart", ss_cmd)
+
+    _save_settings(settings_path, data)
+
+
+def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
+    """Write/update the workspace-dir PostToolUse → `camp inject --drain` hook.
+
+    Installed only when the resolved inject strategy is "claude-hook": a Bash-matched
+    PostToolUse hook drains the workspace inject queue (the member doc enqueued by
+    `camp enter`) into the session via additionalContext on the next tool call.
+
+    Idempotent: re-running adds NO duplicate entries. Existing unrelated keys
+    (including the SessionStart hook) are preserved.
+
+    Args:
+        workspace_dir: Absolute path to the workspace root directory.
+        camp_bin:      Absolute path to the camp binary.
+    """
+    settings_path = workspace_dir / ".claude" / "settings.json"
+    data = _load_settings(settings_path)
+
+    drain_cmd = _workspace_inject_drain_command(camp_bin)
+    _upsert_hook(data, "PostToolUse", drain_cmd, matcher="Bash")
 
     _save_settings(settings_path, data)
 

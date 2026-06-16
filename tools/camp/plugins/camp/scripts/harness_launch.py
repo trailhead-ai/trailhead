@@ -50,6 +50,25 @@ def resolve_doc_files(group: dict[str, Any]) -> list[str]:
     return ["CLAUDE.md"]
 
 
+def resolve_inject(group: dict[str, Any]) -> str:
+    """Resolve the mid-session context-injection strategy.
+
+    Mirrors the per-field merge of resolve_launch / resolve_doc_files:
+      - no [harness] block (claude default)         → "claude-hook"
+      - a [harness] block WITHOUT inject (safe default for a non-claude harness
+        whose injection contract we have not opted into)  → "stdout"
+      - a configured inject value                   → that value (validated as an
+        enum at load time by group_config).
+
+    "stdout" is the universal floor (print the doc to stdout); "claude-hook"
+    enqueues the doc for the Claude Code PostToolUse → additionalContext channel.
+    """
+    harness = group.get("harness")
+    if harness is None:
+        return "claude-hook"
+    return harness.get("inject", "stdout")
+
+
 def resolve_launch(
     group: dict[str, Any],
     slug: str,

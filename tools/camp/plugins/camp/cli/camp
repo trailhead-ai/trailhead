@@ -188,6 +188,12 @@ def main() -> None:
         cmd_worktree_cleanup(force=force)
         return
 
+    # Slice 9: hidden inject hook handler (PostToolUse → drain the inject queue).
+    # Runs before group resolution; resilient (drain_queue never crashes a tool call).
+    if first == "inject":
+        _cmd_inject_cli(argv[1:])
+        return
+
     # Slice 1: 'group' is the new name for 'init'; 'init' redirects to 'group'.
     if first == "group":
         _cmd_group_cli(argv[1:])
@@ -1054,6 +1060,30 @@ def _cmd_cd_group_cli(
     # Print the path exactly once, no trailing whitespace, no newline other than
     # the one print() appends.
     print(str(ws_dir))
+
+
+def _cmd_inject_cli(args: list[str]) -> None:
+    """camp inject --drain [--workspace <dir>] — drain the inject queue (hidden).
+
+    The PostToolUse hook handler for the claude-hook inject strategy. Reads the
+    workspace inject queue and emits the Claude Code additionalContext JSON, then
+    clears the queue; an empty queue emits nothing. The workspace defaults to the
+    cwd (the session is rooted at the workspace dir), overridable via --workspace
+    (used by tests). Resilient: never crashes a tool call — any error → exit 0.
+    """
+    from spine import _consume_flag_value
+
+    rest = list(args)
+    workspace = _consume_flag_value(rest, "--workspace")
+    ws_dir = Path(workspace) if workspace else Path.cwd()
+
+    try:
+        from inject import drain_queue
+        code = drain_queue(ws_dir)
+    except Exception:
+        # Never crash a tool call.
+        code = 0
+    sys.exit(code)
 
 
 def _cmd_shellenv_cli() -> None:

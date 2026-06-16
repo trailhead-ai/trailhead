@@ -56,17 +56,46 @@ def _run_hooks(member_config: dict[str, Any], wt_path: Path) -> None:
         subprocess.run(cmd, cwd=str(wt_path), check=True)
 
 
-def _print_member_doc(member_name: str, wt_path: Path) -> None:
-    """Print the member's CLAUDE.md to stdout, or a fallback notice."""
+def _member_doc_content(member_name: str, wt_path: Path) -> str:
+    """Return the member's CLAUDE.md content, or a fallback notice."""
     claude_md = wt_path / "CLAUDE.md"
     if claude_md.is_file():
-        print(claude_md.read_text(), end="")
-    else:
+        return claude_md.read_text()
+    return (
+        f"# {member_name}\n\n"
+        f"Member worktree activated: {wt_path}\n"
+        f"(No CLAUDE.md found — consider adding one for session context.)\n"
+    )
+
+
+def _surface_member_doc(
+    group: dict[str, Any],
+    member_name: str,
+    wt_path: Path,
+    workspace_dir: Path,
+) -> None:
+    """Surface the member doc via the resolved inject strategy.
+
+    "stdout"      → print the full doc to stdout (universal floor, unchanged).
+    "claude-hook" → enqueue the full doc to the workspace inject queue and print a
+                    concise stdout confirmation (the full doc loads on the next turn
+                    via the camp PostToolUse hook — NOT dumped to stdout here).
+    """
+    from harness_launch import resolve_inject
+
+    doc = _member_doc_content(member_name, wt_path)
+    strategy = resolve_inject(group)
+
+    if strategy == "claude-hook":
+        from inject import enqueue_doc
+
+        enqueue_doc(workspace_dir, doc)
         print(
-            f"# {member_name}\n\n"
-            f"Member worktree activated: {wt_path}\n"
-            f"(No CLAUDE.md found — consider adding one for session context.)\n"
+            f"Entered `{member_name}`; its CLAUDE.md will load into context on the "
+            f"next turn via the camp PostToolUse hook."
         )
+    else:
+        print(doc, end="")
 
 
 def enter_member(
@@ -126,4 +155,7 @@ def enter_member(
             _run_hooks(member_config, wt_path)
         _mark_activated(mpath, member_name)
 
-    _print_member_doc(member_name, wt_path)
+    # The workspace dir is the parent of the member worktree
+    # (<workspace>/<member>) — the inject queue lives at <workspace>/.camp/.
+    workspace_dir = wt_path.parent
+    _surface_member_doc(group, member_name, wt_path, workspace_dir)

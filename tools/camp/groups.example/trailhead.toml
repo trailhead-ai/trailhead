@@ -50,3 +50,13 @@ pattern = "worktree-{slug}"
 #
 # You can also supply both to support multiple tools simultaneously:
 #   # doc_files = ["AGENTS.md", "CLAUDE.md"]
+#
+# inject — mid-session context-injection strategy for `camp enter`.
+#   "stdout"      print the member doc to stdout (universal floor; works with any
+#                 harness, including Aider).
+#   "claude-hook" enqueue the member doc for the Claude Code PostToolUse hook so it
+#                 loads silently into context on the next turn (no visible-log
+#                 clutter). camp wires the PostToolUse hook automatically.
+# Default: claude (no [harness] block) → "claude-hook"; ANY [harness] block without
+# an explicit inject → "stdout" (safe default for a non-claude harness).
+#   # inject = "claude-hook"

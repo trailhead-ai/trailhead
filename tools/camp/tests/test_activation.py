@@ -63,7 +63,12 @@ def _env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_STATE_DIR": str(tmp_path / "camp")}
 
 
-def _make_group(group_name: str, member_name: str, hooks: list[dict] | None = None) -> dict:
+def _make_group(
+    group_name: str,
+    member_name: str,
+    hooks: list[dict] | None = None,
+    harness: dict | None = None,
+) -> dict:
     """Build a minimal group config dict with optional activation hooks."""
     member = {
         "name": member_name,
@@ -73,12 +78,15 @@ def _make_group(group_name: str, member_name: str, hooks: list[dict] | None = No
     }
     if hooks is not None:
         member["hooks"] = hooks
-    return {
+    group = {
         "group": {"name": group_name},
         "members": [member],
         "branch_pattern": "worktree-{slug}",
         "shared_vaults": [],
     }
+    if harness is not None:
+        group["harness"] = harness
+    return group
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +319,7 @@ def test_enter_ready_prints_member_claude_md(tmp_path: Path, capsys) -> None:
         ],
     )
 
-    group = _make_group(group_name, member_name)
+    group = _make_group(group_name, member_name, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
     enter_member(group, slug, member_name, env=env)
@@ -345,7 +353,7 @@ def test_enter_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys) -
         ],
     )
 
-    group = _make_group(group_name, member_name)
+    group = _make_group(group_name, member_name, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
     enter_member(group, slug, member_name, env=env)
@@ -422,7 +430,7 @@ def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
     )
 
     hooks = [{"kind": "dep-install", "cmd": ["npm", "install"]}]
-    group = _make_group(group_name, member_name, hooks=hooks)
+    group = _make_group(group_name, member_name, hooks=hooks, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
     with patch("subprocess.run") as mock_run:
@@ -464,7 +472,7 @@ def test_enter_ready_reenter_reprints_doc(tmp_path: Path, capsys) -> None:
         ],
     )
 
-    group = _make_group(group_name, member_name)
+    group = _make_group(group_name, member_name, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
     enter_member(group, slug, member_name, env=env)
@@ -880,3 +888,101 @@ def test_failing_hook_surfaces_legibly_via_cli(tmp_path: Path) -> None:
     assert "Traceback" not in combined, (
         f"Must not dump a raw Python traceback. combined: {combined}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Slice 9: inject strategy dispatch in enter_member
+# ---------------------------------------------------------------------------
+
+
+def _ready_member_setup(tmp_path: Path, doc: str | None) -> tuple[str, str, str, Path]:
+    """Build a ready member + manifest; optionally write its CLAUDE.md.
+
+    Returns (group_name, member_name, slug, workspace_dir).
+    """
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+    ws_dir = tmp_path / "camp" / group_name / "worktrees" / slug
+    wt_path = ws_dir / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+    if doc is not None:
+        (wt_path / "CLAUDE.md").write_text(doc)
+
+    _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(wt_path),
+                "provision_state": "ready",
+            }
+        ],
+    )
+    return group_name, member_name, slug, ws_dir
+
+
+def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> None:
+    """Under claude-hook, the full doc is enqueued, NOT dumped to stdout."""
+    from activation import enter_member
+    from inject import queue_dir_for
+
+    doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
+    group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
+
+    # No [harness] block → claude default → claude-hook strategy.
+    group = _make_group(group_name, member_name)
+    env = _env(tmp_path)
+
+    enter_member(group, slug, member_name, env=env)
+
+    # Full doc must be enqueued.
+    files = list(queue_dir_for(ws_dir).iterdir())
+    assert len(files) == 1
+    assert doc in files[0].read_text()
+
+    # Full doc must NOT be on stdout.
+    captured = capsys.readouterr()
+    assert "FULL-DOC-BODY-marker" not in captured.out
+
+
+def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -> None:
+    """Under claude-hook, a concise confirmation naming the member is printed to stdout."""
+    from activation import enter_member
+
+    doc = "# Member doc\n"
+    group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
+
+    group = _make_group(group_name, member_name)
+    env = _env(tmp_path)
+
+    enter_member(group, slug, member_name, env=env)
+
+    captured = capsys.readouterr()
+    assert member_name in captured.out
+    # The confirmation should mention the inject hook channel.
+    assert "next turn" in captured.out.lower() or "hook" in captured.out.lower()
+
+
+def test_enter_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:
+    """Under the stdout strategy, the full doc is printed to stdout (unchanged)."""
+    from activation import enter_member
+    from inject import queue_dir_for
+
+    doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
+    group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
+
+    group = _make_group(group_name, member_name, harness={"inject": "stdout"})
+    env = _env(tmp_path)
+
+    enter_member(group, slug, member_name, env=env)
+
+    captured = capsys.readouterr()
+    assert "FULL-DOC-BODY-marker" in captured.out
+
+    # Nothing enqueued under stdout strategy.
+    qdir = queue_dir_for(ws_dir)
+    assert not qdir.exists() or list(qdir.iterdir()) == []

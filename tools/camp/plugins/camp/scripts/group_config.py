@@ -294,6 +294,11 @@ def load_group(path: Path) -> dict[str, Any]:
 # misconfiguration (would KeyError at substitution time) → rejected at load.
 _HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace"})
 
+# Mid-session context-injection strategies (Slice 9). "stdout" is the universal
+# floor; "claude-hook" opts into the Claude Code PostToolUse → additionalContext
+# channel. An unknown value is rejected at load with a legible error.
+_INJECT_STRATEGIES = frozenset({"stdout", "claude-hook"})
+
 
 def _reject_unknown_placeholders(value: str, *, path: Path, where: str) -> None:
     """Reject any {placeholder} not in the known set so a typo'd template fails
@@ -392,6 +397,15 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
         result["doc_files"] = _validate_string_list_field(
             doc_files_raw, path=path, where="harness.doc_files", allow_empty_list=False
         )
+
+    if "inject" in raw:
+        inject = raw["inject"]
+        if not isinstance(inject, str) or inject not in _INJECT_STRATEGIES:
+            raise GroupConfigError(
+                f"{path}: harness.inject {inject!r} is not a known injection "
+                f"strategy — supported strategies: {sorted(_INJECT_STRATEGIES)}"
+            )
+        result["inject"] = inject
 
     return result
 

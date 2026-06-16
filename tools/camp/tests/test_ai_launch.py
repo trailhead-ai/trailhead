@@ -198,3 +198,66 @@ class TestRefuseConcurrent:
         assert launched == [True], "stale lock should be reclaimed and launch proceed"
         data = json.loads(session_lock.lock_path_for(ws).read_text())
         assert data["pid"] == os.getpid()
+
+
+def _ws_settings(env, slug):
+    return _workspace_dir(env, slug) / ".claude" / "settings.json"
+
+
+def _posttooluse_commands(settings_path: Path) -> list[str]:
+    data = json.loads(settings_path.read_text())
+    return [
+        h.get("command", "")
+        for entry in data.get("hooks", {}).get("PostToolUse", [])
+        for h in entry.get("hooks", [])
+    ]
+
+
+class TestBringUpInjectHook:
+    """camp ai installs the PostToolUse → inject --drain hook ONLY for claude-hook."""
+
+    def test_claude_hook_default_installs_posttooluse_hook(self, camp_cli, group_env, monkeypatch):
+        import harness_launch
+
+        monkeypatch.setattr(harness_launch, "launch", lambda *a, **k: None)
+
+        g = group_env
+        # No [harness] block → claude default → claude-hook strategy.
+        camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+
+        cmds = _posttooluse_commands(_ws_settings(g["env"], "feat-x"))
+        assert any("inject --drain" in c for c in cmds), (
+            f"Expected an inject --drain PostToolUse hook, got: {cmds}"
+        )
+
+    def test_stdout_strategy_does_not_install_posttooluse_hook(self, camp_cli, group_env,
+                                                               monkeypatch):
+        import harness_launch
+
+        monkeypatch.setattr(harness_launch, "launch", lambda *a, **k: None)
+
+        g = group_env
+        g["group"]["harness"] = {"inject": "stdout"}
+        camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+
+        settings_path = _ws_settings(g["env"], "feat-x")
+        if settings_path.is_file():
+            cmds = _posttooluse_commands(settings_path)
+            assert not any("inject --drain" in c for c in cmds), (
+                f"stdout strategy must NOT install an inject hook, got: {cmds}"
+            )
+
+    def test_inject_hook_idempotent_on_reentry(self, camp_cli, group_env, monkeypatch):
+        import harness_launch
+        import session_lock
+
+        monkeypatch.setattr(harness_launch, "launch", lambda *a, **k: None)
+
+        g = group_env
+        camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        session_lock.release_session_lock(_workspace_dir(g["env"], "feat-x"))
+        camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+
+        cmds = _posttooluse_commands(_ws_settings(g["env"], "feat-x"))
+        drain_cmds = [c for c in cmds if "inject --drain" in c]
+        assert len(drain_cmds) == 1, f"Duplicate inject hook on re-entry: {cmds}"
