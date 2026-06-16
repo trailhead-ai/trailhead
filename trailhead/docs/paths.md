@@ -26,19 +26,35 @@ need the directory to exist must go through `ensure_dir`.
 
 ### macOS (`sys.platform == "darwin"`)
 
+trailhead adopts the basedir spec on macOS too — the default layout mirrors Linux,
+**not** `~/Library` (see Axiom 4 in [`docs/vision.md`](../../docs/vision.md)).
+
 | Semantic | Resolution |
 |----------|------------|
-| config   | `$XDG_CONFIG_HOME/<app>` → `~/Library/Application Support/<app>` |
-| **state** | `$XDG_STATE_HOME/<app>` → **`~/Library/Application Support/<app>`** |
-| cache    | `$XDG_CACHE_HOME/<app>` → `~/Library/Caches/<app>` |
-
-**Pinned macOS state path:** state is `~/Library/Application Support/<app>`, not a
-separate directory. This mirrors the [`platformdirs`](https://github.com/tox-dev/platformdirs)
-convention (`user_state_path` → Application Support on macOS). A future swap from
-this custom resolver to `platformdirs` would be mechanical because the paths match.
+| config   | `$XDG_CONFIG_HOME/<app>` → `~/.config/<app>` *(legacy fallback ↓)* |
+| state    | `$XDG_STATE_HOME/<app>` → `~/.local/state/<app>` *(legacy fallback ↓)* |
+| cache    | `$XDG_CACHE_HOME/<app>` → `~/.cache/<app>` *(legacy fallback ↓)* |
 
 XDG variables are honored on macOS when the user has explicitly set them (same
 variables as Linux). An empty XDG variable falls through to the macOS default above.
+
+**Legacy-install fallback.** Earlier releases stored macOS data under
+`~/Library/Application Support/<app>` (config + state) and `~/Library/Caches/<app>`
+(cache). To avoid orphaning an existing install, each macOS resolver falls back to
+the legacy path **iff the new XDG path does not exist yet AND the legacy path
+does**:
+
+| Situation | Resolves to |
+|-----------|-------------|
+| Fresh install (neither path exists) | new XDG path |
+| Legacy install (only `~/Library/...` exists) | legacy path |
+| Migrated install (new XDG path exists) | new XDG path |
+| `XDG_*` var or per-app override set | that path (fallback skipped) |
+
+This is the **one** place a resolver's return value depends on the filesystem — a
+read-only `Path.exists()` check, never a write (resolvers stay pure per the core
+contract). It is exercised by `TestMacosLegacyMigrationFallback` in
+`trailhead/tests/test_paths.py`.
 
 ### Windows (`sys.platform == "win32"`)
 

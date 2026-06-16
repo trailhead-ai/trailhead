@@ -21,6 +21,15 @@ Per-harness isolation
 ---------------------
 Each harness composes into its OWN root (``state_dir/composed/<name>/``) with its
 own registration markers, so multiple harnesses never collide.
+
+Design axioms
+-------------
+This interface is the seam that makes trailhead harness-agnostic (Axiom 1) while
+still taking full advantage of each harness (Axiom 2): harness-specific behavior
+lives behind this class, never in the shared install/compose/wire path. To use a
+harness capability the interface doesn't yet express, widen this seam (add a
+method with a safe default) rather than branching on a harness name in the core.
+See ``docs/vision.md``.
 """
 
 from __future__ import annotations
