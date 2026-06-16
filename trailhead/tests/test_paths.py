@@ -142,66 +142,34 @@ class TestMacosBranch:
 
 
 # ---------------------------------------------------------------------------
-# macOS legacy-install migration fallback
-#
-# When trailhead flipped macOS to the basedir spec, existing installs already had
-# data under ~/Library. The resolver falls back to the legacy path IFF the new XDG
-# path is absent AND the legacy path exists — so we never orphan a live install,
-# while new installs still land in the XDG location.
+# macOS adopts the basedir spec unconditionally: it never resolves to
+# ~/Library, even when legacy data lingers there. (The one-time read-only
+# migration fallback was removed once installs had migrated to XDG.)
 # ---------------------------------------------------------------------------
 
 
-class TestMacosLegacyMigrationFallback:
-    def test_config_falls_back_to_legacy_when_only_legacy_exists(self, tmp_path):
+class TestMacosIgnoresLegacyLibrary:
+    def test_config_ignores_legacy_library_data(self, tmp_path):
+        """macOS resolves to ~/.config even when legacy ~/Library data exists."""
         legacy = tmp_path / "Library" / "Application Support" / "camp"
         legacy.mkdir(parents=True)
-        env = {"HOME": str(tmp_path)}
-        result = config_dir("camp", platform="darwin", env=env)
-        assert result == legacy
-
-    def test_state_falls_back_to_legacy_when_only_legacy_exists(self, tmp_path):
-        legacy = tmp_path / "Library" / "Application Support" / "camp"
-        legacy.mkdir(parents=True)
-        env = {"HOME": str(tmp_path)}
-        result = state_dir("camp", platform="darwin", env=env)
-        assert result == legacy
-
-    def test_cache_falls_back_to_legacy_caches_dir(self, tmp_path):
-        legacy = tmp_path / "Library" / "Caches" / "camp"
-        legacy.mkdir(parents=True)
-        env = {"HOME": str(tmp_path)}
-        result = cache_dir("camp", platform="darwin", env=env)
-        assert result == legacy
-
-    def test_new_xdg_path_wins_when_it_already_exists(self, tmp_path):
-        """A migrated install (new path present) sticks to XDG even if legacy lingers."""
-        new = tmp_path / ".config" / "camp"
-        new.mkdir(parents=True)
-        legacy = tmp_path / "Library" / "Application Support" / "camp"
-        legacy.mkdir(parents=True)
-        env = {"HOME": str(tmp_path)}
-        result = config_dir("camp", platform="darwin", env=env)
-        assert result == new
-
-    def test_fresh_install_uses_xdg_when_neither_exists(self, tmp_path):
         env = {"HOME": str(tmp_path)}
         result = config_dir("camp", platform="darwin", env=env)
         assert result == tmp_path / ".config" / "camp"
 
-    def test_xdg_override_skips_legacy_fallback(self, tmp_path):
-        """An explicit XDG var opts out of the fallback even if legacy data exists."""
+    def test_state_ignores_legacy_library_data(self, tmp_path):
         legacy = tmp_path / "Library" / "Application Support" / "camp"
         legacy.mkdir(parents=True)
-        xdg = tmp_path / "xdg_cfg"
-        env = {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(xdg)}
-        result = config_dir("camp", platform="darwin", env=env)
-        assert result == xdg / "camp"
-
-    def test_fallback_does_not_create_directories(self, tmp_path):
-        """The existence check is read-only — resolving never materializes a dir."""
         env = {"HOME": str(tmp_path)}
-        result = config_dir("camp", platform="darwin", env=env)
-        assert not result.exists()
+        result = state_dir("camp", platform="darwin", env=env)
+        assert result == tmp_path / ".local" / "state" / "camp"
+
+    def test_cache_ignores_legacy_library_caches(self, tmp_path):
+        legacy = tmp_path / "Library" / "Caches" / "camp"
+        legacy.mkdir(parents=True)
+        env = {"HOME": str(tmp_path)}
+        result = cache_dir("camp", platform="darwin", env=env)
+        assert result == tmp_path / ".cache" / "camp"
 
 
 # ---------------------------------------------------------------------------
