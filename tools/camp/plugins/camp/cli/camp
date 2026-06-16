@@ -257,13 +257,7 @@ def _dispatch_group_command(
 ) -> None:
     """Dispatch a group-aware command."""
     from spine import (
-        _resolve_slug,
-        _consume_flag_value,
         _die,
-        cmd_help,
-        cmd_path,
-        cmd_foreach,
-        cmd_doctor,
         cmd_disabled,
         cmd_legacy_redirect,
         RESERVED,
