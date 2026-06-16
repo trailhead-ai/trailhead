@@ -7,9 +7,6 @@ managing git worktrees across a configured group of repositories. It handles the
 **Standalone use:** camp stands alone — adopt it without lore or craft if you only
 want the worktree orchestration.
 
-**Status:** Slice 0 (scaffold + worktree spine). Group config wiring is Slice 1;
-full multi-member lifecycle is Slice 2. See the root README for install instructions.
-
 ## PATH setup
 
 `trailhead install` builds a shim for the `camp` CLI. To put it on your PATH, add
@@ -19,21 +16,41 @@ the brew-style `shellenv` line to your shell profile (fish/zsh/bash all handled)
 eval "$(/path/to/trailhead/bin/trailhead shellenv)"
 ```
 
-Then `camp <slug>` works from a plain shell. See the [root README](../../README.md)
+Then `camp ai <slug>` works from a plain shell. See the [root README](../../README.md)
 for the full install flow.
 
 ## Quick start
 
 ```
-camp <slug>          # create or resume a worktree
+camp ai <slug>       # create or resume a workspace
+camp pwd <slug>      # print workspace path
 camp ls              # list all worktrees
 camp status          # show git + drift status
-camp break           # tear down a worktree
+camp rm              # tear down a worktree
 camp --help          # full command reference
 camp --version       # show version + resolved binary path
 ```
 
-## Dev-env commands
+## Shell integration
 
-`camp fire` (dev-env management) is deferred — it will cover provision and
-teardown of local dev-env instances once the engine ships.
+`camp pwd <slug>` prints the resolved workspace path on stdout (exactly one line).
+Use it directly to change directory:
+
+```sh
+cd "$(camp pwd <slug>)"
+```
+
+Wrap it in your own alias or shell function if you use it frequently. For example, in fish:
+
+```fish
+function camp_cd
+    cd (camp pwd $argv)
+end
+```
+
+## Group setup
+
+```
+camp group <name> --member NAME=PATH [--member NAME=PATH ...]
+```
+Authors a group config TOML and wires SessionStart hooks into each member repo.

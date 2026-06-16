@@ -1,4 +1,4 @@
-"""Write/update SessionStart and WorktreeRemove hook entries in .claude/settings.json.
+"""Write/update the SessionStart hook entry in .claude/settings.json.
 
 All writes use json.load/json.dump (never f-strings) so:
   - Paths containing spaces or quotes round-trip correctly.
@@ -7,8 +7,11 @@ All writes use json.load/json.dump (never f-strings) so:
 
 Hook entries written:
   SessionStart  → "${CAMP_BIN:-<abs_camp_bin>} session-bootstrap"
-  WorktreeRemove → "${CAMP_BIN:-<abs_camp_bin>} worktree-cleanup"
   env.CAMP_BIN   → <abs_camp_bin>  (absolute default; ${CAMP_BIN:-…} lets user override)
+
+The WorktreeRemove wiring was dropped in Slice 2: camp owns teardown via
+`camp rm`, per the unified-workspace ADR. The `worktree-cleanup` handler is
+retained (still invocable) but no longer auto-wired into member settings.
 """
 from __future__ import annotations
 
@@ -55,9 +58,14 @@ def _session_start_command(camp_bin: str) -> str:
     return f"${{CAMP_BIN:-{camp_bin}}} session-bootstrap"
 
 
-def _worktree_remove_command(camp_bin: str) -> str:
-    """Return the WorktreeRemove hook command string."""
-    return f"${{CAMP_BIN:-{camp_bin}}} worktree-cleanup"
+def _workspace_session_start_command(camp_bin: str) -> str:
+    """Return the workspace SessionStart hook command string."""
+    return f"${{CAMP_BIN:-{camp_bin}}} setup --status"
+
+
+def _workspace_inject_drain_command(camp_bin: str) -> str:
+    """Return the workspace PostToolUse inject-drain hook command string."""
+    return f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
 
 
 def _has_command(hook_list: list, command: str) -> bool:
@@ -69,11 +77,13 @@ def _has_command(hook_list: list, command: str) -> bool:
     return False
 
 
-def _upsert_hook(data: dict, event: str, command: str) -> None:
+def _upsert_hook(data: dict, event: str, command: str, *, matcher: str | None = None) -> None:
     """Ensure `command` appears exactly once under hooks[event].
 
     If an entry with this exact command already exists, leave it untouched.
     Otherwise, append a new entry { "hooks": [ { "type": "command", "command": <cmd> } ] }.
+    When `matcher` is given (e.g. PostToolUse → "Bash"), it is set on the new
+    entry; idempotency keys on the command string regardless of matcher.
     """
     hooks = data.setdefault("hooks", {})
     hook_list = hooks.setdefault(event, [])
@@ -81,16 +91,78 @@ def _upsert_hook(data: dict, event: str, command: str) -> None:
     if _has_command(hook_list, command):
         return  # Already present — idempotent
 
-    hook_list.append({
-        "hooks": [
-            {"type": "command", "command": command},
-        ]
-    })
+    entry: dict = {"hooks": [{"type": "command", "command": command}]}
+    if matcher is not None:
+        entry["matcher"] = matcher
+    hook_list.append(entry)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def write_workspace_hooks(workspace_dir: Path, camp_bin: str) -> None:
+    """Write/update the workspace-dir SessionStart hook in <workspace_dir>/.claude/settings.json.
+
+    The SessionStart hook fires `camp setup --status` so every (re)entry to the
+    workspace dir makes the agent aware of in-flight/failed member provisioning.
+
+    Idempotent: re-running adds NO duplicate entries.
+    Existing unrelated keys are preserved.
+
+    Args:
+        workspace_dir: Absolute path to the workspace root directory.
+        camp_bin:      Absolute path to the camp binary.
+    """
+    settings_path = workspace_dir / ".claude" / "settings.json"
+    data = _load_settings(settings_path)
+
+    ss_cmd = _workspace_session_start_command(camp_bin)
+    _upsert_hook(data, "SessionStart", ss_cmd)
+
+    _save_settings(settings_path, data)
+
+
+def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
+    """Write/update the workspace-dir PostToolUse → `camp inject --drain` hook.
+
+    Installed only when the resolved inject strategy is "claude-hook": a Bash-matched
+    PostToolUse hook drains the workspace inject queue (the member doc enqueued by
+    `camp enter`) into the session via additionalContext on the next tool call.
+
+    Idempotent: re-running adds NO duplicate entries. Existing unrelated keys
+    (including the SessionStart hook) are preserved.
+
+    Args:
+        workspace_dir: Absolute path to the workspace root directory.
+        camp_bin:      Absolute path to the camp binary.
+    """
+    settings_path = workspace_dir / ".claude" / "settings.json"
+    data = _load_settings(settings_path)
+
+    drain_cmd = _workspace_inject_drain_command(camp_bin)
+    _upsert_hook(data, "PostToolUse", drain_cmd, matcher="Bash")
+
+    _save_settings(settings_path, data)
+
+
+def has_inject_drain_hook(workspace_dir: Path) -> bool:
+    """Return True if a PostToolUse `inject --drain` hook is installed.
+
+    Reads <workspace_dir>/.claude/settings.json (via the shared loader, so an
+    absent/unreadable file → False) and looks for any PostToolUse hook whose
+    command contains "inject --drain". This is the marker that the claude-hook
+    drain channel is actually wired — without it, an enqueued doc is never drained.
+    """
+    settings_path = workspace_dir / ".claude" / "settings.json"
+    data = _load_settings(settings_path)
+    post_tool_use = data.get("hooks", {}).get("PostToolUse", [])
+    for entry in post_tool_use:
+        for h in entry.get("hooks", []):
+            if "inject --drain" in (h.get("command") or ""):
+                return True
+    return False
 
 
 def write_hooks_for_member(repo_root: Path, camp_bin: str) -> None:
@@ -107,10 +179,7 @@ def write_hooks_for_member(repo_root: Path, camp_bin: str) -> None:
     data = _load_settings(settings_path)
 
     ss_cmd = _session_start_command(camp_bin)
-    wr_cmd = _worktree_remove_command(camp_bin)
-
     _upsert_hook(data, "SessionStart", ss_cmd)
-    _upsert_hook(data, "WorktreeRemove", wr_cmd)
 
     # Write env.CAMP_BIN (absolute default path; ${CAMP_BIN:-…} lets user override)
     env_block = data.setdefault("env", {})

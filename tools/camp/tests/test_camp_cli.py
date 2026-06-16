@@ -61,7 +61,8 @@ def test_camp_help_contains_key_commands() -> None:
         text=True,
     )
     output = result.stdout
-    for cmd in ("ls", "status", "break", "sweep", "sync"):
+    # Slice 1: 'break' → 'rm', 'sweep' is disabled and removed from help.
+    for cmd in ("ls", "status", "rm", "sync"):
         assert cmd in output, f"Expected {cmd!r} in --help output, got:\n{output}"
 
 
@@ -144,13 +145,15 @@ def test_capabilities_toml_loads_and_validates() -> None:
     assert manifest.validate is True
 
 
-def test_capabilities_toml_worktree_skill_selectable() -> None:
-    # worktree is now a selectable skill (discovered by convention), not a base
-    # dir; camp declares no always-on base.
+def test_capabilities_toml_no_skills() -> None:
+    # camp ships only a CLI (bin) + hooks — no always-on base and no selectable
+    # skills. The worktree SKILL was removed: the workspace exists before the
+    # harness opens, so worktree orchestration is operator-facing (README), not
+    # a skill the agent invokes.
     from trailhead.capabilities import load_manifest
     manifest = load_manifest(_CAPABILITIES_TOML)
     assert manifest.base == []
-    assert "worktree" in manifest.skills
+    assert manifest.skills == {}
 
 
 # ---------------------------------------------------------------------------
@@ -190,12 +193,15 @@ def _run_init(
     state_dir: Path,
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run `camp init <args>` via cli/camp with config/state overrides."""
+    """Run `camp group <args>` via cli/camp with config/state overrides.
+
+    Slice 1: 'camp init' was renamed to 'camp group'; tests updated to match.
+    """
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
     return subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "init", *args],
+        [sys.executable, str(_CLI_CAMP), "group", *args],
         capture_output=True,
         text=True,
         env=env,
@@ -465,14 +471,30 @@ def test_atomicity_roundtrip_gate_failure_unlinks_tmp(author_env):
     assert not list(g["groups_dir"].glob("*.tmp")), "no .tmp file should remain"
 
 
-def test_init_help_documents_new_flags() -> None:
-    """`camp init --help` documents --member / --scaffold / --force modes."""
+def test_group_help_documents_flags() -> None:
+    """`camp group --help` documents --member / --scaffold / --force modes."""
     result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "init", "--help"],
+        [sys.executable, str(_CLI_CAMP), "group", "--help"],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
     out = result.stdout + result.stderr
     for token in ("--member", "--scaffold", "--force"):
-        assert token in out, f"expected {token!r} in init --help:\n{out}"
+        assert token in out, f"expected {token!r} in group --help:\n{out}"
+
+
+def test_init_help_documents_new_flags() -> None:
+    """`camp group --help` documents --member / --scaffold / --force modes.
+
+    Legacy name kept for backward-compat; routes to group --help.
+    """
+    result = subprocess.run(
+        [sys.executable, str(_CLI_CAMP), "group", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    out = result.stdout + result.stderr
+    for token in ("--member", "--scaffold", "--force"):
+        assert token in out, f"expected {token!r} in group --help:\n{out}"

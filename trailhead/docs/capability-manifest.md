@@ -126,9 +126,9 @@ files).
 
 ```toml
 [tool]
-name = "camp"
+name = "example-tool"
 validate = false
-base = ["skills/worktree"]
+base = ["skills/placeholder"]
 ```
 
 Once the on-disk tree exists, remove `validate = false` (or set it to

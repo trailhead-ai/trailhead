@@ -27,15 +27,33 @@ from pathlib import Path
 # cli/camp → parent is cli/ → parent is plugins/camp/ → scripts/ is a sibling.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+# FIX 6: the hidden `camp inject --drain` PostToolUse hook fires on EVERY Bash
+# tool call. It resolves the workspace from cwd and never touches spine or
+# trailhead.paths, so it must stay near-free: detect the inject route here —
+# BEFORE the cold-subprocess ensure_trailhead_importable() walk and BEFORE the
+# ~1700-line spine module-load — and skip both for it. The bootstrap + spine load
+# still happen unconditionally for every OTHER command (their behavior is
+# unchanged). _spine_main is imported lazily inside the fallback dispatch.
+_INJECT_ROUTE = len(sys.argv) > 1 and sys.argv[1] == "inject"
+
 # (b) D-H guard: bootstrap trailhead.paths before any command code runs.
 # _bootstrap walks up from this file to the monorepo root automatically,
-# so this works on a fresh git clone without any pip install.
-from _bootstrap import ensure_trailhead_importable  # noqa: E402
+# so this works on a fresh git clone without any pip install. Skipped for the
+# inject route (drain resolves from cwd; no trailhead.paths dependency).
+if not _INJECT_ROUTE:
+    from _bootstrap import ensure_trailhead_importable  # noqa: E402
 
-ensure_trailhead_importable()
-_TRAILHEAD_PATHS_OK = True
+    ensure_trailhead_importable()
 
-from spine import main as _spine_main  # noqa: E402
+_TRAILHEAD_PATHS_OK = not _INJECT_ROUTE
+
+# Single source of truth for the verb dispatch tables (FIX 9). verb_taxonomy is a
+# tiny pure-data module (no regex/subprocess/spine), so importing it here keeps
+# the inject route light while letting both entry points share the same tables.
+from verb_taxonomy import (  # noqa: E402
+    DISABLED_VERBS as _DISABLED_VERBS,
+    LEGACY_REDIRECTS as _LEGACY_REDIRECTS,
+)
 
 _SELF = Path(__file__).resolve()
 _BIN_DIR = _SELF.parent.parent / "bin"
@@ -91,6 +109,11 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
     """Attempt to load the group config for the current cwd or --group flag.
 
     Returns (group_config_dict, env) or (None, None) if not resolvable.
+
+    Raises GroupConfigError if a config file is present but malformed — this is a
+    hard failure that must surface to the user, not a silent fall-through to spine.
+    A GroupResolutionError or missing config (no group resolves from cwd) returns
+    (None, None) and lets spine handle the command.
     """
     if not _TRAILHEAD_PATHS_OK:
         return None, None
@@ -134,7 +157,11 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
                 return None, None
 
         return group, None  # env=None → use os.environ (resolver's default)
+    except GroupConfigError:
+        # Config exists but is malformed — re-raise so the caller can surface it.
+        raise
     except Exception:
+        # GroupResolutionError, no config, import errors, etc. — fall through to spine.
         return None, None
 
 
@@ -174,22 +201,45 @@ def main() -> None:
         cmd_worktree_cleanup(force=force)
         return
 
+    # Slice 9: hidden inject hook handler (PostToolUse → drain the inject queue).
+    # Runs before group resolution; resilient (drain_queue never crashes a tool call).
+    if first == "inject":
+        _cmd_inject_cli(argv[1:])
+        return
+
+    # Slice 1: 'group' is the new name for 'init'; 'init' redirects to 'group'.
+    if first == "group":
+        _cmd_group_cli(argv[1:])
+        return
+
     if first == "init":
-        _cmd_init_cli(argv[1:])
+        from spine import cmd_legacy_redirect
+        cmd_legacy_redirect("init", "group")
         return
 
     # ---------------------------------------------------------------------------
     # Slice 2: group-aware command routing
     # ---------------------------------------------------------------------------
-    if first and first not in ("help", "--help", "-h", "doctor", "code",
-                                "foreach", "sweep", "path", "open", "which",
-                                "--version", "version"):
-        group, group_env = _resolve_group_for_command(argv)
+    _SKIP_GROUP_RESOLVE = frozenset({
+        "help", "--help", "-h", "doctor",
+        "foreach", "path", "which",
+        "--version", "version",
+    })
+    if first and first not in _SKIP_GROUP_RESOLVE:
+        try:
+            group, group_env = _resolve_group_for_command(argv)
+        except Exception as _cfg_err:
+            # GroupConfigError: config is present but malformed — surface and exit.
+            print(f"camp: config error: {_cfg_err}", file=sys.stderr)
+            sys.exit(1)
         if group is not None:
             _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
             return
 
-    # Delegate everything else to the spine dispatcher (fallback / non-group cmds)
+    # Delegate everything else to the spine dispatcher (fallback / non-group cmds).
+    # Imported lazily (FIX 6) so the early-returning inject route never pays the
+    # spine module-load cost.
+    from spine import main as _spine_main
     _spine_main()
 
 
@@ -202,21 +252,47 @@ def _dispatch_group_command(
 ) -> None:
     """Dispatch a group-aware command."""
     from spine import (
-        _resolve_slug,
-        _consume_flag_value,
         _die,
-        cmd_help,
-        cmd_path,
-        cmd_code,
-        cmd_foreach,
-        cmd_sweep,
-        cmd_doctor,
+        cmd_disabled,
+        cmd_legacy_redirect,
         RESERVED,
     )
 
-    # Handle slug command (camp <slug>)
+    # Slice 1: disabled verbs — hidden from help, legible error + non-zero exit
+    # (FIX 9: sourced from the single verb_taxonomy definition via spine).
+    if cmd in _DISABLED_VERBS:
+        cmd_disabled(cmd)
+        return
+
+    # Slice 1: legacy verb redirects. 'init' is intercepted earlier in main();
+    # 'open'/'break' are the redirects reachable on the group-aware path.
+    if cmd in _LEGACY_REDIRECTS:
+        cmd_legacy_redirect(cmd, _LEGACY_REDIRECTS[cmd])
+        return
+
+    # Slice 1: new verb surface.
+    if cmd == "ai":
+        _cmd_ai_group_cli(rest, group, group_env, dry_run)
+        return
+    if cmd == "rm":
+        _cmd_break_group_cli(rest, group, group_env, dry_run)
+        return
+    if cmd == "setup":
+        _cmd_setup_group_cli(rest, group, group_env, dry_run)
+        return
+    if cmd == "enter":
+        _cmd_enter_group_cli(rest, group, group_env)
+        return
+    if cmd == "pwd":
+        _cmd_pwd_group_cli(rest, group, group_env)
+        return
+
+    # Bare slug removed: any non-RESERVED token that isn't a known verb → error.
     if cmd not in RESERVED:
-        _cmd_slug_group(cmd, rest, group, group_env, dry_run)
+        _die(
+            f"camp: bare slug dispatch is no longer supported.\n"
+            f"  Use 'camp ai {cmd}' to create or resume a workspace."
+        )
         return
 
     if cmd == "status":
@@ -225,70 +301,53 @@ def _dispatch_group_command(
         _cmd_ls_group_cli(rest, group, group_env)
     elif cmd == "sync":
         _cmd_sync_group_cli(rest, group, group_env, dry_run)
-    elif cmd == "break":
-        _cmd_break_group_cli(rest, group, group_env, dry_run)
-    elif cmd == "restock":
-        _cmd_restock_group_cli(rest, group, group_env, dry_run)
     elif cmd == "rebase":
         _cmd_rebase_group_cli(rest, group, group_env, dry_run)
     else:
         # Fall through to spine for non-group commands
+        from spine import main as _spine_main
         _spine_main()
 
 
-def _cmd_slug_group(
-    slug_raw: str,
-    extra: list[str],
+def _slug_from_args_or_cwd(
+    args: list[str],
     group: dict,
-    env: dict[str, str] | None,
-    dry_run: bool,
-) -> None:
-    """camp <slug>: reconcile worktrees then exec claude.
+    *,
+    verb: str,
+    consume_positional: bool = False,
+    allow_none: bool = False,
+    env: dict[str, str] | None = None,
+) -> str | None:
+    """Resolve a slug from --name, an optional positional, or cwd.
 
-    Decision (D-I integration): camp <slug> calls reconcile_worktree DIRECTLY
-    (so Slice 2 is harness-independent + unit-testable), then execs claude into
-    the primary member's already-created worktree using `claude -r <slug>`.
-    The idempotent reconcile means Slice 3's hook calling it again is a safe no-op.
+    Consumes `--name <slug>` from args in place. If absent and consume_positional
+    is set, takes args[0] as the slug. Otherwise resolves from cwd against the
+    ALREADY-RESOLVED group (no reload of all configs). On no resolution, _die with
+    a uniform message — unless allow_none, in which case None is returned (the
+    caller falls back, e.g. status's fleet view).
     """
-    from spine import _resolve_slug, _dry_run_print
-    from reconcile import reconcile_worktree, format_success_summary
-    from manifest import ManifestError
+    from spine import _consume_flag_value, _resolve_slug, _die
+    from group_resolve import resolve_from_cwd
 
-    slug = _resolve_slug(slug_raw, context="argument")
-    group_name = group["group"]["name"]
+    name = _consume_flag_value(args, "--name")
+    if name is not None:
+        return _resolve_slug(name, context="--name")
+    if consume_positional and args:
+        return _resolve_slug(args[0], context="argument")
 
-    # Primary member = first member in the config
-    members = group["members"]
-    if not members:
-        print(f"camp: group {group_name!r} has no members", file=sys.stderr)
-        sys.exit(1)
-
-    primary = members[0]
-    primary_wt = Path(primary["repo_root"]) / ".claude" / "worktrees" / slug
-
-    if dry_run:
-        print(
-            f"[dry-run] would reconcile_worktree({group_name!r}, {slug!r}) "
-            f"then exec claude in {primary_wt}",
-            file=sys.stderr,
-        )
-        return
-
-    # Reconcile (idempotent create-or-complete)
     try:
-        result = reconcile_worktree(group, slug, env=env)
-    except Exception as e:
-        print(f"camp: worktree creation failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # D-I: print success summary
-    summary = format_success_summary(result)
-    print(f"camp: {summary}", file=sys.stderr)
-
-    # Exec claude into the primary member's worktree
-    os.chdir(str(primary_wt))
-    cmd = ["claude", "-r", slug, *extra]
-    os.execvp("claude", cmd)
+        # Thread env so the cwd slug resolution derives camp_state_dir from the
+        # SAME env as the downstream manifest/workspace ops (FIX 7). resolve_from_cwd
+        # derives state_dir("camp", env=env) when camp_state_dir is not supplied.
+        _, slug = resolve_from_cwd(Path.cwd(), [group], env=env)
+    except Exception:
+        slug = None
+    if slug is None and not allow_none:
+        _die(
+            f"camp {verb}: could not determine slug from cwd — "
+            f"pass --name <slug> or run from inside a workspace directory"
+        )
+    return slug
 
 
 def _cmd_status_group_cli(
@@ -297,17 +356,44 @@ def _cmd_status_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp status [--name <slug>] [--json]"""
+    """camp status [--name <slug>] [--json]
+
+    Scoped (a slug resolvable via --name or cwd): emit the per-member
+    provision-state report with STRUCTURED EXIT CODES so the in-session agent can
+    branch programmatically — 0=all ready, 2=some pending, 3=some failed. --json
+    prints the stable report shape on stdout.
+
+    Fleet view (no slug): the git-status table across all worktrees (exit 0).
+    """
     import json as _json
-    from lifecycle_cmds import cmd_status_group
-    from spine import _consume_flag_value
+    from lifecycle_cmds import cmd_status_group, provision_status_code
 
     as_json = "--json" in args
     filtered = [a for a in args if a != "--json"]
-    name = _consume_flag_value(filtered, "--name")
+
+    # Resolve a slug from --name or cwd; if found, emit the provision-state view.
+    slug = _slug_from_args_or_cwd(filtered, group, verb="status", allow_none=True, env=env)
+
+    if slug is not None:
+        try:
+            code, report = provision_status_code(group, slug, env=env)
+        except Exception as e:
+            print(f"camp status: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if as_json:
+            print(_json.dumps(report))
+        else:
+            print(f"camp status: {slug} — provisioning")
+            for m in report["members"]:
+                line = f"  {m['name']}: {m['provision_state']}"
+                if m.get("reason"):
+                    line += f" ({m['reason']})"
+                print(line)
+        sys.exit(code)
 
     try:
-        result = cmd_status_group(group, slug=name, env=env)
+        result = cmd_status_group(group, slug=None, env=env)
     except Exception as e:
         print(f"camp status: {e}", file=sys.stderr)
         sys.exit(1)
@@ -373,6 +459,114 @@ def _cmd_ls_group_cli(
         print(f"{e['slug']:<24}  {e.get('branch',''):<36}  {e.get('group','')}")
 
 
+def _cmd_setup_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp setup [<slug>] [--background] [--json]
+
+    ONE code path for foreground completion and the detached provisioner:
+    --background is what `camp ai` spawns (start_new_session, log → setup.log); it
+    runs the same per-member provisioning as the foreground invocation, flipping
+    each member pending→ready or →failed under the slug-scoped .reconcile.lock.
+    The slug is resolved from the positional arg, --name, or cwd.
+    """
+    import json as _json
+    from lifecycle_cmds import cmd_setup_group
+    from spine import _consume_flag_value, _die
+
+    # Read-only status mode (the SessionStart hook runs `camp setup --status`).
+    # Parsed BEFORE slug resolution so `--status` is never normalized into a slug.
+    # NEVER mutates (no reconcile, no worktree add, no manifest write) and ALWAYS
+    # exits 0 — a non-zero SessionStart hook exit surfaces as a warning every time.
+    if "--status" in args:
+        _cmd_setup_status_cli(args, group, env)
+        return
+
+    # Reject the removed --retry flag with a legible error.
+    if "--retry" in args:
+        _die(
+            "camp setup: --retry flag has been removed. "
+            "Run 'camp setup' (no flag) to retry pending/failed members."
+        )
+
+    background = "--background" in args
+    as_json = "--json" in args
+    filtered = [a for a in args if a not in ("--background", "--json")]
+    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
+    slug = _slug_from_args_or_cwd(
+        filtered, group, verb="setup", consume_positional=True, env=env
+    )
+
+    if dry_run:
+        print(f"[dry-run] would provision worktree {slug!r}", file=sys.stderr)
+        return
+
+    try:
+        result = cmd_setup_group(group, slug, env=env)
+    except Exception as e:
+        _die(f"camp setup: {e}")
+
+    if as_json:
+        print(_json.dumps(result))
+        return
+
+    members = result.get("members", {})
+    label = "provisioned (background)" if background else "provisioned"
+    print(f"camp setup: {slug} — {label}", file=sys.stderr)
+    for nm, info in members.items():
+        line = f"  {nm}: {info.get('provision_state', '?')}"
+        if info.get("reason"):
+            line += f" ({info['reason']})"
+        print(line, file=sys.stderr)
+
+
+def _cmd_setup_status_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+) -> None:
+    """camp setup --status — read-only provision-status summary for the SessionStart hook.
+
+    Resolves the slug from --name or cwd (the hook runs in the workspace dir),
+    prints a concise human-readable summary to STDOUT (so the hook surfaces it as
+    session context), and ALWAYS exits 0. It never mutates: no reconcile, no
+    worktree add, no manifest write, no junk dir. The structured 0/2/3 exit codes
+    stay on `camp status` for direct agent use, NOT on `--status`.
+    """
+    from lifecycle_cmds import provision_status_code
+
+    filtered = [a for a in args if a not in ("--status", "--background", "--json")]
+    from spine import _consume_flag_value
+    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
+
+    slug = _slug_from_args_or_cwd(
+        filtered, group, verb="setup", consume_positional=True, allow_none=True, env=env
+    )
+
+    if slug is None:
+        print("camp setup --status: no workspace resolved from cwd")
+        return
+
+    try:
+        _code, report = provision_status_code(group, slug, env=env)
+    except Exception as e:
+        # Read-only + never-fail contract: report the issue, still exit 0.
+        print(f"camp setup --status: {slug} — status unavailable ({e})")
+        return
+
+    members = report.get("members", [])
+    ready = sum(1 for m in members if m.get("provision_state") == "ready")
+    print(f"camp setup --status: {slug} — {ready}/{len(members)} ready")
+    for m in members:
+        line = f"  {m['name']}: {m['provision_state']}"
+        if m.get("reason"):
+            line += f" ({m['reason']})"
+        print(line)
+
+
 def _cmd_sync_group_cli(
     args: list[str],
     group: dict,
@@ -409,51 +603,34 @@ def _cmd_break_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp break [--force] [--name <slug>]"""
+    """camp rm [--force] [--name <slug>]"""
     from reconcile import reconcile_break
-    from spine import _consume_flag_value, _resolve_slug, _die
-    from group_resolve import central_state_dir
+    from spine import _die
     from manifest import ManifestError
 
     force = "--force" in args
     filtered = [a for a in args if a != "--force"]
-    name_flag = _consume_flag_value(filtered, "--name")
-
-    if name_flag is not None:
-        slug = _resolve_slug(name_flag, context="--name")
-    elif filtered:
-        slug = _resolve_slug(filtered[0], context="argument")
-    else:
-        # Try cwd resolution
-        try:
-            from group_resolve import resolve_from_cwd
-            from group_config import load_all_groups
-            import trailhead.paths as _paths
-            config_dir = _paths.config_dir("camp") / "groups"
-            configs = load_all_groups(config_dir)
-            _, slug = resolve_from_cwd(Path.cwd(), configs)
-            if slug is None:
-                _die("camp break: could not determine slug from cwd, pass --name <slug>")
-        except Exception as e:
-            _die(f"camp break: {e}")
+    slug = _slug_from_args_or_cwd(
+        filtered, group, verb="rm", consume_positional=True, env=env
+    )
 
     if dry_run:
-        print(f"[dry-run] would break worktree {slug!r} for group {group['group']['name']!r}",
+        print(f"[dry-run] would remove worktree {slug!r} for group {group['group']['name']!r}",
               file=sys.stderr)
         return
 
     try:
         result = reconcile_break(group, slug, env=env, force=force)
     except ManifestError as e:
-        _die(f"camp break: {e}")
+        _die(f"camp rm: {e}")
     except Exception as e:
-        _die(f"camp break: {e}")
+        _die(f"camp rm: {e}")
 
     status = result.get("status", "ok")
     removed = result.get("removed", [])
-    print(f"camp break: removed worktree {slug!r} ({', '.join(removed)})")
+    print(f"camp rm: removed worktree {slug!r} ({', '.join(removed)})")
     if result.get("errors"):
-        print(f"camp break: errors: {result['errors']}", file=sys.stderr)
+        print(f"camp rm: errors: {result['errors']}", file=sys.stderr)
 
 
 def _cmd_restock_group_cli(
@@ -517,27 +694,12 @@ def _cmd_rebase_group_cli(
 ) -> None:
     """camp rebase [--onto <branch>] [--name <slug>]"""
     import subprocess
-    from spine import _consume_flag_value, _resolve_slug, _die
-    from group_resolve import central_state_dir, resolve_from_cwd
+    from spine import _consume_flag_value, _die
     from manifest import manifest_path_for, read_central_manifest
 
     filtered = list(args)
     onto = _consume_flag_value(filtered, "--onto") or "origin/main"
-    name_flag = _consume_flag_value(filtered, "--name")
-
-    if name_flag is not None:
-        slug = _resolve_slug(name_flag, context="--name")
-    else:
-        try:
-            from group_config import load_all_groups
-            import trailhead.paths as _paths
-            config_dir = _paths.config_dir("camp") / "groups"
-            configs = load_all_groups(config_dir)
-            _, slug = resolve_from_cwd(Path.cwd(), configs)
-            if slug is None:
-                _die("camp rebase: could not determine slug from cwd, pass --name <slug>")
-        except Exception as e:
-            _die(f"camp rebase: {e}")
+    slug = _slug_from_args_or_cwd(filtered, group, verb="rebase", env=env)
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -573,20 +735,20 @@ def _cmd_rebase_group_cli(
     print(f"camp rebase: {slug!r} rebased onto {onto}")
 
 
-_INIT_HELP = """\
-usage: camp init <group> [options]
+_GROUP_HELP = """\
+usage: camp group <name> [options]
 
 Three modes (every non-default mode requires an explicit flag):
 
-  camp init <group>
-      Wire SessionStart + WorktreeRemove hook entries into each member's
+  camp group <name>
+      Wire SessionStart hook entries into each member's
       .claude/settings.json for an already-configured group.
 
-  camp init <group> --member NAME=PATH [--member NAME=PATH ...] [options]
+  camp group <name> --member NAME=PATH [--member NAME=PATH ...] [options]
       Author a group config TOML from flags (atomic write), then wire hooks.
       Refuses to overwrite an existing config unless --force.
 
-  camp init <group> --scaffold
+  camp group <name> --scaffold
       Write a commented stub config you edit by hand, then re-run with
       --member. Does not wire hooks.
 
@@ -598,7 +760,6 @@ Options:
   --allow-missing      Skip the repo_root existence/git check when authoring.
   --scaffold           Write a commented stub config and stop (no hooks).
 """
-
 
 def _parse_init_args(args: list[str]) -> dict:
     """Parse `camp init` args into {group_name, members, branch_pattern, force,
@@ -691,8 +852,8 @@ def _parse_member(raw: str) -> dict[str, str]:
     return {"name": name, "repo_root": path}
 
 
-def _cmd_init_cli(args: list[str]) -> None:
-    """camp init <group> — wire hooks, author a config from flags, or write a stub."""
+def _cmd_group_cli(args: list[str]) -> None:
+    """camp group <name> — wire hooks, author a config from flags, or write a stub."""
     from group_config import load_all_groups, GroupConfigError
     from group_resolve import resolve_group_override, GroupResolutionError
     from init_cmd import run_init
@@ -700,7 +861,7 @@ def _cmd_init_cli(args: list[str]) -> None:
     import trailhead.paths as _paths
 
     if not args or args[0] in ("--help", "-h"):
-        print(_INIT_HELP)
+        print(_GROUP_HELP)
         return
 
     parsed = _parse_init_args(args)
@@ -712,14 +873,14 @@ def _cmd_init_cli(args: list[str]) -> None:
     if parsed["scaffold"] and not parsed["members"]:
         if config_path.exists() and not parsed["force"]:
             print(
-                f"camp init: config {config_path!s} already exists — pass --force to overwrite",
+                f"camp group: config {config_path!s} already exists — pass --force to overwrite",
                 file=sys.stderr,
             )
             sys.exit(1)
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path.write_text(group_scaffold.build_stub_toml(group_name))
-        print(f"camp init: wrote stub {config_path!s}")
-        print(f"  edit this then re-run `camp init {group_name} --member NAME=PATH ...`")
+        print(f"camp group: wrote stub {config_path!s}")
+        print(f"  edit this then re-run `camp group {group_name} --member NAME=PATH ...`")
         return
 
     # --- Mode (a): --member present → author config (atomic) then wire hooks ---
@@ -739,10 +900,10 @@ def _cmd_init_cli(args: list[str]) -> None:
             group = resolve_group_override(group_name, all_configs)
             run_init(group, str(_BIN_DIR / "camp"), group_configs=all_configs)
         except (GroupResolutionError, GroupConfigError) as e:
-            print(f"camp init: {e}", file=sys.stderr)
+            print(f"camp group: {e}", file=sys.stderr)
             sys.exit(1)
         print(
-            f"camp init: authored + wired group {group_name!r} "
+            f"camp group: authored + wired group {group_name!r} "
             f"({len(group['members'])} member(s))"
         )
         return
@@ -751,22 +912,213 @@ def _cmd_init_cli(args: list[str]) -> None:
     try:
         all_configs = load_all_groups(config_dir)
     except GroupConfigError as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
         group = resolve_group_override(group_name, all_configs)
     except GroupResolutionError as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
         run_init(group, str(_BIN_DIR / "camp"), group_configs=all_configs)
     except (GroupResolutionError, GroupConfigError) as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"camp init: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
+    print(f"camp group: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
+
+
+def _cmd_ai_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+    dry_run: bool,
+) -> None:
+    """camp ai <slug> — create or resume a workspace.
+
+    Slice 3: synchronous seed (workspace dir + manifest with each member pending)
+    then a DETACHED provisioner (camp setup --background) that survives the harness
+    launch.
+
+    Slice 6: the launch tail acquires a workspace session lock (refuse-concurrent;
+    a live PID holding the lock → refuse, naming workspace + PID + timestamp; a
+    stale/dead-PID lock → reclaimed) and dispatches the config-driven harness-launch
+    seam. First-ever launch uses the `new` template; an existing workspace uses
+    `resume`. The seam os.execvp's the harness (claude default) — tests stub it.
+    """
+    from spine import _resolve_slug, _consume_flag_value, _die
+    from provision import bring_up_workspace
+    from manifest import workspace_dir
+    import harness_launch
+    from session_lock import acquire_session_lock, SessionLockHeld
+
+    rest = list(args)
+    _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+
+    if not rest:
+        print("camp ai: a slug is required\n  usage: camp ai <slug>", file=sys.stderr)
+        sys.exit(1)
+
+    slug = _resolve_slug(rest[0], context="ai")
+
+    group_name = group["group"]["name"]
+    if not group["members"]:
+        _die(f"camp ai: group {group_name!r} has no members")
+
+    if dry_run:
+        print(
+            f"[dry-run] would seed + spawn detached provisioner for {slug!r} "
+            f"then launch the harness",
+            file=sys.stderr,
+        )
+        return
+
+    # New-vs-resume is decided BEFORE bring-up creates the workspace dir: a
+    # first-ever launch (no workspace) uses the `new` template; an existing
+    # workspace uses `resume`.
+    ws_dir = workspace_dir(group_name, slug, env=env)
+    is_resume = ws_dir.exists()
+
+    # Refuse-concurrent FIRST, before any provisioning: a live PID holding the
+    # lock → refuse (naming workspace + PID + timestamp). Stale/dead → reclaimed.
+    try:
+        acquire_session_lock(ws_dir)
+    except SessionLockHeld as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
+    # Resolve the harness profile ONCE for this bring-up; bring_up_workspace and
+    # the launch tail both read fields off it (no per-field re-resolution).
+    profile = harness_launch.resolve_harness_profile(group)
+
+    try:
+        bring_up_workspace(group, slug, env=env, profile=profile)
+    except Exception as e:
+        _die(f"camp ai: workspace bring-up failed: {e}")
+
+    print(
+        f"camp ai: provisioning {slug!r} in the background "
+        f"(run 'camp status' / 'camp setup' to track)",
+        file=sys.stderr,
+    )
+
+    harness_launch.launch(group, slug, ws_dir, is_resume=is_resume, profile=profile)
+
+
+def _cmd_enter_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+) -> None:
+    """camp enter <member> [--name <slug>] — activate a member for the current session.
+
+    Fires the member's activation hooks idempotently, then prints the member's
+    CLAUDE.md to stdout so the calling agent ingests it as context.
+    """
+    from spine import _die
+    from activation import enter_member, MemberNotReadyError
+    from group_config import GroupConfigError
+    from harness_launch import resolve_harness_profile
+
+    filtered = list(args)
+    slug = _slug_from_args_or_cwd(filtered, group, verb="enter", env=env)
+
+    if not filtered:
+        _die("camp enter: a member name is required\n  usage: camp enter <member>")
+
+    member_name = filtered[0]
+
+    profile = resolve_harness_profile(group)
+
+    import subprocess as _subprocess
+    try:
+        enter_member(group, slug, member_name, env=env, profile=profile)
+    except MemberNotReadyError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    except GroupConfigError as e:
+        print(f"camp enter: {e}", file=sys.stderr)
+        sys.exit(1)
+    except _subprocess.CalledProcessError as e:
+        cmd_str = " ".join(str(t) for t in e.cmd) if isinstance(e.cmd, (list, tuple)) else str(e.cmd)
+        print(
+            f"camp enter: activation hook failed for member {member_name!r}\n"
+            f"  command: {cmd_str}\n"
+            f"  exit code: {e.returncode}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except ValueError as e:
+        _die(f"camp enter: {e}")
+
+
+def _cmd_pwd_group_cli(
+    args: list[str],
+    group: dict,
+    env: dict[str, str] | None,
+) -> None:
+    """camp pwd <slug> — print the resolved workspace path on stdout (exactly one line).
+
+    Security contract: stdout carries ONLY the path; diagnostics go to stderr.
+    """
+    from spine import _resolve_slug, _consume_flag_value, _die
+    from shell_integration import cmd_pwd, WorkspaceNotFoundError
+
+    filtered = list(args)
+    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
+
+    if not filtered:
+        print("camp pwd: a slug is required\n  usage: camp pwd <slug>", file=sys.stderr)
+        sys.exit(1)
+
+    slug = _resolve_slug(filtered[0], context="pwd")
+
+    try:
+        ws_dir = cmd_pwd(group, slug, env=env)
+    except WorkspaceNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
+    # Print the path exactly once, no trailing whitespace, no newline other than
+    # the one print() appends.
+    print(str(ws_dir))
+
+
+def _cmd_inject_cli(args: list[str]) -> None:
+    """camp inject --drain [--workspace <dir>] — drain the inject queue (hidden).
+
+    The PostToolUse hook handler for the claude-hook inject strategy. Reads the
+    workspace inject queue and emits the Claude Code additionalContext JSON, then
+    clears the queue; an empty queue emits nothing. Without --workspace, the
+    workspace root is located by walking UP from the cwd to the nearest ancestor
+    containing a `.camp/` dir — Claude Code runs PostToolUse hooks in the session's
+    current cwd, which may be a member worktree (<workspace>/<member>) rather than
+    the workspace root. If no `.camp/` ancestor is found, the cwd is drained as-is
+    (no-op safe). Resilient: never crashes a tool call — any error → exit 0.
+
+    FIX 6: the --workspace parse is inlined here (rather than reusing
+    spine._consume_flag_value) so the per-Bash-call drain path never imports the
+    heavy spine module.
+    """
+    workspace: str | None = None
+    for i, arg in enumerate(args):
+        if arg == "--workspace" and i + 1 < len(args):
+            workspace = args[i + 1]
+            break
+        if arg.startswith("--workspace="):
+            workspace = arg[len("--workspace="):]
+            break
+
+    try:
+        from inject import drain_queue, find_workspace_root
+        ws_dir = Path(workspace) if workspace else find_workspace_root(Path.cwd())
+        code = drain_queue(ws_dir)
+    except Exception:
+        # Never crash a tool call.
+        code = 0
+    sys.exit(code)
 
 
 def _author_group(
@@ -786,7 +1138,7 @@ def _author_group(
 
     if config_path.exists() and not force:
         print(
-            f"camp init: config {config_path!s} already exists — pass --force to overwrite",
+            f"camp group: config {config_path!s} already exists — pass --force to overwrite",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -796,7 +1148,7 @@ def _author_group(
     try:
         all_configs = load_all_groups(config_dir)
     except GroupConfigError as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
     other_configs = [c for c in all_configs if c["group"]["name"] != group_name]
 
@@ -808,7 +1160,7 @@ def _author_group(
             allow_missing=allow_missing,
         )
     except (group_scaffold.ScaffoldError, GroupConfinementError) as e:
-        print(f"camp init: {e}", file=sys.stderr)
+        print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
     rendered = group_scaffold.render_group_toml(group_name, members, branch_pattern)
@@ -821,7 +1173,7 @@ def _author_group(
         load_group(tmp_path)
     except Exception as e:
         tmp_path.unlink(missing_ok=True)
-        print(f"camp init: rendered config failed round-trip validation: {e}", file=sys.stderr)
+        print(f"camp group: rendered config failed round-trip validation: {e}", file=sys.stderr)
         sys.exit(1)
     os.replace(str(tmp_path), str(config_path))
 

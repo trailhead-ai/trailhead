@@ -1,16 +1,19 @@
-"""Group resolution for camp — marker-first cwd/--group resolution (D-G).
+"""Group resolution for camp — state-dir path-parsing cwd/--group resolution (D-G).
 
-Resolution algorithm (marker-first):
-1. Walk the cwd path from the deepest point upward, collecting every
-   `…/.claude/worktrees/<slug>` segment found.
-2. For each such segment (innermost first), check whether the parent matches
-   a member `repo_root` in any loaded group config.
-3. The first match wins: return (group_name, slug).
-4. If no worktree segment matched any group, fall back to a plain repo-root
-   walk (same path, no `.claude/worktrees/` in it) — this is the fleet-view
-   path: returns (group_name, slug=None).
-5. If still no match: raise GroupResolutionError with the legible
+Resolution algorithm (state-dir-path-parsing, U4 — VALIDATED):
+1. cwd.relative_to(camp_state_dir) → if len(parts) >= 3 and parts[1] == "worktrees"
+   → return (group=parts[0], slug=parts[2]), verifying the group is configured.
+   This covers the unified workspace layout:
+       central_state_dir(group)/worktrees/<slug>/<member>/...
+2. else walk cwd upward looking for a member `repo_root` match in the group
+   configs → return (group_name, slug=None). This distinguishes a canonical
+   member repo from a non-member dir by pure path arithmetic (no on-disk scan).
+3. else raise GroupResolutionError with the legible
    "no group resolved from cwd, pass --group" message.
+
+Both cwd and camp_state_dir are resolved with .resolve() before the prefix check.
+camp_state_dir is injectable for hermetic tests; production derives it lazily via
+trailhead.paths.state_dir("camp", env=...).
 
 A repo listed in two groups is an error at resolve time and at eager
 validate_no_overlap time: raises GroupResolutionError naming both groups + the repo.
@@ -126,38 +129,10 @@ def central_state_dir(
 
 
 # ---------------------------------------------------------------------------
-# Internal: walk cwd for .claude/worktrees/<slug> segments
+# Internal: repo_root matching for the canonical-member-repo fallback
 # ---------------------------------------------------------------------------
 
-_WORKTREE_MARKER = ".claude/worktrees"
-_CLAUDE_PART = ".claude"
 _WORKTREES_PART = "worktrees"
-
-
-def _collect_worktree_segments(cwd: Path) -> list[tuple[Path, str]]:
-    """Walk cwd from deepest to shallowest, collecting (parent_of_segment, slug)
-    for every `…/.claude/worktrees/<slug>` found in the path.
-
-    Returns list of (repo_candidate, slug) in innermost-first order.
-
-    The `repo_candidate` is the path immediately above the `.claude/` directory
-    (i.e. the repo root the worktree belongs to).
-    """
-    parts = cwd.resolve().parts  # tuple of path components
-    segments: list[tuple[Path, str]] = []
-
-    for i, part in enumerate(parts):
-        if part == _WORKTREES_PART and i >= 2:
-            # Check that parts[i-1] == ".claude" and i+1 exists (slug)
-            if parts[i - 1] == _CLAUDE_PART and i + 1 < len(parts):
-                slug = parts[i + 1]
-                # repo_candidate = everything up to (but not including) .claude/
-                repo_candidate = Path(*parts[: i - 1])
-                segments.append((repo_candidate, slug))
-
-    # innermost first = last found in left-to-right scan
-    segments.reverse()
-    return segments
 
 
 def _repo_root_matches(candidate: Path, member: dict[str, Any]) -> bool:
@@ -237,44 +212,64 @@ def validate_no_overlap(group_configs: list[dict[str, Any]]) -> None:
 
 
 def resolve_from_cwd(
-    cwd: Path, group_configs: list[dict[str, Any]]
+    cwd: Path,
+    group_configs: list[dict[str, Any]],
+    *,
+    camp_state_dir: Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str | None]:
-    """Resolve (group_name, slug) from cwd using marker-first resolution (D-G).
+    """Resolve (group_name, slug) from cwd via state-dir path parsing (D-G, U4).
 
     Algorithm:
-      1. Collect all .claude/worktrees/<slug> segments in cwd (innermost first).
-      2. For each segment, confirm parent matches a member repo_root in some group.
-         - If one match → return (group, slug).
-         - If two or more groups match the same repo → error (overlap).
-      3. If no worktree segment matched, walk cwd upward looking for a plain
-         repo-root match → return (group, None) for the fleet-view fallback.
-      4. If still no match → GroupResolutionError("no group resolved from cwd, pass --group").
+      1. cwd relative to camp_state_dir → if the relative path is
+         <group>/worktrees/<slug>/... (len >= 3 and parts[1] == "worktrees"),
+         return (group, slug) once the group is confirmed configured.
+      2. else walk cwd upward for a member repo_root match → (group, None)
+         (canonical member repo fleet-view case).
+      3. else GroupResolutionError("no group resolved from cwd, pass --group").
 
     Args:
-        cwd:           Current working directory (absolute path).
-        group_configs: Loaded group config dicts.
+        cwd:            Current working directory (absolute path).
+        group_configs:  Loaded group config dicts.
+        camp_state_dir: The camp state root (state_dir("camp")). If omitted, it is
+                        derived lazily from trailhead.paths.state_dir("camp", env=env).
+        env:            Optional env override forwarded to the lazy state_dir derive.
 
     Returns:
-        (group_name, slug) where slug may be None for the repo-root fleet-view case.
+        (group_name, slug) where slug may be None for the canonical-member-repo case.
 
     Raises:
         GroupResolutionError: On no-match or overlap.
     """
-    # Step 1: marker-first — check .claude/worktrees/<slug> segments
-    segments = _collect_worktree_segments(cwd)
-    for repo_candidate, slug in segments:
-        matching_groups = _find_groups_for_repo(repo_candidate, group_configs)
-        if len(matching_groups) == 1:
-            return matching_groups[0], slug
-        if len(matching_groups) > 1:
-            # Overlap: same repo in multiple groups
-            raise GroupResolutionError(
-                f"camp: repo '{repo_candidate}' is listed in multiple groups: "
-                f"{', '.join(sorted(matching_groups))} — each repo must belong to exactly one group"
-            )
+    resolved_cwd = cwd.resolve()
 
-    # Step 2: fleet-view fallback — plain repo-root walk (slug=None)
-    current = cwd.resolve()
+    if camp_state_dir is None:
+        import trailhead.paths as _paths  # lazy: guard already ran at entry point
+
+        kwargs: dict[str, Any] = {}
+        if env is not None:
+            kwargs["env"] = env
+        camp_state_dir = _paths.state_dir("camp", **kwargs)
+    camp_state = camp_state_dir.resolve()
+
+    # Step 1: state-dir prefix parse — <group>/worktrees/<slug>/...
+    try:
+        rel_parts = resolved_cwd.relative_to(camp_state).parts
+    except ValueError:
+        rel_parts = ()
+
+    if len(rel_parts) >= 3 and rel_parts[1] == _WORKTREES_PART:
+        group_name = rel_parts[0]
+        slug = rel_parts[2]
+        for cfg in group_configs:
+            if cfg["group"]["name"] == group_name:
+                validate_group_name(group_name)
+                return group_name, slug
+        # Under the state dir but no configured group → fall through to the
+        # repo_root walk (a stray dir under the state dir is not a workspace).
+
+    # Step 2: canonical-member-repo fallback — walk cwd upward (slug=None).
+    current = resolved_cwd
     visited: set[Path] = set()
     while current not in visited:
         visited.add(current)
@@ -282,9 +277,8 @@ def resolve_from_cwd(
         if len(matching_groups) == 1:
             return matching_groups[0], None
         if len(matching_groups) > 1:
-            repo_str = str(current)
             raise GroupResolutionError(
-                f"camp: repo '{repo_str}' is listed in multiple groups: "
+                f"camp: repo '{current}' is listed in multiple groups: "
                 f"{', '.join(sorted(matching_groups))} — each repo must belong to exactly one group"
             )
         parent = current.parent

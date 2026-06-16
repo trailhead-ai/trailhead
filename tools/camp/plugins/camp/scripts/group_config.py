@@ -10,6 +10,11 @@ Schema:
   name = "<repo-name>"
   repo_root = "/absolute/path/to/repo"
   bootstrap = ["cmd", "arg1", "arg2"]   # list for subprocess shell=False; optional
+  base = "origin/main"                  # branch start-point; optional, default origin/main
+
+  [[members.hooks]]
+  kind = "dep-install"                  # keyed activation hook kind; required
+  cmd = ["cmd", "arg1", "arg2"]        # list for subprocess shell=False; required
 
   [branch]
   pattern = "worktree-{slug}"            # optional; default "worktree-{slug}"
@@ -17,9 +22,12 @@ Schema:
   [dev_env]                              # optional; warn-and-continue (deferred)
   ...
 
-Bootstrap commands are author-trusted local input. camp runs them list-mode
-(subprocess, shell=False). Sharing group configs from untrusted authors is
-explicitly out of scope (see D-F in the Step-2 plan).
+Bootstrap and hook commands are author-trusted local input. camp runs them
+list-mode (subprocess, shell=False). Sharing group configs from untrusted
+authors is explicitly out of scope (see D-F in the Step-2 plan).
+
+Activation hook kinds:
+  "dep-install"   Run a dependency installation command in the worktree.
 """
 from __future__ import annotations
 
@@ -43,6 +51,13 @@ class GroupConfigNotFound(Exception):
 
     The message includes a first-run hint pointing at groups.example/trailhead.toml.
     """
+
+
+# ---------------------------------------------------------------------------
+# Known activation hook kinds
+# ---------------------------------------------------------------------------
+
+KNOWN_HOOK_KINDS = frozenset({"dep-install"})
 
 
 # ---------------------------------------------------------------------------
@@ -135,11 +150,64 @@ def load_group(path: Path) -> dict[str, Any]:
                     f"bootstrap[{j}] must be a string, got {type(cmd_part).__name__!r}"
                 )
 
+        base = m.get("base", "origin/main")
+        if not isinstance(base, str) or not base.strip():
+            raise GroupConfigError(
+                f"{path}: members[{i}] ('{member_name}'): field 'base' must be a "
+                "non-empty string (the branch start-point, e.g. 'origin/main')"
+            )
+
+        # --- [[members.hooks]] section (optional) ---
+        hooks_raw = m.get("hooks", [])
+        if hooks_raw is None:
+            hooks_raw = []
+        if not isinstance(hooks_raw, list):
+            raise GroupConfigError(
+                f"{path}: members[{i}] ('{member_name}'): field 'hooks' must be a list "
+                "of hook tables"
+            )
+        hooks: list[dict] = []
+        for k, hook in enumerate(hooks_raw):
+            if not isinstance(hook, dict):
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}] must be a table"
+                )
+
+            hook_kind = hook.get("kind")
+            if not isinstance(hook_kind, str) or not hook_kind.strip():
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}].kind is required "
+                    "and must be a non-empty string"
+                )
+            if hook_kind not in KNOWN_HOOK_KINDS:
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}].kind "
+                    f"{hook_kind!r} is not a known hook kind — "
+                    f"supported kinds: {sorted(KNOWN_HOOK_KINDS)}"
+                )
+
+            cmd_raw = hook.get("cmd")
+            if cmd_raw is None:
+                raise GroupConfigError(
+                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}] "
+                    f"(kind={hook_kind!r}) is missing required field 'cmd'"
+                )
+            cmd = _validate_string_list_field(
+                cmd_raw,
+                path=path,
+                where=f"members[{i}] ('{member_name}'): hooks[{k}].cmd",
+                allow_empty_list=False,
+            )
+
+            hooks.append({"kind": hook_kind, "cmd": cmd})
+
         members.append(
             {
                 "name": member_name,
                 "repo_root": repo_root,
                 "bootstrap": list(bootstrap_raw),
+                "base": base,
+                "hooks": hooks,
             }
         )
 
@@ -150,6 +218,9 @@ def load_group(path: Path) -> dict[str, Any]:
         raise GroupConfigError(
             f"{path}: field 'branch.pattern' must be a string"
         )
+
+    # --- [harness] section (optional) — launch seam config (Slice 6) ---
+    harness = _parse_harness(raw.get("harness"), path)
 
     # --- [dev_env] section — warn-and-continue (deferred) ---
     if "dev_env" in raw:
@@ -190,13 +261,140 @@ def load_group(path: Path) -> dict[str, Any]:
 
         shared_vaults.append({"name": sv_name, "root": sv_root})
 
-    return {
+    result: dict[str, Any] = {
         "group": {"name": group_name},
         "members": members,
         "branch_pattern": branch_pattern,
         "shared_vaults": shared_vaults,
         "_toml_path": str(path),
     }
+    if harness is not None:
+        result["harness"] = harness
+    return result
+
+
+# ---------------------------------------------------------------------------
+# [harness] launch-seam block (Slice 6)
+# ---------------------------------------------------------------------------
+
+# Placeholders the launch templates / cwd may reference. Any other {token} is a
+# misconfiguration (would KeyError at substitution time) → rejected at load.
+_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace"})
+
+# Mid-session context-injection strategies (Slice 9). "stdout" is the universal
+# floor; "claude-hook" opts into the Claude Code PostToolUse → additionalContext
+# channel. An unknown value is rejected at load with a legible error.
+_INJECT_STRATEGIES = frozenset({"stdout", "claude-hook"})
+
+
+def _reject_unknown_placeholders(value: str, *, path: Path, where: str) -> None:
+    """Reject any {placeholder} not in the known set so a typo'd template fails
+    legibly at load instead of with a KeyError at launch time."""
+    import string
+
+    for _, field, _, _ in string.Formatter().parse(value):
+        if field is not None and field not in _HARNESS_PLACEHOLDERS:
+            raise GroupConfigError(
+                f"{path}: {where} references unknown placeholder {{{field}}} — "
+                f"supported placeholders: {sorted(_HARNESS_PLACEHOLDERS)}"
+            )
+
+
+def _validate_string_list_field(
+    value: Any,
+    *,
+    path: Path,
+    where: str,
+    allow_empty_list: bool,
+) -> list[str]:
+    """Validate a field that must be a non-empty list of non-blank strings.
+
+    Each token is checked for type (must be str) and stripped-and-rejected if
+    empty or whitespace-only.  allow_empty_list=False rejects an empty list (e.g.
+    argv templates); True would permit it — currently always False at call sites
+    but the flag exists so Slice 9 can reuse the helper without kwargs surgery.
+    """
+    if not isinstance(value, list) or (not allow_empty_list and len(value) == 0):
+        raise GroupConfigError(
+            f"{path}: {where} must be a non-empty list of strings"
+        )
+    for i, token in enumerate(value):
+        if not isinstance(token, str):
+            raise GroupConfigError(
+                f"{path}: {where}[{i}] must be a string, got {type(token).__name__!r}"
+            )
+        if not token.strip():
+            raise GroupConfigError(
+                f"{path}: {where}[{i}] is empty or whitespace-only — "
+                "empty tokens mask misconfiguration"
+            )
+    return list(value)
+
+
+def _validate_argv_template(raw: Any, *, path: Path, where: str) -> list[str]:
+    """Validate a launch argv template: a non-empty list of strings, each
+    stripped-and-rejected if empty, each with only known placeholders."""
+    tokens = _validate_string_list_field(raw, path=path, where=where, allow_empty_list=False)
+    for i, token in enumerate(tokens):
+        _reject_unknown_placeholders(token, path=path, where=f"{where}[{i}]")
+    return tokens
+
+
+def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
+    """Parse + validate the optional [harness] block. Returns None when absent.
+
+    Every field is OPTIONAL — a [harness] block containing only doc_files (or
+    only cwd, or only new) is valid.  Fields that are absent are simply not
+    included in the returned dict; resolve_launch merges per-field against
+    _CLAUDE_DEFAULT at resolution time.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise GroupConfigError(f"{path}: [harness] must be a table")
+
+    result: dict[str, Any] = {}
+
+    if "new" in raw:
+        result["new"] = _validate_argv_template(
+            raw["new"], path=path, where="harness.new"
+        )
+
+    if "resume" in raw:
+        result["resume"] = _validate_argv_template(
+            raw["resume"], path=path, where="harness.resume"
+        )
+
+    if "cwd" in raw:
+        cwd = raw["cwd"]
+        if not isinstance(cwd, str) or not cwd.strip():
+            raise GroupConfigError(
+                f"{path}: harness.cwd must be a non-empty string"
+            )
+        _reject_unknown_placeholders(cwd, path=path, where="harness.cwd")
+        result["cwd"] = cwd
+
+    doc_files_raw = raw.get("doc_files")
+    if doc_files_raw is not None:
+        if not isinstance(doc_files_raw, list) or len(doc_files_raw) == 0:
+            raise GroupConfigError(
+                f"{path}: harness.doc_files must be a non-empty list of strings "
+                "(workspace doc filenames, e.g. [\"CLAUDE.md\"] or [\"AGENTS.md\"])"
+            )
+        result["doc_files"] = _validate_string_list_field(
+            doc_files_raw, path=path, where="harness.doc_files", allow_empty_list=False
+        )
+
+    if "inject" in raw:
+        inject = raw["inject"]
+        if not isinstance(inject, str) or inject not in _INJECT_STRATEGIES:
+            raise GroupConfigError(
+                f"{path}: harness.inject {inject!r} is not a known injection "
+                f"strategy — supported strategies: {sorted(_INJECT_STRATEGIES)}"
+            )
+        result["inject"] = inject
+
+    return result
 
 
 def load_all_groups(groups_dir: Path) -> list[dict[str, Any]]:

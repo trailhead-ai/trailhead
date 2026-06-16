@@ -9,7 +9,7 @@
 # placeholders — replace each `/path/to/<repo>` with the absolute path to your
 # own clone before copying this into your live config
 # (config_dir("camp")/groups/trailhead.toml). camp also authors this file for
-# you: `camp init trailhead --member trailhead=/path/to/trailhead --member ...`.
+# you: `camp group trailhead --member trailhead=/path/to/trailhead --member ...`.
 #
 # Each repo must belong to exactly one group (camp enforces no-overlap).
 #
@@ -38,3 +38,25 @@ bootstrap = []
 
 [branch]
 pattern = "worktree-{slug}"
+
+# [harness] — optional launch-seam config.
+#
+# camp defaults to the claude harness (writes CLAUDE.md as the workspace doc).
+# Override doc_files when using a different AI coding tool:
+#
+#   [harness]
+#   # For Codex, Copilot, or Cursor — they read AGENTS.md as the workspace doc.
+#   # doc_files = ["AGENTS.md"]
+#
+# You can also supply both to support multiple tools simultaneously:
+#   # doc_files = ["AGENTS.md", "CLAUDE.md"]
+#
+# inject — mid-session context-injection strategy for `camp enter`.
+#   "stdout"      print the member doc to stdout (universal floor; works with any
+#                 harness, including Aider).
+#   "claude-hook" enqueue the member doc for the Claude Code PostToolUse hook so it
+#                 loads silently into context on the next turn (no visible-log
+#                 clutter). camp wires the PostToolUse hook automatically.
+# Default: claude (no [harness] block) → "claude-hook"; ANY [harness] block without
+# an explicit inject → "stdout" (safe default for a non-claude harness).
+#   # inject = "claude-hook"
