@@ -163,6 +163,7 @@ def bring_up_workspace(
     slug: str,
     *,
     env: dict[str, str] | None = None,
+    profile: Any | None = None,
 ) -> Path:
     """camp ai bring-up: seed pending members + write workspace docs + spawn provisioner.
 
@@ -174,20 +175,24 @@ def bring_up_workspace(
          `camp inject --drain` hook (idempotent); not for "stdout".
       5. Spawn the detached background provisioner.
 
-    Returns the manifest path. The harness launch (Slice 6) follows this call.
+    The caller may pass the once-resolved HarnessProfile; otherwise it is resolved
+    from group here. Returns the manifest path; the harness launch follows.
     """
     from workspace_doc import write_workspace_doc
     from hooks_writer import write_workspace_hooks, write_workspace_inject_hook
-    from harness_launch import resolve_inject
+    from harness_launch import resolve_harness_profile
+
+    if profile is None:
+        profile = resolve_harness_profile(group)
 
     group_name = group["group"]["name"]
     mpath = seed_pending_workspace(group, slug, env=env)
     ws_dir = _workspace_dir(group_name, slug, env=env)
 
-    write_workspace_doc(ws_dir, group, slug)
+    write_workspace_doc(ws_dir, group, slug, profile=profile)
     write_workspace_hooks(ws_dir, str(_CAMP_BIN))
 
-    if resolve_inject(group) == "claude-hook":
+    if profile.inject == "claude-hook":
         write_workspace_inject_hook(ws_dir, str(_CAMP_BIN))
 
     spawn_detached_provisioner(

@@ -327,3 +327,72 @@ class TestResolveInject:
 
         group = _group({"inject": "claude-hook"})
         assert resolve_inject(group) == "claude-hook"
+
+
+# ---------------------------------------------------------------------------
+# resolve_harness_profile — unified resolved profile (cleanup refactor)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveHarnessProfile:
+    """resolve_harness_profile merges config over the claude default ONCE.
+
+    The three legacy resolvers (resolve_launch/resolve_doc_files/resolve_inject)
+    become thin views over this single resolved profile. Behavior must match them
+    field-for-field, including the intentional inject asymmetry.
+    """
+
+    def test_no_harness_block_is_all_claude_defaults(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group())
+        assert p.new == ["claude"]
+        assert p.resume == ["claude", "-r", "{slug}"]
+        assert p.cwd == "{workspace}"
+        assert p.doc_files == ["CLAUDE.md"]
+        assert p.inject == "claude-hook"
+
+    def test_block_without_inject_defaults_to_stdout(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group({"doc_files": ["AGENTS.md"]}))
+        assert p.doc_files == ["AGENTS.md"]
+        assert p.inject == "stdout"
+        # other fields still fall back per-field
+        assert p.new == ["claude"]
+        assert p.resume == ["claude", "-r", "{slug}"]
+
+    def test_configured_fields_honored(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(
+            _group({"new": ["myh"], "inject": "claude-hook"})
+        )
+        assert p.new == ["myh"]
+        assert p.inject == "claude-hook"
+        assert p.resume == ["claude", "-r", "{slug}"]
+
+    def test_profile_is_frozen(self):
+        import dataclasses
+
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group())
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            p.inject = "stdout"  # type: ignore[misc]
+
+    def test_launch_substitutes_new(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group())
+        argv, cwd = p.launch(slug="feat-x", workspace="/work/space", is_resume=False)
+        assert argv == ["claude"]
+        assert cwd == Path("/work/space")
+
+    def test_launch_substitutes_resume(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group())
+        argv, cwd = p.launch(slug="feat-x", workspace="/work/space", is_resume=True)
+        assert argv == ["claude", "-r", "feat-x"]
+        assert cwd == Path("/work/space")

@@ -22,7 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from harness_launch import resolve_doc_files
+from harness_launch import resolve_harness_profile
 
 
 def _render_doc(
@@ -79,19 +79,25 @@ def write_workspace_doc(
     workspace_dir: Path,
     group: dict[str, Any],
     slug: str,
+    *,
+    profile: Any | None = None,
 ) -> None:
     """Write workspace doc file(s) at the workspace root.
 
-    The filenames written are resolved from group's harness.doc_files config
-    via resolve_doc_files (defaults to ["CLAUDE.md"] for the claude harness).
-    All files receive identical rendered content. Idempotent: files are fully
-    rewritten on each call, so the result is always stable for the same inputs.
+    The filenames written come from the resolved HarnessProfile's doc_files
+    (defaults to ["CLAUDE.md"] for the claude harness). The caller may pass the
+    once-resolved profile; otherwise it is resolved from group here. All files
+    receive identical rendered content. Idempotent: files are fully rewritten on
+    each call, so the result is always stable for the same inputs.
 
     Args:
         workspace_dir: Absolute path to the workspace root directory.
         group:         Parsed group config dict.
         slug:          The workspace slug (used in the doc header).
+        profile:       Optional once-resolved HarnessProfile.
     """
+    if profile is None:
+        profile = resolve_harness_profile(group)
     content = _render_doc(group, slug)
-    for filename in resolve_doc_files(group):
+    for filename in profile.doc_files:
         (workspace_dir / filename).write_text(content)

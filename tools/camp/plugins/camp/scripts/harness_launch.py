@@ -10,9 +10,14 @@ The single launch point at the tail of `camp ai`. A group-level optional
 
 with {slug} / {workspace} substitution. When the block is ABSENT, the baked-in
 claude default applies: new=["claude"] rooted at the workspace dir;
-resume=["claude","-r","{slug}"]. resolve_launch resolves (config | default) +
-is_resume → (argv, cwd); launch() chdirs + os.execvp's. Modality is terminal-exec
-(claude-specific); GUI/detached launch is deferred.
+resume=["claude","-r","{slug}"].
+
+resolve_harness_profile merges the [harness] block over the claude default ONCE
+into a frozen HarnessProfile (launch argv + cwd + doc_files + inject). The legacy
+resolve_launch / resolve_doc_files / resolve_inject are thin views over it, kept
+for the callers/tests that read a single field. profile.launch() does the
+{slug}/{workspace} substitution → (argv, cwd); launch() chdirs + os.execvp's.
+Modality is terminal-exec (claude-specific); GUI/detached launch is deferred.
 
 Tests stub launch() (trailhead.paths is not isolated for the real claude runner —
 memory: harness-cli-not-isolated-by-trailhead-env). The CAMP_TEST_NO_EXEC escape
@@ -22,6 +27,7 @@ cannot monkeypatch in-process.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,36 +43,70 @@ def _substitute(token: str, *, slug: str, workspace: str) -> str:
     return token.format(slug=slug, workspace=workspace)
 
 
-def resolve_doc_files(group: dict[str, Any]) -> list[str]:
-    """Resolve the workspace doc filenames to write.
+@dataclass(frozen=True)
+class HarnessProfile:
+    """The fully-resolved harness profile: launch argv + cwd + doc_files + inject.
 
-    Returns the list of filenames from harness.doc_files when configured,
-    or ["CLAUDE.md"] as the baked-in claude default (matches how resolve_launch
-    falls back: harness = group.get("harness") or _CLAUDE_DEFAULT).
+    Built ONCE by resolve_harness_profile by merging a [harness] block over the
+    baked-in claude default. Carries the still-unsubstituted templates for new /
+    resume / cwd; launch() does the {slug}/{workspace} substitution at call time.
+    """
+
+    new: list[str]
+    resume: list[str]
+    cwd: str
+    doc_files: list[str]
+    inject: str  # "stdout" | "claude-hook"
+
+    def launch(
+        self, *, slug: str, workspace: str, is_resume: bool
+    ) -> tuple[list[str], Path]:
+        """Substitute {slug}/{workspace} into the resolved templates → (argv, cwd)."""
+        template = self.resume if is_resume else self.new
+        argv = [_substitute(tok, slug=slug, workspace=workspace) for tok in template]
+        cwd = Path(_substitute(self.cwd, slug=slug, workspace=workspace))
+        return argv, cwd
+
+
+def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
+    """Merge the [harness] block over the claude default ONCE → a frozen profile.
+
+    Per-field merge over _CLAUDE_DEFAULT for new/resume/cwd/doc_files: a partial
+    block only overrides the fields it lists. The inject default is the one
+    intentional asymmetry (preserved exactly):
+      - NO [harness] block (bare claude default)  → "claude-hook" (native hook)
+      - a [harness] block WITHOUT inject          → "stdout" (safe universal floor
+        for a harness whose injection contract we have not opted into)
+      - a configured inject value                 → that value (enum-validated by
+        group_config at load time).
     """
     harness = group.get("harness")
-    if harness and "doc_files" in harness:
-        return list(harness["doc_files"])
-    return ["CLAUDE.md"]
+    inject = "claude-hook" if harness is None else harness.get("inject", "stdout")
+    harness = harness or {}
+
+    return HarnessProfile(
+        new=list(harness.get("new") or _CLAUDE_DEFAULT["new"]),
+        resume=list(harness.get("resume") or _CLAUDE_DEFAULT["resume"]),
+        cwd=harness.get("cwd") or _CLAUDE_DEFAULT["cwd"],
+        doc_files=list(harness["doc_files"])
+        if "doc_files" in harness
+        else ["CLAUDE.md"],
+        inject=inject,
+    )
+
+
+def resolve_doc_files(group: dict[str, Any]) -> list[str]:
+    """Resolve the workspace doc filenames to write (thin view over the profile)."""
+    return resolve_harness_profile(group).doc_files
 
 
 def resolve_inject(group: dict[str, Any]) -> str:
-    """Resolve the mid-session context-injection strategy.
-
-    Mirrors the per-field merge of resolve_launch / resolve_doc_files:
-      - no [harness] block (claude default)         → "claude-hook"
-      - a [harness] block WITHOUT inject (safe default for a non-claude harness
-        whose injection contract we have not opted into)  → "stdout"
-      - a configured inject value                   → that value (validated as an
-        enum at load time by group_config).
+    """Resolve the mid-session context-injection strategy (thin view over the profile).
 
     "stdout" is the universal floor (print the doc to stdout); "claude-hook"
     enqueues the doc for the Claude Code PostToolUse → additionalContext channel.
     """
-    harness = group.get("harness")
-    if harness is None:
-        return "claude-hook"
-    return harness.get("inject", "stdout")
+    return resolve_harness_profile(group).inject
 
 
 def resolve_launch(
@@ -78,23 +118,11 @@ def resolve_launch(
 ) -> tuple[list[str], Path]:
     """Resolve (config | claude default) + is_resume → (argv, cwd).
 
-    Per-field merge over _CLAUDE_DEFAULT: each of new/resume/cwd uses the
-    configured value when present in the [harness] block, otherwise falls back
-    to the claude default.  This lets a partial block (e.g. doc_files only) work
-    without requiring the caller to restate the default argv.
+    Thin view over the unified profile: resolve once, then substitute.
     """
-    harness = group.get("harness") or {}
-    workspace = str(workspace_dir)
-
-    if is_resume:
-        template = harness.get("resume") or _CLAUDE_DEFAULT["resume"]
-    else:
-        template = harness.get("new") or _CLAUDE_DEFAULT["new"]
-    argv = [_substitute(tok, slug=slug, workspace=workspace) for tok in template]
-
-    cwd_template = harness.get("cwd") or _CLAUDE_DEFAULT["cwd"]
-    cwd = Path(_substitute(cwd_template, slug=slug, workspace=workspace))
-    return argv, cwd
+    return resolve_harness_profile(group).launch(
+        slug=slug, workspace=str(workspace_dir), is_resume=is_resume
+    )
 
 
 def launch(
@@ -103,10 +131,18 @@ def launch(
     workspace_dir: Path,
     *,
     is_resume: bool,
+    profile: HarnessProfile | None = None,
 ) -> None:
     """Resolve then chdir + os.execvp the harness (terminal-exec). Replaces this
-    process image — does not return on success."""
-    argv, cwd = resolve_launch(group, slug, workspace_dir, is_resume=is_resume)
+    process image — does not return on success.
+
+    The caller may pass the once-resolved profile; otherwise it is resolved here.
+    """
+    if profile is None:
+        profile = resolve_harness_profile(group)
+    argv, cwd = profile.launch(
+        slug=slug, workspace=str(workspace_dir), is_resume=is_resume
+    )
 
     if os.environ.get("CAMP_TEST_NO_EXEC"):
         # Test-only escape hatch for subprocess-level CLI tests that cannot

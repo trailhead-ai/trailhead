@@ -94,7 +94,7 @@ class TestNewVsResume:
         calls = []
         monkeypatch.setattr(
             harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume: calls.append(is_resume),
+            lambda group, slug, ws, *, is_resume, profile=None: calls.append(is_resume),
         )
 
         g = group_env
@@ -119,7 +119,7 @@ class TestNewVsResume:
         calls = []
         monkeypatch.setattr(
             harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume: calls.append(is_resume),
+            lambda group, slug, ws, *, is_resume, profile=None: calls.append(is_resume),
         )
         camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         assert calls == [True], "existing workspace should resume"

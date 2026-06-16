@@ -69,10 +69,10 @@ def _member_doc_content(member_name: str, wt_path: Path) -> str:
 
 
 def _surface_member_doc(
-    group: dict[str, Any],
     member_name: str,
     wt_path: Path,
     workspace_dir: Path,
+    inject: str,
 ) -> None:
     """Surface the member doc via the resolved inject strategy.
 
@@ -81,12 +81,9 @@ def _surface_member_doc(
                     concise stdout confirmation (the full doc loads on the next turn
                     via the camp PostToolUse hook — NOT dumped to stdout here).
     """
-    from harness_launch import resolve_inject
-
     doc = _member_doc_content(member_name, wt_path)
-    strategy = resolve_inject(group)
 
-    if strategy == "claude-hook":
+    if inject == "claude-hook":
         from inject import enqueue_doc
 
         enqueue_doc(workspace_dir, doc)
@@ -104,6 +101,7 @@ def enter_member(
     member_name: str,
     *,
     env: dict[str, str] | None = None,
+    profile: Any | None = None,
 ) -> None:
     """Activate a member for the current session.
 
@@ -122,6 +120,11 @@ def enter_member(
         ValueError: If the member name is not found in the manifest.
     """
     from manifest import manifest_path_for, read_central_manifest
+
+    if profile is None:
+        from harness_launch import resolve_harness_profile
+
+        profile = resolve_harness_profile(group)
 
     mpath = manifest_path_for(group["group"]["name"], slug, env=env)
     data = read_central_manifest(mpath)
@@ -158,4 +161,4 @@ def enter_member(
     # The workspace dir is the parent of the member worktree
     # (<workspace>/<member>) — the inject queue lives at <workspace>/.camp/.
     workspace_dir = wt_path.parent
-    _surface_member_doc(group, member_name, wt_path, workspace_dir)
+    _surface_member_doc(member_name, wt_path, workspace_dir, profile.inject)

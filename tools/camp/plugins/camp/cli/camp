@@ -951,8 +951,12 @@ def _cmd_ai_group_cli(
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
+    # Resolve the harness profile ONCE for this bring-up; bring_up_workspace and
+    # the launch tail both read fields off it (no per-field re-resolution).
+    profile = harness_launch.resolve_harness_profile(group)
+
     try:
-        bring_up_workspace(group, slug, env=env)
+        bring_up_workspace(group, slug, env=env, profile=profile)
     except Exception as e:
         _die(f"camp ai: workspace bring-up failed: {e}")
 
@@ -962,7 +966,7 @@ def _cmd_ai_group_cli(
         file=sys.stderr,
     )
 
-    harness_launch.launch(group, slug, ws_dir, is_resume=is_resume)
+    harness_launch.launch(group, slug, ws_dir, is_resume=is_resume, profile=profile)
 
 
 def _cmd_enter_group_cli(
@@ -979,6 +983,7 @@ def _cmd_enter_group_cli(
     from group_resolve import resolve_from_cwd
     from activation import enter_member, MemberNotReadyError
     from group_config import GroupConfigError
+    from harness_launch import resolve_harness_profile
 
     filtered = list(args)
     name_flag = _consume_flag_value(filtered, "--name")
@@ -1001,9 +1006,11 @@ def _cmd_enter_group_cli(
 
     member_name = filtered[0]
 
+    profile = resolve_harness_profile(group)
+
     import subprocess as _subprocess
     try:
-        enter_member(group, slug, member_name, env=env)
+        enter_member(group, slug, member_name, env=env, profile=profile)
     except MemberNotReadyError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
