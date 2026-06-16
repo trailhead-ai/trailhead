@@ -6,6 +6,8 @@ dist/
 .pytest_cache/
 *.pyc
 
+.claude
+
 # User/agent-authored install configs live in config/ but must not be committed.
 # Only the shipped defaults are tracked.
 config/*
