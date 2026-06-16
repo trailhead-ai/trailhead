@@ -50,9 +50,7 @@ RESERVED = frozenset({
     "version", "which",
     "init", "session-bootstrap", "worktree-cleanup",
     # Slice 1: new verb surface
-    "group", "ai", "rm", "cd", "enter", "setup",
-    # Slice 7: shell integration
-    "shellenv",
+    "group", "ai", "rm", "pwd", "enter", "setup",
 })
 
 # ---------------------------------------------------------------------------
@@ -408,7 +406,7 @@ def cmd_help(_args: list[str]) -> None:
         "\n"
         "Usage:\n"
         "  camp ai <slug>                    Create or resume a workspace for a slug\n"
-        "  camp cd <slug>                    Print workspace path (shell cd integration)\n"
+        "  camp pwd <slug>                   Print workspace path\n"
         "\n"
         "Setup:\n"
         "  camp group <name> [options]       Wire hooks and author a group config\n"

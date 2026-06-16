@@ -32,7 +32,7 @@ LEGACY_REDIRECTS: dict[str, str] = {
 # emit the per-verb "needs a group" error. Two message shapes, by historical
 # wording: "ai"/"setup" point the user at configuring a group; the rest emit the
 # standard "pass --group" error.
-NEEDS_GROUP_VERBS = frozenset({"ai", "rm", "cd", "enter", "setup"})
+NEEDS_GROUP_VERBS = frozenset({"ai", "rm", "pwd", "enter", "setup"})
 
 _NEEDS_GROUP_CONFIGURE = frozenset({"ai", "setup"})
 

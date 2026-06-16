@@ -1,20 +1,15 @@
-"""Shell integration for camp — Slice 7.
+"""Shell integration for camp.
 
-Provides two public functions:
+Provides one public function:
 
-cmd_cd(group, slug, *, env=None) -> Path
+cmd_pwd(group, slug, *, env=None) -> Path
     Return the resolved workspace directory for the given (group, slug).
     The caller is responsible for printing this to stdout as exactly one line
     with no trailing whitespace. Raises WorkspaceNotFoundError when the
     workspace directory does not exist.
 
-shellenv() -> str
-    Return the fish shell function definition that wraps `camp cd` so the
-    caller's shell cd's to the workspace directory. Print on stdout; this is
-    the output of `camp shellenv`.
-
-    Fish-only constraint: no bash/zsh shim is emitted this pass
-    (council/Advocate: fish-only is documented in README + SKILL.md).
+Shell usage: cd "$(camp pwd <slug>)" — users can wrap this in their own
+alias or shell function as they like.
 """
 from __future__ import annotations
 
@@ -23,10 +18,10 @@ from typing import Any
 
 
 class WorkspaceNotFoundError(Exception):
-    """Raised by cmd_cd when the workspace directory does not exist."""
+    """Raised by cmd_pwd when the workspace directory does not exist."""
 
 
-def cmd_cd(
+def cmd_pwd(
     group: dict[str, Any],
     slug: str,
     *,
@@ -51,28 +46,8 @@ def cmd_cd(
     ws_dir = central_state_dir(group_name, env=env) / "worktrees" / slug
     if not ws_dir.exists():
         raise WorkspaceNotFoundError(
-            f"camp cd: no workspace for slug {slug!r} in group {group_name!r} "
+            f"camp pwd: no workspace for slug {slug!r} in group {group_name!r} "
             f"(expected: {ws_dir})\n"
             f"  Run 'camp ai {slug}' to create it."
         )
     return ws_dir
-
-
-_FISH_FUNCTION = """\
-function camp_cd
-    set _camp_cd_path (camp cd $argv)
-    or return 1
-    builtin cd $_camp_cd_path
-end
-"""
-
-
-def shellenv() -> str:
-    """Return the fish shell function that wraps camp cd.
-
-    The returned string is a complete, syntactically valid fish function
-    definition. The caller should print it on stdout for eval/sourcing.
-
-    Fish-only: no bash/zsh shim is emitted this pass.
-    """
-    return _FISH_FUNCTION

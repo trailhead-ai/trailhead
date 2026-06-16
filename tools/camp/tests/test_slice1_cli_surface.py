@@ -3,7 +3,7 @@
 TDD tests written before implementation.
 
 Contract:
-- camp group/ai/rm/cd/enter/setup each dispatch to their handler (RESERVED updated).
+- camp group/ai/rm/pwd/enter/setup each dispatch to their handler (RESERVED updated).
 - bare slug (camp foo) → exit non-zero, message names 'camp ai foo'.
 - restock/sweep/code/fire → disabled message + non-zero exit; NOT in camp help.
 - removed verbs init/open/break → legible error pointing at new verb.
@@ -45,7 +45,7 @@ def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedPro
 # not just a substring.
 # ---------------------------------------------------------------------------
 
-_EXPECTED_ACTIVE_VERBS = ("group", "ai", "rm", "cd", "enter", "setup")
+_EXPECTED_ACTIVE_VERBS = ("group", "ai", "rm", "pwd", "enter", "setup")
 _EXPECTED_ACTIVE_SECTIONS = ("Setup", "Workspace")
 _DISABLED_VERBS = ("restock", "sweep", "code", "fire")
 _LEGACY_VERBS = ("init", "open", "break")
@@ -178,13 +178,13 @@ def test_camp_group_is_in_reserved() -> None:
     assert "group" in RESERVED, f"'group' must be in RESERVED, got: {RESERVED}"
 
 
-def test_camp_cd_is_in_reserved() -> None:
-    """'cd' must be in RESERVED."""
+def test_camp_pwd_is_in_reserved() -> None:
+    """'pwd' must be in RESERVED."""
     scripts_dir = _PLUGIN_DIR / "scripts"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     from spine import RESERVED
-    assert "cd" in RESERVED, f"'cd' must be in RESERVED, got: {RESERVED}"
+    assert "pwd" in RESERVED, f"'pwd' must be in RESERVED, got: {RESERVED}"
 
 
 def test_camp_enter_is_in_reserved() -> None:
@@ -325,7 +325,7 @@ def test_camp_break_gives_legible_redirect() -> None:
 
 # NOTE: 'setup' graduated from a stub to real behavior in Slice 3 (and 'ai' too);
 # 'enter' graduated from a stub to real behavior in Slice 5;
-# 'cd' graduated from a stub to real behavior in Slice 7.
+# 'pwd' graduated from a stub to real behavior in Slice 7 (previously named 'cd').
 # All stub verbs have graduated — this parametrize is intentionally empty.
 @pytest.mark.parametrize("verb", [])
 def test_stub_verb_exits_nonzero(verb: str) -> None:

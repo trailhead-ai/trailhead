@@ -1,13 +1,11 @@
-"""Tests for Slice 7: camp cd + camp shellenv shell integration.
+"""Tests for camp pwd shell integration (previously 'camp cd', renamed per PR review).
 
 Test contract:
-- camp cd <slug> prints exactly one line = the resolved absolute workspace path
+- camp pwd <slug> prints exactly one line = the resolved absolute workspace path
   (under the state dir), no trailing whitespace; diagnostics go to stderr, never
   stdout.
 - unknown slug → legible stderr error, non-zero, NOTHING on stdout.
 - outside a member dir without --group → the standard "pass --group" error.
-- camp shellenv emits a syntactically valid fish function that cd's to camp cd
-  output (assert emitted text shape; actual cd is a shell concern).
 """
 from __future__ import annotations
 
@@ -65,14 +63,14 @@ def _run_cli(args: list[str], *, env: dict[str, str], cwd: Path | None = None) -
 
 
 # ---------------------------------------------------------------------------
-# shell_integration module — cd_path
+# shell_integration module — cmd_pwd
 # ---------------------------------------------------------------------------
 
 
-class TestCdPath:
-    def test_cd_path_returns_workspace_dir(self, tmp_path: Path) -> None:
-        """cmd_cd returns the resolved workspace dir for a known slug."""
-        from shell_integration import cmd_cd
+class TestCmdPwd:
+    def test_cmd_pwd_returns_workspace_dir(self, tmp_path: Path) -> None:
+        """cmd_pwd returns the resolved workspace dir for a known slug."""
+        from shell_integration import cmd_pwd
 
         group_name = "mygroup"
         member_name = "myrepo"
@@ -91,12 +89,12 @@ class TestCdPath:
             "members": [{"name": member_name, "repo_root": str(tmp_path / "fake-repo")}],
         }
 
-        result = cmd_cd(group, slug, env=env)
+        result = cmd_pwd(group, slug, env=env)
         assert result == ws_dir
 
-    def test_cd_path_is_absolute(self, tmp_path: Path) -> None:
-        """The path returned by cmd_cd is absolute."""
-        from shell_integration import cmd_cd
+    def test_cmd_pwd_is_absolute(self, tmp_path: Path) -> None:
+        """The path returned by cmd_pwd is absolute."""
+        from shell_integration import cmd_pwd
 
         group_name = "mygroup"
         member_name = "myrepo"
@@ -111,66 +109,18 @@ class TestCdPath:
             "members": [{"name": member_name, "repo_root": str(tmp_path / "fake-repo")}],
         }
 
-        result = cmd_cd(group, slug, env=env)
+        result = cmd_pwd(group, slug, env=env)
         assert result.is_absolute()
 
 
 # ---------------------------------------------------------------------------
-# shell_integration module — shellenv output
+# CLI: camp pwd <slug> — stdout is exactly one line, no trailing whitespace
 # ---------------------------------------------------------------------------
 
 
-class TestShellenv:
-    def test_shellenv_emits_fish_function(self, tmp_path: Path) -> None:
-        """shellenv() returns a string containing a fish function definition."""
-        from shell_integration import shellenv
-
-        output = shellenv()
-        assert "function" in output
-        assert "camp" in output
-
-    def test_shellenv_output_calls_camp_cd(self, tmp_path: Path) -> None:
-        """The emitted fish function invokes 'camp cd' to get the path."""
-        from shell_integration import shellenv
-
-        output = shellenv()
-        assert "camp cd" in output
-
-    def test_shellenv_output_uses_cd(self, tmp_path: Path) -> None:
-        """The emitted fish function calls 'cd' (or 'builtin cd') on the result."""
-        from shell_integration import shellenv
-
-        output = shellenv()
-        # The fish function must call cd in some form
-        assert " cd " in output or output.strip().startswith("cd ") or "\ncd " in output or "builtin cd" in output
-
-    def test_shellenv_output_ends_with_end(self, tmp_path: Path) -> None:
-        """The emitted fish function ends with 'end' (fish function syntax)."""
-        from shell_integration import shellenv
-
-        output = shellenv()
-        # Fish functions end with 'end'
-        stripped = output.strip()
-        assert stripped.endswith("end")
-
-    def test_shellenv_function_name_is_camp_cd(self, tmp_path: Path) -> None:
-        """The emitted fish function is named 'camp_cd' or 'camp' with cd subcommand."""
-        from shell_integration import shellenv
-
-        output = shellenv()
-        # The function definition must define something useful for cd-ing
-        # Fish syntax: function <name>
-        assert "function " in output
-
-
-# ---------------------------------------------------------------------------
-# CLI: camp cd <slug> — stdout is exactly one line, no trailing whitespace
-# ---------------------------------------------------------------------------
-
-
-class TestCampCdCLI:
-    def test_camp_cd_prints_one_line_workspace_path(self, tmp_path: Path) -> None:
-        """camp cd <slug> prints exactly one line: the resolved workspace path."""
+class TestCampPwdCLI:
+    def test_camp_pwd_prints_one_line_workspace_path(self, tmp_path: Path) -> None:
+        """camp pwd <slug> prints exactly one line: the resolved workspace path."""
         group_name = "mygroup"
         member_name = "myrepo"
         slug = "my-slug"
@@ -183,7 +133,7 @@ class TestCampCdCLI:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", slug, "--group", group_name], env=env)
+        result = _run_cli(["pwd", slug, "--group", group_name], env=env)
 
         assert result.returncode == 0, (
             f"Expected exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -196,8 +146,8 @@ class TestCampCdCLI:
             f"Expected path {ws_dir!s}, got {lines[0]!r}"
         )
 
-    def test_camp_cd_stdout_has_no_trailing_whitespace(self, tmp_path: Path) -> None:
-        """The single stdout line from camp cd has no trailing whitespace."""
+    def test_camp_pwd_stdout_has_no_trailing_whitespace(self, tmp_path: Path) -> None:
+        """The single stdout line from camp pwd has no trailing whitespace."""
         group_name = "mygroup"
         member_name = "myrepo"
         slug = "my-slug"
@@ -210,7 +160,7 @@ class TestCampCdCLI:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", slug, "--group", group_name], env=env)
+        result = _run_cli(["pwd", slug, "--group", group_name], env=env)
 
         assert result.returncode == 0
         # stdout must end with exactly one newline (from print), no trailing spaces
@@ -218,7 +168,7 @@ class TestCampCdCLI:
             f"Trailing whitespace on stdout line: {result.stdout!r}"
         )
 
-    def test_camp_cd_diagnostics_go_to_stderr_not_stdout(self, tmp_path: Path) -> None:
+    def test_camp_pwd_diagnostics_go_to_stderr_not_stdout(self, tmp_path: Path) -> None:
         """Any diagnostic output goes to stderr, not stdout."""
         group_name = "mygroup"
         member_name = "myrepo"
@@ -232,15 +182,15 @@ class TestCampCdCLI:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", slug, "--group", group_name], env=env)
+        result = _run_cli(["pwd", slug, "--group", group_name], env=env)
 
         assert result.returncode == 0
         # stdout contains ONLY the path (one line)
         lines = result.stdout.splitlines()
         assert len(lines) == 1
 
-    def test_camp_cd_path_is_absolute(self, tmp_path: Path) -> None:
-        """The path printed by camp cd is absolute."""
+    def test_camp_pwd_path_is_absolute(self, tmp_path: Path) -> None:
+        """The path printed by camp pwd is absolute."""
         group_name = "mygroup"
         member_name = "myrepo"
         slug = "my-slug"
@@ -253,7 +203,7 @@ class TestCampCdCLI:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", slug, "--group", group_name], env=env)
+        result = _run_cli(["pwd", slug, "--group", group_name], env=env)
 
         assert result.returncode == 0
         path_str = result.stdout.strip()
@@ -263,13 +213,13 @@ class TestCampCdCLI:
 
 
 # ---------------------------------------------------------------------------
-# CLI: camp cd — error cases
+# CLI: camp pwd — error cases
 # ---------------------------------------------------------------------------
 
 
-class TestCampCdErrors:
+class TestCampPwdErrors:
     def test_unknown_slug_exits_nonzero(self, tmp_path: Path) -> None:
-        """camp cd with an unknown slug exits non-zero."""
+        """camp pwd with an unknown slug exits non-zero."""
         group_name = "mygroup"
         member_name = "myrepo"
 
@@ -280,7 +230,7 @@ class TestCampCdErrors:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", "nonexistent-slug", "--group", group_name], env=env)
+        result = _run_cli(["pwd", "nonexistent-slug", "--group", group_name], env=env)
 
         assert result.returncode != 0, (
             f"Expected non-zero exit for unknown slug.\n"
@@ -288,7 +238,7 @@ class TestCampCdErrors:
         )
 
     def test_unknown_slug_error_on_stderr_not_stdout(self, tmp_path: Path) -> None:
-        """camp cd unknown slug: error is on stderr, nothing on stdout."""
+        """camp pwd unknown slug: error is on stderr, nothing on stdout."""
         group_name = "mygroup"
         member_name = "myrepo"
 
@@ -299,7 +249,7 @@ class TestCampCdErrors:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", "nonexistent-slug", "--group", group_name], env=env)
+        result = _run_cli(["pwd", "nonexistent-slug", "--group", group_name], env=env)
 
         assert result.returncode != 0
         assert result.stdout == "", (
@@ -310,7 +260,7 @@ class TestCampCdErrors:
         )
 
     def test_unknown_slug_stderr_is_legible(self, tmp_path: Path) -> None:
-        """camp cd unknown slug: stderr contains a legible error message."""
+        """camp pwd unknown slug: stderr contains a legible error message."""
         group_name = "mygroup"
         member_name = "myrepo"
 
@@ -321,7 +271,7 @@ class TestCampCdErrors:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", "nonexistent-slug", "--group", group_name], env=env)
+        result = _run_cli(["pwd", "nonexistent-slug", "--group", group_name], env=env)
 
         assert result.returncode != 0
         # The error message should reference the slug or 'workspace' or 'not found'
@@ -330,7 +280,7 @@ class TestCampCdErrors:
         )
 
     def test_outside_member_dir_without_group_exits_nonzero(self, tmp_path: Path) -> None:
-        """camp cd without --group from outside a member dir exits non-zero."""
+        """camp pwd without --group from outside a member dir exits non-zero."""
         # Create a config, but run from a non-member tmpdir
         group_name = "mygroup"
         member_name = "myrepo"
@@ -346,7 +296,7 @@ class TestCampCdErrors:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", "any-slug"], env=env, cwd=non_member_dir)
+        result = _run_cli(["pwd", "any-slug"], env=env, cwd=non_member_dir)
 
         assert result.returncode != 0, (
             f"Expected non-zero exit without --group outside member dir.\n"
@@ -354,7 +304,7 @@ class TestCampCdErrors:
         )
 
     def test_outside_member_dir_without_group_error_mentions_group(self, tmp_path: Path) -> None:
-        """camp cd without --group from outside a member dir: error mentions --group."""
+        """camp pwd without --group from outside a member dir: error mentions --group."""
         group_name = "mygroup"
         member_name = "myrepo"
 
@@ -368,76 +318,9 @@ class TestCampCdErrors:
             "CAMP_STATE_DIR": str(tmp_path / "state"),
         }
 
-        result = _run_cli(["cd", "any-slug"], env=env, cwd=non_member_dir)
+        result = _run_cli(["pwd", "any-slug"], env=env, cwd=non_member_dir)
 
         assert result.returncode != 0
         assert "--group" in result.stderr or "group" in result.stderr.lower(), (
             f"Expected error mentioning --group in stderr: {result.stderr!r}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# CLI: camp shellenv output shape
-# ---------------------------------------------------------------------------
-
-
-class TestCampShellenvCLI:
-    def test_shellenv_exits_zero(self, tmp_path: Path) -> None:
-        """camp shellenv exits 0."""
-        env = {
-            "CAMP_CONFIG_DIR": str(tmp_path),
-            "CAMP_STATE_DIR": str(tmp_path / "state"),
-        }
-        result = _run_cli(["shellenv"], env=env)
-        assert result.returncode == 0, (
-            f"Expected exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-    def test_shellenv_emits_fish_function_on_stdout(self, tmp_path: Path) -> None:
-        """camp shellenv emits a fish function definition on stdout."""
-        env = {
-            "CAMP_CONFIG_DIR": str(tmp_path),
-            "CAMP_STATE_DIR": str(tmp_path / "state"),
-        }
-        result = _run_cli(["shellenv"], env=env)
-        assert result.returncode == 0
-        assert "function " in result.stdout, (
-            f"Expected fish function definition on stdout:\n{result.stdout!r}"
-        )
-
-    def test_shellenv_fish_function_calls_camp_cd(self, tmp_path: Path) -> None:
-        """The emitted fish function references 'camp cd'."""
-        env = {
-            "CAMP_CONFIG_DIR": str(tmp_path),
-            "CAMP_STATE_DIR": str(tmp_path / "state"),
-        }
-        result = _run_cli(["shellenv"], env=env)
-        assert result.returncode == 0
-        assert "camp cd" in result.stdout, (
-            f"Expected 'camp cd' in shellenv output:\n{result.stdout!r}"
-        )
-
-    def test_shellenv_fish_function_ends_with_end(self, tmp_path: Path) -> None:
-        """The emitted fish function ends with 'end' (fish syntax)."""
-        env = {
-            "CAMP_CONFIG_DIR": str(tmp_path),
-            "CAMP_STATE_DIR": str(tmp_path / "state"),
-        }
-        result = _run_cli(["shellenv"], env=env)
-        assert result.returncode == 0
-        stripped = result.stdout.strip()
-        assert stripped.endswith("end"), (
-            f"Expected fish function to end with 'end':\n{result.stdout!r}"
-        )
-
-    def test_shellenv_nothing_on_stderr(self, tmp_path: Path) -> None:
-        """camp shellenv produces nothing on stderr (clean output)."""
-        env = {
-            "CAMP_CONFIG_DIR": str(tmp_path),
-            "CAMP_STATE_DIR": str(tmp_path / "state"),
-        }
-        result = _run_cli(["shellenv"], env=env)
-        assert result.returncode == 0
-        assert result.stderr == "", (
-            f"Expected empty stderr from shellenv:\n{result.stderr!r}"
         )

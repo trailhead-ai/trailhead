@@ -181,11 +181,6 @@ def main() -> None:
         _cmd_which()
         return
 
-    # Slice 7: shellenv — no group resolution needed; emits fish function to stdout.
-    if argv and argv[0] == "shellenv":
-        _cmd_shellenv_cli()
-        return
-
     # Strip --dry-run for command dispatch (spine re-checks it)
     dry_run = "--dry-run" in argv or bool(os.environ.get("CAMP_DRY_RUN"))
 
@@ -288,8 +283,8 @@ def _dispatch_group_command(
     if cmd == "enter":
         _cmd_enter_group_cli(rest, group, group_env)
         return
-    if cmd == "cd":
-        _cmd_cd_group_cli(rest, group, group_env)
+    if cmd == "pwd":
+        _cmd_pwd_group_cli(rest, group, group_env)
         return
 
     # Bare slug removed: any non-RESERVED token that isn't a known verb → error.
@@ -1059,31 +1054,29 @@ def _cmd_enter_group_cli(
         _die(f"camp enter: {e}")
 
 
-def _cmd_cd_group_cli(
+def _cmd_pwd_group_cli(
     args: list[str],
     group: dict,
     env: dict[str, str] | None,
 ) -> None:
-    """camp cd <slug> — print the resolved workspace path on stdout (exactly one line).
+    """camp pwd <slug> — print the resolved workspace path on stdout (exactly one line).
 
     Security contract: stdout carries ONLY the path; diagnostics go to stderr.
-    The shell function wrapping this command cd's to stdout verbatim — any stray
-    token on stdout breaks it.
     """
     from spine import _resolve_slug, _consume_flag_value, _die
-    from shell_integration import cmd_cd, WorkspaceNotFoundError
+    from shell_integration import cmd_pwd, WorkspaceNotFoundError
 
     filtered = list(args)
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
 
     if not filtered:
-        print("camp cd: a slug is required\n  usage: camp cd <slug>", file=sys.stderr)
+        print("camp pwd: a slug is required\n  usage: camp pwd <slug>", file=sys.stderr)
         sys.exit(1)
 
-    slug = _resolve_slug(filtered[0], context="cd")
+    slug = _resolve_slug(filtered[0], context="pwd")
 
     try:
-        ws_dir = cmd_cd(group, slug, env=env)
+        ws_dir = cmd_pwd(group, slug, env=env)
     except WorkspaceNotFoundError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
@@ -1126,18 +1119,6 @@ def _cmd_inject_cli(args: list[str]) -> None:
         # Never crash a tool call.
         code = 0
     sys.exit(code)
-
-
-def _cmd_shellenv_cli() -> None:
-    """camp shellenv — emit the fish shell integration function on stdout.
-
-    Fish-only: no bash/zsh shim this pass (documented in README + SKILL.md).
-    """
-    from shell_integration import shellenv
-
-    # Print without a trailing newline beyond what the function text carries,
-    # so the output is exactly the function definition.
-    print(shellenv(), end="")
 
 
 def _author_group(
