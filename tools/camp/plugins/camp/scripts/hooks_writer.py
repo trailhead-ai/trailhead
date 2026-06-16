@@ -147,6 +147,24 @@ def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
     _save_settings(settings_path, data)
 
 
+def has_inject_drain_hook(workspace_dir: Path) -> bool:
+    """Return True if a PostToolUse `inject --drain` hook is installed.
+
+    Reads <workspace_dir>/.claude/settings.json (via the shared loader, so an
+    absent/unreadable file → False) and looks for any PostToolUse hook whose
+    command contains "inject --drain". This is the marker that the claude-hook
+    drain channel is actually wired — without it, an enqueued doc is never drained.
+    """
+    settings_path = workspace_dir / ".claude" / "settings.json"
+    data = _load_settings(settings_path)
+    post_tool_use = data.get("hooks", {}).get("PostToolUse", [])
+    for entry in post_tool_use:
+        for h in entry.get("hooks", []):
+            if "inject --drain" in (h.get("command") or ""):
+                return True
+    return False
+
+
 def write_hooks_for_member(repo_root: Path, camp_bin: str) -> None:
     """Write/update camp hook entries in <repo_root>/.claude/settings.json.
 

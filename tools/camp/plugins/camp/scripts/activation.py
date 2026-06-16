@@ -13,6 +13,7 @@ Hooks run shell=False (list-mode, D-F bootstrap-trust posture).
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -77,22 +78,36 @@ def _surface_member_doc(
     """Surface the member doc via the resolved inject strategy.
 
     "stdout"      → print the full doc to stdout (universal floor, unchanged).
-    "claude-hook" → enqueue the full doc to the workspace inject queue and print a
-                    concise stdout confirmation (the full doc loads on the next turn
-                    via the camp PostToolUse hook — NOT dumped to stdout here).
+    "claude-hook" → only if the PostToolUse `inject --drain` hook is actually
+                    installed in <workspace>/.claude/settings.json: enqueue the full
+                    doc to the workspace inject queue and print a concise stdout
+                    confirmation (the full doc loads on the next turn via the camp
+                    PostToolUse hook — NOT dumped to stdout here). If the drain hook
+                    is ABSENT, fall back to the stdout floor so the content still
+                    reaches the agent (no false "will load via hook" claim).
     """
     doc = _member_doc_content(member_name, wt_path)
 
     if inject == "claude-hook":
-        from inject import enqueue_doc
+        from hooks_writer import has_inject_drain_hook
 
-        enqueue_doc(workspace_dir, doc)
+        if has_inject_drain_hook(workspace_dir):
+            from inject import enqueue_doc
+
+            enqueue_doc(workspace_dir, doc)
+            print(
+                f"Entered `{member_name}`; its CLAUDE.md will load into context on the "
+                f"next turn via the camp PostToolUse hook."
+            )
+            return
         print(
-            f"Entered `{member_name}`; its CLAUDE.md will load into context on the "
-            f"next turn via the camp PostToolUse hook."
+            f"camp: claude-hook inject strategy selected but no PostToolUse "
+            f"`inject --drain` hook is installed in the workspace — printing "
+            f"`{member_name}` CLAUDE.md to stdout instead.",
+            file=sys.stderr,
         )
-    else:
-        print(doc, end="")
+
+    print(doc, end="")
 
 
 def enter_member(

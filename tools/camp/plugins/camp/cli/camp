@@ -1079,18 +1079,21 @@ def _cmd_inject_cli(args: list[str]) -> None:
 
     The PostToolUse hook handler for the claude-hook inject strategy. Reads the
     workspace inject queue and emits the Claude Code additionalContext JSON, then
-    clears the queue; an empty queue emits nothing. The workspace defaults to the
-    cwd (the session is rooted at the workspace dir), overridable via --workspace
-    (used by tests). Resilient: never crashes a tool call — any error → exit 0.
+    clears the queue; an empty queue emits nothing. Without --workspace, the
+    workspace root is located by walking UP from the cwd to the nearest ancestor
+    containing a `.camp/` dir — Claude Code runs PostToolUse hooks in the session's
+    current cwd, which may be a member worktree (<workspace>/<member>) rather than
+    the workspace root. If no `.camp/` ancestor is found, the cwd is drained as-is
+    (no-op safe). Resilient: never crashes a tool call — any error → exit 0.
     """
     from spine import _consume_flag_value
 
     rest = list(args)
     workspace = _consume_flag_value(rest, "--workspace")
-    ws_dir = Path(workspace) if workspace else Path.cwd()
 
     try:
-        from inject import drain_queue
+        from inject import drain_queue, find_workspace_root
+        ws_dir = Path(workspace) if workspace else find_workspace_root(Path.cwd())
         code = drain_queue(ws_dir)
     except Exception:
         # Never crash a tool call.

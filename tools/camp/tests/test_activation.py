@@ -926,12 +926,17 @@ def _ready_member_setup(tmp_path: Path, doc: str | None) -> tuple[str, str, str,
 
 
 def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> None:
-    """Under claude-hook, the full doc is enqueued, NOT dumped to stdout."""
+    """Under claude-hook WITH the drain hook installed, the full doc is enqueued,
+    NOT dumped to stdout."""
     from activation import enter_member
     from inject import queue_dir_for
+    from hooks_writer import write_workspace_inject_hook
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
+
+    # The drain hook must be present for the hook channel to be claimed.
+    write_workspace_inject_hook(ws_dir, "/abs/camp")
 
     # No [harness] block → claude default → claude-hook strategy.
     group = _make_group(group_name, member_name)
@@ -950,11 +955,15 @@ def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> No
 
 
 def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -> None:
-    """Under claude-hook, a concise confirmation naming the member is printed to stdout."""
+    """Under claude-hook WITH the drain hook installed, a concise confirmation
+    naming the member is printed to stdout."""
     from activation import enter_member
+    from hooks_writer import write_workspace_inject_hook
 
     doc = "# Member doc\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
+
+    write_workspace_inject_hook(ws_dir, "/abs/camp")
 
     group = _make_group(group_name, member_name)
     env = _env(tmp_path)
@@ -965,6 +974,33 @@ def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -
     assert member_name in captured.out
     # The confirmation should mention the inject hook channel.
     assert "next turn" in captured.out.lower() or "hook" in captured.out.lower()
+
+
+def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(
+    tmp_path: Path, capsys
+) -> None:
+    """BUG 5: claude-hook strategy but NO drain hook installed → fall back to
+    printing the full doc to stdout; no false 'will load via hook' claim."""
+    from activation import enter_member
+    from inject import queue_dir_for
+
+    doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
+    group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
+
+    # No drain hook written to <workspace>/.claude/settings.json.
+    group = _make_group(group_name, member_name)
+    env = _env(tmp_path)
+
+    enter_member(group, slug, member_name, env=env)
+
+    captured = capsys.readouterr()
+    # Content must still reach the agent — full doc on stdout.
+    assert "FULL-DOC-BODY-marker" in captured.out
+    # No false claim that it will load via the hook.
+    assert "next turn" not in captured.out.lower()
+    # Nothing relied on the (absent) drain — queue must not be the only delivery.
+    qdir = queue_dir_for(ws_dir)
+    assert not qdir.exists() or list(qdir.iterdir()) == []
 
 
 def test_enter_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:

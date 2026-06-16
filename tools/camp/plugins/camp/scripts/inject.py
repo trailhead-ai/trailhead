@@ -22,11 +22,16 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import uuid
 from pathlib import Path
 
 # Joiner between multiple queued docs in a single drain.
 _DOC_SEPARATOR = "\n\n---\n\n"
+
+# Zero-pad time_ns so filenames are lexically sortable in enqueue order.
+# 19 digits covers nanosecond timestamps well past the year 2200.
+_NS_WIDTH = 19
 
 
 def queue_dir_for(workspace_dir: Path) -> Path:
@@ -34,15 +39,34 @@ def queue_dir_for(workspace_dir: Path) -> Path:
     return Path(workspace_dir) / ".camp" / "inject_queue"
 
 
+def find_workspace_root(start: Path) -> Path:
+    """Walk UP from `start` to the nearest ancestor containing a `.camp/` dir.
+
+    The workspace root is marked by its `.camp/` directory; member worktrees are
+    subdirs of it, so a walk-up from `<workspace>/<member>/...` reliably finds
+    `<workspace>`. If no ancestor has a `.camp/`, return `start` unchanged (the
+    caller drains it as today — a no-op-safe fallback).
+    """
+    start = Path(start)
+    for candidate in (start, *start.parents):
+        if (candidate / ".camp").is_dir():
+            return candidate
+    return start
+
+
 def enqueue_doc(workspace_dir: Path, doc: str) -> Path:
     """Write `doc` to a fresh unique file in the workspace inject queue.
 
     One file per enqueue so concurrent / repeated `camp enter`s before a drain
-    are not lost. Returns the path of the written queue file.
+    are not lost. The filename is prefixed with a zero-padded monotonic
+    nanosecond timestamp so `sorted()` yields enqueue order; the uuid suffix
+    keeps filenames unique even if two enqueues land on the same `time_ns`.
+    Returns the path of the written queue file.
     """
     qdir = queue_dir_for(workspace_dir)
     qdir.mkdir(parents=True, exist_ok=True)
-    qfile = qdir / f"{uuid.uuid4().hex}.md"
+    prefix = str(time.time_ns()).zfill(_NS_WIDTH)
+    qfile = qdir / f"{prefix}-{uuid.uuid4().hex}.md"
     qfile.write_text(doc)
     return qfile
 
@@ -50,7 +74,8 @@ def enqueue_doc(workspace_dir: Path, doc: str) -> Path:
 def drain_queue(workspace_dir: Path) -> int:
     """Drain the inject queue → emit the PostToolUse JSON contract, then clear.
 
-    Reads every queued doc (sorted for stable ordering), emits the Claude Code
+    Reads every queued doc in enqueue order (filenames are time-prefixed so
+    `sorted()` yields the order they were enqueued), emits the Claude Code
     additionalContext JSON to stdout, and deletes the queue files. An empty queue
     emits nothing. Resilient: any internal error → exit 0, no output (never crash
     a tool call). Returns the exit code (always 0).

@@ -56,6 +56,23 @@ class TestEnqueue:
         files = list(queue_dir_for(ws).iterdir())
         assert len(files) == 2
 
+    def test_enqueue_unique_even_on_same_time_ns(self, tmp_path: Path):
+        """BUG 8: if two enqueues collide on the same time_ns, the uuid suffix
+        still keeps filenames unique — no overwrite."""
+        import unittest.mock as mock
+        from inject import enqueue_doc, queue_dir_for
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        with mock.patch("inject.time.time_ns", return_value=42):
+            enqueue_doc(ws, "doc-one")
+            enqueue_doc(ws, "doc-two")
+
+        files = list(queue_dir_for(ws).iterdir())
+        assert len(files) == 2
+        bodies = {f.read_text() for f in files}
+        assert bodies == {"doc-one", "doc-two"}
+
 
 # ---------------------------------------------------------------------------
 # drain
@@ -129,6 +146,21 @@ class TestDrain:
         assert "FIRST-DOC" in ctx
         assert "SECOND-DOC" in ctx
 
+    def test_drain_emits_docs_in_enqueue_order(self, tmp_path: Path):
+        """BUG 8: docs must surface in enqueue order A, B, C — not uuid-sorted order."""
+        from inject import enqueue_doc
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "DOC-A")
+        enqueue_doc(ws, "DOC-B")
+        enqueue_doc(ws, "DOC-C")
+
+        stdout, _ = _drain(ws)
+        parsed = json.loads(stdout)
+        ctx = parsed["hookSpecificOutput"]["additionalContext"]
+        assert ctx.index("DOC-A") < ctx.index("DOC-B") < ctx.index("DOC-C")
+
     def test_drain_empty_queue_no_output(self, tmp_path: Path):
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -167,6 +199,106 @@ def _run_cli(args: list[str], *, env: dict[str, str], cwd: Path) -> subprocess.C
         env=base,
         cwd=str(cwd),
     )
+
+
+# ---------------------------------------------------------------------------
+# BUG 3: workspace-root walk-up (drain locates the workspace, not Path.cwd())
+# ---------------------------------------------------------------------------
+
+
+class TestFindWorkspaceRoot:
+    def test_finds_nearest_ancestor_with_camp_dir(self, tmp_path: Path):
+        from inject import find_workspace_root
+
+        ws = tmp_path / "ws"
+        (ws / ".camp").mkdir(parents=True)
+        member_subdir = ws / "member" / "sub" / "dir"
+        member_subdir.mkdir(parents=True)
+
+        assert find_workspace_root(member_subdir) == ws
+
+    def test_returns_start_when_no_camp_ancestor(self, tmp_path: Path):
+        from inject import find_workspace_root
+
+        nowhere = tmp_path / "nowhere" / "deep"
+        nowhere.mkdir(parents=True)
+
+        assert find_workspace_root(nowhere) == nowhere
+
+    def test_returns_self_when_start_is_workspace_root(self, tmp_path: Path):
+        from inject import find_workspace_root
+
+        ws = tmp_path / "ws"
+        (ws / ".camp").mkdir(parents=True)
+
+        assert find_workspace_root(ws) == ws
+
+
+class TestInjectCliWalkUp:
+    def test_drain_from_member_subdir_finds_workspace_queue(self, tmp_path: Path):
+        """BUG 3: cwd = <workspace>/<member> still drains <workspace>/.camp queue."""
+        from inject import enqueue_doc
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "WALKUP-DOC-marker")
+        member = ws / "member"
+        member.mkdir()
+
+        result = _run_cli(["inject", "--drain"], env={}, cwd=member)
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert "WALKUP-DOC-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+
+    def test_drain_from_deep_member_subdir_finds_workspace_queue(self, tmp_path: Path):
+        """BUG 3: cwd = <workspace>/<member>/sub/dir still drains the workspace queue."""
+        from inject import enqueue_doc
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "DEEP-DOC-marker")
+        deep = ws / "member" / "sub" / "dir"
+        deep.mkdir(parents=True)
+
+        result = _run_cli(["inject", "--drain"], env={}, cwd=deep)
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert "DEEP-DOC-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+
+    def test_drain_from_workspace_root_still_works(self, tmp_path: Path):
+        """BUG 3: cwd = workspace root still drains its own queue."""
+        from inject import enqueue_doc
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "ROOT-DOC-marker")
+
+        result = _run_cli(["inject", "--drain"], env={}, cwd=ws)
+        assert result.returncode == 0
+        parsed = json.loads(result.stdout)
+        assert "ROOT-DOC-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+
+    def test_drain_with_no_camp_ancestor_no_output(self, tmp_path: Path):
+        """BUG 3: cwd nowhere near a .camp → no output, exit 0 (no-op safe)."""
+        nowhere = tmp_path / "nowhere" / "deep"
+        nowhere.mkdir(parents=True)
+
+        result = _run_cli(["inject", "--drain"], env={}, cwd=nowhere)
+        assert result.returncode == 0
+        assert result.stdout == ""
+
+    def test_drain_walkup_clears_workspace_queue(self, tmp_path: Path):
+        """BUG 3: draining from a member subdir clears the workspace queue."""
+        from inject import enqueue_doc, queue_dir_for
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "doc")
+        member = ws / "member"
+        member.mkdir()
+
+        _run_cli(["inject", "--drain"], env={}, cwd=member)
+        assert list(queue_dir_for(ws).iterdir()) == []
 
 
 class TestInjectCli:

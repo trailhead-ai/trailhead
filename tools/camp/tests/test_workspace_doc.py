@@ -536,6 +536,36 @@ class TestWorkspaceInjectHook:
         assert any("inject --drain" in c for c in self._commands(data, "PostToolUse"))
 
 
+class TestHasInjectDrainHook:
+    """BUG 5: detecting whether the PostToolUse inject --drain hook is installed."""
+
+    def test_true_when_drain_hook_installed(self, tmp_path: Path):
+        from hooks_writer import has_inject_drain_hook, write_workspace_inject_hook
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        write_workspace_inject_hook(ws_dir, "/usr/local/bin/camp")
+
+        assert has_inject_drain_hook(ws_dir) is True
+
+    def test_false_when_no_settings_file(self, tmp_path: Path):
+        from hooks_writer import has_inject_drain_hook
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+
+        assert has_inject_drain_hook(ws_dir) is False
+
+    def test_false_when_only_session_start_hook(self, tmp_path: Path):
+        from hooks_writer import has_inject_drain_hook, write_workspace_hooks
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        write_workspace_hooks(ws_dir, "/usr/local/bin/camp")
+
+        assert has_inject_drain_hook(ws_dir) is False
+
+
 # ---------------------------------------------------------------------------
 # Test 4: bring_up_workspace integration
 # ---------------------------------------------------------------------------
