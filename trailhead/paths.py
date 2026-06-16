@@ -23,15 +23,6 @@ Per-OS resolution (mirrors platformdirs conventions):
     state   → ~/.local/state/<app>
     cache   → ~/.cache/<app>
 
-    Legacy-install fallback: earlier trailhead releases stored macOS data under
-    ~/Library/Application Support/<app> (config + state) and ~/Library/Caches/<app>
-    (cache). To avoid orphaning an existing install when we flipped to XDG, the
-    macOS resolvers fall back to the legacy path IFF the new XDG path does not yet
-    exist AND the legacy path does. New installs always land in the XDG location;
-    set an XDG_* var or the per-app override to opt out of the fallback entirely.
-    This is the one place a resolver's return value depends on what is on disk —
-    it is a read-only existence check, never a write.
-
   Windows (sys.platform == "win32"):
     config  → %APPDATA%/<app>
     state   → %LOCALAPPDATA%/<app>
@@ -132,20 +123,6 @@ def _xdg_override(var_name: str, env: dict[str, str]) -> Path | None:
     return _validate_env_override(value, var_name)
 
 
-def _prefer_legacy_if_only_legacy_exists(new: Path, legacy: Path) -> Path:
-    """Pick the legacy macOS path only to avoid orphaning an existing install.
-
-    Returns ``legacy`` IFF the basedir-spec ``new`` path does not exist yet AND
-    ``legacy`` does; otherwise returns ``new``. This is a read-only existence
-    check — it never creates or moves anything (the resolver-purity contract).
-    New installs (neither path present) and migrated installs (``new`` present)
-    both resolve to ``new``.
-    """
-    if not new.exists() and legacy.exists():
-        return legacy
-    return new
-
-
 # ---------------------------------------------------------------------------
 # Public API — resolver functions (pure, never create dirs)
 # ---------------------------------------------------------------------------
@@ -203,9 +180,8 @@ def state_dir(
 
     Pure: returns a Path, never creates anything on disk.
 
-    macOS note: state defaults to ~/.local/state/<app> (basedir spec), with a
-    read-only fallback to the legacy ~/Library/Application Support/<app> when only
-    that exists. See the module docstring for the full fallback rule.
+    macOS note: state defaults to ~/.local/state/<app> (basedir spec), mirroring
+    Linux. See the module docstring for the full per-OS table.
 
     Args:
         app:      Application name. Must not contain path separators or '..'.
@@ -329,39 +305,27 @@ def _linux_cache(app: str, env: dict[str, str]) -> Path:
 
 
 def _macos_config(app: str, env: dict[str, str]) -> Path:
-    # basedir spec on macOS: default to ~/.config, mirroring Linux. Fall back to
-    # the legacy ~/Library/Application Support only to keep an existing install alive.
+    # basedir spec on macOS: default to ~/.config, mirroring Linux.
     xdg = _xdg_override("XDG_CONFIG_HOME", env)
     if xdg is not None:
         return xdg / app
-    home = _home(env, "config directory")
-    new = home / ".config" / app
-    legacy = home / "Library" / "Application Support" / app
-    return _prefer_legacy_if_only_legacy_exists(new, legacy)
+    return _home(env, "config directory") / ".config" / app
 
 
 def _macos_state(app: str, env: dict[str, str]) -> Path:
-    # basedir spec on macOS: default to ~/.local/state, mirroring Linux. Legacy
-    # installs stored state alongside config under ~/Library/Application Support.
+    # basedir spec on macOS: default to ~/.local/state, mirroring Linux.
     xdg = _xdg_override("XDG_STATE_HOME", env)
     if xdg is not None:
         return xdg / app
-    home = _home(env, "state directory")
-    new = home / ".local" / "state" / app
-    legacy = home / "Library" / "Application Support" / app
-    return _prefer_legacy_if_only_legacy_exists(new, legacy)
+    return _home(env, "state directory") / ".local" / "state" / app
 
 
 def _macos_cache(app: str, env: dict[str, str]) -> Path:
-    # basedir spec on macOS: default to ~/.cache, mirroring Linux. Legacy installs
-    # stored cache under ~/Library/Caches.
+    # basedir spec on macOS: default to ~/.cache, mirroring Linux.
     xdg = _xdg_override("XDG_CACHE_HOME", env)
     if xdg is not None:
         return xdg / app
-    home = _home(env, "cache directory")
-    new = home / ".cache" / app
-    legacy = home / "Library" / "Caches" / app
-    return _prefer_legacy_if_only_legacy_exists(new, legacy)
+    return _home(env, "cache directory") / ".cache" / app
 
 
 def _windows_config(app: str, env: dict[str, str]) -> Path:

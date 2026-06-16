@@ -69,9 +69,9 @@ deliberate departure from the macOS-native `~/Library/Application Support` layou
 - All path resolution goes through [`trailhead/paths.py`](../trailhead/paths.py).
   Never hand-roll a `~/Library/...` or `~/.config/...` path elsewhere — call
   `config_dir` / `state_dir` / `cache_dir`.
-- Existing macOS installs are not orphaned: the resolver falls back to the legacy
-  `~/Library` location read-only, *iff the XDG path doesn't exist yet and the
-  legacy one does*. New installs always land in the XDG location. See
+- macOS resolves to the XDG layout unconditionally — never `~/Library`. An earlier
+  release carried a one-time read-only fallback to the legacy `~/Library` location
+  so pre-XDG installs weren't orphaned; it has since been removed. See
   [`docs/paths.md`](./paths.md) for the full contract.
 
 ## 5. Agents are the primary developers of trailhead
