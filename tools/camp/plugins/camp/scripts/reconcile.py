@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -173,17 +174,29 @@ def _fetch_base(
     "/". A non-remote base (no "/") is a local ref and skips the fetch. A
     subprocess.TimeoutExpired propagates so the caller fails that member rather
     than hanging on an unreachable remote.
+
+    A non-timeout fetch FAILURE (auth reject, bad URL, ref absent, host down) is
+    fatal ONLY when the base ref does not already resolve locally: in that case
+    branching off HEAD would silently put the member on the wrong base, so we
+    raise ReconcileError (the caller flips the member to failed + reason). If the
+    base ref already resolves locally (cached from a prior fetch), a fetch failure
+    is non-fatal — proceed with the cached ref.
     """
     remote, _, ref = base.partition("/")
     if not ref:
         return  # local ref — nothing to fetch
-    subprocess.run(
+    result = subprocess.run(
         ["git", "-C", str(repo_root), "fetch", remote, ref],
         capture_output=True,
         text=True,
         check=False,
         timeout=timeout,
     )
+    if result.returncode != 0 and not _ref_resolves(repo_root, base):
+        raise ReconcileError(
+            f"camp: git fetch failed for base {base!r} in {repo_root} and the ref "
+            f"does not resolve locally: {result.stderr.strip() or result.stdout.strip()}"
+        )
 
 
 def _add_worktree_for_member(
@@ -508,6 +521,24 @@ def reconcile_break(
     # Do NOT leave a manifest listing members whose worktrees are already removed.
     if not errors:
         remove_central_manifest(mpath)
+        # Remove the now-camp-owned workspace dir itself (.camp, .claude,
+        # setup.log, .session.lock, doc files). Leaving it behind makes the next
+        # `camp ai <slug>` see ws_dir.exists() True and wrongly resume a
+        # torn-down session. Confinement: the resolved workspace dir MUST sit
+        # under the resolved worktrees root (central_state_dir/worktrees) anchored
+        # independently of ws_dir — never rmtree an unconfined path (symlink
+        # escape, old layout, etc.).
+        if ws_dir.exists():
+            from group_resolve import central_state_dir
+            worktrees_root = (central_state_dir(group_name, env=env) / "worktrees").resolve()
+            try:
+                ws_resolved.relative_to(worktrees_root)
+            except ValueError:
+                raise ConfinementError(
+                    f"camp: workspace dir {ws_dir} resolves outside the worktrees "
+                    f"root {worktrees_root} — refusing removal"
+                )
+            shutil.rmtree(ws_resolved)
         status = "ok"
     else:
         # Some removals failed. Update the manifest to reflect reality:

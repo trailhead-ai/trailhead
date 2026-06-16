@@ -229,10 +229,11 @@ def provision_member(
     base = member.get("base") or DEFAULT_BASE
     wt_path = workspace_dir(group_name, slug, env=env) / member["name"]
 
-    # Fetch the base ref under a timeout (deferred from Slice 2). A timeout or
-    # fetch failure does not abort if the base already resolves locally; the
-    # subsequent add falls back to HEAD. But a TimeoutExpired propagates so an
-    # unreachable remote fails the member.
+    # Fetch the base ref under a timeout (deferred from Slice 2). A TimeoutExpired
+    # propagates so an unreachable remote fails the member. A non-timeout fetch
+    # failure is fatal only when the base ref does not already resolve locally
+    # (raising ReconcileError) — otherwise branching off HEAD would silently put
+    # the member on the wrong base; a cached, locally-resolving base proceeds.
     reconcile._fetch_base(repo_root, base, timeout=FETCH_TIMEOUT_SECONDS)
     _add_worktree_for_member(member, wt_path, branch, repo_root, base=base)
     _run_bootstrap(member, wt_path)

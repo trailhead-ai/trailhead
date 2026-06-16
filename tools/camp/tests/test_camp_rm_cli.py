@@ -47,6 +47,12 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
                    check=True, capture_output=True)
+    # Self-origin so the configured base `origin/main` resolves locally (a real
+    # member always has a fetchable/resolvable base).
+    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", str(path)],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "fetch", "origin", "--quiet"],
+                   check=True, capture_output=True)
 
 
 def _wait_provisioned(manifest_path: Path, members: list[str], timeout: float = 20.0) -> None:
