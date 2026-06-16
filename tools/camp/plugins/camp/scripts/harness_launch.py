@@ -37,6 +37,19 @@ def _substitute(token: str, *, slug: str, workspace: str) -> str:
     return token.format(slug=slug, workspace=workspace)
 
 
+def resolve_doc_files(group: dict[str, Any]) -> list[str]:
+    """Resolve the workspace doc filenames to write.
+
+    Returns the list of filenames from harness.doc_files when configured,
+    or ["CLAUDE.md"] as the baked-in claude default (matches how resolve_launch
+    falls back: harness = group.get("harness") or _CLAUDE_DEFAULT).
+    """
+    harness = group.get("harness")
+    if harness and "doc_files" in harness:
+        return list(harness["doc_files"])
+    return ["CLAUDE.md"]
+
+
 def resolve_launch(
     group: dict[str, Any],
     slug: str,

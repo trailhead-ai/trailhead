@@ -347,7 +347,29 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
         )
     _reject_unknown_placeholders(cwd, path=path, where="harness.cwd")
 
-    return {"new": new, "resume": resume, "cwd": cwd}
+    result: dict[str, Any] = {"new": new, "resume": resume, "cwd": cwd}
+
+    doc_files_raw = raw.get("doc_files")
+    if doc_files_raw is not None:
+        if not isinstance(doc_files_raw, list) or len(doc_files_raw) == 0:
+            raise GroupConfigError(
+                f"{path}: harness.doc_files must be a non-empty list of strings "
+                "(workspace doc filenames, e.g. [\"CLAUDE.md\"] or [\"AGENTS.md\"])"
+            )
+        for i, token in enumerate(doc_files_raw):
+            if not isinstance(token, str):
+                raise GroupConfigError(
+                    f"{path}: harness.doc_files[{i}] must be a string, "
+                    f"got {type(token).__name__!r}"
+                )
+            if not token.strip():
+                raise GroupConfigError(
+                    f"{path}: harness.doc_files[{i}] is empty or whitespace-only — "
+                    "empty doc_files tokens mask misconfiguration"
+                )
+        result["doc_files"] = list(doc_files_raw)
+
+    return result
 
 
 def load_all_groups(groups_dir: Path) -> list[dict[str, Any]]:

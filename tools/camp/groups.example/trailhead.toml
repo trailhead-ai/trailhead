@@ -38,3 +38,15 @@ bootstrap = []
 
 [branch]
 pattern = "worktree-{slug}"
+
+# [harness] — optional launch-seam config.
+#
+# camp defaults to the claude harness (writes CLAUDE.md as the workspace doc).
+# Override doc_files when using a different AI coding tool:
+#
+#   [harness]
+#   # For Codex, Copilot, or Cursor — they read AGENTS.md as the workspace doc.
+#   # doc_files = ["AGENTS.md"]
+#
+# You can also supply both to support multiple tools simultaneously:
+#   # doc_files = ["AGENTS.md", "CLAUDE.md"]

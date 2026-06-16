@@ -1,10 +1,15 @@
-"""Write camp-owned workspace docs (CLAUDE.md + AGENT.md) at the workspace root.
+"""Write camp-owned workspace docs at the workspace root.
 
-Both files are written idempotently — calling write_workspace_doc twice with the
+The filenames written are determined by harness.doc_files in the group config
+(via resolve_doc_files). The claude default (no [harness] block, or block without
+doc_files) writes only CLAUDE.md. A Codex/Copilot/Cursor harness can configure
+doc_files = ["AGENTS.md"] to write AGENTS.md instead.
+
+All files are written idempotently — calling write_workspace_doc twice with the
 same inputs produces identical output with no duplication or appending.
 
-The docs embed:
-  - the member list (each member name)
+The doc embeds:
+  - the member list (each member name, in a ## Members bulleted block)
   - a verbatim, invocable command table with exact strings:
       camp enter <member>   -- activate a member for the current session
       camp status           -- check provisioning status
@@ -17,12 +22,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from harness_launch import resolve_doc_files
+
 
 def _render_doc(
     group: dict[str, Any],
     slug: str,
 ) -> str:
-    """Render the workspace doc content for CLAUDE.md and AGENT.md.
+    """Render the workspace doc content.
 
     The content is deterministic for the same group + slug inputs.
     """
@@ -65,8 +72,6 @@ before acting on any member.
 3. Run `camp enter <member>` to activate a member — this prints its CLAUDE.md
    and marks it active for the session.
 4. Work in the activated member's worktree directory.
-
-Members: {', '.join(member_names)}
 """
 
 
@@ -75,10 +80,12 @@ def write_workspace_doc(
     group: dict[str, Any],
     slug: str,
 ) -> None:
-    """Write CLAUDE.md and AGENT.md at the workspace root.
+    """Write workspace doc file(s) at the workspace root.
 
-    Idempotent: both files are fully rewritten on each call, so the result
-    is always stable for the same inputs with no duplication.
+    The filenames written are resolved from group's harness.doc_files config
+    via resolve_doc_files (defaults to ["CLAUDE.md"] for the claude harness).
+    All files receive identical rendered content. Idempotent: files are fully
+    rewritten on each call, so the result is always stable for the same inputs.
 
     Args:
         workspace_dir: Absolute path to the workspace root directory.
@@ -86,5 +93,5 @@ def write_workspace_doc(
         slug:          The workspace slug (used in the doc header).
     """
     content = _render_doc(group, slug)
-    (workspace_dir / "CLAUDE.md").write_text(content)
-    (workspace_dir / "AGENT.md").write_text(content)
+    for filename in resolve_doc_files(group):
+        (workspace_dir / filename).write_text(content)

@@ -52,8 +52,11 @@ if str(_SCRIPTS_DIR) not in sys.path:
 # ---------------------------------------------------------------------------
 
 
-def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
-    return {"group": {"name": name}, "members": members, "branch_pattern": branch_pattern}
+def _make_group_config(name, members, *, branch_pattern="worktree-{slug}", harness=None):
+    cfg = {"group": {"name": name}, "members": members, "branch_pattern": branch_pattern}
+    if harness is not None:
+        cfg["harness"] = harness
+    return cfg
 
 
 def _camp_state_env(tmp_path: Path) -> dict[str, str]:
@@ -85,8 +88,8 @@ class TestWorkspaceDocFiles:
 
         assert (ws_dir / "CLAUDE.md").is_file()
 
-    def test_agent_md_written(self, tmp_path: Path):
-        """write_workspace_doc writes AGENT.md at the workspace root."""
+    def test_agent_md_not_written_by_default(self, tmp_path: Path):
+        """write_workspace_doc (claude default, no [harness]) does NOT write AGENT.md."""
         from workspace_doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
@@ -99,7 +102,9 @@ class TestWorkspaceDocFiles:
         )
         write_workspace_doc(ws_dir, group, "feat-x")
 
-        assert (ws_dir / "AGENT.md").is_file()
+        assert not (ws_dir / "AGENT.md").exists(), (
+            "AGENT.md should NOT be written when no [harness] doc_files is configured"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +113,7 @@ class TestWorkspaceDocFiles:
 
 
 class TestWorkspaceDocCommandTable:
-    def _get_docs(self, tmp_path: Path):
+    def _get_claude_md(self, tmp_path: Path) -> str:
         from workspace_doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
@@ -121,11 +126,11 @@ class TestWorkspaceDocCommandTable:
             ],
         )
         write_workspace_doc(ws_dir, group, "feat-x")
-        return (ws_dir / "CLAUDE.md").read_text(), (ws_dir / "AGENT.md").read_text()
+        return (ws_dir / "CLAUDE.md").read_text()
 
     def test_claude_md_contains_camp_enter_exact(self, tmp_path: Path):
         """CLAUDE.md contains the exact string 'camp enter <member>'."""
-        content, _ = self._get_docs(tmp_path)
+        content = self._get_claude_md(tmp_path)
         assert "camp enter <member>" in content, (
             f"Expected 'camp enter <member>' in CLAUDE.md, not found.\n"
             f"Content:\n{content}"
@@ -133,7 +138,7 @@ class TestWorkspaceDocCommandTable:
 
     def test_claude_md_contains_camp_status_exact(self, tmp_path: Path):
         """CLAUDE.md contains the exact string 'camp status'."""
-        content, _ = self._get_docs(tmp_path)
+        content = self._get_claude_md(tmp_path)
         assert "camp status" in content, (
             f"Expected 'camp status' in CLAUDE.md, not found.\n"
             f"Content:\n{content}"
@@ -141,33 +146,27 @@ class TestWorkspaceDocCommandTable:
 
     def test_claude_md_contains_camp_setup_retry_exact(self, tmp_path: Path):
         """CLAUDE.md contains the exact string 'camp setup --retry'."""
-        content, _ = self._get_docs(tmp_path)
+        content = self._get_claude_md(tmp_path)
         assert "camp setup --retry" in content, (
             f"Expected 'camp setup --retry' in CLAUDE.md, not found.\n"
             f"Content:\n{content}"
         )
 
-    def test_agent_md_contains_camp_enter_exact(self, tmp_path: Path):
-        """AGENT.md contains the exact string 'camp enter <member>'."""
-        _, content = self._get_docs(tmp_path)
+    def test_configured_agents_md_contains_camp_enter_exact(self, tmp_path: Path):
+        """When doc_files=[AGENTS.md], that file contains 'camp enter <member>'."""
+        from workspace_doc import write_workspace_doc
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        group = _make_group_config(
+            "mygroup",
+            [{"name": "repo_a", "repo_root": str(tmp_path / "repo_a"), "bootstrap": []}],
+            harness={"doc_files": ["AGENTS.md"]},
+        )
+        write_workspace_doc(ws_dir, group, "feat-x")
+        content = (ws_dir / "AGENTS.md").read_text()
         assert "camp enter <member>" in content, (
-            f"Expected 'camp enter <member>' in AGENT.md, not found.\n"
-            f"Content:\n{content}"
-        )
-
-    def test_agent_md_contains_camp_status_exact(self, tmp_path: Path):
-        """AGENT.md contains the exact string 'camp status'."""
-        _, content = self._get_docs(tmp_path)
-        assert "camp status" in content, (
-            f"Expected 'camp status' in AGENT.md, not found.\n"
-            f"Content:\n{content}"
-        )
-
-    def test_agent_md_contains_camp_setup_retry_exact(self, tmp_path: Path):
-        """AGENT.md contains the exact string 'camp setup --retry'."""
-        _, content = self._get_docs(tmp_path)
-        assert "camp setup --retry" in content, (
-            f"Expected 'camp setup --retry' in AGENT.md, not found.\n"
+            f"Expected 'camp enter <member>' in AGENTS.md, not found.\n"
             f"Content:\n{content}"
         )
 
@@ -198,8 +197,8 @@ class TestWorkspaceDocMemberList:
         for name in ("alpha", "beta", "gamma"):
             assert name in content, f"Member {name!r} missing from CLAUDE.md"
 
-    def test_agent_md_contains_all_member_names(self, tmp_path: Path):
-        """AGENT.md lists all member names."""
+    def test_configured_agents_md_contains_all_member_names(self, tmp_path: Path):
+        """When doc_files=[AGENTS.md], that file lists all member names."""
         from workspace_doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
@@ -210,12 +209,13 @@ class TestWorkspaceDocMemberList:
                 {"name": "alpha", "repo_root": str(tmp_path / "alpha"), "bootstrap": []},
                 {"name": "beta", "repo_root": str(tmp_path / "beta"), "bootstrap": []},
             ],
+            harness={"doc_files": ["AGENTS.md"]},
         )
         write_workspace_doc(ws_dir, group, "feat-x")
 
-        content = (ws_dir / "AGENT.md").read_text()
+        content = (ws_dir / "AGENTS.md").read_text()
         for name in ("alpha", "beta"):
-            assert name in content, f"Member {name!r} missing from AGENT.md"
+            assert name in content, f"Member {name!r} missing from AGENTS.md"
 
 
 # ---------------------------------------------------------------------------
@@ -288,8 +288,8 @@ class TestWorkspaceDocIdempotent:
             "CLAUDE.md content changed on second write (not idempotent)"
         )
 
-    def test_agent_md_no_duplication_on_second_write(self, tmp_path: Path):
-        """Writing twice produces identical AGENT.md — no duplication."""
+    def test_configured_agents_md_no_duplication_on_second_write(self, tmp_path: Path):
+        """Writing twice with doc_files=[AGENTS.md] produces identical AGENTS.md."""
         from workspace_doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
@@ -297,15 +297,16 @@ class TestWorkspaceDocIdempotent:
         group = _make_group_config(
             "mygroup",
             [{"name": "repo_a", "repo_root": str(tmp_path / "repo_a"), "bootstrap": []}],
+            harness={"doc_files": ["AGENTS.md"]},
         )
         write_workspace_doc(ws_dir, group, "feat-x")
-        first = (ws_dir / "AGENT.md").read_text()
+        first = (ws_dir / "AGENTS.md").read_text()
 
         write_workspace_doc(ws_dir, group, "feat-x")
-        second = (ws_dir / "AGENT.md").read_text()
+        second = (ws_dir / "AGENTS.md").read_text()
 
         assert first == second, (
-            "AGENT.md content changed on second write (not idempotent)"
+            "AGENTS.md content changed on second write (not idempotent)"
         )
 
     def test_stable_content_for_same_inputs(self, tmp_path: Path):
@@ -478,8 +479,8 @@ class TestBringUpWorkspaceIntegration:
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc"
         assert (ws_dir / "CLAUDE.md").is_file(), "CLAUDE.md missing after bring_up_workspace"
 
-    def test_bring_up_creates_agent_md(self, tmp_path: Path):
-        """bring_up_workspace writes AGENT.md at the workspace root."""
+    def test_bring_up_does_not_create_agent_md_by_default(self, tmp_path: Path):
+        """bring_up_workspace (claude default) does NOT write AGENT.md."""
         from provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
@@ -494,7 +495,9 @@ class TestBringUpWorkspaceIntegration:
 
         from group_resolve import central_state_dir
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc2"
-        assert (ws_dir / "AGENT.md").is_file(), "AGENT.md missing after bring_up_workspace"
+        assert not (ws_dir / "AGENT.md").exists(), (
+            "AGENT.md should NOT be written by default (no doc_files configured)"
+        )
 
     def test_bring_up_creates_workspace_settings(self, tmp_path: Path):
         """bring_up_workspace writes workspace .claude/settings.json with SessionStart hook."""
@@ -572,3 +575,262 @@ class TestBringUpWorkspaceIntegration:
 
         second_claude = (ws_dir / "CLAUDE.md").read_text()
         assert first_claude == second_claude, "CLAUDE.md duplicated on second bring-up"
+
+
+# ---------------------------------------------------------------------------
+# Slice 8: doc_files / resolve_doc_files + 7b Members-line removal
+# ---------------------------------------------------------------------------
+
+
+class TestResolveDocFiles:
+    """Unit tests for harness_launch.resolve_doc_files."""
+
+    def test_no_harness_returns_claude_md(self):
+        """No [harness] block → resolve_doc_files returns ['CLAUDE.md']."""
+        from harness_launch import resolve_doc_files
+
+        group = {"group": {"name": "g"}, "members": []}
+        assert resolve_doc_files(group) == ["CLAUDE.md"]
+
+    def test_harness_without_doc_files_returns_claude_md(self):
+        """[harness] block without doc_files → ['CLAUDE.md']."""
+        from harness_launch import resolve_doc_files
+
+        group = {
+            "group": {"name": "g"},
+            "members": [],
+            "harness": {
+                "new": ["claude"],
+                "resume": ["claude", "-r", "{slug}"],
+                "cwd": "{workspace}",
+            },
+        }
+        assert resolve_doc_files(group) == ["CLAUDE.md"]
+
+    def test_configured_doc_files_returned(self):
+        """Configured doc_files is returned as-is."""
+        from harness_launch import resolve_doc_files
+
+        group = {
+            "group": {"name": "g"},
+            "members": [],
+            "harness": {"doc_files": ["AGENTS.md"]},
+        }
+        assert resolve_doc_files(group) == ["AGENTS.md"]
+
+    def test_multiple_doc_files_returned(self):
+        """Multiple configured doc_files are all returned."""
+        from harness_launch import resolve_doc_files
+
+        group = {
+            "group": {"name": "g"},
+            "members": [],
+            "harness": {"doc_files": ["AGENTS.md", "CLAUDE.md"]},
+        }
+        assert resolve_doc_files(group) == ["AGENTS.md", "CLAUDE.md"]
+
+
+class TestWriteWorkspaceDocFiles:
+    """Tests for write_workspace_doc file-selection behavior (Slice 8)."""
+
+    def test_default_writes_only_claude_md(self, tmp_path: Path):
+        """No [harness] config → only CLAUDE.md written, AGENT.md not written."""
+        from workspace_doc import write_workspace_doc
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        group = _make_group_config(
+            "g",
+            [{"name": "r", "repo_root": "/tmp/r", "bootstrap": []}],
+        )
+        write_workspace_doc(ws_dir, group, "s")
+
+        assert (ws_dir / "CLAUDE.md").is_file()
+        assert not (ws_dir / "AGENT.md").exists()
+        assert not (ws_dir / "AGENTS.md").exists()
+
+    def test_configured_agents_md_writes_agents_md_only(self, tmp_path: Path):
+        """doc_files=['AGENTS.md'] → AGENTS.md written, CLAUDE.md not written."""
+        from workspace_doc import write_workspace_doc
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        group = _make_group_config(
+            "g",
+            [{"name": "r", "repo_root": "/tmp/r", "bootstrap": []}],
+            harness={"doc_files": ["AGENTS.md"]},
+        )
+        write_workspace_doc(ws_dir, group, "s")
+
+        assert (ws_dir / "AGENTS.md").is_file()
+        assert not (ws_dir / "CLAUDE.md").exists()
+
+    def test_configured_both_writes_both(self, tmp_path: Path):
+        """doc_files=['AGENTS.md','CLAUDE.md'] → both files written."""
+        from workspace_doc import write_workspace_doc
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        group = _make_group_config(
+            "g",
+            [{"name": "r", "repo_root": "/tmp/r", "bootstrap": []}],
+            harness={"doc_files": ["AGENTS.md", "CLAUDE.md"]},
+        )
+        write_workspace_doc(ws_dir, group, "s")
+
+        assert (ws_dir / "AGENTS.md").is_file()
+        assert (ws_dir / "CLAUDE.md").is_file()
+
+    def test_each_doc_has_same_content(self, tmp_path: Path):
+        """All written doc files have identical rendered content."""
+        from workspace_doc import write_workspace_doc
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        group = _make_group_config(
+            "g",
+            [{"name": "r", "repo_root": "/tmp/r", "bootstrap": []}],
+            harness={"doc_files": ["AGENTS.md", "CLAUDE.md"]},
+        )
+        write_workspace_doc(ws_dir, group, "s")
+
+        agents_content = (ws_dir / "AGENTS.md").read_text()
+        claude_content = (ws_dir / "CLAUDE.md").read_text()
+        assert agents_content == claude_content
+
+
+class TestRenderedDocMembersLine:
+    """Slice 8 7b: the trailing 'Members: ...' line must be removed."""
+
+    def _get_content(self, tmp_path: Path, member_names=None) -> str:
+        from workspace_doc import write_workspace_doc
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        members = [
+            {"name": n, "repo_root": f"/tmp/{n}", "bootstrap": []}
+            for n in (member_names or ["alpha", "beta"])
+        ]
+        group = _make_group_config("g", members)
+        write_workspace_doc(ws_dir, group, "slug")
+        return (ws_dir / "CLAUDE.md").read_text()
+
+    def test_no_bare_members_line(self, tmp_path: Path):
+        """Rendered doc must NOT contain a line starting with 'Members:'."""
+        content = self._get_content(tmp_path)
+        for line in content.splitlines():
+            assert not line.startswith("Members:"), (
+                f"Found redundant 'Members:' line in rendered doc: {line!r}\n"
+                f"Full content:\n{content}"
+            )
+
+    def test_members_section_heading_retained(self, tmp_path: Path):
+        """Rendered doc retains the '## Members' section heading."""
+        content = self._get_content(tmp_path)
+        assert "## Members" in content, (
+            f"'## Members' heading missing from rendered doc.\nContent:\n{content}"
+        )
+
+    def test_member_names_still_listed(self, tmp_path: Path):
+        """Member names are still present in the ## Members block."""
+        content = self._get_content(tmp_path, member_names=["alpha", "beta"])
+        assert "alpha" in content
+        assert "beta" in content
+
+
+class TestGroupConfigDocFiles:
+    """group_config validates doc_files when present."""
+
+    def _toml_with_doc_files(self, doc_files_toml: str) -> str:
+        return f"""\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[harness]
+new = ["claude"]
+resume = ["claude", "-r", "{{slug}}"]
+doc_files = {doc_files_toml}
+"""
+
+    def test_valid_doc_files_loads(self, tmp_path: Path):
+        """A valid doc_files list is accepted and returned."""
+        from group_config import load_group
+
+        f = tmp_path / "g.toml"
+        f.write_text(self._toml_with_doc_files('["AGENTS.md"]'))
+        cfg = load_group(f)
+        assert cfg["harness"]["doc_files"] == ["AGENTS.md"]
+
+    def test_doc_files_multiple_accepted(self, tmp_path: Path):
+        """Multiple doc_files entries are accepted."""
+        from group_config import load_group
+
+        f = tmp_path / "g.toml"
+        f.write_text(self._toml_with_doc_files('["AGENTS.md", "CLAUDE.md"]'))
+        cfg = load_group(f)
+        assert cfg["harness"]["doc_files"] == ["AGENTS.md", "CLAUDE.md"]
+
+    def test_empty_list_raises(self, tmp_path: Path):
+        """An empty doc_files list → GroupConfigError."""
+        from group_config import GroupConfigError, load_group
+
+        f = tmp_path / "g.toml"
+        f.write_text(self._toml_with_doc_files("[]"))
+        with pytest.raises(GroupConfigError) as exc_info:
+            load_group(f)
+        assert "doc_files" in str(exc_info.value)
+
+    def test_whitespace_token_raises(self, tmp_path: Path):
+        """A whitespace-only token in doc_files → GroupConfigError."""
+        from group_config import GroupConfigError, load_group
+
+        f = tmp_path / "g.toml"
+        f.write_text(self._toml_with_doc_files('["  "]'))
+        with pytest.raises(GroupConfigError) as exc_info:
+            load_group(f)
+        assert "doc_files" in str(exc_info.value)
+
+    def test_non_string_token_raises(self, tmp_path: Path):
+        """A non-string token in doc_files → GroupConfigError."""
+        from group_config import GroupConfigError, load_group
+
+        f = tmp_path / "g.toml"
+        f.write_text(self._toml_with_doc_files("[42]"))
+        with pytest.raises(GroupConfigError) as exc_info:
+            load_group(f)
+        assert "doc_files" in str(exc_info.value)
+
+    def test_not_a_list_raises(self, tmp_path: Path):
+        """doc_files as a string (not a list) → GroupConfigError."""
+        from group_config import GroupConfigError, load_group
+
+        f = tmp_path / "g.toml"
+        f.write_text(self._toml_with_doc_files('"AGENTS.md"'))
+        with pytest.raises(GroupConfigError) as exc_info:
+            load_group(f)
+        assert "doc_files" in str(exc_info.value)
+
+    def test_absent_doc_files_returns_none(self, tmp_path: Path):
+        """When doc_files is absent from [harness], it's not present in the parsed harness."""
+        from group_config import load_group
+
+        toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[harness]
+new = ["claude"]
+resume = ["claude", "-r", "{slug}"]
+"""
+        f = tmp_path / "g.toml"
+        f.write_text(toml)
+        cfg = load_group(f)
+        assert "doc_files" not in cfg["harness"]
