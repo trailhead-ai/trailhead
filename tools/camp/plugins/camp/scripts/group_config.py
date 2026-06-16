@@ -192,27 +192,14 @@ def load_group(path: Path) -> dict[str, Any]:
                     f"{path}: members[{i}] ('{member_name}'): hooks[{k}] "
                     f"(kind={hook_kind!r}) is missing required field 'cmd'"
                 )
-            if not isinstance(cmd_raw, list):
-                raise GroupConfigError(
-                    f"{path}: members[{i}] ('{member_name}'): hooks[{k}].cmd must be a "
-                    "list of strings (for subprocess shell=False), not a shell string"
-                )
-            for j, token in enumerate(cmd_raw):
-                if not isinstance(token, str):
-                    raise GroupConfigError(
-                        f"{path}: members[{i}] ('{member_name}'): "
-                        f"hooks[{k}].cmd[{j}] must be a string, "
-                        f"got {type(token).__name__!r}"
-                    )
-                if not token.strip():
-                    raise GroupConfigError(
-                        f"{path}: members[{i}] ('{member_name}'): "
-                        f"hooks[{k}].cmd[{j}] is empty or whitespace-only — "
-                        "empty argv tokens are undefined in shell=False mode and "
-                        "mask misconfiguration"
-                    )
+            cmd = _validate_string_list_field(
+                cmd_raw,
+                path=path,
+                where=f"members[{i}] ('{member_name}'): hooks[{k}].cmd",
+                allow_empty_list=False,
+            )
 
-            hooks.append({"kind": hook_kind, "cmd": list(cmd_raw)})
+            hooks.append({"kind": hook_kind, "cmd": cmd})
 
         members.append(
             {

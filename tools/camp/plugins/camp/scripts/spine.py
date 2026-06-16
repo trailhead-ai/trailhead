@@ -1595,11 +1595,13 @@ def cmd_cd(args: list[str], dry_run: bool = False) -> None:
 def cmd_enter(args: list[str], dry_run: bool = False) -> None:
     """camp enter <member> — activate a member and print its CLAUDE.md.
 
-    Full implementation in Slice 5.
+    Reached only when no group resolves from cwd (no --group flag and cwd is
+    outside any member dir). The real implementation lives on the group-aware
+    path in cli/camp (_cmd_enter_group_cli). Emits the standard "pass --group" error.
     """
     _die(
-        "camp enter: not yet implemented in this slice — "
-        "member activation will be wired in Slice 5."
+        "camp enter: no group resolved from cwd — "
+        "pass --group <name> or run from inside a group member directory"
     )
 
 

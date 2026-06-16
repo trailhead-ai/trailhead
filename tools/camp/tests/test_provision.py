@@ -562,7 +562,7 @@ class TestStatusExitCodes:
         provision.seed_pending_workspace(group, slug, env=env)
         for name, state in states.items():
             update_member_state(
-                provision._workspace_dir(group["group"]["name"], slug, env=env) / "manifest.json",
+                provision.workspace_dir(group["group"]["name"], slug, env=env) / "manifest.json",
                 name, state, env=env, group_name=group["group"]["name"], slug=slug,
             )
 

@@ -193,6 +193,25 @@ def update_member_state(
         flip_member_state_unlocked(path, member_name, state, reason=reason)
 
 
+def workspace_dir(group: str, slug: str, *, env: dict[str, str] | None = None) -> Path:
+    """Return the unified workspace dir for (group, slug).
+
+    The single source of truth for central_state_dir(group)/worktrees/<slug>;
+    manifest_path_for and the provision/reconcile/shell-integration callers all
+    derive their paths from this.
+
+    Args:
+        group:  Group name (validated by central_state_dir).
+        slug:   Worktree slug.
+        env:    Optional env override for the resolver (hermetic tests).
+
+    Returns:
+        Absolute path to the workspace dir (directory may not exist yet).
+    """
+    from group_resolve import central_state_dir
+    return central_state_dir(group, env=env) / "worktrees" / slug
+
+
 def manifest_path_for(group: str, slug: str, *, env: dict[str, str] | None = None) -> Path:
     """Return the canonical central manifest path for (group, slug).
 
@@ -204,6 +223,4 @@ def manifest_path_for(group: str, slug: str, *, env: dict[str, str] | None = Non
     Returns:
         Absolute path to manifest.json (directory may not exist yet).
     """
-    from group_resolve import central_state_dir
-    state_dir = central_state_dir(group, env=env)
-    return state_dir / "worktrees" / slug / "manifest.json"
+    return workspace_dir(group, slug, env=env) / "manifest.json"

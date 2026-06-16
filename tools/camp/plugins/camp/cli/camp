@@ -299,6 +299,43 @@ def _dispatch_group_command(
         _spine_main()
 
 
+def _slug_from_args_or_cwd(
+    args: list[str],
+    group: dict,
+    *,
+    verb: str,
+    consume_positional: bool = False,
+    allow_none: bool = False,
+) -> str | None:
+    """Resolve a slug from --name, an optional positional, or cwd.
+
+    Consumes `--name <slug>` from args in place. If absent and consume_positional
+    is set, takes args[0] as the slug. Otherwise resolves from cwd against the
+    ALREADY-RESOLVED group (no reload of all configs). On no resolution, _die with
+    a uniform message — unless allow_none, in which case None is returned (the
+    caller falls back, e.g. status's fleet view).
+    """
+    from spine import _consume_flag_value, _resolve_slug, _die
+    from group_resolve import resolve_from_cwd
+
+    name = _consume_flag_value(args, "--name")
+    if name is not None:
+        return _resolve_slug(name, context="--name")
+    if consume_positional and args:
+        return _resolve_slug(args[0], context="argument")
+
+    try:
+        _, slug = resolve_from_cwd(Path.cwd(), [group])
+    except Exception:
+        slug = None
+    if slug is None and not allow_none:
+        _die(
+            f"camp {verb}: could not determine slug from cwd — "
+            f"pass --name <slug> or run from inside a workspace directory"
+        )
+    return slug
+
+
 def _cmd_status_group_cli(
     args: list[str],
     group: dict,
@@ -316,20 +353,12 @@ def _cmd_status_group_cli(
     """
     import json as _json
     from lifecycle_cmds import cmd_status_group, provision_status_code
-    from spine import _consume_flag_value
 
     as_json = "--json" in args
     filtered = [a for a in args if a != "--json"]
-    name = _consume_flag_value(filtered, "--name")
 
     # Resolve a slug from --name or cwd; if found, emit the provision-state view.
-    slug = name
-    if slug is None:
-        try:
-            from group_resolve import resolve_from_cwd
-            _, slug = resolve_from_cwd(Path.cwd(), [group])
-        except Exception:
-            slug = None
+    slug = _slug_from_args_or_cwd(filtered, group, verb="status", allow_none=True)
 
     if slug is not None:
         try:
@@ -432,8 +461,7 @@ def _cmd_setup_group_cli(
     """
     import json as _json
     from lifecycle_cmds import cmd_setup_group
-    from spine import _consume_flag_value, _resolve_slug, _die
-    from group_resolve import resolve_from_cwd
+    from spine import _consume_flag_value, _die
 
     # Reject the removed --retry flag with a legible error.
     if "--retry" in args:
@@ -446,19 +474,9 @@ def _cmd_setup_group_cli(
     as_json = "--json" in args
     filtered = [a for a in args if a not in ("--background", "--json")]
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
-    name = _consume_flag_value(filtered, "--name")
-
-    if name is not None:
-        slug = _resolve_slug(name, context="--name")
-    elif filtered:
-        slug = _resolve_slug(filtered[0], context="argument")
-    else:
-        try:
-            _, slug = resolve_from_cwd(Path.cwd(), [group])
-        except Exception:
-            slug = None
-        if slug is None:
-            _die("camp setup: could not determine slug from cwd — pass a slug or --name <slug>")
+    slug = _slug_from_args_or_cwd(
+        filtered, group, verb="setup", consume_positional=True
+    )
 
     if dry_run:
         print(f"[dry-run] would provision worktree {slug!r}", file=sys.stderr)
@@ -521,31 +539,14 @@ def _cmd_break_group_cli(
 ) -> None:
     """camp rm [--force] [--name <slug>]"""
     from reconcile import reconcile_break
-    from spine import _consume_flag_value, _resolve_slug, _die
-    from group_resolve import central_state_dir
+    from spine import _die
     from manifest import ManifestError
 
     force = "--force" in args
     filtered = [a for a in args if a != "--force"]
-    name_flag = _consume_flag_value(filtered, "--name")
-
-    if name_flag is not None:
-        slug = _resolve_slug(name_flag, context="--name")
-    elif filtered:
-        slug = _resolve_slug(filtered[0], context="argument")
-    else:
-        # Try cwd resolution
-        try:
-            from group_resolve import resolve_from_cwd
-            from group_config import load_all_groups
-            import trailhead.paths as _paths
-            config_dir = _paths.config_dir("camp") / "groups"
-            configs = load_all_groups(config_dir)
-            _, slug = resolve_from_cwd(Path.cwd(), configs)
-            if slug is None:
-                _die("camp rm: could not determine slug from cwd, pass --name <slug>")
-        except Exception as e:
-            _die(f"camp rm: {e}")
+    slug = _slug_from_args_or_cwd(
+        filtered, group, verb="rm", consume_positional=True
+    )
 
     if dry_run:
         print(f"[dry-run] would remove worktree {slug!r} for group {group['group']['name']!r}",
@@ -627,27 +628,12 @@ def _cmd_rebase_group_cli(
 ) -> None:
     """camp rebase [--onto <branch>] [--name <slug>]"""
     import subprocess
-    from spine import _consume_flag_value, _resolve_slug, _die
-    from group_resolve import central_state_dir, resolve_from_cwd
+    from spine import _consume_flag_value, _die
     from manifest import manifest_path_for, read_central_manifest
 
     filtered = list(args)
     onto = _consume_flag_value(filtered, "--onto") or "origin/main"
-    name_flag = _consume_flag_value(filtered, "--name")
-
-    if name_flag is not None:
-        slug = _resolve_slug(name_flag, context="--name")
-    else:
-        try:
-            from group_config import load_all_groups
-            import trailhead.paths as _paths
-            config_dir = _paths.config_dir("camp") / "groups"
-            configs = load_all_groups(config_dir)
-            _, slug = resolve_from_cwd(Path.cwd(), configs)
-            if slug is None:
-                _die("camp rebase: could not determine slug from cwd, pass --name <slug>")
-        except Exception as e:
-            _die(f"camp rebase: {e}")
+    slug = _slug_from_args_or_cwd(filtered, group, verb="rebase")
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -708,10 +694,6 @@ Options:
   --allow-missing      Skip the repo_root existence/git check when authoring.
   --scaffold           Write a commented stub config and stop (no hooks).
 """
-
-# Backward-compat alias (for internal callers; user-facing is _GROUP_HELP)
-_INIT_HELP = _GROUP_HELP
-
 
 def _parse_init_args(args: list[str]) -> dict:
     """Parse `camp init` args into {group_name, members, branch_pattern, force,
@@ -882,17 +864,6 @@ def _cmd_group_cli(args: list[str]) -> None:
     print(f"camp group: hooks wired for group {group_name!r} ({len(group['members'])} member(s))")
 
 
-def _cmd_init_cli(args: list[str]) -> None:
-    """camp init — legacy entry point; behavior preserved for internal callers.
-
-    External users should use 'camp group' (Slice 1 rename). This function
-    continues to exist so tests and internal callers that invoke it directly
-    still work. The user-facing routing in main() now sends 'init' to the
-    legacy-redirect error.
-    """
-    _cmd_group_cli(args)
-
-
 def _cmd_ai_group_cli(
     args: list[str],
     group: dict,
@@ -912,7 +883,8 @@ def _cmd_ai_group_cli(
     `resume`. The seam os.execvp's the harness (claude default) — tests stub it.
     """
     from spine import _resolve_slug, _consume_flag_value, _die
-    from provision import bring_up_workspace, _workspace_dir
+    from provision import bring_up_workspace
+    from manifest import workspace_dir
     import harness_launch
     from session_lock import acquire_session_lock, SessionLockHeld
 
@@ -940,7 +912,7 @@ def _cmd_ai_group_cli(
     # New-vs-resume is decided BEFORE bring-up creates the workspace dir: a
     # first-ever launch (no workspace) uses the `new` template; an existing
     # workspace uses `resume`.
-    ws_dir = _workspace_dir(group_name, slug, env=env)
+    ws_dir = workspace_dir(group_name, slug, env=env)
     is_resume = ws_dir.exists()
 
     # Refuse-concurrent FIRST, before any provisioning: a live PID holding the
@@ -979,27 +951,13 @@ def _cmd_enter_group_cli(
     Fires the member's activation hooks idempotently, then prints the member's
     CLAUDE.md to stdout so the calling agent ingests it as context.
     """
-    from spine import _consume_flag_value, _die, _resolve_slug
-    from group_resolve import resolve_from_cwd
+    from spine import _die
     from activation import enter_member, MemberNotReadyError
     from group_config import GroupConfigError
     from harness_launch import resolve_harness_profile
 
     filtered = list(args)
-    name_flag = _consume_flag_value(filtered, "--name")
-
-    if name_flag is not None:
-        slug = _resolve_slug(name_flag, context="--name")
-    else:
-        try:
-            _, slug = resolve_from_cwd(Path.cwd(), [group])
-        except Exception:
-            slug = None
-        if slug is None:
-            _die(
-                "camp enter: could not determine slug from cwd — "
-                "pass --name <slug> or run from inside a workspace directory"
-            )
+    slug = _slug_from_args_or_cwd(filtered, group, verb="enter")
 
     if not filtered:
         _die("camp enter: a member name is required\n  usage: camp enter <member>")
@@ -1041,21 +999,11 @@ def _cmd_cd_group_cli(
     The shell function wrapping this command cd's to stdout verbatim — any stray
     token on stdout breaks it.
     """
-    from spine import _resolve_slug, _die
+    from spine import _resolve_slug, _consume_flag_value, _die
     from shell_integration import cmd_cd, WorkspaceNotFoundError
 
-    rest = [a for a in args if a not in ("--group",)]
-    # Drop --group <value> pair (already consumed upstream)
-    filtered = []
-    i = 0
-    while i < len(rest):
-        if rest[i] == "--group":
-            i += 2  # skip --group and its value
-        elif rest[i].startswith("--group="):
-            i += 1
-        else:
-            filtered.append(rest[i])
-            i += 1
+    filtered = list(args)
+    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
 
     if not filtered:
         print("camp cd: a slug is required\n  usage: camp cd <slug>", file=sys.stderr)

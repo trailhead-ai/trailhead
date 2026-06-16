@@ -26,7 +26,6 @@ terminals racing camp <slug> don't both git-worktree-add the same path.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import subprocess
@@ -41,7 +40,9 @@ from manifest import (
     ManifestError,
     manifest_path_for,
     read_central_manifest,
+    reconcile_lock,
     remove_central_manifest,
+    workspace_dir,
     write_central_manifest,
 )
 
@@ -110,15 +111,6 @@ def _branch_name(slug: str, branch_pattern: str) -> str:
     return branch_pattern.format(slug=slug)
 
 
-def _workspace_dir(
-    group_name: str, slug: str, *, env: dict[str, str] | None = None
-) -> Path:
-    """Return the unified workspace dir: central_state_dir(group)/worktrees/<slug>."""
-    from group_resolve import central_state_dir
-
-    return central_state_dir(group_name, env=env) / "worktrees" / slug
-
-
 def _worktree_path(
     group_name: str,
     slug: str,
@@ -128,7 +120,7 @@ def _worktree_path(
 ) -> Path:
     """Return the member's worktree path under the unified workspace dir:
     central_state_dir(group)/worktrees/<slug>/<member>."""
-    return _workspace_dir(group_name, slug, env=env) / member_name
+    return workspace_dir(group_name, slug, env=env) / member_name
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -354,12 +346,7 @@ def reconcile_worktree(
         mpath = manifest_path_for(group_name, slug, env=env)
 
         # Also acquire a file-level lock to guard cross-process concurrency
-        lock_file_path = mpath.parent / ".reconcile.lock"
-        lock_file_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_fd = open(str(lock_file_path), "w")
-        try:
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-
+        with reconcile_lock(mpath.parent):
             # -- Phase 1: Create member worktrees (existence-guarded)
             member_results: list[dict[str, Any]] = []
             for member in members:
@@ -408,13 +395,6 @@ def reconcile_worktree(
             }
             write_central_manifest(mpath, manifest_data)
 
-        finally:
-            try:
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-            except OSError:
-                pass
-            lock_fd.close()
-
     return {
         "slug": slug,
         "member_count": len(member_results),
@@ -456,8 +436,8 @@ def reconcile_break(
     """
     group_name: str = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
-    workspace_dir = _workspace_dir(group_name, slug, env=env)
-    ws_resolved = workspace_dir.resolve()
+    ws_dir = workspace_dir(group_name, slug, env=env)
+    ws_resolved = ws_dir.resolve()
 
     # Read current manifest
     manifest_data = read_central_manifest(mpath)
@@ -490,12 +470,12 @@ def reconcile_break(
         if _is_old_layout_path(wt_path):
             raise LegacyLayoutError(
                 f"camp: member {entry['name']!r} worktree_path {wt_path} uses the "
-                f"retired per-repo layout (outside the workspace dir {workspace_dir}). "
+                f"retired per-repo layout (outside the workspace dir {ws_dir}). "
                 f"camp will not remove it — run `git worktree remove {wt_path}` manually."
             )
         raise ConfinementError(
             f"camp: worktree path {wt_path} resolves outside the workspace dir "
-            f"{workspace_dir} for member {entry['name']!r} — refusing removal"
+            f"{ws_dir} for member {entry['name']!r} — refusing removal"
         )
 
     # Remove each member worktree; track removals for atomicity symmetry
@@ -515,7 +495,7 @@ def reconcile_break(
 
         try:
             _remove_worktree_for_member(
-                member, wt_path, repo_root, workspace_dir, force=force
+                member, wt_path, repo_root, ws_dir, force=force
             )
             removed.append(name)
         except (ConfinementError, LegacyLayoutError):

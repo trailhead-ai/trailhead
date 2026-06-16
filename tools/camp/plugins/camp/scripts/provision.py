@@ -29,20 +29,13 @@ from typing import Any
 
 from manifest import (
     manifest_path_for,
+    workspace_dir,
     write_central_manifest,
 )
 
 # The camp binary this process was launched as — used to build the detached
 # `camp setup --background` argv. Resolved relative to this scripts/ dir.
 _CAMP_BIN = Path(__file__).resolve().parent.parent / "bin" / "camp"
-
-
-def _workspace_dir(
-    group_name: str, slug: str, *, env: dict[str, str] | None = None
-) -> Path:
-    from group_resolve import central_state_dir
-
-    return central_state_dir(group_name, env=env) / "worktrees" / slug
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +108,7 @@ def seed_pending_workspace(
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")
     branch = branch_pattern.format(slug=slug)
 
-    ws_dir = _workspace_dir(group_name, slug, env=env)
+    ws_dir = workspace_dir(group_name, slug, env=env)
     ws_dir.mkdir(parents=True, exist_ok=True)
 
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -187,7 +180,7 @@ def bring_up_workspace(
 
     group_name = group["group"]["name"]
     mpath = seed_pending_workspace(group, slug, env=env)
-    ws_dir = _workspace_dir(group_name, slug, env=env)
+    ws_dir = workspace_dir(group_name, slug, env=env)
 
     write_workspace_doc(ws_dir, group, slug, profile=profile)
     write_workspace_hooks(ws_dir, str(_CAMP_BIN))
@@ -234,7 +227,7 @@ def provision_member(
     branch = branch_pattern.format(slug=slug)
     repo_root = Path(member["repo_root"])
     base = member.get("base") or DEFAULT_BASE
-    wt_path = _workspace_dir(group_name, slug, env=env) / member["name"]
+    wt_path = workspace_dir(group_name, slug, env=env) / member["name"]
 
     # Fetch the base ref under a timeout (deferred from Slice 2). A timeout or
     # fetch failure does not abort if the base already resolves locally; the
