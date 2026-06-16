@@ -237,7 +237,7 @@ class TestSelectionBridge:
         sel = cfg.harnesses[0].selection()
         assert "camp" in sel
         subagents, skills = sel["camp"]
-        assert skills == {"worktree": None}
+        assert skills == {}
         assert subagents == {}
 
 

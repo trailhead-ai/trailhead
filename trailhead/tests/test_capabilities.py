@@ -153,11 +153,14 @@ class TestCraftInventory:
 
 
 class TestOtherInventories:
-    def test_camp_worktree_selectable_no_base(self):
+    def test_camp_has_no_selectable_skills(self):
+        # camp ships only a CLI (bin) + hooks — no base, no subagents, no skills.
+        # The worktree SKILL was removed: the workspace exists before the harness
+        # opens, so worktree orchestration is operator-facing (README), not a skill.
         m = load_manifest(_CAMP_MANIFEST)
         assert m.base == []
         assert m.subagents == {}
-        assert m.skills == {"worktree": "skills/worktree"}
+        assert m.skills == {}
 
     def test_portage_inventory(self):
         m = load_manifest(_PORTAGE_MANIFEST)

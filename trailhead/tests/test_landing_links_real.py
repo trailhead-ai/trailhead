@@ -353,10 +353,15 @@ class TestBuildRealAnchorSet:
         anchors = build_real_anchor_set()
         assert "agents/artist.md" in anchors["craft"]["agents"]
 
-    def test_camp_worktree_skill_present(self):
-        """camp has a single selectable skill (skills/worktree) and no agents (R-1)."""
+    def test_camp_has_no_skills_or_agents(self):
+        """camp ships only a CLI + hooks — its anchor set has no skills and no agents (R-1).
+
+        The worktree SKILL was removed: the workspace exists before the harness
+        opens, so worktree orchestration is operator-facing (README), not a skill.
+        """
         anchors = build_real_anchor_set()
-        assert "skills/worktree" in anchors["camp"]["skills"]
+        assert anchors["camp"]["skills"] == set()
+        assert anchors["camp"]["agents"] == set()
         assert isinstance(anchors["camp"]["skills"], set)
         assert isinstance(anchors["camp"]["agents"], set)
 
