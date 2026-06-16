@@ -206,3 +206,62 @@ class TestLaunch:
 
         assert execd["call"] == ("claude", ["claude", "-r", "feat-x"])
         assert chdir_to["dir"] == str(ws)
+
+
+# ---------------------------------------------------------------------------
+# resolve_launch — per-field merge over claude default (Fix 1)
+# ---------------------------------------------------------------------------
+
+
+class TestPartialHarnessMerge:
+    """[harness] blocks that omit some fields must fall back per-field to claude defaults."""
+
+    def test_doc_files_only_block_uses_default_new(self):
+        """A [harness] block with only doc_files → new falls back to ["claude"]."""
+        from harness_launch import resolve_launch
+
+        ws = Path("/work/space")
+        # Simulate what load_group returns for [harness]\ndoc_files = ["AGENTS.md"]
+        group = _group({"doc_files": ["AGENTS.md"]})
+        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=False)
+        assert argv == ["claude"]
+        assert cwd == ws
+
+    def test_doc_files_only_block_uses_default_resume(self):
+        """A [harness] block with only doc_files → resume falls back to claude default."""
+        from harness_launch import resolve_launch
+
+        ws = Path("/work/space")
+        group = _group({"doc_files": ["AGENTS.md"]})
+        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=True)
+        assert argv == ["claude", "-r", "feat-x"]
+        assert cwd == ws
+
+    def test_cwd_only_block_uses_default_new(self):
+        """A [harness] block with only cwd → new falls back to claude default."""
+        from harness_launch import resolve_launch
+
+        ws = Path("/work/space")
+        group = _group({"cwd": "{workspace}/sub"})
+        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=False)
+        assert argv == ["claude"]
+        assert cwd == Path("/work/space/sub")
+
+    def test_new_only_block_resume_falls_back_to_default(self):
+        """A [harness] block with only new → resume falls back to claude default."""
+        from harness_launch import resolve_launch
+
+        ws = Path("/work/space")
+        group = _group({"new": ["myharness"]})
+        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=True)
+        assert argv == ["claude", "-r", "feat-x"]
+        assert cwd == ws
+
+    def test_new_only_block_uses_configured_new(self):
+        """A [harness] block with only new → new uses the configured argv."""
+        from harness_launch import resolve_launch
+
+        ws = Path("/work/space")
+        group = _group({"new": ["myharness"]})
+        argv, _ = resolve_launch(group, "feat-x", ws, is_resume=False)
+        assert argv == ["myharness"]

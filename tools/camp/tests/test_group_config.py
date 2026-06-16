@@ -517,3 +517,82 @@ def test_shared_vaults_empty_root_raises(tmp_path: Path) -> None:
     msg = str(exc_info.value)
     assert str(f) in msg or "testgroup.toml" in msg
     assert "root" in msg
+
+
+# ---------------------------------------------------------------------------
+# [harness] partial / composable block (Fix 1)
+# ---------------------------------------------------------------------------
+
+
+def _write_and_load(tmp_path: Path, toml_body: str):
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(
+        "[group]\nname = 'testgroup'\n\n"
+        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n\n"
+        + toml_body
+    )
+    return load_group(f)
+
+
+def test_harness_doc_files_only_loads(tmp_path: Path) -> None:
+    """[harness] with only doc_files (no new/resume/cwd) must load without error."""
+    cfg = _write_and_load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
+    assert "harness" in cfg
+    assert cfg["harness"]["doc_files"] == ["AGENTS.md"]
+
+
+def test_harness_doc_files_only_no_new_key(tmp_path: Path) -> None:
+    """[harness] with only doc_files must not populate new/resume/cwd keys."""
+    cfg = _write_and_load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
+    h = cfg["harness"]
+    assert "new" not in h
+    assert "resume" not in h
+
+
+def test_harness_cwd_only_loads(tmp_path: Path) -> None:
+    """[harness] with only cwd must load without error."""
+    cfg = _write_and_load(tmp_path, '[harness]\ncwd = "{workspace}/sub"\n')
+    assert "harness" in cfg
+    assert cfg["harness"]["cwd"] == "{workspace}/sub"
+
+
+def test_harness_new_only_loads(tmp_path: Path) -> None:
+    """[harness] with only new (resume falls back) must load without error."""
+    cfg = _write_and_load(tmp_path, '[harness]\nnew = ["myharness"]\n')
+    assert "harness" in cfg
+    assert cfg["harness"]["new"] == ["myharness"]
+    assert "resume" not in cfg["harness"]
+
+
+def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> None:
+    """Round-trip the groups.example commented [harness] block.
+
+    The example shows [harness] + doc_files = ["AGENTS.md"] alone (no new/resume).
+    Uncommenting it must produce a valid config that loads, and resolve_doc_files
+    must return ["AGENTS.md"] while resolve_launch falls back to claude defaults.
+    """
+    from group_config import load_group
+    from harness_launch import resolve_doc_files, resolve_launch
+
+    f = tmp_path / "trailhead.toml"
+    f.write_text(
+        '[group]\nname = "trailhead"\n\n'
+        '[[members]]\nname = "trailhead"\nrepo_root = "/path/to/trailhead"\n\n'
+        '[harness]\ndoc_files = ["AGENTS.md"]\n'
+    )
+    cfg = load_group(f)
+    assert cfg["group"]["name"] == "trailhead"
+
+    doc_files = resolve_doc_files(cfg)
+    assert doc_files == ["AGENTS.md"]
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    argv, cwd = resolve_launch(cfg, "feat-x", ws, is_resume=False)
+    assert argv == ["claude"]
+    assert cwd == ws
+
+    argv_resume, _ = resolve_launch(cfg, "feat-x", ws, is_resume=True)
+    assert argv_resume == ["claude", "-r", "feat-x"]

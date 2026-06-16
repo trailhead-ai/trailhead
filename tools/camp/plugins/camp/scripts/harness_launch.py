@@ -59,15 +59,21 @@ def resolve_launch(
 ) -> tuple[list[str], Path]:
     """Resolve (config | claude default) + is_resume → (argv, cwd).
 
-    Returns the substituted argv and the resolved launch directory.
+    Per-field merge over _CLAUDE_DEFAULT: each of new/resume/cwd uses the
+    configured value when present in the [harness] block, otherwise falls back
+    to the claude default.  This lets a partial block (e.g. doc_files only) work
+    without requiring the caller to restate the default argv.
     """
-    harness = group.get("harness") or _CLAUDE_DEFAULT
+    harness = group.get("harness") or {}
     workspace = str(workspace_dir)
 
-    template = harness["resume"] if is_resume else harness["new"]
+    if is_resume:
+        template = harness.get("resume") or _CLAUDE_DEFAULT["resume"]
+    else:
+        template = harness.get("new") or _CLAUDE_DEFAULT["new"]
     argv = [_substitute(tok, slug=slug, workspace=workspace) for tok in template]
 
-    cwd_template = harness.get("cwd", "{workspace}")
+    cwd_template = harness.get("cwd") or _CLAUDE_DEFAULT["cwd"]
     cwd = Path(_substitute(cwd_template, slug=slug, workspace=workspace))
     return argv, cwd
 

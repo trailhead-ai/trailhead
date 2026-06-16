@@ -308,46 +308,79 @@ def _reject_unknown_placeholders(value: str, *, path: Path, where: str) -> None:
             )
 
 
-def _validate_argv_template(raw: Any, *, path: Path, where: str) -> list[str]:
-    """Validate a launch argv template: a non-empty list of strings, each
-    stripped-and-rejected if empty, each with only known placeholders."""
-    if not isinstance(raw, list) or len(raw) == 0:
+def _validate_string_list_field(
+    value: Any,
+    *,
+    path: Path,
+    where: str,
+    allow_empty_list: bool,
+) -> list[str]:
+    """Validate a field that must be a non-empty list of non-blank strings.
+
+    Each token is checked for type (must be str) and stripped-and-rejected if
+    empty or whitespace-only.  allow_empty_list=False rejects an empty list (e.g.
+    argv templates); True would permit it — currently always False at call sites
+    but the flag exists so Slice 9 can reuse the helper without kwargs surgery.
+    """
+    if not isinstance(value, list) or (not allow_empty_list and len(value) == 0):
         raise GroupConfigError(
-            f"{path}: {where} must be a non-empty list of strings "
-            "(for subprocess shell=False), not a shell string"
+            f"{path}: {where} must be a non-empty list of strings"
         )
-    for i, token in enumerate(raw):
+    for i, token in enumerate(value):
         if not isinstance(token, str):
             raise GroupConfigError(
                 f"{path}: {where}[{i}] must be a string, got {type(token).__name__!r}"
             )
         if not token.strip():
             raise GroupConfigError(
-                f"{path}: {where}[{i}] is empty or whitespace-only — empty argv "
-                "tokens are undefined in shell=False mode and mask misconfiguration"
+                f"{path}: {where}[{i}] is empty or whitespace-only — "
+                "empty tokens mask misconfiguration"
             )
+    return list(value)
+
+
+def _validate_argv_template(raw: Any, *, path: Path, where: str) -> list[str]:
+    """Validate a launch argv template: a non-empty list of strings, each
+    stripped-and-rejected if empty, each with only known placeholders."""
+    tokens = _validate_string_list_field(raw, path=path, where=where, allow_empty_list=False)
+    for i, token in enumerate(tokens):
         _reject_unknown_placeholders(token, path=path, where=f"{where}[{i}]")
-    return list(raw)
+    return tokens
 
 
 def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
-    """Parse + validate the optional [harness] block. Returns None when absent."""
+    """Parse + validate the optional [harness] block. Returns None when absent.
+
+    Every field is OPTIONAL — a [harness] block containing only doc_files (or
+    only cwd, or only new) is valid.  Fields that are absent are simply not
+    included in the returned dict; resolve_launch merges per-field against
+    _CLAUDE_DEFAULT at resolution time.
+    """
     if raw is None:
         return None
     if not isinstance(raw, dict):
         raise GroupConfigError(f"{path}: [harness] must be a table")
 
-    new = _validate_argv_template(raw.get("new"), path=path, where="harness.new")
-    resume = _validate_argv_template(raw.get("resume"), path=path, where="harness.resume")
+    result: dict[str, Any] = {}
 
-    cwd = raw.get("cwd", "{workspace}")
-    if not isinstance(cwd, str) or not cwd.strip():
-        raise GroupConfigError(
-            f"{path}: harness.cwd must be a non-empty string"
+    if "new" in raw:
+        result["new"] = _validate_argv_template(
+            raw["new"], path=path, where="harness.new"
         )
-    _reject_unknown_placeholders(cwd, path=path, where="harness.cwd")
 
-    result: dict[str, Any] = {"new": new, "resume": resume, "cwd": cwd}
+    if "resume" in raw:
+        result["resume"] = _validate_argv_template(
+            raw["resume"], path=path, where="harness.resume"
+        )
+
+    if "cwd" in raw:
+        cwd = raw["cwd"]
+        if not isinstance(cwd, str) or not cwd.strip():
+            raise GroupConfigError(
+                f"{path}: harness.cwd must be a non-empty string"
+            )
+        _reject_unknown_placeholders(cwd, path=path, where="harness.cwd")
+        result["cwd"] = cwd
 
     doc_files_raw = raw.get("doc_files")
     if doc_files_raw is not None:
@@ -356,18 +389,9 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
                 f"{path}: harness.doc_files must be a non-empty list of strings "
                 "(workspace doc filenames, e.g. [\"CLAUDE.md\"] or [\"AGENTS.md\"])"
             )
-        for i, token in enumerate(doc_files_raw):
-            if not isinstance(token, str):
-                raise GroupConfigError(
-                    f"{path}: harness.doc_files[{i}] must be a string, "
-                    f"got {type(token).__name__!r}"
-                )
-            if not token.strip():
-                raise GroupConfigError(
-                    f"{path}: harness.doc_files[{i}] is empty or whitespace-only — "
-                    "empty doc_files tokens mask misconfiguration"
-                )
-        result["doc_files"] = list(doc_files_raw)
+        result["doc_files"] = _validate_string_list_field(
+            doc_files_raw, path=path, where="harness.doc_files", allow_empty_list=False
+        )
 
     return result
 
