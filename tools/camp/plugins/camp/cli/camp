@@ -422,24 +422,29 @@ def _cmd_setup_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp setup [<slug>] [--retry] [--background] [--json]
+    """camp setup [<slug>] [--background] [--json]
 
     ONE code path for foreground completion and the detached provisioner:
     --background is what `camp ai` spawns (start_new_session, log → setup.log); it
     runs the same per-member provisioning as the foreground invocation, flipping
     each member pending→ready or →failed under the slug-scoped .reconcile.lock.
-    --retry re-runs only non-ready members. The slug is resolved from the
-    positional arg, --name, or cwd.
+    The slug is resolved from the positional arg, --name, or cwd.
     """
     import json as _json
     from lifecycle_cmds import cmd_setup_group
     from spine import _consume_flag_value, _resolve_slug, _die
     from group_resolve import resolve_from_cwd
 
-    retry = "--retry" in args
+    # Reject the removed --retry flag with a legible error.
+    if "--retry" in args:
+        _die(
+            "camp setup: --retry flag has been removed. "
+            "Run 'camp setup' (no flag) to retry pending/failed members."
+        )
+
     background = "--background" in args
     as_json = "--json" in args
-    filtered = [a for a in args if a not in ("--retry", "--background", "--json")]
+    filtered = [a for a in args if a not in ("--background", "--json")]
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
     name = _consume_flag_value(filtered, "--name")
 
@@ -460,7 +465,7 @@ def _cmd_setup_group_cli(
         return
 
     try:
-        result = cmd_setup_group(group, slug, retry=retry, env=env)
+        result = cmd_setup_group(group, slug, env=env)
     except Exception as e:
         _die(f"camp setup: {e}")
 
@@ -953,7 +958,7 @@ def _cmd_ai_group_cli(
 
     print(
         f"camp ai: provisioning {slug!r} in the background "
-        f"(run 'camp status' / 'camp setup --retry' to track)",
+        f"(run 'camp status' / 'camp setup' to track)",
         file=sys.stderr,
     )
 

@@ -5,7 +5,7 @@ Test contract (all must RED before implementation, GREEN after):
 1. workspace CLAUDE.md + AGENT.md written at bring-up:
    a. Both files exist at the workspace root after bring_up_workspace.
    b. Each file contains a verbatim, invocable command table with exact strings
-      'camp enter <member>', 'camp status', 'camp setup --retry' (exact-string match).
+      'camp enter <member>', 'camp status', 'camp setup' (exact-string match).
    c. Doc contains the member list (each member name).
    d. Doc contains "inert until camp enter" or equivalent phrasing.
    e. Doc contains "setup may be in flight" or equivalent phrasing.
@@ -144,11 +144,19 @@ class TestWorkspaceDocCommandTable:
             f"Content:\n{content}"
         )
 
-    def test_claude_md_contains_camp_setup_retry_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp setup --retry'."""
+    def test_claude_md_contains_camp_setup_exact(self, tmp_path: Path):
+        """CLAUDE.md contains the exact string 'camp setup' (no --retry flag)."""
         content = self._get_claude_md(tmp_path)
-        assert "camp setup --retry" in content, (
-            f"Expected 'camp setup --retry' in CLAUDE.md, not found.\n"
+        assert "camp setup" in content, (
+            f"Expected 'camp setup' in CLAUDE.md, not found.\n"
+            f"Content:\n{content}"
+        )
+
+    def test_claude_md_does_not_contain_camp_setup_retry(self, tmp_path: Path):
+        """CLAUDE.md must NOT contain 'camp setup --retry' — the flag was removed."""
+        content = self._get_claude_md(tmp_path)
+        assert "camp setup --retry" not in content, (
+            f"Found 'camp setup --retry' in CLAUDE.md — this flag was removed.\n"
             f"Content:\n{content}"
         )
 

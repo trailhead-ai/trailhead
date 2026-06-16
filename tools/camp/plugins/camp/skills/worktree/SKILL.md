@@ -54,10 +54,10 @@ to stdout so the calling agent ingests it.
 
 ### Provision member worktrees
 ```
-camp setup [--retry]
+camp setup
 ```
 Provisions or retries pending/failed member worktrees. Runs synchronously;
-`--retry` re-runs only non-ready members.
+idempotent — leaves ready members untouched, retries pending/failed ones.
 
 ### Tear down a worktree
 ```

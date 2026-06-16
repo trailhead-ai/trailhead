@@ -17,7 +17,7 @@ bring_up_workspace ties the two together: seed, then spawn.
 The actual per-member work (provision_member) runs the git fetch (under a timeout),
 the worktree add, and the bootstrap, then the caller flips the member's manifest
 state pending→ready or →failed+reason under the slug-scoped .reconcile.lock. It is
-shared by the foreground `camp setup [--retry]` and the background provisioner —
+shared by the foreground `camp setup` and the background provisioner —
 ONE code path.
 """
 from __future__ import annotations

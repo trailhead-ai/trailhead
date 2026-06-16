@@ -410,7 +410,7 @@ def cmd_help(_args: list[str]) -> None:
         "  camp ls [--json]                  List all worktrees\n"
         "  camp status [--name <slug>]       Show worktree status (git + drift)\n"
         "  camp enter <member>               Activate a member and print its CLAUDE.md\n"
-        "  camp setup [--retry]              Provision or retry member worktrees\n"
+        "  camp setup                        Provision or retry member worktrees\n"
         "  camp rm [--force] [--name <slug>] Tear down a worktree\n"
         "  camp sync [--force]               Fast-forward canonical siblings to origin/main\n"
         "  camp rebase [--onto <branch>]     Rebase worktree branches onto origin/main\n"
@@ -1604,7 +1604,7 @@ def cmd_enter(args: list[str], dry_run: bool = False) -> None:
 
 
 def cmd_setup(args: list[str], dry_run: bool = False) -> None:
-    """camp setup [--retry] — provision or retry member worktrees.
+    """camp setup — provision or retry member worktrees.
 
     The real provisioning lives on the group-aware path in cli/camp
     (_cmd_setup_group_cli). This spine fallback is only reached when no group

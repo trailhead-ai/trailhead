@@ -13,7 +13,7 @@ The doc embeds:
   - a verbatim, invocable command table with exact strings:
       camp enter <member>   -- activate a member for the current session
       camp status           -- check provisioning status
-      camp setup --retry    -- retry failed/pending provisioning
+      camp setup            -- retry failed/pending provisioning
   - guidance that members are INERT until `camp enter <member>`
   - guidance that setup may be in flight (background provisioner)
 """
@@ -63,12 +63,12 @@ before acting on any member.
 |---------|---------|
 | `camp enter <member>` | Activate a member for the current session |
 | `camp status` | Check provisioning status (exit 0=ready, 2=pending, 3=failed) |
-| `camp setup --retry` | Retry failed or pending member provisioning |
+| `camp setup` | Retry failed or pending member provisioning |
 
 ## Workflow
 
 1. Run `camp status` to see which members are ready.
-2. If setup is still in flight (pending), wait or run `camp setup --retry`.
+2. If setup is still in flight (pending), wait or run `camp setup`.
 3. Run `camp enter <member>` to activate a member — this prints its CLAUDE.md
    and marks it active for the session.
 4. Work in the activated member's worktree directory.

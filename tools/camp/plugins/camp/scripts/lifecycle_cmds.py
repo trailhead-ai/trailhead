@@ -197,21 +197,15 @@ def cmd_setup_group(
     group: dict[str, Any],
     slug: str,
     *,
-    retry: bool = False,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Foreground provisioning: complete/restart member worktrees idempotently.
 
     Holds the slug-scoped .reconcile.lock for the whole operation so a concurrent
-    background provisioner or another `camp setup --retry` serializes (no torn
-    manifest, no double-add). For each non-ready member it runs the per-member
-    provision (fetch+add+bootstrap) and flips the manifest pending→ready or
-    →failed+reason. A ready member is left untouched. Best-effort: one member
-    failing never blocks the others.
-
-    retry=False: process pending + failed members (the default after camp ai).
-    retry=True:  same selection (only non-ready) — the flag is explicit-intent
-                 (re-run after a failure) and never re-touches a ready member.
+    background provisioner serializes (no torn manifest, no double-add). For each
+    non-ready member it runs the per-member provision (fetch+add+bootstrap) and
+    flips the manifest pending→ready or →failed+reason. A ready member is left
+    untouched. Best-effort: one member failing never blocks the others.
 
     Returns {"slug", "members": {name: {"provision_state", "reason"?}}}.
     """

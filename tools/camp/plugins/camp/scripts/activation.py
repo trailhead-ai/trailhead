@@ -136,13 +136,13 @@ def enter_member(
     if state == "pending":
         raise MemberNotReadyError(
             f"camp enter: member {member_name!r} is still provisioning — "
-            f"run `camp status` to check progress or `camp setup --retry` to retry."
+            f"run `camp status` to check progress or `camp setup` to retry."
         )
     if state == "failed":
         reason = entry.get("reason", "(no reason recorded)")
         raise MemberNotReadyError(
             f"camp enter: member {member_name!r} provisioning failed: {reason}\n"
-            f"  Run `camp setup --retry` to retry provisioning."
+            f"  Run `camp setup` to retry provisioning."
         )
 
     wt_path = Path(entry["worktree_path"])

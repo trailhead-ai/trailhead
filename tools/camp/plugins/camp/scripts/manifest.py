@@ -129,7 +129,7 @@ def remove_central_manifest(path: Path) -> None:
 def reconcile_lock(manifest_dir: Path):
     """Acquire the slug-scoped .reconcile.lock guarding manifest mutations.
 
-    All status flips (background provisioner + foreground `camp setup --retry`)
+    All status flips (background provisioner + foreground `camp setup`)
     serialize on this lock, the same lock reconcile_worktree uses, so concurrent
     writers never tear the whole-manifest temp+rename write.
     """

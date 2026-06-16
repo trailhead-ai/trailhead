@@ -15,10 +15,10 @@ Test contract (all must RED before implementation, GREEN after):
    the detached provisioner (asserted via a spawn seam, not a real claude exec).
 
 4. foreground camp setup: pending→ready on success; a failing member (incl. fetch
-   timeout) → failed + reason, others ready; --retry re-runs only non-ready members;
-   fully idempotent.
+   timeout) → failed + reason, others ready; idempotent (leaves ready members
+   untouched, retries pending/failed ones).
 
-5. concurrency: camp setup --retry started while the background provisioner holds
+5. concurrency: camp setup started while the background provisioner holds
    .reconcile.lock serializes (no torn manifest, no double-add).
 
 6. camp status exit codes: all-ready→0, some-pending→2, some-failed→3; --json shape.
@@ -424,7 +424,7 @@ class TestForegroundSetup:
         assert "timeout" in by_name["repo_b"].get("reason", "").lower()
 
     def test_retry_reruns_only_non_ready(self, two_member_group, monkeypatch):
-        """--retry re-runs pending/failed members, leaves ready untouched."""
+        """camp setup re-runs pending/failed members, leaves ready untouched."""
         import provision
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
@@ -446,7 +446,7 @@ class TestForegroundSetup:
 
         monkeypatch.setattr(provision, "provision_member", tracking_provision)
 
-        cmd_setup_group(g["group"], "feat-r", env=g["env"], retry=True)
+        cmd_setup_group(g["group"], "feat-r", env=g["env"])
 
         # Both already ready → retry processes nothing.
         assert processed == [], f"retry re-ran ready members: {processed}"
@@ -476,7 +476,7 @@ class TestForegroundSetup:
 
 class TestConcurrency:
     def test_setup_serializes_on_reconcile_lock(self, two_member_group, monkeypatch):
-        """A foreground setup --retry started while a provisioner holds the lock
+        """A foreground setup started while a provisioner holds the lock
         serializes — no torn manifest, no double-add."""
         import provision
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
@@ -490,7 +490,7 @@ class TestConcurrency:
 
         def run_setup():
             try:
-                cmd_setup_group(g["group"], "feat-c", env=g["env"], retry=True)
+                cmd_setup_group(g["group"], "feat-c", env=g["env"])
             except Exception as e:  # pragma: no cover
                 errors.append(e)
 

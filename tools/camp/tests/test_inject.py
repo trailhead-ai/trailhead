@@ -193,3 +193,63 @@ class TestInjectCli:
         parsed = json.loads(result.stdout)
         assert parsed["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
         assert "QUEUED-DOC-marker" in parsed["hookSpecificOutput"]["additionalContext"]
+
+
+# ---------------------------------------------------------------------------
+# Task B: error-resilience — drain_queue with a poisoned queue entry
+# ---------------------------------------------------------------------------
+
+
+class TestDrainResilience:
+    def test_drain_resilient_to_read_error_exits_zero_no_stdout(self, tmp_path: Path):
+        """drain_queue with a queue file whose read() raises → exit 0, no stdout.
+
+        Injects the error by patching Path.read_text on the queued file to raise,
+        which fires the outer except Exception branch. This proves the crash-proof
+        safety net actually catches — without it, drain_queue would propagate the
+        exception and the test would error.
+        """
+        import unittest.mock as mock
+        from inject import enqueue_doc, queue_dir_for
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        enqueue_doc(ws, "some doc")
+
+        original_read_text = Path.read_text
+
+        def failing_read_text(self, *args, **kwargs):
+            if str(self).startswith(str(queue_dir_for(ws))):
+                raise OSError("simulated read failure")
+            return original_read_text(self, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", failing_read_text):
+            stdout, code = _drain(ws)
+
+        assert code == 0, f"drain_queue should exit 0 on error, got {code}"
+        assert stdout == "", f"drain_queue should emit no stdout on error, got {stdout!r}"
+
+    def test_drain_cli_exits_zero_no_stdout_when_queue_dir_only_has_subdirs(self, tmp_path: Path):
+        """camp inject --drain exits 0 with no stdout when the queue only has
+        subdirectories (is_file() filters them; the queue appears empty to drain).
+        Verifies the CLI route's resilience contract end-to-end."""
+        from inject import queue_dir_for
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+
+        qdir = queue_dir_for(ws)
+        qdir.mkdir(parents=True, exist_ok=True)
+        # A sub-directory in the queue dir; is_file() → False, filtered out.
+        (qdir / "poison_dir.md").mkdir()
+
+        result = _run_cli(["inject", "--drain", "--workspace", str(ws)],
+                          env={}, cwd=ws)
+        assert result.returncode == 0, (
+            f"camp inject --drain should exit 0 even with only dirs in queue. "
+            f"rc={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}"
+        )
+        assert result.stdout == "", (
+            f"camp inject --drain should produce no stdout with empty/dir-only queue. "
+            f"Got: {result.stdout!r}"
+        )
