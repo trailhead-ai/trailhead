@@ -36,7 +36,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import pytest
 
 from conftest import CLI_PATH, SCRIPTS_DIR
 
@@ -361,7 +360,10 @@ class TestPromoteHappyPath:
         )
 
     def test_confirm_y_copies_note_to_shared_root(self, tmp_path: Path, monkeypatch) -> None:
-        """On simulated y (TTY via monkeypatch), note is copied to shared root; personal original intact."""
+        (
+            "On simulated y (TTY via monkeypatch), note is copied to shared "
+            "root; personal original intact."
+        )
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
         shared_root.mkdir()
@@ -388,7 +390,10 @@ class TestPromoteHappyPath:
         with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
             rc = cli.cmd_promote(_cmd_promote_args(note))
 
-        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
+        assert rc == 0, (
+            f"stderr: {captured_stderr.getvalue()!r}\n"
+            f"stdout: {captured_stdout.getvalue()!r}"
+        )
         dest = shared_root / note.name
         assert dest.exists(), f"Note must be copied to shared root: {shared_root}"
         assert dest.read_text() == original_content, "Copied content must match original"
@@ -576,7 +581,10 @@ class TestPromoteMultipleSharedLayers:
         with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
             rc = cli.cmd_promote(_cmd_promote_args(note, to="alpha"))
 
-        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
+        assert rc == 0, (
+            f"stderr: {captured_stderr.getvalue()!r}\n"
+            f"stdout: {captured_stdout.getvalue()!r}"
+        )
         dest = shared_a / note.name
         assert dest.exists(), "Note must be copied to alpha"
         assert dest.read_text() == original_content
@@ -630,7 +638,10 @@ class TestPromoteUnknownToLayer:
 
 class TestPromoteNonexistentNote:
     def test_nonexistent_note_named_error(self, tmp_path: Path) -> None:
-        """lore promote <missing-note> → named error, no write (subprocess — note check fires before TTY)."""
+        (
+            "lore promote <missing-note> → named error, no write "
+            "(subprocess — note check fires before TTY)."
+        )
         vault = _make_vault(tmp_path)
         shared_root = tmp_path / "shared"
         shared_root.mkdir()
@@ -751,7 +762,10 @@ class TestPromoteSpaceQuoteInPath:
         with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
             rc = cli.cmd_promote(_cmd_promote_args(note))
 
-        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
+        assert rc == 0, (
+            f"stderr: {captured_stderr.getvalue()!r}\n"
+            f"stdout: {captured_stdout.getvalue()!r}"
+        )
         dest = shared_root / note.name
         assert dest.exists(), f"Note with spaces must be promoted: {dest}"
         assert dest.read_text() == original_content, "Content must round-trip intact"
@@ -788,7 +802,10 @@ class TestPromoteSpaceQuoteInPath:
         with mock.patch("sys.stdout", captured_stdout), mock.patch("sys.stderr", captured_stderr):
             rc = cli.cmd_promote(_cmd_promote_args(note))
 
-        assert rc == 0, f"stderr: {captured_stderr.getvalue()!r}\nstdout: {captured_stdout.getvalue()!r}"
+        assert rc == 0, (
+            f"stderr: {captured_stderr.getvalue()!r}\n"
+            f"stdout: {captured_stdout.getvalue()!r}"
+        )
         dest = shared_root / note.name
         assert dest.exists(), "Note with quote must be promoted"
         assert dest.read_text() == original_content

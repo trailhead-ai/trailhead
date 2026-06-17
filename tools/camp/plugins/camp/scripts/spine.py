@@ -177,7 +177,8 @@ def _resolve_slug(raw: str, *, context: str = "argument") -> str:
     """
     if _RAW_DANGEROUS_RE.search(raw):
         _die(
-            f"camp: invalid slug from {context}: {raw!r} — contains path-traversal or shell metacharacters "
+            f"camp: invalid slug from {context}: {raw!r} — contains path-traversal "
+            f"or shell metacharacters "
             f"(no '..', '/', '\\\\', '$', '`', '|', ';', '&')"
         )
 
@@ -481,11 +482,6 @@ def _detect_active_worktree_name(workspace_root: Path) -> str | None:
     """Scan workspace siblings' .claude/worktrees/* for the newest HEAD commit."""
     best_name: str | None = None
     best_ts: float = 0
-    try:
-        from repos import workspace_root as _repos_ws_root
-        siblings_base = workspace_root
-    except ImportError:
-        siblings_base = workspace_root
     trailhead_wt_root = workspace_root / "trailhead" / ".claude" / "worktrees"
     if not trailhead_wt_root.is_dir():
         return None
@@ -861,7 +857,6 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
     workspace_root = _workspace_root()
     # Slice 0: trailhead only; Slice 2 expands to group members.
     sibling_repos = [("trailhead", workspace_root / "trailhead")]
-    record_install = bool(os.environ.get("CAMP_TEST_SYNC_RECORD_INSTALL"))
 
     siblings: dict[str, Any] = {}
     moved: list[str] = []
@@ -1040,13 +1035,30 @@ def cmd_foreach(args: list[str], dry_run: bool = False) -> None:
 
         if not wt_path.is_dir():
             if not as_json:
-                print(f"camp foreach: skip {repo_name!r} — worktree absent at {wt_path}", file=sys.stderr)
-            results.append({"repo": repo_name, "worktree_path": str(wt_path), "skipped": True, "reason": "absent"})
+                print(
+                    f"camp foreach: skip {repo_name!r} — worktree absent at {wt_path}",
+                    file=sys.stderr,
+                )
+            results.append(
+                {
+                    "repo": repo_name,
+                    "worktree_path": str(wt_path),
+                    "skipped": True,
+                    "reason": "absent",
+                }
+            )
             continue
 
         if dry_run:
             print(f"[dry-run] {repo_name}: would exec in {wt_path}: {cmd_list}", file=sys.stderr)
-            results.append({"repo": repo_name, "worktree_path": str(wt_path), "dry_run": True, "argv": cmd_list})
+            results.append(
+                {
+                    "repo": repo_name,
+                    "worktree_path": str(wt_path),
+                    "dry_run": True,
+                    "argv": cmd_list,
+                }
+            )
             continue
 
         proc = subprocess.run(cmd_list, capture_output=True, text=True, cwd=str(wt_path))
@@ -1217,7 +1229,10 @@ def _print_status_human(
         print(f"{slug:<24}  {branch:<30}  {fire:<16}  {repo_str}{stale_marker}")
 
     if stale_instances:
-        print(f"\nDrift: {len(stale_instances)} stale registry instance(s): {', '.join(stale_instances)}")
+        print(
+            f"\nDrift: {len(stale_instances)} stale registry instance(s): "
+            f"{', '.join(stale_instances)}"
+        )
 
 
 def _git_worktree_list(repo_root: Path) -> list[Path]:
@@ -1269,7 +1284,10 @@ def cmd_status(args: list[str], dry_run: bool = False) -> None:
             try:
                 stale_days = int(filtered_args[i + 1])
             except ValueError:
-                _die(f"camp status: --days requires an integer argument, got {filtered_args[i + 1]!r}")
+                _die(
+                    f"camp status: --days requires an integer argument, "
+                    f"got {filtered_args[i + 1]!r}"
+                )
             del filtered_args[i : i + 2]
             continue
         elif filtered_args[i].startswith("--days="):

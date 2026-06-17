@@ -95,7 +95,10 @@ def test_leak_gate_artist_md_is_clean(tmp_path: Path):
 
 
 def test_leak_gate_slice1_surface_still_clean(tmp_path: Path):
-    """The Slice-1 scripts surface (combine_design.py + docs) must remain clean under the Step-6 denylist (D-7/S-3)."""
+    (
+        """The Slice-1 scripts surface (combine_design.py + docs) must remain clean under the """
+        """Step-6 denylist (D-7/S-3)."""
+    )
     scripts_dir = SCRIPTS_DIR
     if not (scripts_dir / "combine_design.py").exists():
         pytest.skip("combine_design.py not yet implemented")
@@ -189,7 +192,8 @@ def test_blocked_message_names_file_line_escape(artist_text: str):
 def test_blocked_message_names_greenfield_escape(artist_text: str):
     """artist.md block rule must name the 'new, no counterpart' greenfield escape hatch (A-3)."""
     assert "new, no counterpart" in artist_text, (
-        "artist.md must state 'new, no counterpart' as a greenfield escape hatch in the BLOCKED rule (A-3)"
+        "artist.md must state 'new, no counterpart' as a greenfield escape hatch "
+        "in the BLOCKED rule (A-3)"
     )
 
 
@@ -225,7 +229,8 @@ def test_blocked_message_names_both_escapes_in_block_rule(artist_text: str):
         "The citation-block BLOCKED message must name 'file:line' as an escape hatch (A-3)"
     )
     assert "new, no counterpart" in block_window, (
-        "The citation-block BLOCKED message must name 'new, no counterpart' as a greenfield escape hatch (A-3)"
+        "The citation-block BLOCKED message must name 'new, no counterpart' "
+        "as a greenfield escape hatch (A-3)"
     )
 
 
@@ -239,10 +244,13 @@ def test_greenfield_aspirational_chrome_out_of_scope_note(artist_text: str):
     """artist.md must state an explicit out-of-scope note for aspirational-chrome setup (A-4)."""
     # Must mention aspirational chrome is out of scope
     has_aspirational = "aspirational" in artist_text.lower()
-    has_out_of_scope = "out of scope" in artist_text.lower() or "not in scope" in artist_text.lower()
+    has_out_of_scope = (
+        "out of scope" in artist_text.lower() or "not in scope" in artist_text.lower()
+    )
 
     assert has_aspirational and has_out_of_scope, (
-        "artist.md must carry an explicit note that full aspirational-chrome setup is out of scope (A-4). "
+        "artist.md must carry an explicit note that full aspirational-chrome setup "
+        "is out of scope (A-4). "
         f"Found 'aspirational': {has_aspirational}, found out-of-scope note: {has_out_of_scope}"
     )
 
@@ -274,8 +282,10 @@ def test_artist_carries_update_mode(artist_text: str):
 
 def test_both_modes_structurally_present(artist_text: str):
     """artist.md must contain both create and update mode sections (A-5)."""
-    create_match = re.search(r"#+\s+.*\bcreate\b.*mode|mode.*\bcreate\b", artist_text, re.IGNORECASE)
-    update_match = re.search(r"#+\s+.*\bupdate\b.*mode|mode.*\bupdate\b", artist_text, re.IGNORECASE)
+    create_match = re.search(
+        r"#+\s+.*\bcreate\b.*mode|mode.*\bcreate\b", artist_text, re.IGNORECASE)
+    update_match = re.search(
+        r"#+\s+.*\bupdate\b.*mode|mode.*\bupdate\b", artist_text, re.IGNORECASE)
     assert create_match is not None, (
         "artist.md must have a section heading for the create mode (A-5)"
     )
@@ -289,7 +299,10 @@ def test_both_modes_structurally_present(artist_text: str):
 # ---------------------------------------------------------------------------
 
 def test_artist_resolves_roots_from_input_env(artist_text: str):
-    """artist.md must reference resolving designs_root/chrome_root from input fields AND DESIGNS_ROOT/CHROME_ROOT env vars."""
+    (
+        """artist.md must reference resolving designs_root/chrome_root from input fields """
+        """AND DESIGNS_ROOT/CHROME_ROOT env vars."""
+    )
     # Must name the concrete fields
     assert "designs_root" in artist_text, (
         "artist.md must name the 'designs_root' field so callers know the resolution contract"
@@ -320,12 +333,16 @@ def test_artist_does_not_name_specific_aesthetic(artist_text: str):
     ]
     for term in forbidden_aesthetic_terms:
         assert term.lower() not in artist_text.lower(), (
-            f"artist.md must not name the aesthetic term {term!r} — the look comes from the consumed catalog, not the agent"
+            f"artist.md must not name the aesthetic term {term!r} — the look comes from "
+            "the consumed catalog, not the agent"
         )
 
 
 def test_artist_does_not_have_fixed_surface_list(artist_text: str):
-    """artist.md must not hardcode a fixed list of surfaces (surfaces are data, read from the brief + chrome catalog)."""
+    (
+        """artist.md must not hardcode a fixed list of surfaces """
+        """(surfaces are data, read from the brief + chrome catalog)."""
+    )
     # The three zenith-specific surfaces must not appear
     forbidden_surfaces = [
         "platform-admin-ui",
@@ -334,14 +351,19 @@ def test_artist_does_not_have_fixed_surface_list(artist_text: str):
     ]
     for surface in forbidden_surfaces:
         assert surface not in artist_text, (
-            f"artist.md must not hardcode the surface {surface!r} — surfaces are data read from the brief"
+            f"artist.md must not hardcode the surface {surface!r} — "
+            "surfaces are data read from the brief"
         )
 
 
 def test_artist_references_combine_as_deliverable_step(artist_text: str):
-    """artist.md must reference 'combine' as the deliverable step (renamed vocabulary from Slice 1)."""
+    (
+        """artist.md must reference 'combine' as the deliverable step """
+        """(renamed vocabulary from Slice 1)."""
+    )
     assert "combine" in artist_text.lower(), (
-        "artist.md must reference 'combine' / combine_design.py as the deliverable step (Slice-1 renamed vocabulary)"
+        "artist.md must reference 'combine' / combine_design.py as the deliverable step "
+        "(Slice-1 renamed vocabulary)"
     )
 
 
@@ -366,6 +388,8 @@ def test_artist_component_mapping_before_html(artist_text: str):
 
 def test_artist_report_under_12_lines(artist_text: str):
     """artist.md must describe a report structure of ~12 lines or fewer."""
-    assert "12" in artist_text or "twelve" in artist_text.lower() or "under" in artist_text.lower(), (
+    assert (
+        "12" in artist_text or "twelve" in artist_text.lower() or "under" in artist_text.lower()
+    ), (
         "artist.md must specify the report structure is under ~12 lines"
     )

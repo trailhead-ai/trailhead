@@ -279,7 +279,6 @@ class TestAreasBuildAreaMapRaises:
         """cmd_areas exits 0 even when build_area_map raises."""
         vault = _make_vault(tmp_path)
         cli = _load_cli()
-        import sys
         from types import SimpleNamespace
         from unittest import mock
         import io
@@ -303,7 +302,6 @@ class TestAreasBuildAreaMapRaises:
         """Degraded stdout line conveys 'no areas' when build_area_map raises."""
         vault = _make_vault(tmp_path)
         cli = _load_cli()
-        import sys
         from types import SimpleNamespace
         from unittest import mock
         import io
@@ -327,7 +325,6 @@ class TestAreasBuildAreaMapRaises:
         """A single-line stderr diagnostic is emitted when build_area_map raises."""
         vault = _make_vault(tmp_path)
         cli = _load_cli()
-        import sys
         from types import SimpleNamespace
         from unittest import mock
         import io

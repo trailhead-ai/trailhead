@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 from unittest import mock
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -109,7 +108,8 @@ def _real_content_note(vault: Path, worktree: str = "synth-beta") -> Path:
     # Insert actual content under "## What we did"
     text = text.replace(
         "## What we did\n<!-- Append as work happens. -->",
-        "## What we did\n<!-- Append as work happens. -->\n\nWired the synth-gadget to the synth-widget.",
+        "## What we did\n<!-- Append as work happens. -->\n\n"
+        "Wired the synth-gadget to the synth-widget.",
     )
     note.write_text(text)
     return note
@@ -265,7 +265,7 @@ class TestFinalizeIdempotencyGuard:
     def _check_not_restamped(self, vault: Path, note: Path, original_text: str, worktree: str):
         _run_finalize({"worktree": worktree}, vault)
         assert note.read_text() == original_text, (
-            f"note with terminal status was re-stamped (idempotency guard missing)"
+            "note with terminal status was re-stamped (idempotency guard missing)"
         )
 
     def test_already_complete_not_restamped(self, tmp_path):
@@ -329,7 +329,7 @@ class TestSweepOrphanSkeletons:
     def test_recent_skeleton_in_other_worktree_is_kept(self, tmp_path):
         """A skeleton newer than RESUME_WINDOW_SECONDS → not swept (may be mid-bootstrap)."""
         vault = _make_vault(tmp_path)
-        s = load_sessions()
+        load_sessions()
         recent = _skeleton_note(vault, worktree="synth-recent")
         # Recent mtime (default — just created)
         current_notes: set[Path] = set()
@@ -449,7 +449,7 @@ class TestTrackedSkeletonDeletionCommitted:
         """Orphan skeletons deleted by sweep_orphan_skeletons must also be committed."""
         vault = _git_vault(tmp_path)
         # Current worktree has a real note (untracked — drives the finalize path)
-        current = _real_content_note(vault, worktree="synth-real-current")
+        _real_content_note(vault, worktree="synth-real-current")
         # Orphan skeleton tracked in git, backdated
         s = load_sessions()
         orphan = _skeleton_note(vault, worktree="synth-orphan-tracked")

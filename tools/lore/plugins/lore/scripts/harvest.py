@@ -216,7 +216,9 @@ def render_note(entry: Entry, templates_dir: Path, today: str, project: str) -> 
             rendered = _append_section(rendered, "## Why it failed", failed + ".")
         revive = fields.get("revive if") or fields.get("revive")
         if revive:
-            rendered = _append_section(rendered, "## What would make it worth retrying", revive + ".")
+            rendered = _append_section(
+                rendered, "## What would make it worth retrying", revive + "."
+            )
 
     elif kind == "follow-up":
         subs = {

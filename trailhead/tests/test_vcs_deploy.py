@@ -309,7 +309,8 @@ class TestLogs:
         assert provider.deploy.logs("some/path", job_id="222") == []
 
     def test_not_found_run_returns_empty_list(self) -> None:
-        """A 404 from gh (nonzero + Not-Found stderr) on annotations is no-false-alarm: empty list."""
+        """A 404 from gh (nonzero + Not-Found stderr) on annotations is no-false-alarm:
+        empty list."""
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:
@@ -408,7 +409,8 @@ class TestDeployErrorCause:
         assert "rate limit" in msg, "stderr not surfaced"
 
     def test_non_json_surfaces_distinct_cause(self) -> None:
-        """gh exiting zero but with non-JSON stdout → DeployError, distinct from the nonzero case."""
+        """gh exiting zero but with non-JSON stdout → DeployError, distinct from the
+        nonzero case."""
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:

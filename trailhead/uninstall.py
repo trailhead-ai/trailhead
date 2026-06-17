@@ -77,7 +77,8 @@ def run_uninstall(
             print(
                 f"This removes the ENTIRE trailhead install:\n"
                 f"  - de-registers all plugins from: {harness_list}\n"
-                f"  - removes the camp/lore CLI shim dir (then drop the `shellenv` line from your profile)\n"
+                f"  - removes the camp/lore CLI shim dir "
+                f"(then drop the `shellenv` line from your profile)\n"
                 f"  - deletes trailhead's composed trees\n"
                 f"Your data is kept (lore vault, camp groups, plugin data dirs).\n"
             )

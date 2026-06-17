@@ -56,14 +56,12 @@ _SCRIPTS_DIR = Path(__file__).parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-import frontmatter as _fm_mod
-from regenerate_indices import (
-    classify_status,
+import frontmatter as _fm_mod  # noqa: E402
+from regenerate_indices import (  # noqa: E402
     first_date,
     first_paragraph_after_headings,
-    load_md_files,
 )
-from vault import iter_note_paths
+from vault import iter_note_paths  # noqa: E402
 
 # Hard caps (D-8c)
 _ONE_LINER_MAX = 120
@@ -561,7 +559,9 @@ def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, s
         folder = vault / folder_name
         if not folder.is_dir():
             continue
-        for p in sorted(iter_note_paths(folder, recursive=True), key=lambda p: p.name, reverse=True):
+        for p in sorted(
+            iter_note_paths(folder, recursive=True), key=lambda p: p.name, reverse=True
+        ):
             if p in seen:
                 continue
             fm = _fm_mod.parse_frontmatter(p)
@@ -771,7 +771,7 @@ def render_recall_banner(result: RecallResult, tty: bool | None = None) -> str:
                     # D-3: human-readable separator for interactive terminals
                     lines.append(f"--- [shared: {vault_name}] ---")
                     lines.extend(vault_block)
-                    lines.append(f"--- [end shared] ---")
+                    lines.append("--- [end shared] ---")
                 else:
                     # D-3: structural XML data channel for agent/piped output
                     # A-3: XML-escape the source= attribute value

@@ -56,17 +56,29 @@ STRUCTURAL_SEAMS: list[str] = [
 # ---------------------------------------------------------------------------
 
 APP_SEAM_TOKENS: list[str] = [
-    "".join(["p", "o", "s", "t", "h", "o", "g"]),                                              # analytics/flag vendor
-    "".join(["i", "n", "s", "t", "r", "u", "m", "e", "n", "t", "-", "f", "e", "a", "t", "u", "r", "e", "-", "f", "l", "a", "g", "s"]),  # flag-provider skill slug
-    "".join(["d", "a", "s", "h", "0"]),                                                        # observability vendor
-    "".join(["e", "v", "i", "d", "e", "n", "c", "e", "_", "p", "a", "c", "k"]),                # soak evidence allowlist script
-    "".join(["p", "l", "a", "n", "-", "c", "o", "s", "t", "-", "h", "i", "s", "t", "o", "r", "y"]),  # cost-history report (Cluster B)
-    "".join(["p", "r", "o", "j", "e", "c", "t", "i", "o", "n", "s"]),                          # private DB schema name
-    "".join(["p", "l", "a", "t", "f", "o", "r", "m", "."]),                                    # dotted metric namespace prefix
-    "".join(["a", "s", "a", "n", "a"]),                                                        # issue tracker vendor
-    "".join(["m", "i", "x"]),                                                                   # build/test CLI
-    "".join(["n", "p", "m"]),                                                                   # build/test CLI
-    "".join(["z", "e", "n", "i", "t", "h", "/", ".", "c", "l", "a", "u", "d", "e"]),           # host-config cross-ref path (denylisted org name → runtime-built)
+    # analytics/flag vendor
+    "".join(["p", "o", "s", "t", "h", "o", "g"]),
+    # flag-provider skill slug
+    "".join(["i", "n", "s", "t", "r", "u", "m", "e", "n", "t", "-", "f", "e", "a", "t", "u",
+             "r", "e", "-", "f", "l", "a", "g", "s"]),
+    # observability vendor
+    "".join(["d", "a", "s", "h", "0"]),
+    # soak evidence allowlist script
+    "".join(["e", "v", "i", "d", "e", "n", "c", "e", "_", "p", "a", "c", "k"]),
+    # cost-history report (Cluster B)
+    "".join(["p", "l", "a", "n", "-", "c", "o", "s", "t", "-", "h", "i", "s", "t", "o", "r", "y"]),
+    # private DB schema name
+    "".join(["p", "r", "o", "j", "e", "c", "t", "i", "o", "n", "s"]),
+    # dotted metric namespace prefix
+    "".join(["p", "l", "a", "t", "f", "o", "r", "m", "."]),
+    # issue tracker vendor
+    "".join(["a", "s", "a", "n", "a"]),
+    # build/test CLI
+    "".join(["m", "i", "x"]),
+    # build/test CLI
+    "".join(["n", "p", "m"]),
+    # host-config cross-ref path (denylisted org name → runtime-built)
+    "".join(["z", "e", "n", "i", "t", "h", "/", ".", "c", "l", "a", "u", "d", "e"]),
 ]
 
 # ---------------------------------------------------------------------------

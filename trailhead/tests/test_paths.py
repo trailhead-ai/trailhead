@@ -7,8 +7,6 @@ trailhead/paths.py is implemented.
 
 import os
 import stat
-import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -287,7 +285,8 @@ class TestUnknownOS:
 
 class TestUnsetHome:
     def test_unset_home_on_linux_raises_named_error(self):
-        """When HOME is unset, expanduser raises RuntimeError — must surface as PathResolutionError."""
+        """When HOME is unset, expanduser raises RuntimeError — must surface as
+        PathResolutionError."""
         env = {}  # no HOME, no XDG
         with pytest.raises(PathResolutionError, match="HOME"):
             config_dir("app", platform="linux", env=env)

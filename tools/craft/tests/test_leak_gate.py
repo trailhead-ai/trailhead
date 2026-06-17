@@ -117,8 +117,10 @@ def test_binary_and_pycache_skipped(tmp_path: Path, denylist: Path):
 # ---- multiple trees ---------------------------------------------------------
 
 def test_multiple_trees_all_scanned(tmp_path: Path, denylist: Path):
-    a = tmp_path / "a"; a.mkdir()
-    b = tmp_path / "b"; b.mkdir()
+    a = tmp_path / "a"
+    a.mkdir()
+    b = tmp_path / "b"
+    b.mkdir()
     _write(a, "ok.md", "clean prose\n")
     _write(b, "bad.md", "uses sekritcorp here\n")
     r = _run([a, b], denylist)
@@ -127,15 +129,18 @@ def test_multiple_trees_all_scanned(tmp_path: Path, denylist: Path):
 
 
 def test_multiple_trees_all_clean_exits_0(tmp_path: Path, denylist: Path):
-    a = tmp_path / "a"; a.mkdir()
-    b = tmp_path / "b"; b.mkdir()
+    a = tmp_path / "a"
+    a.mkdir()
+    b = tmp_path / "b"
+    b.mkdir()
     _write(a, "ok.md", "clean\n")
     _write(b, "fine.md", "also clean\n")
     assert _run([a, b], denylist).returncode == 0
 
 
 def test_multiple_trees_one_missing_fails_closed(tmp_path: Path, denylist: Path):
-    a = tmp_path / "a"; a.mkdir()
+    a = tmp_path / "a"
+    a.mkdir()
     _write(a, "ok.md", "clean\n")
     r = _run([a, tmp_path / "missing"], denylist)
     assert r.returncode == 2

@@ -8,12 +8,11 @@ Also surfaces the eager config-overlap validation (Slice 1) before writing.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
 from hooks_writer import write_hooks_for_member
-from group_resolve import validate_no_overlap, GroupResolutionError
+from group_resolve import validate_no_overlap
 
 
 def run_init(

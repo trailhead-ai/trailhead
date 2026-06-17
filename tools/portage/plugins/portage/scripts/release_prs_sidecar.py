@@ -21,8 +21,8 @@ from _bootstrap import ensure_trailhead_importable
 
 ensure_trailhead_importable()
 
-from trailhead.vcs import get_provider
-from trailhead.vcs.github import SidecarError
+from trailhead.vcs import get_provider  # noqa: E402
+from trailhead.vcs.github import SidecarError  # noqa: E402
 
 
 def _parse_pr_token(token: str) -> dict[str, str]:

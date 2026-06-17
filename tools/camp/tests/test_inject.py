@@ -20,7 +20,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
@@ -182,8 +181,8 @@ class TestDrain:
 # CLI route: camp inject --drain
 # ---------------------------------------------------------------------------
 
-import os
-import subprocess
+import os  # noqa: E402
+import subprocess  # noqa: E402
 
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"

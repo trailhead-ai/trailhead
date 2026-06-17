@@ -33,12 +33,10 @@ lore sync:
 from __future__ import annotations
 
 import os
-import stat
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -303,7 +301,7 @@ def test_init_skips_git_init_if_already_a_repo(tmp_path):
     """If the target is already a git repo, init should not re-initialize."""
     target = tmp_path / "vault"
     _git_init(target)
-    git_dir_mtime_before = (target / ".git").stat().st_mtime
+    (target / ".git").stat()
     env = {**home(tmp_path), "LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)}
     r = run_cli(["init", str(target), "--yes", "--force"], env=env)
     assert r.returncode == 0, r.stderr
@@ -392,7 +390,11 @@ def test_sync_skips_push_without_origin(tmp_path):
     r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
     assert r.returncode == 0, r.stderr
     combined = r.stdout + r.stderr
-    assert "origin" in combined.lower() or "push" in combined.lower() or "remote" in combined.lower()
+    assert (
+        "origin" in combined.lower()
+        or "push" in combined.lower()
+        or "remote" in combined.lower()
+    )
 
 
 def test_sync_accepts_custom_message(tmp_path):

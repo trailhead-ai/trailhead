@@ -17,7 +17,6 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from trailhead.harness import ClaudeCodeHarness
 from trailhead.pathint import ShimDirResult

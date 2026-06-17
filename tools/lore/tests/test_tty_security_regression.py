@@ -23,7 +23,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import pytest
 
 from conftest import CLI_PATH, SCRIPTS_DIR
 
@@ -347,7 +346,6 @@ class TestHappyPathInProcess:
         cli = _load_cli_module()
 
         # Patch stdin to non-TTY
-        fake_stdin = FakeStdin(["y\n"])
         fake_stdin_non_tty = FakeStdin(["y\n"])
         fake_stdin_non_tty.isatty = lambda: False
         monkeypatch.setattr(sys, "stdin", fake_stdin_non_tty)

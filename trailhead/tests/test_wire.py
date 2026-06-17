@@ -1043,7 +1043,8 @@ class TestSplitMarkers:
         uninstall_calls = [c for c in calls if "uninstall" in c]
         install_calls = [c for c in calls if "install" in c and "uninstall" not in c]
         assert uninstall_calls == [], (
-            f"rewire (uninstall) called on un-installed tool; should have installed: {uninstall_calls}"
+            "rewire (uninstall) called on un-installed tool; "
+            f"should have installed: {uninstall_calls}"
         )
         assert len(install_calls) >= 1, (
             f"install not called for un-installed tool: {calls}"

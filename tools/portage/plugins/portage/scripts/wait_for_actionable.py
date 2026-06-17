@@ -22,7 +22,7 @@ from _bootstrap import ensure_trailhead_importable
 
 ensure_trailhead_importable()
 
-from trailhead.vcs import get_provider
+from trailhead.vcs import get_provider  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:

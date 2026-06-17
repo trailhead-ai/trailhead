@@ -13,7 +13,6 @@ for the common case of a non-camp repo.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -61,7 +60,7 @@ def _resolve_group_slug_silently(
       - resolution error of any kind
     """
     try:
-        from group_resolve import resolve_from_cwd, GroupResolutionError
+        from group_resolve import resolve_from_cwd
     except ImportError:
         return None, None
 
@@ -158,7 +157,6 @@ def cmd_worktree_cleanup(*, force: bool = False) -> None:
         sys.stderr.write(f"camp worktree-cleanup: {e}\n")
         sys.exit(1)
 
-    status = result.get("status", "ok")
     removed = result.get("removed", [])
     if removed:
         print(f"camp: removed worktrees for slug {slug!r} ({', '.join(removed)})")

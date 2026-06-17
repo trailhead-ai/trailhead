@@ -7,7 +7,8 @@ Test contract (all must fail before the fix, pass after):
 - Block-style surfaces:  - '[[areas/synth-alpha]]' → ["synth-alpha"]
 - Inline surfaces: ["[[areas/synth-alpha]]", "[[tools/synth-tool]]"] → ["synth-alpha", "synth-tool"]
 - Prefix coverage: areas/, tools/, AND plans/ all strip to bare slug for overlap keys
-- related-spec: '[[specs/synth-spec-slug]]' → "specs/synth-spec-slug" (full path, NOT slug-reduced, NOT a list)
+- related-spec: '[[specs/synth-spec-slug]]' → "specs/synth-spec-slug"
+  (full path, NOT slug-reduced, NOT a list)
 - Bare-slug forms (inline [a, b] and block - a) unchanged (regression guard)
 - End-to-end (rederived): recall_areas finds deferred notes with block-style
   wikilink surfaces: [[areas/...]] format (D23 area semantics)
@@ -17,7 +18,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 from conftest import load_script
 
@@ -118,13 +118,15 @@ class TestWikilinkUnwrapSlugReduced:
 
 class TestNonOverlapWikilinkFields:
     def test_related_spec_keeps_full_path(self):
-        """related-spec: '[[specs/synth-spec-slug]]' → 'specs/synth-spec-slug' (scalar, full path)."""
+        """related-spec: '[[specs/synth-spec-slug]]' → 'specs/synth-spec-slug'
+        (scalar, full path)."""
         result = _fm("related-spec: '[[specs/synth-spec-slug]]'")
         assert result["related-spec"] == "specs/synth-spec-slug"
         assert not isinstance(result["related-spec"], list)
 
     def test_related_plan_keeps_full_path(self):
-        """related-plan: '[[plans/synth-plan-slug]]' → 'plans/synth-plan-slug' (scalar, full path)."""
+        """related-plan: '[[plans/synth-plan-slug]]' → 'plans/synth-plan-slug'
+        (scalar, full path)."""
         result = _fm("related-plan: '[[plans/synth-plan-slug]]'")
         assert result["related-plan"] == "plans/synth-plan-slug"
         assert not isinstance(result["related-plan"], list)

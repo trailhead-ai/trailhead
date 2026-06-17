@@ -29,7 +29,6 @@ no real claude exec, no ~/.claude.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import textwrap
@@ -37,7 +36,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -518,7 +516,8 @@ class TestForegroundSetup:
         group = _make_group_config(
             "failg",
             [
-                {"name": "repo_a", "repo_root": str(repo_a), "bootstrap": [], "base": "origin/main"},
+                {"name": "repo_a", "repo_root": str(repo_a), "bootstrap": [],
+                 "base": "origin/main"},
                 {"name": "repo_b", "repo_root": str(tmp_path / "nonexistent"),
                  "bootstrap": [], "base": "origin/main"},
             ],
@@ -640,8 +639,10 @@ class TestConcurrency:
 
         t1 = threading.Thread(target=run_setup)
         t2 = threading.Thread(target=run_setup)
-        t1.start(); t2.start()
-        t1.join(timeout=30); t2.join(timeout=30)
+        t1.start()
+        t2.start()
+        t1.join(timeout=30)
+        t2.join(timeout=30)
 
         assert not errors, f"concurrent setup raised: {errors}"
 
@@ -685,7 +686,8 @@ class TestConcurrency:
 
         w = threading.Thread(target=writer)
         r = threading.Thread(target=reader)
-        w.start(); r.start()
+        w.start()
+        r.start()
         r.join(timeout=30)
         stop.set()
         w.join(timeout=30)

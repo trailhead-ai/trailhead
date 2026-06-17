@@ -9,13 +9,11 @@ Test contract:
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
@@ -50,7 +48,9 @@ def _make_workspace(tmp_path: Path, group_name: str, slug: str) -> Path:
     return ws_dir
 
 
-def _run_cli(args: list[str], *, env: dict[str, str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+def _run_cli(
+    args: list[str], *, env: dict[str, str], cwd: Path | None = None
+) -> subprocess.CompletedProcess:
     base = {**os.environ}
     base.update(env)
     return subprocess.run(
@@ -256,7 +256,7 @@ class TestCampPwdErrors:
             f"Expected empty stdout for unknown slug, got: {result.stdout!r}"
         )
         assert result.stderr.strip() != "", (
-            f"Expected non-empty stderr for unknown slug error, got empty"
+            "Expected non-empty stderr for unknown slug error, got empty"
         )
 
     def test_unknown_slug_stderr_is_legible(self, tmp_path: Path) -> None:
@@ -275,7 +275,12 @@ class TestCampPwdErrors:
 
         assert result.returncode != 0
         # The error message should reference the slug or 'workspace' or 'not found'
-        assert "nonexistent-slug" in result.stderr or "not found" in result.stderr.lower() or "does not exist" in result.stderr.lower() or "no workspace" in result.stderr.lower(), (
+        assert (
+            "nonexistent-slug" in result.stderr
+            or "not found" in result.stderr.lower()
+            or "does not exist" in result.stderr.lower()
+            or "no workspace" in result.stderr.lower()
+        ), (
             f"Expected legible error naming the slug in stderr: {result.stderr!r}"
         )
 

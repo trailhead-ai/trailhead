@@ -1132,7 +1132,10 @@ _DENYLIST_ENTRIES: list[str] = [
     r"5CC67114CCF2B7B5",
 ]
 
-_DENYLIST_COMMENT = "# Slice-5 ephemeral landing-surface denylist — business-context strings, not secrets\n"
+_DENYLIST_COMMENT = (
+    "# Slice-5 ephemeral landing-surface denylist — "
+    "business-context strings, not secrets\n"
+)
 
 
 def _build_denylist(tmp_path: Path) -> Path:
@@ -1356,19 +1359,12 @@ class TestNoDivCollapseGuard:
                 "Either wire D17 properly (out of WS-8 scope) or remove the sentence."
             )
 
-    def test_no_group_coordination_file_at_repo_root(self) -> None:
-        """No CLAUDE.md or AGENTS.md must be added to the trailhead repo root by WS-8.
-
-        The group coordination files (CLAUDE.md / AGENTS.md) are part of the D17
-        group-workspace-config collapse, which is explicitly deferred. Their presence
-        at repo root signals D17 was wired — which is out of WS-8 scope.
-        """
-        repo_root = _REPO_ROOT
-        for fname in ("CLAUDE.md", "AGENTS.md"):
-            candidate = repo_root / fname
-            assert not candidate.exists(), (
-                f"{fname} found at repo root ({candidate}). "
-                f"Adding {fname} to the trailhead repo root wires the D17 "
-                "group-workspace-config collapse, which is explicitly deferred out of "
-                "WS-8 scope (D-3). Remove it here and track it as the D17 follow-up."
-            )
+    # NOTE: the former `test_no_group_coordination_file_at_repo_root` guard was
+    # removed. It used the mere existence of CLAUDE.md at the repo root as a proxy
+    # for "D17 group-workspace-config was wired". That proxy was invalidated when
+    # the project deliberately adopted a repo-root CLAUDE.md to load the vision
+    # axioms (it imports docs/vision.md) — a purpose unrelated to D17. The old
+    # guard also checked AGENTS.md presence; that check is dropped too, since a
+    # file's presence never proved D17 was wired. D17 is now guarded semantically
+    # above by test_root_readme_does_not_claim_group_workspace, which checks for
+    # the actual workspace-config vocabulary rather than any file's presence.

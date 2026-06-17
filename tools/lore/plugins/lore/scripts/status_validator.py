@@ -11,8 +11,12 @@ from __future__ import annotations
 
 # Canonical status sets per note type, keyed by the directory / plural name.
 CANONICAL: dict[str, frozenset[str]] = {
-    "plans": frozenset({"draft", "ready", "in-progress", "complete", "superseded", "dropped", "shelved"}),
-    "specs": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped", "shelved"}),
+    "plans": frozenset(
+        {"draft", "ready", "in-progress", "complete", "superseded", "dropped", "shelved"}
+    ),
+    "specs": frozenset(
+        {"draft", "ready", "planned", "complete", "superseded", "dropped", "shelved"}
+    ),
     "sessions": frozenset({"active", "complete", "shelved", "finalized", "handoff"}),
     "deferred": frozenset({"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}),
     "follow-ups": frozenset({"active", "resolved", "dropped"}),
@@ -112,7 +116,8 @@ def main(argv: list[str] | None = None) -> int:
         path = Path(path_str)
         if not path.exists():
             violations.append(
-                f"  {path}: path does not exist — guard internal inconsistency; reinstall with `lore init`"
+                f"  {path}: path does not exist — guard internal inconsistency; "
+                f"reinstall with `lore init`"
             )
             continue
         try:
@@ -129,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif is_deprecated_status(note_type, status):
             deprecations.append(
-                f"  {path}: status={status!r} accepted (deprecated — migrate to 'complete' before cutover)"
+                f"  {path}: status={status!r} accepted "
+                f"(deprecated — migrate to 'complete' before cutover)"
             )
 
     if deprecations:

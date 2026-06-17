@@ -369,6 +369,8 @@ def test_resume_explicit_target_still_works(tmp_path):
 
 def test_resume_no_target_no_match_errors(tmp_path):
     vault = _git_vault(tmp_path)
-    r = run_cli(["resume", "--worktree", "ghost"], env={"LORE_VAULT": str(vault)}, cwd=str(tmp_path))
+    r = run_cli(
+        ["resume", "--worktree", "ghost"], env={"LORE_VAULT": str(vault)}, cwd=str(tmp_path)
+    )
     assert r.returncode == 1
     assert "ghost" in (r.stdout + r.stderr)

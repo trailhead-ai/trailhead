@@ -2,7 +2,8 @@
 
 Plan: 2026-06-12-trailhead-lean-execute-loop-controller
 - Slice 1: executor report head/tail split (agents/executor.md)
-- Slice 2: code-reviewer structured verdict (agents/code-reviewer.md + skills/review/code-reviewer.md)
+- Slice 2: code-reviewer structured verdict
+  (agents/code-reviewer.md + skills/review/code-reviewer.md)
 - Slice 3: execute SKILL §4 single-pass + §5 working set (skills/execute/SKILL.md)
 
 TDD contract: grep-style body guards on the craft agent/skill prompt files.
@@ -174,7 +175,10 @@ class TestExecutorTailDirective:
         )
 
     def test_tail_directive_states_not_returned_or_not_echoed(self):
-        """The durable-tail section must state it is 'not returned' or 'not echoed' to the controller."""
+        (
+            "The durable-tail section must state it is 'not returned' "
+            "or 'not echoed' to the controller."
+        )
         text = _executor_text()
         _head, tail = _split_at_tail_marker(text)
         assert tail, (
@@ -270,7 +274,8 @@ class TestHarvestCandidatesIsLast:
         """executor.md must contain a '## Harvest candidates' section."""
         text = _executor_text()
         assert "## Harvest candidates" in text, (
-            "executor.md must contain a '## Harvest candidates' section (required by the downstream hook)"
+            "executor.md must contain a '## Harvest candidates' section "
+            "(required by the downstream hook)"
         )
 
     def test_harvest_candidates_is_last_double_hash_section(self):
@@ -283,7 +288,8 @@ class TestHarvestCandidatesIsLast:
         subsequent_sections = re.findall(r"^## .+", after_harvest, re.MULTILINE)
         assert not subsequent_sections, (
             f"executor.md has ## sections after '## Harvest candidates': {subsequent_sections}. "
-            "The harvest block must be the last ## section — a downstream hook locates it by anchor."
+            "The harvest block must be the last ## section — a downstream hook "
+            "locates it by anchor."
         )
 
 
@@ -443,7 +449,10 @@ class TestCodeReviewerNegativeAbsence:
         )
 
     def test_skill_lacks_acknowledge_strengths_instruction(self):
-        """'Acknowledge strengths' instruction must be ABSENT from skills/review/code-reviewer.md."""
+        (
+            "'Acknowledge strengths' instruction must be ABSENT from "
+            "skills/review/code-reviewer.md."
+        )
         text = _skill_reviewer_text()
         assert "Acknowledge strengths" not in text, (
             "skills/review/code-reviewer.md still contains 'Acknowledge strengths' — "
@@ -451,7 +460,8 @@ class TestCodeReviewerNegativeAbsence:
         )
 
     def test_skill_lacks_assessment_ready_to_merge(self):
-        """'### Assessment' / 'Ready to merge?' block must be ABSENT from skills/review/code-reviewer.md.
+        """'### Assessment' / 'Ready to merge?' block must be ABSENT from
+        skills/review/code-reviewer.md.
 
         The verdict replaces this block. Both the heading and the question phrase must go.
         """
@@ -661,7 +671,8 @@ class TestExecuteSkillSection4SinglePass:
         assert "Dispatch `code-reviewer` twice" not in section, (
             "skills/execute/SKILL.md §4 still contains 'Dispatch `code-reviewer` twice' — "
             "the old unconditional double-dispatch instruction must be replaced by the single "
-            "combined pass with conditional second pass. This is the load-bearing NEGATIVE assertion."
+            "combined pass with conditional second pass. This is the load-bearing "
+            "NEGATIVE assertion."
         )
 
 
@@ -674,7 +685,8 @@ class TestExecuteSkillSection5WorkingSet:
         section = _split_execute_at_section(text, "Update the plan file")
         assert "current slice" in section.lower(), (
             "skills/execute/SKILL.md §5 must name 'current slice' in the working-set directive — "
-            "the controller's per-cycle working set is the current slice section + unknowns checklist."
+            "the controller's per-cycle working set is the current slice section "
+            "+ unknowns checklist."
         )
 
     def test_section5_names_unknowns_checklist_in_working_set(self):
@@ -682,7 +694,8 @@ class TestExecuteSkillSection5WorkingSet:
         text = _execute_skill_text()
         section = _split_execute_at_section(text, "Update the plan file")
         assert "unknowns checklist" in section.lower(), (
-            "skills/execute/SKILL.md §5 must name 'unknowns checklist' in the working-set directive."
+            "skills/execute/SKILL.md §5 must name 'unknowns checklist' in the "
+            "working-set directive."
         )
 
     def test_section5_states_does_not_reread_full_plan(self):

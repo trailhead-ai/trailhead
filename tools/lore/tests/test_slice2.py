@@ -135,7 +135,11 @@ def test_readme_lore_finish_mentions_harvest_or_expanded():
             # (either by mentioning harvest/expand or by being updated).
             # The old text was just "Finalize the active session note and commit"
             # — we check it's been updated.
-            assert "harvest" in line.lower() or "expand" in line.lower() or "notes" in line.lower(), (
+            assert (
+                "harvest" in line.lower()
+                or "expand" in line.lower()
+                or "notes" in line.lower()
+            ), (
                 f"README's 'lore finish' CLI line should reflect the expanded "
                 f"behavior (harvest / expand / notes); got: {line!r}"
             )

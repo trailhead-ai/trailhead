@@ -41,7 +41,6 @@ import sys
 import textwrap
 from pathlib import Path
 
-import pytest
 
 # This test file lives at tools/portage/tests/test_portage_vcs_loader.py.
 # A real portage thin script lives at tools/portage/plugins/portage/scripts/<name>.py.

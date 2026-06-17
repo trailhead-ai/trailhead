@@ -150,7 +150,9 @@ class TestSweepOrphanSkeletons:
     def test_sweeps_bucketed_skeleton(self, vault):
         import os
         import time
-        skeleton = _session_note(vault, "2026-06/2026-06-01-1000-beta-worktree.md", worktree="beta-worktree")
+        skeleton = _session_note(
+            vault, "2026-06/2026-06-01-1000-beta-worktree.md", worktree="beta-worktree"
+        )
         # Make it old enough to be eligible for sweep.
         old = time.time() - 60 * 60
         os.utime(skeleton, (old, old))

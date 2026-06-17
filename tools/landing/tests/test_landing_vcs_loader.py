@@ -26,7 +26,6 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import pytest
 
 # This test file lives at tools/landing/tests/test_landing_vcs_loader.py.
 # A real landing thin script lives at tools/landing/plugins/landing/scripts/<name>.py.

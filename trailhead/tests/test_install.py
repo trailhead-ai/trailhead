@@ -9,7 +9,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from trailhead.harness import ClaudeCodeHarness
 from trailhead.install import run_install

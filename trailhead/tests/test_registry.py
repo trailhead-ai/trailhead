@@ -17,9 +17,6 @@ Contract (B-3 HERMETICITY):
 """
 
 import json
-import os
-import re
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -292,7 +289,8 @@ class TestInputGuard:
 
 class TestRegisterMarketplace:
     def test_register_marketplace_calls_marketplace_add(self, tmp_path):
-        """register_marketplace must call 'claude plugin marketplace add --scope user <composed_root>'."""
+        """register_marketplace must call
+        'claude plugin marketplace add --scope user <composed_root>'."""
         from trailhead.registry import register_marketplace
 
         composed_root = tmp_path / "composed"
@@ -850,7 +848,9 @@ class TestUnregisterTool:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         with pytest.raises(ValueError):
-            unregister_tool(tool="../evil", composed_root=composed_root, runner=lambda args, **kw: None)
+            unregister_tool(
+                tool="../evil", composed_root=composed_root, runner=lambda args, **kw: None
+            )
 
 
 class TestUnregisterMarketplace:

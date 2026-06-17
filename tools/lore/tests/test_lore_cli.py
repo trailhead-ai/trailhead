@@ -7,9 +7,8 @@ sibling-module import path, exit codes, and stdout/stderr.
 import os
 import subprocess
 import sys
-from pathlib import Path
 
-from conftest import CLI_PATH, SCRIPTS_DIR, load_script
+from conftest import CLI_PATH, load_script
 
 TAXONOMY = [
     "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",

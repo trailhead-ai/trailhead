@@ -40,14 +40,10 @@ Covers (rederived from plan Slice 3 / D26 / D-6 / D-7 / A-3 / C-1 / C-5 / D-3):
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
 import sys
-import textwrap
-from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"

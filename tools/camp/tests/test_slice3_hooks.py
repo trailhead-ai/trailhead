@@ -149,7 +149,8 @@ def two_member_group(tmp_path: Path):
 
 class TestHooksWriter:
     def test_writes_session_start_hook(self, two_member_group):
-        """init writes a SessionStart hook for session-bootstrap into each member's settings.json."""
+        """init writes a SessionStart hook for session-bootstrap into each
+        member's settings.json."""
         from hooks_writer import write_hooks_for_member
 
         g = two_member_group
@@ -973,10 +974,10 @@ class TestHelpMenuInit:
         # argparse dumps start with 'usage: camp' and contain 'optional arguments:'
         # or 'options:'; curated help has 'camp —'
         assert "optional arguments:" not in combined, (
-            f"argparse dump detected in --help output"
+            "argparse dump detected in --help output"
         )
         assert "positional arguments:" not in combined, (
-            f"argparse dump detected in --help output"
+            "argparse dump detected in --help output"
         )
 
     def test_help_does_not_list_session_bootstrap_or_worktree_cleanup(self):

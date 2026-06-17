@@ -10,7 +10,6 @@ Test contract (Slice 1):
 """
 from __future__ import annotations
 
-import io
 import sys
 from pathlib import Path
 

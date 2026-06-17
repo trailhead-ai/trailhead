@@ -15,7 +15,6 @@ Write BEFORE implementation — these tests must fail RED first, then pass GREEN
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
