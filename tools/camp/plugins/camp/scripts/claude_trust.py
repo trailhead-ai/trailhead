@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -53,6 +54,26 @@ def _home_from_env(env: dict[str, str] | None) -> Path:
             if key in env:
                 return Path(env[key])
     return Path.home()
+
+
+def _is_mergeable(data: object, project_key: str) -> bool:
+    """True if `data` is shaped so the trust flag can be merged without raising.
+
+    Guards the build path against parseable-but-wrong JSON: the top level, the
+    `projects` map, and the existing per-project entry must each be objects.
+    A real ~/.claude.json is always dict-shaped; this keeps the module's own
+    "never raises" promise from depending on the caller's try/except.
+    """
+    if not isinstance(data, dict):
+        return False
+    projects = data.get("projects")
+    if projects is not None and not isinstance(projects, dict):
+        return False
+    if isinstance(projects, dict):
+        entry = projects.get(project_key)
+        if entry is not None and not isinstance(entry, dict):
+            return False
+    return True
 
 
 def pretrust_workspace(
@@ -118,14 +139,24 @@ def pretrust_workspace(
             )
             return
 
+        # Parseable but structurally wrong (top-level or projects/entry not a
+        # mapping) is treated like malformed: abort without overwriting so the
+        # "never raises, never clobbers" contract holds on the build path too,
+        # not just the read path (council/Reliability — non-dict shapes).
+        if not _is_mergeable(existing_data, str(launch_dir)):
+            print(
+                f"camp: pretrust skipped — {claude_json_path} has an unexpected "
+                "structure (projects/entry is not an object); not overwriting",
+                file=sys.stderr,
+            )
+            return
+
     # Idempotency check: skip if already trusted.
     project_key = str(launch_dir)
     if existing_data is not None:
-        projects = existing_data.get("projects", {})
-        if isinstance(projects, dict):
-            entry = projects.get(project_key, {})
-            if isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True:
-                return
+        entry = existing_data.get("projects", {}).get(project_key, {})
+        if entry.get("hasTrustDialogAccepted") is True:
+            return
 
     # Build the merged payload.
     data = existing_data if existing_data is not None else {}
@@ -134,14 +165,10 @@ def pretrust_workspace(
     project_entry["hasTrustDialogAccepted"] = True
 
     # Atomic write: tmp file in HOME (not in a .claude/ subdir), then os.replace.
-    # The tmp file is created 0o600 via an opener so there is no world-readable
-    # window even for the brief moment the file exists in HOME (council/Security).
+    # tempfile.mkstemp creates the tmp file 0o600 by construction, so there is no
+    # world-readable window even for the brief moment it exists in HOME
+    # (council/Security — no explicit opener needed; mkstemp already enforces this).
     write_mode = existing_mode if existing_mode is not None else 0o600
-
-    def _opener(path: str, flags: int) -> int:
-        return os.open(path, flags, 0o600)
-
-    import tempfile
 
     fd, tmp_path_str = tempfile.mkstemp(
         dir=str(home), prefix=".claude-", suffix=".tmp"

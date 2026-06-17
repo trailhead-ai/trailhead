@@ -2,8 +2,9 @@
 
 Test contract (all with env={"HOME": str(tmp_path)} — never touch real ~/.claude.json):
 - Absent ~/.claude.json → file created with projects.<key>.hasTrustDialogAccepted == true;
-  key is realpath of launch_dir; created mode is 0o600; tmp file also 0o600 (no
-  world-readable window).
+  key is realpath of launch_dir; created (final) mode is 0o600. (The tmp file's
+  0o600 mode during the write window is guaranteed by tempfile.mkstemp, not
+  separately asserted here.)
 - Existing file → entry merged; unrelated top-level keys and other projects entries
   preserved; existing mode preserved.
 - Idempotent: second call produces an identical file.
@@ -215,6 +216,61 @@ class TestMalformedJson:
         err = capsys.readouterr().err
         assert err.startswith("camp:")
         assert "malformed" in err.lower() or "parse" in err.lower() or "json" in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# pretrust_workspace — parseable-but-wrong structure (never-raise on build path)
+# ---------------------------------------------------------------------------
+
+
+class TestUnexpectedStructure:
+    """Valid JSON whose shape would break the merge must abort, not raise/clobber.
+
+    Guards the build path (data.setdefault chain) against a non-dict top level or
+    a non-dict projects/entry — the module's "never raises" contract must hold
+    without relying on the Slice 2 caller's try/except.
+    """
+
+    def _run(self, tmp_path, content):
+        from claude_trust import pretrust_workspace
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(content)
+        original = claude_json.read_text()
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        pretrust_workspace(
+            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+        )
+        return claude_json, original
+
+    def test_top_level_not_object_aborts_without_overwrite(self, tmp_path):
+        claude_json, original = self._run(tmp_path, '["a", "list"]')
+        assert claude_json.read_text() == original
+
+    def test_projects_not_object_aborts_without_overwrite(self, tmp_path):
+        claude_json, original = self._run(tmp_path, '{"projects": "nope"}')
+        assert claude_json.read_text() == original
+
+    def test_project_entry_not_object_aborts_without_overwrite(self, tmp_path):
+        from claude_trust import pretrust_workspace
+
+        claude_json = tmp_path / ".claude.json"
+        launch_dir = tmp_path / "ws"
+        launch_dir.mkdir()
+        key = str(launch_dir.resolve())
+        claude_json.write_text(json.dumps({"projects": {key: "should-be-object"}}))
+        original = claude_json.read_text()
+        pretrust_workspace(
+            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
+        )
+        assert claude_json.read_text() == original
+
+    def test_unexpected_structure_does_not_raise_and_warns(self, tmp_path, capsys):
+        self._run(tmp_path, '"just a string"')
+        err = capsys.readouterr().err
+        assert err.startswith("camp:")
+        assert "structure" in err.lower() or "object" in err.lower()
 
 
 # ---------------------------------------------------------------------------
