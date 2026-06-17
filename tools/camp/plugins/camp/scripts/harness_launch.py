@@ -58,13 +58,31 @@ class HarnessProfile:
     doc_files: list[str]
     inject: str  # "stdout" | "claude-hook"
 
+    def resolved_cwd(self, *, slug: str, workspace: Path | str) -> Path:
+        """Single source of the substituted launch cwd.
+
+        Accepts workspace as Path or str; returns the resolved Path after
+        {slug}/{workspace} substitution.  Used by launch() and by
+        pretrust_workspace (Slice 1) to determine the trust target without
+        having to duplicate the substitution logic.
+        """
+        return Path(_substitute(self.cwd, slug=slug, workspace=str(workspace)))
+
+    def is_claude_launch(self) -> bool:
+        """True when the new-launch binary is `claude` (by basename).
+
+        Keyed on Path(new[0]).name == "claude" — a false-negative for wrappers,
+        but safe: skip pretrust when unsure (council/Security minor).
+        """
+        return Path(self.new[0]).name == "claude"
+
     def launch(
         self, *, slug: str, workspace: str, is_resume: bool
     ) -> tuple[list[str], Path]:
         """Substitute {slug}/{workspace} into the resolved templates → (argv, cwd)."""
         template = self.resume if is_resume else self.new
         argv = [_substitute(tok, slug=slug, workspace=workspace) for tok in template]
-        cwd = Path(_substitute(self.cwd, slug=slug, workspace=workspace))
+        cwd = self.resolved_cwd(slug=slug, workspace=workspace)
         return argv, cwd
 
 
