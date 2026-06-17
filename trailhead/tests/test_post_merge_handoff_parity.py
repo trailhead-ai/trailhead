@@ -134,7 +134,8 @@ def _parse_required_inputs(soaker_text: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 class TestPostMergeHandoffParity:
-    """post_merge_handoff marker (portage monitor) must cover all required inputs of landing soaker."""
+    """post_merge_handoff marker (portage monitor) must cover all required inputs of
+    landing soaker."""
 
     @pytest.fixture
     def monitor_text(self) -> str:

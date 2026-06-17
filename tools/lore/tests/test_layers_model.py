@@ -315,7 +315,11 @@ finally:
         if "succeeded" not in result.stdout:
             # Should have exited via SystemExit(1) with a legible message
             assert "SystemExit" in result.stdout or result.returncode != 0
-            assert "trailhead" in result.stderr.lower() or "TRAILHEAD_ROOT" in result.stderr or result.stderr
+            assert (
+                "trailhead" in result.stderr.lower()
+                or "TRAILHEAD_ROOT" in result.stderr
+                or result.stderr
+            )
 
 
 # ---------------------------------------------------------------------------

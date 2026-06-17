@@ -29,7 +29,7 @@ import pytest
 SCRIPTS_DIR = Path(__file__).parent.parent / "plugins" / "lore" / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from follow_up_due import FollowUpDueResult, follow_up_notes_due  # noqa: E402
+from follow_up_due import follow_up_notes_due  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +261,6 @@ def test_empty_follow_up_dir_returns_empty_result(tmp_path: Path):
 
 def test_status_preserved_after_patch(tmp_path: Path):
     """After stamping last-checked/last-state, the note's status is unchanged."""
-    from pathlib import Path as P
     import frontmatter as fm
 
     follow_ups = _follow_up_dir(tmp_path)

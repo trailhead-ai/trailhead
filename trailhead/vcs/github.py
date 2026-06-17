@@ -325,7 +325,10 @@ def _evaluate(
             if changes or comments:
                 return {
                     "action": "review",
-                    "reason": f"{len(changes)} changes requested, {len(comments)} comments from {review_bot_login}",
+                    "reason": (
+                        f"{len(changes)} changes requested, "
+                        f"{len(comments)} comments from {review_bot_login}"
+                    ),
                     "details": {"reviews": bot_reviews},
                 }
         return {"action": "done", "reason": "PR is mergeable and clean", "details": status}
@@ -370,7 +373,9 @@ def _evaluate(
             "reason": "CI failure without clear code annotations — rerun failed jobs",
             "details": {
                 "checks": failing,
-                "commands": [f"gh run rerun {rid} --failed" for rid in sorted(run_ids)] if run_ids else [],
+                "commands": (
+                    [f"gh run rerun {rid} --failed" for rid in sorted(run_ids)] if run_ids else []
+                ),
             },
         }
 
@@ -381,11 +386,18 @@ def _evaluate(
         if changes or comments:
             return {
                 "action": "review",
-                "reason": f"{len(changes)} changes requested, {len(comments)} comments from {review_bot_login}",
+                "reason": (
+                    f"{len(changes)} changes requested, "
+                    f"{len(comments)} comments from {review_bot_login}"
+                ),
                 "details": {"reviews": bot_reviews},
             }
 
-    return {"action": "wait", "reason": "CI still running or no actionable state yet", "details": status}
+    return {
+        "action": "wait",
+        "reason": "CI still running or no actionable state yet",
+        "details": status,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +457,9 @@ def _get_pr_state(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | N
         return None
 
 
-def _do_merge(repo_path: str, pr_number: str, author_email: str, runner: rp.Runner) -> tuple[bool, str]:
+def _do_merge(
+    repo_path: str, pr_number: str, author_email: str, runner: rp.Runner
+) -> tuple[bool, str]:
     r = rp.run(
         ["gh", "pr", "merge", pr_number, "--merge", "--author-email", author_email],
         cwd=repo_path,

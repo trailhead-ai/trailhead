@@ -4,13 +4,11 @@ trailhead no longer edits the shell rc; it builds a shim dir and `shellenv`
 prints the export lines the user adds to their profile.
 """
 
-import os
 from pathlib import Path
 
 import pytest
 
 from trailhead.pathint import (
-    PathIntegrationError,
     ShimDenylistError,
     create_shims,
     detect_shell,
@@ -44,7 +42,10 @@ class TestResolveShimDir:
 
 class TestCreateShims:
     def test_creates_one_shim_per_tool(self, tmp_path):
-        tools = {"camp": Path("/repo/tools/camp/bin/camp"), "lore": Path("/repo/tools/lore/bin/lore")}
+        tools = {
+            "camp": Path("/repo/tools/camp/bin/camp"),
+            "lore": Path("/repo/tools/lore/bin/lore"),
+        }
         res = create_shims(tools, "/repo", env=_env(tmp_path))
         assert (res.shim_dir / "camp").is_file()
         assert (res.shim_dir / "lore").is_file()

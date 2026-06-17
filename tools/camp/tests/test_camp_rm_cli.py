@@ -205,7 +205,11 @@ class TestCampRmDirtyBlock:
         self._make_dirty(rm_env)
         r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup")
         combined = r.stdout + r.stderr
-        assert "dirty" in combined.lower() or "uncommitted" in combined.lower() or "force" in combined.lower(), (
+        assert (
+            "dirty" in combined.lower()
+            or "uncommitted" in combined.lower()
+            or "force" in combined.lower()
+        ), (
             f"dirty-block error should mention 'dirty', 'uncommitted', or 'force'.\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
@@ -241,7 +245,11 @@ class TestCampRmUnknownSlug:
         """camp rm <unknown-slug> error message names the missing slug."""
         r = _camp(rm_env, "rm", "no-such-slug", "--group", "rmgroup")
         combined = r.stdout + r.stderr
-        assert "no-such-slug" in combined or "manifest" in combined.lower() or "not found" in combined.lower(), (
+        assert (
+            "no-such-slug" in combined
+            or "manifest" in combined.lower()
+            or "not found" in combined.lower()
+        ), (
             f"unknown-slug error should name the slug or explain what's missing.\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
@@ -253,7 +261,6 @@ class TestCampRmInvokesReconcileBreak:
         the camp rm CLI path. A manifest with an old-layout path triggers a legible
         error, confirming the real reconcile_break is called (not the stub).
         """
-        from group_resolve import central_state_dir
         from manifest import write_central_manifest, manifest_path_for
 
         env = {"CAMP_STATE_DIR": str(rm_env["state_dir"])}
@@ -269,7 +276,11 @@ class TestCampRmInvokesReconcileBreak:
         r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup")
         combined = r.stdout + r.stderr
         assert r.returncode != 0, "old-layout path should trigger a non-zero exit"
-        assert "legacy" in combined.lower() or "retired" in combined.lower() or "manually" in combined.lower(), (
+        assert (
+            "legacy" in combined.lower()
+            or "retired" in combined.lower()
+            or "manually" in combined.lower()
+        ), (
             f"camp rm should surface the LegacyLayoutError from reconcile_break.\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )

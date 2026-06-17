@@ -24,7 +24,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -56,21 +55,29 @@ def _git_vault(tmp_path: Path) -> Path:
 
 
 # Synthetic harvest entries, one per type + a gotcha + a malformed line.
-PENDING_BODY = """\
-# Harvest pending
-
-Staging area.
-
-## 2026-06-04T10:00:00Z — some-agent — widget-worktree
-
-- deferred: rewrite the gizmo loader. Trigger to revisit: when the gizmo count exceeds 100.  <!-- h:aaaaaaaaaaaa -->
-- decision: chose the ring buffer over a linked list because lookups stay O(1). Reversibility: hard.  <!-- h:bbbbbbbbbbbb -->
-- dead-end: tried caching the sprocket index in memory. Failed because the index outgrew the heap. Revive if: we shard the sprocket store.  <!-- h:cccccccccccc -->
-- follow-up: the doodad library v3 release. Cadence: monthly. Why: v3 removes the legacy adapter we depend on.  <!-- h:dddddddddddd -->
-- lesson: skipped the bounds check on the flange array. Why it matters: out-of-range writes corrupt the adjacent widget. Confidence: high.  <!-- h:eeeeeeeeeeee -->
-- gotcha: the flux capacitor resets its counter on every reconnect. Where it bit: flux_capacitor.py:88.  <!-- h:ffffffffffff -->
-- this is a malformed line with no type prefix and no hash marker
-"""
+PENDING_BODY = (
+    "# Harvest pending\n"
+    "\n"
+    "Staging area.\n"
+    "\n"
+    "## 2026-06-04T10:00:00Z — some-agent — widget-worktree\n"
+    "\n"
+    "- deferred: rewrite the gizmo loader. Trigger to revisit: when the gizmo "
+    "count exceeds 100.  <!-- h:aaaaaaaaaaaa -->\n"
+    "- decision: chose the ring buffer over a linked list because lookups stay "
+    "O(1). Reversibility: hard.  <!-- h:bbbbbbbbbbbb -->\n"
+    "- dead-end: tried caching the sprocket index in memory. Failed because the "
+    "index outgrew the heap. Revive if: we shard the sprocket store.  "
+    "<!-- h:cccccccccccc -->\n"
+    "- follow-up: the doodad library v3 release. Cadence: monthly. Why: v3 "
+    "removes the legacy adapter we depend on.  <!-- h:dddddddddddd -->\n"
+    "- lesson: skipped the bounds check on the flange array. Why it matters: "
+    "out-of-range writes corrupt the adjacent widget. Confidence: high.  "
+    "<!-- h:eeeeeeeeeeee -->\n"
+    "- gotcha: the flux capacitor resets its counter on every reconnect. Where "
+    "it bit: flux_capacitor.py:88.  <!-- h:ffffffffffff -->\n"
+    "- this is a malformed line with no type prefix and no hash marker\n"
+)
 
 
 def _seed_pending(vault: Path) -> Path:
@@ -101,7 +108,8 @@ def _seed_session_note(vault: Path, worktree: str = "widget-worktree") -> Path:
         "## Learned\n\n"
         "## Open questions\n\n"
         "## Harvest candidates\n\n"
-        "- follow-up: the gadget API deprecation. Cadence: weekly. Why: the v1 endpoint sunsets soon.  <!-- h:1111aaaa1111 -->\n"
+        "- follow-up: the gadget API deprecation. Cadence: weekly. Why: the v1 "
+        "endpoint sunsets soon.  <!-- h:1111aaaa1111 -->\n"
     )
     return note
 
@@ -318,7 +326,9 @@ class TestSingleCommitExplicitPaths:
             ["git", "-C", str(vault), "rev-list", "--count", "HEAD"],
             capture_output=True, text=True,
         ).stdout.strip()
-        assert int(after) == int(before) + 1, f"expected exactly one new commit ({before} -> {after})"
+        assert int(after) == int(before) + 1, (
+            f"expected exactly one new commit ({before} -> {after})"
+        )
         # the single commit's tree includes session note + new notes + pending
         files = subprocess.run(
             ["git", "-C", str(vault), "show", "--name-only", "--pretty=format:", "HEAD"],
@@ -431,7 +441,8 @@ class TestIdempotentRerun:
         with pending.open("a") as f:
             f.write(
                 "\n## 2026-06-04T11:00:00Z — some-agent — widget-worktree\n\n"
-                "- deferred: rewrite the gizmo loader. Trigger to revisit: when the gizmo count exceeds 100.  <!-- h:aaaaaaaaaaaa -->\n"
+                "- deferred: rewrite the gizmo loader. Trigger to revisit: when "
+                "the gizmo count exceeds 100.  <!-- h:aaaaaaaaaaaa -->\n"
             )
         _seed_session_note(vault, worktree="widget-worktree")
         # reactivate session note so finish runs again

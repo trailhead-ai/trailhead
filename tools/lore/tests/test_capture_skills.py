@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from unittest import mock
 
-from conftest import CLI_PATH, SCRIPTS_DIR, load_script
+from conftest import CLI_PATH, load_script
 
 TODAY = "2026-06-02"  # frozen for determinism
 
@@ -274,7 +274,10 @@ class TestNewDeferred:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
-        assert len((list((vault / "deferred").glob("*.md")) + list((vault / "deferred").glob("*/*.md")))) == 1
+        assert len(
+            list((vault / "deferred").glob("*.md"))
+            + list((vault / "deferred").glob("*/*.md"))
+        ) == 1
 
     def test_no_session_prints_skip_notice(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -302,7 +305,10 @@ class TestNewDeadEnd:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
-        assert len((list((vault / "dead-ends").glob("*.md")) + list((vault / "dead-ends").glob("*/*.md")))) == 1
+        assert len(
+            list((vault / "dead-ends").glob("*.md"))
+            + list((vault / "dead-ends").glob("*/*.md"))
+        ) == 1
 
     def test_frontmatter_type_and_status(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -379,7 +385,10 @@ class TestNewDeadEnd:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0
-        assert len((list((vault / "dead-ends").glob("*.md")) + list((vault / "dead-ends").glob("*/*.md")))) == 1
+        assert len(
+            list((vault / "dead-ends").glob("*.md"))
+            + list((vault / "dead-ends").glob("*/*.md"))
+        ) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +405,10 @@ class TestNewDecision:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
-        assert len((list((vault / "decisions").glob("*.md")) + list((vault / "decisions").glob("*/*.md")))) == 1
+        assert len(
+            list((vault / "decisions").glob("*.md"))
+            + list((vault / "decisions").glob("*/*.md"))
+        ) == 1
 
     def test_frontmatter_type_no_status(self, tmp_path):
         """Decisions are immutable — they must NOT carry a status field."""
@@ -464,7 +476,10 @@ class TestNewDecision:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0
-        assert len((list((vault / "decisions").glob("*.md")) + list((vault / "decisions").glob("*/*.md")))) == 1
+        assert len(
+            list((vault / "decisions").glob("*.md"))
+            + list((vault / "decisions").glob("*/*.md"))
+        ) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +496,10 @@ class TestNewFollowUp:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr + r.stdout
-        assert len((list((vault / "follow-ups").glob("*.md")) + list((vault / "follow-ups").glob("*/*.md")))) == 1
+        assert len(
+            list((vault / "follow-ups").glob("*.md"))
+            + list((vault / "follow-ups").glob("*/*.md"))
+        ) == 1
 
     def test_frontmatter_type_and_status(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -714,7 +732,10 @@ class TestSlugSafety:
             env=env,
         )
         assert r2.returncode == 0, r2.stderr
-        notes = (list((vault / "deferred").glob("*.md")) + list((vault / "deferred").glob("*/*.md")))
+        notes = (
+            list((vault / "deferred").glob("*.md"))
+            + list((vault / "deferred").glob("*/*.md"))
+        )
         assert len(notes) == 2, (
             f"Expected 2 distinct notes, got {len(notes)}: {[n.name for n in notes]}"
         )
@@ -729,7 +750,10 @@ class TestSlugSafety:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr
-        notes = (list((vault / "deferred").glob("*.md")) + list((vault / "deferred").glob("*/*.md")))
+        notes = (
+            list((vault / "deferred").glob("*.md"))
+            + list((vault / "deferred").glob("*/*.md"))
+        )
         assert len(notes) == 1
         name = notes[0].name
         assert not name.endswith("-.md"), (
@@ -745,7 +769,10 @@ class TestSlugSafety:
             env={"LORE_USER": "ada"},
         )
         assert r.returncode == 0, r.stderr
-        notes = (list((vault / "deferred").glob("*.md")) + list((vault / "deferred").glob("*/*.md")))
+        notes = (
+            list((vault / "deferred").glob("*.md"))
+            + list((vault / "deferred").glob("*/*.md"))
+        )
         assert len(notes) == 1
         name = notes[0].name
         assert not name.endswith("-.md"), (
@@ -924,7 +951,10 @@ class TestBacklinkWorktreeScoped:
         )
         assert r.returncode == 0, r.stderr + r.stdout
         # The note itself must be written
-        assert len((list((vault / "deferred").glob("*.md")) + list((vault / "deferred").glob("*/*.md")))) == 1
+        assert len(
+            list((vault / "deferred").glob("*.md"))
+            + list((vault / "deferred").glob("*/*.md"))
+        ) == 1
         # Some notice about missing/skipped session
         combined = r.stdout + r.stderr
         assert "session" in combined.lower() or "backlink" in combined.lower()

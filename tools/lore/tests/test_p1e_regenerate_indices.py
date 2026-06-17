@@ -17,7 +17,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -529,7 +528,9 @@ class TestBucketedScan:
         _run_main(vault)
         content = (vault / "plans" / "_index.md").read_text()
         assert "[[2026-06/synth-widget-plan]]" not in content, "broken parent-only link emitted"
-        assert "[[plans/2026-06/synth-widget-plan]]" in content, "resolvable vault-relative link missing"
+        assert (
+            "[[plans/2026-06/synth-widget-plan]]" in content
+        ), "resolvable vault-relative link missing"
 
     def test_specs_index_across_two_buckets(self, tmp_path):
         vault = _make_vault(tmp_path, "specs/2026-05", "specs/2026-06")

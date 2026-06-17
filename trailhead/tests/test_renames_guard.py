@@ -17,7 +17,6 @@ Write BEFORE the renames — these tests must fail RED first, then green after.
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -85,25 +84,35 @@ def _grep_files(pattern: str, files: list[Path]) -> list[tuple[Path, int, str]]:
 class TestGrepGuard:
     """Zero occurrences of old identifiers in the live source tree."""
 
-    def _assert_no_hits(self, pattern: str, description: str, *, exclude_pattern: str | None = None) -> None:
+    def _assert_no_hits(
+        self, pattern: str, description: str, *, exclude_pattern: str | None = None
+    ) -> None:
         files = _collect_files()
         hits = _grep_files(pattern, files)
         if exclude_pattern:
             excl_rx = re.compile(exclude_pattern)
             hits = [(f, ln, line) for f, ln, line in hits if not excl_rx.search(line)]
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of {description} — must be zero after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of {description} — "
+                "must be zero after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
 
     def test_no_council_dash_references(self):
-        """council-advocate/builder/reliability/security must not appear in tools/ source after rename."""
-        # Grep for the specific old agent-name prefixes (not /council-session which is a lore vault type)
+        """council-advocate/builder/reliability/security must not appear in tools/ source
+        after rename."""
+        # Grep for the specific old agent-name prefixes (not /council-session which is a
+        # lore vault type)
         files = _collect_files()
         hits = _grep_files(r"council-(advocate|builder|reliability|security)", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of old council-* agent names — must be zero after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of old council-* agent names — "
+                "must be zero after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -119,7 +128,10 @@ class TestGrepGuard:
         files = _collect_files()
         hits = _grep_files(r"circle-(advocate|builder|reliability|security)", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of old circle-* agent names — must be zero (forbidden form):"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of old circle-* agent names — "
+                "must be zero (forbidden form):"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -135,7 +147,8 @@ class TestGrepGuard:
             pytest.fail("\n".join(msg_lines))
 
     def test_no_scout_references(self):
-        """The `scout` agent token must not appear in tools/ source after rename to assumption-prover.
+        """The `scout` agent token must not appear in tools/ source after rename to
+        assumption-prover.
 
         Word-boundary scoped so it matches the agent stem (`scout`, `scout.md`, `scout`'s)
         but not hypothetical unrelated substrings. Verified RED-first: every current hit is
@@ -144,7 +157,10 @@ class TestGrepGuard:
         files = _collect_files()
         hits = _grep_files(r"\bscout\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'scout' — must be 'assumption-prover' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'scout' — "
+                "must be 'assumption-prover' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -158,7 +174,10 @@ class TestGrepGuard:
         files = _collect_files()
         hits = _grep_files(r"\btrailblazer\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'trailblazer' — must be 'executor' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'trailblazer' — "
+                "must be 'executor' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -169,7 +188,10 @@ class TestGrepGuard:
         files = _collect_files()
         hits = _grep_files(r"subagent-driven-development", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'subagent-driven-development' — must be 'execute' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'subagent-driven-development' — "
+                "must be 'execute' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -185,7 +207,10 @@ class TestGrepGuard:
         files = _collect_files()
         hits = _grep_files(r"lore-librarian", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'lore-librarian' — must be zero (forbidden name):"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'lore-librarian' — "
+                "must be zero (forbidden name):"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -200,7 +225,10 @@ class TestGrepGuard:
         files = _collect_files()
         hits = _grep_files(r"loremaster", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'loremaster' — must be 'librarian' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'loremaster' — "
+                "must be 'librarian' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -210,13 +238,17 @@ class TestGrepGuard:
         files = _collect_files()
         hits = _grep_files(r"skills/finished", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/finished' — must be zero after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'skills/finished' — "
+                "must be zero after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
 
     def test_no_skills_review_lore_reference_in_manifest(self):
-        """lore capabilities.toml must not reference skills/review (the tend/review skill is deleted)."""
+        """lore capabilities.toml must not reference skills/review (the tend/review skill is
+        deleted)."""
         text = _LORE_MANIFEST.read_text()
         assert "skills/review" not in text, (
             "lore/capabilities.toml still references 'skills/review' — "
@@ -232,7 +264,8 @@ class TestGrepGuard:
         )
 
     def test_no_circle_review_prose(self):
-        """'Circle Review' Title-Case prose must not appear in SKILL.md bodies after rename to 'Council Review'.
+        """'Circle Review' Title-Case prose must not appear in SKILL.md bodies after rename
+        to 'Council Review'.
 
         The panel's review step is now labelled 'Council Review'; the old 'Circle
         Review' label must be gone. Excludes:
@@ -247,7 +280,10 @@ class TestGrepGuard:
         # No exclusions needed: 'Circle Review' with both words Title-Cased is
         # exclusively the old panel-review label.
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'Circle Review' — must be 'Council Review' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'Circle Review' — "
+                "must be 'Council Review' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -264,7 +300,8 @@ class TestGrepGuard:
         )
         name = _parse_frontmatter_name(path)
         assert name == "assumption-prover", (
-            f"agents/assumption-prover.md frontmatter name: is {name!r}, expected 'assumption-prover'"
+            f"agents/assumption-prover.md frontmatter name: is {name!r}, "
+            "expected 'assumption-prover'"
         )
 
     def test_executor_role_prose_in_execute_skill(self):
@@ -339,7 +376,10 @@ class TestForgeToCraftRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"\bforge\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the bare word 'forge' — must be 'craft' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the bare word 'forge' — "
+                "must be 'craft' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -353,7 +393,10 @@ class TestForgeToCraftRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"forge:", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the 'forge:' namespace prefix — must be 'craft:' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the 'forge:' namespace prefix — "
+                "must be 'craft:' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -363,7 +406,10 @@ class TestForgeToCraftRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"forge-local", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the 'forge-local' marketplace name — must be 'craft-local' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the 'forge-local' marketplace name — "
+                "must be 'craft-local' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -453,7 +499,8 @@ class TestManifestValidation:
         )
 
     def test_craft_council_references_council_agents(self):
-        """craft council capability must reference the bare-named council agents (advocate/builder/breaker/attacker)."""
+        """craft council capability must reference the bare-named council agents
+        (advocate/builder/breaker/attacker)."""
         m = load_manifest(_CRAFT_MANIFEST)
         for stem in ("advocate", "builder", "breaker", "attacker"):
             assert stem in m.subagents, (
@@ -486,7 +533,8 @@ class TestCouncilAgentStandaloneDescriptions:
     """
 
     def test_council_agents_drop_council_only_gate(self):
-        """No renamed council agent may keep the 'use only when invoked' standalone-blocking clause."""
+        """No renamed council agent may keep the 'use only when invoked'
+        standalone-blocking clause."""
         for stem in ("advocate", "builder", "breaker", "attacker"):
             path = _CRAFT_PLUGIN_ROOT / "agents" / f"{stem}.md"
             assert path.exists(), f"renamed council agent not found: {path}"
@@ -780,7 +828,9 @@ class TestConsultSkillAndSharedCouncil:
 
     def test_council_include_names_all_four_agents(self):
         """The shared include must name all four council agent stems."""
-        assert _COUNCIL_INCLUDE.exists(), f"skills/_shared/council.md not found at {_COUNCIL_INCLUDE}"
+        assert _COUNCIL_INCLUDE.exists(), (
+            f"skills/_shared/council.md not found at {_COUNCIL_INCLUDE}"
+        )
         text = _COUNCIL_INCLUDE.read_text()
         missing = [stem for stem in _COUNCIL_STEMS if stem not in text]
         assert not missing, (
@@ -795,7 +845,9 @@ class TestConsultSkillAndSharedCouncil:
         Parses the include for the stems it actually names, then asserts each is an
         existing agent file by exact name.
         """
-        assert _COUNCIL_INCLUDE.exists(), f"skills/_shared/council.md not found at {_COUNCIL_INCLUDE}"
+        assert _COUNCIL_INCLUDE.exists(), (
+            f"skills/_shared/council.md not found at {_COUNCIL_INCLUDE}"
+        )
         text = _COUNCIL_INCLUDE.read_text()
         for stem in _COUNCIL_STEMS:
             assert stem in text, (
@@ -954,7 +1006,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"skills/followup", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/followup' — must be 'skills/polish' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'skills/followup' — "
+                "must be 'skills/polish' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -969,7 +1024,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"skills/handoff", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/handoff' — must be 'skills/shelve' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'skills/handoff' — "
+                "must be 'skills/shelve' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -979,7 +1037,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"skills/planning", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/planning' — must be 'skills/plan' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'skills/planning' — "
+                "must be 'skills/plan' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -993,7 +1054,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"requesting-code-review", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'requesting-code-review' — must be 'review' (skill) after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'requesting-code-review' — "
+                "must be 'review' (skill) after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1007,13 +1071,17 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"/forge:handoff", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of '/forge:handoff' — must be '/craft:shelve' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of '/forge:handoff' — "
+                "must be '/craft:shelve' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
 
     def test_no_followup_command_invocation(self):
-        """The `/followup` and `/forge:followup` skill invocations must not appear after rename to polish.
+        """The `/followup` and `/forge:followup` skill invocations must not appear after
+        rename to polish.
 
         Scoped to the slash-command form so it targets the skill identity, NOT the
         `followup-to:` plan-brief frontmatter field or the `-followup-<n>` slug
@@ -1022,7 +1090,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"/(forge:)?followup", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of '/followup' invocation — must be '/polish' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of '/followup' invocation — "
+                "must be '/polish' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1032,7 +1103,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"^name: followup\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of `name: followup` frontmatter — must be `name: polish` after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of `name: followup` frontmatter — "
+                "must be `name: polish` after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1042,7 +1116,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"^name: handoff\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of `name: handoff` frontmatter — must be `name: shelve` after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of `name: handoff` frontmatter — "
+                "must be `name: shelve` after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1052,7 +1129,10 @@ class TestSlice4SkillRenameForbids:
         files = _collect_files()
         hits = _grep_files(r"^name: planning\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of `name: planning` frontmatter — must be `name: plan` after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of `name: planning` frontmatter — "
+                "must be `name: plan` after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1131,7 +1211,8 @@ class TestSlice4ManifestRepointed:
         )
 
     def test_review_capability_references_review_skill(self):
-        """craft must ship the code-reviewer subagent and the review skill (not requesting-code-review).
+        """craft must ship the code-reviewer subagent and the review skill (not
+        requesting-code-review).
 
         The skill NAME stays `review`; only the old skill path changes.
         """
@@ -1209,7 +1290,10 @@ class TestSlice6RadarSkillDataForbids:
         files = _collect_files()
         hits = _grep_files(r"skills/radar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/radar' — must be 'skills/follow-up' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'skills/radar' — "
+                "must be 'skills/follow-up' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1219,7 +1303,10 @@ class TestSlice6RadarSkillDataForbids:
         files = _collect_files()
         hits = _grep_files(r"skills/check-radar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/check-radar' — must be 'skills/check-in' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'skills/check-radar' — "
+                "must be 'skills/check-in' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1234,7 +1321,10 @@ class TestSlice6RadarSkillDataForbids:
         files = _collect_files()
         hits = _grep_files(r"/lore:check-radar|^name: check-radar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the check-radar skill identity — must be 'check-in' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the check-radar skill identity — "
+                "must be 'check-in' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1248,7 +1338,10 @@ class TestSlice6RadarSkillDataForbids:
         files = _collect_files()
         hits = _grep_files(r"radar_due", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'radar_due' — must be 'follow_up_due' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'radar_due' — "
+                "must be 'follow_up_due' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1263,7 +1356,10 @@ class TestSlice6RadarSkillDataForbids:
         files = _files_under(_LORE_SKILLS) + _files_under(_LORE_TEMPLATES)
         hits = _grep_files(r"^type: radar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'type: radar' in skills/templates — must be 'type: follow-up' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'type: radar' in skills/templates — "
+                "must be 'type: follow-up' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1273,7 +1369,10 @@ class TestSlice6RadarSkillDataForbids:
         files = _collect_files()
         hits = _grep_files(r"lore new radar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'lore new radar' — must be 'lore new follow-up' after rename:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'lore new radar' — "
+                "must be 'lore new follow-up' after rename:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1413,7 +1512,10 @@ class TestSlice7DeletionForbids:
         files = _collect_files()
         hits = _grep_files(r"skills/reflect\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'skills/reflect' — the reflect skill is deleted:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'skills/reflect' — "
+                "the reflect skill is deleted:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1423,7 +1525,10 @@ class TestSlice7DeletionForbids:
         files = _collect_files()
         hits = _grep_files(r"reflect_sessions", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of 'reflect_sessions' — the script is deleted:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of 'reflect_sessions' — "
+                "the script is deleted:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1438,7 +1543,9 @@ class TestSlice7DeletionForbids:
         files = _collect_files()
         hits = _grep_files(r"/lore:reflect\b|^name: reflect\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the reflect skill identity — deleted:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the reflect skill identity — deleted:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1453,7 +1560,9 @@ class TestSlice7DeletionForbids:
         """
         hits = _grep_files(r"skills/(review|tend)\b", _LORE_FILES)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of lore 'skills/review|skills/tend' — deleted:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of lore 'skills/review|skills/tend' — deleted:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1464,7 +1573,10 @@ class TestSlice7DeletionForbids:
         PATH-SCOPED to tools/lore/. Matches the helper identity `review.py` /
         `import review` / `load_script("review")` — not the English word.
         """
-        hits = _grep_files(r"\breview\.py\b|import review\b|load_script\(\"review\"\)|from review import", _LORE_FILES)
+        hits = _grep_files(
+            r"\breview\.py\b|import review\b|load_script\(\"review\"\)|from review import",
+            _LORE_FILES,
+        )
         if hits:
             msg_lines = [f"Found {len(hits)} occurrence(s) of the lore review.py helper — deleted:"]
             for f, ln, line in hits[:10]:
@@ -1479,7 +1591,10 @@ class TestSlice7DeletionForbids:
         """
         hits = _grep_files(r"/lore:(review|tend)\b|^name: (review|tend)\b", _LORE_FILES)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the lore review/tend skill identity — deleted:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the lore review/tend skill identity — "
+                "deleted:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1506,7 +1621,10 @@ class TestSlice7DeletionForbids:
         """
         hits = _grep_files(r"skills/ping\b", _LORE_FILES)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of lore 'skills/ping' — the skill is deleted:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of lore 'skills/ping' — "
+                "the skill is deleted:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1516,7 +1634,9 @@ class TestSlice7DeletionForbids:
         files = _collect_files()
         hits = _grep_files(r"/lore:ping\b|^name: ping\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the lore ping skill identity — deleted:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the lore ping skill identity — deleted:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1678,7 +1798,10 @@ class TestSlice9RadarFullForbid:
         ]
         hits = _grep_files(r"\bradar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the bare word 'radar' — must be zero (→ follow-up):"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the bare word 'radar' — "
+                "must be zero (→ follow-up):"
+            ]
             for f, ln, line in hits[:20]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1688,7 +1811,10 @@ class TestSlice9RadarFullForbid:
         files = _scan_files_excluding_experiments()
         hits = _grep_files(r"/lore:radar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of dead command '/lore:radar' — must be '/lore:follow-up':"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of dead command '/lore:radar' — "
+                "must be '/lore:follow-up':"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1702,7 +1828,10 @@ class TestSlice9RadarFullForbid:
         files = _scan_files_excluding_experiments()
         hits = _grep_files(r"/lore:check-radar\b", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of dead command '/lore:check-radar' — must be '/lore:check-in':"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of dead command '/lore:check-radar' — "
+                "must be '/lore:check-in':"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1718,7 +1847,10 @@ class TestSlice9RadarFullForbid:
         files = _scan_files_excluding_experiments()
         hits = _grep_files(r"`radar:`|^\s*-\s*\*\*radar\*\*|^\s*-\s*radar:", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of the `radar:` harvest typed-prefix — must be `follow-up:`:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of the `radar:` harvest typed-prefix — "
+                "must be `follow-up:`:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))
@@ -1742,7 +1874,10 @@ class TestSlice9DesignMockupWriterForbid:
         ]
         hits = _grep_files(r"design-mockup-writer", files)
         if hits:
-            msg_lines = [f"Found {len(hits)} occurrence(s) of live 'design-mockup-writer' ref — must be zero:"]
+            msg_lines = [
+                f"Found {len(hits)} occurrence(s) of live 'design-mockup-writer' ref — "
+                "must be zero:"
+            ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(msg_lines))

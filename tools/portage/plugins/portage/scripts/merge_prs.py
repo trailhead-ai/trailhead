@@ -27,8 +27,8 @@ from _bootstrap import ensure_trailhead_importable
 
 ensure_trailhead_importable()
 
-from trailhead.vcs import get_provider
-from trailhead.vcs.github import (
+from trailhead.vcs import get_provider  # noqa: E402
+from trailhead.vcs.github import (  # noqa: E402
     InvalidInputError,
     ManifestReadError,
     MergeConfigError,

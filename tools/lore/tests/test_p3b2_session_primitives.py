@@ -31,7 +31,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -322,7 +321,7 @@ class TestFindShelvedNotes:
             status="shelved", ended="2026-01-02T09:00:00Z",
         )
         # Note with ended: but empty value (no crash expected)
-        no_ended = _write_session_note(
+        _write_session_note(
             vault, "2026-01-01-0900-gamma-worktree.md",
             status="shelved", started="2026-01-01T09:00:00Z", ended=None,
         )
@@ -537,7 +536,7 @@ class TestLoreHandoffIdempotency:
 
     def test_already_shelved_exits_zero(self, tmp_path):
         vault = _git_vault(tmp_path)
-        note = _write_session_note(
+        _write_session_note(
             vault, "2026-01-01-1000-alpha-worktree.md",
             status="shelved", ended="2026-01-01T09:00:00Z",
         )

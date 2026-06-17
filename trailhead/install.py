@@ -37,7 +37,7 @@ from trailhead.install_config import (
     resolve_config,
     resolve_config_path,
 )
-from trailhead.pathint import create_shims, resolve_shim_dir
+from trailhead.pathint import create_shims
 from trailhead.wire import LockError, WireError, wire, wire_lock
 
 _REPO_ROOT = Path(__file__).parent.parent

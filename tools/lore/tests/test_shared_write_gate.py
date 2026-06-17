@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -29,7 +28,7 @@ from unittest import mock
 
 import pytest
 
-from conftest import REPO_ROOT, SCRIPTS_DIR, load_script
+from conftest import SCRIPTS_DIR, load_script
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -92,7 +91,8 @@ class TestWriteToSharedGate:
         assert not list(shared.root.iterdir()), "Shared root must remain empty after refusal"
 
     def test_valid_token_copies_note_personal_untouched(self, tmp_path: Path) -> None:
-        """Valid live bound token → note copied to shared, personal original intact, token consumed."""
+        """Valid live bound token → note copied to shared, personal original intact,
+        token consumed."""
         p = _promote()
         shared = _make_shared_layer(tmp_path)
         note = tmp_path / "personal" / "note.md"
@@ -286,7 +286,6 @@ class TestNoBypassParameter:
         sig = inspect.signature(p.mint_token)
         # tty_confirmed must exist and be keyword-only
         assert "tty_confirmed" in sig.parameters, "mint_token must accept tty_confirmed"
-        param = sig.parameters["tty_confirmed"]
         # keyword-only (after *) or at least present
         forbidden_aliases = {"yes", "skip_tty", "force", "auto"}
         overlap = set(sig.parameters.keys()) & forbidden_aliases
@@ -346,12 +345,8 @@ class TestAtomicCopy:
         token = p.mint_token(token_dir, note, shared.name, tty_confirmed=True)
 
         # Patch the copy operation to raise IOError mid-copy
-        original_copy = p._atomic_copy if hasattr(p, "_atomic_copy") else None
-
         def _fail_copy(src: Path, dest: Path) -> None:
             raise IOError("simulated disk failure mid-copy")
-
-        copy_fn_name = "_atomic_copy" if hasattr(p, "_atomic_copy") else "shutil.copy2"
 
         with mock.patch.object(p, "_atomic_copy", side_effect=IOError("simulated disk failure")):
             with pytest.raises((IOError, OSError)):
@@ -384,8 +379,6 @@ class TestAtomicCopy:
         token = p.mint_token(token_dir, note, shared.name, tty_confirmed=True)
 
         # Inject failure via patching os.replace to fail
-        real_replace = os.replace
-
         def _fail_replace(src: str, dst: str) -> None:
             raise OSError("simulated failure at os.replace")
 

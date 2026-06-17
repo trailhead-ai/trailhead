@@ -226,7 +226,8 @@ class TestOverrides:
 class TestDedupCollision:
     def test_collision_detected(self, tmp_path):
         src_a, src_b = tmp_path / "a", tmp_path / "b"
-        src_a.mkdir(); src_b.mkdir()
+        src_a.mkdir()
+        src_b.mkdir()
         shared = tmp_path / "dest" / "x"
         with pytest.raises(CollisionError) as exc:
             _detect_collisions([CopyOp(src_a, shared), CopyOp(src_b, shared)])

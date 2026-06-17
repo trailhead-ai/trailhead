@@ -179,8 +179,10 @@ class TestPluginExpansion:
             tmp_path,
             '[[harness]]\nname="claude_code"\n'
             '  [[harness.plugins]]\n  name="landing"\n'
-            '    [[harness.plugins.subagents]]\n    name="doctor"\n    file_path="/custom/doctor.md"\n'
-            '    [[harness.plugins.skills]]\n    name="resolve"\n    file_path="/custom/SKILL.md"\n',
+            '    [[harness.plugins.subagents]]\n    name="doctor"\n'
+            '    file_path="/custom/doctor.md"\n'
+            '    [[harness.plugins.skills]]\n    name="resolve"\n'
+            '    file_path="/custom/SKILL.md"\n',
         )
         cfg = resolve_config(config_path=path, detected_harnesses=[])
         landing = cfg.harnesses[0].plugins[0]

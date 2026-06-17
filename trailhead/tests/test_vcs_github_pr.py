@@ -75,13 +75,25 @@ def _make_pr_stub(pr_statuses: dict[str, str], fail_on: set[str] | None = None):
             pr_number = _token_after(cmd, "view")
             status = pr_statuses.get(str(pr_number), "MERGEABLE_CLEAN")
             if status == "MERGED":
-                payload = {"state": "MERGED", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "headRefName": "feat"}
+                payload = {
+                    "state": "MERGED", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                    "isDraft": False, "headRefName": "feat",
+                }
             elif status == "DRAFT":
-                payload = {"state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "headRefName": "feat"}
+                payload = {
+                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                    "isDraft": True, "headRefName": "feat",
+                }
             elif status == "BLOCKED":
-                payload = {"state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "isDraft": False, "headRefName": "feat"}
+                payload = {
+                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
+                    "isDraft": False, "headRefName": "feat",
+                }
             else:
-                payload = {"state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "headRefName": "feat"}
+                payload = {
+                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                    "isDraft": False, "headRefName": "feat",
+                }
             return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
         if "gh" in cmd_str and "pr" in cmd_str and "merge" in cmd_str:
             pr_number = _token_after(cmd, "merge")
@@ -118,7 +130,11 @@ def _write_toml(tmp_path: Path, content: str) -> Path:
 class TestPrStatus:
     def test_done_when_mergeable_and_clean(self) -> None:
         provider = get_provider("github", runner=_make_gh_stub(
-            {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "reviews": []}, []))
+            {
+                "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                "isDraft": False, "reviews": [],
+            },
+            []))
         result = provider.pr.status("some/path", "42")
         assert result["mergeable"] == "MERGEABLE"
         assert result["mergeStateStatus"] == "CLEAN"
@@ -127,7 +143,9 @@ class TestPrStatus:
     def test_bot_reviews_present_when_configured(self) -> None:
         view = {
             "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "isDraft": False,
-            "reviews": [{"author": {"login": "my-bot"}, "state": "CHANGES_REQUESTED", "body": "fix"}],
+            "reviews": [
+                {"author": {"login": "my-bot"}, "state": "CHANGES_REQUESTED", "body": "fix"},
+            ],
         }
         provider = get_provider("github", runner=_make_gh_stub(view, []))
         result = provider.pr.status("some/path", "42", review_bot_login="my-bot")
@@ -137,7 +155,9 @@ class TestPrStatus:
     def test_wrong_login_filtered(self) -> None:
         view = {
             "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False,
-            "reviews": [{"author": {"login": "other-bot"}, "state": "CHANGES_REQUESTED", "body": "x"}],
+            "reviews": [
+                {"author": {"login": "other-bot"}, "state": "CHANGES_REQUESTED", "body": "x"},
+            ],
         }
         provider = get_provider("github", runner=_make_gh_stub(view, []))
         result = provider.pr.status("some/path", "42", review_bot_login="my-review-bot")
@@ -152,7 +172,10 @@ class TestPrStatus:
             cmd_str = " ".join(cmd)
             if "pr" in cmd_str and "view" in cmd_str:
                 return subprocess.CompletedProcess(
-                    cmd, 0, json.dumps({"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "reviews": []}), "")
+                    cmd, 0, json.dumps({
+                        "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                        "isDraft": False, "reviews": [],
+                    }), "")
             return subprocess.CompletedProcess(cmd, 0, "[]", "")
 
         provider = get_provider("github", runner=stub)
@@ -191,7 +214,10 @@ class TestPrStatus:
 class TestCiChecks:
     def test_annotation_gh_api_call_issued(self) -> None:
         calls: list[list[str]] = []
-        view_data = {"mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "isDraft": False, "reviews": []}
+        view_data = {
+            "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
+            "isDraft": False, "reviews": [],
+        }
         checks_data = [{"name": "ci", "state": "FAILURE",
                         "link": "https://github.com/myorg/myrepo/actions/runs/111/job/222"}]
         annotations_data = [{"path": "src/foo.py", "start_line": 10, "message": "assertion failed",
@@ -212,7 +238,9 @@ class TestCiChecks:
 
         provider = get_provider("github", runner=stub)
         result = provider.ci.checks("some/path", "42")
-        annotation_calls = [c for c in calls if "api" in c and any("annotations" in tok for tok in c)]
+        annotation_calls = [
+            c for c in calls if "api" in c and any("annotations" in tok for tok in c)
+        ]
         assert annotation_calls
         api_call_str = " ".join(annotation_calls[0])
         assert "check-runs/222" in api_call_str
@@ -262,12 +290,16 @@ class TestPrEvaluate:
         assert result["action"] == "wait"
 
     def test_no_bot_configured_ignores_reviews(self) -> None:
-        status = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "failingChecks": []}
+        status = {
+            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+            "isDraft": False, "failingChecks": [],
+        }
         result = self._provider().pr.evaluate(status, review_bot_login=None)
         assert result["action"] == "done"
 
     def test_with_bot_configured_changes_requested_yields_review(self) -> None:
-        status = _pr_payload("MERGEABLE", "CLEAN", reviews=[{"state": "CHANGES_REQUESTED", "body": "fix"}])
+        status = _pr_payload(
+            "MERGEABLE", "CLEAN", reviews=[{"state": "CHANGES_REQUESTED", "body": "fix"}])
         result = self._provider().pr.evaluate(status, review_bot_login="my-review-bot")
         assert result["action"] == "review"
 
@@ -293,7 +325,9 @@ class TestPrMerge:
         def stub(cmd, **kwargs):
             if "merge" in cmd and "--merge" in cmd:
                 for tok in cmd:
-                    if tok not in ("gh", "pr", "merge", "--merge", "--author-email", "test@example.com") and not tok.startswith("-"):
+                    if tok not in (
+                        "gh", "pr", "merge", "--merge", "--author-email", "test@example.com",
+                    ) and not tok.startswith("-"):
                         merge_calls.append(tok)
                         break
                 return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
@@ -467,7 +501,9 @@ class TestPrMerge:
 
 class TestCiWait:
     def test_returns_immediately_when_actionable(self) -> None:
-        view_data = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "reviews": []}
+        view_data = {
+            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "reviews": [],
+        }
 
         def stub(cmd, **kwargs):
             cmd_str = " ".join(cmd)
@@ -483,7 +519,9 @@ class TestCiWait:
         assert result.get("timeout") is not True
 
     def test_times_out_when_always_waiting(self) -> None:
-        draft_view = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "reviews": []}
+        draft_view = {
+            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "reviews": [],
+        }
 
         def stub(cmd, **kwargs):
             cmd_str = " ".join(cmd)
@@ -499,7 +537,9 @@ class TestCiWait:
 
     def test_total_slept_does_not_exceed_timeout(self) -> None:
         """I-1: the loop must never sleep past timeout (no overshoot on terminal iteration)."""
-        draft_view = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "reviews": []}
+        draft_view = {
+            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "reviews": [],
+        }
         slept: list[float] = []
 
         def fake_sleep(secs: float) -> None:

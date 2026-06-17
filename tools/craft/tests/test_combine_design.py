@@ -276,7 +276,10 @@ def test_multi_surface_sections_labeled_by_prefix(tmp_path: Path):
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "admin-home.html", _make_screen_html("Admin Home", "<p>admin home</p>"))
-    _write(designs, "admin-settings.html", _make_screen_html("Admin Settings", "<p>admin settings</p>"))
+    _write(
+        designs, "admin-settings.html",
+        _make_screen_html("Admin Settings", "<p>admin settings</p>"),
+    )
     _write(designs, "mobile-home.html", _make_screen_html("Mobile Home", "<p>mobile home</p>"))
 
     chrome = tmp_path / "chrome.md"
@@ -340,7 +343,10 @@ def test_spec_link_present_in_output(tmp_path: Path):
 
 
 def test_no_external_stylesheet_link_except_flagged_webfont(tmp_path: Path):
-    """Output must be self-contained — no external stylesheet links (except mockup-only web-font flagged as comment)."""
+    (
+        "Output must be self-contained — no external stylesheet links "
+        "(except mockup-only web-font flagged as comment)."
+    )
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "web-home.html", _make_screen_html("Home", "<p>home</p>"))
@@ -782,7 +788,10 @@ def test_env_fallback_designs_root_when_flag_absent(tmp_path: Path, monkeypatch)
 
 
 def test_env_fallback_chrome_root_when_flag_absent(tmp_path: Path, monkeypatch):
-    """When --chrome-path is absent but CHROME_ROOT is set, combine_design.py uses CHROME_ROOT as the chrome path."""
+    (
+        "When --chrome-path is absent but CHROME_ROOT is set, combine_design.py "
+        "uses CHROME_ROOT as the chrome path."
+    )
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "web-home.html", _make_screen_html("Home", "<p>chrome-root sentinel</p>"))
@@ -868,7 +877,10 @@ def test_cli_flag_wins_over_env_designs_root(tmp_path: Path):
 
 
 def test_cli_neither_flag_nor_env_exits_nonzero(tmp_path: Path):
-    """When neither --designs-dir nor DESIGNS_ROOT is provided, combine_design.py exits nonzero with a named error."""
+    (
+        "When neither --designs-dir nor DESIGNS_ROOT is provided, "
+        "combine_design.py exits nonzero with a named error."
+    )
     chrome = tmp_path / "chrome.md"
     chrome.write_text(_make_chrome([]))
 
@@ -893,7 +905,8 @@ def test_cli_neither_flag_nor_env_exits_nonzero(tmp_path: Path):
     )
 
     assert result.returncode != 0, (
-        "combine_design.py must exit nonzero when neither --designs-dir nor DESIGNS_ROOT is provided"
+        "combine_design.py must exit nonzero when neither --designs-dir "
+        "nor DESIGNS_ROOT is provided"
     )
     error_output = result.stderr + result.stdout
     assert "DESIGNS_ROOT" in error_output or "designs" in error_output.lower(), (
@@ -918,5 +931,5 @@ def test_leak_gate_combine_design_script_is_clean(tmp_path: Path):
     # Filter hits to only combine_design.py
     hits = [line for line in result.stdout.splitlines() if "combine_design" in line]
     assert not hits, (
-        f"combine_design.py contains forbidden tokens:\n" + "\n".join(hits)
+        "combine_design.py contains forbidden tokens:\n" + "\n".join(hits)
     )

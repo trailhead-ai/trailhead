@@ -1,6 +1,5 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
-from pathlib import Path
 
 import pytest
 
@@ -95,7 +94,8 @@ class TestDelegationToRegistry:
 
     def test_register_and_install_use_runner(self, tmp_path):
         calls = []
-        runner = lambda args, **kw: calls.append(list(args))
+        def runner(args, **kw):
+            return calls.append(list(args))
         h = ClaudeCodeHarness()
         h.register(tmp_path, runner=runner)
         h.install_tool("lore", tmp_path, runner=runner)

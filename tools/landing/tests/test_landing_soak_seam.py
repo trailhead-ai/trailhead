@@ -24,13 +24,11 @@ Hermeticity: tmp_path-based stub commands; no network; stdlib only.
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -90,7 +88,8 @@ class TestSoakInertDefault:
         toml = _write_toml(tmp_path)
         r = _run_soak(toml)
         assert r.returncode == 0, (
-            f"soak_health.py must exit 0 when no health command is configured (D-3 inert default);\n"
+            f"soak_health.py must exit 0 when no health command is configured "
+            f"(D-3 inert default);\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
 

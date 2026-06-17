@@ -30,7 +30,7 @@ from sessions import (  # noqa: E402
     finalize_note,
     is_skeleton_body,
     sweep_orphan_skeletons,
-    write_note_atomic,
+    write_note_atomic,  # noqa: F401 — re-exported as a module attribute for tests
 )
 from vault import resolve_vault  # noqa: E402
 

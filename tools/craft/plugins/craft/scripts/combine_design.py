@@ -65,7 +65,9 @@ def _parse_chrome_tokens(chrome_text: str) -> list[tuple[str, str]]:
 
     Returns list of (token_name, value) tuples.
     """
-    match = re.search(r"^## Brand tokens?\s*\n(.*?)(?=^##|\Z)", chrome_text, re.MULTILINE | re.DOTALL)
+    match = re.search(
+        r"^## Brand tokens?\s*\n(.*?)(?=^##|\Z)", chrome_text, re.MULTILINE | re.DOTALL
+    )
     if not match:
         return []
     block = match.group(1)
@@ -202,7 +204,9 @@ def _tokens_swatch_html(tokens: list[tuple[str, str]]) -> str:
         '  <h2 style="font-family:sans-serif;font-size:1em;">00 Design tokens</h2>\n',
     ]
     if tokens:
-        lines.append('  <table style="border-collapse:collapse;font-family:monospace;font-size:0.9em;">\n')
+        lines.append(
+            '  <table style="border-collapse:collapse;font-family:monospace;font-size:0.9em;">\n'
+        )
         for name, value in tokens:
             swatch = ""
             if value.startswith("#") or value.startswith("rgb"):
@@ -217,7 +221,10 @@ def _tokens_swatch_html(tokens: list[tuple[str, str]]) -> str:
             )
         lines.append("  </table>\n")
     else:
-        lines.append("  <p style=\"font-family:sans-serif;color:#666;\">No brand tokens found in chrome catalog.</p>\n")
+        lines.append(
+            "  <p style=\"font-family:sans-serif;color:#666;\">"
+            "No brand tokens found in chrome catalog.</p>\n"
+        )
     lines.append("</section>\n")
     return "".join(lines)
 
@@ -226,7 +233,8 @@ def _screen_section_html(number: str, name: str, anchor: str, body_html: str) ->
     """Wrap a screen's body in a numbered section."""
     return (
         f'<section id="{anchor}" style="padding:20px;border-top:2px solid #ddd;">\n'
-        f'  <h2 style="font-family:sans-serif;">{_html_escape(number)} — {_html_escape(name)}</h2>\n'
+        f'  <h2 style="font-family:sans-serif;">'
+        f"{_html_escape(number)} — {_html_escape(name)}</h2>\n"
         f"  <!-- begin verbatim screen markup (D-4: assembled verbatim, not re-rendered) -->\n"
         f"  {body_html}\n"
         f"  <!-- end verbatim screen markup -->\n"

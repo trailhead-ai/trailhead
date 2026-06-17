@@ -78,7 +78,8 @@ MIDDLE_BAND_TOKENS: list[str] = [
     "".join(["d", "e", "v", "-", "e", "n", "v"]), # hyphenated env term
     "".join(["m", "i", "x"]),                      # Elixir build tool
     "".join(["n", "p", "m"]),                      # Node build tool
-    "".join(["m", "o", "b", "i", "l", "e", "-", "o", "v", "e", "r", "v", "i", "e", "w"]),  # internal mobile repo slug
+    # internal mobile repo slug
+    "".join(["m", "o", "b", "i", "l", "e", "-", "o", "v", "e", "r", "v", "i", "e", "w"]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -204,8 +205,11 @@ def test_harvest_bearing_agent_retains_heading(stem: str):
 
 _PLANNER_OBSERVABILITY_TOKENS: list[str] = [
     "".join(["p", "l", "a", "t", "f", "o", "r", "m", "."]),  # dotted metric namespace prefix
-    "".join(["e", "v", "i", "d", "e", "n", "c", "e", "_", "p", "a", "c", "k"]),  # soak evidence-pack script
-    "".join(["p", "l", "a", "t", "f", "o", "r", "m", "-", "h", "e", "a", "l", "t", "h", "-", "c", "h", "e", "c", "k", "s"]),  # subsystem profile slug
+    # soak evidence-pack script
+    "".join(["e", "v", "i", "d", "e", "n", "c", "e", "_", "p", "a", "c", "k"]),
+    # subsystem profile slug
+    "".join(["p", "l", "a", "t", "f", "o", "r", "m", "-", "h", "e", "a", "l", "t", "h",
+             "-", "c", "h", "e", "c", "k", "s"]),
     "".join(["d", "a", "s", "h", "0"]),  # observability vendor
 ]
 

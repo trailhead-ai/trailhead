@@ -43,15 +43,10 @@ invocation shape. The resolver's env= injection is used for all state paths.
 """
 from __future__ import annotations
 
-import fcntl
-import io
 import json
-import os
 import subprocess
 import sys
 import threading
-import time
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -167,7 +162,6 @@ def two_member_group(tmp_path: Path):
 class TestReconcileWorktreeCreates:
     def test_creates_both_worktrees_on_correct_branch(self, two_member_group):
         """Both member worktrees land under …/worktrees/<slug>/<member>."""
-        from manifest import read_central_manifest
         from reconcile import reconcile_worktree
 
         g = two_member_group
@@ -296,7 +290,6 @@ class TestPartialCreationAtomicity:
     def test_partial_create_then_rerun_completes_set(self, two_member_group):
         """After partial creation (member-1 only), re-run completes without crash."""
         from reconcile import reconcile_worktree
-        from manifest import read_central_manifest
         from group_resolve import central_state_dir
 
         g = two_member_group
@@ -331,7 +324,6 @@ class TestPartialCreationAtomicity:
         g = two_member_group
         slug = "feat-partial2"
 
-        call_count = [0]
         original_add = None
 
         def failing_add_for_member_b(member, wt_path, branch, repo_root):
@@ -683,9 +675,6 @@ class TestBreakAtomicitySymmetry:
         slug = "break-atomic"
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
-        wt_b = _member_wt("testgroup", slug, "repo_b", g["env"])
-
         # Simulate mid-break failure: remove repo_a's worktree but then fail on repo_b
         call_count = [0]
 
@@ -793,14 +782,16 @@ class TestMalformedManifest:
             read_central_manifest(manifest_path)
 
         # Must be a named error, not a raw json decode traceback
-        assert "manifest" in str(exc_info.value).lower() or str(manifest_path) in str(exc_info.value)
+        assert (
+            "manifest" in str(exc_info.value).lower()
+            or str(manifest_path) in str(exc_info.value)
+        )
 
     def test_malformed_manifest_status_gives_legible_error(self, two_member_group):
         """cmd_status with a malformed manifest must not traceback."""
         from reconcile import reconcile_worktree
         from group_resolve import central_state_dir
         from manifest import ManifestError
-        import spine
 
         g = two_member_group
         slug = "bad-status"
@@ -1005,7 +996,10 @@ class TestCmdBreak:
         with pytest.raises(Exception) as exc_info:
             reconcile_break(g["group"], slug, env=g["env"], force=False)
 
-        assert "dirty" in str(exc_info.value).lower() or "uncommitted" in str(exc_info.value).lower()
+        assert (
+            "dirty" in str(exc_info.value).lower()
+            or "uncommitted" in str(exc_info.value).lower()
+        )
 
     def test_break_dirty_worktree_succeeds_with_force(self, two_member_group):
         """break --force succeeds even with dirty worktrees."""
@@ -1059,8 +1053,10 @@ class TestManifestAPI:
             "slug": "feat-x",
             "branch": "worktree-feat-x",
             "members": [
-                {"name": "repo_a", "repo_root": "/tmp/a", "worktree_path": "/tmp/a/.claude/worktrees/feat-x"},
-                {"name": "repo_b", "repo_root": "/tmp/b", "worktree_path": "/tmp/b/.claude/worktrees/feat-x"},
+                {"name": "repo_a", "repo_root": "/tmp/a",
+                 "worktree_path": "/tmp/a/.claude/worktrees/feat-x"},
+                {"name": "repo_b", "repo_root": "/tmp/b",
+                 "worktree_path": "/tmp/b/.claude/worktrees/feat-x"},
             ],
         }
 
@@ -1091,7 +1087,10 @@ class TestManifestAPI:
         from manifest import write_central_manifest, remove_central_manifest
 
         manifest_path = tmp_path / "manifest.json"
-        write_central_manifest(manifest_path, {"schema_version": 1, "group": "g", "slug": "s", "branch": "b", "members": []})
+        write_central_manifest(
+            manifest_path,
+            {"schema_version": 1, "group": "g", "slug": "s", "branch": "b", "members": []},
+        )
         assert manifest_path.exists()
 
         remove_central_manifest(manifest_path)

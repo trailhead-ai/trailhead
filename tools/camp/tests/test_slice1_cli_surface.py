@@ -340,7 +340,11 @@ def test_stub_verb_exits_nonzero(verb: str) -> None:
 def test_stub_verb_prints_not_implemented_message(verb: str) -> None:
     result = _run([verb, "dummy"])
     combined = result.stdout + result.stderr
-    assert "not yet" in combined.lower() or "slice" in combined.lower() or "implement" in combined.lower(), (
+    assert (
+        "not yet" in combined.lower()
+        or "slice" in combined.lower()
+        or "implement" in combined.lower()
+    ), (
         f"Stub verb {verb!r} must print 'not yet implemented' message.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )

@@ -37,12 +37,17 @@ BUILDER_BARS = """*Builder:*
 - Producer slice's contract isn't proven by tests but a consumer slice depends on it
 - Plan introduces a new abstraction layer for a single caller (premature)"""
 
-RELIABILITY_BARS = """*Reliability:*
-- A slice has no test contract, OR test contract is vacuous
-- New code path's failure mode is invisible (no health check, metric, log, soak observable) AND the spec's Observability & Failure Visibility block says `n/a — soak-invisible` without substantive reason
-- Plan removes existing test coverage without replacement
-- A slice does irreversible work without dry-run / preview / staged rollout
-- A destructive migration or backfill runs without a gated, replayable console (the ORM / query layer or migration/backfill console) instead of an ad-hoc one-shot"""
+RELIABILITY_BARS = (
+    "*Reliability:*\n"
+    "- A slice has no test contract, OR test contract is vacuous\n"
+    "- New code path's failure mode is invisible (no health check, metric, log, "
+    "soak observable) AND the spec's Observability & Failure Visibility block says "
+    "`n/a — soak-invisible` without substantive reason\n"
+    "- Plan removes existing test coverage without replacement\n"
+    "- A slice does irreversible work without dry-run / preview / staged rollout\n"
+    "- A destructive migration or backfill runs without a gated, replayable console "
+    "(the ORM / query layer or migration/backfill console) instead of an ad-hoc one-shot"
+)
 
 SECURITY_BARS = """*Security:*
 - New authenticated endpoint without named authz check
@@ -51,21 +56,25 @@ SECURITY_BARS = """*Security:*
 - Secret in source / config without using the existing secret-management pattern
 - Admin-only behavior exposed to non-admin paths"""
 
-ADVOCATE_BARS = """*Advocate* — dual rule, apply the higher bar for internal admin UX:
-
-End-user-facing (the mobile client, the public web surface):
-- Stuck state with no escape
-- Primary flow 3+ clicks where 1 is industry-standard
-- Developer-jargon error messages
-- Missing empty / error / loading states
-- A change tested on only one platform but breaks an existing flow on another
-
-Internal admin UI — Critical ONLY when at least one holds:
-- (a) No workaround exists
-- (b) High-frequency daily workflow with compounding friction (e.g. 1-click → 10-click for a 50×-daily task)
-- (c) Feedback ambiguity that propagates bad decisions downstream
-
-Otherwise internal-admin findings are Important at most. Admin users tolerate friction; bikeshedding internal UX is high-cost."""
+ADVOCATE_BARS = (
+    "*Advocate* — dual rule, apply the higher bar for internal admin UX:\n"
+    "\n"
+    "End-user-facing (the mobile client, the public web surface):\n"
+    "- Stuck state with no escape\n"
+    "- Primary flow 3+ clicks where 1 is industry-standard\n"
+    "- Developer-jargon error messages\n"
+    "- Missing empty / error / loading states\n"
+    "- A change tested on only one platform but breaks an existing flow on another\n"
+    "\n"
+    "Internal admin UI — Critical ONLY when at least one holds:\n"
+    "- (a) No workaround exists\n"
+    "- (b) High-frequency daily workflow with compounding friction "
+    "(e.g. 1-click → 10-click for a 50×-daily task)\n"
+    "- (c) Feedback ambiguity that propagates bad decisions downstream\n"
+    "\n"
+    "Otherwise internal-admin findings are Important at most. Admin users tolerate "
+    "friction; bikeshedding internal UX is high-cost."
+)
 
 ALL_BARS = [BUILDER_BARS, RELIABILITY_BARS, SECURITY_BARS, ADVOCATE_BARS]
 

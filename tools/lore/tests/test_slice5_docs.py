@@ -118,6 +118,10 @@ class TestPromoteDoc:
         assert "recall" in text.lower(), (
             f"PROMOTE.md must mention 'lore recall' for shared areas. Got: {text[:500]!r}"
         )
-        assert "menu" in text.lower() or "always-loaded" in text.lower() or "personal" in text.lower(), (
+        assert (
+            "menu" in text.lower()
+            or "always-loaded" in text.lower()
+            or "personal" in text.lower()
+        ), (
             f"PROMOTE.md must document D-6 menu stays personal. Got: {text[:500]!r}"
         )

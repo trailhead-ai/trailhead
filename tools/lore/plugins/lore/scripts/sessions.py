@@ -79,7 +79,9 @@ def session_note_path(vault: Path, worktree_name: str) -> Path | None:
     sessions_dir = Path(vault) / "sessions"
     if not sessions_dir.is_dir():
         return None
-    for p in sorted(iter_note_paths(sessions_dir, recursive=True), key=lambda p: p.name, reverse=True):
+    for p in sorted(
+        iter_note_paths(sessions_dir, recursive=True), key=lambda p: p.name, reverse=True
+    ):
         if _is_note_for_worktree(p, worktree_name):
             return p
     return None
@@ -91,7 +93,11 @@ def all_session_notes_for_worktree(vault: Path, worktree_name: str) -> list[Path
     if not sessions_dir.is_dir():
         return []
     return sorted(
-        (p for p in iter_note_paths(sessions_dir, recursive=True) if _is_note_for_worktree(p, worktree_name)),
+        (
+            p
+            for p in iter_note_paths(sessions_dir, recursive=True)
+            if _is_note_for_worktree(p, worktree_name)
+        ),
         key=lambda p: p.name,
         reverse=True,
     )

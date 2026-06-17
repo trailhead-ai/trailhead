@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -97,7 +97,6 @@ def _make_group(
 def test_enter_pending_prints_provisioning_message(tmp_path: Path) -> None:
     """A pending member → 'still provisioning' message + retry hint; hooks NOT run."""
     from activation import enter_member, MemberNotReadyError
-    from group_config import GroupConfigError
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -247,7 +246,7 @@ def test_enter_ready_fires_each_hook_once(tmp_path: Path) -> None:
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
-        result = enter_member(group, slug, member_name, env=env)
+        enter_member(group, slug, member_name, env=env)
 
     assert mock_run.call_count == 2
     first_call_argv = mock_run.call_args_list[0][0][0]
@@ -366,7 +365,7 @@ def test_enter_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys) -
 def test_enter_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
     """After enter_member succeeds, the manifest member has activated=true."""
     from activation import enter_member
-    from manifest import read_central_manifest, manifest_path_for
+    from manifest import read_central_manifest
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -403,7 +402,6 @@ def test_enter_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
 def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
     """Re-entering an already-activated member skips hooks; doc is still printed."""
     from activation import enter_member
-    from manifest import read_central_manifest
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -414,7 +412,7 @@ def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
     claude_md_content = "# Member Doc\n"
     (wt_path / "CLAUDE.md").write_text(claude_md_content)
 
-    mpath = _make_manifest(
+    _make_manifest(
         tmp_path,
         slug,
         group_name,
@@ -434,7 +432,8 @@ def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
     env = _env(tmp_path)
 
     with patch("subprocess.run") as mock_run:
-        import io, contextlib
+        import io
+        import contextlib
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             enter_member(group, slug, member_name, env=env)

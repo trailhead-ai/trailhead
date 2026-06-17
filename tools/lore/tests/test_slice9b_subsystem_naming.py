@@ -8,13 +8,12 @@ Covers (rederived from D23 area/D8b/D1 invariants):
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-from conftest import CLI_PATH, SCRIPTS_DIR, load_script
+from conftest import CLI_PATH, load_script
 
 TODAY = "2026-06-02"
 

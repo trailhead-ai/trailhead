@@ -57,7 +57,8 @@ class TestReport:
 
     def test_clis_reported_from_which(self, tmp_path):
         _make_tree(tmp_path, "claude_code", ["lore"])
-        which = lambda n: f"/shim/{n}" if n == "camp" else None
+        def which(n):
+            return f"/shim/{n}" if n == "camp" else None
         r = run_doctor(env=_env(tmp_path), which_runner=which,
                        python_version_runner=_fake_py)
         assert r.data["clis"]["camp"] == "/shim/camp"

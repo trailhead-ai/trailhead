@@ -26,19 +26,14 @@ terminals racing camp <slug> don't both git-worktree-add the same path.
 """
 from __future__ import annotations
 
-import json
-import os
 import shutil
 import subprocess
-import sys
-import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from manifest import (
-    ManifestError,
     manifest_path_for,
     read_central_manifest,
     reconcile_lock,

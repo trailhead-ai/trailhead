@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import os
 import subprocess
 import sys
 import textwrap
@@ -281,7 +280,7 @@ class TestC1RmtreeGuard:
         from reconcile import reconcile_break, ConfinementError
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
-        from manifest import workspace_dir, read_central_manifest, write_central_manifest
+        from manifest import workspace_dir, read_central_manifest
 
         repo = tmp_path / "repo_a"
         _init_git_repo(repo)

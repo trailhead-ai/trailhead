@@ -18,14 +18,12 @@ Test contract (all must RED before implementation, GREEN after):
 """
 from __future__ import annotations
 
-import io
 import os
 import sys
 import textwrap
 from pathlib import Path
 from unittest import mock
 
-import pytest
 
 from conftest import SCRIPTS_DIR, load_script
 
@@ -366,7 +364,7 @@ class TestMissingSharedRoot:
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 2
-        names = [l.name for l in layers]
+        names = [layer.name for layer in layers]
         assert "personal" in names
         assert "good-vault" in names
         assert "missing-vault" not in names
@@ -439,7 +437,7 @@ class TestConfinementViolations:
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 2
-        names = [l.name for l in layers]
+        names = [layer.name for layer in layers]
         assert "good-vault" in names
         assert "personal" in names
 

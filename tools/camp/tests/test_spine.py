@@ -13,12 +13,8 @@ Test contract from the plan (Slice 0):
 """
 from __future__ import annotations
 
-import importlib
 import json
-import os
-import subprocess
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -88,7 +84,10 @@ def test_read_manifest_returns_none_on_bad_json(tmp_path: Path) -> None:
 
 def test_resolve_manifest_for_direct(tmp_path: Path) -> None:
     import repos
-    manifest = {"name": "slug1", "repos": [{"name": "alpha", "worktree_path": str(tmp_path / "alpha")}]}
+    manifest = {
+        "name": "slug1",
+        "repos": [{"name": "alpha", "worktree_path": str(tmp_path / "alpha")}],
+    }
     (tmp_path / repos._MANIFEST_FILENAME).write_text(json.dumps(manifest))
     result = repos.resolve_manifest_for(tmp_path)
     assert result is not None

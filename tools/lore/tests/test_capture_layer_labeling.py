@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from conftest import CLI_PATH, SCRIPTS_DIR
+from conftest import CLI_PATH
 
 TODAY = "2026-06-10"
 

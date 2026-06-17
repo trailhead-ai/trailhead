@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -155,8 +153,10 @@ class TestBug1SetupStatus:
         code, _out, _err = self._run_status(camp_cli, g, "feat-st0", monkeypatch, capsys)
         assert code == 0
 
-    def test_status_exits_zero_when_pending_or_failed(self, camp_cli, two_member_group, monkeypatch, capsys):
-        from provision import bring_up_workspace, seed_pending_workspace
+    def test_status_exits_zero_when_pending_or_failed(
+        self, camp_cli, two_member_group, monkeypatch, capsys
+    ):
+        from provision import seed_pending_workspace
         from manifest import update_member_state
         g = two_member_group
         seed_pending_workspace(g["group"], "feat-pf", env=g["env"])
@@ -170,7 +170,9 @@ class TestBug1SetupStatus:
         # still reports the failed/pending members
         assert "failed" in out.lower() or "pending" in out.lower()
 
-    def test_status_never_mutates_creates_no_junk_dir(self, camp_cli, two_member_group, monkeypatch, capsys):
+    def test_status_never_mutates_creates_no_junk_dir(
+        self, camp_cli, two_member_group, monkeypatch, capsys
+    ):
         g = two_member_group
         self._provision(camp_cli, g, "feat-nm")
         mpath = _workspace_dir("bugfixgroup", "feat-nm", g["env"]) / "manifest.json"
@@ -182,7 +184,9 @@ class TestBug1SetupStatus:
         # The real workspace's manifest is unchanged (no reconcile/flip/write).
         assert mpath.read_text() == before, "camp setup --status must not mutate the manifest"
 
-    def test_status_consumed_not_treated_as_slug(self, camp_cli, two_member_group, monkeypatch, capsys):
+    def test_status_consumed_not_treated_as_slug(
+        self, camp_cli, two_member_group, monkeypatch, capsys
+    ):
         """`--status` must be parsed before slug resolution — never normalized to
         the slug `status`."""
         g = two_member_group
@@ -218,7 +222,6 @@ class TestBug2RmRemovesWorkspaceDir:
         """After camp rm, a subsequent camp ai chooses the `new` template
         (is_resume False), not resume against a torn-down session."""
         import harness_launch
-        import session_lock
         from reconcile import reconcile_break
 
         g = two_member_group
@@ -244,7 +247,9 @@ class TestBug2RmRemovesWorkspaceDir:
             reconcile_break(g["group"], "feat-dirty", env=g["env"])
         assert ws.exists(), "a dirty-block abort must leave the workspace dir intact"
 
-    def test_confinement_rejects_out_of_tree_workspace_dir(self, two_member_group, tmp_path, monkeypatch):
+    def test_confinement_rejects_out_of_tree_workspace_dir(
+        self, two_member_group, tmp_path, monkeypatch
+    ):
         """The workspace-dir rmtree uses the same confinement guard — an
         out-of-tree resolved workspace dir is rejected, not rmtree'd."""
         from reconcile import reconcile_break, ConfinementError
@@ -252,7 +257,7 @@ class TestBug2RmRemovesWorkspaceDir:
         from manifest import workspace_dir
         g = two_member_group
         self._provision(g, "feat-conf")
-        ws = workspace_dir("bugfixgroup", "feat-conf", env=g["env"])
+        workspace_dir("bugfixgroup", "feat-conf", env=g["env"])
 
         outside = tmp_path / "outside-tree"
         outside.mkdir()

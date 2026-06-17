@@ -64,7 +64,6 @@ class TestClaudeDefault:
 class TestCustomHarness:
     def test_custom_new_argv_substitutes_workspace(self):
         from harness_launch import resolve_launch
-        from group_config import load_group
 
         ws = Path("/work/space")
         # Configured via the parsed-config shape (post load_group).

@@ -240,7 +240,8 @@ def test_design_phase_declaration_present(doc_text: str):
     # Must mention "design phase" in the context of the loop
     has_design_phase = "design phase" in doc_lower
     assert has_design_phase, (
-        "design-authoring.md must state that 'design' is the loop's design phase (Slice 3 / spec concept map §1299)"
+        "design-authoring.md must state that 'design' is the loop's design phase "
+        "(Slice 3 / spec concept map §1299)"
     )
 
 
@@ -262,7 +263,8 @@ def test_design_phase_names_combine_produces_reference(doc_text: str):
     doc_lower = doc_text.lower()
     has_reference = "reference" in doc_lower
     assert has_reference, (
-        "design-authoring.md must state that combine_design.py produces the self-contained reference"
+        "design-authoring.md must state that combine_design.py produces the "
+        "self-contained reference"
     )
 
 

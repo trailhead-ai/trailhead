@@ -50,7 +50,6 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -499,7 +498,8 @@ class TestRecallAreasCrossCutting:
         recall = load_recall()
         result = recall.recall_areas(vault, ["auth"])
         assert result.cross_cutting_total >= 15, (
-            f"cross_cutting_total should reflect all 15 candidates, got {result.cross_cutting_total}"
+            "cross_cutting_total should reflect all 15 candidates, "
+            f"got {result.cross_cutting_total}"
         )
         # The actual added items are capped at 10
         cross_items = [it for it in result.items if it.type == "cross-cutting"]
@@ -575,7 +575,7 @@ class TestRecallAreasEdgeCases:
     def test_recency_days_default_is_14(self, tmp_path):
         """D-1 amended: 14-day cross-cutting window (90d returned ~649 items on
         the live vault — noise that diluted area-tagged signal)."""
-        vault = _make_vault(tmp_path)
+        _make_vault(tmp_path)
         recall = load_recall()
         import inspect
         sig = inspect.signature(recall.recall_areas)

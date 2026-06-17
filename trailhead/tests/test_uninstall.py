@@ -11,7 +11,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from trailhead.uninstall import run_uninstall
 

@@ -229,13 +229,15 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(prog="handoff_capture", description=__doc__)
-    sub = ap.add_subparsers(dest="mode", required=False)
+    ap.add_subparsers(dest="mode", required=False)
 
     ap.add_argument("--capture", metavar="REPO", help="print captured git state for REPO")
     ap.add_argument("--default-branch", default="main")
     ap.add_argument("--fallback-n", type=int, default=50)
 
-    ap.add_argument("--degraded", action="store_true", help="write the out-of-repo fallback handoff file")
+    ap.add_argument(
+        "--degraded", action="store_true", help="write the out-of-repo fallback handoff file"
+    )
     ap.add_argument("--slug", help="slug for the degraded handoff filename")
     ap.add_argument("--hints", default="", help="pickup hints text")
     ap.add_argument("--repo", default=".", help="repo to capture for the degraded write")
