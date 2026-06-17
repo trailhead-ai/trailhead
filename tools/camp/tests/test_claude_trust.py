@@ -121,19 +121,21 @@ class TestExistingFile:
         key = str(launch_dir.resolve())
         assert data["projects"][key]["hasTrustDialogAccepted"] is True
 
-    def test_preserves_existing_file_mode(self, tmp_path):
+    def test_loose_existing_mode_tightened_to_0o600(self, tmp_path):
+        """~/.claude.json holds OAuth secrets — a looser pre-existing mode is
+        tightened to 0o600, never preserved (council/Security)."""
         from claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text(json.dumps({"projects": {}}))
-        os.chmod(str(claude_json), 0o640)
+        os.chmod(str(claude_json), 0o644)
 
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
         pretrust_workspace(launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)})
 
         mode = claude_json.stat().st_mode & 0o777
-        assert mode == 0o640
+        assert mode == 0o600
 
 
 # ---------------------------------------------------------------------------
@@ -505,3 +507,64 @@ class TestIsClaudeLaunch:
 
         p = resolve_harness_profile(self._group({"new": ["/usr/local/bin/claude"]}))
         assert p.is_claude_launch() is True
+
+    def test_empty_new_is_not_claude_launch_no_raise(self):
+        """Directly-built profile with empty new must answer False, not IndexError."""
+        from harness_launch import HarnessProfile
+
+        p = HarnessProfile(
+            new=[], resume=[], cwd="{workspace}", doc_files=["CLAUDE.md"],
+            inject="stdout", pretrust=True,
+        )
+        assert p.is_claude_launch() is False
+
+
+# ---------------------------------------------------------------------------
+# HarnessProfile.should_pretrust
+# ---------------------------------------------------------------------------
+
+
+class TestShouldPretrust:
+    def _group(self, harness=None):
+        g = {"group": {"name": "g"}, "members": [{"name": "r", "repo_root": "/tmp/r"}]}
+        if harness is not None:
+            g["harness"] = harness
+        return g
+
+    def test_bare_default_pretrusts(self):
+        from harness_launch import resolve_harness_profile
+
+        assert resolve_harness_profile(self._group()).should_pretrust() is True
+
+    def test_explicit_claude_block_without_inject_pretrusts(self):
+        """Regression guard: a [harness] block defaults inject to 'stdout', but a
+        plain ['claude', ...] launch must still pretrust (gated via is_claude_launch,
+        not the inject signal alone)."""
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(self._group({"new": ["claude", "--flag"]}))
+        assert p.inject == "stdout"  # block present, no inject key
+        assert p.should_pretrust() is True
+
+    def test_pretrust_false_disables(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(self._group({"new": ["claude"], "pretrust": False}))
+        assert p.should_pretrust() is False
+
+    def test_non_claude_binary_without_claude_hook_does_not_pretrust(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(self._group({"new": ["codex"]}))
+        assert p.should_pretrust() is False
+
+    def test_wrapper_with_claude_hook_inject_pretrusts(self):
+        """Opt-in path: a claude wrapper named non-'claude' can still pretrust by
+        declaring the native claude-hook inject channel."""
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(
+            self._group({"new": ["claude-wrapper"], "inject": "claude-hook"})
+        )
+        assert p.is_claude_launch() is False
+        assert p.should_pretrust() is True

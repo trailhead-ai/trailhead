@@ -118,12 +118,10 @@ def pretrust_workspace(
 
     # Load existing file, or start from scratch when absent. Exception-based
     # detection (no pre-check exists() stat): a missing file is the create case;
-    # any other read error aborts without overwriting. This drops a redundant
-    # stat and closes the exists()→read TOCTOU window.
+    # any other read error aborts without overwriting. This closes the
+    # exists()→read TOCTOU window.
     existing_data: dict | None = None
-    existing_mode: int | None = None
     try:
-        existing_mode = claude_json_path.stat().st_mode & 0o777
         with open(str(claude_json_path), "r") as fh:
             raw = fh.read()
     except FileNotFoundError:
@@ -172,9 +170,10 @@ def pretrust_workspace(
     project_entry["hasTrustDialogAccepted"] = True
 
     # Atomic write: tmp file in HOME (not in a .claude/ subdir), then os.replace.
-    # tempfile.mkstemp creates the tmp file 0o600 by construction, so there is no
-    # world-readable window even for the brief moment it exists in HOME
-    # (council/Security — no explicit opener needed; mkstemp already enforces this).
+    # The file lands 0o600 unconditionally — tempfile.mkstemp creates the tmp file
+    # 0o600 by construction and we never widen it. This is deliberate: ~/.claude.json
+    # holds OAuth secrets, so we always enforce owner-only perms rather than
+    # preserving a (possibly looser) pre-existing mode (council/Security).
     fd, tmp_path_str = tempfile.mkstemp(
         dir=str(home), prefix=".claude-", suffix=".tmp"
     )
@@ -182,11 +181,6 @@ def pretrust_workspace(
         with os.fdopen(fd, "w") as fh:
             json.dump(data, fh, indent=2)
             fh.write("\n")
-        # Restore the original mode before promoting if it differed from the
-        # 0o600 the tmp file already has (absent file → existing_mode is None →
-        # keep mkstemp's 0o600).
-        if existing_mode is not None and existing_mode != 0o600:
-            os.chmod(tmp_path_str, existing_mode)
         os.replace(tmp_path_str, str(claude_json_path))
     except Exception:
         try:
