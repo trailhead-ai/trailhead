@@ -1,0 +1,63 @@
+name: tests
+
+# Run the test suite on every pull request as it is opened and on each new push
+# to the PR branch (synchronize) or when it is reopened.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel an in-flight run when the PR branch gets a newer push.
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff (PEP 8)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        # Pinned to the same version as the pre-commit hook (.pre-commit-config.yaml).
+        run: python -m pip install --upgrade pip "ruff==0.15.17"
+
+      - name: Lint (rules + line-length configured in pyproject.toml)
+        run: ruff check .
+
+  pytest:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Honor requires-python = ">=3.11"; test the floor plus current releases.
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install pytest
+        # trailhead has zero third-party runtime deps (stdlib only); pytest is the
+        # only thing the suite needs beyond the standard library.
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run the test suite
+        # Invoked as `python -m pytest` so the repo root is on sys.path and the
+        # `trailhead` package imports without an editable install (the checkout IS
+        # the source). testpaths in pyproject.toml span the CLI + all tool suites.
+        run: python -m pytest
