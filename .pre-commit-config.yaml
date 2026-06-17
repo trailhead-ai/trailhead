@@ -1,0 +1,28 @@
+# Pre-commit hooks for trailhead.
+#
+# One-time setup (per clone):
+#   pip install pre-commit
+#   pre-commit install                       # installs the pre-commit (lint) hook
+#   pre-commit install --hook-type commit-msg  # installs the conventional-commit hook
+#
+# `default_install_hook_types` below makes a bare `pre-commit install` wire up
+# BOTH stages, so the two-line install collapses to one.
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  # Enforce Conventional Commits on the commit message (commit-msg stage).
+  # Matches the repo convention: feat(scope):, fix(scope):, refactor(scope):,
+  # docs(...), test(...), chore(...), etc.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # PEP 8 style enforcement via ruff (pycodestyle E/W + pyflakes F).
+  # Rules and line-length are configured in pyproject.toml ([tool.ruff]).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.17
+    hooks:
+      - id: ruff
+        args: [--fix]
