@@ -207,6 +207,25 @@ class TestHarnessConfigValidation:
         with pytest.raises(GroupConfigError):
             self._load(tmp_path, "[harness]\ninject = 42\n")
 
+    def test_harness_pretrust_true_parses(self, tmp_path):
+        cfg = self._load(tmp_path, "[harness]\npretrust = true\n")
+        assert cfg["harness"]["pretrust"] is True
+
+    def test_harness_pretrust_false_parses(self, tmp_path):
+        cfg = self._load(tmp_path, "[harness]\npretrust = false\n")
+        assert cfg["harness"]["pretrust"] is False
+
+    def test_harness_pretrust_absent_not_in_parsed(self, tmp_path):
+        cfg = self._load(tmp_path, "[harness]\ndoc_files = [\"AGENTS.md\"]\n")
+        assert "pretrust" not in cfg["harness"]
+
+    def test_harness_pretrust_non_bool_rejected(self, tmp_path):
+        from group_config import GroupConfigError
+
+        with pytest.raises(GroupConfigError) as exc:
+            self._load(tmp_path, "[harness]\npretrust = \"yes\"\n")
+        assert "pretrust" in str(exc.value)
+
 
 # ---------------------------------------------------------------------------
 # launch() — resolves then os.execvp (stubbed)
@@ -396,3 +415,21 @@ class TestResolveHarnessProfile:
         argv, cwd = p.launch(slug="feat-x", workspace="/work/space", is_resume=True)
         assert argv == ["claude", "-r", "feat-x"]
         assert cwd == Path("/work/space")
+
+    def test_no_harness_block_pretrust_defaults_true(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group())
+        assert p.pretrust is True
+
+    def test_block_without_pretrust_defaults_true(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group({"doc_files": ["AGENTS.md"]}))
+        assert p.pretrust is True
+
+    def test_configured_pretrust_false_honored(self):
+        from harness_launch import resolve_harness_profile
+
+        p = resolve_harness_profile(_group({"pretrust": False}))
+        assert p.pretrust is False

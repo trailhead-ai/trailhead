@@ -57,6 +57,7 @@ class HarnessProfile:
     cwd: str
     doc_files: list[str]
     inject: str  # "stdout" | "claude-hook"
+    pretrust: bool  # pre-seed the claude per-dir trust flag (claude launches only)
 
     def resolved_cwd(self, *, slug: str, workspace: Path | str) -> Path:
         """Single source of the substituted launch cwd.
@@ -110,6 +111,7 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
         if "doc_files" in harness
         else ["CLAUDE.md"],
         inject=inject,
+        pretrust=harness.get("pretrust", True),
     )
 
 

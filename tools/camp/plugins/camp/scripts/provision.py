@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -187,6 +188,22 @@ def bring_up_workspace(
 
     if profile.inject == "claude-hook":
         write_workspace_inject_hook(ws_dir, str(_CAMP_BIN))
+
+    # Pre-seed the claude per-directory trust flag for the resolved launch cwd so
+    # the harness does not stall on the trust dialog. Gated to claude launches
+    # with pretrust enabled; best-effort — any failure is warned and NON-FATAL so
+    # bring-up (manifest seed + detached spawn) still completes.
+    if profile.pretrust and profile.is_claude_launch():
+        import claude_trust
+
+        try:
+            claude_trust.pretrust_workspace(
+                profile.resolved_cwd(slug=slug, workspace=ws_dir),
+                workspace_root=ws_dir,
+                env=env,
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort, never blocks bring-up
+            print(f"camp: pretrust failed (continuing): {exc}", file=sys.stderr)
 
     spawn_detached_provisioner(
         group_name=group_name,

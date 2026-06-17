@@ -60,3 +60,9 @@ pattern = "worktree-{slug}"
 # Default: claude (no [harness] block) → "claude-hook"; ANY [harness] block without
 # an explicit inject → "stdout" (safe default for a non-claude harness).
 #   # inject = "claude-hook"
+#
+# pretrust — pre-seed the Claude Code per-directory trust flag in ~/.claude.json
+#   for the workspace launch dir, so `camp ai` does not stall on the "Do you trust
+#   the files in this folder?" dialog. Applies only to claude launches; best-effort
+#   (a failure simply lets the dialog reappear). Default: true. Opt out with:
+#   # pretrust = false
