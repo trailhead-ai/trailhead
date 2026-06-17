@@ -1363,7 +1363,8 @@ class TestNoDivCollapseGuard:
     # removed. It used the mere existence of CLAUDE.md at the repo root as a proxy
     # for "D17 group-workspace-config was wired". That proxy was invalidated when
     # the project deliberately adopted a repo-root CLAUDE.md to load the vision
-    # axioms (it imports docs/vision.md) — a purpose unrelated to D17. D17 wiring
-    # is still guarded above by test_root_readme_does_not_claim_group_workspace,
-    # which checks for the actual workspace-config vocabulary rather than a file's
-    # presence.
+    # axioms (it imports docs/vision.md) — a purpose unrelated to D17. The old
+    # guard also checked AGENTS.md presence; that check is dropped too, since a
+    # file's presence never proved D17 was wired. D17 is now guarded semantically
+    # above by test_root_readme_does_not_claim_group_workspace, which checks for
+    # the actual workspace-config vocabulary rather than any file's presence.

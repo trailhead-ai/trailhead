@@ -53,8 +53,9 @@ jobs:
 
       - name: Install pytest
         # trailhead has zero third-party runtime deps (stdlib only); pytest is the
-        # only thing the suite needs beyond the standard library.
-        run: python -m pip install --upgrade pip pytest
+        # only thing the suite needs beyond the standard library. Pinned for
+        # reproducible CI runs (matches the lint job's pinned ruff).
+        run: python -m pip install --upgrade pip "pytest==9.0.3"
 
       - name: Run the test suite
         # Invoked as `python -m pytest` so the repo root is on sys.path and the
