@@ -45,11 +45,14 @@ def _substitute(token: str, *, slug: str, workspace: str) -> str:
 
 @dataclass(frozen=True)
 class HarnessProfile:
-    """The fully-resolved harness profile: launch argv + cwd + doc_files + inject.
+    """The fully-resolved harness profile: launch argv + cwd + doc_files + inject
+    + pretrust.
 
     Built ONCE by resolve_harness_profile by merging a [harness] block over the
     baked-in claude default. Carries the still-unsubstituted templates for new /
     resume / cwd; launch() does the {slug}/{workspace} substitution at call time.
+    `pretrust` gates the claude trust pre-seed (bring_up_workspace, Slice 2); it is
+    only acted on for claude launches (see is_claude_launch).
     """
 
     new: list[str]
@@ -98,6 +101,10 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
         for a harness whose injection contract we have not opted into)
       - a configured inject value                 → that value (enum-validated by
         group_config at load time).
+
+    `pretrust` has NO such asymmetry — it defaults to True everywhere; the
+    is_claude_launch() gate at the call site (not the default) is what prevents a
+    non-claude [harness] block from getting a claude trust write.
     """
     harness = group.get("harness")
     inject = "claude-hook" if harness is None else harness.get("inject", "stdout")

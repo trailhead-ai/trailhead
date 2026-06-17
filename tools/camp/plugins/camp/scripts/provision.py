@@ -167,7 +167,11 @@ def bring_up_workspace(
       3. Write workspace .claude/settings.json with SessionStart→camp setup --status.
       4. When the inject strategy is "claude-hook", also wire the PostToolUse →
          `camp inject --drain` hook (idempotent); not for "stdout".
-      5. Spawn the detached background provisioner.
+      5. When the launch is claude and `[harness] pretrust` is on (default),
+         pre-seed the claude per-directory trust flag for the resolved launch cwd
+         (claude_trust.pretrust_workspace) so the harness does not stall on the
+         trust dialog. Best-effort: a failure is warned and NON-FATAL.
+      6. Spawn the detached background provisioner.
 
     The caller may pass the once-resolved HarnessProfile; otherwise it is resolved
     from group here. Returns the manifest path; the harness launch follows.
