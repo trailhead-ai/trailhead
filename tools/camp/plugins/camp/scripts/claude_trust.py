@@ -29,9 +29,13 @@ Design notes:
   reappears after bring-up, re-run the manual interactive check to validate the
   current entry shape.
 
-Failure posture: any abort path emits a single `camp: …` line on stderr and
-returns without raising.  The caller (bring_up_workspace) treats this as best-
-effort — launch continues and the user sees Claude Code's trust dialog instead.
+Failure posture: every *expected* abort (out-of-confinement, malformed /
+unreadable / structurally-wrong existing file) emits a single `camp: …` line on
+stderr and returns without raising.  An *unexpected* failure of the atomic write
+itself (after the merged payload is built) unlinks the temp file and propagates —
+the best-effort caller (bring_up_workspace) catches it, logs `camp: pretrust
+failed`, and continues.  Either way launch proceeds and, on failure, the user
+simply sees Claude Code's trust dialog instead.
 
 Security (council/Security C2 — confinement):
   pretrust_workspace only writes when launch_dir is workspace_root or a
@@ -112,23 +116,26 @@ def pretrust_workspace(
     home = _home_from_env(env)
     claude_json_path = home / ".claude.json"
 
-    # Load existing file, or start from scratch when absent.
+    # Load existing file, or start from scratch when absent. Exception-based
+    # detection (no pre-check exists() stat): a missing file is the create case;
+    # any other read error aborts without overwriting. This drops a redundant
+    # stat and closes the exists()→read TOCTOU window.
     existing_data: dict | None = None
     existing_mode: int | None = None
-
-    if claude_json_path.exists():
-        try:
-            existing_mode = claude_json_path.stat().st_mode & 0o777
-            with open(str(claude_json_path), "r") as fh:
-                raw = fh.read()
-        except OSError as exc:
-            print(
-                f"camp: pretrust skipped — could not read {claude_json_path}: {exc} "
-                "(unreadable file; aborting to avoid overwriting)",
-                file=sys.stderr,
-            )
-            return
-
+    try:
+        existing_mode = claude_json_path.stat().st_mode & 0o777
+        with open(str(claude_json_path), "r") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        pass  # absent → create from scratch below
+    except OSError as exc:
+        print(
+            f"camp: pretrust skipped — could not read {claude_json_path}: {exc} "
+            "(unreadable file; aborting to avoid overwriting)",
+            file=sys.stderr,
+        )
+        return
+    else:
         try:
             existing_data = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -168,8 +175,6 @@ def pretrust_workspace(
     # tempfile.mkstemp creates the tmp file 0o600 by construction, so there is no
     # world-readable window even for the brief moment it exists in HOME
     # (council/Security — no explicit opener needed; mkstemp already enforces this).
-    write_mode = existing_mode if existing_mode is not None else 0o600
-
     fd, tmp_path_str = tempfile.mkstemp(
         dir=str(home), prefix=".claude-", suffix=".tmp"
     )
@@ -177,10 +182,11 @@ def pretrust_workspace(
         with os.fdopen(fd, "w") as fh:
             json.dump(data, fh, indent=2)
             fh.write("\n")
-        # Restore the original mode before promoting (covers the case where the
-        # original file had a non-0o600 mode; the tmp was created 0o600).
-        if write_mode != 0o600:
-            os.chmod(tmp_path_str, write_mode)
+        # Restore the original mode before promoting if it differed from the
+        # 0o600 the tmp file already has (absent file → existing_mode is None →
+        # keep mkstemp's 0o600).
+        if existing_mode is not None and existing_mode != 0o600:
+            os.chmod(tmp_path_str, existing_mode)
         os.replace(tmp_path_str, str(claude_json_path))
     except Exception:
         try:
