@@ -175,6 +175,18 @@ def _discover_shared_vaults(groups_dir: Path, cwd: Path) -> list[dict]:
     if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
         sys.path.insert(0, str(_CAMP_PLUGIN_ROOT))
 
+    # camp.group_resolve.resolve_from_cwd lazily does `import trailhead.paths`,
+    # assuming the entry-point bootstrap guard already ran. When lore reaches into
+    # camp as a *library* (not via camp's own CLI) that guarantee doesn't hold, so
+    # we run the guard here. Without it, the lazy import raises ModuleNotFoundError
+    # which escapes the GroupResolutionError catch below and degrades recall to
+    # personal-only — silently dropping every shared layer (B-1/D20).
+    try:
+        from _bootstrap import ensure_trailhead_importable
+        ensure_trailhead_importable()
+    except (ImportError, SystemExit):
+        return []  # trailhead unavailable → personal-only (B-1/D20)
+
     try:
         import camp.scripts.group_config as _gc
         import camp.scripts.group_resolve as _gr
