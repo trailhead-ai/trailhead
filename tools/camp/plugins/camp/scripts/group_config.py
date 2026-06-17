@@ -394,6 +394,15 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
             )
         result["inject"] = inject
 
+    if "pretrust" in raw:
+        pretrust = raw["pretrust"]
+        if not isinstance(pretrust, bool):
+            raise GroupConfigError(
+                f"{path}: harness.pretrust must be a boolean (true/false), got "
+                f"{type(pretrust).__name__!r}"
+            )
+        result["pretrust"] = pretrust
+
     return result
 
 

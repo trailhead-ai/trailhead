@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -166,7 +167,11 @@ def bring_up_workspace(
       3. Write workspace .claude/settings.json with SessionStart→camp setup --status.
       4. When the inject strategy is "claude-hook", also wire the PostToolUse →
          `camp inject --drain` hook (idempotent); not for "stdout".
-      5. Spawn the detached background provisioner.
+      5. When the launch is claude and `[harness] pretrust` is on (default),
+         pre-seed the claude per-directory trust flag for the resolved launch cwd
+         (claude_trust.pretrust_workspace) so the harness does not stall on the
+         trust dialog. Best-effort: a failure is warned and NON-FATAL.
+      6. Spawn the detached background provisioner.
 
     The caller may pass the once-resolved HarnessProfile; otherwise it is resolved
     from group here. Returns the manifest path; the harness launch follows.
@@ -187,6 +192,22 @@ def bring_up_workspace(
 
     if profile.inject == "claude-hook":
         write_workspace_inject_hook(ws_dir, str(_CAMP_BIN))
+
+    # Pre-seed the claude per-directory trust flag for the resolved launch cwd so
+    # the harness does not stall on the trust dialog. Best-effort — the ENTIRE
+    # step (gate decision, import, and write) is wrapped so any failure is warned
+    # and NON-FATAL: bring-up (manifest seed + detached spawn) still completes.
+    try:
+        if profile.should_pretrust():
+            import claude_trust
+
+            claude_trust.pretrust_workspace(
+                profile.resolved_cwd(slug=slug, workspace=ws_dir),
+                workspace_root=ws_dir,
+                env=env,
+            )
+    except Exception as exc:  # noqa: BLE001 — best-effort, never blocks bring-up
+        print(f"camp: pretrust failed (continuing): {exc}", file=sys.stderr)
 
     spawn_detached_provisioner(
         group_name=group_name,

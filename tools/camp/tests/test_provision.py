@@ -340,6 +340,143 @@ class TestAiSeedAndSpawn:
 
 
 # ===========================================================================
+# Slice 2: claude pretrust wiring (gated, best-effort)
+# ===========================================================================
+
+
+def _read_trust(home: Path) -> dict:
+    claude_json = home / ".claude.json"
+    if not claude_json.is_file():
+        return {}
+    return json.loads(claude_json.read_text())
+
+
+class TestPretrustWiring:
+    """bring_up_workspace pre-seeds the claude trust flag for the launch cwd.
+
+    Gated on profile.pretrust and profile.is_claude_launch(); best-effort (any
+    exception is warned and non-fatal). env threads HOME through so the write
+    lands under tmp, never the real ~/.claude.json
+    (lesson: harness-cli-not-isolated-by-trailhead-env).
+    """
+
+    def _env(self, two_member_group):
+        env = dict(two_member_group["env"])
+        env["HOME"] = str(two_member_group["tmp_path"] / "home")
+        (two_member_group["tmp_path"] / "home").mkdir(parents=True, exist_ok=True)
+        return env
+
+    def test_claude_default_writes_trust_under_tmp_home(self, two_member_group, monkeypatch):
+        import provision
+        from provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(g["group"], "feat-pt", env=env)
+
+        ws_dir = _workspace_dir("testgroup", "feat-pt", env)
+        trust = _read_trust(Path(env["HOME"]))
+        key = str(ws_dir.resolve())
+        assert trust["projects"][key]["hasTrustDialogAccepted"] is True
+
+    def test_trust_targets_resolved_subpath_cwd(self, two_member_group, monkeypatch):
+        import provision
+        from provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        group = dict(g["group"])
+        group["harness"] = {"cwd": "{workspace}/app"}
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(group, "feat-sub", env=env)
+
+        ws_dir = _workspace_dir("testgroup", "feat-sub", env)
+        trust = _read_trust(Path(env["HOME"]))
+        subpath = str((ws_dir / "app").resolve())
+        assert trust["projects"][subpath]["hasTrustDialogAccepted"] is True
+        assert str(ws_dir.resolve()) not in trust.get("projects", {})
+
+    def test_pretrust_false_writes_nothing(self, two_member_group, monkeypatch):
+        import provision
+        from provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        group = dict(g["group"])
+        group["harness"] = {"pretrust": False}
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(group, "feat-off", env=env)
+
+        assert _read_trust(Path(env["HOME"])) == {}
+        # Bring-up otherwise unchanged: manifest seeded.
+        from manifest import read_central_manifest
+        mpath = _workspace_dir("testgroup", "feat-off", env) / "manifest.json"
+        assert read_central_manifest(mpath)["members"]
+
+    def test_non_claude_launch_writes_nothing(self, two_member_group, monkeypatch):
+        import provision
+        from provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        group = dict(g["group"])
+        group["harness"] = {"new": ["codex"]}
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        bring_up_workspace(group, "feat-codex", env=env)
+
+        assert _read_trust(Path(env["HOME"])) == {}
+
+    def test_pretrust_exception_does_not_abort_bringup(self, two_member_group, monkeypatch):
+        import provision
+        import claude_trust
+        from provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        spawned = []
+        monkeypatch.setattr(
+            provision, "spawn_detached_provisioner",
+            lambda **kw: spawned.append(kw),
+        )
+
+        def boom(*a, **kw):
+            raise RuntimeError("pretrust blew up")
+
+        monkeypatch.setattr(claude_trust, "pretrust_workspace", boom)
+
+        bring_up_workspace(g["group"], "feat-boom", env=env)
+
+        # Best-effort invariant: manifest still seeded AND provisioner still spawned.
+        from manifest import read_central_manifest
+        mpath = _workspace_dir("testgroup", "feat-boom", env) / "manifest.json"
+        assert read_central_manifest(mpath)["members"]
+        assert len(spawned) == 1
+
+    def test_resume_path_trust_entry_present(self, two_member_group, monkeypatch):
+        import provision
+        from provision import bring_up_workspace
+
+        g = two_member_group
+        env = self._env(g)
+        monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+
+        # First bring-up creates the workspace dir + trust entry.
+        bring_up_workspace(g["group"], "feat-res", env=env)
+        # Second bring-up over the existing ws_dir (resume path): entry asserted PRESENT.
+        bring_up_workspace(g["group"], "feat-res", env=env)
+
+        ws_dir = _workspace_dir("testgroup", "feat-res", env)
+        trust = _read_trust(Path(env["HOME"]))
+        key = str(ws_dir.resolve())
+        assert trust["projects"][key]["hasTrustDialogAccepted"] is True
+
+
+# ===========================================================================
 # Test 4: foreground camp setup — provisioning state machine
 # ===========================================================================
 

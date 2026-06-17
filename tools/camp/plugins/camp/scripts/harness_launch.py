@@ -45,11 +45,14 @@ def _substitute(token: str, *, slug: str, workspace: str) -> str:
 
 @dataclass(frozen=True)
 class HarnessProfile:
-    """The fully-resolved harness profile: launch argv + cwd + doc_files + inject.
+    """The fully-resolved harness profile: launch argv + cwd + doc_files + inject
+    + pretrust.
 
     Built ONCE by resolve_harness_profile by merging a [harness] block over the
     baked-in claude default. Carries the still-unsubstituted templates for new /
     resume / cwd; launch() does the {slug}/{workspace} substitution at call time.
+    `pretrust` gates the claude trust pre-seed (bring_up_workspace, Slice 2); it is
+    only acted on for claude launches (see is_claude_launch).
     """
 
     new: list[str]
@@ -57,6 +60,49 @@ class HarnessProfile:
     cwd: str
     doc_files: list[str]
     inject: str  # "stdout" | "claude-hook"
+    pretrust: bool  # opt-in to the claude trust pre-seed (see should_pretrust)
+
+    def resolved_cwd(self, *, slug: str, workspace: Path | str) -> Path:
+        """Single source of the substituted launch cwd.
+
+        Accepts workspace as Path or str; returns the resolved Path after
+        {slug}/{workspace} substitution.  Used by launch() and by
+        pretrust_workspace (Slice 1) to determine the trust target without
+        having to duplicate the substitution logic.
+        """
+        return Path(_substitute(self.cwd, slug=slug, workspace=str(workspace)))
+
+    def is_claude_launch(self) -> bool:
+        """True when the new-launch binary is `claude` (by basename).
+
+        Keyed on Path(new[0]).name == "claude". Empty `new` is impossible in
+        practice (group_config rejects it and resolve_harness_profile falls back
+        to the non-empty default), but guard the index anyway so the predicate
+        honors its "answer, don't raise" contract for a directly-built profile.
+        """
+        return bool(self.new) and Path(self.new[0]).name == "claude"
+
+    def should_pretrust(self) -> bool:
+        """Whether camp should pre-seed the claude trust flag for this launch.
+
+        The single, declarative decision the bring-up call site asks (so harness
+        scoping lives on the profile, not as a separate guard at the call site).
+
+        Fires when pretrust is opted-in AND ANY positive claude signal holds:
+          - the launch binary's basename is `claude` (covers the bare default and
+            an explicit `[harness] new = ["claude", …]` block), OR
+          - the native claude-hook inject channel is selected — the declarative
+            opt-in for a claude launched under a wrapper/renamed binary, where the
+            basename check alone would false-negative.
+
+        Using OR (not the inject signal alone) is deliberate: an explicit
+        `[harness]` block without `inject` defaults inject to "stdout", so an
+        inject-only gate would wrongly skip pretrust for a plain `["claude", …]`
+        launch.
+        """
+        return self.pretrust and (
+            self.is_claude_launch() or self.inject == "claude-hook"
+        )
 
     def launch(
         self, *, slug: str, workspace: str, is_resume: bool
@@ -64,7 +110,7 @@ class HarnessProfile:
         """Substitute {slug}/{workspace} into the resolved templates → (argv, cwd)."""
         template = self.resume if is_resume else self.new
         argv = [_substitute(tok, slug=slug, workspace=workspace) for tok in template]
-        cwd = Path(_substitute(self.cwd, slug=slug, workspace=workspace))
+        cwd = self.resolved_cwd(slug=slug, workspace=workspace)
         return argv, cwd
 
 
@@ -79,6 +125,11 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
         for a harness whose injection contract we have not opted into)
       - a configured inject value                 → that value (enum-validated by
         group_config at load time).
+
+    `pretrust` has NO such asymmetry — it defaults to True everywhere. Harness
+    scoping is NOT carried by the default; it lives in HarnessProfile.should_pretrust()
+    (pretrust AND a positive claude signal), which is what prevents a non-claude
+    [harness] block from getting a claude trust write.
     """
     harness = group.get("harness")
     inject = "claude-hook" if harness is None else harness.get("inject", "stdout")
@@ -92,6 +143,7 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
         if "doc_files" in harness
         else ["CLAUDE.md"],
         inject=inject,
+        pretrust=harness.get("pretrust", True),
     )
 
 
