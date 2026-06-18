@@ -421,8 +421,15 @@ def test_update_in_unconfigured_vault_errors(tmp_path):
     assert "not currently configured" in (r2.stdout + r2.stderr)
 
 
-def test_delete_in_unconfigured_vault_errors(tmp_path):
-    """``lore record delete`` for a record whose vault is not configured → error."""
+def test_delete_in_removed_vault_is_unreachable(tmp_path):
+    """``lore record delete`` after the record's vault was removed from config.
+
+    Delete resolves the target vault via config (symmetric with create) using the
+    routing flags + the record's kind — NOT $LORE_VAULT. A record that was routed
+    to a now-removed team vault therefore resolves to the ``default`` floor, where
+    it does not exist, and delete fails cleanly with a not-found error rather than
+    acting on an orphaned target.
+    """
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "config"
     vaults = _spec_config_vaults(state)
@@ -436,16 +443,68 @@ def test_delete_in_unconfigured_vault_errors(tmp_path):
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
 
+    # Remove the team vault from config — the record's directory still exists on
+    # disk, but it is no longer a configured destination.
     vaults = [v for v in vaults if v["name"] != "product-engineering"]
     cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
 
+    # Delete with no routing flags resolves to the default vault, where the
+    # record is not present → clean non-zero not-found, not a silent orphan act.
     r2 = _run_with_config(
         ["record", "delete", record_id],
         vault=Path(_vault_path(state, "product-engineering")),
         state=state, config_home=config_home,
     )
     assert r2.returncode != 0
-    assert "not currently configured" in (r2.stdout + r2.stderr)
+    assert "not found" in (r2.stdout + r2.stderr).lower()
+
+
+# ---------------------------------------------------------------------------
+# Regression: default-vault records are reachable by update/delete with a config
+# present (create routes to the config default vault, NOT $LORE_VAULT).
+# ---------------------------------------------------------------------------
+
+def test_default_record_updatable_and_deletable_with_config(tmp_path):
+    """A no-scope record created with a config present routes to the ``default``
+    config vault; update and delete must reach it THERE (config resolution),
+    not in the active ``$LORE_VAULT`` directory (which is a different path).
+
+    This is the create-vs-update/delete location split the config-routing work
+    introduced: create routed no-scope records into ``state/vaults/default`` while
+    update/delete looked in ``$LORE_VAULT`` — so a just-created record was
+    unreachable. Update/delete now resolve via config, symmetric with create.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    _write_config(config_home, _spec_config_vaults(state))
+    default_path = Path(_vault_path(state, "default"))
+    # The active vault and the default config vault are deliberately different dirs.
+    assert Path(vault).resolve() != default_path.resolve()
+
+    # Create with NO scope flags → routes to the default config vault.
+    r = _run_with_config(
+        ["record", "create", "--kind", "blob", "--title", "Apple",
+         "--set", "keywords=foo"],
+        vault=vault, state=state, config_home=config_home, stdin_text="apple body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    assert list((default_path / "blob").glob("*.md")), "record not in default vault"
+
+    # Update (metadata-only, no flags) must reach the record in the default vault.
+    r2 = _run_with_config(
+        ["record", "update", record_id, "--set", "keywords=bar"],
+        vault=vault, state=state, config_home=config_home,
+    )
+    assert r2.returncode == 0, f"update should reach default-vault record: {r2.stderr}"
+
+    # Delete (no flags) must also reach it.
+    r3 = _run_with_config(
+        ["record", "delete", record_id],
+        vault=vault, state=state, config_home=config_home,
+    )
+    assert r3.returncode == 0, f"delete should reach default-vault record: {r3.stderr}"
+    assert not list((default_path / "blob").glob("*.md")), "record not deleted"
 
 
 # ---------------------------------------------------------------------------

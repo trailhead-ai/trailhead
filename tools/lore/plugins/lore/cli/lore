@@ -714,8 +714,38 @@ def _orphan_vault_guard(vault_root: str) -> str | None:
     if target in configured:
         return None
     return (
-        f"lore: record's vault {vault_root} is not currently configured"
+        f"lore: vault {vault_root} is not currently configured"
     )
+
+
+def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
+    """Resolve the vault root that ``record update``/``delete`` should act on.
+
+    Symmetric with ``record create`` (S4): when a ``config.json`` exists, the
+    target vault is chosen by the SAME config resolution — the record's ``kind``
+    (from ``record_id``) plus the command's routing flags (``--repo/--product/
+    --suite/--team``) — so update/delete operate on the very vault create routed
+    the record to (a no-scope record lands in, and is updated from, the
+    ``default`` vault). When **no** config exists, fall back to the active vault
+    (``vault.resolve_vault()``) — vanilla usage is unchanged (Axiom 3).
+
+    NOTE (scoped fix, 2026-06-18): this reconciles the create-vs-update/delete
+    location split that the config-routing work introduced. The broader removal
+    of ``$LORE_VAULT`` in favor of config-only resolution across *every* lore
+    command (and the hooks) is tracked as a follow-up — see [[config-only-vault-resolution]].
+    """
+    loaded = _load_vault_config()
+    if loaded is None:
+        return str(vault_mod.resolve_vault())
+    _, vaults = loaded
+    kind = record_id.split("/", 1)[0]
+    participating_scopes = {
+        flag: getattr(args, flag)
+        for flag in ("repo", "product", "suite", "team")
+        if getattr(args, flag, None)
+    }
+    chosen = vault_resolve_mod.resolve_vault(participating_scopes, kind, vaults)
+    return str(chosen.path)
 
 
 # ---- seed -------------------------------------------------------------------
@@ -2136,14 +2166,11 @@ def _cmd_record_delete(args: argparse.Namespace) -> int:
         )
         return 1
 
-    vault_root = str(vault_mod.resolve_vault())
-
-    # Orphan-ID guard (Slice 5, S4): when a config exists, refuse to act on a
-    # record whose target vault is no longer configured. Vanilla (no config) skips.
-    orphan_err = _orphan_vault_guard(vault_root)
-    if orphan_err is not None:
-        print(orphan_err, file=sys.stderr)
-        return 1
+    # Resolve the target vault via config (symmetric with `record create`) when a
+    # config exists, else the active vault (vanilla). A record whose vault was
+    # removed from config resolves to the default floor and surfaces a clean
+    # RecordNotFoundError below rather than acting on an orphaned target.
+    vault_root = _resolve_record_op_vault(record_id, args)
 
     try:
         conn = index_store_mod.open_index()
@@ -2506,14 +2533,18 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
     stdin_text = _read_stdin_body()
     has_stdin = stdin_text != ""
 
-    vault_root = str(vault_mod.resolve_vault())
+    # Resolve the target vault via config (symmetric with `record create`) when a
+    # config exists, else the active vault (vanilla).
+    vault_root = _resolve_record_op_vault(record_id, args)
 
-    # Orphan-ID guard (Slice 5, S4): when a config exists, refuse to act on a
-    # record whose target vault is no longer configured. Vanilla (no config) skips.
-    orphan_err = _orphan_vault_guard(vault_root)
-    if orphan_err is not None:
-        print(orphan_err, file=sys.stderr)
-        return 1
+    # Orphan-ID guard (Slice 5, S4): a `--move-to VAULT` names an explicit
+    # destination vault by path; refuse to relocate a record into a vault that is
+    # not currently configured (when a config exists). Vanilla (no config) skips.
+    if move_to is not None:
+        orphan_err = _orphan_vault_guard(str(Path(move_to).expanduser()))
+        if orphan_err is not None:
+            print(orphan_err, file=sys.stderr)
+            return 1
 
     try:
         conn = index_store_mod.open_index()
