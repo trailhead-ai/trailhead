@@ -70,12 +70,13 @@ lore set-status <f> <v>   Validate and flip a note's frontmatter status
 lore stats                Print vault counts
 lore finish               Finalize the session note, expand harvest-pending into vault notes, and commit
 lore sync                 Stage, commit, and push the vault
-lore recall --areas <n>   Pull area-scoped memory (decisions/lessons/dead-ends/deferred)
+lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
+lore areas                List the area profiles in the vault
 ```
 
 Run `lore <subcommand> --help` for full options.
 
-## How recall works
+## How search works
 
 Your next session loads what's relevant without you asking — explained, not
 guessed.
@@ -85,11 +86,14 @@ of every area profile in your vault, listing each area's name, one-line
 summary, and keywords. This area map is always loaded into context.
 
 The agent reads the area map as part of its normal task analysis, matches the
-current task to one or more areas, and calls `lore recall --areas <name>` to
+current task to one or more areas, and runs `lore search 'area:<name>'` to
 pull that area's accumulated memory — decisions, lessons, dead-ends, and open
-deferred items — into the conversation. The recall is **scoped and explainable**:
-the agent can say "I recalled the auth-module area because the task touches
-login flows," not just "here is some context."
+deferred items linked to that area — into the conversation. The search is
+**scoped and explainable**: the agent can say "I searched the auth-module area
+because the task touches login flows," not just "here is some context." Search
+also covers full-text and the other record facets (`kind:`, `status:`,
+`keyword:`, date ranges) — `lore search 'area:<name>'` is the area-membership
+case of the one general query interface.
 
 **To register an area**, use `/lore:area`. Give it a name, a one-line summary,
 and a set of keywords. The profile feeds the area map; the agent uses keywords

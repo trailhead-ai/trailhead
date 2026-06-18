@@ -32,8 +32,9 @@ TARGET_P95_MS = 100.0
 # Per-corpus hard ceilings.
 #
 # At 1× (the real current vault size) the representative mixed query lands ~10ms on
-# a dev box — comfortably under the pinned 100ms target, so the 1× assert is strict
-# (target + a thin host-noise margin).
+# a dev box — comfortably under the pinned 100ms target, so the 1× assert IS the
+# pinned target itself (~10× headroom over the measured value absorbs host noise
+# while still catching a real regression at the pinned size — the locked latency SLO).
 #
 # At 5× (~10k records) the dominant cost is the ranking step: the Slice-3 compiler
 # orders full-text results by a *correlated* ``bm25()`` subquery
@@ -44,7 +45,7 @@ TARGET_P95_MS = 100.0
 # sub-millisecond. This is a documented property of the locked Slice-3 ranking form,
 # not a Slice-5 regression — so the 5× assert uses a wider, documented ceiling and
 # always prints the measured p95 for visibility.
-CEILING_1X_MS = 120.0
+CEILING_1X_MS = TARGET_P95_MS  # 100ms — the pinned SLO is asserted at the real vault size
 CEILING_5X_MS = 300.0
 
 CORPUS_1X = 2149      # ~current vault size
