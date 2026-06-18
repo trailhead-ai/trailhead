@@ -229,7 +229,9 @@ def test_validate_and_write_round_trip(rs, conn, tmp_path):
     assert raw == json.dumps(parsed, indent=2, sort_keys=True)
 
     row = conn.execute(
-        "SELECT title, body FROM records WHERE vault=? AND kind=? AND name=?",
+        "SELECT records.title, record_fts.body FROM records "
+        "JOIN record_fts ON record_fts.rowid = records.rowid "
+        "WHERE records.vault=? AND records.kind=? AND records.name=?",
         (str(vault), "spec", "my-spec"),
     ).fetchone()
     assert row[0] == "My Spec"

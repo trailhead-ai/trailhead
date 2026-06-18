@@ -205,8 +205,12 @@ def test_upsert_row_idempotent_same_key_leaves_one_row(tmp_path):
         mod.upsert_row(conn, "/vault", "spec", "my-spec", sidecar, "second")
         conn.commit()
         count = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+        # S3 moved body text into the populated record_fts table (no records.body
+        # column); read it back via the rowid alias join.
         body = conn.execute(
-            "SELECT body FROM records WHERE vault=? AND kind=? AND name=?",
+            "SELECT record_fts.body FROM records "
+            "JOIN record_fts ON record_fts.rowid = records.rowid "
+            "WHERE records.vault=? AND records.kind=? AND records.name=?",
             ("/vault", "spec", "my-spec")
         ).fetchone()[0]
     finally:
