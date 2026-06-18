@@ -84,7 +84,6 @@ def resolve_vault(participating_scopes: dict, kind: str, config: list):
     # For the default vault we keep it aside as the guaranteed floor.
     default_vault = None
     config_by_scope_name: dict = {}  # (scope, normalized_name) -> Vault
-    config_default: dict = {}        # scope -> Vault for non-participated match
 
     for vault in config:
         if vault.scope == "default":
