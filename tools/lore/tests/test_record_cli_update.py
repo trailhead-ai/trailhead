@@ -30,47 +30,19 @@ from __future__ import annotations
 import difflib
 import importlib.util
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-from conftest import CLI_PATH, load_script
+from conftest import load_script, make_vault as _make_vault, run_cli as _run
 
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 
 
 # ---------------------------------------------------------------------------
-# Subprocess + vault helpers (mirror the Slice 3 harness)
+# Artifact-inspection helpers (the CLI harness lives in conftest)
 # ---------------------------------------------------------------------------
-
-def _run(args, *, vault, state_dir, stdin_text=None, env_extra=None):
-    """Run the lore CLI as a subprocess; returns CompletedProcess."""
-    full_env = dict(os.environ)
-    full_env["LORE_VAULT"] = str(vault)
-    full_env["XDG_STATE_HOME"] = str(state_dir)
-    full_env["LORE_EMAIL"] = "tester@example.com"
-    if env_extra:
-        full_env.update(env_extra)
-    return subprocess.run(
-        [sys.executable, str(CLI_PATH), *args],
-        capture_output=True,
-        text=True,
-        env=full_env,
-        input=stdin_text,
-    )
-
-
-def _make_vault(tmp_path: Path) -> tuple[Path, Path]:
-    vault = tmp_path / "vault"
-    vault.mkdir(parents=True, exist_ok=True)
-    state = tmp_path / "state"
-    state.mkdir(parents=True, exist_ok=True)
-    return vault, state
-
 
 def _find_sidecar(vault: Path, record_id: str) -> dict:
     kind, name = record_id.split("/", 1)

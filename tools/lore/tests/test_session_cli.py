@@ -39,14 +39,13 @@ Never writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from conftest import CLI_PATH, load_script
+from conftest import load_script, make_vault as _make_vault, run_cli as _run
 
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
@@ -57,33 +56,8 @@ SID2 = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers (the CLI subprocess harness + vault factory live in conftest)
 # ---------------------------------------------------------------------------
-
-def _run(args, *, vault, state_dir, stdin_text=None, env_extra=None):
-    """Run the lore CLI as a subprocess; returns CompletedProcess."""
-    full_env = dict(os.environ)
-    full_env["LORE_VAULT"] = str(vault)
-    full_env["XDG_STATE_HOME"] = str(state_dir)
-    full_env["LORE_EMAIL"] = "tester@example.com"
-    if env_extra:
-        full_env.update(env_extra)
-    return subprocess.run(
-        [sys.executable, str(CLI_PATH), *args],
-        capture_output=True,
-        text=True,
-        env=full_env,
-        input=stdin_text,
-    )
-
-
-def _make_vault(tmp_path: Path) -> tuple[Path, Path]:
-    """Return (vault_dir, state_dir), creating both."""
-    vault = tmp_path / "vault"
-    vault.mkdir(parents=True, exist_ok=True)
-    state = tmp_path / "state"
-    state.mkdir(parents=True, exist_ok=True)
-    return vault, state
 
 
 def _session_note(vault: Path, session_id: str) -> Path:

@@ -127,6 +127,17 @@ def _is_tty() -> bool:
     return sys.stdin.isatty()
 
 
+def _read_stdin_body() -> str:
+    """Return the piped stdin body, or ``""`` when stdin is a TTY (no pipe).
+
+    The shared read used by every ``lore record``/``session`` write path. An empty
+    return covers both a TTY and an empty/closed pipe — callers that need to tell
+    "no stdin" from "empty body" key on ``== ""`` (see the record-update metadata-
+    only path).
+    """
+    return "" if sys.stdin.isatty() else sys.stdin.read()
+
+
 def _kebab(title: str) -> str:
     """Lowercase, replace non-alphanumerics with a single hyphen, trim.
 
@@ -1716,93 +1727,22 @@ def _cmd_record_blob(args: argparse.Namespace) -> int:
     body is fence-neutralized (AC-FENCE1) via :func:`record_store.neutralize_fences`
     and written via :func:`record_store.write_temp_then_rename` (AC-TX1).
 
-    **Path-traversal confinement invariant (AC14a — Critical, Slice 5, S2):**
-    Before any write this function enforces that the resolved target is a
-    descendant of ``realpath(blob_root)``:
-
-      1. Reject ``<path>`` if it is absolute (starts with ``/`` or ``os.sep``).
-      2. Reject ``<path>`` if it contains any ``..`` path segment.
-      3. Resolve ``blob_root_real = os.path.realpath(blob_root)`` AFTER creating
-         the blob_root directory (so realpath traverses real dirs and catches
-         directory-level symlinks).
-      4. Resolve ``target_real = os.path.realpath(target)`` on the proposed target.
-      5. Assert ``target_real == blob_root_real`` or
-         ``target_real.startswith(blob_root_real + os.sep)`` — this ``+ os.sep``
-         guard prevents a sibling directory sharing a name prefix from satisfying
-         the check (e.g. ``blob_root=/a/blob`` and ``target=/a/blob2/x`` would
-         satisfy a naive ``startswith`` without the separator guard).
-
-    A symlink inside the blob root pointing outside is caught by step 5 because
-    ``os.path.realpath`` resolves the symlink chain, so the resolved target path
-    will not start with ``blob_root_real + os.sep``.
-
-    On any traversal rejection: non-zero exit + clear stderr, **no write**.
+    **Path-traversal confinement (AC14a — Critical, Slice 5, S2)** is delegated to
+    :func:`record_store.confine_blob_path`, the library-boundary guard (NUL /
+    absolute / ``..`` / ``.`` rejection + realpath-descendant check). On any
+    violation it raises :class:`InvalidBlobPathError`; we surface that as a non-zero
+    exit + clear stderr, **no write**.
     """
     blob_path = getattr(args, "blob_path", None)
-    if not blob_path:
-        print("error: blob path is required", file=sys.stderr)
+    blob_root = Path(vault_mod.resolve_vault()) / "blob"
+
+    try:
+        target = record_store_mod.confine_blob_path(blob_path, blob_root)
+    except record_store_mod.InvalidBlobPathError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    # 0. Reject NUL bytes — pathlib silently strips them, so guard before any
-    # Path() handling produces a confusing downstream error (audit Finding 4).
-    if "\x00" in blob_path:
-        print("error: blob path must not contain NUL bytes", file=sys.stderr)
-        return 1
-
-    # 1. Reject absolute paths.
-    if os.path.isabs(blob_path):
-        print(
-            f"error: blob path must be relative, got absolute path: {blob_path!r}",
-            file=sys.stderr,
-        )
-        return 1
-
-    # 2. Reject any '..' or degenerate '.'/empty segment. Path('.').parts == ()
-    # so a bare '.' would otherwise resolve to blob_root itself and slip a
-    # transient .tmp write to the vault level (audit Finding 3); require at least
-    # one real named segment.
-    path_parts = Path(blob_path).parts
-    if not path_parts or ".." in path_parts or "." in path_parts:
-        print(
-            f"error: blob path must be a relative path with no '..'/'.' segments: "
-            f"{blob_path!r}",
-            file=sys.stderr,
-        )
-        return 1
-
-    vault_root = Path(vault_mod.resolve_vault())
-    blob_root = vault_root / "blob"
-
-    # 3. Ensure blob_root exists before calling realpath, so realpath resolves
-    # through real directories (catches directory-level symlink escapes).
-    blob_root.mkdir(parents=True, exist_ok=True)
-    blob_root_real = os.path.realpath(blob_root)
-
-    target = blob_root / blob_path
-    target_real = os.path.realpath(target)
-
-    # 5. Descendant check: target must equal blob_root or start with it + sep.
-    # The '+ os.sep' guard prevents a sibling directory sharing a name prefix
-    # from satisfying the check (e.g. '/vault/blob2/x' would satisfy a bare
-    # startswith('/vault/blob') without the sep guard).
-    if not (
-        target_real == blob_root_real
-        or target_real.startswith(blob_root_real + os.sep)
-    ):
-        print(
-            f"error: blob path {blob_path!r} escapes the blob root "
-            f"(resolved to {target_real!r}, outside {blob_root_real!r})",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Read body from stdin; fence-neutralize; write atomically.
-    if sys.stdin.isatty():
-        body = ""
-    else:
-        body = sys.stdin.read()
-
-    safe_body = record_store_mod.neutralize_fences(body)
+    safe_body = record_store_mod.neutralize_fences(_read_stdin_body())
 
     try:
         record_store_mod.write_temp_then_rename(target, safe_body)
@@ -1870,10 +1810,7 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
 
     # Body from stdin (AC1). No stdin → empty body.  The leading ``---``
     # check is intentionally absent — we read verbatim (AC-TX3).
-    if sys.stdin.isatty():
-        body = ""
-    else:
-        body = sys.stdin.read()
+    body = _read_stdin_body()
 
     # Resolve vault.
     vault_root = Path(vault_mod.resolve_vault())
@@ -1987,8 +1924,7 @@ def _cmd_session_candidate(args: argparse.Namespace) -> int:
         print("error: --phase is required", file=sys.stderr)
         return 1
 
-    body = "" if sys.stdin.isatty() else sys.stdin.read()
-    safe_body = record_store_mod.neutralize_fences(body)
+    safe_body = record_store_mod.neutralize_fences(_read_stdin_body())
 
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     # A single record-candidate entry: a one-line header carrying KIND + PHASE +
@@ -2084,10 +2020,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
     # (AC10) — distinct from a non-empty body replace (AC9). An intentional
     # empty-body replace is degenerate and out of scope; clear the body via a
     # ``--diff`` deleting every line instead.
-    if sys.stdin.isatty():
-        stdin_text = ""
-    else:
-        stdin_text = sys.stdin.read()
+    stdin_text = _read_stdin_body()
     has_stdin = stdin_text != ""
 
     vault_root = str(vault_mod.resolve_vault())
