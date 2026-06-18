@@ -1778,7 +1778,7 @@ def _cmd_vault_add(args: argparse.Namespace) -> int:
         print(f"lore: vault {normalized!r} not found after write", file=sys.stderr)
         return 1
 
-    shared_flag = 1 if vault_config_mod.is_shared(vault) else 0
+    shared_flag = vault_config_mod.shared_flag(vault)
     try:
         conn = index_store_mod.open_index()
         try:
@@ -2280,7 +2280,7 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         )
         chosen = resolution.chosen
         vault_root = Path(chosen.path)
-        shared_flag = 1 if vault_config_mod.is_shared(chosen) else 0
+        shared_flag = vault_config_mod.shared_flag(chosen)
         routing_line = f"Routed to vault: {chosen.name} ({chosen.scope})"
         if resolution.skipped is not None:
             routing_line += (

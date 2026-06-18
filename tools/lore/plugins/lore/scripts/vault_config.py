@@ -164,6 +164,18 @@ def is_shared(vault: Vault) -> bool:
     return vault.shared
 
 
+def shared_flag(vault: Vault) -> int:
+    """Return the index trust flag for ``vault`` — ``1`` shared, ``0`` own.
+
+    The single source of the ``bool → 0/1`` mapping that S3's ``records.shared``
+    column expects, so the write path (``record create``), the per-vault scan
+    (``vault add``), and the full ``reindex`` cannot derive the trust flag
+    differently. Untrusted (``shared: true``) content must fence identically
+    however it reached the index — see [[vault_resolve]] / S3's fence.
+    """
+    return 1 if is_shared(vault) else 0
+
+
 def is_configured_vault(name: str, vaults: list) -> bool:
     """Return ``True`` iff ``name`` (after normalization) is in ``vaults``.
 
