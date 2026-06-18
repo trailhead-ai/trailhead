@@ -287,13 +287,19 @@ class TestLockedCompileTable:
         """A bare full-text term compiles to a SQL rowid-IN-subquery predicate."""
         cq = compiler.compile(kql.parse("foo"))
         assert cq.has_fts
-        assert "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)" in cq.where
+        assert (
+            "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
+            in cq.where
+        )
         assert "foo" in cq.params
 
     def test_phrase_is_sql_predicate_quoted_match(self, kql, compiler):
         cq = compiler.compile(kql.parse('"penny worker"'))
         assert cq.has_fts
-        assert "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)" in cq.where
+        assert (
+            "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
+            in cq.where
+        )
         assert '"penny worker"' in cq.params
 
     def test_and_boolean_composed(self, kql, compiler):

@@ -16,7 +16,6 @@ Run against a temp vault — never reads or writes $LORE_VAULT.
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys

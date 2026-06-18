@@ -18,7 +18,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import CLI_PATH, load_script, make_vault, run_cli  # noqa: E402
+from conftest import load_script, make_vault, run_cli  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
 HOOKS_DIR = PLUGIN_ROOT / "hooks"
