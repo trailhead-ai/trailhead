@@ -589,9 +589,11 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
 
     ws = tmp_path / "ws"
     ws.mkdir()
+    from session_identity import session_id_for
+    sid = session_id_for("trailhead", "feat-x")
     argv, cwd = resolve_launch(cfg, "feat-x", ws, is_resume=False)
-    assert argv == ["claude"]
+    assert argv == ["claude", "--session-id", sid]
     assert cwd == ws
 
     argv_resume, _ = resolve_launch(cfg, "feat-x", ws, is_resume=True)
-    assert argv_resume == ["claude", "-r", "feat-x"]
+    assert argv_resume == ["claude", "--resume", sid]

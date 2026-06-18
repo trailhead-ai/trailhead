@@ -279,7 +279,7 @@ def load_group(path: Path) -> dict[str, Any]:
 
 # Placeholders the launch templates / cwd may reference. Any other {token} is a
 # misconfiguration (would KeyError at substitution time) → rejected at load.
-_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace"})
+_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace", "session_id"})
 
 # Mid-session context-injection strategies (Slice 9). "stdout" is the universal
 # floor; "claude-hook" opts into the Claude Code PostToolUse → additionalContext

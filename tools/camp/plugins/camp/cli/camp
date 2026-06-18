@@ -952,6 +952,7 @@ def _cmd_ai_group_cli(
     from provision import bring_up_workspace
     from manifest import workspace_dir
     import harness_launch
+    from session_identity import session_id_for
     from session_lock import acquire_session_lock, SessionLockHeld
 
     rest = list(args)
@@ -975,11 +976,15 @@ def _cmd_ai_group_cli(
         )
         return
 
-    # New-vs-resume is decided BEFORE bring-up creates the workspace dir: a
-    # first-ever launch (no workspace) uses the `new` template; an existing
-    # workspace uses `resume`.
     ws_dir = workspace_dir(group_name, slug, env=env)
-    is_resume = ws_dir.exists()
+    # Capture this BEFORE acquire_session_lock (which mkdirs ws_dir): it is the
+    # "have we been here before?" signal used for the missing-session message.
+    ws_existed = ws_dir.exists()
+
+    # Resolve the harness profile ONCE for this bring-up; bring_up_workspace and
+    # the launch tail both read fields off it (no per-field re-resolution).
+    profile = harness_launch.resolve_harness_profile(group)
+    session_id = session_id_for(group_name, slug)
 
     # Refuse-concurrent FIRST, before any provisioning: a live PID holding the
     # lock → refuse (naming workspace + PID + timestamp). Stale/dead → reclaimed.
@@ -989,9 +994,22 @@ def _cmd_ai_group_cli(
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
-    # Resolve the harness profile ONCE for this bring-up; bring_up_workspace and
-    # the launch tail both read fields off it (no per-field re-resolution).
-    profile = harness_launch.resolve_harness_profile(group)
+    # New-vs-resume is decided by whether the deterministic SESSION actually
+    # exists — NOT by whether the workspace dir exists. A provisioned-but-never-
+    # launched (or deleted-session) workspace must start FRESH with --session-id
+    # rather than --resume a missing id (which would dump the user in the picker).
+    # For a non-claude [harness] block we have no session-file knowledge, so fall
+    # back to workspace-dir existence (the prior behavior).
+    if profile.is_claude_launch():
+        session_present = harness_launch.claude_session_exists(session_id, env=env)
+        is_resume = session_present
+        if ws_existed and not session_present:
+            print(
+                f"camp ai: no session found for {slug!r}; starting fresh",
+                file=sys.stderr,
+            )
+    else:
+        is_resume = ws_existed
 
     try:
         bring_up_workspace(group, slug, env=env, profile=profile)
@@ -1004,7 +1022,9 @@ def _cmd_ai_group_cli(
         file=sys.stderr,
     )
 
-    harness_launch.launch(group, slug, ws_dir, is_resume=is_resume, profile=profile)
+    harness_launch.launch(
+        group, slug, ws_dir, is_resume=is_resume, session_id=session_id, profile=profile
+    )
 
 
 def _cmd_enter_group_cli(

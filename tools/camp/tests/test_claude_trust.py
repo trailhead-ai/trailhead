@@ -459,7 +459,9 @@ class TestResolvedCwd:
 
         p = resolve_harness_profile(self._group({"cwd": "{workspace}/sub"}))
         ws = Path("/work/space")
-        _, launch_cwd = p.launch(slug="feat-x", workspace=str(ws), is_resume=False)
+        _, launch_cwd = p.launch(
+            slug="feat-x", workspace=str(ws), is_resume=False, session_id="sid"
+        )
         resolved = p.resolved_cwd(slug="feat-x", workspace=ws)
         assert launch_cwd == resolved
 

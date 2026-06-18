@@ -231,7 +231,9 @@ class TestBug2RmRemovesWorkspaceDir:
         calls = []
         monkeypatch.setattr(
             harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume, profile=None: calls.append(is_resume),
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
+                calls.append(is_resume)
+            ),
         )
         camp_cli._cmd_ai_group_cli(["feat-cycle"], g["group"], g["env"], dry_run=False)
         assert calls == [False], "after rm, camp ai must take the `new` path"
