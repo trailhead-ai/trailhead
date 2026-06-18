@@ -168,14 +168,16 @@ class TestAreasWithContent:
 
         assert "Traceback" not in stdout
 
-    def test_stdout_contains_lore_recall_instruction(self, tmp_path):
-        """render_area_menu includes a 'lore recall' instruction — assert it passes through."""
+    def test_stdout_contains_lore_search_instruction(self, tmp_path):
+        """render_area_menu includes a 'lore search' instruction (Slice 5 cutover:
+        the per-area lookup is `lore search 'area:<name>'`, not `lore recall`)."""
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"], summary="Auth flows")
 
         stdout, _, _ = _run_areas(str(vault))
 
-        assert "lore recall" in stdout
+        assert "lore search" in stdout
+        assert "lore recall" not in stdout
 
 
 # ---------------------------------------------------------------------------

@@ -10,14 +10,12 @@ Test contract (all must fail before the fix, pass after):
 - related-spec: '[[specs/synth-spec-slug]]' → "specs/synth-spec-slug"
   (full path, NOT slug-reduced, NOT a list)
 - Bare-slug forms (inline [a, b] and block - a) unchanged (regression guard)
-- End-to-end (rederived): recall_areas finds deferred notes with block-style
-  wikilink surfaces: [[areas/...]] format (D23 area semantics)
+
+(The end-to-end `recall_areas` overlap cases were removed in Slice 5 when the
+recall command path was retired; membership is now an index-projection property
+covered by test_index_projection.py.)
 """
 from __future__ import annotations
-
-import sys
-from pathlib import Path
-
 
 from conftest import load_script
 
@@ -175,122 +173,3 @@ class TestRegressionGuard:
         """Block-style list with bare slugs (no wikilink) must parse as-is."""
         result = _fm("subsystems:\n  - synth-alpha\n  - synth-beta")
         assert result["subsystems"] == ["synth-alpha", "synth-beta"]
-
-
-# ---------------------------------------------------------------------------
-# End-to-end: recall._has_overlap with block-style wikilink surfaces
-# (MUST FAIL before the fix, PASS after — the verified break)
-# ---------------------------------------------------------------------------
-
-def _load_recall():
-    """Load recall module with sys.modules registration so @dataclass resolves."""
-    import importlib.util as _ilu
-    scripts_dir = Path(__file__).parent.parent / "plugins" / "lore" / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    for cached in ("recall", "vault", "frontmatter", "status_validator",
-                   "regenerate_indices", "sessions"):
-        sys.modules.pop(cached, None)
-    spec = _ilu.spec_from_file_location("recall", scripts_dir / "recall.py")
-    mod = _ilu.module_from_spec(spec)
-    sys.modules["recall"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _make_vault(tmp_path: Path) -> Path:
-    vault = tmp_path / "vault"
-    for d in ("areas", "deferred", "dead-ends", "lessons", "sessions"):
-        (vault / d).mkdir(parents=True)
-    return vault
-
-
-def _write_area(vault: Path, name: str) -> Path:
-    """Write a minimal area profile."""
-    p = vault / "areas" / f"{name}.md"
-    p.write_text(
-        f"---\ntype: area\nname: {name}\nkeywords: [{name}]\n---\n\n"
-        f"## Overview\nThe {name} area.\n"
-    )
-    return p
-
-
-def _write_deferred_block_wikilink(vault: Path, name: str, area_slug: str) -> Path:
-    """Write a deferred note using block-style wikilink surfaces.
-
-    Uses [[areas/<slug>]] format — the current slug-reduced overlap key.
-    """
-    p = vault / "deferred" / f"{name}.md"
-    p.write_text(
-        f"---\n"
-        f"type: deferred\n"
-        f"status: open\n"
-        f"surfaces:\n"
-        f"  - '[[areas/{area_slug}]]'\n"
-        f"next-check: 2026-07-01\n"
-        f"---\n\n"
-        f"# {name}\n\nSomething deferred.\n"
-    )
-    return p
-
-
-class TestEndToEndRecallOverlap:
-    def test_block_wikilink_surfaces_matches_overlap(self, tmp_path):
-        """End-to-end: recall_areas finds a deferred note whose surfaces: uses
-        block-style [[areas/synth-alpha]] wikilink.
-
-        Before the fix: surfaces parses to '' (empty string) → no match.
-        After the fix: surfaces parses to ['synth-alpha'] → match.
-        """
-        vault = _make_vault(tmp_path)
-        _write_area(vault, "synth-alpha")
-        _write_deferred_block_wikilink(vault, "synth-deferred-item", "synth-alpha")
-
-        recall_mod = _load_recall()
-        result = recall_mod.recall_areas(vault, ["synth-alpha"])
-        item_names = [item.title for item in result.items]
-        assert any("synth-deferred-item" in n for n in item_names), (
-            f"recall_areas did not find 'synth-deferred-item'. Items: {item_names}. "
-            f"Block-style wikilink surfaces: not being parsed correctly."
-        )
-
-    def test_relevant_deferred_finds_block_wikilink_note(self, tmp_path):
-        """recall_areas returns the block-wikilink deferred note when the area
-        slug matches — rederived from the old _relevant_deferred shape test."""
-        vault = _make_vault(tmp_path)
-        _write_area(vault, "synth-alpha")
-        _write_deferred_block_wikilink(vault, "synth-deferred-item", "synth-alpha")
-
-        recall_mod = _load_recall()
-        result = recall_mod.recall_areas(vault, ["synth-alpha"])
-        assert result.count >= 1, (
-            f"Expected at least 1 item, got {result.count}. "
-            f"Block-style wikilink surfaces: not visible to recall_areas."
-        )
-        item_names = [item.title for item in result.items]
-        assert any("synth-deferred-item" in n for n in item_names)
-
-    def test_inline_wikilink_surfaces_also_matches(self, tmp_path):
-        """Inline wikilink list [[areas/...]] format also works end-to-end."""
-        vault = _make_vault(tmp_path)
-        _write_area(vault, "synth-alpha")
-        _write_area(vault, "synth-tool")
-        p = vault / "deferred" / "synth-inline-item.md"
-        p.write_text(
-            '---\n'
-            'type: deferred\n'
-            'status: open\n'
-            'surfaces: ["[[areas/synth-alpha]]", "[[areas/synth-tool]]"]\n'
-            'next-check: 2026-07-01\n'
-            '---\n\n'
-            '# synth-inline-item\n\nSomething deferred.\n'
-        )
-        recall_mod = _load_recall()
-        # Requesting either area should pull the inline-wikilink deferred note
-        for area in ["synth-alpha", "synth-tool"]:
-            result = recall_mod.recall_areas(vault, [area])
-            item_names = [item.title for item in result.items]
-            assert any("synth-inline-item" in n for n in item_names), (
-                f"Expected synth-inline-item when requesting area '{area}', "
-                f"got: {item_names}"
-            )
