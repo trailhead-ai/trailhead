@@ -436,6 +436,35 @@ def test_move_record_relocates_rekeys_and_removes_old(rs, conn, tmp_path):
     assert new_id == "spec/my-spec"
 
 
+@pytest.mark.parametrize(
+    "evil_old_id",
+    ["../other-vault/spec/victim", "spec/../../other-vault/spec/victim", "/etc/passwd"],
+)
+def test_move_record_confines_old_id_against_traversal(rs, conn, tmp_path, evil_old_id):
+    """A traversal old_id is confined at the library boundary (security audit follow-up).
+
+    move_record is a direct S7-callable API; a crafted old_id must not read/unlink
+    files outside the source vault → InvalidRecordIdError, victim untouched.
+    """
+    src_vault = tmp_path / "vault-a"
+    dst_vault = tmp_path / "vault-b"
+    src_vault.mkdir()
+    dst_vault.mkdir()
+    # A victim record outside the source vault.
+    victim_dir = tmp_path / "other-vault" / "spec"
+    victim_dir.mkdir(parents=True)
+    (victim_dir / "victim.md").write_text("important other-vault content\n")
+    (victim_dir / "victim.json").write_text('{"kind": "spec"}\n')
+
+    new_loc = rs.place_record("Dest", "spec", None, str(dst_vault))
+    with pytest.raises(rs.InvalidRecordIdError):
+        rs.move_record(evil_old_id, new_loc, conn, old_vault_root=str(src_vault))
+
+    # Victim survived; nothing copied to the destination.
+    assert (victim_dir / "victim.md").read_text() == "important other-vault content\n"
+    assert not (dst_vault / "spec" / "victim.md").exists()
+
+
 def test_move_record_interrupted_keeps_old_intact(rs, conn, tmp_path, monkeypatch):
     """An interrupted move (crash before delete-old) keeps the old copy — no loss."""
     src_vault = tmp_path / "vault-a"

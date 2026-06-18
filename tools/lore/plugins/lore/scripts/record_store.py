@@ -735,11 +735,15 @@ def move_record(
     Reads the old body+sidecar, writes them atomically under *new_location*,
     repoints the index (delete old row → upsert new row), then deletes the old
     artifacts. Returns the new ``RecordId``.
+
+    ``old_id`` is confined via :func:`_confine_record_id` so a direct library
+    caller (e.g. S7 migration) cannot read/unlink ``.md``/``.json`` files outside
+    the source vault — every RECORD_ID-bearing op is guarded at the boundary.
     """
-    old_kind, old_name = old_id.split("/", 1)
     old_root = old_vault_root if old_vault_root is not None else vault_mod.resolve_vault()
-    old_body_path = Path(old_root) / old_kind / f"{old_name}.md"
-    old_sidecar_path = Path(old_root) / old_kind / f"{old_name}.json"
+    old_kind, old_name, old_body_path, old_sidecar_path = _confine_record_id(
+        old_id, old_root
+    )
 
     if not old_body_path.exists() and not old_sidecar_path.exists():
         raise RecordNotFoundError(f"record not found: {old_id}")

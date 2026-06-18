@@ -1962,7 +1962,10 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
         return 1
 
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    entry = f"- referenced {now} {record_id}"
+    # Neutralize fences in the entry (AC-FENCE1): RECORD_ID is a free-form arg, so
+    # a `<external-memory>` token in it must not land live in the session note —
+    # the referenced boundary neutralizes uniformly like candidate/create/blob.
+    entry = record_store_mod.neutralize_fences(f"- referenced {now} {record_id}")
 
     vault = Path(vault_mod.resolve_vault())
     sessions_dir = vault / "sessions"
