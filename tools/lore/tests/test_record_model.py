@@ -286,6 +286,43 @@ def test_datetime_not_iso_rejected_naming_key():
     assert any("created-at" in e for e in result.errors)
 
 
+def test_datetime_explicit_utc_offset_accepted():
+    """A zero UTC offset (`+00:00`) is the same instant as `Z` — accepted."""
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["created-at"] = "2026-06-17T14:32:00+00:00"
+    result = rm().validate(sidecar)
+    assert result.errors == []
+
+
+def test_datetime_naive_rejected():
+    """A naive timestamp carries no UTC guarantee — rejected (contract is UTC)."""
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["created-at"] = "2026-06-17T14:32:00"
+    result = rm().validate(sidecar)
+    assert any("created-at" in e for e in result.errors)
+
+
+def test_datetime_non_utc_offset_rejected():
+    """A non-zero offset is not UTC — rejected, matching the 'UTC' error text."""
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["created-at"] = "2026-06-17T14:32:00+05:00"
+    result = rm().validate(sidecar)
+    assert any("created-at" in e for e in result.errors)
+
+
+def test_non_str_kind_does_not_raise():
+    """Purity: a malformed sidecar with a non-str (unhashable) kind yields an
+    error, never a TypeError from the vocab lookup."""
+    m = rm()
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["kind"] = {"not": "a-string"}
+    result = m.validate(sidecar)  # must not raise
+    assert any("kind" in e for e in result.errors)
+    # The accessor is likewise total for non-str input.
+    assert m.permitted_statuses({"x": 1}) is None
+    assert m.initial_status(["list"]) is None
+
+
 def test_version_absent_defaults_to_v1_no_error():
     sidecar = _worked_example_spec_sidecar()
     del sidecar["version"]

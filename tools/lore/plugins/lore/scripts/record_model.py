@@ -38,7 +38,7 @@ Invariants (Spec S1):
 # is a valid runtime expression on 3.11+ and there are no forward references.
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import NamedTuple
 
 # --- Canonical declarative model (Slice 1) ----------------------------------
@@ -171,7 +171,12 @@ def permitted_statuses(kind: str | None) -> tuple[str, ...] | None:
     ``status_validator.permitted_statuses`` — so ``validate()`` can branch on
     ``None`` rather than guarding an exception.
     """
-    return STATUS_VOCAB.get(kind) if kind is not None else None
+    # Guard against a non-str ``kind`` (e.g. a malformed sidecar carrying a
+    # dict/list) so the accessor — and thus ``validate`` — never raises
+    # ``TypeError`` on an unhashable lookup key.
+    if not isinstance(kind, str):
+        return None
+    return STATUS_VOCAB.get(kind)
 
 
 def initial_status(kind: str | None) -> str | None:
@@ -233,15 +238,24 @@ def _is_list_of_str(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _is_iso8601(value: object) -> bool:
-    """True iff ``value`` is an ISO-8601 string (incl. a ``Z`` suffix on 3.11+)."""
+def _is_iso8601_utc(value: object) -> bool:
+    """True iff ``value`` is an ISO-8601 **UTC** datetime string.
+
+    The spec locks datetimes to ISO-8601 UTC (e.g. ``2026-06-17T14:32:00Z``) and
+    S2/S7 trust that guarantee, so this enforces what the error message claims:
+    the value must parse via ``datetime.fromisoformat`` (which accepts the ``Z``
+    suffix on 3.11+) **and** carry a zero UTC offset. Naive (no tzinfo),
+    date-only, and non-UTC-offset values are rejected.
+    """
     if not isinstance(value, str):
         return False
     try:
-        datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return False
-    return True
+    if parsed.tzinfo is None:
+        return False
+    return parsed.utcoffset() == timedelta(0)
 
 
 # Per-type checkers share a uniform `(key, value) -> list[str]` signature (empty
@@ -259,7 +273,7 @@ def _check_list_str(key: str, value: object) -> list[str]:
 
 
 def _check_datetime(key: str, value: object) -> list[str]:
-    if _is_iso8601(value):
+    if _is_iso8601_utc(value):
         return []
     return [f"key {key!r} must be an ISO-8601 UTC datetime string"]
 
