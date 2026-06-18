@@ -184,6 +184,12 @@ def _validate_hunk_counts(hunk: _Hunk) -> None:
 
     A deficit indicates the concatenated-no-newline format ``difflib`` emits when
     both sides of a change lack a trailing newline (see :class:`DiffFormatError`).
+
+    Note: the ``@@`` header counts are *advisory* — application is driven entirely
+    by the parsed marker lines (Phase 1 verifies against the original body; Phase 2
+    replaces using ``len(old_slice)``), so a lying or surplus header count cannot
+    misdrive the apply. This check uses the counts only to detect the one ambiguous
+    difflib format above; a surplus is harmless and intentionally not rejected.
     """
     old_seen = sum(1 for l in hunk.lines if l and l[0] in (" ", "-"))
     new_seen = sum(1 for l in hunk.lines if l and l[0] in (" ", "+"))

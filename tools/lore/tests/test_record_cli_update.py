@@ -440,8 +440,13 @@ def test_update_crash_simulated_move_then_reindex_leaves_one_copy(tmp_path):
     )
     assert r_idx.returncode == 0, r_idx.stderr
 
-    # The new copy's row exists.
+    # AC12 self-healing: reindex reconciles the index to EXACTLY the new copy.
+    # The new copy's row exists...
     assert len(_index_rows(state, vault2, kind, name)) == 1
+    # ...and the stranded old copy no longer resolves in the index (reindex is
+    # index-only — the orphaned vault1 disk artifacts are harmless and not
+    # re-indexed because vault1 is outside the reindex scope).
+    assert _index_rows(state, vault, kind, name) == []
 
 
 # ===========================================================================
