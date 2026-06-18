@@ -1,7 +1,7 @@
 """Quarried worktree-spine for camp.
 
 Contains slug handling, manifest/cwd resolution, git wrappers, and all
-worktree command handlers (cmd_status, cmd_break, cmd_sync,
+worktree command handlers (cmd_status, cmd_sync,
 cmd_restock, cmd_ls, cmd_path, cmd_code, cmd_sweep, cmd_foreach,
 cmd_doctor, cmd_help).
 
@@ -430,13 +430,6 @@ def cmd_help(_args: list[str]) -> None:
         "  --dry-run        Print what camp would exec; do not run it\n"
         "  CAMP_DRY_RUN=1   Equivalent to --dry-run\n"
     )
-
-
-def _branch_exists(slug: str, repo_root: Path) -> bool:
-    """Return True if branch 'worktree-<slug>' exists in the repo."""
-    branch_name = f"worktree-{slug}"
-    result = _git(repo_root, "branch", "--list", branch_name)
-    return bool(result.stdout.strip())
 
 
 _CODE_WORKSPACES_DIR = Path.home() / "code" / ".workspaces"
@@ -1338,52 +1331,6 @@ def _parse_last_json_line(stdout: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 pass
     return {}
-
-
-def cmd_break(args: list[str], dry_run: bool = False) -> None:
-    """camp break [--force] [--name <slug>]
-
-    In Slice 2, this will call the full worktree cleanup logic. For Slice 0
-    it prints what it would do (stub / passthrough).
-    """
-    force = "--force" in args
-    filtered = [a for a in args if a != "--force"]
-    slug, _wt_path = _resolve_target(filtered)
-
-    canonical_root = _canonical_root()
-    cleanup_script = canonical_root / "scripts" / "cleanup-worktree.sh"
-
-    cmd = ["bash", str(cleanup_script), slug]
-    if force:
-        cmd.append("--force")
-
-    if dry_run:
-        _dry_run_print(cmd)
-        return
-
-    if not cleanup_script.is_file():
-        _die(
-            f"camp break: cleanup script not found at {cleanup_script}\n"
-            "  Worktree lifecycle is implemented in Slice 2."
-        )
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    stdout = result.stdout.strip()
-    stderr = result.stderr.strip()
-
-    parsed = _parse_last_json_line(stdout)
-    status = parsed.get("status", "failed" if result.returncode != 0 else "ok")
-
-    if stderr:
-        print(stderr, file=sys.stderr)
-
-    if status == "ok":
-        removed = parsed.get("removed") or []
-        name = parsed.get("name") or slug
-        print(f"camp break: removed worktree {name!r} ({', '.join(removed)})")
-        return
-
-    _die(f"camp break: unexpected status {status!r}")
 
 
 def cmd_rebase(args: list[str], dry_run: bool = False) -> None:

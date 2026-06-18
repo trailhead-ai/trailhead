@@ -15,9 +15,8 @@ dir. (Resume keys on the SESSION ID, not the slug — `claude --resume` resumes 
 id, never by name; see session_identity.session_id_for.)
 
 resolve_harness_profile merges the [harness] block over the claude default ONCE
-into a frozen HarnessProfile (launch argv + cwd + doc_files + inject). The legacy
-resolve_launch / resolve_doc_files / resolve_inject are thin views over it, kept
-for the callers/tests that read a single field. profile.launch() does the
+into a frozen HarnessProfile (launch argv + cwd + doc_files + inject); callers
+read fields off it directly. profile.launch() does the
 {slug}/{workspace}/{session_id} substitution → (argv, cwd); launch() chdirs +
 os.execvp's. Modality is terminal-exec (claude-specific); GUI/detached launch is
 deferred.
@@ -187,42 +186,6 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
         else ["CLAUDE.md"],
         inject=inject,
         pretrust=harness.get("pretrust", True),
-    )
-
-
-def resolve_doc_files(group: dict[str, Any]) -> list[str]:
-    """Resolve the workspace doc filenames to write (thin view over the profile)."""
-    return resolve_harness_profile(group).doc_files
-
-
-def resolve_inject(group: dict[str, Any]) -> str:
-    """Resolve the mid-session context-injection strategy (thin view over the profile).
-
-    "stdout" is the universal floor (print the doc to stdout); "claude-hook"
-    enqueues the doc for the Claude Code PostToolUse → additionalContext channel.
-    """
-    return resolve_harness_profile(group).inject
-
-
-def resolve_launch(
-    group: dict[str, Any],
-    slug: str,
-    workspace_dir: Path,
-    *,
-    is_resume: bool,
-) -> tuple[list[str], Path]:
-    """Resolve (config | claude default) + is_resume → (argv, cwd).
-
-    Thin view over the unified profile: resolve once, then substitute. The
-    deterministic session id is derived from (group, slug).
-    """
-    from session_identity import session_id_for
-
-    return resolve_harness_profile(group).launch(
-        slug=slug,
-        workspace=str(workspace_dir),
-        is_resume=is_resume,
-        session_id=session_id_for(group["group"]["name"], slug),
     )
 
 

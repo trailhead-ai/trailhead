@@ -157,8 +157,10 @@ def flip_member_state_unlocked(
     """Read-mutate-write one member's provision_state WITHOUT acquiring the lock.
 
     The caller MUST already hold the .reconcile.lock (re-acquiring flock on a
-    second fd in the same process deadlocks). Use update_member_state for the
-    self-locking variant.
+    second fd in the same process deadlocks) — wrap the call in
+    `with reconcile_lock(path.parent): ...`. Production flips run inside the
+    reconcile_lock already held by the provisioner, so this unlocked primitive is
+    the only flip path.
     """
     data = read_central_manifest(path)
     for member in data.get("members", []):
@@ -170,27 +172,6 @@ def flip_member_state_unlocked(
                 member.pop("reason", None)
             break
     write_central_manifest(path, data)
-
-
-def update_member_state(
-    path: Path,
-    member_name: str,
-    state: str,
-    *,
-    reason: str | None = None,
-    env: dict[str, str] | None = None,
-    group_name: str | None = None,
-    slug: str | None = None,
-) -> None:
-    """Atomically flip one member's provision_state under the .reconcile.lock.
-
-    Reads the whole manifest, mutates the named member's provision_state (and
-    reason when failing / clearing it when not), and writes the whole manifest
-    back via the atomic temp+rename in write_central_manifest. The .reconcile.lock
-    serializes concurrent flips so no write is torn.
-    """
-    with reconcile_lock(path.parent):
-        flip_member_state_unlocked(path, member_name, state, reason=reason)
 
 
 def workspace_dir(group: str, slug: str, *, env: dict[str, str] | None = None) -> Path:

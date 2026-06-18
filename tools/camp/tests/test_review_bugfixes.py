@@ -157,14 +157,13 @@ class TestBug1SetupStatus:
         self, camp_cli, two_member_group, monkeypatch, capsys
     ):
         from provision import seed_pending_workspace
-        from manifest import update_member_state
+        from manifest import flip_member_state_unlocked, reconcile_lock
         g = two_member_group
         seed_pending_workspace(g["group"], "feat-pf", env=g["env"])
         mpath = _workspace_dir("bugfixgroup", "feat-pf", g["env"]) / "manifest.json"
-        update_member_state(mpath, "repo_a", "failed", reason="boom",
-                            env=g["env"], group_name="bugfixgroup", slug="feat-pf")
-        update_member_state(mpath, "repo_b", "pending",
-                            env=g["env"], group_name="bugfixgroup", slug="feat-pf")
+        with reconcile_lock(mpath.parent):
+            flip_member_state_unlocked(mpath, "repo_a", "failed", reason="boom")
+            flip_member_state_unlocked(mpath, "repo_b", "pending")
         code, out, _err = self._run_status(camp_cli, g, "feat-pf", monkeypatch, capsys)
         assert code == 0, "SessionStart hook must never exit non-zero"
         # still reports the failed/pending members

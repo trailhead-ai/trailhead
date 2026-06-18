@@ -157,7 +157,7 @@ class TestCampStatusExitCodes:
     def _seed_states(self, cli_env, slug, states):
         from group_resolve import central_state_dir
         from provision import seed_pending_workspace
-        from manifest import update_member_state
+        from manifest import flip_member_state_unlocked, reconcile_lock
         from group_config import load_group
 
         group = load_group(cli_env["config_dir"] / "groups" / "mygroup.toml")
@@ -165,7 +165,8 @@ class TestCampStatusExitCodes:
         seed_pending_workspace(group, slug, env=env)
         mpath = central_state_dir("mygroup", env=env) / "worktrees" / slug / "manifest.json"
         for name, st in states.items():
-            update_member_state(mpath, name, st, env=env, group_name="mygroup", slug=slug)
+            with reconcile_lock(mpath.parent):
+                flip_member_state_unlocked(mpath, name, st)
 
     def test_status_all_ready_exit_0(self, cli_env):
         self._seed_states(cli_env, "st0", {"repo_a": "ready", "repo_b": "ready"})

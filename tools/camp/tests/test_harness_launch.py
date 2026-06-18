@@ -3,8 +3,7 @@
 A group-level optional [harness] block declares `new` + `resume` argv templates
 + `cwd`, with {slug} / {workspace} / {session_id} substitution. When absent the
 baked-in claude default applies (new→["claude","--session-id","{session_id}"]
-cwd=workspace; resume→["claude","--resume","{session_id}"]). resolve_launch
-resolves (config | default) + is_resume → (argv, cwd). The launch seam os.execvp's;
+cwd=workspace; resume→["claude","--resume","{session_id}"]). The launch seam os.execvp's;
 tests stub the exec (no real claude).
 
 Test contract (harness portion):
@@ -35,42 +34,51 @@ def _group(harness=None):
     return g
 
 
+def _launch(group, slug, ws, *, is_resume):
+    """Resolve the profile and substitute → (argv, cwd), as the camp ai tail does."""
+    from harness_launch import resolve_harness_profile
+    from session_identity import session_id_for
+
+    return resolve_harness_profile(group).launch(
+        slug=slug,
+        workspace=str(ws),
+        is_resume=is_resume,
+        session_id=session_id_for(group["group"]["name"], slug),
+    )
+
+
 # ---------------------------------------------------------------------------
-# resolve_launch — claude default (no [harness] config)
+# profile.launch — claude default (no [harness] config)
 # ---------------------------------------------------------------------------
 
 
 class TestClaudeDefault:
     def test_default_new_argv_seeds_session_id(self):
-        from harness_launch import resolve_launch
         from session_identity import session_id_for
 
         ws = Path("/work/space")
         sid = session_id_for("g", "feat-x")
-        argv, cwd = resolve_launch(_group(), "feat-x", ws, is_resume=False)
+        argv, cwd = _launch(_group(), "feat-x", ws, is_resume=False)
         assert argv == ["claude", "--session-id", sid]
         assert cwd == ws
 
     def test_default_resume_argv_resumes_session_id(self):
-        from harness_launch import resolve_launch
         from session_identity import session_id_for
 
         ws = Path("/work/space")
         sid = session_id_for("g", "feat-x")
-        argv, cwd = resolve_launch(_group(), "feat-x", ws, is_resume=True)
+        argv, cwd = _launch(_group(), "feat-x", ws, is_resume=True)
         assert argv == ["claude", "--resume", sid]
         assert cwd == ws
 
 
 # ---------------------------------------------------------------------------
-# resolve_launch — custom [harness] block
+# profile.launch — custom [harness] block
 # ---------------------------------------------------------------------------
 
 
 class TestCustomHarness:
     def test_custom_new_argv_substitutes_workspace(self):
-        from harness_launch import resolve_launch
-
         ws = Path("/work/space")
         # Configured via the parsed-config shape (post load_group).
         group = _group(
@@ -80,13 +88,11 @@ class TestCustomHarness:
                 "cwd": "{workspace}",
             }
         )
-        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=False)
+        argv, cwd = _launch(group, "feat-x", ws, is_resume=False)
         assert argv == ["myharness", "--root", "/work/space"]
         assert cwd == ws
 
     def test_custom_resume_argv_substitutes_slug(self):
-        from harness_launch import resolve_launch
-
         ws = Path("/work/space")
         group = _group(
             {
@@ -95,12 +101,10 @@ class TestCustomHarness:
                 "cwd": "{workspace}",
             }
         )
-        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=True)
+        argv, cwd = _launch(group, "feat-x", ws, is_resume=True)
         assert argv == ["myharness", "--session", "feat-x"]
 
     def test_custom_cwd_substitution(self):
-        from harness_launch import resolve_launch
-
         ws = Path("/work/space")
         group = _group(
             {
@@ -109,7 +113,7 @@ class TestCustomHarness:
                 "cwd": "{workspace}/sub",
             }
         )
-        _, cwd = resolve_launch(group, "feat-x", ws, is_resume=False)
+        _, cwd = _launch(group, "feat-x", ws, is_resume=False)
         assert cwd == Path("/work/space/sub")
 
 
@@ -260,7 +264,7 @@ class TestLaunch:
 
 
 # ---------------------------------------------------------------------------
-# resolve_launch — per-field merge over claude default (Fix 1)
+# profile.launch — per-field merge over claude default (Fix 1)
 # ---------------------------------------------------------------------------
 
 
@@ -269,70 +273,64 @@ class TestPartialHarnessMerge:
 
     def test_doc_files_only_block_uses_default_new(self):
         """A [harness] block with only doc_files → new falls back to the claude default."""
-        from harness_launch import resolve_launch
         from session_identity import session_id_for
 
         ws = Path("/work/space")
         sid = session_id_for("g", "feat-x")
         # Simulate what load_group returns for [harness]\ndoc_files = ["AGENTS.md"]
         group = _group({"doc_files": ["AGENTS.md"]})
-        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=False)
+        argv, cwd = _launch(group, "feat-x", ws, is_resume=False)
         assert argv == ["claude", "--session-id", sid]
         assert cwd == ws
 
     def test_doc_files_only_block_uses_default_resume(self):
         """A [harness] block with only doc_files → resume falls back to claude default."""
-        from harness_launch import resolve_launch
         from session_identity import session_id_for
 
         ws = Path("/work/space")
         sid = session_id_for("g", "feat-x")
         group = _group({"doc_files": ["AGENTS.md"]})
-        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=True)
+        argv, cwd = _launch(group, "feat-x", ws, is_resume=True)
         assert argv == ["claude", "--resume", sid]
         assert cwd == ws
 
     def test_cwd_only_block_uses_default_new(self):
         """A [harness] block with only cwd → new falls back to claude default."""
-        from harness_launch import resolve_launch
         from session_identity import session_id_for
 
         ws = Path("/work/space")
         sid = session_id_for("g", "feat-x")
         group = _group({"cwd": "{workspace}/sub"})
-        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=False)
+        argv, cwd = _launch(group, "feat-x", ws, is_resume=False)
         assert argv == ["claude", "--session-id", sid]
         assert cwd == Path("/work/space/sub")
 
     def test_new_only_block_resume_falls_back_to_default(self):
         """A [harness] block with only new → resume falls back to claude default."""
-        from harness_launch import resolve_launch
         from session_identity import session_id_for
 
         ws = Path("/work/space")
         sid = session_id_for("g", "feat-x")
         group = _group({"new": ["myharness"]})
-        argv, cwd = resolve_launch(group, "feat-x", ws, is_resume=True)
+        argv, cwd = _launch(group, "feat-x", ws, is_resume=True)
         assert argv == ["claude", "--resume", sid]
         assert cwd == ws
 
     def test_new_only_block_uses_configured_new(self):
         """A [harness] block with only new → new uses the configured argv."""
-        from harness_launch import resolve_launch
-
         ws = Path("/work/space")
         group = _group({"new": ["myharness"]})
-        argv, _ = resolve_launch(group, "feat-x", ws, is_resume=False)
+        argv, _ = _launch(group, "feat-x", ws, is_resume=False)
         assert argv == ["myharness"]
 
 
 # ---------------------------------------------------------------------------
-# resolve_inject — mid-session context-injection strategy (Slice 9)
+# profile.inject — mid-session context-injection strategy (Slice 9)
 # ---------------------------------------------------------------------------
 
 
 class TestResolveInject:
-    """resolve_inject mirrors resolve_launch/resolve_doc_files per-field merge.
+    """resolve_harness_profile(...).inject per-field merge.
 
     - no [harness] block (claude default) → "claude-hook".
     - [harness] block WITHOUT inject → "stdout" (safe default).
@@ -340,40 +338,39 @@ class TestResolveInject:
     """
 
     def test_no_harness_block_defaults_to_claude_hook(self):
-        from harness_launch import resolve_inject
+        from harness_launch import resolve_harness_profile
 
-        assert resolve_inject(_group()) == "claude-hook"
+        assert resolve_harness_profile(_group()).inject == "claude-hook"
 
     def test_harness_block_without_inject_defaults_to_stdout(self):
-        from harness_launch import resolve_inject
+        from harness_launch import resolve_harness_profile
 
         group = _group({"doc_files": ["AGENTS.md"]})
-        assert resolve_inject(group) == "stdout"
+        assert resolve_harness_profile(group).inject == "stdout"
 
     def test_configured_stdout_honored(self):
-        from harness_launch import resolve_inject
+        from harness_launch import resolve_harness_profile
 
         group = _group({"inject": "stdout"})
-        assert resolve_inject(group) == "stdout"
+        assert resolve_harness_profile(group).inject == "stdout"
 
     def test_configured_claude_hook_honored(self):
-        from harness_launch import resolve_inject
+        from harness_launch import resolve_harness_profile
 
         group = _group({"inject": "claude-hook"})
-        assert resolve_inject(group) == "claude-hook"
+        assert resolve_harness_profile(group).inject == "claude-hook"
 
 
 # ---------------------------------------------------------------------------
-# resolve_harness_profile — unified resolved profile (cleanup refactor)
+# resolve_harness_profile — unified resolved profile
 # ---------------------------------------------------------------------------
 
 
 class TestResolveHarnessProfile:
     """resolve_harness_profile merges config over the claude default ONCE.
 
-    The three legacy resolvers (resolve_launch/resolve_doc_files/resolve_inject)
-    become thin views over this single resolved profile. Behavior must match them
-    field-for-field, including the intentional inject asymmetry.
+    Callers read launch argv / cwd / doc_files / inject off the single resolved
+    profile. Behavior includes the intentional inject asymmetry.
     """
 
     def test_no_harness_block_is_all_claude_defaults(self):

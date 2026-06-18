@@ -660,7 +660,11 @@ class TestConcurrency:
         import provision
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
-        from manifest import update_member_state, read_central_manifest
+        from manifest import (
+            flip_member_state_unlocked,
+            read_central_manifest,
+            reconcile_lock,
+        )
 
         g = two_member_group
         bring_up_workspace(g["group"], "feat-rt", env=g["env"])
@@ -673,8 +677,8 @@ class TestConcurrency:
             i = 0
             while not stop.is_set():
                 state = "ready" if i % 2 else "pending"
-                update_member_state(mpath, "repo_a", state, env=g["env"],
-                                    group_name="testgroup", slug="feat-rt")
+                with reconcile_lock(mpath.parent):
+                    flip_member_state_unlocked(mpath, "repo_a", state)
                 i += 1
 
         def reader():
@@ -704,13 +708,15 @@ class TestStatusExitCodes:
     def _seed_states(self, group, slug, env, states: dict[str, str]):
         import provision
         # Seed pending then flip to target states directly.
-        from manifest import update_member_state
+        from manifest import flip_member_state_unlocked, reconcile_lock
         provision.seed_pending_workspace(group, slug, env=env)
+        mpath = (
+            provision.workspace_dir(group["group"]["name"], slug, env=env)
+            / "manifest.json"
+        )
         for name, state in states.items():
-            update_member_state(
-                provision.workspace_dir(group["group"]["name"], slug, env=env) / "manifest.json",
-                name, state, env=env, group_name=group["group"]["name"], slug=slug,
-            )
+            with reconcile_lock(mpath.parent):
+                flip_member_state_unlocked(mpath, name, state)
 
     def test_all_ready_exit_0(self, two_member_group):
         from lifecycle_cmds import provision_status_code

@@ -631,23 +631,3 @@ def reconcile_break(
         "removed": removed,
         "errors": errors,
     }
-
-
-def format_success_summary(result: dict[str, Any]) -> str:
-    """Format a D-I success summary line for camp <slug>.
-
-    Format: "worktree-<slug>: N member(s) — <names> (bootstrap: ok) | manifest: <path>"
-    """
-    slug = result.get("slug", "?")
-    count = result.get("member_count", 0)
-    members = result.get("members", [])
-    names = ", ".join(members) if members else "(none)"
-    bootstrap_status = result.get("bootstrap", "ok")
-    manifest_path = result.get("manifest_path", "?")
-
-    # Derive branch name from manifest path or members
-    # The slug is embedded in the manifest path as .../<slug>/manifest.json
-    return (
-        f"worktree-{slug}: {count} member(s) — {names} "
-        f"(bootstrap: {bootstrap_status}) | manifest: {manifest_path}"
-    )

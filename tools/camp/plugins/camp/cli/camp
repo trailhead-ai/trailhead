@@ -633,59 +633,6 @@ def _cmd_break_group_cli(
         print(f"camp rm: errors: {result['errors']}", file=sys.stderr)
 
 
-def _cmd_restock_group_cli(
-    args: list[str],
-    group: dict,
-    env: dict[str, str] | None,
-    dry_run: bool,
-) -> None:
-    """camp restock — re-run bootstrap commands on each canonical member repo."""
-    import json as _json
-    import subprocess
-
-    as_json = "--json" in args
-
-    results: dict = {}
-    errors = 0
-
-    for member in group["members"]:
-        name = member["name"]
-        repo_root = Path(member["repo_root"])
-        bootstrap = member.get("bootstrap") or []
-
-        if not bootstrap:
-            results[name] = {"action": "no-bootstrap"}
-            continue
-
-        if dry_run:
-            print(f"[dry-run] restock {name}: would run {bootstrap}", file=sys.stderr)
-            results[name] = {"action": "dry-run"}
-            continue
-
-        r = subprocess.run(
-            bootstrap,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if r.returncode == 0:
-            results[name] = {"action": "ok"}
-        else:
-            results[name] = {"action": "error", "error": r.stderr.strip()}
-            errors += 1
-
-    status = "ok" if errors == 0 else "ok_with_warnings"
-    report = {"status": status, "members": results, "errors": errors}
-
-    if as_json:
-        print(_json.dumps(report))
-    else:
-        print(f"camp restock: status={status}")
-        for name, info in results.items():
-            print(f"  {name}: {info.get('action', '?')}")
-
-
 def _cmd_rebase_group_cli(
     args: list[str],
     group: dict,

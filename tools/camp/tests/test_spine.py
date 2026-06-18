@@ -2,8 +2,6 @@
 
 Test contract from the plan (Slice 0):
 - U2 regression: spine imports without dev_env modules (they are absent).
-- repos.py manifest read/resolve: round-trip a synthetic manifest via
-  read_manifest / resolve_manifest_for / repo_path.
 - slug normalize/validate: accept/reject the right inputs.
 - git-wrapper shapes: _git / _git_out form the expected argv.
 - cmd_sweep with no registry → orphan_instances={}, no NotImplementedError.
@@ -36,100 +34,18 @@ if str(_SCRIPTS_DIR) not in sys.path:
 # ---------------------------------------------------------------------------
 
 
-def test_repos_imports_without_dev_env() -> None:
-    """repos.py must be importable with dev_env.* modules absent."""
-    import repos  # noqa: F401 — this is the import under test
-
-
 def test_spine_imports_without_dev_env() -> None:
     """spine.py (worktree handlers) must be importable with dev_env.* absent."""
     import spine  # noqa: F401 — this is the import under test
 
 
 def test_no_dev_env_in_sys_modules_after_import() -> None:
-    """After importing repos + spine, no dev_env.* module must appear in sys.modules."""
-    import repos  # noqa: F401
+    """After importing spine, no dev_env.* module must appear in sys.modules."""
     import spine  # noqa: F401
     for mod in sys.modules:
         assert not mod.startswith("dev_env"), (
             f"dev_env module leaked into sys.modules: {mod!r}"
         )
-
-
-# ---------------------------------------------------------------------------
-# repos.py manifest read / resolve round-trip
-# ---------------------------------------------------------------------------
-
-
-def test_read_manifest_returns_none_when_absent(tmp_path: Path) -> None:
-    import repos
-    assert repos.read_manifest(tmp_path) is None
-
-
-def test_read_manifest_returns_data(tmp_path: Path) -> None:
-    import repos
-    manifest = {"name": "test-slug", "repos": []}
-    (tmp_path / repos._MANIFEST_FILENAME).write_text(json.dumps(manifest))
-    result = repos.read_manifest(tmp_path)
-    assert result is not None
-    assert result["name"] == "test-slug"
-
-
-def test_read_manifest_returns_none_on_bad_json(tmp_path: Path) -> None:
-    import repos
-    (tmp_path / repos._MANIFEST_FILENAME).write_text("not json{")
-    result = repos.read_manifest(tmp_path)
-    assert result is None
-
-
-def test_resolve_manifest_for_direct(tmp_path: Path) -> None:
-    import repos
-    manifest = {
-        "name": "slug1",
-        "repos": [{"name": "alpha", "worktree_path": str(tmp_path / "alpha")}],
-    }
-    (tmp_path / repos._MANIFEST_FILENAME).write_text(json.dumps(manifest))
-    result = repos.resolve_manifest_for(tmp_path)
-    assert result is not None
-    assert result["name"] == "slug1"
-
-
-def test_resolve_manifest_for_sibling_marker(tmp_path: Path) -> None:
-    import repos
-    manifest_dir = tmp_path / "zenith-wt"
-    manifest_dir.mkdir()
-    manifest = {"name": "sibling-slug", "repos": []}
-    (manifest_dir / repos._MANIFEST_FILENAME).write_text(json.dumps(manifest))
-    sibling_dir = tmp_path / "sibling-wt"
-    sibling_dir.mkdir()
-    (sibling_dir / repos._SIBLING_MARKER).write_text(
-        str(manifest_dir / repos._MANIFEST_FILENAME)
-    )
-    result = repos.resolve_manifest_for(sibling_dir)
-    assert result is not None
-    assert result["name"] == "sibling-slug"
-
-
-def test_resolve_manifest_for_returns_none_when_absent(tmp_path: Path) -> None:
-    import repos
-    result = repos.resolve_manifest_for(tmp_path)
-    assert result is None
-
-
-def test_repo_path_from_manifest(tmp_path: Path) -> None:
-    import repos
-    sibling = tmp_path / "alpha-wt"
-    sibling.mkdir()
-    manifest = {"name": "s", "repos": [{"name": "alpha", "worktree_path": str(sibling)}]}
-    (tmp_path / repos._MANIFEST_FILENAME).write_text(json.dumps(manifest))
-    result = repos.repo_path(tmp_path, "alpha")
-    assert result == sibling
-
-
-def test_repo_path_fallback(tmp_path: Path) -> None:
-    import repos
-    result = repos.repo_path(tmp_path, "missing-repo")
-    assert result == tmp_path / "missing-repo"
 
 
 # ---------------------------------------------------------------------------

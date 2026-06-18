@@ -986,20 +986,6 @@ class TestSuccessSummary:
         assert "manifest_path" in result
         assert "members" in result
 
-    def test_success_summary_line_format(self, two_member_group):
-        """The success summary line includes member names and bootstrap status."""
-        from reconcile import reconcile_worktree, format_success_summary
-
-        g = two_member_group
-        result = reconcile_worktree(g["group"], "feat-summary2", env=g["env"])
-        line = format_success_summary(result)
-
-        # D-I: "worktree-<slug>: N member(s) — <names> (bootstrap: ok) | manifest: <path>"
-        assert "worktree-feat-summary2" in line
-        assert "2" in line  # member count
-        assert "repo_a" in line
-        assert "repo_b" in line
-        assert "manifest" in line.lower()
 
 
 # ---------------------------------------------------------------------------
