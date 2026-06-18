@@ -259,13 +259,15 @@ def test_set_empty_string_scalar_equiv_unset(tmp_path):
         _BASE_ARGS + ["--set", "status="],
         vault=vault, state_dir=state,
     )
-    # Either we succeed (status defaulted) or it may be treated as "unset",
-    # but it must NOT be treated as setting status to the empty string.
-    if r.returncode == 0:
-        record_id = r.stdout.strip()
-        sidecar = _find_sidecar(vault, record_id)
-        # Empty string → status is absent or defaulted to "draft" (not "").
-        assert sidecar.get("status") != ""
+    # status is not required and is defaulted by the validator, so clearing it
+    # deterministically succeeds — and must NOT be stored as the empty string.
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    sidecar = _find_sidecar(vault, record_id)
+    status = sidecar.get("status")
+    # Empty string → status absent or defaulted to a non-empty value, never "".
+    assert status != ""
+    assert status is None or isinstance(status, str) and status
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +322,12 @@ def test_set_empty_list_field_is_hard_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_unset_list_field_no_value_clears_whole_list(tmp_path):
-    """--unset keywords (no =VALUE) clears the entire keywords list (AC18)."""
+    """--unset K (no =VALUE) clears the entire list field (AC18).
+
+    Uses a NON-required list field (related-urls) so the write succeeds and the
+    cleared state is deterministic — clearing the required 'keywords' field is
+    covered separately below.
+    """
     vault, state = _make_vault(tmp_path)
     r = _run(
         [
@@ -328,20 +335,34 @@ def test_unset_list_field_no_value_clears_whole_list(tmp_path):
             "--kind", "spec",
             "--title", "My Record",
             "--set", "keywords=foo",
-            "--set", "keywords=bar",
-            "--unset", "keywords",   # clears whole list
+            "--set", "related-urls=https://a.example",
+            "--set", "related-urls=https://b.example",
+            "--unset", "related-urls",   # clears whole list
         ],
         vault=vault, state_dir=state,
     )
-    # Clearing the only required list field may fail validation — that is
-    # expected and acceptable.  What must NOT happen: silent write with an
-    # empty list (keywords=[]) when the error path should fire, OR the list
-    # still containing items.
-    if r.returncode == 0:
-        record_id = r.stdout.strip()
-        sidecar = _find_sidecar(vault, record_id)
-        assert sidecar.get("keywords") in (None, [])
-    # non-zero is also acceptable (validation rejects empty required list).
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    sidecar = _find_sidecar(vault, record_id)
+    # The whole list is gone (key absent or empty), never a leftover item.
+    assert sidecar.get("related-urls") in (None, [])
+
+
+def test_unset_required_list_field_fails_validation(tmp_path):
+    """--unset keywords removes a required key → deterministic non-zero, nothing written."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        [
+            "record", "create",
+            "--kind", "spec",
+            "--title", "My Record",
+            "--set", "keywords=foo",
+            "--unset", "keywords",   # removes a required operator key
+        ],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    assert list(vault.glob("**/*.md")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -423,19 +444,53 @@ def test_unknown_subcommand_hints_did_you_mean(tmp_path):
 
 
 def test_known_removed_command_hints_replacement(tmp_path):
-    """A removed/renamed command prints a specific 'use X instead' hint.
+    """A command in the dispatch-hint table prints a specific 'did you mean' hint.
 
-    The recall→search mapping table is present; 'recall' currently still routes,
-    so this test verifies the dispatch hint table is wired, not that recall
-    is removed.  We test with a clearly non-existent old command.
+    The recall→search mapping table is present; 'recall' currently still routes
+    (it IS a registered command), while 'search' is not yet registered (S3). So
+    typing 'search' fires the specific table hint pointing at 'recall'. This
+    verifies the hint TABLE is wired, distinct from the generic unknown-command
+    message exercised by the 'frob' test above.
     """
     vault, state = _make_vault(tmp_path)
-    # 'frob' is not a known command; the hint mechanism should fire.
     r = _run(
-        ["frob"],
+        ["search"],
         vault=vault, state_dir=state,
     )
     assert r.returncode != 0
     out = r.stdout + r.stderr
+    # The table maps search→recall, so the hint must name 'recall'.
+    assert "recall" in out.lower()
+    assert "did you mean" in out.lower()
+
+
+def test_valid_command_bad_arg_does_not_emit_unknown_command_hint(tmp_path):
+    """A valid command failing on a sub-argument must NOT be mislabelled.
+
+    Regression guard (AC-DISP1): 'record create' missing --kind is a legitimate
+    argparse error under a *valid* top-level command; the unknown-command hint
+    must not fire and claim 'unknown command record'.
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--title", "No Kind Here"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    out = (r.stdout + r.stderr).lower()
+    assert "unknown command" not in out
+
+
+def test_unset_scalar_field_with_value_is_hard_error(tmp_path):
+    """--unset K=VALUE on a scalar field → non-zero, not a silent no-op."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--unset", "status=draft"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    out = (r.stderr + r.stdout).lower()
+    assert "list field" in out or "scalar" in out
+    assert list(vault.glob("**/*.md")) == []
     # Some kind of helpful message must appear.
     assert len(out.strip()) > 0

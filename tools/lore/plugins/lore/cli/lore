@@ -1614,12 +1614,20 @@ def _apply_set_unset(
             continue
 
         if value is not None:
-            # AC16: --unset K=VALUE removes one item from a list.
+            # AC16: --unset K=VALUE removes one item from a list. The K=VALUE
+            # form is only meaningful for list fields; on a scalar key it would
+            # be a silent no-op (an agent footgun), so reject it explicitly.
+            if key not in list_keys:
+                errors.append(
+                    f"error: --unset {key}=VALUE is only valid for list fields; "
+                    f"to clear a scalar field use --unset {key}"
+                )
+                continue
             current = result.get(key, [])
             if isinstance(current, list) and value in current:
                 current = [v for v in current if v != value]
                 result[key] = current
-            # Silently a no-op if the value is not found.
+            # Removing a value not present in the list is a tolerated no-op.
         else:
             # AC18: --unset K (no value) clears the scalar or whole list.
             result.pop(key, None)
@@ -2011,6 +2019,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _known_commands(parser: argparse.ArgumentParser) -> frozenset[str]:
+    """Return the set of registered top-level subcommand names.
+
+    Introspects the parser's ``_SubParsersAction`` so the unknown-command hint
+    (AC-DISP1) can tell a genuinely unrecognized command from a *valid* command
+    that merely failed on a sub-argument (e.g. ``record create`` missing
+    ``--kind``) — the latter must NOT be mislabelled "unknown command".
+    """
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return frozenset(action.choices)
+    return frozenset()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     # Intercept argparse's SystemExit so we can emit the ``did you mean …?``
@@ -2020,14 +2042,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(list(raw))
     except SystemExit as exc:
-        if raw and exc.code == 2:
-            cmd = raw[0]
+        cmd = raw[0] if raw else ""
+        # Only treat this as an unknown command when the first token is not a
+        # flag and not a registered subcommand. A valid command that fails on a
+        # sub-argument re-raises argparse's own error untouched (AC-DISP1: do
+        # not swallow / mislabel legitimate argparse errors).
+        if exc.code == 2 and cmd and not cmd.startswith("-") and cmd not in _known_commands(parser):
             hint = _unknown_command_hint(cmd)
             if hint:
-                print(f"lore: {hint}", file=sys.stderr)
+                print(f"lore: unknown command {cmd!r}. {hint}", file=sys.stderr)
             else:
-                # For any unrecognized command, print a generic "did you mean"
-                # prompt so agents can distinguish a typo from a real error.
+                # For any unrecognized command, print a generic prompt so agents
+                # can distinguish a typo from a real error.
                 print(
                     f"lore: unknown command {cmd!r}. "
                     f"Run 'lore --help' for a list of subcommands.",
