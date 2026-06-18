@@ -1,4 +1,4 @@
-"""KQL AST → SQL compiler (Slice 3, S3).
+"""KQL AST → SQL compiler (Slice 3, S3 — review redesign).
 
 Compiles a backend-agnostic KQL AST (produced by ``kql.py``) into a parameterized
 SQL fragment set for execution against the realized index schema (``index_store.py``).
@@ -9,114 +9,111 @@ returns a :class:`CompiledQuery`. The caller (Slice 4) executes the query.
 NOTE: This module intentionally omits ``from __future__ import annotations``.  The
 ``@dataclass`` machinery looks up ``cls.__module__`` in ``sys.modules`` when
 annotations are stored as strings (which ``from __future__ import annotations``
-forces). The ``load_script`` test harness loads this module via
-``importlib.util`` without registering it in ``sys.modules``, so string-annotation
-mode would crash (same gotcha as ``kql.py``, Slice 2 contract).
+forces). The ``load_script`` test harness loads this module via ``importlib.util``
+without registering it in ``sys.modules``, so string-annotation mode would crash
+(same gotcha as ``kql.py``, Slice 2 contract).
 
-**SELECT shape for Slice 4 (LOCKED):**
+**Full-text is a SQL-composable predicate (review redesign — CRITICAL #1).**
 
-When the query has full-text terms (``has_fts=True``), Slice 4 MUST execute:
+The earlier design treated FTS ``MATCH`` and SQL ``WHERE`` as two independent
+channels rejoined with a hard-coded top-level ``AND``. That broke boolean
+composition: ``not foo`` produced a leading-``NOT`` MATCH (FTS5 syntax error) and
+``foo or kind:spec`` silently dropped the OR (too-narrow result set). The fix:
+compile each ``FullText(term)`` / ``Phrase(text)`` node to a SQL predicate
 
-  SELECT records.* FROM record_fts
-  JOIN records ON records.rowid = record_fts.rowid
-  WHERE record_fts MATCH ?
-    AND <other predicates on records.*>
-  ORDER BY bm25(record_fts, 3.0, 2.0, 1.0)
-  LIMIT ?
+    records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)
 
-The ``MATCH ?`` placeholder receives ``match_expr`` as the first bind param; the
-remaining bind params follow in ``params`` order.
+with the sanitized single-term/phrase MATCH string as a BOUND param. ``And``/``Or``/
+``Not``/``Group`` then compose these full-text predicates and the scalar/facet
+predicates UNIFORMLY as SQL boolean (``(L) AND (R)``, ``(L) OR (R)``, ``NOT (X)``).
+Every combination is now correct:
+  - ``foo or kind:spec`` → ``(rowid IN (… MATCH ?)) OR (records.kind = ?)``
+  - ``not foo``          → ``NOT (rowid IN (… MATCH ?))`` (no FTS syntax error)
+  - ``kind:spec not foo`` → ``(records.kind = ?) AND (NOT (rowid IN (… MATCH ?)))``
 
-For pure-facet queries (``has_fts=False``), Slice 4 executes:
+**FINAL exact SELECT shape Slice 4 executes (LOCKED — no mandatory FTS JOIN):**
 
   SELECT * FROM records
-  WHERE <predicates>
-  ORDER BY updated_at DESC, last_referenced_at DESC
+  WHERE <predicates — full-text predicates live inline in the tree>
+  ORDER BY <ranking>
   LIMIT ?
 
-Use ``CompiledQuery.full_query(fts_join=has_fts)`` to obtain the assembled SQL.
+Use ``CompiledQuery.full_query()`` to obtain the assembled SQL; it is positionally
+aligned with ``CompiledQuery.params``.
+
+**Ranking (LOCKED — bm25 weights + sign proven in Slice 0, KU3).**
+
+When the query carries ANY full-text term, order by bm25 with the locked weights
+``(3.0, 2.0, 1.0)`` for ``(title, keywords, body)``, best-first = ASC (bm25 is
+negative). Because full-text is now in WHERE (not a filtering JOIN), the score is
+computed with a correlated subquery over the OR-combined POSITIVE (non-negated)
+full-text terms:
+
+  ORDER BY (
+    SELECT bm25(record_fts, 3.0, 2.0, 1.0)
+    FROM record_fts
+    WHERE record_fts.rowid = records.rowid AND record_fts MATCH ?
+  ) IS NULL, (
+    SELECT bm25(record_fts, 3.0, 2.0, 1.0)
+    FROM record_fts
+    WHERE record_fts.rowid = records.rowid AND record_fts MATCH ?
+  ) ASC, updated_at DESC, last_referenced_at DESC
+
+The ``IS NULL`` leading key pushes rows that do not match the ranking expression
+(NULL score) AFTER the matched (negative) rows; ``updated_at DESC,
+last_referenced_at DESC`` is a stable tiebreak. A PURE-FACET query (no full-text
+node at all) orders by ``updated_at DESC, last_referenced_at DESC`` (no bm25).
+
+**Bound-param ORDER (positionally aligned with full_query()):**
+  1. WHERE-clause params in AST tree order (each scalar/facet value AND each
+     full-text MATCH string).
+  2. The ranking-subquery MATCH param (the OR-combined positive-full-text expr) —
+     emitted TWICE because the ORDER BY references it in both the ``IS NULL`` key
+     and the ``ASC`` key. Only present when the query has full-text.
+  3. The ``LIMIT ?`` value, always last.
 
 **Alias resolution (LOCKED):**
-  ``area`` → ``related-area``
-  ``phase`` → ``related-phases``
-  ``keyword`` → ``keywords``
+  ``area`` → ``related-area``,  ``phase`` → ``related-phases``,  ``keyword`` → ``keywords``
   Real keys (``related-area``, ``related-phases``, ``keywords``) pass through unchanged.
 
 **Scalar field → column mapping (LOCKED):**
-  ``kind`` → ``kind``,  ``status`` → ``status``,  ``repo`` → ``repo``,
-  ``team`` → ``team``,  ``product`` → ``product``,  ``suite`` → ``suite``
+  ``kind``, ``status``, ``repo``, ``team``, ``product``, ``suite`` (identity).
 
 **Comparison field → column mapping (LOCKED):**
-  ``created-at`` → ``created_at``
-  ``updated-at`` → ``updated_at``
-  ``last-referenced-at`` → ``last_referenced_at``
-
-**Ranking (LOCKED — sign proven in Slice 0, KU3):**
-  Full-text query → ``ORDER BY bm25(record_fts, 3.0, 2.0, 1.0)``
-  (bm25 returns negative values; no explicit ASC/DESC means ASC = best-first)
-  Pure-facet query → ``ORDER BY updated_at DESC, last_referenced_at DESC``
+  ``created-at`` → ``created_at``,  ``updated-at`` → ``updated_at``,
+  ``last-referenced-at`` → ``last_referenced_at``.
 
 **Scope (LOCKED):**
-  ``vault=X`` → ``AND records.vault = ?`` bound
-  ``vault=None`` → no vault predicate (all vaults)
+  ``vault=X`` → ``AND records.vault = ?`` bound;  ``vault=None`` → no vault predicate.
 
 **Security — injection defense (council-flagged, REQUIRED):**
 
-  *Scalar WHERE values:* ALL scalar field values, facet values, comparison values, and
-  the vault param are passed as BIND PARAMS — never string-interpolated. SQL injection
-  via any field value is therefore structurally impossible in the compiled WHERE clause.
+  *Scalar WHERE values* (field/facet/comparison values, vault, LIMIT) are BIND
+  PARAMS — never string-interpolated. SQL injection via any value is structurally
+  impossible in the compiled SQL. Column names come ONLY from the fixed allowlist
+  maps; an unmapped field is a generic ``ValueError`` (no reflected token).
 
-  *Comparison op:* the ``op`` on a ``Compare`` node comes from the TYPED AST — a fixed
-  enum ``{">=", "<=", ">", "<"}`` set at parse time. It is emitted literally (not
-  user-controlled free text at compile time), so literal emission is injection-safe.
-  An assertion guards this invariant.
+  *Comparison op* is validated against the fixed ``{">=","<=",">","<"}`` set with a
+  plain ``if … raise`` (NOT ``assert`` — ``assert`` is stripped under ``python -O``).
+  The error message is generic (no reflected ``op`` value → no log injection).
 
-  *FTS MATCH expression:* the MATCH expression string is string-constructed (SQLite
-  FTS5 ``MATCH`` takes a single string argument; we bind it as a ``?`` param so the
-  full expression is a bind param). However, the *internals* of that string are
-  constructed from parser-supplied tokens which may contain stray ``'``, ``"``, ``\\``,
-  or literal FTS operators (``AND``/``OR``/``NEAR(...)``), per the Slice 2 contract.
-
-  **FTS token sanitizer rule:**
-
-  Two sanitizer functions are used — one for bare terms (``FullText`` nodes), one for
-  phrase text (``Phrase`` nodes):
-
-  ``_sanitize_bare_term(raw)`` — for ``FullText`` tokens:
-  1. Strip all backslash characters (``\\`` has no role in FTS5 expressions).
-  2. Strip all double-quote characters (``"``).
-  3. If the cleaned result is equal (case-insensitively) to a reserved FTS5 operator
-     (``AND``, ``OR``, ``NOT``), OR if the original contained any of the stripped
-     special characters, wrap in double quotes to form a quoted FTS5 phrase.
-     A quoted FTS5 term is treated as a literal single token and cannot be
-     interpreted as a boolean operator.
-  4. Otherwise, emit the cleaned result as-is (a clean bare term like ``foo`` stays
-     ``foo`` per the LOCKED MATCH encoding spec).
-
-  ``_sanitize_phrase_text(raw)`` — for ``Phrase`` tokens:
-  1. Strip all backslash characters.
-  2. Strip all double-quote characters.
-  3. Always wrap in double quotes → ``"<cleaned>"`` so the result is a paired FTS5
-     adjacent-phrase expression.
-
-  This means:
-  - ``foo`` (bare term, clean) → ``foo``
-  - ``foo'bar`` (bare term, has single quote) → ``"foo'bar"``  (quoted)
-  - ``foo"bar`` (bare term, has double quote) → ``"foobar"``   (stripped + quoted)
-  - ``foo\\bar`` (bare term, has backslash) → ``"foobar"``    (stripped + quoted)
-  - ``AND`` (bare FTS operator as a term) → ``"AND"``         (quoted, literal)
-  - ``penny worker`` (phrase text) → ``"penny worker"``
-  - ``penny" OR "1"="1`` (phrase text, injection) → ``"penny OR 11"`` (quotes stripped)
-
-  Sanitized tokens may match fewer rows when stray chars are stripped, but they
-  NEVER raise an FTS syntax error and NEVER return spurious rows via injection.
+  *FTS MATCH strings* are bound as ``?`` params, but the FTS5 ``MATCH`` mini-language
+  interprets the string contents, so each token is run through a STRICT ALLOWLIST
+  sanitizer: a token that does not fully match ``^[-A-Za-z0-9._]+$`` (or that is a
+  reserved bare operator ``AND``/``OR``/``NOT``) is wrapped as a quoted FTS5 string
+  literal (``"…"`` with internal ``"`` stripped) so it is treated as a literal token,
+  never as FTS5 syntax (``*``, ``(``, ``)``, ``NEAR(…)``, ``^``, ``col:`` filter,
+  prefix ``foo*`` all become inert literals). Phrase text is ALWAYS wrapped in
+  ``"…"``. A token that is empty after sanitizing raises a generic compile error
+  rather than silently matching nothing.
 """
 
+import re
 from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
-# Alias + column maps
+# Alias + column maps (the ONLY source of SQL column names — no raw fallthrough)
 # ---------------------------------------------------------------------------
 
 _FACET_ALIAS_MAP = {
@@ -142,70 +139,55 @@ _COMPARE_COL_MAP = {
 
 _VALID_OPS = frozenset({">=", "<=", ">", "<"})
 
-# Facet names that are real index keys (pass through without alias lookup)
-_REAL_FACET_KEYS = frozenset({"related-area", "related-phases", "keywords"})
-# Facet names recognized as aliases (resolved before compile)
-_FACET_ALIASES = frozenset(_FACET_ALIAS_MAP.keys())
-
 
 # ---------------------------------------------------------------------------
-# FTS token sanitizers
+# FTS token sanitizers (strict allowlist)
 # ---------------------------------------------------------------------------
 
+# A token that fully matches this is a safe bare FTS5 term (unicode61 splits on
+# hyphen/dot/underscore so these are inert as far as the MATCH grammar goes).
+_FTS_BARE_SAFE = re.compile(r"^[-A-Za-z0-9._]+$")
+
+# Reserved bare FTS5 operators — must be wrapped even though they pass the regex.
 _FTS5_RESERVED_OPS = frozenset({"AND", "OR", "NOT"})
 
 
-def _sanitize_bare_term(raw: str) -> str:
-    """Sanitize a bare FullText term token for inclusion in a MATCH expression.
+def _clean_for_literal(raw: str) -> str:
+    """Strip characters that cannot live inside an FTS5 quoted literal.
 
-    A clean token (no backslashes, no double quotes, no single quotes) is emitted
-    as-is so that ``foo`` compiles to the MATCH string ``foo`` per the LOCKED spec.
-    Dirty tokens are stripped of ``\\`` and ``"`` (which break FTS5 syntax or phrase
-    boundaries), then wrapped in double quotes so they are treated as FTS5 literal
-    phrase terms rather than boolean operators.
-
-    Rules:
-      1. Strip all backslash characters (no role in FTS5).
-      2. Strip all double-quote characters.
-      3. If the original contained any special chars that break bare FTS5 terms
-         (``\\``, ``"``, or ``'`` — a bare single quote is a syntax error in FTS5),
-         OR if the cleaned result (case-insensitively) equals a reserved FTS5
-         operator (``AND`` / ``OR`` / ``NOT``), wrap the cleaned result in double
-         quotes.  Single quotes inside a double-quoted FTS5 phrase are inert.
-      4. Otherwise, emit the cleaned result bare.
-
-    Examples:
-      ``foo``      → ``foo``       (clean; emitted as-is)
-      ``foo'bar``  → ``"foo'bar"`` (single quote; quoted so FTS5 treats as literal)
-      ``foo"bar``  → ``"foobar"``  (stray double quote stripped, then quoted)
-      ``foo\\bar`` → ``"foobar"``  (backslash stripped, then quoted)
-      ``AND``      → ``"AND"``     (reserved FTS op; quoted to treat as literal)
+    Interior double quotes would terminate the literal; backslashes have no role in
+    FTS5 — both are removed so what remains is inert literal text.
     """
-    has_special = "\\" in raw or '"' in raw or "'" in raw
-    cleaned = raw.replace("\\", "").replace('"', "")
-    if has_special or cleaned.upper() in _FTS5_RESERVED_OPS:
-        return f'"{cleaned}"'
-    return cleaned
+    return raw.replace('"', "").replace("\\", "")
+
+
+def _sanitize_bare_term(raw: str) -> str:
+    """Sanitize a bare ``FullText`` term into a single-token MATCH string.
+
+    Strict allowlist: a token that fully matches ``^[-A-Za-z0-9._]+$`` and is not a
+    reserved bare operator is emitted as-is (so ``foo`` → ``foo`` per the LOCKED
+    MATCH encoding). Anything else is wrapped as a quoted FTS5 string literal so it
+    is treated as a literal token, never FTS5 syntax. Raises ``ValueError`` on a
+    token that is empty after stripping interior quotes (generic message — no
+    reflected raw token).
+    """
+    if _FTS_BARE_SAFE.match(raw) and raw.upper() not in _FTS5_RESERVED_OPS:
+        return raw
+    cleaned = _clean_for_literal(raw)
+    if not cleaned.strip():
+        raise ValueError("empty full-text term after sanitizing")
+    return f'"{cleaned}"'
 
 
 def _sanitize_phrase_text(raw: str) -> str:
-    """Sanitize a Phrase.text token and wrap it in double quotes.
+    """Sanitize a ``Phrase`` text token — ALWAYS a quoted FTS5 phrase literal.
 
-    A Phrase node always produces a ``"..."`` FTS5 adjacent-phrase expression.
-    Stray backslashes and double quotes inside the text are stripped so they cannot
-    alter phrase boundaries or break the outer quoting.
-
-    Rules:
-      1. Strip all backslash characters.
-      2. Strip all double-quote characters.
-      3. Wrap the result in double quotes → ``"<cleaned>"``.
-
-    Examples:
-      ``penny worker``        → ``"penny worker"``
-      ``penny" OR "1"="1``    → ``"penny OR 11"``
-      ``foo\\bar``            → ``"foobar"``
+    Interior double quotes are stripped so they cannot break the outer quoting.
+    Raises ``ValueError`` if the phrase is empty after stripping (generic message).
     """
-    cleaned = raw.replace("\\", "").replace('"', "")
+    cleaned = _clean_for_literal(raw)
+    if not cleaned.strip():
+        raise ValueError("empty phrase after sanitizing")
     return f'"{cleaned}"'
 
 
@@ -219,16 +201,17 @@ class CompiledQuery:
 
     Attributes:
         where:      The SQL WHERE clause fragment (without the ``WHERE`` keyword).
-                    May contain ``record_fts MATCH ?`` when ``has_fts`` is True.
-        params:     Ordered list of bind params corresponding to ``?`` placeholders
-                    in ``where`` (and in ``full_query``).
+                    Full-text predicates (``records.rowid IN (SELECT rowid FROM
+                    record_fts WHERE record_fts MATCH ?)``) are inline in the tree.
+        params:     Ordered bind params, positionally aligned with ``full_query()``:
+                    WHERE params (tree order incl. each MATCH string), then the
+                    ranking-subquery MATCH param (twice, only when ``has_fts``),
+                    then the LIMIT value.
         order_by:   The ORDER BY clause string (without the ``ORDER BY`` keyword).
         limit:      The LIMIT value (int).
-        has_fts:    True when the query contains at least one full-text node
-                    (FullText or Phrase).  Slice 4 uses this to choose the JOIN form.
-        match_expr: The assembled FTS5 MATCH expression string (empty string when
-                    ``has_fts`` is False).  This is bound as a ``?`` param — it is
-                    already the first element of ``params`` when ``has_fts`` is True.
+        has_fts:    True when the query contains at least one full-text node.
+        rank_match: The OR-combined POSITIVE full-text MATCH expression used by the
+                    bm25 ranking subquery (empty string for a pure-facet query).
     """
 
     where: str
@@ -236,32 +219,19 @@ class CompiledQuery:
     order_by: str
     limit: int
     has_fts: bool
-    match_expr: str
+    rank_match: str
 
-    def full_query(self, *, fts_join: bool = False) -> str:
-        """Assemble the full SELECT statement.
+    def full_query(self) -> str:
+        """Assemble the full SELECT statement (FROM records — no mandatory join).
 
-        Args:
-            fts_join: When True, use the FTS JOIN form (required when ``has_fts``
-                      is True so that ``bm25(record_fts, ...)`` is reachable in
-                      ORDER BY).  When False, use the plain ``FROM records`` form.
-
-        Returns:
-            A SQL string with ``?`` placeholders matching ``self.params``.
+        Returns a SQL string with ``?`` placeholders positionally aligned with
+        ``self.params``.
         """
-        if fts_join:
-            base = (
-                "SELECT records.* FROM record_fts "
-                "JOIN records ON records.rowid = record_fts.rowid"
-            )
-        else:
-            base = "SELECT * FROM records"
-
-        parts = [base]
+        parts = ["SELECT * FROM records"]
         if self.where:
             parts.append(f"WHERE {self.where}")
         parts.append(f"ORDER BY {self.order_by}")
-        parts.append(f"LIMIT {self.limit}")
+        parts.append("LIMIT ?")
         return "\n".join(parts)
 
 
@@ -269,182 +239,156 @@ class CompiledQuery:
 # Internal compiler state
 # ---------------------------------------------------------------------------
 
+_FTS_PREDICATE = (
+    "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
+)
+
+
 class _Compiler:
-    """Stateful compiler that walks the AST and builds WHERE + FTS components.
+    """Walks the AST and builds a single uniform SQL predicate channel.
 
-    Keeps two separate "channels":
-      - ``_sql_parts`` / ``_sql_params``: SQL predicates on scalar/facet columns
-      - ``_fts_expr``: the assembled FTS5 MATCH expression (as a string)
-
-    The FTS expression mirrors the boolean structure of the full-text portion of
-    the AST.  Scalar predicates never appear in the FTS expression; FTS terms never
-    appear in the SQL WHERE (they are collapsed into ``record_fts MATCH ?`` instead).
-
-    Strategy:
-      Walk the AST recursively.  Each node returns a tuple ``(sql_frag, fts_frag)``
-      where one or both may be empty.  Boolean nodes (And/Or/Not/Group) combine
-      sub-results appropriately.
+    Each ``_compile_*`` returns ``(sql_frag, params)``. Full-text nodes compile to
+    the ``_FTS_PREDICATE`` with their sanitized MATCH string as a bound param, so
+    the boolean nodes (And/Or/Not/Group) compose them with scalar/facet predicates
+    uniformly. Positive (non-negated) full-text MATCH strings are collected in
+    ``self.positive_fts`` for the bm25 ranking subquery; ``self._negated`` tracks
+    whether the current subtree sits under an odd number of ``Not`` nodes.
     """
 
-    def _compile_node(self, node) -> tuple[str, list, str]:
-        """Compile a node, returning (sql_frag, sql_params, fts_frag).
+    def __init__(self):
+        self.positive_fts: list = []
+        self._negated = False
 
-        sql_frag:   SQL predicate for this subtree (empty string if pure FTS).
-        sql_params: Bind params for sql_frag.
-        fts_frag:   FTS5 MATCH sub-expression for this subtree (empty if no FTS).
-        """
+    def _compile_node(self, node) -> tuple:
         type_name = type(node).__name__
-
-        if type_name == "FieldEq":
-            return self._compile_field_eq(node)
-        if type_name == "FacetMembership":
-            return self._compile_facet_membership(node)
-        if type_name == "FullText":
-            return self._compile_fulltext(node)
-        if type_name == "Phrase":
-            return self._compile_phrase(node)
-        if type_name == "Compare":
-            return self._compile_compare(node)
-        if type_name == "And":
-            return self._compile_and(node)
-        if type_name == "Or":
-            return self._compile_or(node)
-        if type_name == "Not":
-            return self._compile_not(node)
-        if type_name == "Group":
-            return self._compile_group(node)
-
-        raise ValueError(f"unknown AST node type: {type_name!r}")
+        handler = {
+            "FieldEq": self._compile_field_eq,
+            "FacetMembership": self._compile_facet_membership,
+            "FullText": self._compile_fulltext,
+            "Phrase": self._compile_phrase,
+            "Compare": self._compile_compare,
+            "And": self._compile_and,
+            "Or": self._compile_or,
+            "Not": self._compile_not,
+            "Group": self._compile_group,
+        }.get(type_name)
+        if handler is None:
+            raise ValueError("unknown AST node type")
+        return handler(node)
 
     # -- leaf nodes ----------------------------------------------------------
 
-    def _compile_field_eq(self, node) -> tuple[str, list, str]:
+    def _compile_field_eq(self, node) -> tuple:
         col = _SCALAR_COL_MAP.get(node.field)
         if col is None:
-            # Compare fields used with equality (non-standard but passthrough)
-            col = _COMPARE_COL_MAP.get(node.field, node.field)
-        return f"records.{col} = ?", [node.value], ""
+            col = _COMPARE_COL_MAP.get(node.field)
+        if col is None:
+            # Columns come ONLY from the fixed allowlist maps — no raw fallthrough
+            # (structural injection guard). Generic message: no reflected field.
+            raise ValueError("unknown field")
+        return f"records.{col} = ?", [node.value]
 
-    def _compile_facet_membership(self, node) -> tuple[str, list, str]:
-        # Resolve alias first
+    def _compile_facet_membership(self, node) -> tuple:
         facet = _FACET_ALIAS_MAP.get(node.facet, node.facet)
+        # NOTE: ``facet`` is passed as a BIND param (``f.facet = ?``) — it is a VALUE,
+        # not a SQL column name, so a facet name need not be allowlisted (unlike the
+        # column-name fallthroughs above, which were removed). Do not "fix" this into
+        # an allowlist lookup: an unmapped facet name is a safe literal here.
         sql = (
             "EXISTS (SELECT 1 FROM record_facet f "
             "WHERE f.id = records.id AND f.facet = ? AND f.value = ?)"
         )
-        return sql, [facet, node.value], ""
+        return sql, [facet, node.value]
 
-    def _compile_fulltext(self, node) -> tuple[str, list, str]:
-        sanitized = _sanitize_bare_term(node.term)
-        return "", [], sanitized
+    def _compile_fulltext(self, node) -> tuple:
+        match_str = _sanitize_bare_term(node.term)
+        if not self._negated:
+            self.positive_fts.append(match_str)
+        return _FTS_PREDICATE, [match_str]
 
-    def _compile_phrase(self, node) -> tuple[str, list, str]:
-        sanitized = _sanitize_phrase_text(node.text)
-        return "", [], sanitized
+    def _compile_phrase(self, node) -> tuple:
+        match_str = _sanitize_phrase_text(node.text)
+        if not self._negated:
+            self.positive_fts.append(match_str)
+        return _FTS_PREDICATE, [match_str]
 
-    def _compile_compare(self, node) -> tuple[str, list, str]:
+    def _compile_compare(self, node) -> tuple:
         op = node.op
-        assert op in _VALID_OPS, (
-            f"Compare.op must be one of {sorted(_VALID_OPS)} — got {op!r}. "
-            "This is a typed AST value set by the parser, never user free-text."
-        )
+        if op not in _VALID_OPS:
+            # Generic message — must NOT reflect the raw op value (log injection).
+            # Plain `if`, not `assert` (assert is stripped under `python -O`).
+            raise ValueError("invalid comparison operator")
         col = _COMPARE_COL_MAP.get(node.field)
         if col is None:
-            col = _SCALAR_COL_MAP.get(node.field, node.field)
-        return f"records.{col} {op} ?", [node.value], ""
+            col = _SCALAR_COL_MAP.get(node.field)
+        if col is None:
+            raise ValueError("unknown field")
+        return f"records.{col} {op} ?", [node.value]
 
     # -- boolean nodes -------------------------------------------------------
 
-    def _compile_and(self, node) -> tuple[str, list, str]:
-        ls, lp, lf = self._compile_node(node.left)
-        rs, rp, rf = self._compile_node(node.right)
-        return _combine_sql(ls, rs, "AND"), lp + rp, _combine_fts(lf, rf, "AND")
+    def _compile_and(self, node) -> tuple:
+        ls, lp = self._compile_node(node.left)
+        rs, rp = self._compile_node(node.right)
+        return _combine_sql(ls, rs, "AND"), lp + rp
 
-    def _compile_or(self, node) -> tuple[str, list, str]:
-        ls, lp, lf = self._compile_node(node.left)
-        rs, rp, rf = self._compile_node(node.right)
-        return _combine_sql(ls, rs, "OR"), lp + rp, _combine_fts(lf, rf, "OR")
+    def _compile_or(self, node) -> tuple:
+        ls, lp = self._compile_node(node.left)
+        rs, rp = self._compile_node(node.right)
+        return _combine_sql(ls, rs, "OR"), lp + rp
 
-    def _compile_not(self, node) -> tuple[str, list, str]:
-        inner_sql, inner_params, inner_fts = self._compile_node(node.operand)
-
+    def _compile_not(self, node) -> tuple:
+        prev = self._negated
+        self._negated = not prev
+        inner_sql, inner_params = self._compile_node(node.operand)
+        self._negated = prev
         sql_frag = f"NOT ({inner_sql})" if inner_sql else ""
-        fts_frag = f"NOT {inner_fts}" if inner_fts else ""
-        return sql_frag, inner_params, fts_frag
+        return sql_frag, inner_params
 
-    def _compile_group(self, node) -> tuple[str, list, str]:
-        inner_sql, inner_params, inner_fts = self._compile_node(node.inner)
-        # Wrap SQL in parens (structural grouping)
+    def _compile_group(self, node) -> tuple:
+        inner_sql, inner_params = self._compile_node(node.inner)
         sql_frag = f"({inner_sql})" if inner_sql else ""
-        # FTS side: FTS5 already handles sub-expression grouping via its own parens,
-        # but since we're building a flat FTS expression, we parenthesize here too.
-        fts_frag = f"({inner_fts})" if inner_fts else ""
-        return sql_frag, inner_params, fts_frag
+        return sql_frag, inner_params
 
-
-# ---------------------------------------------------------------------------
-# Helpers for combining SQL/FTS fragments
-# ---------------------------------------------------------------------------
 
 def _combine_sql(left_sql: str, right_sql: str, op: str) -> str:
-    """Combine two SQL fragments with a boolean operator.
-
-    If one side is empty (pure FTS node), the other side is returned as-is.
-    """
+    """Combine two SQL fragments with a boolean operator, each side parenthesized."""
     if left_sql and right_sql:
         return f"({left_sql}) {op} ({right_sql})"
     return left_sql or right_sql
-
-
-def _combine_fts(left_fts: str, right_fts: str, op: str) -> str:
-    """Combine two FTS expression fragments with a boolean operator.
-
-    If one side is empty (pure SQL node), the other side is returned as-is.
-    """
-    if left_fts and right_fts:
-        return f"{left_fts} {op} {right_fts}"
-    return left_fts or right_fts
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def compile(ast, *, vault: str | None = None, limit: int = 20) -> CompiledQuery:
+def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
     """Compile a KQL AST to a parameterized SQL fragment set.
 
     Args:
         ast:   Root AST node produced by ``kql.parse()``.
-        vault: When provided, add ``records.vault = ?`` to the WHERE clause;
-               ``None`` adds no vault predicate (all vaults).
-        limit: Maximum rows to return (default 20, per spec lock).
+        vault: When provided, add ``records.vault = ?`` to the WHERE; ``None`` adds
+               no vault predicate (all vaults).
+        limit: Maximum rows to return (default 20, per spec lock). Coerced to int.
 
     Returns:
-        A :class:`CompiledQuery` carrying the WHERE fragment, ordered bind params,
-        ORDER BY clause, LIMIT, ``has_fts`` flag, and ``match_expr`` string.
+        A :class:`CompiledQuery` whose ``params`` is positionally aligned with
+        ``full_query()`` (WHERE params, then the rank-subquery MATCH param ×2 when
+        full-text is present, then the LIMIT value).
     """
+    limit = int(limit)
+
     compiler = _Compiler()
-    sql_frag, params, fts_frag = compiler._compile_node(ast)
+    sql_frag, where_params = compiler._compile_node(ast)
 
-    has_fts = bool(fts_frag)
+    has_fts = bool(compiler.positive_fts)
 
-    # Build the final WHERE clause.
-    # When has_fts, inject the MATCH predicate into the WHERE clause so the FTS
-    # filter applies during execution.  The match_expr is bound as a ? param (first
-    # in the params list) so it is never string-interpolated into the SQL.
     where_parts = []
     final_params: list = []
 
-    if has_fts:
-        where_parts.append("record_fts MATCH ?")
-        final_params.append(fts_frag)  # match_expr bound as first param
-
     if sql_frag:
         where_parts.append(sql_frag)
-        final_params.extend(params)
-    else:
-        # No SQL predicates (pure FTS query) — params is empty
-        pass
+        final_params.extend(where_params)
 
     if vault is not None:
         where_parts.append("records.vault = ?")
@@ -452,11 +396,26 @@ def compile(ast, *, vault: str | None = None, limit: int = 20) -> CompiledQuery:
 
     where = " AND ".join(where_parts) if where_parts else "1"
 
-    # ORDER BY
     if has_fts:
-        order_by = "bm25(record_fts, 3.0, 2.0, 1.0)"
+        rank_match = " OR ".join(compiler.positive_fts)
+        bm25_subquery = (
+            "(SELECT bm25(record_fts, 3.0, 2.0, 1.0) FROM record_fts "
+            "WHERE record_fts.rowid = records.rowid AND record_fts MATCH ?)"
+        )
+        # NULL (unmatched) rows sort LAST; matched (negative) rows sort ASC = best
+        # first; recency tiebreak makes the order stable. The MATCH param appears
+        # twice (the IS NULL key and the ASC key), so it is appended twice.
+        order_by = (
+            f"{bm25_subquery} IS NULL, {bm25_subquery} ASC, "
+            "updated_at DESC, last_referenced_at DESC"
+        )
+        final_params.append(rank_match)
+        final_params.append(rank_match)
     else:
+        rank_match = ""
         order_by = "updated_at DESC, last_referenced_at DESC"
+
+    final_params.append(limit)
 
     return CompiledQuery(
         where=where,
@@ -464,5 +423,5 @@ def compile(ast, *, vault: str | None = None, limit: int = 20) -> CompiledQuery:
         order_by=order_by,
         limit=limit,
         has_fts=has_fts,
-        match_expr=fts_frag,
+        rank_match=rank_match,
     )

@@ -1,41 +1,26 @@
-"""Slice 3 (S3) tests: KQL AST → SQL compiler.
+"""Slice 3 (S3) tests: KQL AST → SQL compiler (review redesign).
 
-Covers every bullet in the plan's Slice 3 test contract:
+Full-text is a SQL-composable predicate so the WHOLE boolean tree composes
+uniformly in SQL. Each FullText/Phrase node compiles to
 
-  - Each LOCKED compile-table row produces the expected SQL fragment + params.
-  - MATCH encoding: bare term → 'foo', phrase → '"penny worker"', multi-term →
-    'penny AND worker'.
-  - Ranking: a full-text query emits bm25(...) ORDER BY; pure-facet emits recency ORDER BY.
-  - --vault adds the vault = ? param; no --vault adds no vault predicate.
-  - Injection safety: a value like ``penny' OR '1'='1`` is a bind param, not
-    interpolated; executing the compiled query against a fixture index returns no
-    spurious rows.
-  - FTS MATCH sanitizer: bare term ``foo'bar`` and a phrase containing stray
-    quotes/backslashes are sanitized so the MATCH string is well-formed, raises no
-    FTS syntax error, and matches no spurious rows (verified by executing against
-    the fixture index).
-  - --limit default 20 present; explicit --limit N overrides.
+    records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)
 
-SELECT shape for Slice 4 (LOCKED):
-  When the query has full-text terms, Slice 4 MUST execute a JOIN form so that
-  bm25(record_fts, ...) is reachable in ORDER BY:
+with the sanitized single-term/phrase MATCH string as a BOUND param. And/Or/Not/
+Group compose these full-text predicates and the scalar/facet predicates uniformly
+as SQL boolean. Ranking, when any full-text term is present, is a correlated bm25
+subquery over the OR-combined POSITIVE (non-negated) full-text terms; pure-facet
+queries use recency order.
 
-    SELECT records.* FROM record_fts
-    JOIN records ON records.rowid = record_fts.rowid
-    WHERE record_fts MATCH ?
-      AND <other predicates on records.*>
-    ORDER BY bm25(record_fts, 3.0, 2.0, 1.0)
-    LIMIT ?
+FINAL SELECT shape Slice 4 executes (LOCKED — no mandatory FTS JOIN):
 
-  For pure-facet queries (no MATCH), Slice 4 executes:
+  SELECT * FROM records
+  WHERE <predicates, full-text predicates inline>
+  ORDER BY <bm25 subquery sort key | recency>
+  LIMIT ?
 
-    SELECT * FROM records
-    WHERE <predicates>
-    ORDER BY updated_at DESC, last_referenced_at DESC
-    LIMIT ?
-
-  CompiledQuery.has_fts tells Slice 4 which form to use.
-  CompiledQuery.full_query(fts_join=True/False) returns the assembled SQL.
+Bound-param order: WHERE-clause params (tree order, including each MATCH string),
+then the ranking-subquery MATCH param (only when full-text present), then LIMIT.
+``CompiledQuery.full_query()`` + ``params`` stay positionally aligned.
 """
 
 import json
@@ -89,6 +74,7 @@ def _sidecar(
     status="active",
     keywords=None,
     related=None,
+    updated_at="2026-06-17T10:00:00Z",
 ):
     s = {
         "version": "v1",
@@ -102,7 +88,7 @@ def _sidecar(
         "repo": None,
         "created-at": "2026-06-17T10:00:00Z",
         "created-by": "tester@example.com",
-        "updated-at": "2026-06-17T10:00:00Z",
+        "updated-at": updated_at,
         "updated-by": "tester@example.com",
         "last-referenced-at": None,
     }
@@ -127,7 +113,7 @@ def fixture_index(tmp_path, index_store):
                       keywords=["search"], area=penny,
                       body="unique body word zephyr"
       - plan/beta   — kind=plan, status=draft, title="Beta Plan",
-                      body="beta only body"
+                      body="beta only body content here"
       - area/penny  — kind=area, title="Penny Area"
     """
     vault = tmp_path / "vault"
@@ -162,14 +148,50 @@ def fixture_index(tmp_path, index_store):
     return conn, vault, env
 
 
-# ---------------------------------------------------------------------------
-# Helper: execute a CompiledQuery against an open connection
-# ---------------------------------------------------------------------------
+@pytest.fixture()
+def ranking_index(tmp_path, index_store):
+    """Index with two records both matching the term 'zephyr':
 
-def _exec(conn, cq, *, fts_join=False):
-    """Execute a CompiledQuery and return all rows as a list."""
-    sql = cq.full_query(fts_join=fts_join)
-    return conn.execute(sql, cq.params).fetchall()
+      - spec/title-hit : title="zephyr report", body="filler text"  (TITLE hit)
+      - spec/body-hit  : title="Body Only", body="a zephyr in the body"  (BODY hit)
+
+    Under bm25(record_fts, 3.0, 2.0, 1.0) ASC the title hit must sort first.
+    """
+    vault = tmp_path / "vault"
+    fake_state = tmp_path / "xdg-state"
+    fake_state.mkdir()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(fake_state)
+
+    _write_record(
+        vault, "spec", "title-hit",
+        _sidecar(kind="spec", title="zephyr report", status="active"),
+        "filler text without the magic word",
+    )
+    _write_record(
+        vault, "spec", "body-hit",
+        _sidecar(kind="spec", title="Body Only", status="active"),
+        "a zephyr lives in the body content",
+    )
+    # A non-matching record to confirm NULL-score rows sort last.
+    _write_record(
+        vault, "spec", "no-hit",
+        _sidecar(kind="spec", title="Nothing", status="active"),
+        "irrelevant content entirely",
+    )
+
+    conn = index_store.open_index(env=env)
+    index_store.rebuild([str(vault)], conn)
+    conn.commit()
+    return conn, vault, env
+
+
+def _ids(rows, conn):
+    """Map sqlite Row/tuple results to the records.id values."""
+    out = []
+    for r in rows:
+        out.append(r["id"] if isinstance(r, sqlite3.Row) else r[0])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -180,125 +202,102 @@ class TestLockedCompileTable:
     """Each LOCKED compile-table row → expected SQL fragment + params."""
 
     def test_kind_scalar_field_eq(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("kind:spec"))
         assert "records.kind = ?" in cq.where
         assert "spec" in cq.params
 
     def test_status_scalar_field_eq(self, kql, compiler):
-        ast = kql.parse("status:active")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("status:active"))
         assert "records.status = ?" in cq.where
         assert "active" in cq.params
 
     def test_repo_scalar_field_eq(self, kql, compiler):
-        ast = kql.parse('repo:"trailhead-ai/trailhead"')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse('repo:"trailhead-ai/trailhead"'))
         assert "records.repo = ?" in cq.where
         assert "trailhead-ai/trailhead" in cq.params
 
     def test_team_scalar_field_eq(self, kql, compiler):
-        ast = kql.parse('team:"platform infra"')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse('team:"platform infra"'))
         assert "records.team = ?" in cq.where
         assert "platform infra" in cq.params
 
     def test_product_scalar_field_eq(self, kql, compiler):
-        ast = kql.parse("product:lore")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("product:lore"))
         assert "records.product = ?" in cq.where
         assert "lore" in cq.params
 
     def test_suite_scalar_field_eq(self, kql, compiler):
-        ast = kql.parse("suite:search")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("suite:search"))
         assert "records.suite = ?" in cq.where
         assert "search" in cq.params
 
     def test_area_alias_resolves_to_facet_exists(self, kql, compiler):
-        """area:penny → related-area facet EXISTS subquery."""
-        ast = kql.parse("area:penny")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("area:penny"))
         assert "EXISTS" in cq.where
         assert "record_facet" in cq.where
         assert "related-area" in cq.params
         assert "penny" in cq.params
 
     def test_phase_alias_resolves_to_facet_exists(self, kql, compiler):
-        """phase:build → related-phases facet EXISTS subquery."""
-        ast = kql.parse("phase:build")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("phase:build"))
         assert "EXISTS" in cq.where
         assert "related-phases" in cq.params
         assert "build" in cq.params
 
     def test_keyword_alias_resolves_to_facet_exists(self, kql, compiler):
-        """keyword:foo → keywords facet EXISTS subquery."""
-        ast = kql.parse("keyword:foo")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("keyword:foo"))
         assert "EXISTS" in cq.where
         assert "keywords" in cq.params
         assert "foo" in cq.params
 
     def test_related_area_real_key_passthrough(self, kql, compiler):
-        """related-area:penny (real key, not alias) still resolves to EXISTS."""
-        ast = kql.parse("related-area:penny")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("related-area:penny"))
         assert "EXISTS" in cq.where
         assert "related-area" in cq.params
 
     def test_related_phases_real_key_passthrough(self, kql, compiler):
-        ast = kql.parse("related-phases:build")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("related-phases:build"))
         assert "EXISTS" in cq.where
         assert "related-phases" in cq.params
 
     def test_keywords_real_key_passthrough(self, kql, compiler):
-        ast = kql.parse("keywords:foo")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("keywords:foo"))
         assert "EXISTS" in cq.where
         assert "keywords" in cq.params
 
     def test_compare_gte_created_at(self, kql, compiler):
-        ast = kql.parse('created-at >= "2026-01-01"')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse('created-at >= "2026-01-01"'))
         assert "records.created_at >= ?" in cq.where
         assert "2026-01-01" in cq.params
 
     def test_compare_lte_updated_at(self, kql, compiler):
-        ast = kql.parse('updated-at <= "2026-06-01"')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse('updated-at <= "2026-06-01"'))
         assert "records.updated_at <= ?" in cq.where
         assert "2026-06-01" in cq.params
 
     def test_compare_gt(self, kql, compiler):
-        ast = kql.parse('created-at > "2025-01-01"')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse('created-at > "2025-01-01"'))
         assert "records.created_at > ?" in cq.where
 
     def test_compare_lt_last_referenced_at(self, kql, compiler):
-        ast = kql.parse('last-referenced-at < "2026-01-01"')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse('last-referenced-at < "2026-01-01"'))
         assert "records.last_referenced_at < ?" in cq.where
 
-    def test_fulltext_bare_term(self, kql, compiler):
-        """Bare full-text term produces a MATCH expression and has_fts=True."""
-        ast = kql.parse("foo")
-        cq = compiler.compile(ast)
+    def test_fulltext_bare_term_is_sql_predicate(self, kql, compiler):
+        """A bare full-text term compiles to a SQL rowid-IN-subquery predicate."""
+        cq = compiler.compile(kql.parse("foo"))
         assert cq.has_fts
-        assert cq.match_expr == "foo"
+        assert "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)" in cq.where
+        assert "foo" in cq.params
 
-    def test_phrase_produces_quoted_match(self, kql, compiler):
-        """Quoted phrase produces a double-quoted MATCH string."""
-        ast = kql.parse('"penny worker"')
-        cq = compiler.compile(ast)
+    def test_phrase_is_sql_predicate_quoted_match(self, kql, compiler):
+        cq = compiler.compile(kql.parse('"penny worker"'))
         assert cq.has_fts
-        assert cq.match_expr == '"penny worker"'
+        assert "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)" in cq.where
+        assert '"penny worker"' in cq.params
 
     def test_and_boolean_composed(self, kql, compiler):
-        """kind:spec AND status:active → two predicates joined by AND."""
-        ast = kql.parse("kind:spec and status:active")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("kind:spec and status:active"))
         assert "records.kind = ?" in cq.where
         assert "records.status = ?" in cq.where
         assert " AND " in cq.where
@@ -306,76 +305,115 @@ class TestLockedCompileTable:
         assert "active" in cq.params
 
     def test_or_boolean_composed(self, kql, compiler):
-        """kind:spec OR kind:plan → two predicates joined by OR."""
-        ast = kql.parse("kind:spec or kind:plan")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("kind:spec or kind:plan"))
         assert " OR " in cq.where
         assert "spec" in cq.params
         assert "plan" in cq.params
 
     def test_not_boolean_composed(self, kql, compiler):
-        """-status:dropped → NOT predicate."""
-        ast = kql.parse("-status:dropped")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("-status:dropped"))
         assert "NOT " in cq.where or "NOT(" in cq.where
         assert "dropped" in cq.params
 
     def test_group_unwrapped(self, kql, compiler):
-        """Group(inner) is unwrapped via .inner — not treated as transparent."""
-        ast = kql.parse("(kind:spec or kind:plan) and status:active")
-        cq = compiler.compile(ast)
-        # The whole thing compiles without error; the paren group is just SQL parens
+        cq = compiler.compile(kql.parse("(kind:spec or kind:plan) and status:active"))
         assert "records.kind = ?" in cq.where
         assert "records.status = ?" in cq.where
 
 
 # ---------------------------------------------------------------------------
-# MATCH encoding
+# CRITICAL #1 — boolean composition across the FTS/SQL boundary
+# ---------------------------------------------------------------------------
+
+class TestBooleanComposition:
+    """Full-text composes uniformly with scalar/facet predicates in SQL."""
+
+    def test_or_of_fulltext_and_facet_preserves_or(self, kql, compiler, fixture_index):
+        """`zephyr or kind:plan`: a row matching ONLY the full-text term AND a row
+        matching ONLY kind:plan are BOTH returned (OR preserved, not AND-collapsed)."""
+        conn, vault, env = fixture_index
+        ast = kql.parse("zephyr or kind:plan")
+        cq = compiler.compile(ast)
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        ids = _ids(rows, conn)
+        # alpha matches ONLY 'zephyr' (it is kind=spec, not plan)
+        assert any(i.endswith("/spec/alpha") for i in ids), ids
+        # beta matches ONLY kind:plan (no 'zephyr' in it)
+        assert any(i.endswith("/plan/beta") for i in ids), ids
+
+    def test_or_returns_more_than_and_would(self, kql, compiler, fixture_index):
+        """OR yields a strictly larger set than the broken AND-collapse would."""
+        conn, vault, env = fixture_index
+        cq_or = compiler.compile(kql.parse("zephyr or kind:plan"))
+        cq_and = compiler.compile(kql.parse("zephyr and kind:plan"))
+        or_rows = conn.execute(cq_or.full_query(), cq_or.params).fetchall()
+        and_rows = conn.execute(cq_and.full_query(), cq_and.params).fetchall()
+        assert len(or_rows) > len(and_rows)
+        # AND of zephyr+kind:plan matches nothing (alpha is spec, beta has no zephyr)
+        assert and_rows == []
+
+    def test_leading_not_fulltext_no_fts_syntax_error(self, kql, compiler, fixture_index):
+        """`not zephyr` executes without an FTS5 syntax error (the old leading-NOT bug)."""
+        conn, vault, env = fixture_index
+        ast = kql.parse("not zephyr")
+        cq = compiler.compile(ast)
+        try:
+            rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        except sqlite3.OperationalError as exc:
+            pytest.fail(f"`not zephyr` raised OperationalError: {exc}")
+        ids = _ids(rows, conn)
+        # The complement: every record EXCEPT alpha (which contains 'zephyr')
+        assert not any(i.endswith("/spec/alpha") for i in ids), ids
+        assert any(i.endswith("/plan/beta") for i in ids), ids
+        assert any(i.endswith("/area/penny") for i in ids), ids
+
+    def test_facet_and_not_fulltext_correct_complement(self, kql, compiler, fixture_index):
+        """`kind:area not zephyr` (implicit AND) returns the correct complement set."""
+        conn, vault, env = fixture_index
+        ast = kql.parse("kind:area not zephyr")
+        cq = compiler.compile(ast)
+        try:
+            rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        except sqlite3.OperationalError as exc:
+            pytest.fail(f"`kind:area not zephyr` raised OperationalError: {exc}")
+        ids = _ids(rows, conn)
+        # Only area/penny is kind=area and it has no 'zephyr'
+        assert ids == [i for i in ids if i.endswith("/area/penny")]
+        assert any(i.endswith("/area/penny") for i in ids), ids
+
+
+# ---------------------------------------------------------------------------
+# MATCH encoding (single-term predicate strings — locked encoding preserved)
 # ---------------------------------------------------------------------------
 
 class TestMatchEncoding:
-    """Exact MATCH expression strings per the LOCKED spec."""
+    """Each full-text node carries its own single-term MATCH string param."""
 
-    def test_bare_term_match(self, kql, compiler):
-        ast = kql.parse("foo")
-        cq = compiler.compile(ast)
-        assert cq.match_expr == "foo"
+    def test_bare_term_match_param(self, kql, compiler):
+        cq = compiler.compile(kql.parse("foo"))
+        assert "foo" in cq.params
 
-    def test_phrase_match_double_quoted(self, kql, compiler):
-        """Phrase 'penny worker' → match_expr = '"penny worker"' (double quotes preserved)."""
-        ast = kql.parse('"penny worker"')
-        cq = compiler.compile(ast)
-        assert cq.match_expr == '"penny worker"'
+    def test_phrase_match_param_double_quoted(self, kql, compiler):
+        cq = compiler.compile(kql.parse('"penny worker"'))
+        assert '"penny worker"' in cq.params
 
-    def test_multi_term_and_match(self, kql, compiler):
-        """Two bare terms via implicit AND → match_expr = 'penny AND worker'."""
-        ast = kql.parse("penny worker")
-        cq = compiler.compile(ast)
-        assert cq.match_expr == "penny AND worker"
+    def test_multi_term_each_own_predicate(self, kql, compiler):
+        """`penny worker` → two separate single-term predicates (penny, worker)."""
+        cq = compiler.compile(kql.parse("penny worker"))
+        assert "penny" in cq.params
+        assert "worker" in cq.params
+        # Two rowid-IN predicates joined by AND
+        assert cq.where.count("records.rowid IN") == 2
 
-    def test_explicit_and_terms_match(self, kql, compiler):
-        ast = kql.parse("penny and worker")
-        cq = compiler.compile(ast)
-        assert cq.match_expr == "penny AND worker"
+    def test_ranking_match_or_combines_positive_terms(self, kql, compiler):
+        """The ranking subquery MATCH param OR-combines positive full-text terms."""
+        cq = compiler.compile(kql.parse("penny worker"))
+        assert cq.rank_match == "penny OR worker"
 
-    def test_or_terms_match(self, kql, compiler):
-        ast = kql.parse("penny or worker")
-        cq = compiler.compile(ast)
-        assert cq.match_expr == "penny OR worker"
-
-    def test_not_fts_term_match(self, kql, compiler):
-        ast = kql.parse("penny not worker")
-        cq = compiler.compile(ast)
-        # NOT in FTS5 boolean → NOT worker in match expr
-        assert "NOT" in cq.match_expr
-
-    def test_mixed_fts_and_facet_match(self, kql, compiler):
-        """A query with both FTS term and facet: has_fts=True, match_expr only for FTS part."""
-        ast = kql.parse("penny and kind:spec")
-        cq = compiler.compile(ast)
+    def test_mixed_fts_and_facet_keeps_facet_in_where(self, kql, compiler):
+        cq = compiler.compile(kql.parse("penny and kind:spec"))
         assert cq.has_fts
-        assert cq.match_expr == "penny"
-        # Facet part lives in WHERE
+        assert "penny" in cq.params
         assert "records.kind = ?" in cq.where
 
 
@@ -386,27 +424,51 @@ class TestMatchEncoding:
 class TestRankingSelection:
 
     def test_fulltext_query_uses_bm25_order(self, kql, compiler):
-        ast = kql.parse("foo")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("foo"))
         assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.order_by
 
     def test_pure_facet_uses_recency_order(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("kind:spec"))
         assert "updated_at" in cq.order_by
         assert "last_referenced_at" in cq.order_by
         assert "bm25" not in cq.order_by
 
     def test_phrase_query_uses_bm25_order(self, kql, compiler):
-        ast = kql.parse('"penny worker"')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse('"penny worker"'))
         assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.order_by
 
     def test_mixed_fulltext_and_facet_uses_bm25(self, kql, compiler):
-        """Any full-text term in the query → bm25 ORDER BY."""
-        ast = kql.parse("foo and kind:spec")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("foo and kind:spec"))
         assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.order_by
+
+    def test_bm25_orders_title_hit_before_body_hit(self, kql, compiler, ranking_index):
+        """A title-hit row sorts before a body-only-hit row under the bm25 ORDER BY."""
+        conn, vault, env = ranking_index
+        cq = compiler.compile(kql.parse("zephyr"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        ids = _ids(rows, conn)
+        title_idx = next(i for i, x in enumerate(ids) if x.endswith("/spec/title-hit"))
+        body_idx = next(i for i, x in enumerate(ids) if x.endswith("/spec/body-hit"))
+        assert title_idx < body_idx, ids
+
+    def test_null_score_rows_sort_last(self, kql, compiler, ranking_index):
+        """A query that returns matched + unmatched rows sorts unmatched (NULL) last."""
+        conn, vault, env = ranking_index
+        # `zephyr or kind:spec` — all three rows are kind:spec, but only two match
+        # 'zephyr'. The two zephyr-matching rows (negative bm25) must sort before the
+        # non-matching no-hit row (NULL score).
+        cq = compiler.compile(kql.parse("zephyr or kind:spec"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        ids = _ids(rows, conn)
+        no_hit_idx = next(i for i, x in enumerate(ids) if x.endswith("/spec/no-hit"))
+        # no-hit must be last (NULL score sorts after matched negative scores)
+        assert no_hit_idx == len(ids) - 1, ids
+
+    def test_pure_facet_recency_order_executes(self, kql, compiler, fixture_index):
+        conn, vault, env = fixture_index
+        cq = compiler.compile(kql.parse("status:active"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        assert len(rows) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -416,43 +478,87 @@ class TestRankingSelection:
 class TestVaultScope:
 
     def test_vault_none_adds_no_predicate(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast, vault=None)
+        cq = compiler.compile(kql.parse("kind:spec"), vault=None)
         assert "vault" not in cq.where
 
     def test_vault_name_adds_predicate(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast, vault="my-vault")
+        cq = compiler.compile(kql.parse("kind:spec"), vault="my-vault")
         assert "records.vault = ?" in cq.where
         assert "my-vault" in cq.params
 
     def test_vault_does_not_double_add_on_fulltext(self, kql, compiler):
-        ast = kql.parse("foo")
-        cq = compiler.compile(ast, vault="my-vault")
+        cq = compiler.compile(kql.parse("foo"), vault="my-vault")
         assert cq.params.count("my-vault") == 1
 
 
 # ---------------------------------------------------------------------------
-# Limit
+# Limit (bound param)
 # ---------------------------------------------------------------------------
 
 class TestLimit:
 
     def test_default_limit_is_20(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("kind:spec"))
         assert cq.limit == 20
 
     def test_explicit_limit_overrides(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast, limit=5)
+        cq = compiler.compile(kql.parse("kind:spec"), limit=5)
         assert cq.limit == 5
 
-    def test_limit_appears_in_full_query(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast, limit=7)
+    def test_limit_is_bound_param_not_interpolated(self, kql, compiler):
+        """LIMIT is a ? placeholder; the value is the last bind param."""
+        cq = compiler.compile(kql.parse("kind:spec"), limit=7)
         sql = cq.full_query()
-        assert "LIMIT" in sql.upper()
+        assert "LIMIT ?" in sql
+        assert "LIMIT 7" not in sql
+        assert cq.params[-1] == 7
+
+    def test_limit_coerced_to_int(self, kql, compiler):
+        cq = compiler.compile(kql.parse("kind:spec"), limit="9")
+        assert cq.limit == 9
+        assert cq.params[-1] == 9
+
+    def test_limit_appears_in_full_query(self, kql, compiler):
+        cq = compiler.compile(kql.parse("kind:spec"), limit=7)
+        assert "LIMIT" in cq.full_query().upper()
+
+
+# ---------------------------------------------------------------------------
+# Positional param alignment (executed)
+# ---------------------------------------------------------------------------
+
+class TestParamAlignment:
+    """full_query() placeholders and params stay positionally aligned (executed)."""
+
+    def test_param_count_matches_placeholders_pure_facet(self, kql, compiler):
+        cq = compiler.compile(kql.parse("kind:spec and status:active"), vault="v")
+        sql = cq.full_query()
+        assert sql.count("?") == len(cq.params)
+
+    def test_param_count_matches_placeholders_fulltext(self, kql, compiler):
+        cq = compiler.compile(kql.parse("penny worker and kind:spec"), vault="v")
+        sql = cq.full_query()
+        assert sql.count("?") == len(cq.params)
+
+    def test_assembled_query_executes_with_alignment(self, kql, compiler, fixture_index):
+        """A WHERE-params + rank-param + limit query executes (alignment proven)."""
+        conn, vault, env = fixture_index
+        ast = kql.parse("zephyr and kind:spec")
+        cq = compiler.compile(ast, vault=str(vault), limit=10)
+        sql = cq.full_query()
+        assert sql.count("?") == len(cq.params)
+        rows = conn.execute(sql, cq.params).fetchall()
+        ids = _ids(rows, conn)
+        assert any(i.endswith("/spec/alpha") for i in ids), ids
+
+    def test_rank_match_param_precedes_limit(self, kql, compiler):
+        """Param order: WHERE params (incl. MATCH strings), then rank MATCH, then LIMIT."""
+        cq = compiler.compile(kql.parse("zephyr"), limit=5)
+        # rank_match present and appears in params before the trailing LIMIT
+        assert cq.rank_match in cq.params
+        assert cq.params[-1] == 5
+        # The MATCH string 'zephyr' appears in WHERE position (index 0), rank later.
+        assert cq.params[0] == "zephyr"
 
 
 # ---------------------------------------------------------------------------
@@ -462,30 +568,21 @@ class TestLimit:
 class TestInjectionSafety:
 
     def test_scalar_value_is_bound_not_interpolated(self, kql, compiler):
-        """A SQL-injection payload in a field value travels as a bind param."""
-        ast = kql.parse("kind:spec")
-        # Manually craft a FieldEq with a payload value (the parser would reject it
-        # as an unknown value, but the compiler sees it as a plain string).
         kql_mod = load_script("kql")
         inject_ast = kql_mod.FieldEq(field="kind", value="penny' OR '1'='1")
         cq = compiler.compile(inject_ast)
-        # The where clause must NOT contain the literal payload string
         assert "penny' OR '1'='1" not in cq.where
-        # But it must be in params
         assert "penny' OR '1'='1" in cq.params
 
     def test_injection_value_returns_no_spurious_rows(self, kql, compiler, fixture_index):
-        """Executing the compiled query with the injection payload returns no spurious rows."""
         conn, vault, env = fixture_index
         kql_mod = load_script("kql")
-        # Craft a FieldEq with SQL injection payload
         inject_ast = kql_mod.FieldEq(field="kind", value="penny' OR '1'='1")
         cq = compiler.compile(inject_ast)
         rows = conn.execute(cq.full_query(), cq.params).fetchall()
         assert rows == [], f"injection payload returned {len(rows)} spurious rows"
 
     def test_facet_injection_in_value_is_bound(self, kql, compiler):
-        """Facet value with injection payload is also a bind param."""
         kql_mod = load_script("kql")
         inject_ast = kql_mod.FacetMembership(facet="area", value="foo' OR '1'='1")
         cq = compiler.compile(inject_ast)
@@ -494,129 +591,140 @@ class TestInjectionSafety:
 
 
 # ---------------------------------------------------------------------------
-# FTS MATCH sanitizer (council-flagged, REQUIRED)
+# SECURITY — Compare.op guard (no assert, generic message)
+# ---------------------------------------------------------------------------
+
+class TestCompareOpGuard:
+
+    def test_invalid_op_raises_value_error(self, compiler):
+        kql_mod = load_script("kql")
+        bad = kql_mod.Compare(field="created-at", op="; DROP TABLE records;--", value="x")
+        with pytest.raises(ValueError) as exc:
+            compiler.compile(bad)
+        # Generic message — must NOT reflect the raw op value (no log injection)
+        assert "DROP TABLE" not in str(exc.value)
+
+    def test_valid_op_does_not_raise(self, kql, compiler):
+        cq = compiler.compile(kql.parse('created-at >= "2026-01-01"'))
+        assert "records.created_at >= ?" in cq.where
+
+
+# ---------------------------------------------------------------------------
+# SECURITY — unknown column raises (no node.field fallthrough)
+# ---------------------------------------------------------------------------
+
+class TestUnknownColumnGuard:
+
+    def test_unknown_field_eq_column_raises(self, compiler):
+        kql_mod = load_script("kql")
+        node = kql_mod.FieldEq(field="evil_col", value="x")
+        with pytest.raises(ValueError) as exc:
+            compiler.compile(node)
+        assert "evil_col" not in str(exc.value)
+
+    def test_unknown_compare_column_raises(self, compiler):
+        kql_mod = load_script("kql")
+        node = kql_mod.Compare(field="evil_col", op=">=", value="x")
+        with pytest.raises(ValueError) as exc:
+            compiler.compile(node)
+        assert "evil_col" not in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# SECURITY — FTS5 strict-allowlist sanitizer (executed)
 # ---------------------------------------------------------------------------
 
 class TestFtsSanitizer:
-    """FTS match tokens with stray quotes/backslashes produce well-formed MATCH strings."""
+    """Strict allowlist: tokens not matching ^[-A-Za-z0-9._]+$ become quoted literals."""
 
-    def test_bare_term_with_single_quote_is_sanitized(self, kql, compiler):
-        """FullText("foo'bar") produces a well-formed match_expr (no FTS syntax error)."""
-        kql_mod = load_script("kql")
-        # Simulate what the parser would emit if it saw a stray-quote term
-        # (the parser strips quotes, but the compiler must sanitize anyway)
-        ast = kql_mod.FullText(term="foo'bar")
-        cq = compiler.compile(ast)
-        # match_expr must not contain a raw single quote that would break FTS
-        # (single quotes in bare terms are not valid FTS5 syntax)
-        assert cq.has_fts
-        assert cq.match_expr  # non-empty
+    _INJECTION_TERMS = [
+        "*",
+        "(foo",
+        "foo)",
+        "NEAR(foo,bar)",
+        "^foo",
+        "foo*",
+        "body:zephyr",
+        "col:nonexistent",
+        "(foo OR bar)",
+    ]
 
-    def test_sanitized_term_raises_no_fts_error_on_execute(self, kql, compiler, fixture_index):
-        """Executing a query with a sanitized stray-quote term raises no FTS syntax error."""
-        conn, vault, env = fixture_index
-        kql_mod = load_script("kql")
-        ast = kql_mod.FullText(term="foo'bar")
-        cq = compiler.compile(ast)
-        # Must not raise sqlite3.OperationalError
-        try:
-            rows = conn.execute(
-                "SELECT records.* FROM record_fts "
-                "JOIN records ON records.rowid = record_fts.rowid "
-                f"WHERE record_fts MATCH ?",
-                (cq.match_expr,),
-            ).fetchall()
-        except sqlite3.OperationalError as exc:
-            pytest.fail(f"Sanitized FTS term raised OperationalError: {exc}")
-        # No spurious rows (no record has 'foo'bar' in it)
-        assert rows == []
-
-    def test_phrase_with_stray_double_quote_is_sanitized(self, kql, compiler):
-        """Phrase.text with stray double quote is sanitized so match_expr is well-formed."""
-        kql_mod = load_script("kql")
-        # Phrase text containing an embedded double quote (injection attempt)
-        ast = kql_mod.Phrase(text='penny" OR "1"="1')
-        cq = compiler.compile(ast)
-        assert cq.has_fts
-        # The match_expr must not have unmatched or stray quotes that break FTS
-        assert cq.match_expr
-
-    def test_phrase_stray_quote_raises_no_fts_error_on_execute(
-        self, kql, compiler, fixture_index
+    @pytest.mark.parametrize("term", _INJECTION_TERMS)
+    def test_injection_term_compiles_and_executes_no_error(
+        self, kql, compiler, fixture_index, term
     ):
-        """Executing a phrase with stray quotes sanitized raises no FTS syntax error."""
         conn, vault, env = fixture_index
         kql_mod = load_script("kql")
-        ast = kql_mod.Phrase(text='penny" OR "1"="1')
+        ast = kql_mod.FullText(term=term)
         cq = compiler.compile(ast)
         try:
-            rows = conn.execute(
-                "SELECT records.* FROM record_fts "
-                "JOIN records ON records.rowid = record_fts.rowid "
-                f"WHERE record_fts MATCH ?",
-                (cq.match_expr,),
-            ).fetchall()
+            rows = conn.execute(cq.full_query(), cq.params).fetchall()
         except sqlite3.OperationalError as exc:
-            pytest.fail(f"Phrase with stray quote raised OperationalError: {exc}")
+            pytest.fail(f"FTS term {term!r} raised OperationalError: {exc}")
+        # No spurious rows — these are literal tokens that match nothing in the fixture
+        assert rows == [], f"{term!r} returned {len(rows)} spurious rows"
+
+    def test_clean_bare_term_stays_unquoted(self, kql, compiler):
+        cq = compiler.compile(kql.parse("zephyr"))
+        assert "zephyr" in cq.params  # emitted bare, not '"zephyr"'
+
+    def test_reserved_op_term_is_quoted(self, kql, compiler):
+        kql_mod = load_script("kql")
+        cq = compiler.compile(kql_mod.FullText(term="AND"))
+        assert '"AND"' in cq.params
+
+    def test_dotted_term_stays_unquoted(self, kql, compiler):
+        """A token matching the allowlist (dot/hyphen/underscore) stays bare."""
+        kql_mod = load_script("kql")
+        cq = compiler.compile(kql_mod.FullText(term="phi-scrubber.v2"))
+        assert "phi-scrubber.v2" in cq.params
+
+    def test_single_quote_term_becomes_quoted_literal(self, kql, compiler, fixture_index):
+        conn, vault, env = fixture_index
+        kql_mod = load_script("kql")
+        cq = compiler.compile(kql_mod.FullText(term="foo'bar"))
+        try:
+            rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        except sqlite3.OperationalError as exc:
+            pytest.fail(f"single-quote term raised OperationalError: {exc}")
         assert rows == []
 
-    def test_bare_term_with_backslash_is_sanitized(self, kql, compiler, fixture_index):
-        """FullText with backslash is sanitized, raises no FTS error on execute."""
-        conn, vault, env = fixture_index
+    def test_phrase_always_wrapped(self, kql, compiler):
         kql_mod = load_script("kql")
-        ast = kql_mod.FullText(term="foo\\bar")
-        cq = compiler.compile(ast)
-        try:
-            conn.execute(
-                "SELECT records.* FROM record_fts "
-                "JOIN records ON records.rowid = record_fts.rowid "
-                f"WHERE record_fts MATCH ?",
-                (cq.match_expr,),
-            ).fetchall()
-        except sqlite3.OperationalError as exc:
-            pytest.fail(f"Backslash term raised OperationalError: {exc}")
+        cq = compiler.compile(kql_mod.Phrase(text="penny worker"))
+        assert '"penny worker"' in cq.params
 
-    def test_sanitized_term_matches_no_spurious_rows(self, kql, compiler, fixture_index):
-        """A sanitized injection payload in a FTS term returns no spurious rows."""
+    def test_phrase_with_stray_quotes_sanitized(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
         kql_mod = load_script("kql")
-        # Injection attempt: try to break out of the MATCH phrase
-        ast = kql_mod.FullText(term='zephyr" OR "')
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql_mod.Phrase(text='penny" OR "1"="1'))
         try:
-            rows = conn.execute(
-                "SELECT records.* FROM record_fts "
-                "JOIN records ON records.rowid = record_fts.rowid "
-                f"WHERE record_fts MATCH ?",
-                (cq.match_expr,),
-            ).fetchall()
+            rows = conn.execute(cq.full_query(), cq.params).fetchall()
         except sqlite3.OperationalError as exc:
-            pytest.fail(f"FTS injection raised OperationalError: {exc}")
-        # 'zephyr' IS in one record body, but 'zephyr" OR "' (as injected) must not
-        # return the alpha record OR any spurious rows via injection
-        # (sanitization wraps in quotes so the whole thing is one token, which won't match)
-        assert len(rows) == 0, (
-            f"injection payload returned {len(rows)} rows — sanitizer breakout"
-        )
+            pytest.fail(f"phrase stray-quote raised OperationalError: {exc}")
+        assert rows == []
 
-    def test_fts_literal_operator_in_term_is_neutralized(self, kql, compiler, fixture_index):
-        """A bare term containing 'AND' or 'OR' as text is not treated as FTS operator."""
-        conn, vault, env = fixture_index
+
+# ---------------------------------------------------------------------------
+# SECURITY — empty-after-strip token raises a clean compile error
+# ---------------------------------------------------------------------------
+
+class TestEmptyAfterStrip:
+
+    @pytest.mark.parametrize("term", ['"', "\\", '""'])
+    def test_empty_after_strip_raises(self, compiler, term):
         kql_mod = load_script("kql")
-        # The term 'ANDING' should not be split into 'AND' + 'ING' as FTS operators.
-        # But more dangerously, a term that IS a bare FTS operator shouldn't break things.
-        ast = kql_mod.FullText(term="AND")
-        cq = compiler.compile(ast)
-        # Must not raise FTS syntax error
-        try:
-            conn.execute(
-                "SELECT records.* FROM record_fts "
-                "JOIN records ON records.rowid = record_fts.rowid "
-                f"WHERE record_fts MATCH ?",
-                (cq.match_expr,),
-            ).fetchall()
-        except sqlite3.OperationalError as exc:
-            pytest.fail(f"Bare 'AND' term raised OperationalError: {exc}")
+        node = kql_mod.FullText(term=term)
+        with pytest.raises(ValueError) as exc:
+            compiler.compile(node)
+        # Generic — does NOT reflect the raw token
+        assert term not in str(exc.value) or term == ""
+
+    def test_empty_phrase_raises(self, compiler):
+        kql_mod = load_script("kql")
+        node = kql_mod.Phrase(text='""')
+        with pytest.raises(ValueError):
+            compiler.compile(node)
 
 
 # ---------------------------------------------------------------------------
@@ -625,74 +733,53 @@ class TestFtsSanitizer:
 
 class TestFullQueryShape:
 
-    def test_pure_facet_full_query_selects_from_records(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
-        sql = cq.full_query(fts_join=False)
+    def test_full_query_selects_from_records(self, kql, compiler):
+        cq = compiler.compile(kql.parse("kind:spec"))
+        sql = cq.full_query()
         assert sql.lstrip().upper().startswith("SELECT")
         assert "FROM records" in sql
         assert "LIMIT" in sql.upper()
 
-    def test_fts_full_query_uses_join_form(self, kql, compiler):
-        """full_query(fts_join=True) uses the JOIN form for bm25() reachability."""
-        ast = kql.parse("foo")
-        cq = compiler.compile(ast)
-        sql = cq.full_query(fts_join=True)
-        assert "JOIN records" in sql
-        assert "record_fts MATCH" in sql
+    def test_fulltext_full_query_no_mandatory_join(self, kql, compiler):
+        """Full-text query FROM is just `records` — full-text lives in WHERE."""
+        cq = compiler.compile(kql.parse("foo"))
+        sql = cq.full_query()
+        assert "FROM records" in sql
+        assert "JOIN record_fts" not in sql
+        assert "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)" in sql
         assert "bm25(record_fts, 3.0, 2.0, 1.0)" in sql
 
     def test_fts_full_query_executes_against_fixture(self, kql, compiler, fixture_index):
-        """A full-text query compiled and executed via the JOIN form returns rows."""
         conn, vault, env = fixture_index
-        ast = kql.parse("zephyr")
-        cq = compiler.compile(ast)
-        sql = cq.full_query(fts_join=True)
-        # The match_expr is bound in params; sql contains MATCH ? placeholder
-        rows = conn.execute(sql, cq.params).fetchall()
+        cq = compiler.compile(kql.parse("zephyr"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
         assert len(rows) >= 1, "expected at least one row matching 'zephyr'"
 
-    def test_pure_facet_full_query_executes_against_fixture(
-        self, kql, compiler, fixture_index
-    ):
-        """A pure-facet query compiled and executed returns rows from records."""
+    def test_pure_facet_full_query_executes_against_fixture(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
-        sql = cq.full_query(fts_join=False)
-        rows = conn.execute(sql, cq.params).fetchall()
-        # alpha is kind=spec
+        cq = compiler.compile(kql.parse("kind:spec"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
         assert len(rows) == 1
 
-    def test_area_facet_query_executes_against_fixture(
-        self, kql, compiler, fixture_index
-    ):
-        """area:penny returns the record that declared area:penny (forward edge)."""
+    def test_area_facet_query_executes_against_fixture(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
-        ast = kql.parse("area:penny")
-        cq = compiler.compile(ast)
-        sql = cq.full_query(fts_join=False)
-        rows = conn.execute(sql, cq.params).fetchall()
+        cq = compiler.compile(kql.parse("area:penny"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
         assert len(rows) >= 1, "expected at least one record with area:penny"
 
     def test_vault_scope_narrows_results(self, kql, compiler, fixture_index):
-        """vault= narrows results to that vault; wrong vault returns nothing."""
         conn, vault, env = fixture_index
-        ast = kql.parse("kind:spec")
-        cq_with = compiler.compile(ast, vault=str(vault))
+        cq_with = compiler.compile(kql.parse("kind:spec"), vault=str(vault))
         rows_with = conn.execute(cq_with.full_query(), cq_with.params).fetchall()
         assert len(rows_with) == 1
 
-        cq_wrong = compiler.compile(ast, vault="nonexistent-vault")
+        cq_wrong = compiler.compile(kql.parse("kind:spec"), vault="nonexistent-vault")
         rows_wrong = conn.execute(cq_wrong.full_query(), cq_wrong.params).fetchall()
         assert rows_wrong == []
 
     def test_limit_caps_results(self, kql, compiler, fixture_index):
-        """limit=1 caps results to 1 even when more rows exist."""
         conn, vault, env = fixture_index
-        # All records (3 total)
-        ast = kql.parse("status:active or status:draft")
-        cq = compiler.compile(ast, limit=1)
+        cq = compiler.compile(kql.parse("status:active or status:draft"), limit=1)
         rows = conn.execute(cq.full_query(), cq.params).fetchall()
         assert len(rows) == 1
 
@@ -703,32 +790,23 @@ class TestFullQueryShape:
 
 class TestCompiledQueryStructure:
 
-    def test_compiled_query_has_where_params_order_by_limit(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
-        assert hasattr(cq, "where")
-        assert hasattr(cq, "params")
-        assert hasattr(cq, "order_by")
-        assert hasattr(cq, "limit")
-        assert hasattr(cq, "has_fts")
-        assert hasattr(cq, "match_expr")
+    def test_compiled_query_has_expected_attrs(self, kql, compiler):
+        cq = compiler.compile(kql.parse("kind:spec"))
+        for attr in ("where", "params", "order_by", "limit", "has_fts", "rank_match"):
+            assert hasattr(cq, attr), attr
 
     def test_params_is_list(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("kind:spec"))
         assert isinstance(cq.params, list)
 
     def test_has_fts_false_for_pure_facet(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("kind:spec"))
         assert cq.has_fts is False
 
     def test_has_fts_true_for_fulltext(self, kql, compiler):
-        ast = kql.parse("foo")
-        cq = compiler.compile(ast)
+        cq = compiler.compile(kql.parse("foo"))
         assert cq.has_fts is True
 
-    def test_match_expr_empty_for_pure_facet(self, kql, compiler):
-        ast = kql.parse("kind:spec")
-        cq = compiler.compile(ast)
-        assert not cq.match_expr  # empty string / None / falsy
+    def test_rank_match_empty_for_pure_facet(self, kql, compiler):
+        cq = compiler.compile(kql.parse("kind:spec"))
+        assert not cq.rank_match
