@@ -34,9 +34,13 @@ write).
   *all kinds eligible*.
 - ``shared`` is a bool (default ``False`` = own/trusted); the ``default``-scope
   vault is always ``shared=False`` and may not be declared ``shared: true``.
-- ``path`` is the resolved ``Path`` for the vault's on-disk directory,
-  confined via ``layers.assert_within_root`` so an explicit ``path`` entry
-  cannot escape the vaults root.
+- ``path`` is the resolved ``Path`` for the vault's on-disk directory. A
+  *relative* explicit ``path`` is confined via ``layers.assert_within_root``
+  to the vaults root; an *absolute* explicit ``path`` is **honored as given**
+  (the spec's "an explicit path is honored" rule) and may legitimately point
+  outside the vaults tree — confinement is only enforced for the
+  derived/relative case. (Destructive ops like ``vault delete
+  --remove-from-disk`` re-confine at the call site; see ``cli/lore``.)
 
 **Validation rules — all hard errors (raise :class:`VaultConfigError`):**
 
@@ -51,9 +55,12 @@ write).
 
 **Path derivation:** default path is
 ``state_dir("lore")/vaults/<normalized-name>``; an explicit ``path`` entry
-overrides. The resolved path is confined via
-``layers.assert_within_root(candidate, vaults_root)`` so explicit paths
-cannot escape the vaults tree (symlink-safe, realpath-based).
+overrides. A *relative* explicit path is confined via
+``layers.assert_within_root(candidate, vaults_root)`` (symlink-safe,
+realpath-based); an *absolute* explicit path is honored as given. **Side
+effect:** when an explicit path is present, validation ``mkdir``s the vaults
+root so realpath-confinement can resolve through real directories — i.e.
+:func:`validate_config` is not strictly filesystem-inert in that case.
 
 **Important — apply ``validate_layer_name`` AFTER normalization only.**
 ``layers.validate_layer_name`` rejects ``/`` (``layers.py:78``), and a repo
@@ -472,7 +479,10 @@ def write_config_atomic(path, config: dict) -> None:
         ``OSError`` from the dump or replace propagates as-is.
     """
     path = Path(path)
-    tmp_path = path.with_suffix(".tmp")
+    # Pid-scoped temp name (same directory → same filesystem, atomic replace)
+    # so two concurrent writers can't clobber each other's in-flight temp file,
+    # matching record_store.write_temp_then_rename's convention.
+    tmp_path = path.with_suffix(f".{os.getpid()}.tmp")
     try:
         with tmp_path.open("w", encoding="utf-8") as fh:
             json.dump(config, fh, indent=2, ensure_ascii=False)
