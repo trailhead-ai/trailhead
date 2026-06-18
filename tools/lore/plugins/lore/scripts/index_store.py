@@ -378,18 +378,24 @@ def rebuild(
                 md_path = kind_dir / f"{name}.md"
                 if not md_path.exists():
                     continue
+                # I-2: the projection (records INSERT included) is inside the
+                # skip guard so a single malformed sidecar — bad JSON, unreadable
+                # body, OR a NOT NULL / CHECK violation at INSERT — skips that one
+                # record instead of aborting the whole rebuild. ``reindex`` is the
+                # recovery path; it must stay rebuildable even over a corrupted or
+                # hand-truncated sidecar.
                 try:
                     import json as _json
                     sidecar = _json.loads(json_path.read_text())
                     body = md_path.read_text()
                     stat = md_path.stat()
+                    record_id = _project_record(
+                        conn, vault_str, kind, name, sidecar, body, layer,
+                        src_mtime=stat.st_mtime, src_size=stat.st_size,
+                    )
                 except Exception:
                     continue
 
-                record_id = _project_record(
-                    conn, vault_str, kind, name, sidecar, body, layer,
-                    src_mtime=stat.st_mtime, src_size=stat.st_size,
-                )
                 name_index[(kind, name)] = record_id
 
                 related = sidecar.get("related")

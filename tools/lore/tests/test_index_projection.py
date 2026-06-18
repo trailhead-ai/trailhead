@@ -537,6 +537,39 @@ def test_reindex_idempotent(env, tmp_path):
     assert facets1 == facets2 == 2
 
 
+def test_reindex_skips_malformed_sidecar_without_aborting(env, tmp_path):
+    """One malformed sidecar must skip that record, not abort the whole rebuild (I-2).
+
+    ``reindex`` is the recovery path; it must stay rebuildable even over a corrupted
+    or hand-truncated sidecar. A sidecar missing a NOT NULL field (here ``created-at``,
+    which is fed un-coerced into the ``created_at TEXT NOT NULL`` column) raises an
+    IntegrityError at the records INSERT — that must be caught per-record so the good
+    records still index.
+    """
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(
+        vault, "spec", "good",
+        _sidecar(title="Good", keywords=["g"]),
+        "body",
+    )
+    # A malformed sidecar: valid JSON, complete file pair, but missing the NOT NULL
+    # ``created-at`` so _project_record's records INSERT raises IntegrityError.
+    bad = _sidecar(title="Bad")
+    del bad["created-at"]
+    _write_record(vault, "spec", "bad", bad, "body")
+
+    conn = mod.open_index(env=env)
+    try:
+        count = mod.rebuild([str(vault)], conn)  # must not raise
+        conn.commit()
+        names = {r[0] for r in conn.execute("SELECT name FROM records").fetchall()}
+    finally:
+        conn.close()
+    assert count == 1, "only the good record should be indexed"
+    assert names == {"good"}, "malformed sidecar skipped, good record survives"
+
+
 def test_reindex_drops_deleted_records_and_facets(env, tmp_path):
     """A since-deleted record's records AND record_facet rows are gone after rebuild."""
     mod = load_index_store()
