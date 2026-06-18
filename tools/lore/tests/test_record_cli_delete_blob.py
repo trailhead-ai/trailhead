@@ -34,7 +34,6 @@ Never writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys

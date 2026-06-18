@@ -30,7 +30,6 @@ columns. **No FTS5/BM25** — that is S3. Because the index is derived and
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from pathlib import Path
 from typing import Any

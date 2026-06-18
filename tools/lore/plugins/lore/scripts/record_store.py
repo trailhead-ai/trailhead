@@ -202,8 +202,8 @@ def _validate_hunk_counts(hunk: _Hunk) -> None:
     misdrive the apply. This check uses the counts only to detect the one ambiguous
     difflib format above; a surplus is harmless and intentionally not rejected.
     """
-    old_seen = sum(1 for l in hunk.lines if l and l[0] in (" ", "-"))
-    new_seen = sum(1 for l in hunk.lines if l and l[0] in (" ", "+"))
+    old_seen = sum(1 for ln in hunk.lines if ln and ln[0] in (" ", "-"))
+    new_seen = sum(1 for ln in hunk.lines if ln and ln[0] in (" ", "+"))
     if old_seen < hunk.old_count or new_seen < hunk.new_count:
         raise DiffFormatError(
             f"Hunk {hunk.header!r}: parsed {old_seen}/{hunk.old_count} old lines "
