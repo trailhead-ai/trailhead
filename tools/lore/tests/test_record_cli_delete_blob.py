@@ -316,3 +316,79 @@ def test_blob_accepts_benign_nested_path(tmp_path):
     target = vault / "blob" / "a" / "b" / "c.md"
     assert target.exists()
     assert target.read_text(encoding="utf-8") == "benign content\n"
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL security regression (audit Finding 1/5): RECORD_ID confinement on
+# delete + update. A crafted ID with '..' / absolute segments must NOT delete
+# or overwrite .md/.json files outside the active vault.
+# ---------------------------------------------------------------------------
+
+def _make_outside_victim(tmp_path: Path) -> Path:
+    """Create a sibling 'other-vault' with a victim spec record outside the vault."""
+    other = tmp_path / "other-vault" / "spec"
+    other.mkdir(parents=True, exist_ok=True)
+    (other / "victim.md").write_text("important other-vault content\n", encoding="utf-8")
+    (other / "victim.json").write_text('{"kind": "spec"}\n', encoding="utf-8")
+    return other
+
+
+@pytest.mark.parametrize(
+    "evil_id",
+    [
+        "../other-vault/spec/victim",          # climb out of the vault root
+        "spec/../../other-vault/spec/victim",  # climb out via the name half
+        "/etc/passwd",                          # absolute (no slash-split escape)
+        "spec/../../../etc/hosts",              # deep traversal
+    ],
+)
+def test_delete_rejects_record_id_escaping_vault(tmp_path, evil_id):
+    """A traversal RECORD_ID on delete → non-zero, victim files untouched (AC14a)."""
+    vault, state = _make_vault(tmp_path)
+    victim = _make_outside_victim(tmp_path)
+
+    r = _run(["record", "delete", evil_id], vault=vault, state_dir=state)
+    assert r.returncode != 0, f"escape ID {evil_id!r} was not rejected: {r.stdout!r}"
+    # The outside victim must still be on disk — nothing deleted outside the vault.
+    assert (victim / "victim.md").exists()
+    assert (victim / "victim.json").exists()
+
+
+@pytest.mark.parametrize(
+    "evil_id",
+    [
+        "../other-vault/spec/victim",
+        "spec/../../other-vault/spec/victim",
+        "/etc/passwd",
+    ],
+)
+def test_update_rejects_record_id_escaping_vault(tmp_path, evil_id):
+    """A traversal RECORD_ID on update → non-zero, victim files unmodified (AC14a)."""
+    vault, state = _make_vault(tmp_path)
+    victim = _make_outside_victim(tmp_path)
+    before = (victim / "victim.md").read_text(encoding="utf-8")
+
+    r = _run(
+        ["record", "update", evil_id],
+        vault=vault, state_dir=state,
+        stdin_text="HIJACKED BODY\n",
+    )
+    assert r.returncode != 0, f"escape ID {evil_id!r} was not rejected: {r.stdout!r}"
+    # The outside victim body must be byte-for-byte unchanged.
+    assert (victim / "victim.md").read_text(encoding="utf-8") == before
+
+
+# ---------------------------------------------------------------------------
+# blob degenerate-path guard (audit Finding 3): '.' must not slip a transient
+# .tmp write to the vault level. (Finding 4 — NUL byte — cannot traverse argv:
+# execve/subprocess reject an embedded NUL before the CLI runs, so the in-CLI
+# NUL guard is defense-in-depth and not exercisable via the subprocess harness.)
+# ---------------------------------------------------------------------------
+
+def test_blob_rejects_dot_path(tmp_path):
+    """blob path '.' → non-zero, no stray .tmp written at the vault level (Finding 3)."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(["record", "blob", "."], vault=vault, state_dir=state, stdin_text="x\n")
+    assert r.returncode != 0
+    # No transient blob*.tmp leaked at the vault root level.
+    assert list(vault.glob("blob*.tmp")) == []

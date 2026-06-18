@@ -1694,7 +1694,10 @@ def _cmd_record_delete(args: argparse.Namespace) -> int:
             conn.commit()
         finally:
             conn.close()
-    except record_store_mod.RecordNotFoundError as exc:
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
@@ -1739,6 +1742,12 @@ def _cmd_record_blob(args: argparse.Namespace) -> int:
         print("error: blob path is required", file=sys.stderr)
         return 1
 
+    # 0. Reject NUL bytes — pathlib silently strips them, so guard before any
+    # Path() handling produces a confusing downstream error (audit Finding 4).
+    if "\x00" in blob_path:
+        print("error: blob path must not contain NUL bytes", file=sys.stderr)
+        return 1
+
     # 1. Reject absolute paths.
     if os.path.isabs(blob_path):
         print(
@@ -1747,11 +1756,15 @@ def _cmd_record_blob(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # 2. Reject any '..' segment (early rejection before realpath).
+    # 2. Reject any '..' or degenerate '.'/empty segment. Path('.').parts == ()
+    # so a bare '.' would otherwise resolve to blob_root itself and slip a
+    # transient .tmp write to the vault level (audit Finding 3); require at least
+    # one real named segment.
     path_parts = Path(blob_path).parts
-    if ".." in path_parts:
+    if not path_parts or ".." in path_parts or "." in path_parts:
         print(
-            f"error: blob path must not contain '..' traversal segments: {blob_path!r}",
+            f"error: blob path must be a relative path with no '..'/'.' segments: "
+            f"{blob_path!r}",
             file=sys.stderr,
         )
         return 1
@@ -2045,7 +2058,10 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
             conn.commit()
         finally:
             conn.close()
-    except record_store_mod.RecordNotFoundError as exc:
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except record_store_mod.RecordValidationError as exc:

@@ -117,6 +117,17 @@ class RecordNotFoundError(RecordStoreError):
     """The record ID does not resolve to an on-disk record."""
 
 
+class InvalidRecordIdError(RecordStoreError):
+    """The RECORD_ID is malformed or would escape the vault root.
+
+    A RECORD_ID is a vault-relative ``<kind>/<name>`` path. Any ``..`` segment,
+    absolute component, NUL byte, or empty part is rejected here — the same
+    confinement AC14a mandates for ``blob`` paths, applied symmetrically to every
+    RECORD_ID-bearing op (``update``/``delete``) so a crafted ID cannot read,
+    overwrite, or unlink ``.md``/``.json`` files outside the active vault.
+    """
+
+
 class DiffRejectError(RecordStoreError):
     """A unified diff is valid format but its context doesn't match the body (Slice 4, KU2).
 
@@ -444,6 +455,49 @@ def _unique_stem(kind_dir: Path, base: str) -> str:
     return f"{base}-{counter}"
 
 
+def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, Path]:
+    """Validate a ``<kind>/<name>`` RECORD_ID and resolve its confined paths (AC14a).
+
+    Returns ``(kind, name, body_path, sidecar_path)``. Raises
+    :class:`InvalidRecordIdError` if the ID is malformed or would escape the vault:
+    a missing slash, a NUL byte, any empty / ``.`` / ``..`` path segment, an
+    absolute component, or a resolved ``.md``/``.json`` path whose realpath is not a
+    descendant of the vault root (the same realpath-descendant check ``blob`` uses,
+    catching symlinked ``kind`` dirs). This is the library-boundary guard so every
+    RECORD_ID-bearing caller (``update`` via :func:`locate_record`, ``delete`` via
+    :func:`delete_record`) is confined symmetrically.
+    """
+    if not record_id or "\x00" in record_id or "/" not in record_id:
+        raise InvalidRecordIdError(f"malformed RECORD_ID: {record_id!r}")
+    kind, name = record_id.split("/", 1)
+    # Reject absolute components and any degenerate / traversal segment in EITHER
+    # half. Path(...).parts surfaces every segment; an absolute path yields a
+    # leading "/" part, and "."/".." are caught explicitly (Path(".").parts == ()).
+    if os.path.isabs(kind) or os.path.isabs(name):
+        raise InvalidRecordIdError(f"RECORD_ID must be vault-relative: {record_id!r}")
+    # Every path segment of both halves must be a real name — no empty, ".", or
+    # ".." segments (Path(...).parts splits on "/", so segments never contain it).
+    segments = [kind, *Path(name).parts]
+    if not segments or any(seg in ("", ".", "..") for seg in segments):
+        raise InvalidRecordIdError(f"illegal RECORD_ID segment in {record_id!r}")
+
+    kind_dir = Path(root) / kind
+    body_path = kind_dir / f"{name}.md"
+    sidecar_path = kind_dir / f"{name}.json"
+
+    # Realpath-descendant containment (catches symlink escapes). Resolve against
+    # the vault root's realpath with an explicit os.sep guard so a sibling dir
+    # sharing a name prefix cannot satisfy the check.
+    root_real = os.path.realpath(root)
+    for p in (body_path, sidecar_path):
+        p_real = os.path.realpath(p)
+        if p_real != root_real and not p_real.startswith(root_real + os.sep):
+            raise InvalidRecordIdError(
+                f"RECORD_ID resolves outside the vault root: {record_id!r}"
+            )
+    return kind, name, body_path, sidecar_path
+
+
 # ---------------------------------------------------------------------------
 # place_record
 # ---------------------------------------------------------------------------
@@ -498,11 +552,8 @@ def locate_record(
     in place (preserving the ID). Raises :class:`RecordNotFoundError` when neither
     artifact exists (AC8).
     """
-    kind, name = record_id.split("/", 1)
     root = vault_root if vault_root is not None else vault_mod.resolve_vault()
-    kind_dir = Path(root) / kind
-    body_path = kind_dir / f"{name}.md"
-    sidecar_path = kind_dir / f"{name}.json"
+    kind, name, body_path, sidecar_path = _confine_record_id(record_id, root)
     if not body_path.exists() and not sidecar_path.exists():
         raise RecordNotFoundError(f"record not found: {record_id}")
     return RecordLocation(
@@ -673,10 +724,8 @@ def delete_record(
 
     A missing ID (neither artifact on disk) → :class:`RecordNotFoundError`.
     """
-    kind, name = record_id.split("/", 1)
     root = vault_root if vault_root is not None else vault_mod.resolve_vault()
-    body_path = Path(root) / kind / f"{name}.md"
-    sidecar_path = Path(root) / kind / f"{name}.json"
+    kind, name, body_path, sidecar_path = _confine_record_id(record_id, root)
 
     if not body_path.exists() and not sidecar_path.exists():
         raise RecordNotFoundError(f"record not found: {record_id}")
