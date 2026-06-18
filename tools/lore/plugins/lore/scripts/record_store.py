@@ -60,7 +60,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 import index_store
 import record_model
@@ -115,6 +115,201 @@ class RecordValidationError(RecordStoreError):
 
 class RecordNotFoundError(RecordStoreError):
     """The record ID does not resolve to an on-disk record."""
+
+
+class DiffRejectError(RecordStoreError):
+    """A unified diff is valid format but its context doesn't match the body (Slice 4, KU2).
+
+    A *stale* diff: the structure parses, but one or more hunks' context/deletion
+    lines do not match the current body verbatim (so the diff was generated from a
+    different version of the body). On reject the on-disk body is byte-for-byte
+    unchanged and NO index update happens (AC-DIFF1).
+
+    Attributes:
+        original_body: the body exactly as received — byte-for-byte unmodified.
+        rejected: list of ``(header, reason)`` pairs for each failing hunk, in a
+            stable order, for the CLI's parseable one-line-per-hunk stderr output.
+    """
+
+    def __init__(self, original_body: str, rejected: list[tuple[str, str]]) -> None:
+        self.original_body = original_body
+        self.rejected = rejected
+        super().__init__(
+            f"{len(rejected)} hunk(s) rejected: "
+            + "; ".join(f"{h}: {r}" for h, r in rejected)
+        )
+
+
+class DiffFormatError(RecordStoreError):
+    """A unified diff string is structurally unparseable (Slice 4, KU2).
+
+    Distinct from :class:`DiffRejectError` (valid format, stale context). The known
+    trigger is ``difflib.unified_diff``'s **concatenated-no-newline** edge case:
+    when BOTH the deleted and the inserted line lack a trailing newline it emits
+    ``-old+new`` with no separator, and the embedded ``+`` is indistinguishable
+    from content. The applier detects this via a hunk-count deficit and raises
+    rather than guessing. Unreachable for well-formed lore bodies —
+    :func:`write_temp_then_rename` always trailing-newlines — but handled safely.
+    """
+
+
+# ---------------------------------------------------------------------------
+# Unified-diff applier (Slice 4, KU2 — proven pure-stdlib decision rule)
+# ---------------------------------------------------------------------------
+
+# The two-phase applier: Phase 1 verifies EVERY hunk's context+deletion lines
+# verbatim against ``body.splitlines(keepends=True)`` (verbatim comparison
+# auto-detects CRLF-vs-LF and trailing-newline mismatches — the core safety
+# invariant); if ANY hunk fails it raises :class:`DiffRejectError` with the body
+# unmodified and runs NO Phase 2. Phase 2 (only if all hunks verified) applies in
+# order tracking ``offset = Σ(new_count − old_count)`` of prior hunks so each hunk
+# indexes the evolving result correctly. Proven on the three KU2 adversarial cases
+# (CRLF body, trailing-newline mismatch, adjacent hunks).
+
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+class _Hunk(NamedTuple):
+    """A single parsed unified-diff hunk (header + body lines with endings kept)."""
+
+    header: str          # raw ``@@ -L,N +L,M @@`` line (for error reporting)
+    old_start: int       # 1-based line number in the original body
+    old_count: int
+    new_count: int
+    lines: list[str]     # hunk lines WITH leading marker AND original line ending
+
+
+def _validate_hunk_counts(hunk: _Hunk) -> None:
+    """Raise :class:`DiffFormatError` on a parsed-vs-header line-count deficit.
+
+    A deficit indicates the concatenated-no-newline format ``difflib`` emits when
+    both sides of a change lack a trailing newline (see :class:`DiffFormatError`).
+    """
+    old_seen = sum(1 for l in hunk.lines if l and l[0] in (" ", "-"))
+    new_seen = sum(1 for l in hunk.lines if l and l[0] in (" ", "+"))
+    if old_seen < hunk.old_count or new_seen < hunk.new_count:
+        raise DiffFormatError(
+            f"Hunk {hunk.header!r}: parsed {old_seen}/{hunk.old_count} old lines "
+            f"and {new_seen}/{hunk.new_count} new lines — the diff appears to use "
+            f"the concatenated-no-newline format difflib emits when both the "
+            f"deleted and inserted lines lack a trailing newline. This format is "
+            f"ambiguous and cannot be applied safely. Regenerate the diff from "
+            f"content with a trailing newline."
+        )
+
+
+def _parse_hunks(diff: str) -> list[_Hunk]:
+    """Parse a unified diff into ``_Hunk`` objects, line endings kept verbatim.
+
+    Uses ``diff.splitlines(keepends=True)`` so each hunk line retains its original
+    line ending (``\\n`` / ``\\r\\n`` / none). File-header (``--- ``/``+++ ``) lines
+    are skipped. Raises :class:`DiffFormatError` on the concatenated-no-newline
+    edge case (via :func:`_validate_hunk_counts`).
+    """
+    hunks: list[_Hunk] = []
+    current: Optional[_Hunk] = None
+
+    for raw in diff.splitlines(keepends=True):
+        raw_stripped = raw.rstrip("\r\n")
+        m = _HUNK_HEADER_RE.match(raw_stripped)
+        if m:
+            if current is not None:
+                _validate_hunk_counts(current)
+                hunks.append(current)
+            current = _Hunk(
+                header=raw_stripped,
+                old_start=int(m.group(1)),
+                old_count=int(m.group(2)) if m.group(2) is not None else 1,
+                new_count=int(m.group(4)) if m.group(4) is not None else 1,
+                lines=[],
+            )
+        elif current is not None:
+            if raw_stripped.startswith(("--- ", "+++ ")):
+                continue
+            if raw and raw[0] in (" ", "-", "+"):
+                current.lines.append(raw)
+
+    if current is not None:
+        _validate_hunk_counts(current)
+        hunks.append(current)
+
+    return hunks
+
+
+def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
+    """Apply a unified *diff* to *body* (Slice 4, KU2). Returns ``(new_body, [])``.
+
+    Two-phase, atomic:
+      - **Phase 1** — parse all hunks, then verify EVERY hunk's context (`` ``) +
+        deletion (``-``) lines **verbatim** against ``body.splitlines(keepends=True)``.
+        Verbatim comparison auto-detects CRLF-vs-LF and trailing-newline
+        mismatches — the core safety invariant. Collect ALL failures; if any →
+        raise :class:`DiffRejectError(original_body, rejected)` and run NO Phase 2.
+      - **Phase 2** (only if all hunks verified) — apply in order tracking
+        ``offset = Σ(new_count − old_count)`` of prior hunks so each hunk indexes
+        the evolving result correctly.
+
+    Raises :class:`DiffRejectError` on stale context (body unmodified) and
+    :class:`DiffFormatError` on the concatenated-no-newline format. The returned
+    list is always empty on success (rejections raise — never partial).
+    """
+    original_body = body
+    body_lines = body.splitlines(keepends=True)
+    hunks = _parse_hunks(diff)
+
+    # --- Phase 1: verify every hunk against the original body -------------------
+    rejected: list[tuple[str, str]] = []
+    for hunk in hunks:
+        ctx_lines: list[str] = []
+        for hl in hunk.lines:
+            if hl[0] in (" ", "-"):
+                ctx_lines.append(hl[1:])  # strip marker; keep line ending
+
+        start_0 = hunk.old_start - 1
+        end_0 = start_0 + len(ctx_lines)
+        if end_0 > len(body_lines):
+            rejected.append((
+                hunk.header,
+                f"context overruns body (body has {len(body_lines)} lines, "
+                f"hunk starts at line {hunk.old_start} and expects "
+                f"{len(ctx_lines)} context/deletion lines)",
+            ))
+            continue
+
+        mismatch_line: Optional[int] = None
+        for i, expected in enumerate(ctx_lines):
+            if body_lines[start_0 + i] != expected:
+                mismatch_line = hunk.old_start + i
+                break
+        if mismatch_line is not None:
+            rejected.append((
+                hunk.header,
+                f"context mismatch at body line {mismatch_line}",
+            ))
+
+    if rejected:
+        raise DiffRejectError(original_body=original_body, rejected=rejected)
+
+    # --- Phase 2: apply all hunks (all verified) -------------------------------
+    result_lines = list(body_lines)
+    offset = 0
+    for hunk in hunks:
+        old_slice: list[str] = []
+        new_slice: list[str] = []
+        for hl in hunk.lines:
+            marker, content = hl[0], hl[1:]
+            if marker == " ":
+                old_slice.append(content)
+                new_slice.append(content)
+            elif marker == "-":
+                old_slice.append(content)
+            elif marker == "+":
+                new_slice.append(content)
+        start_0 = hunk.old_start - 1 + offset
+        result_lines[start_0:start_0 + len(old_slice)] = new_slice
+        offset += len(new_slice) - len(old_slice)
+
+    return "".join(result_lines), []
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +478,34 @@ def place_record(
         record_id=record_id,
         body_path=kind_dir / f"{stem}.md",
         sidecar_path=kind_dir / f"{stem}.json",
+    )
+
+
+def locate_record(
+    record_id: RecordId,
+    vault_root: str | None = None,
+) -> RecordLocation:
+    """Resolve an **existing** ``<kind>/<name>`` record to its on-disk location (Slice 4).
+
+    Unlike :func:`place_record`, this does NOT slug or apply a collision suffix —
+    it points at the record's existing ``.md``/``.json`` pair so an update writes
+    in place (preserving the ID). Raises :class:`RecordNotFoundError` when neither
+    artifact exists (AC8).
+    """
+    kind, name = record_id.split("/", 1)
+    root = vault_root if vault_root is not None else vault_mod.resolve_vault()
+    kind_dir = Path(root) / kind
+    body_path = kind_dir / f"{name}.md"
+    sidecar_path = kind_dir / f"{name}.json"
+    if not body_path.exists() and not sidecar_path.exists():
+        raise RecordNotFoundError(f"record not found: {record_id}")
+    return RecordLocation(
+        vault_root=root,
+        kind=kind,
+        name=name,
+        record_id=record_id,
+        body_path=body_path,
+        sidecar_path=sidecar_path,
     )
 
 

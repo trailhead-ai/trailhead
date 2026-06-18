@@ -1636,12 +1636,31 @@ def _apply_set_unset(
 
 
 def cmd_record(args: argparse.Namespace) -> int:
-    """Dispatch ``lore record <action>`` — Slice 3 create path (S2).
+    """Dispatch ``lore record <action>`` — create (Slice 3) / update (Slice 4) (S2).
 
-    Thin shell over ``record_store`` (Slice 2). Parses argv, builds the sidecar
-    dict, reads the body from stdin (empty string when stdin is not piped), calls
-    ``place_record`` + ``validate_and_write``, and prints the vault-relative
-    RECORD_ID on stdout.
+    Thin shell over ``record_store`` (Slice 2). Routes to the create or update
+    handler by ``record_action``; both are argv→library adapters with no
+    validation or I/O logic of their own.
+    """
+    action = getattr(args, "record_action", None)
+    if action == "create":
+        return _cmd_record_create(args)
+    if action == "update":
+        return _cmd_record_update(args)
+    print(
+        f"lore record: unknown action {action!r}. "
+        f"Use 'lore record create' or 'lore record update'.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _cmd_record_create(args: argparse.Namespace) -> int:
+    """``lore record create`` (Slice 3, S2) — thin shell over ``record_store``.
+
+    Builds the sidecar dict, reads the body from stdin (empty string when stdin is
+    not piped), calls ``place_record`` + ``validate_and_write``, and prints the
+    vault-relative RECORD_ID on stdout.
 
     Body is read verbatim from stdin — a leading ``---`` block is **never**
     parsed as frontmatter (AC-TX3); it is stored as body text.
@@ -1652,14 +1671,6 @@ def cmd_record(args: argparse.Namespace) -> int:
     the routing flag influences vault selection (S4); ``--set team=X`` writes
     the ``team`` metadata field in the sidecar.
     """
-    action = getattr(args, "record_action", None)
-    if action != "create":
-        print(
-            f"lore record: unknown action {action!r}. Use 'lore record create'.",
-            file=sys.stderr,
-        )
-        return 1
-
     # --kind is required (AC2).
     kind = getattr(args, "kind", None)
     if not kind:
@@ -1740,6 +1751,171 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     # AC4: print the vault-relative RECORD_ID on stdout.
     print(record_id)
+    return 0
+
+
+def _cmd_record_update(args: argparse.Namespace) -> int:
+    """``lore record update RECORD_ID`` (Slice 4, S2) — thin shell over ``record_store``.
+
+    Body sources (mutually exclusive on stdin):
+      - **Full-body** (default, piped stdin): stdin replaces the whole body (AC9).
+      - **``--diff``**: stdin is a unified diff applied to the existing body via
+        ``record_store.apply_unified_diff`` (KU2). The post-hunk body flows through
+        ``validate_and_write`` → ``neutralize_fences`` before the atomic rename, so
+        a hunk injecting an ``<external-memory>`` token cannot land a live fence
+        (council/Security — the diff path is not a neutralization bypass). Any hunk
+        failing → non-zero, record byte-for-byte unmodified, no index update
+        (AC-DIFF1); rejected hunks print to stderr one-line-per-hunk for agent retry.
+      - **Metadata-only** (no stdin): the body is unchanged and only ``--set`` /
+        ``--unset`` sidecar params apply (AC10/AC11). A ``note: no stdin — body
+        unchanged, metadata-only update`` is printed to **stderr** (exit stays 0)
+        so an agent that *forgot* to pipe a body can detect the mode
+        (council/Advocate).
+
+    ``updated-at``/``updated-by`` are re-stamped every update; ``created-*`` are
+    preserved (``validate_and_write`` recovers them from the on-disk sidecar).
+
+    ``--move-to VAULT`` relocates the record to a different vault root via
+    ``record_store.move_record`` (AC12): the record physically moves, the new ID is
+    returned. In S2 the move *primitive* is exercised by injecting a second vault
+    root; the scope→different-vault routing *trigger* is S4's resolution.
+
+    Invalid/nonexistent RECORD_ID → non-zero (AC8).
+    """
+    import json
+
+    record_id = getattr(args, "record_id", None)
+    if not record_id or "/" not in record_id:
+        print(
+            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
+            file=sys.stderr,
+        )
+        return 1
+
+    use_diff = bool(getattr(args, "diff", False))
+    move_to = getattr(args, "move_to", None)
+
+    # stdin detection: a TTY is never "piped"; otherwise read what's there. An
+    # empty read (no pipe / /dev/null / closed stdin) is the metadata-only signal
+    # (AC10) — distinct from a non-empty body replace (AC9). An intentional
+    # empty-body replace is degenerate and out of scope; clear the body via a
+    # ``--diff`` deleting every line instead.
+    if sys.stdin.isatty():
+        stdin_text = ""
+    else:
+        stdin_text = sys.stdin.read()
+    has_stdin = stdin_text != ""
+
+    vault_root = str(vault_mod.resolve_vault())
+
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            # Resolve the existing record in place (AC8 → RecordNotFoundError).
+            location = record_store_mod.locate_record(record_id, vault_root=vault_root)
+
+            # Load the existing sidecar so --set/--unset mutate the live record.
+            existing_sidecar: dict = {}
+            if location.sidecar_path.exists():
+                try:
+                    existing_sidecar = json.loads(
+                        location.sidecar_path.read_text(encoding="utf-8")
+                    )
+                except (OSError, ValueError):
+                    existing_sidecar = {}
+            if not isinstance(existing_sidecar, dict):
+                existing_sidecar = {}
+
+            existing_body = (
+                location.body_path.read_text(encoding="utf-8")
+                if location.body_path.exists()
+                else ""
+            )
+
+            # --- resolve the new body -----------------------------------------
+            if use_diff:
+                # stdin is a unified diff applied to the existing body (KU2).
+                try:
+                    new_body, _ = record_store_mod.apply_unified_diff(
+                        existing_body, stdin_text
+                    )
+                except record_store_mod.DiffRejectError as exc:
+                    # Atomic reject (AC-DIFF1): body byte-for-byte unchanged, no
+                    # index update. Parseable one-line-per-hunk stderr for retry.
+                    for header, reason in exc.rejected:
+                        print(f"rejected hunk {header}: {reason}", file=sys.stderr)
+                    return 1
+                except record_store_mod.DiffFormatError as exc:
+                    print(f"error: unparseable diff: {exc}", file=sys.stderr)
+                    return 1
+            elif has_stdin:
+                # Full-body replace (AC9).
+                new_body = stdin_text
+            else:
+                # Metadata-only (AC10/AC11): body unchanged. Emit the notice to
+                # stderr (council/Advocate) — exit stays 0.
+                new_body = existing_body
+                print(
+                    "note: no stdin — body unchanged, metadata-only update",
+                    file=sys.stderr,
+                )
+
+            # --- apply --set / --unset to the sidecar -------------------------
+            set_pairs: list[str] = list(getattr(args, "set_pairs", None) or [])
+            unset_pairs: list[str] = list(getattr(args, "unset_pairs", None) or [])
+            sidecar, set_errors = _apply_set_unset(
+                existing_sidecar, set_pairs, unset_pairs
+            )
+            if set_errors:
+                for msg in set_errors:
+                    print(msg, file=sys.stderr)
+                return 1
+
+            # --- write in place (re-stamps updated-*, preserves created-*) -----
+            new_id = record_store_mod.validate_and_write(
+                location=location,
+                sidecar=sidecar,
+                body=new_body,
+                conn=conn,
+            )
+
+            # --- vault-move (AC12): relocate to a different vault root ---------
+            if move_to:
+                dest_root = str(Path(move_to).expanduser())
+                if dest_root != location.vault_root:
+                    dest_location = record_store_mod.RecordLocation(
+                        vault_root=dest_root,
+                        kind=location.kind,
+                        name=location.name,
+                        record_id=location.record_id,
+                        body_path=Path(dest_root) / location.kind / f"{location.name}.md",
+                        sidecar_path=Path(dest_root) / location.kind / f"{location.name}.json",
+                    )
+                    new_id = record_store_mod.move_record(
+                        old_id=location.record_id,
+                        new_location=dest_location,
+                        conn=conn,
+                        old_vault_root=location.vault_root,
+                    )
+
+            conn.commit()
+        finally:
+            conn.close()
+    except record_store_mod.RecordNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except record_store_mod.RecordValidationError as exc:
+        for msg in exc.errors:
+            print(f"error: {msg}", file=sys.stderr)
+        return 1
+    except record_store_mod.ProvenanceError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record update failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(new_id)
     return 0
 
 
@@ -2015,6 +2191,45 @@ def build_parser() -> argparse.ArgumentParser:
              "item (AC16). --unset K clears the whole key (AC18).",
     )
     p_record_create.set_defaults(func=cmd_record)
+
+    # ``lore record update RECORD_ID`` (Slice 4, S2).
+    p_record_update = p_record_sub.add_parser(
+        "update", help="Update an existing vault record (full-body / --diff / metadata-only)"
+    )
+    p_record_update.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID to update (<kind>/<name>)",
+    )
+    p_record_update.add_argument(
+        "--diff", action="store_true",
+        help="Treat piped stdin as a unified diff applied to the existing body "
+             "(KU2). On any non-applying hunk the record is left byte-for-byte "
+             "unmodified and the rejected hunks print to stderr (AC-DIFF1).",
+    )
+    p_record_update.add_argument(
+        "--move-to", dest="move_to", default=None, metavar="VAULT",
+        help="Relocate the record to a different vault root via move_record "
+             "(AC12). The record physically moves and the new ID is printed.",
+    )
+    # Routing flags (AC5, AC-ROUTE1): accepted for parity with create; the
+    # scope→different-vault routing trigger is S4's resolution (--move-to is the
+    # S2 hook that exercises the move primitive directly).
+    p_record_update.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument("--product", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument("--suite", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument(
+        "--set", dest="set_pairs", action="append", default=[],
+        metavar="K=V",
+        help="Set a sidecar field (repeatable). Same AC15-AC18 semantics as create.",
+    )
+    p_record_update.add_argument(
+        "--unset", dest="unset_pairs", action="append", default=[],
+        metavar="K[=VALUE]",
+        help="Unset a sidecar field (repeatable). Same AC16/AC18 semantics as create.",
+    )
+    p_record_update.set_defaults(func=cmd_record)
 
     return parser
 
