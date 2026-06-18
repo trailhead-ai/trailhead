@@ -37,9 +37,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import frontmatter  # noqa: E402
 import harvest as harvest_mod  # noqa: E402
+import index_store as index_store_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
+import record_model as record_model_mod  # noqa: E402
+import record_store as record_store_mod  # noqa: E402
+import session_store as session_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
@@ -121,6 +125,17 @@ def _is_tty() -> bool:
     monkeypatch; a separate agent subprocess cannot patch production's isatty.
     """
     return sys.stdin.isatty()
+
+
+def _read_stdin_body() -> str:
+    """Return the piped stdin body, or ``""`` when stdin is a TTY (no pipe).
+
+    The shared read used by every ``lore record``/``session`` write path. An empty
+    return covers both a TTY and an empty/closed pipe — callers that need to tell
+    "no stdin" from "empty body" key on ``== ""`` (see the record-update metadata-
+    only path).
+    """
+    return "" if sys.stdin.isatty() else sys.stdin.read()
 
 
 def _kebab(title: str) -> str:
@@ -1487,6 +1502,664 @@ def cmd_areas(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- reindex ----------------------------------------------------------------
+
+def cmd_reindex(args: argparse.Namespace) -> int:
+    """Rebuild the derived SQLite index from the vault directory tree.
+
+    Drops and repopulates the ``records`` table by scanning the resolved
+    vault for ``<kind>/<name>.json`` + ``<kind>/<name>.md`` pairs.  Prints
+    the number of indexed rows to **stdout** on success; errors go to
+    **stderr**.  Exits 0.
+
+    Text-wins / index-derived posture (AC-TX2): the index is always
+    rebuildable from the git-tracked text files.
+    """
+    vault_root = (
+        Path(args.vault).expanduser().resolve()
+        if getattr(args, "vault", None)
+        else Path(vault_mod.resolve_vault())
+    )
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            count = index_store_mod.rebuild([str(vault_root)], conn)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"error: reindex failed: {exc}", file=sys.stderr)
+        return 1
+    print(count)
+    return 0
+
+
+# ---- record -----------------------------------------------------------------
+
+# Provenance keys that the CLI auto-sets on every write — the operator must
+# never be able to override these via --set / --unset (AC-PROV1). Derived from
+# the record_model ``auto_set`` attribute so it stays in sync with S1's schema.
+_PROVENANCE_KEYS: frozenset[str] = record_model_mod.auto_set_keys("v1")
+
+
+def _list_typed_keys() -> frozenset[str]:
+    """Return the set of sidecar keys whose type_tag is ``list[str]`` (v1).
+
+    Used by the --set/--unset matrix (AC15-AC18) to distinguish scalar fields
+    from list fields without hardcoding a key list.  Derived from S1's
+    FIELDS_V1 so it stays in sync with the model.
+    """
+    return frozenset(
+        key
+        for key, spec in record_model_mod.FIELDS_V1.items()
+        if spec.type_tag == "list[str]"
+    )
+
+
+def _apply_set_unset(
+    sidecar: dict,
+    set_pairs: list[str],
+    unset_pairs: list[str],
+) -> tuple[dict, list[str]]:
+    """Apply --set K=V / --unset K to *sidecar*; return (updated, errors).
+
+    Implements the full AC15–AC18 + AC-PROV1 matrix:
+      - AC-PROV1: --set / --unset on a provenance key → error, nothing applied.
+      - AC15: --set K="" on a scalar key ≡ --unset K (clears the key).
+      - AC16: --unset K=VALUE removes one item from a list-valued key.
+      - AC17: --set K="" on a list-valued key → hard error naming correct forms.
+      - AC18: --unset K (no =VALUE) clears the whole list / scalar key.
+
+    Returns the (possibly mutated copy of) sidecar and a list of error strings
+    (non-empty means nothing should be written).
+    """
+    list_keys = _list_typed_keys()
+    errors: list[str] = []
+    result = dict(sidecar)
+
+    for pair in set_pairs:
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+        else:
+            key, value = pair, ""
+
+        if key in _PROVENANCE_KEYS:
+            errors.append(
+                f"error: --set {key!r} is a provenance field; "
+                f"it is auto-set by lore and cannot be changed (AC-PROV1)"
+            )
+            continue
+
+        if key in list_keys:
+            if value == "":
+                # AC17: --set K="" on a list field is a hard error.
+                errors.append(
+                    f"error: --set {key!r}=\"\" is not valid for a list field; "
+                    f"to remove one item use --unset {key}=VALUE; "
+                    f"to clear the whole list use --unset {key}"
+                )
+                continue
+            # Append the value to the list (create if missing).
+            current = result.get(key, [])
+            if not isinstance(current, list):
+                current = []
+            result[key] = current + [value]
+        else:
+            # Scalar field.
+            if value == "":
+                # AC15: --set K="" ≡ --unset K on a scalar.
+                result.pop(key, None)
+            else:
+                result[key] = value
+
+    for pair in unset_pairs:
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+        else:
+            key, value = pair, None
+
+        if key in _PROVENANCE_KEYS:
+            errors.append(
+                f"error: --unset {key!r} is a provenance field; "
+                f"it is auto-set by lore and cannot be changed (AC-PROV1)"
+            )
+            continue
+
+        if value is not None:
+            # AC16: --unset K=VALUE removes one item from a list. The K=VALUE
+            # form is only meaningful for list fields; on a scalar key it would
+            # be a silent no-op (an agent footgun), so reject it explicitly.
+            if key not in list_keys:
+                errors.append(
+                    f"error: --unset {key}=VALUE is only valid for list fields; "
+                    f"to clear a scalar field use --unset {key}"
+                )
+                continue
+            current = result.get(key, [])
+            if isinstance(current, list) and value in current:
+                current = [v for v in current if v != value]
+                result[key] = current
+            # Removing a value not present in the list is a tolerated no-op.
+        else:
+            # AC18: --unset K (no value) clears the scalar or whole list.
+            result.pop(key, None)
+
+    return result, errors
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    """Dispatch ``lore record <action>`` — create (Slice 3) / update (Slice 4) /
+    delete (Slice 5) / blob (Slice 5) (S2).
+
+    Thin shell over ``record_store`` (Slice 2). Routes to the appropriate handler
+    by ``record_action``; all handlers are argv→library adapters with no
+    validation or I/O logic of their own.
+
+    **Blob confinement invariant (AC14a, Slice 5, S2):** the blob write path MUST
+    resolve to a descendant of ``realpath(blob_root)`` after the blob_root directory
+    exists. This check catches ``..`` segments, absolute paths, and symlink escapes.
+    Non-zero + clear stderr on rejection; no write occurs.
+    """
+    action = getattr(args, "record_action", None)
+    if action == "create":
+        return _cmd_record_create(args)
+    if action == "update":
+        return _cmd_record_update(args)
+    if action == "delete":
+        return _cmd_record_delete(args)
+    if action == "blob":
+        return _cmd_record_blob(args)
+    print(
+        f"lore record: unknown action {action!r}. "
+        f"Use 'lore record create', 'lore record update', "
+        f"'lore record delete', or 'lore record blob'.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _cmd_record_delete(args: argparse.Namespace) -> int:
+    """``lore record delete RECORD_ID`` (Slice 5, S2) — thin shell over ``record_store``.
+
+    Removes the body (``.md``), sidecar (``.json``), and index row for RECORD_ID
+    in one operation (AC13). Uses :func:`record_store.delete_record`, which is the
+    transactional delete primitive from Slice 2 — this function does NOT
+    re-implement removal logic.
+
+    RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
+    An invalid format or nonexistent record → non-zero + clear stderr (AC13).
+    """
+    record_id = getattr(args, "record_id", None)
+    if not record_id or "/" not in record_id:
+        print(
+            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
+            file=sys.stderr,
+        )
+        return 1
+
+    vault_root = str(vault_mod.resolve_vault())
+
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            record_store_mod.delete_record(record_id, conn, vault_root=vault_root)
+            conn.commit()
+        finally:
+            conn.close()
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record delete failed: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def _cmd_record_blob(args: argparse.Namespace) -> int:
+    """``lore record blob <path>`` (Slice 5, S2) — write a blob under ``<vault>/blob/``.
+
+    A **distinct** subcommand (not ``--kind blob``): reads the body from stdin and
+    writes it to ``<vault>/blob/<path>``, creating intermediate directories.  The
+    body is fence-neutralized (AC-FENCE1) via :func:`record_store.neutralize_fences`
+    and written via :func:`record_store.write_temp_then_rename` (AC-TX1).
+
+    **Path-traversal confinement (AC14a — Critical, Slice 5, S2)** is delegated to
+    :func:`record_store.confine_blob_path`, the library-boundary guard (NUL /
+    absolute / ``..`` / ``.`` rejection + realpath-descendant check). On any
+    violation it raises :class:`InvalidBlobPathError`; we surface that as a non-zero
+    exit + clear stderr, **no write**.
+    """
+    blob_path = getattr(args, "blob_path", None)
+    blob_root = Path(vault_mod.resolve_vault()) / "blob"
+
+    try:
+        target = record_store_mod.confine_blob_path(blob_path, blob_root)
+    except record_store_mod.InvalidBlobPathError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    safe_body = record_store_mod.neutralize_fences(_read_stdin_body())
+
+    try:
+        record_store_mod.write_temp_then_rename(target, safe_body)
+    except Exception as exc:
+        print(f"error: blob write failed: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def _cmd_record_create(args: argparse.Namespace) -> int:
+    """``lore record create`` (Slice 3, S2) — thin shell over ``record_store``.
+
+    Builds the sidecar dict, reads the body from stdin (empty string when stdin is
+    not piped), calls ``place_record`` + ``validate_and_write``, and prints the
+    vault-relative RECORD_ID on stdout.
+
+    Body is read verbatim from stdin — a leading ``---`` block is **never**
+    parsed as frontmatter (AC-TX3); it is stored as body text.
+
+    Routing flags (--repo / --product / --suite / --team) are passed to
+    ``place_record`` as ``scope`` for the S4 multi-vault hook.  The
+    ``--team`` routing flag is distinct from ``--set team=X`` (AC-ROUTE1):
+    the routing flag influences vault selection (S4); ``--set team=X`` writes
+    the ``team`` metadata field in the sidecar.
+    """
+    # --kind is required (AC2).
+    kind = getattr(args, "kind", None)
+    if not kind:
+        print("error: --kind is required", file=sys.stderr)
+        return 1
+
+    # --title is required (operator-required by the record model).
+    title = getattr(args, "title", None)
+    if not title:
+        print("error: --title is required", file=sys.stderr)
+        return 1
+
+    # Build the scope string from routing flags (AC5, AC-ROUTE1).
+    # These are routing hints passed to place_record; they do NOT go into
+    # the sidecar (that is --set team=X / --set repo=X, which is separate).
+    scope_parts: list[str] = []
+    for flag in ("repo", "product", "suite", "team"):
+        val = getattr(args, flag, None)
+        if val:
+            scope_parts.append(f"{flag}:{val}")
+    scope = ",".join(scope_parts) if scope_parts else None
+
+    # Seed the sidecar with the required operator fields.
+    sidecar: dict = {
+        "kind": kind,
+        "title": title,
+        "keywords": [],
+    }
+
+    # Apply --set / --unset mutations (AC15-AC18, AC-PROV1).
+    set_pairs: list[str] = list(getattr(args, "set_pairs", None) or [])
+    unset_pairs: list[str] = list(getattr(args, "unset_pairs", None) or [])
+
+    sidecar, set_errors = _apply_set_unset(sidecar, set_pairs, unset_pairs)
+    if set_errors:
+        for msg in set_errors:
+            print(msg, file=sys.stderr)
+        return 1
+
+    # Body from stdin (AC1). No stdin → empty body.  The leading ``---``
+    # check is intentionally absent — we read verbatim (AC-TX3).
+    body = _read_stdin_body()
+
+    # Resolve vault.
+    vault_root = Path(vault_mod.resolve_vault())
+
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            location = record_store_mod.place_record(
+                name=title,
+                kind=kind,
+                scope=scope,
+                vault_root=str(vault_root),
+            )
+            record_id = record_store_mod.validate_and_write(
+                location=location,
+                sidecar=sidecar,
+                body=body,
+                conn=conn,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except record_store_mod.RecordValidationError as exc:
+        for msg in exc.errors:
+            print(f"error: {msg}", file=sys.stderr)
+        return 1
+    except record_store_mod.ProvenanceError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record create failed: {exc}", file=sys.stderr)
+        return 1
+
+    # AC4: print the vault-relative RECORD_ID on stdout.
+    print(record_id)
+    return 0
+
+
+# ---- session ----------------------------------------------------------------
+
+def cmd_session(args: argparse.Namespace) -> int:
+    """Dispatch ``lore session <action>`` — candidate (AC20/AC21) / referenced (AC22) (Slice 6, S2).
+
+    A **separate** endpoint from ``lore record``: it does NOT route through the
+    record write path (``validate_and_write``), creates no ``.json`` sidecar, and
+    writes no derived index row (AC23, endpoint isolation). Session notes are
+    body-only files under ``<vault>/sessions/<session_id>.md`` whose lazy-create +
+    append is race-safe via ``session_store.create_or_append`` (``fcntl.flock``,
+    KU3).
+
+    **Confinement (council/Security):** the ``session_id`` becomes the note
+    filename, so it is sanitized at this entry point BEFORE any path is constructed
+    (``session_store.sanitize_session_id``). A crafted id containing a path
+    separator, ``..``, a NUL byte, or otherwise not matching the canonical GUID
+    shape is rejected with a non-zero exit + clear stderr — a session write can
+    never escape ``sessions/``.
+    """
+    action = getattr(args, "session_action", None)
+    if action == "candidate":
+        return _cmd_session_candidate(args)
+    if action == "referenced":
+        return _cmd_session_referenced(args)
+    print(
+        f"lore session: unknown action {action!r}. "
+        f"Use 'lore session candidate' or 'lore session referenced'.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _resolve_session_id(args: argparse.Namespace) -> tuple[str | None, int]:
+    """Resolve + sanitize the ``--session-id`` (or env) for a session subcommand.
+
+    Returns ``(session_id, 0)`` on success or ``(None, 1)`` on rejection (after
+    printing a clear stderr message). The sanitizer is the confinement boundary
+    for ``sessions/`` (council/Security) — call this BEFORE any path use.
+    """
+    raw = _session_id_from_args_or_env(args)
+    if not raw:
+        print(
+            "error: --session-id is required (or set $CLAUDE_CODE_SESSION_ID)",
+            file=sys.stderr,
+        )
+        return None, 1
+    try:
+        return session_store_mod.sanitize_session_id(raw), 0
+    except session_store_mod.InvalidSessionIdError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None, 1
+
+
+def _cmd_session_candidate(args: argparse.Namespace) -> int:
+    """``lore session candidate --session-id ID --kind KIND --phase PHASE`` (AC20/AC21, S2).
+
+    Body from stdin. Lazy-creates the session note on first use for ID (name = the
+    sanitized GUID, per S1) and appends a record-candidate entry carrying KIND +
+    PHASE. The body is fence-neutralized (AC-FENCE1) via
+    ``record_store.neutralize_fences``; the lazy-create + append is race-safe via
+    ``session_store.create_or_append`` (KU3).
+    """
+    session_id, rc = _resolve_session_id(args)
+    if session_id is None:
+        return rc
+
+    kind = getattr(args, "kind", None)
+    if not kind:
+        print("error: --kind is required", file=sys.stderr)
+        return 1
+    phase = getattr(args, "phase", None)
+    if not phase:
+        print("error: --phase is required", file=sys.stderr)
+        return 1
+
+    safe_body = record_store_mod.neutralize_fences(_read_stdin_body())
+
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # A single record-candidate entry: a one-line header carrying KIND + PHASE +
+    # timestamp, then the (possibly multi-line) neutralized body indented as a
+    # block so the append stays one logical entry.
+    entry_lines = [f"- candidate {now} kind={kind} phase={phase}"]
+    for line in safe_body.splitlines():
+        entry_lines.append(f"  {line}")
+    entry = "\n".join(entry_lines)
+
+    vault = Path(vault_mod.resolve_vault())
+    sessions_dir = vault / "sessions"
+    try:
+        session_store_mod.create_or_append(session_id, entry, sessions_dir)
+    except Exception as exc:
+        print(f"error: session candidate write failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_session_referenced(args: argparse.Namespace) -> int:
+    """``lore session referenced RECORD_ID --session-id ID`` (AC22, S2).
+
+    Logs that RECORD_ID was used this session (feeds finish-time
+    ``last-referenced-at``). Lazy-creates the session note on first use and appends
+    a reference entry via ``session_store.create_or_append`` (race-safe, KU3).
+    """
+    session_id, rc = _resolve_session_id(args)
+    if session_id is None:
+        return rc
+
+    record_id = getattr(args, "record_id", None)
+    if not record_id:
+        print("error: RECORD_ID is required", file=sys.stderr)
+        return 1
+
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Neutralize fences in the entry (AC-FENCE1): RECORD_ID is a free-form arg, so
+    # a `<external-memory>` token in it must not land live in the session note —
+    # the referenced boundary neutralizes uniformly like candidate/create/blob.
+    entry = record_store_mod.neutralize_fences(f"- referenced {now} {record_id}")
+
+    vault = Path(vault_mod.resolve_vault())
+    sessions_dir = vault / "sessions"
+    try:
+        session_store_mod.create_or_append(session_id, entry, sessions_dir)
+    except Exception as exc:
+        print(f"error: session referenced write failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_record_update(args: argparse.Namespace) -> int:
+    """``lore record update RECORD_ID`` (Slice 4, S2) — thin shell over ``record_store``.
+
+    Body sources (mutually exclusive on stdin):
+      - **Full-body** (default, piped stdin): stdin replaces the whole body (AC9).
+      - **``--diff``**: stdin is a unified diff applied to the existing body via
+        ``record_store.apply_unified_diff`` (KU2). The post-hunk body flows through
+        ``validate_and_write`` → ``neutralize_fences`` before the atomic rename, so
+        a hunk injecting an ``<external-memory>`` token cannot land a live fence
+        (council/Security — the diff path is not a neutralization bypass). Any hunk
+        failing → non-zero, record byte-for-byte unmodified, no index update
+        (AC-DIFF1); rejected hunks print to stderr one-line-per-hunk for agent retry.
+      - **Metadata-only** (no stdin): the body is unchanged and only ``--set`` /
+        ``--unset`` sidecar params apply (AC10/AC11). A ``note: no stdin — body
+        unchanged, metadata-only update`` is printed to **stderr** (exit stays 0)
+        so an agent that *forgot* to pipe a body can detect the mode
+        (council/Advocate).
+
+    ``updated-at``/``updated-by`` are re-stamped every update; ``created-*`` are
+    preserved (``validate_and_write`` recovers them from the on-disk sidecar).
+
+    ``--move-to VAULT`` relocates the record to a different vault root via
+    ``record_store.move_record`` (AC12): the record physically moves, the new ID is
+    returned. In S2 the move *primitive* is exercised by injecting a second vault
+    root; the scope→different-vault routing *trigger* is S4's resolution.
+
+    Invalid/nonexistent RECORD_ID → non-zero (AC8).
+    """
+    import json
+
+    record_id = getattr(args, "record_id", None)
+    if not record_id or "/" not in record_id:
+        print(
+            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
+            file=sys.stderr,
+        )
+        return 1
+
+    use_diff = bool(getattr(args, "diff", False))
+    move_to = getattr(args, "move_to", None)
+
+    # stdin detection: a TTY is never "piped"; otherwise read what's there. An
+    # empty read (no pipe / /dev/null / closed stdin) is the metadata-only signal
+    # (AC10) — distinct from a non-empty body replace (AC9). An intentional
+    # empty-body replace is degenerate and out of scope; clear the body via a
+    # ``--diff`` deleting every line instead.
+    stdin_text = _read_stdin_body()
+    has_stdin = stdin_text != ""
+
+    vault_root = str(vault_mod.resolve_vault())
+
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            # Resolve the existing record in place (AC8 → RecordNotFoundError).
+            location = record_store_mod.locate_record(record_id, vault_root=vault_root)
+
+            # Load the existing sidecar so --set/--unset mutate the live record.
+            existing_sidecar: dict = {}
+            if location.sidecar_path.exists():
+                try:
+                    existing_sidecar = json.loads(
+                        location.sidecar_path.read_text(encoding="utf-8")
+                    )
+                except (OSError, ValueError):
+                    existing_sidecar = {}
+            if not isinstance(existing_sidecar, dict):
+                existing_sidecar = {}
+
+            existing_body = (
+                location.body_path.read_text(encoding="utf-8")
+                if location.body_path.exists()
+                else ""
+            )
+
+            # --- resolve the new body -----------------------------------------
+            if use_diff:
+                # stdin is a unified diff applied to the existing body (KU2).
+                try:
+                    new_body, _ = record_store_mod.apply_unified_diff(
+                        existing_body, stdin_text
+                    )
+                except record_store_mod.DiffRejectError as exc:
+                    # Atomic reject (AC-DIFF1): body byte-for-byte unchanged, no
+                    # index update. Parseable one-line-per-hunk stderr for retry.
+                    for header, reason in exc.rejected:
+                        print(f"rejected hunk {header}: {reason}", file=sys.stderr)
+                    return 1
+                except record_store_mod.DiffFormatError as exc:
+                    print(f"error: unparseable diff: {exc}", file=sys.stderr)
+                    return 1
+            elif has_stdin:
+                # Full-body replace (AC9).
+                new_body = stdin_text
+            else:
+                # Metadata-only (AC10/AC11): body unchanged. Emit the notice to
+                # stderr (council/Advocate) — exit stays 0.
+                new_body = existing_body
+                print(
+                    "note: no stdin — body unchanged, metadata-only update",
+                    file=sys.stderr,
+                )
+
+            # --- apply --set / --unset to the sidecar -------------------------
+            set_pairs: list[str] = list(getattr(args, "set_pairs", None) or [])
+            unset_pairs: list[str] = list(getattr(args, "unset_pairs", None) or [])
+            sidecar, set_errors = _apply_set_unset(
+                existing_sidecar, set_pairs, unset_pairs
+            )
+            if set_errors:
+                for msg in set_errors:
+                    print(msg, file=sys.stderr)
+                return 1
+
+            # --- write in place (re-stamps updated-*, preserves created-*) -----
+            new_id = record_store_mod.validate_and_write(
+                location=location,
+                sidecar=sidecar,
+                body=new_body,
+                conn=conn,
+            )
+
+            # --- vault-move (AC12): relocate to a different vault root ---------
+            if move_to:
+                dest_root = str(Path(move_to).expanduser())
+                if dest_root != location.vault_root:
+                    dest_location = record_store_mod.RecordLocation(
+                        vault_root=dest_root,
+                        kind=location.kind,
+                        name=location.name,
+                        record_id=location.record_id,
+                        body_path=Path(dest_root) / location.kind / f"{location.name}.md",
+                        sidecar_path=Path(dest_root) / location.kind / f"{location.name}.json",
+                    )
+                    new_id = record_store_mod.move_record(
+                        old_id=location.record_id,
+                        new_location=dest_location,
+                        conn=conn,
+                        old_vault_root=location.vault_root,
+                    )
+
+            conn.commit()
+        finally:
+            conn.close()
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except record_store_mod.RecordValidationError as exc:
+        for msg in exc.errors:
+            print(f"error: {msg}", file=sys.stderr)
+        return 1
+    except record_store_mod.ProvenanceError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record update failed: {exc}", file=sys.stderr)
+        return 1
+
+    print(new_id)
+    return 0
+
+
+# ---- unknown-command dispatch hint ------------------------------------------
+
+# Table mapping removed/renamed commands to their replacements (AC-DISP1).
+# The ``recall→search`` mapping is dormant in S2 (``recall`` still routes;
+# ``search`` is S3) — the table is present so the hint mechanism is wired.
+_DISPATCH_HINTS: dict[str, str] = {
+    "search": "recall",   # ``search`` is S3; ``recall`` still routes in S2
+}
+
+
+def _unknown_command_hint(command: str) -> str:
+    """Return a 'did you mean …?' hint for an unrecognized command, or an empty string."""
+    if command in _DISPATCH_HINTS:
+        replacement = _DISPATCH_HINTS[command]
+        return f"did you mean 'lore {replacement}'?"
+    return ""
+
+
 # ---- argparse ---------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1677,12 +2350,234 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_recall.set_defaults(func=cmd_recall)
 
+    p_reindex = sub.add_parser(
+        "reindex",
+        help="Rebuild the derived SQLite index from the vault directory tree",
+    )
+    p_reindex.add_argument(
+        "--vault",
+        default=None,
+        help="Vault path (overrides $LORE_VAULT)",
+    )
+    p_reindex.set_defaults(func=cmd_reindex)
+
+    # record subcommand: ``lore record create`` (Slice 3, S2).
+    # ``--team`` is the *routing* flag (scope → place_record; AC-ROUTE1); it is
+    # distinct from ``--set team=X``, which writes the sidecar ``team`` field.
+    p_record = sub.add_parser(
+        "record",
+        help="Create, update, delete, or manage vault records",
+    )
+    p_record_sub = p_record.add_subparsers(dest="record_action", required=True)
+
+    p_record_create = p_record_sub.add_parser("create", help="Create a new vault record")
+    p_record_create.add_argument(
+        "--kind", required=True,
+        help="Record kind (one of: area, backlog, blob, collaboration, decision, "
+             "lesson, plan, session, spec)",
+    )
+    p_record_create.add_argument(
+        "--title", required=True,
+        help="Human-readable title (used to derive the record name slug)",
+    )
+    # Routing flags (AC5, AC-ROUTE1): passed to place_record as scope.
+    # These influence vault selection (S4 hook) and do NOT write sidecar fields.
+    p_record_create.add_argument(
+        "--repo", default=None,
+        help="Routing scope: restrict to this repo's vault (AC5; no sidecar effect)",
+    )
+    p_record_create.add_argument(
+        "--product", default=None,
+        help="Routing scope: restrict to this product's vault (AC5; no sidecar effect)",
+    )
+    p_record_create.add_argument(
+        "--suite", default=None,
+        help="Routing scope: restrict to this suite's vault (AC5; no sidecar effect)",
+    )
+    p_record_create.add_argument(
+        "--team", default=None,
+        help="Routing scope: restrict to this team's vault (AC5; no sidecar effect). "
+             "To set the 'team' sidecar metadata field, use --set team=VALUE instead "
+             "(AC-ROUTE1).",
+    )
+    p_record_create.add_argument(
+        "--set", dest="set_pairs", action="append", default=[],
+        metavar="K=V",
+        help="Set a sidecar field (repeatable). Use K=VALUE to set a scalar or "
+             "append to a list. --set K=\"\" on a scalar clears the key (AC15). "
+             "--set K=\"\" on a list field is a hard error (AC17; use --unset instead).",
+    )
+    p_record_create.add_argument(
+        "--unset", dest="unset_pairs", action="append", default=[],
+        metavar="K[=VALUE]",
+        help="Unset a sidecar field (repeatable). --unset K=VALUE removes one list "
+             "item (AC16). --unset K clears the whole key (AC18).",
+    )
+    p_record_create.set_defaults(func=cmd_record)
+
+    # ``lore record update RECORD_ID`` (Slice 4, S2).
+    p_record_update = p_record_sub.add_parser(
+        "update", help="Update an existing vault record (full-body / --diff / metadata-only)"
+    )
+    p_record_update.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID to update (<kind>/<name>)",
+    )
+    p_record_update.add_argument(
+        "--diff", action="store_true",
+        help="Treat piped stdin as a unified diff applied to the existing body "
+             "(KU2). On any non-applying hunk the record is left byte-for-byte "
+             "unmodified and the rejected hunks print to stderr (AC-DIFF1).",
+    )
+    p_record_update.add_argument(
+        "--move-to", dest="move_to", default=None, metavar="VAULT",
+        help="Relocate the record to a different vault root via move_record "
+             "(AC12). The record physically moves and the new ID is printed.",
+    )
+    # Routing flags (AC5, AC-ROUTE1): accepted for parity with create; the
+    # scope→different-vault routing trigger is S4's resolution (--move-to is the
+    # S2 hook that exercises the move primitive directly).
+    p_record_update.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument("--product", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument("--suite", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument(
+        "--set", dest="set_pairs", action="append", default=[],
+        metavar="K=V",
+        help="Set a sidecar field (repeatable). Same AC15-AC18 semantics as create.",
+    )
+    p_record_update.add_argument(
+        "--unset", dest="unset_pairs", action="append", default=[],
+        metavar="K[=VALUE]",
+        help="Unset a sidecar field (repeatable). Same AC16/AC18 semantics as create.",
+    )
+    p_record_update.set_defaults(func=cmd_record)
+
+    # ``lore record delete RECORD_ID`` (Slice 5, S2).
+    p_record_delete = p_record_sub.add_parser(
+        "delete", help="Delete a vault record (body + sidecar + index row)"
+    )
+    p_record_delete.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID to delete (<kind>/<name>)",
+    )
+    p_record_delete.set_defaults(func=cmd_record)
+
+    # ``lore record blob <path>`` (Slice 5, S2).
+    # A DISTINCT subcommand — NOT ``--kind blob``.  Body from stdin; path is the
+    # relative path under ``<vault>/blob/`` to write to.  Path-traversal is
+    # hardened (AC14a): absolute paths, ``..`` segments, and symlink escapes are
+    # all rejected before any write occurs (see ``_cmd_record_blob`` for the full
+    # confinement invariant).
+    p_record_blob = p_record_sub.add_parser(
+        "blob",
+        help="Write stdin as a blob under <vault>/blob/<path> (path-traversal hardened, AC14/AC14a)",
+    )
+    p_record_blob.add_argument(
+        "blob_path",
+        metavar="PATH",
+        help="Relative path under <vault>/blob/ to write (e.g. notes/readme.md). "
+             "Must be relative (no leading /), must not contain '..' segments. "
+             "Intermediate directories are created. (AC14/AC14a)",
+    )
+    p_record_blob.set_defaults(func=cmd_record)
+
+    # session subcommand: ``lore session candidate|referenced`` (Slice 6, S2).
+    # A SEPARATE endpoint from ``lore record`` — it does NOT route through the
+    # record write path (AC23, endpoint isolation). Registered with EXPLICIT
+    # subcommand names; the action is required. The name is the exact string
+    # ``session`` — it does NOT clash with the existing flat ``session-note``
+    # command, because argparse prefers an exact subcommand match over an
+    # abbreviation (council/Advocate; the no-prefix-abbrev-clash test pins this).
+    p_session = sub.add_parser(
+        "session",
+        help="Log record candidates / references for a session (race-safe, AC20-23)",
+    )
+    p_session_sub = p_session.add_subparsers(dest="session_action", required=True)
+
+    # ``lore session candidate --session-id ID --kind KIND --phase PHASE`` (AC20/AC21).
+    p_session_candidate = p_session_sub.add_parser(
+        "candidate",
+        help="Log a record-candidate (lazy-creates the session note, race-safe)",
+    )
+    p_session_candidate.add_argument(
+        "--session-id", dest="session_id", default=None,
+        help="Session id (GUID) to log under (default: $CLAUDE_CODE_SESSION_ID). "
+             "Sanitized before any path use — separators/'..'/NUL/non-GUID rejected.",
+    )
+    p_session_candidate.add_argument(
+        "--kind", required=True,
+        help="The kind of record being proposed (e.g. spec, decision, lesson).",
+    )
+    p_session_candidate.add_argument(
+        "--phase", required=True,
+        help="The session phase the candidate was proposed in (e.g. Plan, Build).",
+    )
+    p_session_candidate.set_defaults(func=cmd_session)
+
+    # ``lore session referenced RECORD_ID --session-id ID`` (AC22).
+    p_session_referenced = p_session_sub.add_parser(
+        "referenced",
+        help="Log that a RECORD_ID was used this session (feeds last-referenced-at)",
+    )
+    p_session_referenced.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID referenced this session (<kind>/<name>).",
+    )
+    p_session_referenced.add_argument(
+        "--session-id", dest="session_id", default=None,
+        help="Session id (GUID) to log under (default: $CLAUDE_CODE_SESSION_ID). "
+             "Sanitized before any path use — separators/'..'/NUL/non-GUID rejected.",
+    )
+    p_session_referenced.set_defaults(func=cmd_session)
+
     return parser
+
+
+def _known_commands(parser: argparse.ArgumentParser) -> frozenset[str]:
+    """Return the set of registered top-level subcommand names.
+
+    Introspects the parser's ``_SubParsersAction`` so the unknown-command hint
+    (AC-DISP1) can tell a genuinely unrecognized command from a *valid* command
+    that merely failed on a sub-argument (e.g. ``record create`` missing
+    ``--kind``) — the latter must NOT be mislabelled "unknown command".
+    """
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return frozenset(action.choices)
+    return frozenset()
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    # Intercept argparse's SystemExit so we can emit the ``did you mean …?``
+    # hint (AC-DISP1) before re-raising. argparse calls sys.exit(2) on an
+    # unrecognized command, so we catch that here.
+    raw = argv if argv is not None else sys.argv[1:]
+    try:
+        args = parser.parse_args(list(raw))
+    except SystemExit as exc:
+        cmd = raw[0] if raw else ""
+        # Only treat this as an unknown command when the first token is not a
+        # flag and not a registered subcommand. A valid command that fails on a
+        # sub-argument re-raises argparse's own error untouched (AC-DISP1: do
+        # not swallow / mislabel legitimate argparse errors).
+        if exc.code == 2 and cmd and not cmd.startswith("-") and cmd not in _known_commands(parser):
+            hint = _unknown_command_hint(cmd)
+            if hint:
+                print(f"lore: unknown command {cmd!r}. {hint}", file=sys.stderr)
+            else:
+                # For any unrecognized command, print a generic prompt so agents
+                # can distinguish a typo from a real error.
+                print(
+                    f"lore: unknown command {cmd!r}. "
+                    f"Run 'lore --help' for a list of subcommands.",
+                    file=sys.stderr,
+                )
+        raise
     return args.func(args)
 
 

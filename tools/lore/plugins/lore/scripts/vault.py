@@ -103,6 +103,45 @@ def resolve_user() -> str:
     return "you"
 
 
+def resolve_committer_email() -> str:
+    """Return the committer email for record provenance (``*-by`` fields).
+
+    **Deterministic, not cwd-dependent (Slice 2 / council/Security).** Fixed
+    order: ``$LORE_EMAIL`` (test/override) → ``git config --global user.email``.
+    Deliberately **not** a bare ``git config user.email`` — that would silently
+    inherit a repo-local override from whatever working repo the CLI was invoked
+    in (e.g. stamp ``dev@client.com`` when run inside a client repo). The
+    ``--global`` scope pins the human's identity regardless of cwd.
+
+    Returns the email, or the **empty string** when unset (no silent fallback —
+    the empty-email decision KU4 belongs to ``record_store.validate_and_write``,
+    which turns empty into a hard typed error). Distinct from
+    :func:`resolve_user`, which returns git user.NAME with a ``"you"`` fallback —
+    wrong field and wrong fallback for ``*-by``.
+
+    ``$LORE_EMAIL`` is **spoofable provenance, never an authn/authz signal**
+    (same posture as the ``*-by`` axiom). Never raises.
+    """
+    raw = os.environ.get("LORE_EMAIL", "")
+    email = _sanitize(raw)
+    if email:
+        return email
+
+    try:
+        result = subprocess.run(
+            ["git", "config", "--global", "user.email"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            email = _sanitize(result.stdout or "")
+            if email:
+                return email
+    except Exception:
+        pass
+
+    return ""
+
+
 def resolve_project(cwd: Path | None = None) -> str:
     """Infer the current project name from the git remote URL.
 
