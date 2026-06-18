@@ -593,3 +593,184 @@ def test_lore_reindex_count_reflects_vault_records(tmp_path):
     result = _run_lore(["reindex"], env)
     assert result.returncode == 0
     assert "3" in result.stdout.strip()
+
+
+# ---------------------------------------------------------------------------
+# scan_vault / remove_vault — per-vault incremental helpers (Slice 4, S4)
+# ---------------------------------------------------------------------------
+
+def test_scan_vault_inserts_rows_for_existing_pairs(tmp_path):
+    """scan_vault upserts one row per <kind>/<name>.json+.md pair; returns count."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    vault_root = tmp_path / "vault"
+    _write_fixture_vault(vault_root, [
+        ("spec", "spec-a", _make_sidecar(kind="spec", name="spec-a", title="Spec A"), "body a"),
+        ("plan", "plan-x", _make_sidecar(kind="plan", name="plan-x", title="Plan X"), "body x"),
+    ])
+
+    conn = mod.open_index(env=env)
+    try:
+        count = mod.scan_vault(str(vault_root), conn, shared=0)
+        conn.commit()
+        rows = conn.execute(
+            "SELECT vault, kind, name, shared FROM records ORDER BY name"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert count == 2
+    assert {(r[0], r[1], r[2]) for r in rows} == {
+        (str(vault_root), "spec", "spec-a"),
+        (str(vault_root), "plan", "plan-x"),
+    }
+    assert all(r[3] == 0 for r in rows)
+
+
+def test_scan_vault_honors_shared_flag(tmp_path):
+    """scan_vault stamps the shared flag it is passed onto every row."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    vault_root = tmp_path / "vault"
+    _write_fixture_vault(vault_root, [
+        ("spec", "spec-a", _make_sidecar(kind="spec", name="spec-a", title="Spec A"), "body a"),
+    ])
+
+    conn = mod.open_index(env=env)
+    try:
+        mod.scan_vault(str(vault_root), conn, shared=1)
+        conn.commit()
+        shared = conn.execute("SELECT shared FROM records").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert shared == 1
+
+
+def test_scan_vault_skips_malformed_sidecar(tmp_path):
+    """A malformed sidecar skips exactly that record, never aborts the scan."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    vault_root = tmp_path / "vault"
+    _write_fixture_vault(vault_root, [
+        ("spec", "good", _make_sidecar(kind="spec", name="good", title="Good"), "ok"),
+    ])
+    bad_dir = vault_root / "spec"
+    (bad_dir / "bad.json").write_text("{not valid json")
+    (bad_dir / "bad.md").write_text("body")
+
+    conn = mod.open_index(env=env)
+    try:
+        count = mod.scan_vault(str(vault_root), conn, shared=0)
+        conn.commit()
+        total = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert count == 1
+    assert total == 1
+
+
+def test_scan_vault_missing_root_returns_zero(tmp_path):
+    """scan_vault over a non-existent root is a no-op returning 0."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    conn = mod.open_index(env=env)
+    try:
+        count = mod.scan_vault(str(tmp_path / "nope"), conn, shared=0)
+    finally:
+        conn.close()
+
+    assert count == 0
+
+
+def test_remove_vault_removes_only_that_vaults_rows(tmp_path):
+    """remove_vault deletes all rows for one root, leaves other vaults intact."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    vault_a = tmp_path / "vault-a"
+    vault_b = tmp_path / "vault-b"
+    _write_fixture_vault(vault_a, [
+        ("spec", "a1", _make_sidecar(kind="spec", name="a1", title="A1"), "b"),
+        ("plan", "a2", _make_sidecar(kind="plan", name="a2", title="A2"), "b"),
+    ])
+    _write_fixture_vault(vault_b, [
+        ("spec", "b1", _make_sidecar(kind="spec", name="b1", title="B1"), "b"),
+    ])
+
+    conn = mod.open_index(env=env)
+    try:
+        mod.scan_vault(str(vault_a), conn, shared=0)
+        mod.scan_vault(str(vault_b), conn, shared=1)
+        conn.commit()
+        removed = mod.remove_vault(str(vault_a), conn)
+        conn.commit()
+        remaining = conn.execute(
+            "SELECT vault FROM records"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert removed == 2
+    assert all(r[0] == str(vault_b) for r in remaining)
+    assert len(remaining) == 1
+
+
+def test_remove_vault_cleans_fts_rows(tmp_path):
+    """remove_vault must not orphan record_fts rows (FTS is not FK-cascaded)."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    vault_root = tmp_path / "vault"
+    _write_fixture_vault(vault_root, [
+        ("spec", "s1", _make_sidecar(kind="spec", name="s1", title="S1"), "body one"),
+        ("spec", "s2", _make_sidecar(kind="spec", name="s2", title="S2"), "body two"),
+    ])
+
+    conn = mod.open_index(env=env)
+    try:
+        mod.scan_vault(str(vault_root), conn, shared=0)
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM record_fts").fetchone()[0] == 2
+        mod.remove_vault(str(vault_root), conn)
+        conn.commit()
+        fts_count = conn.execute("SELECT COUNT(*) FROM record_fts").fetchone()[0]
+        rec_count = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert fts_count == 0
+    assert rec_count == 0
+
+
+def test_remove_vault_missing_root_returns_zero(tmp_path):
+    """remove_vault for a root with no rows returns 0 (silent)."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    conn = mod.open_index(env=env)
+    try:
+        removed = mod.remove_vault(str(tmp_path / "nope"), conn)
+    finally:
+        conn.close()
+
+    assert removed == 0

@@ -324,6 +324,90 @@ def delete_row(
     _delete_projection(conn, _record_id(vault, kind, name))
 
 
+def scan_vault(
+    vault_root: str,
+    conn: sqlite3.Connection,
+    *,
+    shared: int,
+) -> int:
+    """Scan one vault root and ``upsert_row`` each complete record pair (S4).
+
+    The **per-vault incremental** companion to ``rebuild`` used by ``lore vault
+    add`` to fold a single (possibly already-populated) vault's records into the
+    global index without dropping everything else. Scans ``<kind>/<name>.json`` +
+    ``<kind>/<name>.md`` pairs under *vault_root*; only complete pairs are indexed.
+
+    Mirrors ``rebuild``'s skip-guard (I-2): a single malformed sidecar — bad JSON,
+    unreadable body, or a NOT NULL / CHECK violation at INSERT — skips that one
+    record instead of aborting the scan. Each surviving record is projected via
+    ``upsert_row`` (idempotent, I-1), stamped with the caller-supplied ``shared``
+    flag (0 = own/trusted, 1 = untrusted/shared).
+
+    Reverse facet edges are a ``reindex``-only, two-pass property (I-4); a one-pass
+    per-vault scan emits forward edges only — acceptable because the index is derived
+    and ``lore reindex`` restores full reverse symmetry.
+
+    Args:
+        vault_root: The vault root path (as a string) to scan; this exact string
+                    is the ``records.vault`` value, matching ``rebuild``.
+        conn:       Open SQLite connection (FK ON, schema present).
+        shared:     The trust flag to stamp on every row (0 own, 1 shared).
+
+    Returns:
+        The number of record rows upserted. A missing/non-directory root → 0.
+    """
+    root = Path(vault_root)
+    if not root.is_dir():
+        return 0
+    import json as _json
+    count = 0
+    for kind_dir in root.iterdir():
+        if not kind_dir.is_dir():
+            continue
+        kind = kind_dir.name
+        for json_path in kind_dir.glob("*.json"):
+            name = json_path.stem
+            md_path = kind_dir / f"{name}.md"
+            if not md_path.exists():
+                continue
+            try:
+                sidecar = _json.loads(json_path.read_text())
+                body = md_path.read_text()
+                upsert_row(
+                    conn, vault_root, kind, name, sidecar, body, shared=shared,
+                )
+            except Exception:
+                continue
+            count += 1
+    return count
+
+
+def remove_vault(vault_root: str, conn: sqlite3.Connection) -> int:
+    """Remove every row for *vault_root* from the index (S4).
+
+    The per-vault companion to ``delete_row`` used by ``lore vault delete``. A bulk
+    ``DELETE FROM records WHERE vault=?`` would orphan the matching ``record_fts``
+    rows (FTS5 is a virtual table, NOT FK-cascaded), so this selects each
+    ``(kind, name)`` under the root and loops ``delete_row`` — which cleans the
+    ``records`` row, its facets (CASCADE), and its FTS row per id. The caller must
+    ``conn.commit()``.
+
+    Args:
+        vault_root: The vault root path (as a string), matching the stored
+                    ``records.vault`` value.
+        conn:       Open SQLite connection (FK ON).
+
+    Returns:
+        The number of record rows removed. No matching rows → 0 (silent).
+    """
+    keys = conn.execute(
+        "SELECT kind, name FROM records WHERE vault=?", (vault_root,)
+    ).fetchall()
+    for kind, name in keys:
+        delete_row(conn, vault_root, kind, name)
+    return len(keys)
+
+
 def rebuild(
     vaults: list[str],
     conn: sqlite3.Connection,
