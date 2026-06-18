@@ -19,7 +19,6 @@ Covers the Slice 1 test contract from the S4 plan
 """
 
 import json
-import os
 
 import pytest
 

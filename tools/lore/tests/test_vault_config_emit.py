@@ -15,7 +15,7 @@ Covers the Slice 3 test contract from the S4 plan
 """
 
 import json
-import os
+from pathlib import Path
 
 import pytest
 

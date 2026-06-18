@@ -19,10 +19,6 @@ Covers the Slice 2 test contract from the S4 plan
 - 3-scope / 2-ineligible fall-through (Reliability hardening).
 """
 
-import json
-
-import pytest
-
 from conftest import load_script
 
 
@@ -38,7 +34,8 @@ def vr():
 #
 #   { "vaults": [
 #       { "name": "default",               "scope": "default" },
-#       { "name": "trailhead-ai_trailhead", "scope": "repo",  "records": ["decision","spec","plan"] },
+#       { "name": "trailhead-ai_trailhead", "scope": "repo",
+#         "records": ["decision","spec","plan"] },
 #       { "name": "product-engineering",    "scope": "team",  "records": ["blob"] }
 #   ]}
 
