@@ -468,7 +468,7 @@ class TestBranchBasePolicy:
         wt_path = tmp_path / "ws" / "feat" / "repo_a"
         _add_worktree_for_member(
             member, wt_path, "worktree-feat", Path(member["repo_root"]),
-            base="origin/main",
+            base="origin/main", slug="feat",
         )
 
         adds = fake.worktree_add_calls()
@@ -491,7 +491,7 @@ class TestBranchBasePolicy:
         wt_path = tmp_path / "ws" / "feat" / "repo_a"
         _add_worktree_for_member(
             member, wt_path, "worktree-feat", Path(member["repo_root"]),
-            base="origin/trunk",
+            base="origin/trunk", slug="feat",
         )
 
         argv = fake.worktree_add_calls()[0]
@@ -503,7 +503,7 @@ class TestBranchBasePolicy:
 
         captured: dict[str, str] = {}
 
-        def fake_add(member, wt_path, branch, repo_root, *, base):
+        def fake_add(member, wt_path, branch, repo_root, *, base, slug):
             captured[member["name"]] = base
 
         monkeypatch.setattr(reconcile, "_add_worktree_for_member", fake_add)
@@ -526,6 +526,124 @@ class TestBranchBasePolicy:
 
         assert captured["repo_a"] == "origin/main"
         assert captured["repo_b"] == "origin/trunk"
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: worktree admin name == slug (stage + git worktree move)
+# ---------------------------------------------------------------------------
+
+
+def _admin_name(wt: Path) -> str:
+    """The git-internal worktree admin name = basename of `git rev-parse --git-dir`.
+
+    This is exactly what Claude Code surfaces as `workspace.git_worktree`.
+    """
+    git_dir = subprocess.run(
+        ["git", "-C", str(wt), "rev-parse", "--git-dir"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    return Path(git_dir).name
+
+
+class TestWorktreeAdminName:
+    def test_admin_name_is_slug_not_member(self, two_member_group):
+        """Each member worktree's git admin name is the SLUG; folder is the member."""
+        from reconcile import reconcile_worktree
+
+        g = two_member_group
+        slug = "lore-refactor-s3"
+
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        for member in ("repo_a", "repo_b"):
+            wt = _member_wt("testgroup", slug, member, g["env"])
+            assert wt.is_dir(), f"worktree missing for {member} at {wt}"
+            # Folder keeps the member name…
+            assert wt.name == member
+            # …but git's internal admin name is the slug (what git_worktree reports).
+            assert _admin_name(wt) == slug, (
+                f"admin name for {member} should be {slug!r}, got {_admin_name(wt)!r}"
+            )
+
+    def test_idempotent_rerun_is_noop(self, two_member_group):
+        """A second reconcile is a clean no-op — worktrees + admin name unchanged."""
+        from reconcile import reconcile_worktree
+
+        g = two_member_group
+        slug = "feat-idem"
+
+        reconcile_worktree(g["group"], slug, env=g["env"])
+        reconcile_worktree(g["group"], slug, env=g["env"])  # must not raise
+
+        wt = _member_wt("testgroup", slug, "repo_a", g["env"])
+        assert wt.is_dir()
+        assert _admin_name(wt) == slug
+
+    def test_member_equal_slug_short_circuit_still_adds(self, tmp_path):
+        """When slug == member name (stage == wt_path) the add happens directly,
+        with no move, and still produces a registered worktree named the slug."""
+        from reconcile import _add_worktree_for_member, _worktree_registered
+
+        repo = tmp_path / "trailhead"
+        _init_git_repo(repo)
+        slug = "trailhead"  # equals the member name
+        member = {"name": "trailhead", "repo_root": str(repo)}
+        wt_path = tmp_path / "ws" / slug / "trailhead"
+
+        _add_worktree_for_member(
+            member, wt_path, f"worktree-{slug}", repo,
+            base="origin/main", slug=slug,
+        )
+
+        assert wt_path.is_dir()
+        assert _worktree_registered(repo, wt_path)
+        assert _admin_name(wt_path) == slug
+
+    def test_partial_stage_recovery_resumes_at_move(self, tmp_path):
+        """A prior run that added <stage> but never moved → recover via move, not a
+        failing re-add."""
+        from reconcile import _add_worktree_for_member
+
+        repo = tmp_path / "trailhead"
+        _init_git_repo(repo)
+        slug = "feat-recov"
+        member = {"name": "trailhead", "repo_root": str(repo)}
+        wt_path = tmp_path / "ws" / slug / "trailhead"
+        stage = wt_path.parent / slug
+        wt_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Simulate the partial state: stage added (registered) but not moved.
+        branch = f"worktree-{slug}"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(stage), "HEAD"],
+            check=True, capture_output=True,
+        )
+        assert stage.is_dir()
+
+        # Recovery must move (not re-add, which would fail "already registered").
+        _add_worktree_for_member(
+            member, wt_path, branch, repo, base="origin/main", slug=slug,
+        )
+
+        assert wt_path.is_dir(), "recovery did not produce the final worktree"
+        assert not stage.exists(), "stage should have been moved away"
+        assert _admin_name(wt_path) == slug
+
+    def test_confinement_rejects_escaping_slug(self, tmp_path):
+        """A '../'-laden slug that would push <stage> outside the workspace is
+        rejected with ReconcileError before any git call."""
+        from reconcile import _add_worktree_for_member, ReconcileError
+
+        repo = tmp_path / "trailhead"
+        _init_git_repo(repo)
+        member = {"name": "trailhead", "repo_root": str(repo)}
+        wt_path = tmp_path / "ws" / "feat" / "trailhead"
+
+        with pytest.raises(ReconcileError):
+            _add_worktree_for_member(
+                member, wt_path, "worktree-feat", repo,
+                base="origin/main", slug="../escape",
+            )
 
 
 # ---------------------------------------------------------------------------

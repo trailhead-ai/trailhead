@@ -415,7 +415,7 @@ class TestBug4FetchFailureFailsMember:
         captured = {}
         monkeypatch.setattr(
             reconcile, "_add_worktree_for_member",
-            lambda member, wt, branch, repo, *, base: captured.setdefault("base", base),
+            lambda member, wt, branch, repo, *, base, slug: captured.setdefault("base", base),
         )
 
         member = g["group"]["members"][0]
