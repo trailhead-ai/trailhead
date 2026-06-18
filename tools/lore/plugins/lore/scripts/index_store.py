@@ -19,9 +19,9 @@ migration cost (``reindex`` repopulates):
 
 - ``records`` — ``id TEXT PRIMARY KEY`` (``"<vault>/<kind>/<name>"``); ``vault/kind/
   name`` (``UNIQUE``); ``title/status`` NOT NULL; ``team/suite/product/repo``; the
-  ISO dates; ``layer TEXT NOT NULL`` with a **``CHECK (layer IN ('personal',
-  'shared'))``** constraint so a bad layer value fails at ingest rather than silently
-  emitting shared content unfenced (council/Security); ``src_mtime REAL NOT NULL`` /
+  ISO dates; ``shared INTEGER NOT NULL`` with a **``CHECK (shared IN (0, 1))``**
+  constraint so a bad trust value fails at ingest rather than silently emitting
+  untrusted content unfenced (council/Security); ``src_mtime REAL NOT NULL`` /
   ``src_size INTEGER NOT NULL`` for drift detection. **There is no ``body`` column** —
   body text lives only in the markdown file and is fed into ``record_fts.body``.
 - ``record_facet(id REFERENCES records(id) ON DELETE CASCADE, facet, value)`` +
@@ -61,10 +61,14 @@ foreign_keys`` to OFF and does NOT persist it in the file, so ``open_index`` iss
   vault). Reverse edges make ``related``/alias membership symmetric. The incremental
   ``update_index`` path emits **forward** edges only; full reverse symmetry is a
   documented ``reindex``-only gap — safe because the index is derived.
-- I-5: ``layer`` is ``'personal'`` for the default/personal vault and ``'shared'``
-  otherwise (``rebuild`` treats its first vault — or the explicit ``personal_vault``
-  arg — as personal; the incremental ``upsert_row`` write path always targets the
-  user's own vault, so it defaults ``layer='personal'``).
+- I-5: ``shared`` is ``0`` (trusted, unfenced) for the user's own/owned vault and
+  ``1`` (untrusted/shared — must be fenced by ``search``) otherwise. ``rebuild``
+  derives ``shared = 0`` for its first vault — or the explicit ``owned_vault`` arg —
+  and ``1`` for all others; the incremental ``upsert_row`` write path always targets
+  the user's own vault, so it defaults ``shared=0``. **S4 follow-up:** the derivation
+  source for ``shared`` will swap from "owned vault = first vault" to a per-vault
+  ``config.json`` (``shared: true`` ⇒ untrusted); only the source changes — the
+  column shape (``shared`` 0/1) and the ``search`` classification stay as built here.
 - I-6: ``delete_row`` removes the ``records`` row (CASCADE clears its facets) and the
   matching ``record_fts`` row; a missing key is a silent no-op (never raises).
 """
@@ -123,7 +127,7 @@ CREATE TABLE IF NOT EXISTS records (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     last_referenced_at TEXT,
-    layer           TEXT NOT NULL CHECK (layer IN ('personal', 'shared')),
+    shared          INTEGER NOT NULL CHECK (shared IN (0, 1)),
     src_mtime       REAL NOT NULL,
     src_size        INTEGER NOT NULL,
     UNIQUE (vault, kind, name)
@@ -203,7 +207,7 @@ def _project_record(
     name: str,
     sidecar: dict[str, Any],
     body: str,
-    layer: str,
+    shared: int,
     src_mtime: float,
     src_size: int,
 ) -> str:
@@ -229,7 +233,7 @@ def _project_record(
             id, vault, kind, name, title, status,
             team, suite, product, repo,
             created_at, updated_at, last_referenced_at,
-            layer, src_mtime, src_size
+            shared, src_mtime, src_size
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
@@ -238,7 +242,7 @@ def _project_record(
             sidecar.get("product"), sidecar.get("repo"),
             sidecar.get("created-at"), sidecar.get("updated-at"),
             sidecar.get("last-referenced-at"),
-            layer, src_mtime, src_size,
+            shared, src_mtime, src_size,
         ),
     )
     rowid = cur.lastrowid
@@ -286,14 +290,14 @@ def upsert_row(
     sidecar: dict[str, Any],
     body: str,
     *,
-    layer: str = "personal",
+    shared: int = 0,
 ) -> None:
     """Project the record keyed ``(vault, kind, name)`` (the write seam, I-3).
 
     Thin wrapper over the shared projection: writes the scalar columns, the forward
     ``record_facet`` rows, and the FTS row in one call. Reverse edges are a
-    ``reindex``-only property (I-4). ``layer`` defaults to ``'personal'`` because the
-    incremental write path always targets the user's own (default) vault.
+    ``reindex``-only property (I-4). ``shared`` defaults to ``0`` (trusted/unfenced)
+    because the incremental write path always targets the user's own (owned) vault.
 
     ``src_mtime``/``src_size`` are derived from the in-memory ``body`` (the write
     just produced it; the on-disk file is fresh by construction). The caller must
@@ -301,7 +305,7 @@ def upsert_row(
     """
     body_bytes = body.encode("utf-8")
     _project_record(
-        conn, vault, kind, name, sidecar, body, layer,
+        conn, vault, kind, name, sidecar, body, shared,
         src_mtime=0.0, src_size=len(body_bytes),
     )
 
@@ -324,7 +328,7 @@ def rebuild(
     vaults: list[str],
     conn: sqlite3.Connection,
     *,
-    personal_vault: str | None = None,
+    owned_vault: str | None = None,
 ) -> int:
     """Drop and two-pass repopulate the index from the vault directory trees (I-2/I-4).
 
@@ -338,14 +342,17 @@ def rebuild(
     FK is satisfied because every record row exists before any facet row, even when a
     reverse-edge target lives in a later-ingested vault.
 
-    The first vault (or the explicit ``personal_vault``) is the personal layer; all
-    others are ``'shared'`` (I-5).
+    The first vault (or the explicit ``owned_vault``) is the user's own/owned vault
+    → ``shared=0`` (trusted, unfenced); all others are ``shared=1`` (untrusted, fenced
+    by ``search``) (I-5). **S4 follow-up:** this derivation source (owned = first vault)
+    is provisional — S4 swaps it to a per-vault ``config.json`` (``shared: true`` ⇒
+    untrusted). Only the source changes; the ``shared`` 0/1 column stays.
 
     Args:
-        vaults:         Vault root paths (as strings) to scan; first is personal
-                        unless ``personal_vault`` is given.
-        conn:           Open SQLite connection (FK ON, realized schema present).
-        personal_vault: Override which vault is the ``'personal'`` layer.
+        vaults:       Vault root paths (as strings) to scan; first is the owned vault
+                      unless ``owned_vault`` is given.
+        conn:         Open SQLite connection (FK ON, realized schema present).
+        owned_vault:  Override which vault is the user's own/owned (``shared=0``) vault.
 
     Returns:
         The number of record rows inserted.
@@ -354,8 +361,8 @@ def rebuild(
     conn.execute("DELETE FROM record_facet")
     conn.execute("DELETE FROM records")
 
-    if personal_vault is None and vaults:
-        personal_vault = vaults[0]
+    if owned_vault is None and vaults:
+        owned_vault = vaults[0]
 
     # (kind, name) -> record id, for reverse-edge target resolution in pass 2.
     name_index: dict[tuple[str, str], str] = {}
@@ -368,7 +375,7 @@ def rebuild(
         vault_root = Path(vault_str)
         if not vault_root.is_dir():
             continue
-        layer = "personal" if vault_str == personal_vault else "shared"
+        shared = 0 if vault_str == owned_vault else 1
         for kind_dir in vault_root.iterdir():
             if not kind_dir.is_dir():
                 continue
@@ -390,7 +397,7 @@ def rebuild(
                     body = md_path.read_text()
                     stat = md_path.stat()
                     record_id = _project_record(
-                        conn, vault_str, kind, name, sidecar, body, layer,
+                        conn, vault_str, kind, name, sidecar, body, shared,
                         src_mtime=stat.st_mtime, src_size=stat.st_size,
                     )
                 except Exception:

@@ -14,8 +14,9 @@ BOTH the `update_index` write seam and `reindex`:
     lives in a second vault ingested second (FK-ordering).
   - BM25 sort direction: a title-hit sorts before a body-only-hit under
     ``ORDER BY bm25(record_fts, 3.0, 2.0, 1.0)``.
-  - Layer integrity: a record from a non-default vault has ``layer='shared'``; a
-    non-enum layer value is rejected by the CHECK constraint.
+  - Trust integrity: a record from a non-owned vault has ``shared=1``; a record
+    from the owned vault has ``shared=0``; a value outside ``{0, 1}`` is rejected
+    by the ``CHECK (shared IN (0, 1))`` constraint.
   - ``reindex`` idempotent; a since-deleted record's ``records`` AND ``record_facet``
     rows are gone after rebuild (CASCADE / drop+rebuild).
   - The ``update_index`` write path populates the written record's forward facets + FTS
@@ -161,7 +162,7 @@ def test_open_index_provisions_realized_tables(env):
 
 
 def test_records_has_locked_columns(env):
-    """records carries the locked S3 columns incl. id, layer, src_mtime, src_size."""
+    """records carries the locked S3 columns incl. id, shared, src_mtime, src_size."""
     mod = load_index_store()
     conn = mod.open_index(env=env)
     try:
@@ -172,7 +173,7 @@ def test_records_has_locked_columns(env):
         "id", "vault", "kind", "name", "title", "status",
         "team", "suite", "product", "repo",
         "created_at", "updated_at", "last_referenced_at",
-        "layer", "src_mtime", "src_size",
+        "shared", "src_mtime", "src_size",
     }
     assert expected <= cols, f"missing columns: {expected - cols}"
 
@@ -191,7 +192,7 @@ def test_reindex_populates_records_columns(env, tmp_path):
         mod.rebuild([str(vault)], conn)
         conn.commit()
         row = conn.execute(
-            "SELECT id, vault, kind, name, title, status, team, layer "
+            "SELECT id, vault, kind, name, title, status, team, shared "
             "FROM records"
         ).fetchone()
     finally:
@@ -203,7 +204,7 @@ def test_reindex_populates_records_columns(env, tmp_path):
     assert row[4] == "Alpha Spec"
     assert row[5] == "active"
     assert row[6] == "trailhead"
-    assert row[7] == "personal"
+    assert row[7] == 0
 
 
 def test_reindex_one_facet_row_per_list_value(env, tmp_path):
@@ -408,7 +409,7 @@ def test_reverse_edge_cross_vault_target_ingested_second(env, tmp_path):
 
     conn = mod.open_index(env=env)
     try:
-        # personal=vault_a, shared=vault_b; both records inserted before any facet (pass 1/2).
+        # owned=vault_a, shared=vault_b; both records inserted before any facet (pass 1/2).
         mod.rebuild([str(vault_a), str(vault_b)], conn)
         conn.commit()
         # Reverse edge: marco carries a related-spec edge back to penny, so
@@ -466,11 +467,11 @@ def test_bm25_title_hit_sorts_before_body_only_hit(env, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Layer integrity
+# Trust integrity (shared 0/1 column)
 # ---------------------------------------------------------------------------
 
-def test_non_default_vault_is_shared_layer(env, tmp_path):
-    """A record from a non-default (second) vault gets layer='shared'."""
+def test_non_owned_vault_is_shared(env, tmp_path):
+    """A record from a non-owned (second) vault gets shared=1; owned gets shared=0."""
     mod = load_index_store()
     vault_a = tmp_path / "vault-a"
     vault_b = tmp_path / "vault-b"
@@ -480,29 +481,29 @@ def test_non_default_vault_is_shared_layer(env, tmp_path):
     try:
         mod.rebuild([str(vault_a), str(vault_b)], conn)
         conn.commit()
-        layers = {
+        shared = {
             r[0]: r[1]
-            for r in conn.execute("SELECT name, layer FROM records").fetchall()
+            for r in conn.execute("SELECT name, shared FROM records").fetchall()
         }
     finally:
         conn.close()
-    assert layers["in-a"] == "personal"
-    assert layers["in-b"] == "shared"
+    assert shared["in-a"] == 0
+    assert shared["in-b"] == 1
 
 
-def test_check_constraint_rejects_non_enum_layer(env):
-    """A non-enum layer value is rejected by the CHECK constraint."""
+def test_check_constraint_rejects_value_outside_zero_one(env):
+    """A shared value outside {0, 1} is rejected by the CHECK constraint."""
     mod = load_index_store()
     conn = mod.open_index(env=env)
     try:
         with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
             conn.execute(
                 "INSERT INTO records (id, vault, kind, name, title, status, "
-                "created_at, updated_at, layer, src_mtime, src_size) VALUES "
+                "created_at, updated_at, shared, src_mtime, src_size) VALUES "
                 "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ("v/spec/x", "v", "spec", "x", "X", "active",
                  "2026-06-17T10:00:00Z", "2026-06-17T10:00:00Z",
-                 "untrusted", 0.0, 0),
+                 2, 0.0, 0),
             )
     finally:
         conn.close()

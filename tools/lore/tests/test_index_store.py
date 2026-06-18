@@ -87,7 +87,6 @@ def _make_sidecar(kind="spec", name="my-spec", title="My Spec", status="draft"):
         "updated-by": "tom@example.com",
         "last-referenced-at": None,
         "scope": None,
-        "layer": None,
     }
 
 

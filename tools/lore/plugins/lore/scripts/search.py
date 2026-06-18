@@ -16,18 +16,20 @@ spirit (no INSERT/UPDATE/DELETE, no commit) and closes it.
    ``records`` column — stay index-only; never read the vault ``.md`` files).
 6. Render — human banner or ``--json``.
 
-**Injection-defense output (airtight, A-3).** Each hit's ``layer`` (read straight
-from the index column — never re-resolved) decides wrapping. ``_classify_layer``
-maps the raw index value to exactly ``"personal"`` or ``"shared"`` using a
-**fail-safe default**: only the exact string ``"personal"`` is unfenced; any other
-value (empty, None, unknown, wrong case) maps to ``"shared"`` (fenced). This
-prevents a corrupt or non-standard layer value from leaking shared content unfenced.
-``shared``-layer hits — INCLUDING their snippets — are emitted inside
-``<external-memory layer="shared" source="…">`` via ``xml_escape.wrap_shared`` so
-a literal ``</external-memory>`` in shared content/snippet is entity-escaped and
-cannot break out or spoof the fence. ``personal``-layer hits are unfenced. Personal
-and shared hits go in clearly delimited, NON-interleaved blocks (all personal first;
-all shared inside the fence, grouped by source vault).
+**Injection-defense output (airtight, A-3).** Each hit's ``shared`` flag (read
+straight from the index ``shared`` INTEGER column — never re-resolved) decides
+wrapping. ``_is_shared`` reads the raw value with a **fail-safe default**: a hit is
+trusted/unfenced ONLY when ``shared`` is exactly the integer ``0``; ANY other value
+— ``1``, ``None``, ``""``, a string, ``"0"``, anything unexpected — is treated as
+shared (fenced). This prevents a corrupt or non-standard ``shared`` value from
+leaking untrusted content unfenced. ``shared`` hits — INCLUDING their snippets — are
+emitted inside ``<external-memory layer="shared" source="…">`` via
+``xml_escape.wrap_shared`` so a literal ``</external-memory>`` in shared content/
+snippet is entity-escaped and cannot break out or spoof the fence. (The fence wire
+format's ``layer="shared"`` literal is the LOCKED output contract the agent reads —
+it is unrelated to the index ``shared`` column.) Trusted (``shared=0``) hits are
+unfenced. Trusted and shared hits go in clearly delimited, NON-interleaved blocks
+(all trusted first; all shared inside the fence, grouped by source vault).
 
 **Error-path escape (council Critical).** Any reflected query token echoed in a
 hard-error message is XML-body-escaped before being written to stderr, so a query
@@ -78,19 +80,28 @@ _SNIPPET_MAX = 160
 
 
 # ---------------------------------------------------------------------------
-# Layer classification (fail-safe)
+# Trust classification (fail-safe)
 # ---------------------------------------------------------------------------
 
-def _classify_layer(raw_layer) -> str:
-    """Map a raw index ``layer`` value to exactly ``"personal"`` or ``"shared"``.
+def _is_shared(raw_shared) -> bool:
+    """True ⇒ the hit is untrusted/shared and must be fenced.
 
-    **Fail-safe default:** only the exact string ``"personal"`` is unfenced;
-    every other value — including ``None``, ``""``, wrong case, or any unknown
-    string — maps to ``"shared"`` (fenced). This ensures that a corrupt,
-    missing, or non-standard layer value in the index never causes shared
-    content to be leaked as personal (unfenced).
+    **Fail-safe default:** a hit is trusted (unfenced) ONLY when the raw index
+    ``shared`` value is exactly the integer ``0``. ANY other value — ``1``,
+    ``None``, ``""``, a string (incl. the string ``"0"``), ``2``, ``True``/
+    ``False``, or anything unexpected — is treated as shared (fenced). This
+    ensures a corrupt, missing, or non-standard ``shared`` value in the index
+    never causes untrusted content to be leaked as trusted (unfenced).
+
+    The strict ``is 0`` check (not ``== 0``) excludes ``False`` and ``0.0`` —
+    only a genuine integer ``0`` from the ``shared INTEGER`` column is trusted.
+
+    **S4 follow-up:** the index ``shared`` derivation source swaps to per-vault
+    ``config.json`` in S4; this classification (read the column, fence iff not
+    integer 0) stays unchanged.
     """
-    return "personal" if raw_layer == "personal" else "shared"
+    return not (isinstance(raw_shared, int) and not isinstance(raw_shared, bool)
+                and raw_shared == 0)
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +190,7 @@ def _fetch_hits(conn, cq):
             "title": record.get("title") or "",
             "kind": record.get("kind") or "",
             "status": record.get("status") or "",
-            "layer": _classify_layer(record.get("layer")),
+            "shared": 1 if _is_shared(record.get("shared")) else 0,
             "vault": record.get("vault") or "",
             "snippet": snippet,
         })
@@ -222,19 +233,19 @@ def _render_human(hits, *, total, limit, stale, reverse_edge):
     if not hits:
         lines.append("0 results")
     else:
-        personal = [h for h in hits if h["layer"] == "personal"]
-        shared = [h for h in hits if h["layer"] != "personal"]
+        trusted = [h for h in hits if h["shared"] == 0]
+        shared = [h for h in hits if h["shared"] != 0]
 
         lines.append(f"{len(hits)} result{'s' if len(hits) != 1 else ''}")
         lines.append("")
 
-        if personal:
-            lines.append("Personal:")
-            for h in personal:
+        if trusted:
+            lines.append("Trusted:")
+            for h in trusted:
                 lines.extend(_render_hit_lines(h))
 
         if shared:
-            if personal:
+            if trusted:
                 lines.append("")
             by_vault: dict[str, list] = {}
             for h in shared:
