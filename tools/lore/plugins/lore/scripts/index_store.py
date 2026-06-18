@@ -62,13 +62,14 @@ foreign_keys`` to OFF and does NOT persist it in the file, so ``open_index`` iss
   ``update_index`` path emits **forward** edges only; full reverse symmetry is a
   documented ``reindex``-only gap — safe because the index is derived.
 - I-5: ``shared`` is ``0`` (trusted, unfenced) for the user's own/owned vault and
-  ``1`` (untrusted/shared — must be fenced by ``search``) otherwise. ``rebuild``
-  derives ``shared = 0`` for its first vault — or the explicit ``owned_vault`` arg —
-  and ``1`` for all others; the incremental ``upsert_row`` write path always targets
-  the user's own vault, so it defaults ``shared=0``. **S4 follow-up:** the derivation
-  source for ``shared`` will swap from "owned vault = first vault" to a per-vault
-  ``config.json`` (``shared: true`` ⇒ untrusted); only the source changes — the
-  column shape (``shared`` 0/1) and the ``search`` classification stay as built here.
+  ``1`` (untrusted/shared — must be fenced by ``search``) otherwise. **S4 wired the
+  config source:** ``rebuild`` takes ``shared_roots`` (the set of resolved root paths
+  ``config.json`` marks ``shared: true``) and derives ``shared=1`` iff the vault's
+  root is in that set; when ``shared_roots`` is ``None`` it falls back to the
+  owned-vault heuristic (first vault — or ``owned_vault`` — is ``shared=0``, rest
+  ``1``) for vanilla no-config usage. The incremental ``upsert_row`` write path is
+  passed the resolved vault's ``shared`` by ``record_store`` (default ``0``). The
+  column shape (``shared`` 0/1) and the ``search`` classification are unchanged.
 - I-6: ``delete_row`` removes the ``records`` row (CASCADE clears its facets) and the
   matching ``record_fts`` row; a missing key is a silent no-op (never raises).
 """
@@ -145,6 +146,11 @@ CREATE INDEX IF NOT EXISTS idx_facet ON record_facet(facet, value);
 CREATE VIRTUAL TABLE IF NOT EXISTS record_fts USING fts5(
     title, keywords, body,
     tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE TABLE IF NOT EXISTS index_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
 );
 """
 
@@ -408,11 +414,37 @@ def remove_vault(vault_root: str, conn: sqlite3.Connection) -> int:
     return len(keys)
 
 
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Upsert a key/value row into ``index_meta`` (S4 config-freshness signal).
+
+    The ``index_meta`` table records derived-index provenance the read path needs
+    to detect drift it cannot see by stat alone — notably ``config_mtime``, the
+    ``config.json`` mtime the index was last (re)built against. ``search`` compares
+    the stored value to the current ``config.json`` mtime and warns when the index
+    is older, so an out-of-band config edit (e.g. flipping a vault's ``shared``
+    flag) can't silently leave rows wrong. The caller must ``conn.commit()``.
+    """
+    conn.execute(
+        "INSERT INTO index_meta(key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+
+
+def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    """Return the ``index_meta`` value for *key*, or ``None`` if unset (S4)."""
+    row = conn.execute(
+        "SELECT value FROM index_meta WHERE key=?", (key,)
+    ).fetchone()
+    return None if row is None else row[0]
+
+
 def rebuild(
     vaults: list[str],
     conn: sqlite3.Connection,
     *,
     owned_vault: str | None = None,
+    shared_roots: set[str] | None = None,
 ) -> int:
     """Drop and two-pass repopulate the index from the vault directory trees (I-2/I-4).
 
@@ -426,17 +458,26 @@ def rebuild(
     FK is satisfied because every record row exists before any facet row, even when a
     reverse-edge target lives in a later-ingested vault.
 
-    The first vault (or the explicit ``owned_vault``) is the user's own/owned vault
-    → ``shared=0`` (trusted, unfenced); all others are ``shared=1`` (untrusted, fenced
-    by ``search``) (I-5). **S4 follow-up:** this derivation source (owned = first vault)
-    is provisional — S4 swaps it to a per-vault ``config.json`` (``shared: true`` ⇒
-    untrusted). Only the source changes; the ``shared`` 0/1 column stays.
+    **``shared`` derivation source (I-5).** Two modes:
+
+    - **Config-sourced (S4, preferred):** when ``shared_roots`` is given, a vault's
+      rows get ``shared=1`` iff its root string ∈ ``shared_roots`` (the set of
+      resolved root paths the config marks ``shared: true``), else ``shared=0``.
+      This is the per-vault ``config.json`` source the spec mandates — a config edit
+      that flips a vault's ``shared`` flag re-derives the column on the next reindex.
+    - **Owned-vault heuristic (vanilla fallback):** when ``shared_roots`` is ``None``,
+      the first vault (or the explicit ``owned_vault``) is the user's own/owned vault
+      → ``shared=0``; all others → ``shared=1``. Preserves today's no-config behavior.
+
+    Only the source changes; the ``shared`` 0/1 column shape stays.
 
     Args:
-        vaults:       Vault root paths (as strings) to scan; first is the owned vault
-                      unless ``owned_vault`` is given.
-        conn:         Open SQLite connection (FK ON, realized schema present).
-        owned_vault:  Override which vault is the user's own/owned (``shared=0``) vault.
+        vaults:        Vault root paths (as strings) to scan; first is the owned vault
+                       unless ``owned_vault`` is given (owned-heuristic mode only).
+        conn:          Open SQLite connection (FK ON, realized schema present).
+        owned_vault:   Override which vault is own/owned (``shared=0``) — heuristic mode.
+        shared_roots:  When given, switches to config-sourced ``shared``: a vault's
+                       rows are ``shared=1`` iff its root ∈ this set, else ``0``.
 
     Returns:
         The number of record rows inserted.
@@ -459,7 +500,10 @@ def rebuild(
         vault_root = Path(vault_str)
         if not vault_root.is_dir():
             continue
-        shared = 0 if vault_str == owned_vault else 1
+        if shared_roots is not None:
+            shared = 1 if vault_str in shared_roots else 0
+        else:
+            shared = 0 if vault_str == owned_vault else 1
         for kind_dir in vault_root.iterdir():
             if not kind_dir.is_dir():
                 continue

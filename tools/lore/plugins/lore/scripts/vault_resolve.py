@@ -38,6 +38,8 @@ Pure stdlib: no I/O.  References: Slice 2, S4 plan.
 # machinery on 3.12+ looks the module up in sys.modules to resolve field
 # annotations — same caution as vault_config.py (Slice 1 gotcha).
 
+from typing import NamedTuple
+
 import vault_config as _vc
 
 # ---------------------------------------------------------------------------
@@ -47,6 +49,32 @@ import vault_config as _vc
 #: Scope precedence, highest first.  The ``default`` scope sits last so it
 #: acts as the unconditional floor.
 _PRECEDENCE: tuple = ("repo", "product", "suite", "team", "default")
+
+
+# ---------------------------------------------------------------------------
+# Resolution result (Slice 5) — elected vault + any skipped higher vault
+# ---------------------------------------------------------------------------
+
+
+class Resolution(NamedTuple):
+    """The outcome of :func:`explain_resolution`.
+
+    Attributes:
+        chosen:        The elected :class:`vault_config.Vault` (always present —
+                       resolution is total).
+        skipped:       The highest-precedence vault that *matched* a supplied scope
+                       but was **ineligible** for the kind (its allowlist excluded
+                       the kind), and so was passed over for a lower-precedence
+                       eligible vault.  ``None`` when nothing was skipped (the
+                       chosen vault was the highest match, or the default floor was
+                       reached with no higher match).
+        skipped_reason: A human-readable reason the ``skipped`` vault was passed
+                       over (``"kind not in allowlist"``), or ``None``.
+    """
+
+    chosen: object
+    skipped: object
+    skipped_reason: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -131,5 +159,69 @@ def resolve_vault(participating_scopes: dict, kind: str, config: list):
 
     raise RuntimeError(  # pragma: no cover
         "lore: resolve_vault found no eligible vault — config is missing a "
+        "default-scope vault (this violates the Slice 1 invariant)"
+    )
+
+
+def explain_resolution(participating_scopes: dict, kind: str, config: list) -> Resolution:
+    """Resolve a vault AND report the highest matched-but-ineligible vault (Slice 5).
+
+    Same selection as :func:`resolve_vault` (totality, precedence, fall-through),
+    but returns a :class:`Resolution` so the CLI can print a routing-confirmation
+    line that names *why* a higher-precedence vault was skipped (council/Advocate —
+    an author should never silently lose a record to allowlist fall-through).
+
+    The ``skipped`` field is the **highest-precedence** vault that matched a supplied
+    scope+name but was ineligible for *kind* (its ``records`` allowlist excluded the
+    kind), so the chosen vault is a lower-precedence eligible one. ``resolve_vault``
+    is kept intact (the Slice 2 contract); this is a strict superset used only by the
+    CLI confirmation path.
+    """
+    default_vault = None
+    config_by_scope_name: dict = {}
+    for vault in config:
+        if vault.scope == "default":
+            default_vault = vault
+        config_by_scope_name[(vault.scope, vault.name)] = vault
+
+    normalized_participants: dict = {
+        scope: _vc.normalize_vault_name(name)
+        for scope, name in participating_scopes.items()
+    }
+
+    def _is_eligible(vault) -> bool:
+        return not vault.records or kind in vault.records
+
+    skipped = None
+    skipped_reason: str | None = None
+
+    for scope in _PRECEDENCE:
+        if scope == "default":
+            if default_vault is not None:
+                return Resolution(default_vault, skipped, skipped_reason)
+            continue
+
+        if scope not in normalized_participants:
+            continue
+
+        supplied_name = normalized_participants[scope]
+        vault = config_by_scope_name.get((scope, supplied_name))
+        if vault is None:
+            continue
+
+        if _is_eligible(vault):
+            return Resolution(vault, skipped, skipped_reason)
+
+        # Matched but ineligible — record the FIRST (highest-precedence) such vault
+        # as the reported skip, then fall through to the next scope.
+        if skipped is None:
+            skipped = vault
+            skipped_reason = "kind not in allowlist"
+
+    if default_vault is not None:  # pragma: no cover - same guard as resolve_vault
+        return Resolution(default_vault, skipped, skipped_reason)
+
+    raise RuntimeError(  # pragma: no cover
+        "lore: explain_resolution found no eligible vault — config is missing a "
         "default-scope vault (this violates the Slice 1 invariant)"
     )
