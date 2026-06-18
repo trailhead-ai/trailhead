@@ -16,12 +16,21 @@ def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
     """Run the lore CLI as a subprocess; returns CompletedProcess.
 
     Shared harness for the record/session CLI tests — injects LORE_VAULT +
-    XDG_STATE_HOME (+ a stable LORE_EMAIL) so tests never touch the real vault or
-    state dir. ``env_extra`` overlays extra env vars.
+    XDG_STATE_HOME + XDG_CONFIG_HOME (+ a stable LORE_EMAIL) so tests never touch
+    the real vault, state, or config dir. ``env_extra`` overlays extra env vars.
+
+    XDG_CONFIG_HOME is isolated to a fresh, config-less dir under ``state_dir`` so
+    these tests get deterministic **vanilla** vault resolution (no ``config.json``
+    → active LORE_VAULT). Since S4 made ``record create``/``update``/``delete``
+    consult ``config_dir("lore")/config.json``, an inherited ambient config (e.g.
+    on a CI runner) would otherwise reroute records away from the test vault.
+    Callers that exercise layered vaults pass their own XDG_CONFIG_HOME via
+    ``env_extra`` (applied last, so it wins).
     """
     full_env = dict(os.environ)
     full_env["LORE_VAULT"] = str(vault)
     full_env["XDG_STATE_HOME"] = str(state_dir)
+    full_env["XDG_CONFIG_HOME"] = str(Path(state_dir) / "_xdg_config")
     full_env["LORE_EMAIL"] = "tester@example.com"
     if env_extra:
         full_env.update(env_extra)

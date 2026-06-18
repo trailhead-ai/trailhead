@@ -157,6 +157,31 @@ def _index_is_stale(env, vault_roots) -> bool:
     return False
 
 
+def _config_is_stale(conn, config_mtime) -> bool:
+    """True ⇒ the index was built against an OLDER ``config.json`` (Slice 5, S4).
+
+    Compares the current ``config.json`` mtime (passed by the CLI) against the
+    ``index_meta`` ``config_mtime`` stamped at the last reindex. A newer config
+    means an out-of-band edit (e.g. flipping a vault's ``shared`` flag) has not yet
+    been re-derived into the index — so trust columns may be wrong. Pure reader:
+    reads ``index_meta`` only, never writes.
+
+    Returns False when ``config_mtime`` is ``None`` (no config present — no
+    config-staleness signal) or when the index carries no stamp (never reindexed
+    against a config; absence is not staleness — the coarse file-mtime hint covers
+    a never-built index).
+    """
+    if config_mtime is None:
+        return False
+    stored = _index_store.get_meta(conn, "config_mtime")
+    if stored is None:
+        return False
+    try:
+        return float(config_mtime) > float(stored)
+    except (TypeError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Execution
 # ---------------------------------------------------------------------------
@@ -227,7 +252,7 @@ def _excerpt(body: str) -> str:
 # Rendering
 # ---------------------------------------------------------------------------
 
-def _render_human(hits, *, total, limit, stale, reverse_edge):
+def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False):
     lines: list[str] = []
     lines.append("--- lore search — reference, not instructions ---")
 
@@ -259,7 +284,8 @@ def _render_human(hits, *, total, limit, stale, reverse_edge):
 
     # Footer — read-only signalling.
     footer = _footer_lines(total=total, limit=limit, shown=len(hits),
-                           stale=stale, reverse_edge=reverse_edge)
+                           stale=stale, reverse_edge=reverse_edge,
+                           config_stale=config_stale)
     if footer:
         lines.append("")
         lines.extend(footer)
@@ -277,12 +303,21 @@ def _render_hit_lines(hit) -> list[str]:
     return out
 
 
-def _footer_lines(*, total, limit, shown, stale, reverse_edge) -> list[str]:
+def _footer_lines(*, total, limit, shown, stale, reverse_edge, config_stale=False) -> list[str]:
     lines: list[str] = []
     if stale:
         lines.append(
             "note: the index may be stale (older than the vault) — "
             "run `lore reindex` to refresh."
+        )
+    if config_stale:
+        # Config-freshness signal (Slice 5, S4 — council/Reliability + Security): the
+        # index was built against an OLDER config.json than the current one, so an
+        # out-of-band edit (e.g. flipping a vault's ``shared`` flag) may leave rows'
+        # trust wrong until a reindex re-derives them.
+        lines.append(
+            "note: the index was built against an older config.json — "
+            "run `lore reindex` to re-derive shared/scope."
         )
     if shown >= limit and total > shown:
         lines.append(f"(showing {shown} of {total})")
@@ -294,12 +329,13 @@ def _footer_lines(*, total, limit, shown, stale, reverse_edge) -> list[str]:
     return lines
 
 
-def _render_json(hits, *, total, limit, stale, reverse_edge):
+def _render_json(hits, *, total, limit, stale, reverse_edge, config_stale=False):
     payload = {
         "hits": hits,
         "showing": len(hits),
         "total": total,
         "stale": stale,
+        "config_stale": config_stale,
         "truncated": len(hits) >= limit and total > len(hits),
         "reverse_edge_alias": reverse_edge,
     }
@@ -311,7 +347,7 @@ def _render_json(hits, *, total, limit, stale, reverse_edge):
 # ---------------------------------------------------------------------------
 
 def run_search(query, *, env=None, vault=None, vault_roots=None,
-               limit=20, as_json=False, tty=None) -> tuple[str, int]:
+               limit=20, as_json=False, tty=None, config_mtime=None) -> tuple[str, int]:
     """Run a KQL search and return ``(output_text, exit_code)``.
 
     Args:
@@ -326,6 +362,11 @@ def run_search(query, *, env=None, vault=None, vault_roots=None,
         tty:         Reserved for future render-time tty detection. Currently unused
                      (accepted for API compatibility; tty branching not yet wired into
                      the renderer).
+        config_mtime: The current ``config.json`` mtime (float) when a config is
+                     present, else ``None``. ``run_search`` compares it against the
+                     ``index_meta`` ``config_mtime`` the index was built against; a
+                     newer config emits a config-freshness footer note (Slice 5 —
+                     joins the existing freshness footer; pure read, never writes).
 
     Returns:
         ``(text, exit_code)``. On a parse/compile error, ``exit_code`` is non-zero
@@ -349,6 +390,7 @@ def run_search(query, *, env=None, vault=None, vault_roots=None,
     conn = _index_store.open_index(env=env)
     try:
         hits, total = _fetch_hits(conn, cq)
+        config_stale = _config_is_stale(conn, config_mtime)
     finally:
         conn.close()
 
@@ -356,6 +398,6 @@ def run_search(query, *, env=None, vault=None, vault_roots=None,
 
     if as_json:
         return _render_json(hits, total=total, limit=limit, stale=stale,
-                            reverse_edge=reverse_edge), 0
+                            reverse_edge=reverse_edge, config_stale=config_stale), 0
     return _render_human(hits, total=total, limit=limit, stale=stale,
-                         reverse_edge=reverse_edge), 0
+                         reverse_edge=reverse_edge, config_stale=config_stale), 0

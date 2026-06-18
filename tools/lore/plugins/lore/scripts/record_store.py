@@ -636,19 +636,25 @@ def update_index(
     sidecar: dict[str, Any],
     body: str,
     vault_root: str,
+    shared: int = 0,
 ) -> None:
     """Upsert the index row for *record_id* (thin pass-through to ``index_store``).
 
     The seam S3 enriches (FTS5/BM25). *record_id* is ``<kind>/<name>``; the index
     is keyed ``(vault, kind, name)``.
 
-    The CLI write path always targets the user's own/owned vault, so the indexed
-    row is **trusted** (``shared=0``, unfenced by ``search``). This is the default,
-    passed explicitly so the trust posture is visible at the write seam — a record
-    written via the CLI must never be fenced as shared.
+    ``shared`` is the trust flag stamped on the row (0 = own/trusted, unfenced by
+    ``search``; 1 = untrusted/shared, fenced). It **defaults to 0** so the vanilla
+    no-config write path (and every pre-S4 caller) keeps stamping trusted rows. S4's
+    config-driven create path passes ``shared=1`` when the resolved destination is a
+    ``shared: true`` vault (``vault_config.is_shared``), so a record routed into a
+    shared vault is fenced correctly — the trust source now matches the vault, not a
+    blanket "CLI writes are always own" assumption.
     """
     kind, name = record_id.split("/", 1)
-    index_store.upsert_row(conn, vault_root, kind, name, sidecar, body, shared=0)
+    index_store.upsert_row(
+        conn, vault_root, kind, name, sidecar, body, shared=shared
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +667,7 @@ def validate_and_write(
     sidecar: dict[str, Any],
     body: str,
     conn,
+    shared: int = 0,
 ) -> RecordId:
     """Validate, stamp provenance, and durably write a record (AC-TX1/LIB3).
 
@@ -674,8 +681,13 @@ def validate_and_write(
          re-stamped every write.
       4. Neutralize ``<external-memory>`` fences in the body (AC-FENCE1).
       5. Atomically write body then sidecar (write-temp-then-rename).
-      6. Update the index. **If this raises, the text is already durable and
-         wins** (AC-TX2) — we do not roll back; the exception propagates.
+      6. Update the index with the resolved vault's ``shared`` trust flag (S4 —
+         default 0/own preserves vanilla). **If this raises, the text is already
+         durable and wins** (AC-TX2) — we do not roll back; the exception propagates.
+
+    ``shared`` is the trust flag for the destination vault (0 = own/trusted, 1 =
+    untrusted/shared). The caller (the CLI) computes it from
+    ``vault_config.is_shared(resolved_vault)`` when a config is present, else 0.
 
     Returns the vault-relative ``RecordId``.
     """
@@ -714,7 +726,12 @@ def validate_and_write(
     write_temp_then_rename(location.sidecar_path, sidecar_text)
 
     # 6 — index last; on failure the text already won (AC-TX2 — no rollback).
-    update_index(conn, location.record_id, stamped, safe_body, location.vault_root)
+    # ``shared`` is the resolved vault's trust flag (S4): default 0 (own/trusted)
+    # preserves vanilla; the config-driven create path passes 1 for a shared vault.
+    update_index(
+        conn, location.record_id, stamped, safe_body, location.vault_root,
+        shared=shared,
+    )
 
     return location.record_id
 

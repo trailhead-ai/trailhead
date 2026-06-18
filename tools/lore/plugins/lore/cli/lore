@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -48,6 +49,8 @@ import session_store as session_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
+import vault_config as vault_config_mod  # noqa: E402
+import vault_resolve as vault_resolve_mod  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 STARTER_DIR = PLUGIN_ROOT / "starter"
@@ -628,6 +631,123 @@ def _resolve_token_dir() -> Path:
     return token_dir
 
 
+def _resolve_config_path() -> Path:
+    """Return ``config_dir("lore")/config.json``, honoring XDG overrides.
+
+    Mirrors the promote-token / index path resolver pattern: lazy-import
+    ``_bootstrap`` + ``trailhead.paths`` and fall back to the XDG default on any
+    import failure so the CLI works in a vanilla checkout.
+    """
+    try:
+        import _bootstrap
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+        return _paths.config_dir("lore") / "config.json"
+    except (ImportError, SystemExit):
+        base = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        if base and os.path.isabs(base):
+            return Path(base) / "lore" / "config.json"
+        return Path.home() / ".config" / "lore" / "config.json"
+
+
+def _resolve_vaults_root() -> Path:
+    """Return ``state_dir("lore")/vaults``, honoring XDG overrides.
+
+    The confinement root for ``vault delete --remove-from-disk``: a vault whose
+    resolved path is not within this root (or reaches it via a symlink) is refused.
+    """
+    try:
+        import _bootstrap
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+        return _paths.state_dir("lore") / "vaults"
+    except (ImportError, SystemExit):
+        base = os.environ.get("XDG_STATE_HOME", "").strip()
+        if base and os.path.isabs(base):
+            return Path(base) / "lore" / "vaults"
+        return Path.home() / ".local" / "state" / "lore" / "vaults"
+
+
+def _load_vault_config():
+    """Return ``(config_path, list[Vault])`` if config.json exists & loads, else ``None``.
+
+    The single gate for all S4 config-driven behavior (Slice 5): routing, config-
+    sourced ``shared`` reindex, config-freshness signal, and the orphan-ID guard
+    all fire **only** when this returns a value. A missing ``config.json`` returns
+    ``None`` so every path falls back to vanilla (Axiom 3 — support vanilla usage).
+
+    A *present but malformed/invalid* config returns ``None`` too: the freshness +
+    routing layers are best-effort, and a broken config must not brick a plain
+    ``record create``; ``lore vault ls``/``add`` are the surfaces that surface the
+    config error explicitly.
+    """
+    config_path = _resolve_config_path()
+    if not config_path.exists():
+        return None
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (vault_config_mod.VaultConfigError, OSError, ValueError):
+        return None
+    return config_path, vaults
+
+
+def _orphan_vault_guard(vault_root: str) -> str | None:
+    """Return an error message iff *vault_root* is not a currently-configured vault.
+
+    The orphaned-RECORD_ID guard (Slice 5, S4): a record's target vault may have
+    been removed by a later ``config.json`` edit / ``vault delete``. ``record
+    update``/``delete`` call this **only when a config exists**; when it returns a
+    message the caller fails non-zero rather than acting on an orphaned target.
+
+    Conservative + vanilla-safe (Axiom 3): returns ``None`` (no guard) when no
+    config is present, so single-vault usage is never rejected. When a config IS
+    present, the resolved vault root path is matched against the configured vaults'
+    resolved paths (the index ``vault`` column stores the resolved root path, not
+    the config name — so path identity, realpath-normalized, is the right key).
+    """
+    loaded = _load_vault_config()
+    if loaded is None:
+        return None
+    _, vaults = loaded
+    target = os.path.realpath(vault_root)
+    configured = {os.path.realpath(str(v.path)) for v in vaults}
+    if target in configured:
+        return None
+    return (
+        f"lore: vault {vault_root} is not currently configured"
+    )
+
+
+def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
+    """Resolve the vault root that ``record update``/``delete`` should act on.
+
+    Symmetric with ``record create`` (S4): when a ``config.json`` exists, the
+    target vault is chosen by the SAME config resolution — the record's ``kind``
+    (from ``record_id``) plus the command's routing flags (``--repo/--product/
+    --suite/--team``) — so update/delete operate on the very vault create routed
+    the record to (a no-scope record lands in, and is updated from, the
+    ``default`` vault). When **no** config exists, fall back to the active vault
+    (``vault.resolve_vault()``) — vanilla usage is unchanged (Axiom 3).
+
+    NOTE (scoped fix, 2026-06-18): this reconciles the create-vs-update/delete
+    location split that the config-routing work introduced. The broader removal
+    of ``$LORE_VAULT`` in favor of config-only resolution across *every* lore
+    command (and the hooks) is tracked as a follow-up — see [[config-only-vault-resolution]].
+    """
+    loaded = _load_vault_config()
+    if loaded is None:
+        return str(vault_mod.resolve_vault())
+    _, vaults = loaded
+    kind = record_id.split("/", 1)[0]
+    participating_scopes = {
+        flag: getattr(args, flag)
+        for flag in ("repo", "product", "suite", "team")
+        if getattr(args, flag, None)
+    }
+    chosen = vault_resolve_mod.resolve_vault(participating_scopes, kind, vaults)
+    return str(chosen.path)
+
+
 # ---- seed -------------------------------------------------------------------
 
 def cmd_seed(args: argparse.Namespace) -> int:
@@ -765,6 +885,17 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"warning: guard install failed: {result.stderr.strip()}", file=sys.stderr)
         else:
             print(result.stdout.strip())
+
+    # Seed config.json with the single default-scope vault (Slice 4, S4) if it
+    # does not already exist. The config is the layered-vaults registry; init is
+    # the only command that creates it from scratch.
+    config_path = _resolve_config_path()
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        vault_config_mod.write_config_atomic(
+            config_path, {"vaults": [{"name": "default", "scope": "default"}]}
+        )
+        print(f"Seeded lore vault config at {config_path}")
 
     print(f"\nInitialized lore vault at {target}\n")
     print(f"export LORE_VAULT={target}")
@@ -1430,16 +1561,49 @@ def cmd_reindex(args: argparse.Namespace) -> int:
 
     Text-wins / index-derived posture (AC-TX2): the index is always
     rebuildable from the git-tracked text files.
+
+    **Multi-vault + config-sourced ``shared`` (Slice 5, S4).** When a
+    ``config.json`` exists & loads (and no explicit ``--vault`` narrows the
+    scope), reindex spans **all** configured vault roots and derives each vault's
+    ``shared`` from its config flag (``shared_roots`` — the set of roots marked
+    ``shared: true``), then stamps the ``config.json`` mtime into the index meta
+    so ``search`` can warn when the index is older than the config. With NO config
+    (or an explicit ``--vault``) it keeps today's single-active-vault behavior with
+    the owned=first-vault heuristic (vanilla).
     """
-    vault_root = (
-        Path(args.vault).expanduser().resolve()
-        if getattr(args, "vault", None)
-        else Path(vault_mod.resolve_vault())
-    )
+    vault_override = getattr(args, "vault", None)
+    loaded = None if vault_override else _load_vault_config()
+
+    if loaded is not None:
+        config_path, vaults = loaded
+        vault_roots = [str(v.path) for v in vaults]
+        shared_roots = {
+            str(v.path) for v in vaults if vault_config_mod.is_shared(v)
+        }
+    else:
+        config_path = None
+        single = (
+            Path(vault_override).expanduser().resolve()
+            if vault_override
+            else Path(vault_mod.resolve_vault())
+        )
+        vault_roots = [str(single)]
+        shared_roots = None
+
     try:
         conn = index_store_mod.open_index()
         try:
-            count = index_store_mod.rebuild([str(vault_root)], conn)
+            count = index_store_mod.rebuild(
+                vault_roots, conn, shared_roots=shared_roots
+            )
+            # Stamp the config mtime so search can flag a stale-config index
+            # (council/Reliability + Security). No config → no stamp.
+            if config_path is not None:
+                try:
+                    mtime = config_path.stat().st_mtime
+                    index_store_mod.set_meta(conn, "config_mtime", repr(mtime))
+                except OSError:
+                    pass
             conn.commit()
         finally:
             conn.close()
@@ -1492,6 +1656,17 @@ def cmd_search(args: argparse.Namespace) -> int:
     except Exception:
         vault_roots = []
 
+    # Config-freshness signal (Slice 5, S4): pass the current config.json mtime so
+    # run_search can warn when the index was built against an older config. No
+    # config → None → no config-staleness note (vanilla).
+    config_mtime = None
+    config_path = _resolve_config_path()
+    if config_path.exists():
+        try:
+            config_mtime = config_path.stat().st_mtime
+        except OSError:
+            config_mtime = None
+
     text, code = search_mod.run_search(
         args.query,
         env=dict(os.environ),
@@ -1499,12 +1674,333 @@ def cmd_search(args: argparse.Namespace) -> int:
         vault_roots=vault_roots or None,
         limit=args.limit,
         as_json=getattr(args, "json", False),
+        config_mtime=config_mtime,
     )
     if code == 0:
         print(text)
     else:
         print(text, file=sys.stderr)
     return code
+
+
+# ---- vault ------------------------------------------------------------------
+
+def cmd_vault(args: argparse.Namespace) -> int:
+    """Dispatch ``lore vault <action>`` — add / delete / ls / config (Slice 4, S4).
+
+    Thin shell over ``vault_config`` (the parse/validate/mutate boundary) and
+    ``index_store`` (the per-vault scan/remove seam). Routes by ``vault_action``.
+    """
+    action = getattr(args, "vault_action", None)
+    if action == "add":
+        return _cmd_vault_add(args)
+    if action == "delete":
+        return _cmd_vault_delete(args)
+    if action == "ls":
+        return _cmd_vault_ls(args)
+    if action == "config":
+        return _cmd_vault_config(args)
+    print(
+        f"lore vault: unknown action {action!r}. "
+        f"Use 'lore vault add', 'lore vault delete', 'lore vault ls', "
+        f"or 'lore vault config'.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _read_raw_config(config_path: Path) -> dict:
+    """Return the parsed raw config dict, or a fresh empty shape if absent."""
+    if not config_path.exists():
+        return {"vaults": []}
+    return json.loads(config_path.read_text(encoding="utf-8"))
+
+
+def _cmd_vault_add(args: argparse.Namespace) -> int:
+    """``lore vault add NAME --scope SCOPE [--path PATH] [--record KIND ...]``.
+
+    Validates the new entry, writes it to ``config.json`` (atomic), then scans the
+    resolved vault's on-disk records into the global index — so registering an
+    already-populated directory makes its records immediately searchable. Re-adding
+    a name whose directory still exists reattaches + re-scans (no clobber).
+    """
+    config_path = _resolve_config_path()
+    name = args.name
+    normalized = vault_config_mod.normalize_vault_name(name)
+    scope = args.scope
+    records = list(args.record or [])
+
+    # Validate scope value early (argparse already constrains it, but be explicit).
+    if scope not in vault_config_mod.VALID_SCOPES:
+        print(
+            f"lore: invalid scope {scope!r}; must be one of "
+            f"{sorted(vault_config_mod.VALID_SCOPES)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # The default vault may not carry a records allowlist (umbrella decision 6).
+    if scope == "default" and records:
+        print(
+            "lore: the default-scope vault may not carry a --record allowlist "
+            "(umbrella decision 6); it is the resolution floor and accepts every kind",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Every --record kind must be a known record kind (fail early).
+    for kind in records:
+        if kind not in record_model_mod.KINDS:
+            print(
+                f"lore: --record {kind!r} is not a valid record kind; "
+                f"valid kinds: {sorted(record_model_mod.KINDS)}",
+                file=sys.stderr,
+            )
+            return 1
+
+    config = _read_raw_config(config_path)
+
+    # Duplicate-name guard (compared after normalization).
+    existing = {
+        vault_config_mod.normalize_vault_name(v.get("name", ""))
+        for v in config.get("vaults", [])
+    }
+    if normalized in existing:
+        print(
+            f"lore: vault name {normalized!r} is already configured; "
+            "vault names must be globally unique",
+            file=sys.stderr,
+        )
+        return 1
+
+    entry: dict = {"name": normalized, "scope": scope}
+    if args.path:
+        entry["path"] = str(Path(args.path).expanduser())
+    if records:
+        entry["records"] = records
+    if args.shared:
+        entry["shared"] = True
+
+    vault_config_mod.add_vault_entry(config, entry)
+
+    # Validate the full candidate config IN MEMORY before persisting, so a
+    # well-formed-but-semantically-invalid entry (one that passes the inline
+    # guards above but fails load_config's deeper checks — e.g. a name that
+    # validate_layer_name rejects after normalization, or an explicit --path
+    # that fails confinement) is never written to config.json and then
+    # rejected. config.json stays byte-for-byte unchanged on a rejected add.
+    try:
+        vaults = vault_config_mod.validate_config(config)
+    except vault_config_mod.VaultConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        vault_config_mod.write_config_atomic(config_path, config)
+    except Exception as exc:
+        print(f"lore: failed to write config: {exc}", file=sys.stderr)
+        return 1
+
+    # Resolve the vault we just added + scan its on-disk records into the index.
+    vault = next((v for v in vaults if v.name == normalized), None)
+    if vault is None:
+        print(f"lore: vault {normalized!r} not found after write", file=sys.stderr)
+        return 1
+
+    shared_flag = vault_config_mod.shared_flag(vault)
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            count = index_store_mod.scan_vault(
+                str(vault.path), conn, shared=shared_flag
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"lore: vault add indexed config but failed to scan: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Added vault {normalized!r} ({scope}); indexed {count} record(s).")
+    return 0
+
+
+def _cmd_vault_delete(args: argparse.Namespace) -> int:
+    """``lore vault delete NAME [--remove-from-disk [--yes]]``.
+
+    Removes the config entry and the vault's index rows (on-disk dir kept by
+    default). ``--remove-from-disk`` is the only destructive op: it prints a
+    preview (resolved dir + record count) and requires ``--yes``; it rmtree's ONLY
+    the exact resolved configured path after ``assert_within_root`` confines its
+    realpath to ``state_dir("lore")/vaults`` — refusing any path that resolves
+    outside that root or reaches it via a symlink.
+    """
+    config_path = _resolve_config_path()
+    name = args.name
+    normalized = vault_config_mod.normalize_vault_name(name)
+
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"lore: cannot read config: {exc}", file=sys.stderr)
+        return 1
+    except vault_config_mod.VaultConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    vault = next((v for v in vaults if v.name == normalized), None)
+    if vault is None:
+        print(f"lore: vault {normalized!r} is not configured", file=sys.stderr)
+        return 1
+
+    # --remove-from-disk gating happens BEFORE any config/index mutation so a
+    # refused destructive request leaves everything intact.
+    if args.remove_from_disk:
+        vaults_root = _resolve_vaults_root()
+        # The LITERAL configured path (pre-resolution) is what we guard: a symlink
+        # at the configured path must be refused even when its target resolves
+        # within the vaults root. ``load_config`` resolves the path, so we read the
+        # raw entry to recover the literal configured value.
+        raw = _read_raw_config(config_path)
+        literal = next(
+            (e.get("path") for e in raw.get("vaults", [])
+             if vault_config_mod.normalize_vault_name(e.get("name", "")) == normalized),
+            None,
+        )
+        literal_path = Path(literal) if literal else Path(vault.path)
+        realpath = Path(vault.path).resolve()
+        try:
+            layers_mod.assert_within_root(realpath, vaults_root)
+        except layers_mod.LayerConfinementError as exc:
+            print(
+                f"lore: refusing to remove {vault.path} from disk — it resolves "
+                f"outside the vaults root {vaults_root} (confinement): {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        # Symlink guard: refuse only when the vault dir's OWN leaf is a symlink,
+        # so its target is not followed by rmtree. A symlinked ANCESTOR (macOS
+        # /var → /private/var, a symlinked $HOME or NFS mount) must NOT trip this
+        # — comparing whole-path realpath equality would false-positive on those
+        # and break --remove-from-disk on common setups. We compare the leaf's
+        # realpath against its resolved-parent + leaf name: they differ only when
+        # the leaf itself is a link.
+        leaf_is_symlink = (
+            literal_path.is_symlink()
+            or Path(literal_path).resolve()
+            != Path(literal_path).parent.resolve() / literal_path.name
+        )
+        if leaf_is_symlink:
+            print(
+                f"lore: refusing to remove {literal_path} from disk — its directory "
+                "is a symlink",
+                file=sys.stderr,
+            )
+            return 1
+
+        # Preview + require --yes (no bare-flag destruction).
+        record_count = 0
+        if realpath.is_dir():
+            conn = index_store_mod.open_index()
+            try:
+                record_count = conn.execute(
+                    "SELECT COUNT(*) FROM records WHERE vault=?", (str(vault.path),)
+                ).fetchone()[0]
+            finally:
+                conn.close()
+        print(
+            f"--remove-from-disk would permanently delete the directory:\n"
+            f"  {realpath}\n"
+            f"  ({record_count} indexed record(s))"
+        )
+        if not args.yes:
+            print(
+                "lore: aborted — re-run with --yes to confirm permanent deletion",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Remove config entry + index rows (the always-non-destructive part).
+    config = _read_raw_config(config_path)
+    vault_config_mod.remove_vault_entry(config, normalized)
+    try:
+        vault_config_mod.write_config_atomic(config_path, config)
+    except Exception as exc:
+        print(f"lore: failed to write config: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            removed = index_store_mod.remove_vault(str(vault.path), conn)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"lore: removed config entry but failed to clear index rows: {exc}",
+              file=sys.stderr)
+        return 1
+
+    if args.remove_from_disk:
+        shutil.rmtree(Path(vault.path).resolve())
+        print(f"Deleted vault {normalized!r} (config + {removed} index row(s) + on-disk dir).")
+    else:
+        print(f"Deleted vault {normalized!r} (config + {removed} index row(s); dir kept).")
+    return 0
+
+
+def _cmd_vault_ls(args: argparse.Namespace) -> int:
+    """``lore vault ls`` — list name/scope/path/records for each configured vault.
+
+    Tolerates a not-yet-created config (pre-``init``): prints a hint and exits 0,
+    never a traceback.
+    """
+    config_path = _resolve_config_path()
+    if not config_path.exists():
+        print("No vault config found; run 'lore init' to seed one.")
+        return 0
+
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"lore: cannot read config: {exc}", file=sys.stderr)
+        return 1
+    except vault_config_mod.VaultConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    for v in vaults:
+        allowlist = ", ".join(v.records) if v.records else "(all kinds)"
+        shared = " shared" if v.shared else ""
+        print(f"{v.name}\t{v.scope}{shared}\t{v.path}\t[{allowlist}]")
+    return 0
+
+
+def _cmd_vault_config(args: argparse.Namespace) -> int:
+    """``lore vault config`` — open ``config.json`` in ``$EDITOR``.
+
+    Launches the editor via ``subprocess`` LIST form (never ``shell=True``) so a
+    crafted ``$EDITOR`` cannot inject a shell command. On editor exit, prints a
+    reminder that ``lore reindex`` is needed for any scope/``shared`` change to
+    take effect.
+    """
+    config_path = _resolve_config_path()
+    if not config_path.exists():
+        print("No vault config found; run 'lore init' to seed one.", file=sys.stderr)
+        return 1
+
+    editor = os.environ.get("EDITOR", "").strip() or "vi"
+    try:
+        subprocess.run([editor, str(config_path)])
+    except OSError as exc:
+        print(f"lore: failed to launch editor {editor!r}: {exc}", file=sys.stderr)
+        return 1
+    print(
+        "Note: run 'lore reindex' for any scope or shared change to take effect "
+        "(the index is derived from config)."
+    )
+    return 0
 
 
 # ---- record -----------------------------------------------------------------
@@ -1670,7 +2166,11 @@ def _cmd_record_delete(args: argparse.Namespace) -> int:
         )
         return 1
 
-    vault_root = str(vault_mod.resolve_vault())
+    # Resolve the target vault via config (symmetric with `record create`) when a
+    # config exists, else the active vault (vanilla). A record whose vault was
+    # removed from config resolves to the default floor and surfaces a clean
+    # RecordNotFoundError below rather than acting on an orphaned target.
+    vault_root = _resolve_record_op_vault(record_id, args)
 
     try:
         conn = index_store_mod.open_index()
@@ -1785,8 +2285,36 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
     # check is intentionally absent — we read verbatim (AC-TX3).
     body = _read_stdin_body()
 
-    # Resolve vault.
-    vault_root = Path(vault_mod.resolve_vault())
+    # --- vault routing (Slice 5, S4) ---------------------------------------
+    # ``participating_scopes`` is built ONLY from the routing FLAGS
+    # (--repo/--product/--suite/--team) — NOT from --set (sidecar-only). When a
+    # config.json exists & loads, resolution picks the destination vault; a
+    # confirmation line names the elected vault + scope (+ any fall-through
+    # reason). With NO config we keep vanilla behavior: the active vault, shared=0.
+    loaded = _load_vault_config()
+    participating_scopes: dict = {}
+    for flag in ("repo", "product", "suite", "team"):
+        val = getattr(args, flag, None)
+        if val:
+            participating_scopes[flag] = val
+
+    shared_flag = 0
+    routing_line: str | None = None
+    if loaded is not None:
+        _, vaults = loaded
+        resolution = vault_resolve_mod.explain_resolution(
+            participating_scopes, kind, vaults
+        )
+        chosen = resolution.chosen
+        vault_root = Path(chosen.path)
+        shared_flag = vault_config_mod.shared_flag(chosen)
+        routing_line = f"Routed to vault: {chosen.name} ({chosen.scope})"
+        if resolution.skipped is not None:
+            routing_line += (
+                f"\n{resolution.skipped.name} excluded: {resolution.skipped_reason}"
+            )
+    else:
+        vault_root = Path(vault_mod.resolve_vault())
 
     try:
         conn = index_store_mod.open_index()
@@ -1802,6 +2330,7 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
                 sidecar=sidecar,
                 body=body,
                 conn=conn,
+                shared=shared_flag,
             )
             conn.commit()
         finally:
@@ -1816,6 +2345,11 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"error: record create failed: {exc}", file=sys.stderr)
         return 1
+
+    # Routing confirmation goes to STDERR (council/Advocate) so the RECORD_ID stays
+    # the sole parseable stdout line (the S2 create contract — test_record_cli_create).
+    if routing_line is not None:
+        print(routing_line, file=sys.stderr)
 
     # AC4: print the vault-relative RECORD_ID on stdout.
     print(record_id)
@@ -1999,7 +2533,18 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
     stdin_text = _read_stdin_body()
     has_stdin = stdin_text != ""
 
-    vault_root = str(vault_mod.resolve_vault())
+    # Resolve the target vault via config (symmetric with `record create`) when a
+    # config exists, else the active vault (vanilla).
+    vault_root = _resolve_record_op_vault(record_id, args)
+
+    # Orphan-ID guard (Slice 5, S4): a `--move-to VAULT` names an explicit
+    # destination vault by path; refuse to relocate a record into a vault that is
+    # not currently configured (when a config exists). Vanilla (no config) skips.
+    if move_to is not None:
+        orphan_err = _orphan_vault_guard(str(Path(move_to).expanduser()))
+        if orphan_err is not None:
+            print(orphan_err, file=sys.stderr)
+            return 1
 
     try:
         conn = index_store_mod.open_index()
@@ -2441,6 +2986,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="RECORD_ID",
         help="The vault-relative record ID to delete (<kind>/<name>)",
     )
+    # Routing flags (symmetric with create/update): when a config exists they
+    # select which vault the record lives in (a record routed to a scoped vault
+    # on create is reached for delete with the same flags). Suppressed from help
+    # like update's.
+    p_record_delete.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    p_record_delete.add_argument("--product", default=None, help=argparse.SUPPRESS)
+    p_record_delete.add_argument("--suite", default=None, help=argparse.SUPPRESS)
+    p_record_delete.add_argument("--team", default=None, help=argparse.SUPPRESS)
     p_record_delete.set_defaults(func=cmd_record)
 
     # ``lore record blob <path>`` (Slice 5, S2).
@@ -2461,6 +3014,49 @@ def build_parser() -> argparse.ArgumentParser:
              "Intermediate directories are created. (AC14/AC14a)",
     )
     p_record_blob.set_defaults(func=cmd_record)
+
+    # vault subcommand: ``lore vault add|delete|ls|config`` (Slice 4, S4).
+    p_vault = sub.add_parser(
+        "vault",
+        help="Manage configured layered vaults (add/delete/ls/config)",
+    )
+    p_vault_sub = p_vault.add_subparsers(dest="vault_action", required=True)
+
+    p_vault_add = p_vault_sub.add_parser("add", help="Register a configured vault")
+    p_vault_add.add_argument("name", help="Vault name (a repo name may contain '/')")
+    p_vault_add.add_argument(
+        "--scope", required=True,
+        choices=["repo", "product", "suite", "team", "default"],
+        help="Vault scope (precedence repo > product > suite > team > default)",
+    )
+    p_vault_add.add_argument("--path", default=None, help="Override the on-disk path")
+    p_vault_add.add_argument(
+        "--record", action="append", default=[], metavar="KIND",
+        help="Restrict the vault to this record kind (repeatable; not on default)",
+    )
+    p_vault_add.add_argument(
+        "--shared", action="store_true",
+        help="Mark the vault as untrusted/shared (its hits are fenced by search)",
+    )
+    p_vault_add.set_defaults(func=cmd_vault)
+
+    p_vault_delete = p_vault_sub.add_parser("delete", help="Remove a configured vault")
+    p_vault_delete.add_argument("name", help="Vault name to remove")
+    p_vault_delete.add_argument(
+        "--remove-from-disk", dest="remove_from_disk", action="store_true",
+        help="Also delete the on-disk directory (requires --yes; confined)",
+    )
+    p_vault_delete.add_argument(
+        "--yes", action="store_true",
+        help="Confirm the destructive --remove-from-disk operation",
+    )
+    p_vault_delete.set_defaults(func=cmd_vault)
+
+    p_vault_ls = p_vault_sub.add_parser("ls", help="List configured vaults")
+    p_vault_ls.set_defaults(func=cmd_vault)
+
+    p_vault_config = p_vault_sub.add_parser("config", help="Edit config.json in $EDITOR")
+    p_vault_config.set_defaults(func=cmd_vault)
 
     # session subcommand: ``lore session candidate|referenced`` (Slice 6, S2).
     # A SEPARATE endpoint from ``lore record`` — it does NOT route through the
