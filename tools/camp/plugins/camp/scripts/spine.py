@@ -1,8 +1,8 @@
 """Quarried worktree-spine for camp.
 
 Contains slug handling, manifest/cwd resolution, git wrappers, and all
-worktree command handlers (cmd_slug, cmd_status, cmd_break, cmd_sync,
-cmd_restock, cmd_ls, cmd_path, cmd_open, cmd_code, cmd_sweep, cmd_foreach,
+worktree command handlers (cmd_status, cmd_break, cmd_sync,
+cmd_restock, cmd_ls, cmd_path, cmd_code, cmd_sweep, cmd_foreach,
 cmd_doctor, cmd_help).
 
 De-zenithed from zenith/bin/camp (quarry provenance — Slice 0):
@@ -437,42 +437,6 @@ def _branch_exists(slug: str, repo_root: Path) -> bool:
     branch_name = f"worktree-{slug}"
     result = _git(repo_root, "branch", "--list", branch_name)
     return bool(result.stdout.strip())
-
-
-def cmd_slug(slug: str, extra: list[str], dry_run: bool = False) -> None:
-    """Dispatch a validated slug: resume, create, or detect orphaned branch."""
-    workspace_root = _workspace_root()
-    wt_path = _worktree_path_for_slug(slug, workspace_root)
-
-    if wt_path.is_dir():
-        cmd = ["claude", "-r", slug, *extra]
-        if dry_run:
-            _dry_run_print(cmd)
-            print(f"[dry-run] would chdir to: {wt_path}", file=sys.stderr)
-        else:
-            print(f"camp: resume {slug} → claude -r {slug}", file=sys.stderr)
-            os.chdir(str(wt_path))
-            os.execvp("claude", cmd)
-    else:
-        cmd = ["claude", "--worktree", slug, "-n", slug, *extra]
-        if dry_run:
-            _dry_run_print(cmd)
-        else:
-            print(
-                f"camp: create {slug} → claude --worktree {slug} -n {slug}",
-                file=sys.stderr,
-            )
-            os.execvp("claude", cmd)
-
-
-def cmd_open(args: list[str], dry_run: bool = False) -> None:
-    """camp open <slug> — escape hatch to reach a reserved-word-slug worktree."""
-    if not args:
-        _die("camp open: a slug is required\n  usage: camp open <slug>")
-    raw_slug = args[0]
-    extra = args[1:]
-    slug = _resolve_slug(raw_slug, context="open")
-    cmd_slug(slug, extra, dry_run=dry_run)
 
 
 _CODE_WORKSPACES_DIR = Path.home() / "code" / ".workspaces"
