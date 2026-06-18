@@ -629,6 +629,30 @@ class TestWorktreeAdminName:
         assert not stage.exists(), "stage should have been moved away"
         assert _admin_name(wt_path) == slug
 
+    def test_orphaned_stage_dir_is_cleaned_and_add_succeeds(self, tmp_path):
+        """A stage dir left on disk but NOT git-registered (failed prior add /
+        pruned registry) must not brick the fresh add — it is cleared first."""
+        from reconcile import _add_worktree_for_member
+
+        repo = tmp_path / "trailhead"
+        _init_git_repo(repo)
+        slug = "feat-orphan"
+        member = {"name": "trailhead", "repo_root": str(repo)}
+        wt_path = tmp_path / "ws" / slug / "trailhead"
+        stage = wt_path.parent / slug
+
+        # Orphaned stage: a real directory with content, not a registered worktree.
+        stage.mkdir(parents=True)
+        (stage / "leftover.txt").write_text("stale\n")
+
+        _add_worktree_for_member(
+            member, wt_path, f"worktree-{slug}", repo, base="origin/main", slug=slug,
+        )
+
+        assert wt_path.is_dir(), "add should succeed despite the orphaned stage dir"
+        assert not stage.exists(), "orphaned stage dir should have been cleared/moved"
+        assert _admin_name(wt_path) == slug
+
     def test_confinement_rejects_escaping_slug(self, tmp_path):
         """A '../'-laden slug that would push <stage> outside the workspace is
         rejected with ReconcileError before any git call."""

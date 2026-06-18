@@ -304,6 +304,15 @@ def _add_worktree_for_member(
     add_target = wt_path if direct else stage
     wt_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # An ORPHANED stage dir — present on disk but NOT git-registered (a prior add
+    # that failed after creating the dir, or a pruned registry that left the dir) —
+    # would make `git worktree add` fail "already exists" on every retry, bricking
+    # recovery. Clear it first so the add stays idempotent. (Confined: the assert
+    # above guarantees `stage` is under the workspace dir.) Not done for `direct`:
+    # an existing wt_path is the step-1 existence-guard's job, not a fresh-add orphan.
+    if not direct and stage.exists():
+        shutil.rmtree(stage, ignore_errors=True)
+
     if _branch_exists_locally(repo_root, branch):
         result = _git(repo_root, "worktree", "add", str(add_target), branch)
     else:
