@@ -1,12 +1,28 @@
-"""Config model for lore layered vaults (Slice 1, S4).
+"""Config model for lore layered vaults (Slices 1 + 3, S4).
 
 This module is the **single parse+validate boundary** for ``config.json`` —
 the ``$XDG_CONFIG_HOME/lore/config.json`` file that declares all configured
 vaults. It exposes a ``Vault`` NamedTuple, ``load_config`` for parse+validate,
-and the lightweight query helpers ``is_shared`` / ``is_configured_vault``.
+the lightweight query helpers ``is_shared`` / ``is_configured_vault``, and the
+**config-mutation API** (Slice 3): ``add_vault_entry``, ``remove_vault_entry``,
+``write_config_atomic``.
 
-**No writes here.** Slice 3 adds the mutation API (``add_vault_entry``,
-``remove_vault_entry``, ``write_config_atomic``). This slice is **pure read**.
+**Mutation API (Slice 3):**
+
+All three helpers operate on the *raw parsed config dict* (the JSON object with
+its ``"vaults"`` array), not on the validated ``list[Vault]``.  This matches the
+on-disk JSON shape and is the ergonomic input for Slice 4's CLI (load → mutate →
+write).
+
+- ``add_vault_entry(config, vault_entry)`` — append a dict to
+  ``config["vaults"]``.
+- ``remove_vault_entry(config, name)`` — drop the entry whose ``"name"`` matches
+  after normalization; no-op if absent.
+- ``write_config_atomic(path, config)`` — **``json.dump`` to a temp file in the
+  same directory, ``json.load``-re-read to verify the file is valid + structurally
+  sane, then ``os.replace`` over ``config.json``** (council/Reliability).  A crash
+  or malformed write never leaves ``config.json`` unparseable; the temp file is
+  cleaned up on failure.
 
 **Vault model invariants (locked, Slice 1 test contract):**
 
@@ -351,3 +367,92 @@ def load_config(config_path: str, env: dict | None = None) -> list:
         )
 
     return vaults
+
+
+# ---------------------------------------------------------------------------
+# Config mutation API (Slice 3)
+# ---------------------------------------------------------------------------
+
+
+def add_vault_entry(config: dict, vault_entry: dict) -> None:
+    """Append *vault_entry* to the ``"vaults"`` array in *config*.
+
+    Operates on the raw parsed config dict (the JSON object shape); does not
+    validate the entry.  Validation is the caller's responsibility (Slice 4's
+    CLI validates before calling this).
+
+    Args:
+        config:      The raw config dict (e.g. from ``json.loads`` or
+                     ``_read_config``).  Modified in place.
+        vault_entry: A dict representing one vault entry (at minimum
+                     ``{"name": ..., "scope": ...}``).
+    """
+    config.setdefault("vaults", []).append(vault_entry)
+
+
+def remove_vault_entry(config: dict, name: str) -> None:
+    """Remove the entry named *name* from ``config["vaults"]`` (in place).
+
+    Compares *name* after normalization (``/`` → ``_``) against each entry's
+    ``"name"`` field (also normalized for comparison), consistent with the
+    module-wide normalization convention.  If no entry matches, this is a
+    no-op (does not raise).
+
+    Args:
+        config: The raw config dict.  Modified in place.
+        name:   The vault name to remove.  Accepts both the raw
+                (``org/repo``) and normalized (``org_repo``) form.
+    """
+    normalized_target = normalize_vault_name(name)
+    config["vaults"] = [
+        v for v in config.get("vaults", [])
+        if normalize_vault_name(v.get("name", "")) != normalized_target
+    ]
+
+
+def write_config_atomic(path, config: dict) -> None:
+    """Write *config* to *path* atomically with post-write verification.
+
+    **Protocol (council/Reliability):**
+
+    1. ``json.dump`` the config to a temp file in the same directory as
+       *path* (same-directory temp ensures ``os.replace`` is atomic — same
+       filesystem, no cross-device rename).
+    2. ``json.load``-re-read the temp file to verify the written bytes are
+       valid JSON and contain the expected ``"vaults"`` list.
+    3. ``os.replace`` the temp file over *path*.
+
+    If step 2 raises (malformed JSON or missing ``"vaults"`` key), the temp
+    file is removed and *path* is left byte-for-byte unchanged.  A crash
+    between steps 1 and 3 leaves only the temp file; *path* is intact.
+
+    Args:
+        path:   Path-like pointing to ``config.json``.  Must be writable;
+                parent directory must exist.
+        config: The raw config dict to serialize.
+
+    Raises:
+        Any exception from ``json.load`` re-verification (e.g.
+        ``json.JSONDecodeError``, ``ValueError``) propagates to the caller
+        after the temp file is cleaned up.
+        ``OSError`` from the dump or replace propagates as-is.
+    """
+    path = Path(path)
+    tmp_path = path.with_suffix(".tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as fh:
+            json.dump(config, fh, indent=2, ensure_ascii=False)
+        # Verify: re-read and confirm the "vaults" key is present
+        with tmp_path.open("r", encoding="utf-8") as fh:
+            verified = json.load(fh)
+        if "vaults" not in verified:
+            raise ValueError(
+                "write_config_atomic: re-read verified file missing 'vaults' key"
+            )
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
