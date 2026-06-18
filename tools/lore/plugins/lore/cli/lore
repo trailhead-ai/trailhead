@@ -2986,6 +2986,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="RECORD_ID",
         help="The vault-relative record ID to delete (<kind>/<name>)",
     )
+    # Routing flags (symmetric with create/update): when a config exists they
+    # select which vault the record lives in (a record routed to a scoped vault
+    # on create is reached for delete with the same flags). Suppressed from help
+    # like update's.
+    p_record_delete.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    p_record_delete.add_argument("--product", default=None, help=argparse.SUPPRESS)
+    p_record_delete.add_argument("--suite", default=None, help=argparse.SUPPRESS)
+    p_record_delete.add_argument("--team", default=None, help=argparse.SUPPRESS)
     p_record_delete.set_defaults(func=cmd_record)
 
     # ``lore record blob <path>`` (Slice 5, S2).

@@ -507,6 +507,42 @@ def test_default_record_updatable_and_deletable_with_config(tmp_path):
     assert not list((default_path / "blob").glob("*.md")), "record not deleted"
 
 
+def test_scoped_record_updatable_and_deletable_with_same_flags(tmp_path):
+    """A record routed to a scoped vault via ``--team`` on create is reachable by
+    update and delete when the SAME routing flag is supplied — proving update/delete
+    flag plumbing resolves to the scoped vault, not the default floor.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    _write_config(config_home, _spec_config_vaults(state))
+    pe_path = Path(_vault_path(state, "product-engineering"))
+
+    r = _run_with_config(
+        ["record", "create", "--kind", "blob", "--title", "Grape",
+         "--set", "keywords=foo", "--team", "product-engineering"],
+        vault=vault, state=state, config_home=config_home, stdin_text="grape body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    assert list((pe_path / "blob").glob("*.md")), "record not in team vault"
+
+    # Update WITH the same --team flag reaches the scoped record.
+    r2 = _run_with_config(
+        ["record", "update", record_id, "--set", "keywords=bar",
+         "--team", "product-engineering"],
+        vault=vault, state=state, config_home=config_home,
+    )
+    assert r2.returncode == 0, f"scoped update should reach the record: {r2.stderr}"
+
+    # Delete WITH the same --team flag reaches the scoped record.
+    r3 = _run_with_config(
+        ["record", "delete", record_id, "--team", "product-engineering"],
+        vault=vault, state=state, config_home=config_home,
+    )
+    assert r3.returncode == 0, f"scoped delete should reach the record: {r3.stderr}"
+    assert not list((pe_path / "blob").glob("*.md")), "scoped record not deleted"
+
+
 # ---------------------------------------------------------------------------
 # Vanilla regression: no config.json present → today's behavior
 # ---------------------------------------------------------------------------
