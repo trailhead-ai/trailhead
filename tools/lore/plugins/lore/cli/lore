@@ -41,6 +41,8 @@ import index_store as index_store_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
+import record_model as record_model_mod  # noqa: E402
+import record_store as record_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
@@ -1520,6 +1522,237 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- record -----------------------------------------------------------------
+
+# Provenance keys that the CLI auto-sets on every write — the operator must
+# never be able to override these via --set / --unset (AC-PROV1). Derived from
+# the record_model ``auto_set`` attribute so it stays in sync with S1's schema.
+_PROVENANCE_KEYS: frozenset[str] = record_model_mod.auto_set_keys("v1")
+
+
+def _list_typed_keys() -> frozenset[str]:
+    """Return the set of sidecar keys whose type_tag is ``list[str]`` (v1).
+
+    Used by the --set/--unset matrix (AC15-AC18) to distinguish scalar fields
+    from list fields without hardcoding a key list.  Derived from S1's
+    FIELDS_V1 so it stays in sync with the model.
+    """
+    return frozenset(
+        key
+        for key, spec in record_model_mod.FIELDS_V1.items()
+        if spec.type_tag == "list[str]"
+    )
+
+
+def _apply_set_unset(
+    sidecar: dict,
+    set_pairs: list[str],
+    unset_pairs: list[str],
+) -> tuple[dict, list[str]]:
+    """Apply --set K=V / --unset K to *sidecar*; return (updated, errors).
+
+    Implements the full AC15–AC18 + AC-PROV1 matrix:
+      - AC-PROV1: --set / --unset on a provenance key → error, nothing applied.
+      - AC15: --set K="" on a scalar key ≡ --unset K (clears the key).
+      - AC16: --unset K=VALUE removes one item from a list-valued key.
+      - AC17: --set K="" on a list-valued key → hard error naming correct forms.
+      - AC18: --unset K (no =VALUE) clears the whole list / scalar key.
+
+    Returns the (possibly mutated copy of) sidecar and a list of error strings
+    (non-empty means nothing should be written).
+    """
+    list_keys = _list_typed_keys()
+    errors: list[str] = []
+    result = dict(sidecar)
+
+    for pair in set_pairs:
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+        else:
+            key, value = pair, ""
+
+        if key in _PROVENANCE_KEYS:
+            errors.append(
+                f"error: --set {key!r} is a provenance field; "
+                f"it is auto-set by lore and cannot be changed (AC-PROV1)"
+            )
+            continue
+
+        if key in list_keys:
+            if value == "":
+                # AC17: --set K="" on a list field is a hard error.
+                errors.append(
+                    f"error: --set {key!r}=\"\" is not valid for a list field; "
+                    f"to remove one item use --unset {key}=VALUE; "
+                    f"to clear the whole list use --unset {key}"
+                )
+                continue
+            # Append the value to the list (create if missing).
+            current = result.get(key, [])
+            if not isinstance(current, list):
+                current = []
+            result[key] = current + [value]
+        else:
+            # Scalar field.
+            if value == "":
+                # AC15: --set K="" ≡ --unset K on a scalar.
+                result.pop(key, None)
+            else:
+                result[key] = value
+
+    for pair in unset_pairs:
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+        else:
+            key, value = pair, None
+
+        if key in _PROVENANCE_KEYS:
+            errors.append(
+                f"error: --unset {key!r} is a provenance field; "
+                f"it is auto-set by lore and cannot be changed (AC-PROV1)"
+            )
+            continue
+
+        if value is not None:
+            # AC16: --unset K=VALUE removes one item from a list.
+            current = result.get(key, [])
+            if isinstance(current, list) and value in current:
+                current = [v for v in current if v != value]
+                result[key] = current
+            # Silently a no-op if the value is not found.
+        else:
+            # AC18: --unset K (no value) clears the scalar or whole list.
+            result.pop(key, None)
+
+    return result, errors
+
+
+def cmd_record(args: argparse.Namespace) -> int:
+    """Dispatch ``lore record <action>`` — Slice 3 create path (S2).
+
+    Thin shell over ``record_store`` (Slice 2). Parses argv, builds the sidecar
+    dict, reads the body from stdin (empty string when stdin is not piped), calls
+    ``place_record`` + ``validate_and_write``, and prints the vault-relative
+    RECORD_ID on stdout.
+
+    Body is read verbatim from stdin — a leading ``---`` block is **never**
+    parsed as frontmatter (AC-TX3); it is stored as body text.
+
+    Routing flags (--repo / --product / --suite / --team) are passed to
+    ``place_record`` as ``scope`` for the S4 multi-vault hook.  The
+    ``--team`` routing flag is distinct from ``--set team=X`` (AC-ROUTE1):
+    the routing flag influences vault selection (S4); ``--set team=X`` writes
+    the ``team`` metadata field in the sidecar.
+    """
+    action = getattr(args, "record_action", None)
+    if action != "create":
+        print(
+            f"lore record: unknown action {action!r}. Use 'lore record create'.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # --kind is required (AC2).
+    kind = getattr(args, "kind", None)
+    if not kind:
+        print("error: --kind is required", file=sys.stderr)
+        return 1
+
+    # --title is required (operator-required by the record model).
+    title = getattr(args, "title", None)
+    if not title:
+        print("error: --title is required", file=sys.stderr)
+        return 1
+
+    # Build the scope string from routing flags (AC5, AC-ROUTE1).
+    # These are routing hints passed to place_record; they do NOT go into
+    # the sidecar (that is --set team=X / --set repo=X, which is separate).
+    scope_parts: list[str] = []
+    for flag in ("repo", "product", "suite", "team"):
+        val = getattr(args, flag, None)
+        if val:
+            scope_parts.append(f"{flag}:{val}")
+    scope = ",".join(scope_parts) if scope_parts else None
+
+    # Seed the sidecar with the required operator fields.
+    sidecar: dict = {
+        "kind": kind,
+        "title": title,
+        "keywords": [],
+    }
+
+    # Apply --set / --unset mutations (AC15-AC18, AC-PROV1).
+    set_pairs: list[str] = list(getattr(args, "set_pairs", None) or [])
+    unset_pairs: list[str] = list(getattr(args, "unset_pairs", None) or [])
+
+    sidecar, set_errors = _apply_set_unset(sidecar, set_pairs, unset_pairs)
+    if set_errors:
+        for msg in set_errors:
+            print(msg, file=sys.stderr)
+        return 1
+
+    # Body from stdin (AC1). No stdin → empty body.  The leading ``---``
+    # check is intentionally absent — we read verbatim (AC-TX3).
+    if sys.stdin.isatty():
+        body = ""
+    else:
+        body = sys.stdin.read()
+
+    # Resolve vault.
+    vault_root = Path(vault_mod.resolve_vault())
+
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            location = record_store_mod.place_record(
+                name=title,
+                kind=kind,
+                scope=scope,
+                vault_root=str(vault_root),
+            )
+            record_id = record_store_mod.validate_and_write(
+                location=location,
+                sidecar=sidecar,
+                body=body,
+                conn=conn,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except record_store_mod.RecordValidationError as exc:
+        for msg in exc.errors:
+            print(f"error: {msg}", file=sys.stderr)
+        return 1
+    except record_store_mod.ProvenanceError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record create failed: {exc}", file=sys.stderr)
+        return 1
+
+    # AC4: print the vault-relative RECORD_ID on stdout.
+    print(record_id)
+    return 0
+
+
+# ---- unknown-command dispatch hint ------------------------------------------
+
+# Table mapping removed/renamed commands to their replacements (AC-DISP1).
+# The ``recall→search`` mapping is dormant in S2 (``recall`` still routes;
+# ``search`` is S3) — the table is present so the hint mechanism is wired.
+_DISPATCH_HINTS: dict[str, str] = {
+    "search": "recall",   # ``search`` is S3; ``recall`` still routes in S2
+}
+
+
+def _unknown_command_hint(command: str) -> str:
+    """Return a 'did you mean …?' hint for an unrecognized command, or an empty string."""
+    if command in _DISPATCH_HINTS:
+        replacement = _DISPATCH_HINTS[command]
+        return f"did you mean 'lore {replacement}'?"
+    return ""
+
+
 # ---- argparse ---------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1721,12 +1954,86 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_reindex.set_defaults(func=cmd_reindex)
 
+    # record subcommand: ``lore record create`` (Slice 3, S2).
+    # ``--team`` is the *routing* flag (scope → place_record; AC-ROUTE1); it is
+    # distinct from ``--set team=X``, which writes the sidecar ``team`` field.
+    p_record = sub.add_parser(
+        "record",
+        help="Create, update, delete, or manage vault records",
+    )
+    p_record_sub = p_record.add_subparsers(dest="record_action", required=True)
+
+    p_record_create = p_record_sub.add_parser("create", help="Create a new vault record")
+    p_record_create.add_argument(
+        "--kind", required=True,
+        help="Record kind (one of: area, backlog, blob, collaboration, decision, "
+             "lesson, plan, session, spec)",
+    )
+    p_record_create.add_argument(
+        "--title", required=True,
+        help="Human-readable title (used to derive the record name slug)",
+    )
+    # Routing flags (AC5, AC-ROUTE1): passed to place_record as scope.
+    # These influence vault selection (S4 hook) and do NOT write sidecar fields.
+    p_record_create.add_argument(
+        "--repo", default=None,
+        help="Routing scope: restrict to this repo's vault (AC5; no sidecar effect)",
+    )
+    p_record_create.add_argument(
+        "--product", default=None,
+        help="Routing scope: restrict to this product's vault (AC5; no sidecar effect)",
+    )
+    p_record_create.add_argument(
+        "--suite", default=None,
+        help="Routing scope: restrict to this suite's vault (AC5; no sidecar effect)",
+    )
+    p_record_create.add_argument(
+        "--team", default=None,
+        help="Routing scope: restrict to this team's vault (AC5; no sidecar effect). "
+             "To set the 'team' sidecar metadata field, use --set team=VALUE instead "
+             "(AC-ROUTE1).",
+    )
+    p_record_create.add_argument(
+        "--set", dest="set_pairs", action="append", default=[],
+        metavar="K=V",
+        help="Set a sidecar field (repeatable). Use K=VALUE to set a scalar or "
+             "append to a list. --set K=\"\" on a scalar clears the key (AC15). "
+             "--set K=\"\" on a list field is a hard error (AC17; use --unset instead).",
+    )
+    p_record_create.add_argument(
+        "--unset", dest="unset_pairs", action="append", default=[],
+        metavar="K[=VALUE]",
+        help="Unset a sidecar field (repeatable). --unset K=VALUE removes one list "
+             "item (AC16). --unset K clears the whole key (AC18).",
+    )
+    p_record_create.set_defaults(func=cmd_record)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    # Intercept argparse's SystemExit so we can emit the ``did you mean …?``
+    # hint (AC-DISP1) before re-raising. argparse calls sys.exit(2) on an
+    # unrecognized command, so we catch that here.
+    raw = argv if argv is not None else sys.argv[1:]
+    try:
+        args = parser.parse_args(list(raw))
+    except SystemExit as exc:
+        if raw and exc.code == 2:
+            cmd = raw[0]
+            hint = _unknown_command_hint(cmd)
+            if hint:
+                print(f"lore: {hint}", file=sys.stderr)
+            else:
+                # For any unrecognized command, print a generic "did you mean"
+                # prompt so agents can distinguish a typo from a real error.
+                print(
+                    f"lore: unknown command {cmd!r}. "
+                    f"Run 'lore --help' for a list of subcommands.",
+                    file=sys.stderr,
+                )
+        raise
     return args.func(args)
 
 
