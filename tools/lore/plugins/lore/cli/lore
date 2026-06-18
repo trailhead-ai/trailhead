@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import frontmatter  # noqa: E402
 import harvest as harvest_mod  # noqa: E402
+import index_store as index_store_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
@@ -1487,6 +1488,38 @@ def cmd_areas(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- reindex ----------------------------------------------------------------
+
+def cmd_reindex(args: argparse.Namespace) -> int:
+    """Rebuild the derived SQLite index from the vault directory tree.
+
+    Drops and repopulates the ``records`` table by scanning the resolved
+    vault for ``<kind>/<name>.json`` + ``<kind>/<name>.md`` pairs.  Prints
+    the number of indexed rows to **stdout** on success; errors go to
+    **stderr**.  Exits 0.
+
+    Text-wins / index-derived posture (AC-TX2): the index is always
+    rebuildable from the git-tracked text files.
+    """
+    vault_root = (
+        Path(args.vault).expanduser().resolve()
+        if getattr(args, "vault", None)
+        else Path(vault_mod.resolve_vault())
+    )
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            count = index_store_mod.rebuild([str(vault_root)], conn)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"error: reindex failed: {exc}", file=sys.stderr)
+        return 1
+    print(count)
+    return 0
+
+
 # ---- argparse ---------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1676,6 +1709,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Vault path (overrides $LORE_VAULT)",
     )
     p_recall.set_defaults(func=cmd_recall)
+
+    p_reindex = sub.add_parser(
+        "reindex",
+        help="Rebuild the derived SQLite index from the vault directory tree",
+    )
+    p_reindex.add_argument(
+        "--vault",
+        default=None,
+        help="Vault path (overrides $LORE_VAULT)",
+    )
+    p_reindex.set_defaults(func=cmd_reindex)
 
     return parser
 
