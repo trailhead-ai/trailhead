@@ -1657,13 +1657,23 @@ def _cmd_vault_add(args: argparse.Namespace) -> int:
 
     vault_config_mod.add_vault_entry(config, entry)
 
-    # Validate the full resulting config by re-loading it from a written file.
+    # Validate the full candidate config IN MEMORY before persisting, so a
+    # well-formed-but-semantically-invalid entry (one that passes the inline
+    # guards above but fails load_config's deeper checks — e.g. a name that
+    # validate_layer_name rejects after normalization, or an explicit --path
+    # that fails confinement) is never written to config.json and then
+    # rejected. config.json stays byte-for-byte unchanged on a rejected add.
+    try:
+        vaults = vault_config_mod.validate_config(config)
+    except vault_config_mod.VaultConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     config_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         vault_config_mod.write_config_atomic(config_path, config)
-        vaults = vault_config_mod.load_config(str(config_path))
-    except vault_config_mod.VaultConfigError as exc:
-        print(str(exc), file=sys.stderr)
+    except Exception as exc:
+        print(f"lore: failed to write config: {exc}", file=sys.stderr)
         return 1
 
     # Resolve the vault we just added + scan its on-disk records into the index.
@@ -1743,13 +1753,22 @@ def _cmd_vault_delete(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        # Symlink guard: refuse when any component of the literal configured path
-        # is a symlink, so a link whose target lands inside the vaults root cannot
-        # be used to rmtree the link's real target.
-        if literal_path.is_symlink() or os.path.realpath(literal_path) != str(literal_path):
+        # Symlink guard: refuse only when the vault dir's OWN leaf is a symlink,
+        # so its target is not followed by rmtree. A symlinked ANCESTOR (macOS
+        # /var → /private/var, a symlinked $HOME or NFS mount) must NOT trip this
+        # — comparing whole-path realpath equality would false-positive on those
+        # and break --remove-from-disk on common setups. We compare the leaf's
+        # realpath against its resolved-parent + leaf name: they differ only when
+        # the leaf itself is a link.
+        leaf_is_symlink = (
+            literal_path.is_symlink()
+            or Path(literal_path).resolve()
+            != Path(literal_path).parent.resolve() / literal_path.name
+        )
+        if leaf_is_symlink:
             print(
-                f"lore: refusing to remove {literal_path} from disk — it is a symlink "
-                "or resolves through one",
+                f"lore: refusing to remove {literal_path} from disk — its directory "
+                "is a symlink",
                 file=sys.stderr,
             )
             return 1

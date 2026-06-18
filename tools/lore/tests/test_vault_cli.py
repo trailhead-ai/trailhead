@@ -248,6 +248,23 @@ def test_add_unknown_record_kind_is_error(tmp_path):
     assert "notakind" in res.stderr
 
 
+def test_add_deep_validation_failure_leaves_config_unchanged(tmp_path):
+    """A well-formed-but-semantically-invalid entry (passes the inline guards
+    but fails load_config's deeper checks — here a name that is invalid after
+    normalization) must be rejected WITHOUT mutating config.json."""
+    state, config = _dirs(tmp_path)
+    _seed_default_config(config, state)
+    before = _config_path(config).read_bytes()
+
+    # ".." passes the inline scope/duplicate/record guards but fails
+    # validate_layer_name inside load_config (deep validation).
+    res = _run(["vault", "add", "..", "--scope", "team"],
+               state=state, config=config)
+    assert res.returncode != 0, res.stdout
+    # config.json must be byte-for-byte unchanged — never persisted then rejected.
+    assert _config_path(config).read_bytes() == before
+
+
 # ---------------------------------------------------------------------------
 # vault delete — config entry + index rows; on-disk kept by default
 # ---------------------------------------------------------------------------
@@ -378,6 +395,36 @@ def test_delete_remove_from_disk_refuses_symlink_targeting_inside_root(tmp_path)
     assert res.returncode != 0
     assert real.is_dir()
     assert (real / "keep.txt").is_file()
+
+
+def test_delete_remove_from_disk_succeeds_with_symlinked_ancestor(tmp_path):
+    """A symlinked ANCESTOR of the vault dir (e.g. macOS /var, a symlinked
+    $HOME) must NOT trip the symlink guard — only the vault dir's own leaf
+    being a symlink is refused. The vault dir itself is a real directory."""
+    # Real state tree; the XDG_STATE_HOME we hand the CLI is a symlink to it,
+    # so every ancestor of the vault dir resolves through a symlink.
+    real_state = tmp_path / "real-state"
+    real_state.mkdir()
+    state = tmp_path / "state-link"
+    state.symlink_to(real_state)
+    config = tmp_path / "config"
+    config.mkdir()
+
+    # Legitimate vault dir: a real directory beneath the (symlinked) state root.
+    vault_dir = _vaults_root(state) / "team-vault"
+    _write_record(vault_dir, "spec", "spec-a", _sidecar("spec", "spec-a", "Spec A"), "body a")
+
+    _seed_default_config(config, state)
+    add = _run(["vault", "add", "team-vault", "--scope", "team"],
+               state=state, config=config)
+    assert add.returncode == 0, add.stderr
+
+    res = _run(["vault", "delete", "team-vault", "--remove-from-disk", "--yes"],
+               state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    # The vault dir (a real dir, just reached through a symlinked ancestor)
+    # must actually be deleted.
+    assert not vault_dir.exists()
 
 
 # ---------------------------------------------------------------------------

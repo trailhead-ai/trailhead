@@ -74,6 +74,7 @@ foreign_keys`` to OFF and does NOT persist it in the file, so ``open_index`` iss
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -359,7 +360,6 @@ def scan_vault(
     root = Path(vault_root)
     if not root.is_dir():
         return 0
-    import json as _json
     count = 0
     for kind_dir in root.iterdir():
         if not kind_dir.is_dir():
@@ -371,7 +371,7 @@ def scan_vault(
             if not md_path.exists():
                 continue
             try:
-                sidecar = _json.loads(json_path.read_text())
+                sidecar = json.loads(json_path.read_text())
                 body = md_path.read_text()
                 upsert_row(
                     conn, vault_root, kind, name, sidecar, body, shared=shared,
@@ -476,8 +476,7 @@ def rebuild(
                 # recovery path; it must stay rebuildable even over a corrupted or
                 # hand-truncated sidecar.
                 try:
-                    import json as _json
-                    sidecar = _json.loads(json_path.read_text())
+                    sidecar = json.loads(json_path.read_text())
                     body = md_path.read_text()
                     stat = md_path.stat()
                     record_id = _project_record(

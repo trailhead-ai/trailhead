@@ -245,10 +245,32 @@ def load_config(config_path: str, env: dict | None = None) -> list:
     - Every normalized name passes ``layers.validate_layer_name``.
     - Every resolved path is within the vaults root (``assert_within_root``).
     """
-    # Read and parse the JSON config.
+    # Read and parse the JSON config, then validate the parsed dict.
     raw_text = Path(config_path).read_text(encoding="utf-8")
     data = json.loads(raw_text)
+    return validate_config(data, env=env)
 
+
+def validate_config(data: dict, env: dict | None = None) -> list:
+    """Validate an already-parsed config dict; return a ``Vault`` list.
+
+    This is the in-memory validation entry point: it performs the same
+    invariant checks :func:`load_config` performs, but against a parsed dict
+    rather than a file on disk. Callers that build a candidate config in
+    memory (e.g. ``lore vault add`` assembling ``existing + new entry``) can
+    validate it BEFORE persisting, so a semantically-invalid-but-well-formed
+    entry is never written to ``config.json`` and then rejected.
+
+    Args:
+        data: The raw parsed config dict (a ``{"vaults": [...]}`` object).
+        env:  Optional XDG environment override (see :func:`load_config`).
+
+    Returns:
+        A list of :class:`Vault` instances in config order, names normalized.
+
+    Raises:
+        VaultConfigError: On any validation failure (see module docstring).
+    """
     raw_entries = data.get("vaults", [])
 
     # Derive the vaults root for path confinement. We pass the current
