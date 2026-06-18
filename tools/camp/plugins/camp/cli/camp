@@ -943,20 +943,20 @@ def _cmd_ai_group_cli(
 
     # New-vs-resume is decided by whether the deterministic SESSION actually
     # exists — NOT by whether the workspace dir exists. A provisioned-but-never-
-    # launched (or deleted-session) workspace must start FRESH with --session-id
-    # rather than --resume a missing id (which would dump the user in the picker).
-    # For a non-claude [harness] block we have no session-file knowledge, so fall
-    # back to workspace-dir existence (the prior behavior).
-    if profile.is_claude_launch():
-        session_present = harness_launch.claude_session_exists(session_id, env=env)
-        is_resume = session_present
-        if ws_existed and not session_present:
+    # launched (or deleted-session) workspace must start FRESH rather than resume a
+    # missing id (which would dump the user in the picker). The profile answers
+    # whether a resumable session exists (None = no session knowledge → fall back
+    # to workspace-dir existence, the prior behavior for a non-claude harness).
+    resumable = profile.has_resumable_session(session_id, env=env)
+    if resumable is None:
+        is_resume = ws_existed
+    else:
+        is_resume = resumable
+        if ws_existed and not resumable:
             print(
                 f"camp ai: no session found for {slug!r}; starting fresh",
                 file=sys.stderr,
             )
-    else:
-        is_resume = ws_existed
 
     try:
         bring_up_workspace(group, slug, env=env, profile=profile)

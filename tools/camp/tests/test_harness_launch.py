@@ -451,6 +451,30 @@ class TestResolveHarnessProfile:
         assert p.pretrust is False
 
 
+class TestHasResumableSession:
+    """The profile answers new-vs-resume so the core need not branch on harness."""
+
+    def test_claude_profile_consults_session_file(self, tmp_path):
+        from harness_launch import resolve_harness_profile
+
+        env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}
+        p = resolve_harness_profile(_group())  # claude default
+        assert p.has_resumable_session("sid-x", env=env) is False  # absent
+
+        proj = tmp_path / "claude" / "projects" / "-enc"
+        proj.mkdir(parents=True)
+        (proj / "sid-x.jsonl").write_text("{}\n")
+        assert p.has_resumable_session("sid-x", env=env) is True
+
+    def test_non_claude_profile_returns_none(self, tmp_path):
+        from harness_launch import resolve_harness_profile
+
+        env = {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}
+        p = resolve_harness_profile(_group({"new": ["myharness"]}))
+        # None → caller falls back to its own signal (workspace-dir existence).
+        assert p.has_resumable_session("sid-x", env=env) is None
+
+
 # ---------------------------------------------------------------------------
 # session_identity — deterministic resumable session id
 # ---------------------------------------------------------------------------

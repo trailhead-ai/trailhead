@@ -143,6 +143,23 @@ class HarnessProfile:
             self.is_claude_launch() or self.inject == "claude-hook"
         )
 
+    def has_resumable_session(
+        self, session_id: str, *, env: dict[str, str] | None = None
+    ) -> bool | None:
+        """Whether a resumable harness session exists for `session_id`.
+
+        The single declarative question the `camp ai` tail asks to choose new vs
+        resume — so harness scoping lives on the profile, not as an is_claude_launch
+        branch at the call site (mirrors should_pretrust).
+
+        Returns True/False when the harness exposes session state (claude: a session
+        transcript file, via claude_session_exists); returns None when it does NOT,
+        signaling the caller to fall back to its own signal (workspace-dir existence).
+        """
+        if self.is_claude_launch():
+            return claude_session_exists(session_id, env=env)
+        return None
+
     def launch(
         self, *, slug: str, workspace: str, is_resume: bool, session_id: str
     ) -> tuple[list[str], Path]:

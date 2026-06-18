@@ -144,20 +144,29 @@ def _ref_resolves(repo_root: Path, ref: str) -> bool:
     return result.returncode == 0
 
 
-def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
-    """Return True if wt_path is already listed in git's worktree registry."""
+def _registered_worktree_paths(repo_root: Path) -> set[Path]:
+    """Resolved paths of every worktree registered with git (empty on failure).
+
+    One `git worktree list` read; callers test membership locally instead of
+    forking git once per candidate path.
+    """
     result = _git(repo_root, "worktree", "list", "--porcelain")
     if result.returncode != 0:
-        return False
+        return set()
+    paths: set[Path] = set()
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
             registered = line[len("worktree "):].strip()
             try:
-                if Path(registered).resolve() == wt_path.resolve():
-                    return True
+                paths.add(Path(registered).resolve())
             except Exception:
                 pass
-    return False
+    return paths
+
+
+def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
+    """Return True if wt_path is already listed in git's worktree registry."""
+    return wt_path.resolve() in _registered_worktree_paths(repo_root)
 
 
 def _fetch_base(
@@ -255,12 +264,16 @@ def _add_worktree_for_member(
 
     Raises ReconcileError on git failure or a confinement violation.
     """
+    # One git-registry read; both the existence-guard and the stage-recovery check
+    # test membership against it (no second `git worktree list` fork).
+    #   NB: paths are matched via Path.resolve(), which FOLLOWS symlinks; on an
+    #   overlay/bind-mount FS two distinct paths could resolve equal and cause a
+    #   false-positive skip. Acceptable for camp's state-dir layout (no such
+    #   aliasing), but noted so a future FS change revisits it.
+    registered = _registered_worktree_paths(repo_root)
+
     # 1. Existence-guard — final path already present (idempotent no-op).
-    #    NB: _worktree_registered uses Path.resolve(), which FOLLOWS symlinks; on
-    #    an overlay/bind-mount FS two distinct paths could resolve equal and cause
-    #    a false-positive skip. Acceptable for camp's state-dir layout (no such
-    #    aliasing), but noted so a future FS change revisits it.
-    if wt_path.is_dir() or _worktree_registered(repo_root, wt_path):
+    if wt_path.is_dir() or wt_path.resolve() in registered:
         return
 
     # Stage is a sibling of wt_path whose basename is the slug (see docstring).
@@ -283,7 +296,7 @@ def _add_worktree_for_member(
     direct = stage == wt_path  # member == slug → no move needed
 
     # 2. Partial-state recovery: stage was added but not moved → resume at move.
-    if not direct and _worktree_registered(repo_root, stage):
+    if not direct and stage.resolve() in registered:
         _move_worktree(member, stage, wt_path, repo_root)
         return
 
