@@ -236,10 +236,14 @@ def _tokenize(text):
             i = j + 1
             continue
 
-        # regex literal /.../ — rejected immediately
+        # bare '/' — rejected. Either an unsupported regex literal (/re/) or an
+        # unquoted value containing a slash; both are errors, but the common case
+        # is a value (e.g. a repo path) that needs quoting, so say so.
         if c == '/':
             raise KqlParseError(
-                "regex queries (/re/) are not supported in this KQL subset"
+                "unexpected '/': regex (/re/) is not supported, and a value "
+                "containing '/' must be quoted "
+                '(e.g. repo:"trailhead-ai/trailhead")'
             )
 
         # operators >=, <=, >, <

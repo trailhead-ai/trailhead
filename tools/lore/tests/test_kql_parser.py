@@ -48,6 +48,28 @@ def test_status_and_kind(kql):
     assert right.field == "kind" and right.value == "lesson"
 
 
+def test_or_binds_looser_than_and(kql):
+    # Precedence contract (Slice 3 compiles boolean SQL against this shape):
+    # `a or b and c` → Or(a, And(b, c)) — AND binds tighter than OR.
+    ast = kql.parse("kind:spec or kind:plan and status:active")
+    assert isinstance(ast, kql.Or), "OR must be the top node (binds loosest)"
+    assert isinstance(ast.left, kql.FieldEq)
+    assert ast.left.field == "kind" and ast.left.value == "spec"
+    assert isinstance(ast.right, kql.And), "AND must bind tighter than OR"
+    assert ast.right.left.field == "kind" and ast.right.left.value == "plan"
+    assert ast.right.right.field == "status" and ast.right.right.value == "active"
+
+
+def test_implicit_and_is_left_associative(kql):
+    # Implicit AND between three terms is left-associative: a b c → And(And(a,b),c).
+    ast = kql.parse("kind:spec status:active team:platform")
+    assert isinstance(ast, kql.And)
+    assert isinstance(ast.left, kql.And), "implicit AND must be left-associative"
+    assert ast.left.left.field == "kind"
+    assert ast.left.right.field == "status"
+    assert ast.right.field == "team"
+
+
 def test_field_or_group(kql):
     # kind:(spec or plan) → Or(FieldEq("kind","spec"), FieldEq("kind","plan"))
     ast = kql.parse("kind:(spec or plan)")
