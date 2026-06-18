@@ -1636,23 +1636,167 @@ def _apply_set_unset(
 
 
 def cmd_record(args: argparse.Namespace) -> int:
-    """Dispatch ``lore record <action>`` — create (Slice 3) / update (Slice 4) (S2).
+    """Dispatch ``lore record <action>`` — create (Slice 3) / update (Slice 4) /
+    delete (Slice 5) / blob (Slice 5) (S2).
 
-    Thin shell over ``record_store`` (Slice 2). Routes to the create or update
-    handler by ``record_action``; both are argv→library adapters with no
+    Thin shell over ``record_store`` (Slice 2). Routes to the appropriate handler
+    by ``record_action``; all handlers are argv→library adapters with no
     validation or I/O logic of their own.
+
+    **Blob confinement invariant (AC14a, Slice 5, S2):** the blob write path MUST
+    resolve to a descendant of ``realpath(blob_root)`` after the blob_root directory
+    exists. This check catches ``..`` segments, absolute paths, and symlink escapes.
+    Non-zero + clear stderr on rejection; no write occurs.
     """
     action = getattr(args, "record_action", None)
     if action == "create":
         return _cmd_record_create(args)
     if action == "update":
         return _cmd_record_update(args)
+    if action == "delete":
+        return _cmd_record_delete(args)
+    if action == "blob":
+        return _cmd_record_blob(args)
     print(
         f"lore record: unknown action {action!r}. "
-        f"Use 'lore record create' or 'lore record update'.",
+        f"Use 'lore record create', 'lore record update', "
+        f"'lore record delete', or 'lore record blob'.",
         file=sys.stderr,
     )
     return 1
+
+
+def _cmd_record_delete(args: argparse.Namespace) -> int:
+    """``lore record delete RECORD_ID`` (Slice 5, S2) — thin shell over ``record_store``.
+
+    Removes the body (``.md``), sidecar (``.json``), and index row for RECORD_ID
+    in one operation (AC13). Uses :func:`record_store.delete_record`, which is the
+    transactional delete primitive from Slice 2 — this function does NOT
+    re-implement removal logic.
+
+    RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
+    An invalid format or nonexistent record → non-zero + clear stderr (AC13).
+    """
+    record_id = getattr(args, "record_id", None)
+    if not record_id or "/" not in record_id:
+        print(
+            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
+            file=sys.stderr,
+        )
+        return 1
+
+    vault_root = str(vault_mod.resolve_vault())
+
+    try:
+        conn = index_store_mod.open_index()
+        try:
+            record_store_mod.delete_record(record_id, conn, vault_root=vault_root)
+            conn.commit()
+        finally:
+            conn.close()
+    except record_store_mod.RecordNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record delete failed: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def _cmd_record_blob(args: argparse.Namespace) -> int:
+    """``lore record blob <path>`` (Slice 5, S2) — write a blob under ``<vault>/blob/``.
+
+    A **distinct** subcommand (not ``--kind blob``): reads the body from stdin and
+    writes it to ``<vault>/blob/<path>``, creating intermediate directories.  The
+    body is fence-neutralized (AC-FENCE1) via :func:`record_store.neutralize_fences`
+    and written via :func:`record_store.write_temp_then_rename` (AC-TX1).
+
+    **Path-traversal confinement invariant (AC14a — Critical, Slice 5, S2):**
+    Before any write this function enforces that the resolved target is a
+    descendant of ``realpath(blob_root)``:
+
+      1. Reject ``<path>`` if it is absolute (starts with ``/`` or ``os.sep``).
+      2. Reject ``<path>`` if it contains any ``..`` path segment.
+      3. Resolve ``blob_root_real = os.path.realpath(blob_root)`` AFTER creating
+         the blob_root directory (so realpath traverses real dirs and catches
+         directory-level symlinks).
+      4. Resolve ``target_real = os.path.realpath(target)`` on the proposed target.
+      5. Assert ``target_real == blob_root_real`` or
+         ``target_real.startswith(blob_root_real + os.sep)`` — this ``+ os.sep``
+         guard prevents a sibling directory sharing a name prefix from satisfying
+         the check (e.g. ``blob_root=/a/blob`` and ``target=/a/blob2/x`` would
+         satisfy a naive ``startswith`` without the separator guard).
+
+    A symlink inside the blob root pointing outside is caught by step 5 because
+    ``os.path.realpath`` resolves the symlink chain, so the resolved target path
+    will not start with ``blob_root_real + os.sep``.
+
+    On any traversal rejection: non-zero exit + clear stderr, **no write**.
+    """
+    blob_path = getattr(args, "blob_path", None)
+    if not blob_path:
+        print("error: blob path is required", file=sys.stderr)
+        return 1
+
+    # 1. Reject absolute paths.
+    if os.path.isabs(blob_path):
+        print(
+            f"error: blob path must be relative, got absolute path: {blob_path!r}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 2. Reject any '..' segment (early rejection before realpath).
+    path_parts = Path(blob_path).parts
+    if ".." in path_parts:
+        print(
+            f"error: blob path must not contain '..' traversal segments: {blob_path!r}",
+            file=sys.stderr,
+        )
+        return 1
+
+    vault_root = Path(vault_mod.resolve_vault())
+    blob_root = vault_root / "blob"
+
+    # 3. Ensure blob_root exists before calling realpath, so realpath resolves
+    # through real directories (catches directory-level symlink escapes).
+    blob_root.mkdir(parents=True, exist_ok=True)
+    blob_root_real = os.path.realpath(blob_root)
+
+    target = blob_root / blob_path
+    target_real = os.path.realpath(target)
+
+    # 5. Descendant check: target must equal blob_root or start with it + sep.
+    # The '+ os.sep' guard prevents a sibling directory sharing a name prefix
+    # from satisfying the check (e.g. '/vault/blob2/x' would satisfy a bare
+    # startswith('/vault/blob') without the sep guard).
+    if not (
+        target_real == blob_root_real
+        or target_real.startswith(blob_root_real + os.sep)
+    ):
+        print(
+            f"error: blob path {blob_path!r} escapes the blob root "
+            f"(resolved to {target_real!r}, outside {blob_root_real!r})",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Read body from stdin; fence-neutralize; write atomically.
+    if sys.stdin.isatty():
+        body = ""
+    else:
+        body = sys.stdin.read()
+
+    safe_body = record_store_mod.neutralize_fences(body)
+
+    try:
+        record_store_mod.write_temp_then_rename(target, safe_body)
+    except Exception as exc:
+        print(f"error: blob write failed: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
 
 
 def _cmd_record_create(args: argparse.Namespace) -> int:
@@ -2230,6 +2374,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Unset a sidecar field (repeatable). Same AC16/AC18 semantics as create.",
     )
     p_record_update.set_defaults(func=cmd_record)
+
+    # ``lore record delete RECORD_ID`` (Slice 5, S2).
+    p_record_delete = p_record_sub.add_parser(
+        "delete", help="Delete a vault record (body + sidecar + index row)"
+    )
+    p_record_delete.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID to delete (<kind>/<name>)",
+    )
+    p_record_delete.set_defaults(func=cmd_record)
+
+    # ``lore record blob <path>`` (Slice 5, S2).
+    # A DISTINCT subcommand — NOT ``--kind blob``.  Body from stdin; path is the
+    # relative path under ``<vault>/blob/`` to write to.  Path-traversal is
+    # hardened (AC14a): absolute paths, ``..`` segments, and symlink escapes are
+    # all rejected before any write occurs (see ``_cmd_record_blob`` for the full
+    # confinement invariant).
+    p_record_blob = p_record_sub.add_parser(
+        "blob",
+        help="Write stdin as a blob under <vault>/blob/<path> (path-traversal hardened, AC14/AC14a)",
+    )
+    p_record_blob.add_argument(
+        "blob_path",
+        metavar="PATH",
+        help="Relative path under <vault>/blob/ to write (e.g. notes/readme.md). "
+             "Must be relative (no leading /), must not contain '..' segments. "
+             "Intermediate directories are created. (AC14/AC14a)",
+    )
+    p_record_blob.set_defaults(func=cmd_record)
 
     return parser
 
