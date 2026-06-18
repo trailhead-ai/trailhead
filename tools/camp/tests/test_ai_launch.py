@@ -146,7 +146,6 @@ class TestNewVsResume:
         """Workspace dir exists but the session is gone → start fresh (NOT the
         picker) and tell the user."""
         import harness_launch
-        import session_lock
 
         g = group_env
         # Simulate a provisioned-but-never-launched workspace: dir exists, no session.
