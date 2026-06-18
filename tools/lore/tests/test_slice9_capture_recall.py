@@ -10,7 +10,6 @@ Covers:
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -470,18 +469,12 @@ class TestNoPlaceholdersAcrossAllTypes:
 
 
 # ---------------------------------------------------------------------------
-# INTEGRATION TEST: capture→recall end-to-end via `lore recall --areas`
+# Capture: `lore new area` naming (the recall-command capture→banner integration
+# tests were removed in Slice 5 when `recall` was retired — capture→`lore search`
+# retrieval is covered by test_search_cli.py + test_index_projection.py).
 # ---------------------------------------------------------------------------
 
-class TestCaptureRecallIntegration:
-    """The headline integration test: proves that a deferred item captured via
-    `lore new deferred --surfaces auth` resurfaces in recall when the agent
-    calls `lore recall --areas auth`.
-
-    D23 area-mediated recall replaces the old branch-keyword infer_subsystems
-    / render_subsystem_block approach.
-    """
-
+class TestCaptureAreaNaming:
     def _make_full_vault(self, tmp_path: Path) -> Path:
         vault = tmp_path / "vault"
         for d in ("deferred", "dead-ends", "decisions", "follow-ups", "areas", "sessions",
@@ -506,91 +499,4 @@ class TestCaptureRecallIntegration:
         assert len(notes) == 1
         assert notes[0].name == "auth.md", (
             f"Expected auth.md (no date prefix), got {notes[0].name!r}"
-        )
-
-    def test_deferred_with_surfaces_appears_in_recall_banner(self, tmp_path):
-        """After `lore new deferred --surfaces auth`, `lore recall --areas auth`
-        must surface the deferred note in its banner."""
-        vault = self._make_full_vault(tmp_path)
-        self._create_auth_area_via_cli(vault)
-
-        r = run_cli([
-            "new", "deferred", "--vault", str(vault),
-            "--title", "Fix auth retry logic",
-            "--surfaces", "auth",
-            "--project", "demo",
-        ])
-        assert r.returncode == 0, r.stderr + r.stdout
-
-        fm_mod = load_script("frontmatter")
-        note = _find_note(vault / "deferred")
-        fm = fm_mod.parse_frontmatter(note)
-        assert fm.get("surfaces") == ["auth"], (
-            f"Expected surfaces=['auth'], got {fm.get('surfaces')!r}"
-        )
-
-        r_recall = run_cli([
-            "recall", "--areas", "auth", "--vault", str(vault),
-        ])
-        assert r_recall.returncode == 0, f"lore recall failed: {r_recall.stderr}"
-        assert "Recalled (areas:" in r_recall.stdout, (
-            f"Expected banner in stdout, got: {r_recall.stdout!r}"
-        )
-        note_stem = note.stem
-        assert note_stem in r_recall.stdout, (
-            f"Deferred note {note_stem!r} not found in recall banner:\n{r_recall.stdout}"
-        )
-
-    def test_full_capture_recall_loop(self, tmp_path):
-        """End-to-end: create area + capture deferred with --surfaces → recall surfaces it."""
-        vault = self._make_full_vault(tmp_path)
-        self._create_auth_area_via_cli(vault)
-
-        r = run_cli([
-            "new", "deferred", "--vault", str(vault),
-            "--title", "Fix auth retry logic",
-            "--surfaces", "auth",
-            "--project", "demo",
-        ])
-        assert r.returncode == 0, r.stderr
-
-        r_recall = run_cli([
-            "recall", "--areas", "auth", "--vault", str(vault),
-        ])
-        assert r_recall.returncode == 0, f"lore recall failed: {r_recall.stderr}"
-
-        note = _find_note(vault / "deferred")
-        note_stem = note.stem
-        assert note_stem in r_recall.stdout, (
-            f"Capture→recall BROKEN: deferred note {note_stem!r} not in recall banner.\n"
-            f"stdout:\n{r_recall.stdout}"
-        )
-        assert "Recalled (areas:" in r_recall.stdout
-
-    def test_recall_json_count_agrees_with_banner(self, tmp_path):
-        """--json count must equal the N in the human banner."""
-        vault = self._make_full_vault(tmp_path)
-        self._create_auth_area_via_cli(vault)
-
-        run_cli([
-            "new", "deferred", "--vault", str(vault),
-            "--title", "some-deferred-item",
-            "--surfaces", "auth",
-        ])
-
-        r_human = run_cli(["recall", "--areas", "auth", "--vault", str(vault)])
-        r_json = run_cli(["recall", "--areas", "auth", "--vault", str(vault), "--json"])
-        assert r_human.returncode == 0
-        assert r_json.returncode == 0
-
-        data = json.loads(r_json.stdout)
-        json_count = data["count"]
-
-        import re as _re
-        m = _re.search(r"Recalled \(areas:[^)]+\) — (\d+) item", r_human.stdout)
-        assert m, f"No 'Recalled ... — N items' in banner:\n{r_human.stdout}"
-        banner_count = int(m.group(1))
-
-        assert json_count == banner_count, (
-            f"JSON count {json_count} != banner count {banner_count}"
         )

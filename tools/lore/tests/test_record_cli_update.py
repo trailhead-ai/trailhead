@@ -65,10 +65,18 @@ def _open_index(state: Path):
 
 
 def _index_rows(state: Path, vault: Path, kind: str, name: str) -> list:
+    """Return ``(name, fts_body)`` rows for the keyed record.
+
+    S3 moved body text out of ``records`` into the populated ``record_fts`` table;
+    the body is read back via the rowid alias join so these write-path assertions
+    still observe the indexed body.
+    """
     conn = _open_index(state)
     try:
         return conn.execute(
-            "SELECT name, body FROM records WHERE vault=? AND kind=? AND name=?",
+            "SELECT records.name, record_fts.body FROM records "
+            "JOIN record_fts ON record_fts.rowid = records.rowid "
+            "WHERE records.vault=? AND records.kind=? AND records.name=?",
             (str(vault), kind, name),
         ).fetchall()
     finally:

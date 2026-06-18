@@ -891,20 +891,28 @@ _TOOL_READMES: list[Path] = [
 class TestLoreRecallHonestyGuards:
     """D22 recall-fix honesty guards — positive (R-3) + negative.
 
-    The lore README "How recall works" section must:
-      - Contain `recall --areas` (the real mechanism — R-3 positive).
+    The lore README "How search works" section must:
+      - Document the area-mediated memory mechanism — now `lore search 'area:<name>'`,
+        which superseded `lore recall --areas` in S3 (R-3 positive).
       - Not assert branch-keyword recall as a live mechanism (removed 2026-06-05).
       - Not present Tier-2 semantic/embedding recall as a built feature.
     """
 
-    def test_lore_readme_contains_recall_areas_positive(self):
-        """R-3 positive: the lore README must contain 'recall --areas' (the real mechanism)."""
+    def test_lore_readme_contains_area_search_positive(self):
+        """R-3 positive: the lore README must document the real area-memory mechanism.
+
+        S3 retired `lore recall --areas` and replaced it with the area-membership
+        case of `lore search` (`lore search 'area:<name>'`). The README must document
+        that real mechanism — the guard's intent (the actual mechanism is documented,
+        not just that the old oversell is absent) is unchanged; only the mechanism is.
+        """
         assert _LORE_README.exists(), f"lore README not found at {_LORE_README}"
         text = _LORE_README.read_text(encoding="utf-8")
-        assert "recall --areas" in text, (
-            "lore README must contain 'recall --areas' — the area-mediated recall mechanism "
-            "(R-3 positive: ensures the real mechanism is documented, not just that the old "
-            "oversell is absent)"
+        assert "lore search" in text and "area:" in text, (
+            "lore README must document the area-mediated memory mechanism — "
+            "`lore search 'area:<name>'` (which superseded `lore recall --areas` in S3) "
+            "(R-3 positive: ensures the real mechanism is documented, not just that the "
+            "old oversell is absent)"
         )
 
     def test_lore_readme_no_branch_keyword_recall_as_live_feature(self):

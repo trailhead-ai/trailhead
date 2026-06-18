@@ -641,9 +641,14 @@ def update_index(
 
     The seam S3 enriches (FTS5/BM25). *record_id* is ``<kind>/<name>``; the index
     is keyed ``(vault, kind, name)``.
+
+    The CLI write path always targets the user's own/owned vault, so the indexed
+    row is **trusted** (``shared=0``, unfenced by ``search``). This is the default,
+    passed explicitly so the trust posture is visible at the write seam — a record
+    written via the CLI must never be fenced as shared.
     """
     kind, name = record_id.split("/", 1)
-    index_store.upsert_row(conn, vault_root, kind, name, sidecar, body)
+    index_store.upsert_row(conn, vault_root, kind, name, sidecar, body, shared=0)
 
 
 # ---------------------------------------------------------------------------

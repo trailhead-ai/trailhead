@@ -303,65 +303,20 @@ def _make_recall_vault(vault: Path):
         (vault / d).mkdir(parents=True, exist_ok=True)
 
 
-class TestRecallRecursion:
-    """Verify recall_areas finds notes in flat AND YYYY-MM bucketed locations.
+class TestAreaMapStaysFlat:
+    """``build_area_map`` enumerates areas/*.md with a FLAT glob (no recursion).
 
-    Rederived from D23 area semantics: uses recall_areas() with area overlap
-    instead of the old subsystem private functions.
+    The recall-command recursion tests that used to live here were removed in
+    Slice 5 with the recall command path; folder recursion is now an
+    index-projection property covered by test_index_projection.py. The flat-glob
+    guard for the kept area-map path stays.
     """
-
-    def _area(self, vault: Path):
-        areas = vault / "areas"
-        areas.mkdir(parents=True, exist_ok=True)
-        (areas / "widget-flow.md").write_text(
-            "---\ntype: area\nname: widget-flow\nkeywords: [widget]\n---\n"
-            "## Overview\nThe widget flow area.\n"
-        )
-
-    def test_deferred_recall_recurses(self, vault):
-        """recall_areas finds deferred in flat AND YYYY-MM bucketed locations."""
-        _make_recall_vault(vault)
-        self._area(vault)
-        deferred = vault / "deferred"
-        (deferred / "2026-06").mkdir(parents=True)
-        body = "---\ntype: deferred\nstatus: open\nareas: [widget-flow]\n---\n# d\n"
-        (deferred / "2026-06" / "bucketed.md").write_text(body)
-        (deferred / "flat.md").write_text(body)
-        recall = _load_recall()
-        result = recall.recall_areas(vault, ["widget-flow"])
-        assert result.count == 2
-
-    def test_dead_ends_recall_recurses(self, vault):
-        """recall_areas finds dead-ends in flat AND YYYY-MM bucketed locations."""
-        _make_recall_vault(vault)
-        self._area(vault)
-        dead = vault / "dead-ends"
-        (dead / "2026-06").mkdir(parents=True)
-        body = "---\ntype: dead-end\nareas: [widget-flow]\n---\n# de\n"
-        (dead / "2026-06" / "bucketed.md").write_text(body)
-        (dead / "flat.md").write_text(body)
-        recall = _load_recall()
-        result = recall.recall_areas(vault, ["widget-flow"])
-        assert result.count == 2
-
-    def test_lessons_recall_recurses(self, vault):
-        """recall_areas finds lessons in flat AND YYYY-MM bucketed locations."""
-        _make_recall_vault(vault)
-        self._area(vault)
-        lessons = vault / "lessons"
-        (lessons / "2026-06").mkdir(parents=True)
-        body = "---\ntype: lesson\nstatus: active\nareas: [widget-flow]\n---\n# l\n"
-        (lessons / "2026-06" / "bucketed.md").write_text(body)
-        (lessons / "flat.md").write_text(body)
-        recall = _load_recall()
-        result = recall.recall_areas(vault, ["widget-flow"])
-        assert result.count == 2
 
     def test_areas_stay_flat(self, vault):
         """Over-recursion guard: area profiles in a YYYY-MM subdir are not found.
 
-        build_area_map uses flat glob of areas/*.md; a profile in a bucket
-        is not enumerated and cannot be targeted by recall_areas.
+        build_area_map uses a flat glob of areas/*.md; a profile in a bucket
+        is not enumerated.
         """
         _make_recall_vault(vault)
         # Only a bucketed area file — NOT in the flat areas/ dir

@@ -43,6 +43,7 @@ import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
 import record_model as record_model_mod  # noqa: E402
 import record_store as record_store_mod  # noqa: E402
+import search as search_mod  # noqa: E402
 import session_store as session_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
@@ -1381,92 +1382,7 @@ def cmd_session_note(args: argparse.Namespace) -> int:
     return 1
 
 
-# ---- recall -----------------------------------------------------------------
-
-def cmd_recall(args: argparse.Namespace) -> int:
-    """Print the recall banner for the requested areas to stdout.
-
-    Exit code is always 0 — recall must never fail a session (D-1).
-    A vault-resolution / infra error prints a one-line stderr signal and
-    falls back to the zero-match banner on stdout.
-
-    --json emits the structured RecallResult for programmatic callers
-    (e.g. the librarian agent). JSON items carry source/layer (D-7).
-    """
-    import json as _json
-
-    tty = sys.stdout.isatty()
-
-    # Parse area names from the comma-separated --areas argument.
-    raw_areas = (getattr(args, "areas", None) or "").strip()
-    area_names = [a.strip() for a in raw_areas.split(",") if a.strip()]
-
-    # Resolve vault: --vault overrides $LORE_VAULT.
-    vault_override = getattr(args, "vault", None)
-    try:
-        if vault_override:
-            vault = Path(vault_override).expanduser().resolve()
-        else:
-            vault = Path(vault_mod.resolve_vault())
-        if not vault.exists():
-            raise FileNotFoundError(vault)
-    except Exception as exc:
-        print(
-            f"lore recall: could not resolve vault ({exc})",
-            file=sys.stderr,
-        )
-        # Degrade to zero-match banner so the caller gets *something* on stdout.
-        empty_result = recall_mod.RecallResult(areas=[], matched_area_names=[])
-        print(recall_mod.render_recall_banner(empty_result, tty=tty))
-        return 0
-
-    # Resolve layers: when --vault is NOT set, compose all declared layers
-    # (personal + shared). When --vault IS set, skip layer resolution — the
-    # override is a deliberate "use exactly this vault" escape (D-3).
-    all_layers = None
-    if not vault_override:
-        try:
-            all_layers = layers_mod.resolve_layers(
-                cwd=Path.cwd(),
-                groups_dir=_resolve_groups_dir(),
-            )
-        except Exception:
-            all_layers = None  # degrade to single-vault; never fail a session
-
-    try:
-        result = recall_mod.recall_areas(vault, area_names, layers=all_layers)
-    except Exception as exc:
-        print(
-            f"lore recall: recall failed ({exc})",
-            file=sys.stderr,
-        )
-        empty_result = recall_mod.RecallResult(areas=[], matched_area_names=[])
-        print(recall_mod.render_recall_banner(empty_result, tty=tty))
-        return 0
-
-    if getattr(args, "json", False):
-        def _item_to_dict(item):
-            return {
-                "type": item.type,
-                "title": item.title,
-                "path": str(item.path),
-                "one_liner": item.one_liner,
-                "source": item.source,
-                "layer": item.layer,
-                "trusted": item.trusted,
-            }
-        payload = {
-            "areas": result.areas,
-            "items": [_item_to_dict(it) for it in result.items],
-            "count": result.count,
-            "cross_cutting_total": result.cross_cutting_total,
-        }
-        print(_json.dumps(payload, indent=2))
-    else:
-        print(recall_mod.render_recall_banner(result, tty=tty))
-
-    return 0
-
+# ---- areas ------------------------------------------------------------------
 
 def cmd_areas(args: argparse.Namespace) -> int:
     """Print the full area menu (names, one-liners, keywords) to stdout.
@@ -1532,6 +1448,63 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         return 1
     print(count)
     return 0
+
+
+# ---- search -----------------------------------------------------------------
+
+def cmd_search(args: argparse.Namespace) -> int:
+    """Run a KQL-subset query over the global derived index (the search facade).
+
+    Parses → compiles → executes ONE read-only SQL query → renders. ``search`` is
+    a PURE READER — it never writes, mutates, repairs, or rebuilds the index, and
+    never bumps ``last-referenced-at``.
+
+    Error hygiene: a parse/compile error prints ``lore search: <msg>`` on stderr
+    (the reflected query token already XML-body-escaped by ``search.run_search``)
+    and exits non-zero — never a traceback, never a silent empty result. A VALID
+    query with zero matches prints an empty-result banner and exits 0.
+    """
+    vault_override = getattr(args, "vault", None)
+
+    # Resolve ``--vault`` once to the canonical path the indexer stored: the index
+    # ``vault`` column holds the vault root string used at rebuild time, and
+    # ``--vault`` narrows by that value (resolved to match the indexer).
+    vault_value = (
+        str(Path(vault_override).expanduser().resolve()) if vault_override else None
+    )
+
+    # Vault root(s) for the coarse staleness stat (best-effort; never fail search).
+    vault_roots: list[str] = []
+    try:
+        if vault_value:
+            vault_roots = [vault_value]
+        else:
+            try:
+                all_layers = layers_mod.resolve_layers(
+                    cwd=Path.cwd(),
+                    groups_dir=_resolve_groups_dir(),
+                )
+                vault_roots = [str(lay.root.resolve()) for lay in all_layers]
+            except Exception:
+                vault_roots = []
+            if not vault_roots:
+                vault_roots = [str(Path(vault_mod.resolve_vault()))]
+    except Exception:
+        vault_roots = []
+
+    text, code = search_mod.run_search(
+        args.query,
+        env=dict(os.environ),
+        vault=vault_value,
+        vault_roots=vault_roots or None,
+        limit=args.limit,
+        as_json=getattr(args, "json", False),
+    )
+    if code == 0:
+        print(text)
+    else:
+        print(text, file=sys.stderr)
+    return code
 
 
 # ---- record -----------------------------------------------------------------
@@ -2145,11 +2118,11 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
 # ---- unknown-command dispatch hint ------------------------------------------
 
 # Table mapping removed/renamed commands to their replacements (AC-DISP1).
-# The ``recall→search`` mapping is dormant in S2 (``recall`` still routes;
-# ``search`` is S3) — the table is present so the hint mechanism is wired.
-_DISPATCH_HINTS: dict[str, str] = {
-    "search": "recall",   # ``search`` is S3; ``recall`` still routes in S2
-}
+# Slice 5 (S3) retires the ``recall`` command and rewires its call sites to
+# ``search``; this entry redirects an agent that still types the old command to
+# its replacement so the retired ``recall`` subcommand resolves to a clear
+# non-zero error with a "did you mean 'lore search'?" hint, never a silent no-op.
+_DISPATCH_HINTS: dict[str, str] = {"recall": "search"}
 
 
 def _unknown_command_hint(command: str) -> str:
@@ -2328,28 +2301,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_areas.set_defaults(func=cmd_areas)
 
-    p_recall = sub.add_parser(
-        "recall",
-        help="Pull area-scoped memory (decisions/lessons/dead-ends/deferred) for the agent",
-    )
-    p_recall.add_argument(
-        "--areas",
-        default="",
-        help="Comma-separated area names to recall memory for",
-    )
-    p_recall.add_argument(
-        "--json",
-        action="store_true",
-        default=False,
-        help="Emit structured JSON instead of the human banner",
-    )
-    p_recall.add_argument(
-        "--vault",
-        default=None,
-        help="Vault path (overrides $LORE_VAULT)",
-    )
-    p_recall.set_defaults(func=cmd_recall)
-
     p_reindex = sub.add_parser(
         "reindex",
         help="Rebuild the derived SQLite index from the vault directory tree",
@@ -2360,6 +2311,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Vault path (overrides $LORE_VAULT)",
     )
     p_reindex.set_defaults(func=cmd_reindex)
+
+    p_search = sub.add_parser(
+        "search",
+        help="Query the global lore index with the KQL-subset facade",
+    )
+    p_search.add_argument(
+        "query",
+        help="KQL-subset query string (e.g. 'kind:spec and area:penny')",
+    )
+    p_search.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit structured JSON instead of the human banner",
+    )
+    p_search.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of results (default 20)",
+    )
+    p_search.add_argument(
+        "--vault",
+        default=None,
+        help="Narrow the search to a single vault path (overrides all-vaults)",
+    )
+    p_search.set_defaults(func=cmd_search)
 
     # record subcommand: ``lore record create`` (Slice 3, S2).
     # ``--team`` is the *routing* flag (scope → place_record; AC-ROUTE1); it is

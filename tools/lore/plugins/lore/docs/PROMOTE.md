@@ -51,24 +51,24 @@ team has explicitly decided the contents are safe to expose publicly.
 
 ## D-6: the always-loaded area menu stays personal-scoped
 
-The `lore recall` area menu (loaded at SessionStart) is personal-vault-scoped only. It
+The `lore areas` menu (pointed at from SessionStart) is personal-vault-scoped only. It
 lists area names and keywords from your personal vault.
 
-Shared-layer areas surface **only on explicit `lore recall`** — they do not appear in
-the always-loaded menu. This means:
+Shared-layer content surfaces **only on an explicit `lore search` query** — it does not
+appear in the always-loaded pointer. This means:
 
-- The always-on menu is always trusted (self-authored) content.
+- The always-on pointer is always trusted (self-authored) content.
 - Shared-layer content (which may be authored by others and is structurally delimited
-  as a data channel) only enters context when you explicitly ask for it via `lore recall`.
+  as a data channel) only enters context when you explicitly query for it via `lore search`.
 
-If you want to see what shared areas are available, run:
+If you want to pull memory for a shared-layer area, run:
 
 ```
-lore recall --areas <area-name>
+lore search 'area:<area-name>'
 ```
 
-Shared items appear wrapped in `<external-memory layer="shared" source="<vault>">` in
-the recall output — the structural signal that this content is reference data from
+Shared hits appear wrapped in `<external-memory layer="shared" source="<vault>">` in
+the search output — the structural signal that this content is reference data from
 others, not your personal self-authored notes.
 
 ## Declaring a shared vault

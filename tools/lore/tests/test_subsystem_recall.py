@@ -114,13 +114,23 @@ class TestD23ApiShape:
             "render_subsystem_block was deleted; use render_recall_banner"
         )
 
-    def test_new_api_present(self):
-        """D23 replacement functions exist."""
+    def test_recall_command_path_not_present(self):
+        """The recall COMMAND path was retired in Slice 5 (S3) — `lore search` is
+        the query interface. Its symbols must not reappear."""
+        recall = load_script("recall")
+        for name in ("recall_areas", "render_recall_banner",
+                     "RecallItem", "RecallResult"):
+            assert not hasattr(recall, name), (
+                f"recall.{name} is part of the retired recall command path "
+                "(Slice 5); use `lore search` instead."
+            )
+
+    def test_area_map_api_present(self):
+        """The kept area-map path (serves `lore areas` + the SessionStart pointer)."""
         recall = load_script("recall")
         assert hasattr(recall, "build_area_map")
-        assert hasattr(recall, "recall_areas")
-        assert hasattr(recall, "render_recall_banner")
         assert hasattr(recall, "render_area_menu")
+        assert hasattr(recall, "render_area_pointer")
 
 
 # ---------------------------------------------------------------------------

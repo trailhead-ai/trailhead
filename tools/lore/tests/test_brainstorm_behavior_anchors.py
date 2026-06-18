@@ -82,8 +82,9 @@ def test_spec_canonical_sections_present():
 
 def test_recall_primary_and_spec_scaffold_anchors_present():
     text = _text()
-    # recall stays the imperative primary lookup (also covered by test_recall_wiring)
-    assert "run `lore recall" in text.lower()
+    # `lore search` is the imperative primary lookup post Slice-5 cutover
+    # (also covered by test_recall_wiring).
+    assert "run `lore search" in text.lower()
     # the CLI scaffold pointer (the spec-template authority) must remain
     assert "lore new spec" in text
     # the design-mockup provider seam must remain

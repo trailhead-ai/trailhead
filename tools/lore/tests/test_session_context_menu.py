@@ -9,11 +9,11 @@ Covers (rederived from D7/D8a/Slice-2 invariants):
 
   render_area_pointer:
     - 0 areas -> empty string (hook omits block)
-    - N areas -> contains count + "lore areas" cue + "lore recall" + trigger cue
+    - N areas -> contains count + "lore areas" cue + "lore search" + trigger cue
 
   build_context (hook integration):
     - with >=1 area in fixture vault: output contains the pointer (area count,
-      "lore areas" literal, trigger cue, "lore recall"); does NOT contain
+      "lore areas" literal, trigger cue, "lore search"); does NOT contain
       "lore area map" nor any individual area one-liner
     - count equals len(build_area_map(vault))
     - with zero areas: output contains the baseline vault index, no pointer line
@@ -170,13 +170,15 @@ class TestRenderAreaPointer:
         result = recall.render_area_pointer(vault)
         assert "unfamiliar" in result
 
-    def test_n_areas_contains_lore_recall(self, tmp_path):
-        """N-areas -> pointer contains 'lore recall' so agent knows the follow-up."""
+    def test_n_areas_contains_lore_search(self, tmp_path):
+        """N-areas -> pointer contains 'lore search' so the agent knows the follow-up
+        (Slice 5 cutover: the per-area lookup is `lore search 'area:<name>'`)."""
         recall = load_recall()
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"], summary="OAuth flows")
         result = recall.render_area_pointer(vault)
-        assert "lore recall" in result
+        assert "lore search" in result
+        assert "lore recall" not in result
 
     def test_count_matches_build_area_map_length(self, tmp_path):
         """Count in the pointer equals len(build_area_map(vault))."""
@@ -272,8 +274,9 @@ class TestBuildContextMenu:
         ctx = data["hookSpecificOutput"]["additionalContext"]
         assert str(len(entries)) in ctx
 
-    def test_with_areas_context_contains_lore_recall(self, tmp_path):
-        """Pointer includes 'lore recall' so agent knows the follow-up command."""
+    def test_with_areas_context_contains_lore_search(self, tmp_path):
+        """Pointer includes 'lore search' so the agent knows the follow-up command
+        (Slice 5 cutover: `recall` retired, `lore search 'area:<name>'` is the lookup)."""
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"], summary="OAuth and JWT flows")
         cwd = tmp_path / "worktree"
@@ -282,7 +285,8 @@ class TestBuildContextMenu:
         out = _run_session_context({"session_id": "s1"}, _base_env(vault), cwd)
         data = json.loads(out)
         ctx = data["hookSpecificOutput"]["additionalContext"]
-        assert "lore recall" in ctx
+        assert "lore search" in ctx
+        assert "lore recall" not in ctx
 
     def test_with_areas_does_not_contain_individual_area_one_liners(self, tmp_path):
         """Individual area one-liners must NOT appear in the injection (pointer only)."""
