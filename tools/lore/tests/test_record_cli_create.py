@@ -413,14 +413,14 @@ def test_unknown_subcommand_hints_did_you_mean(tmp_path):
     assert "did you mean" in out.lower() or "unknown" in out.lower()
 
 
-def test_known_removed_command_hints_replacement(tmp_path):
-    """A command in the dispatch-hint table prints a specific 'did you mean' hint.
+def test_search_is_a_registered_command(tmp_path):
+    """``search`` is a real command in Slice 4 (S3), not an unknown-command hint.
 
-    The recall→search mapping table is present; 'recall' currently still routes
-    (it IS a registered command), while 'search' is not yet registered (S3). So
-    typing 'search' fires the specific table hint pointing at 'recall'. This
-    verifies the hint TABLE is wired, distinct from the generic unknown-command
-    message exercised by the 'frob' test above.
+    Slice 4 registers the ``search`` subcommand, so the dormant S2 ``search→recall``
+    dispatch-hint scaffold is gone. Typing ``lore search`` with no query is now a
+    *valid command* failing on a missing positional arg (argparse usage error) —
+    it must NOT be mislabelled as an unknown command pointing at ``recall``. The
+    ``recall→search`` cutover hint is owned by Slice 5.
     """
     vault, state = _make_vault(tmp_path)
     r = _run(
@@ -428,10 +428,12 @@ def test_known_removed_command_hints_replacement(tmp_path):
         vault=vault, state_dir=state,
     )
     assert r.returncode != 0
-    out = r.stdout + r.stderr
-    # The table maps search→recall, so the hint must name 'recall'.
-    assert "recall" in out.lower()
-    assert "did you mean" in out.lower()
+    out = (r.stdout + r.stderr).lower()
+    # A valid command's argparse error — not the unknown-command hint.
+    assert "unknown command" not in out
+    assert "did you mean 'lore recall'" not in out
+    # argparse names the missing positional and the search usage.
+    assert "search" in out
 
 
 def test_valid_command_bad_arg_does_not_emit_unknown_command_hint(tmp_path):

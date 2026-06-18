@@ -62,6 +62,13 @@ from regenerate_indices import (  # noqa: E402
     first_paragraph_after_headings,
 )
 from vault import iter_note_paths  # noqa: E402
+from xml_escape import xml_attr_escape, xml_body_escape  # noqa: E402
+
+# A-3 injection-defense helpers now live in ``xml_escape.py`` (the single source
+# of truth, so Slice 5's gutting of this file cannot remove the wrapper logic).
+# Re-exported under the historic private names for in-module call sites.
+_xml_attr_escape = xml_attr_escape
+_xml_body_escape = xml_body_escape
 
 # Hard caps (D-8c)
 _ONE_LINER_MAX = 120
@@ -591,46 +598,6 @@ def _pull_cross_cutting(vault, requested_slugs, recency_days, project, add_fn, s
             ))
             added += 1
     return total_candidates
-
-
-# ---------------------------------------------------------------------------
-# A-3: XML helpers for the shared data-channel delimiter
-# ---------------------------------------------------------------------------
-
-def _xml_attr_escape(value: str) -> str:
-    """XML-attribute-escape a string for use in an attribute value.
-
-    Escapes & " < > so the value is safe inside a double-quoted attribute.
-    A-3: a vault name like '"><script' must not break the tag structure.
-    """
-    value = value.replace("&", "&amp;")
-    value = value.replace('"', "&quot;")
-    value = value.replace("<", "&lt;")
-    value = value.replace(">", "&gt;")
-    return value
-
-
-def _xml_body_escape(text: str) -> str:
-    """Encode text so it cannot break out of or spoof the external-memory channel.
-
-    A-3 (both directions):
-    - A literal '</external-memory>' in the body must not terminate the channel
-      early. We encode the leading '<' as '&lt;' which makes the channel
-      un-escapable.
-    - A literal '<external-memory' in the body must not spoof a new framing tag.
-      Same encoding: all '<' become '&lt;', all '>' become '&gt;'.
-    - '&' becomes '&amp;' first so we don't double-encode.
-
-    This is a full XML character-data escape (the body is emitted as CDATA
-    within the XML element content). The only characters that need escaping in
-    XML text content are & and <.
-    """
-    text = text.replace("&", "&amp;")
-    text = text.replace("<", "&lt;")
-    # '>' is technically only special in ']]>' sequences but encode it for
-    # safety so the body cannot contain a well-formed closing tag either.
-    text = text.replace(">", "&gt;")
-    return text
 
 
 def render_area_menu(entries: list[AreaEntry]) -> str:
