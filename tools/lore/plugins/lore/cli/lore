@@ -1466,11 +1466,18 @@ def cmd_search(args: argparse.Namespace) -> int:
     """
     vault_override = getattr(args, "vault", None)
 
+    # Resolve ``--vault`` once to the canonical path the indexer stored: the index
+    # ``vault`` column holds the vault root string used at rebuild time, and
+    # ``--vault`` narrows by that value (resolved to match the indexer).
+    vault_value = (
+        str(Path(vault_override).expanduser().resolve()) if vault_override else None
+    )
+
     # Vault root(s) for the coarse staleness stat (best-effort; never fail search).
     vault_roots: list[str] = []
     try:
-        if vault_override:
-            vault_roots = [str(Path(vault_override).expanduser().resolve())]
+        if vault_value:
+            vault_roots = [vault_value]
         else:
             try:
                 all_layers = layers_mod.resolve_layers(
@@ -1484,12 +1491,6 @@ def cmd_search(args: argparse.Namespace) -> int:
                 vault_roots = [str(Path(vault_mod.resolve_vault()))]
     except Exception:
         vault_roots = []
-
-    # The index ``vault`` column stores the vault root path string used at rebuild
-    # time; ``--vault`` narrows by that value (resolved to match the indexer).
-    vault_value = (
-        str(Path(vault_override).expanduser().resolve()) if vault_override else None
-    )
 
     text, code = search_mod.run_search(
         args.query,

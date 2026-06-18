@@ -175,16 +175,17 @@ def _fetch_hits(conn, cq):
     hits = []
     for row in rows:
         record = dict(zip(cols, row))
-        rowid_row = conn.execute(
-            "SELECT rowid FROM records WHERE id=?", (record["id"],)
+        # Snippet body lives only in the populated FTS table (record_fts.body),
+        # keyed by the rowid that aliases records.rowid. One join fetches it
+        # directly from the record id — no separate rowid round-trip.
+        body_row = conn.execute(
+            "SELECT f.body FROM record_fts f "
+            "JOIN records r ON r.rowid = f.rowid WHERE r.id = ?",
+            (record["id"],),
         ).fetchone()
         snippet = ""
-        if rowid_row is not None:
-            body_row = conn.execute(
-                "SELECT body FROM record_fts WHERE rowid=?", (rowid_row[0],)
-            ).fetchone()
-            if body_row is not None and body_row[0]:
-                snippet = _excerpt(body_row[0])
+        if body_row is not None and body_row[0]:
+            snippet = _excerpt(body_row[0])
         hits.append({
             "id": record["id"],
             "title": record.get("title") or "",
