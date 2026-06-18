@@ -1,8 +1,9 @@
 """Write camp-owned workspace docs at the workspace root.
 
 The filenames written are determined by harness.doc_files in the group config
-(via resolve_doc_files). The claude default (no [harness] block, or block without
-doc_files) writes only CLAUDE.md. A Codex/Copilot/Cursor harness can configure
+(via resolve_harness_profile(...).doc_files). The claude default (no [harness]
+block, or block without doc_files) writes only CLAUDE.md. A Codex/Copilot/Cursor
+harness can configure
 doc_files = ["AGENTS.md"] to write AGENTS.md instead.
 
 All files are written idempotently — calling write_workspace_doc twice with the

@@ -633,59 +633,6 @@ def _cmd_break_group_cli(
         print(f"camp rm: errors: {result['errors']}", file=sys.stderr)
 
 
-def _cmd_restock_group_cli(
-    args: list[str],
-    group: dict,
-    env: dict[str, str] | None,
-    dry_run: bool,
-) -> None:
-    """camp restock — re-run bootstrap commands on each canonical member repo."""
-    import json as _json
-    import subprocess
-
-    as_json = "--json" in args
-
-    results: dict = {}
-    errors = 0
-
-    for member in group["members"]:
-        name = member["name"]
-        repo_root = Path(member["repo_root"])
-        bootstrap = member.get("bootstrap") or []
-
-        if not bootstrap:
-            results[name] = {"action": "no-bootstrap"}
-            continue
-
-        if dry_run:
-            print(f"[dry-run] restock {name}: would run {bootstrap}", file=sys.stderr)
-            results[name] = {"action": "dry-run"}
-            continue
-
-        r = subprocess.run(
-            bootstrap,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if r.returncode == 0:
-            results[name] = {"action": "ok"}
-        else:
-            results[name] = {"action": "error", "error": r.stderr.strip()}
-            errors += 1
-
-    status = "ok" if errors == 0 else "ok_with_warnings"
-    report = {"status": status, "members": results, "errors": errors}
-
-    if as_json:
-        print(_json.dumps(report))
-    else:
-        print(f"camp restock: status={status}")
-        for name, info in results.items():
-            print(f"  {name}: {info.get('action', '?')}")
-
-
 def _cmd_rebase_group_cli(
     args: list[str],
     group: dict,
@@ -952,6 +899,7 @@ def _cmd_ai_group_cli(
     from provision import bring_up_workspace
     from manifest import workspace_dir
     import harness_launch
+    from session_identity import session_id_for
     from session_lock import acquire_session_lock, SessionLockHeld
 
     rest = list(args)
@@ -975,11 +923,15 @@ def _cmd_ai_group_cli(
         )
         return
 
-    # New-vs-resume is decided BEFORE bring-up creates the workspace dir: a
-    # first-ever launch (no workspace) uses the `new` template; an existing
-    # workspace uses `resume`.
     ws_dir = workspace_dir(group_name, slug, env=env)
-    is_resume = ws_dir.exists()
+    # Capture this BEFORE acquire_session_lock (which mkdirs ws_dir): it is the
+    # "have we been here before?" signal used for the missing-session message.
+    ws_existed = ws_dir.exists()
+
+    # Resolve the harness profile ONCE for this bring-up; bring_up_workspace and
+    # the launch tail both read fields off it (no per-field re-resolution).
+    profile = harness_launch.resolve_harness_profile(group)
+    session_id = session_id_for(group_name, slug)
 
     # Refuse-concurrent FIRST, before any provisioning: a live PID holding the
     # lock → refuse (naming workspace + PID + timestamp). Stale/dead → reclaimed.
@@ -989,9 +941,22 @@ def _cmd_ai_group_cli(
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
-    # Resolve the harness profile ONCE for this bring-up; bring_up_workspace and
-    # the launch tail both read fields off it (no per-field re-resolution).
-    profile = harness_launch.resolve_harness_profile(group)
+    # New-vs-resume is decided by whether the deterministic SESSION actually
+    # exists — NOT by whether the workspace dir exists. A provisioned-but-never-
+    # launched (or deleted-session) workspace must start FRESH rather than resume a
+    # missing id (which would dump the user in the picker). The profile answers
+    # whether a resumable session exists (None = no session knowledge → fall back
+    # to workspace-dir existence, the prior behavior for a non-claude harness).
+    resumable = profile.has_resumable_session(session_id, env=env)
+    if resumable is None:
+        is_resume = ws_existed
+    else:
+        is_resume = resumable
+        if ws_existed and not resumable:
+            print(
+                f"camp ai: no session found for {slug!r}; starting fresh",
+                file=sys.stderr,
+            )
 
     try:
         bring_up_workspace(group, slug, env=env, profile=profile)
@@ -1004,7 +969,9 @@ def _cmd_ai_group_cli(
         file=sys.stderr,
     )
 
-    harness_launch.launch(group, slug, ws_dir, is_resume=is_resume, profile=profile)
+    harness_launch.launch(
+        group, slug, ws_dir, is_resume=is_resume, session_id=session_id, profile=profile
+    )
 
 
 def _cmd_enter_group_cli(

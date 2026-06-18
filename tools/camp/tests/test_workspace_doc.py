@@ -689,23 +689,23 @@ class TestBringUpWorkspaceIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Slice 8: doc_files / resolve_doc_files + 7b Members-line removal
+# Slice 8: doc_files (resolve_harness_profile) + 7b Members-line removal
 # ---------------------------------------------------------------------------
 
 
 class TestResolveDocFiles:
-    """Unit tests for harness_launch.resolve_doc_files."""
+    """Unit tests for resolve_harness_profile(...).doc_files."""
 
     def test_no_harness_returns_claude_md(self):
-        """No [harness] block → resolve_doc_files returns ['CLAUDE.md']."""
-        from harness_launch import resolve_doc_files
+        """No [harness] block → doc_files is ['CLAUDE.md']."""
+        from harness_launch import resolve_harness_profile
 
         group = {"group": {"name": "g"}, "members": []}
-        assert resolve_doc_files(group) == ["CLAUDE.md"]
+        assert resolve_harness_profile(group).doc_files == ["CLAUDE.md"]
 
     def test_harness_without_doc_files_returns_claude_md(self):
         """[harness] block without doc_files → ['CLAUDE.md']."""
-        from harness_launch import resolve_doc_files
+        from harness_launch import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -716,29 +716,29 @@ class TestResolveDocFiles:
                 "cwd": "{workspace}",
             },
         }
-        assert resolve_doc_files(group) == ["CLAUDE.md"]
+        assert resolve_harness_profile(group).doc_files == ["CLAUDE.md"]
 
     def test_configured_doc_files_returned(self):
         """Configured doc_files is returned as-is."""
-        from harness_launch import resolve_doc_files
+        from harness_launch import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
             "members": [],
             "harness": {"doc_files": ["AGENTS.md"]},
         }
-        assert resolve_doc_files(group) == ["AGENTS.md"]
+        assert resolve_harness_profile(group).doc_files == ["AGENTS.md"]
 
     def test_multiple_doc_files_returned(self):
         """Multiple configured doc_files are all returned."""
-        from harness_launch import resolve_doc_files
+        from harness_launch import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
             "members": [],
             "harness": {"doc_files": ["AGENTS.md", "CLAUDE.md"]},
         }
-        assert resolve_doc_files(group) == ["AGENTS.md", "CLAUDE.md"]
+        assert resolve_harness_profile(group).doc_files == ["AGENTS.md", "CLAUDE.md"]
 
 
 class TestWriteWorkspaceDocFiles:

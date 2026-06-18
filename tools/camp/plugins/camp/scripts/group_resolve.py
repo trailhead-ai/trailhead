@@ -158,24 +158,6 @@ def _find_groups_for_repo(
     return matching
 
 
-def _find_groups_for_cwd_direct(
-    cwd: Path, group_configs: list[dict[str, Any]]
-) -> list[str]:
-    """Return group names where cwd or any of its parents is a member repo_root."""
-    current = cwd.resolve()
-    visited: set[Path] = set()
-    while current not in visited:
-        visited.add(current)
-        groups = _find_groups_for_repo(current, group_configs)
-        if groups:
-            return groups
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return []
-
-
 # ---------------------------------------------------------------------------
 # Overlap validation (eager, for `camp config validate` and at resolve time)
 # ---------------------------------------------------------------------------

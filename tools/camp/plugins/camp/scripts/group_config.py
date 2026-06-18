@@ -279,7 +279,7 @@ def load_group(path: Path) -> dict[str, Any]:
 
 # Placeholders the launch templates / cwd may reference. Any other {token} is a
 # misconfiguration (would KeyError at substitution time) → rejected at load.
-_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace"})
+_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace", "session_id"})
 
 # Mid-session context-injection strategies (Slice 9). "stdout" is the universal
 # floor; "claude-hook" opts into the Claude Code PostToolUse → additionalContext
@@ -345,7 +345,7 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
 
     Every field is OPTIONAL — a [harness] block containing only doc_files (or
     only cwd, or only new) is valid.  Fields that are absent are simply not
-    included in the returned dict; resolve_launch merges per-field against
+    included in the returned dict; resolve_harness_profile merges per-field against
     _CLAUDE_DEFAULT at resolution time.
     """
     if raw is None:

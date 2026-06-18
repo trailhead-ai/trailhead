@@ -1,15 +1,15 @@
 """Hook handlers for camp: session-bootstrap and worktree-cleanup.
 
-Both handlers are invoked via .claude/settings.json hooks:
-  SessionStart   → camp session-bootstrap
-  WorktreeRemove → camp worktree-cleanup
+  SessionStart   → camp session-bootstrap   (wired by hooks_writer into member
+                   .claude/settings.json)
+  worktree-cleanup                            (retained + invocable, but NOT
+                   auto-wired: the WorktreeRemove wiring was dropped — camp owns
+                   teardown via `camp rm`. Kept for direct invocation / vanilla use.)
 
-Both are silent-exit-0 in all no-op cases (cold start, not a member, malformed
-config, slug=None) because the hook fires at EVERY SessionStart/WorktreeRemove
-in EVERY repo — including ones that never ran camp init.
-
-All no-op cases exit 0 with empty stderr so they don't pollute session start
-for the common case of a non-camp repo.
+session-bootstrap is silent-exit-0 in all no-op cases (cold start, not a member,
+malformed config, slug=None) because it fires at EVERY SessionStart in EVERY repo
+— including ones that never ran camp init. All no-op cases exit 0 with empty
+stderr so they don't pollute session start for the common case of a non-camp repo.
 """
 from __future__ import annotations
 
@@ -119,8 +119,10 @@ def cmd_session_bootstrap() -> None:
 def cmd_worktree_cleanup(*, force: bool = False) -> None:
     """camp worktree-cleanup: remove member worktrees + central manifest.
 
-    Called by the WorktreeRemove hook. Silent exit-0 when cwd is not a
-    member of any known group (common case for non-camp repos).
+    Retained + directly invocable, but NOT auto-wired into any hook (the
+    WorktreeRemove wiring was dropped — `camp rm` is the wired teardown path).
+    Silent exit-0 when cwd is not a member of any known group (common case for
+    non-camp repos).
 
     Raises SystemExit(1) with a message when:
       - A dirty worktree blocks removal (and force=False).

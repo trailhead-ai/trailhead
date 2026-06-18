@@ -144,20 +144,29 @@ def _ref_resolves(repo_root: Path, ref: str) -> bool:
     return result.returncode == 0
 
 
-def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
-    """Return True if wt_path is already listed in git's worktree registry."""
+def _registered_worktree_paths(repo_root: Path) -> set[Path]:
+    """Resolved paths of every worktree registered with git (empty on failure).
+
+    One `git worktree list` read; callers test membership locally instead of
+    forking git once per candidate path.
+    """
     result = _git(repo_root, "worktree", "list", "--porcelain")
     if result.returncode != 0:
-        return False
+        return set()
+    paths: set[Path] = set()
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
             registered = line[len("worktree "):].strip()
             try:
-                if Path(registered).resolve() == wt_path.resolve():
-                    return True
+                paths.add(Path(registered).resolve())
             except Exception:
                 pass
-    return False
+    return paths
+
+
+def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
+    """Return True if wt_path is already listed in git's worktree registry."""
+    return wt_path.resolve() in _registered_worktree_paths(repo_root)
 
 
 def _fetch_base(
@@ -194,6 +203,23 @@ def _fetch_base(
         )
 
 
+def _move_worktree(
+    member: dict[str, Any], stage: Path, wt_path: Path, repo_root: Path
+) -> None:
+    """git worktree move <stage> <wt_path>, preserving the git-internal admin name.
+
+    On failure, raise ReconcileError but leave <stage> registered so the next
+    reconcile resumes at the move step (recovery is idempotent, never
+    destructive — see _add_worktree_for_member's state machine).
+    """
+    result = _git(repo_root, "worktree", "move", str(stage), str(wt_path))
+    if result.returncode != 0:
+        raise ReconcileError(
+            f"camp: git worktree move failed for member {member['name']!r} "
+            f"({stage} → {wt_path}): {result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
 def _add_worktree_for_member(
     member: dict[str, Any],
     wt_path: Path,
@@ -201,11 +227,34 @@ def _add_worktree_for_member(
     repo_root: Path,
     *,
     base: str = DEFAULT_BASE,
+    slug: str,
 ) -> None:
-    """Add a git worktree for one member, branched off `base`.
+    """Add a git worktree for one member at wt_path, branched off `base`.
 
-    Existence-guard: if wt_path already exists (directory present OR already
-    registered with git), skip the add — idempotent re-run.
+    Admin-name control (Slice 1): git derives a worktree's INTERNAL admin name
+    (the dir under `.git/worktrees/<name>`, which Claude Code surfaces as
+    `workspace.git_worktree`) from the basename of the add path, de-duplicating
+    collisions as `<name>`, `<name>1`, …. Every camp member worktree is leaf-named
+    after the MEMBER (`trailhead`), so they all collide and git reports useless
+    names like `trailhead5`. To make the admin name the SLUG instead, we
+    `git worktree add` at a staging path whose basename IS the slug, then
+    `git worktree move` it into the `<member>` folder — `git worktree move`
+    preserves the admin name, so the folder keeps the member name while
+    `git_worktree` reports the slug.
+
+    Existence-guard: if wt_path already exists (directory present OR registered),
+    skip — idempotent re-run.
+
+    Recoverable partial state: the add and move are two phases. The entry is a
+    state machine checked IN THIS ORDER, so an interrupt/FS error between the two
+    phases is recoverable on the next reconcile rather than bricking the worktree:
+      1. wt_path present (dir or registered)           → done, skip.
+      2. stage registered (added but not yet moved)    → resume at the MOVE step
+         (do NOT re-add — git rejects the duplicate path).
+      3. otherwise                                     → fresh add, then move.
+
+    member == slug short-circuit: when stage == wt_path the add path's basename is
+    already the slug, so add directly at wt_path with no move (but still add).
 
     Branch-base policy: a new branch is created off `base` (default origin/main,
     per-member overridable). Because the `git fetch` is deferred to the Slice 3
@@ -213,26 +262,73 @@ def _add_worktree_for_member(
     local clone; otherwise it falls back to HEAD so synchronous bring-up never
     fails on a not-yet-fetched remote ref.
 
-    Raises ReconcileError on git failure.
+    Raises ReconcileError on git failure or a confinement violation.
     """
-    if wt_path.is_dir() or _worktree_registered(repo_root, wt_path):
-        return  # Already present — existence-guard (idempotent)
+    # One git-registry read; both the existence-guard and the stage-recovery check
+    # test membership against it (no second `git worktree list` fork).
+    #   NB: paths are matched via Path.resolve(), which FOLLOWS symlinks; on an
+    #   overlay/bind-mount FS two distinct paths could resolve equal and cause a
+    #   false-positive skip. Acceptable for camp's state-dir layout (no such
+    #   aliasing), but noted so a future FS change revisits it.
+    registered = _registered_worktree_paths(repo_root)
 
+    # 1. Existence-guard — final path already present (idempotent no-op).
+    if wt_path.is_dir() or wt_path.resolve() in registered:
+        return
+
+    # Stage is a sibling of wt_path whose basename is the slug (see docstring).
+    stage = wt_path.parent / slug
+
+    # Confinement (defense-in-depth): a future caller that bypasses the
+    # ^[a-z0-9-]+$ slug validation must not be able to make <stage> escape the
+    # workspace via a "../"-laden slug. Mirror reconcile_break's resolve-then-
+    # relative_to check. Runs BEFORE any mkdir/git call.
+    parent_resolved = wt_path.parent.resolve()
+    try:
+        stage.resolve().relative_to(parent_resolved)
+    except ValueError:
+        raise ReconcileError(
+            f"camp: refusing worktree add for member {member['name']!r} — stage "
+            f"path {stage} escapes the workspace dir {wt_path.parent} "
+            f"(slug {slug!r})"
+        )
+
+    direct = stage == wt_path  # member == slug → no move needed
+
+    # 2. Partial-state recovery: stage was added but not moved → resume at move.
+    if not direct and stage.resolve() in registered:
+        _move_worktree(member, stage, wt_path, repo_root)
+        return
+
+    # 3. Fresh add (at stage, or directly at wt_path when member == slug).
+    add_target = wt_path if direct else stage
     wt_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # An ORPHANED stage dir — present on disk but NOT git-registered (a prior add
+    # that failed after creating the dir, or a pruned registry that left the dir) —
+    # would make `git worktree add` fail "already exists" on every retry, bricking
+    # recovery. Clear it first so the add stays idempotent. (Confined: the assert
+    # above guarantees `stage` is under the workspace dir.) Not done for `direct`:
+    # an existing wt_path is the step-1 existence-guard's job, not a fresh-add orphan.
+    if not direct and stage.exists():
+        shutil.rmtree(stage, ignore_errors=True)
+
     if _branch_exists_locally(repo_root, branch):
-        result = _git(repo_root, "worktree", "add", str(wt_path), branch)
+        result = _git(repo_root, "worktree", "add", str(add_target), branch)
     else:
         start_point = base if _ref_resolves(repo_root, base) else "HEAD"
         result = _git(
-            repo_root, "worktree", "add", "-b", branch, str(wt_path), start_point
+            repo_root, "worktree", "add", "-b", branch, str(add_target), start_point
         )
 
     if result.returncode != 0:
         raise ReconcileError(
             f"camp: git worktree add failed for member {member['name']!r} "
-            f"at {wt_path}: {result.stderr.strip() or result.stdout.strip()}"
+            f"at {add_target}: {result.stderr.strip() or result.stdout.strip()}"
         )
+
+    if not direct:
+        _move_worktree(member, stage, wt_path, repo_root)
 
 
 def _run_bootstrap(member: dict[str, Any], wt_path: Path) -> None:
@@ -364,7 +460,7 @@ def reconcile_worktree(
                 )
                 base = member.get("base") or DEFAULT_BASE
                 _add_worktree_for_member(
-                    member, wt_path, branch, repo_root, base=base
+                    member, wt_path, branch, repo_root, base=base, slug=slug
                 )
                 member_results.append({
                     "name": member["name"],
@@ -557,23 +653,3 @@ def reconcile_break(
         "removed": removed,
         "errors": errors,
     }
-
-
-def format_success_summary(result: dict[str, Any]) -> str:
-    """Format a D-I success summary line for camp <slug>.
-
-    Format: "worktree-<slug>: N member(s) — <names> (bootstrap: ok) | manifest: <path>"
-    """
-    slug = result.get("slug", "?")
-    count = result.get("member_count", 0)
-    members = result.get("members", [])
-    names = ", ".join(members) if members else "(none)"
-    bootstrap_status = result.get("bootstrap", "ok")
-    manifest_path = result.get("manifest_path", "?")
-
-    # Derive branch name from manifest path or members
-    # The slug is embedded in the manifest path as .../<slug>/manifest.json
-    return (
-        f"worktree-{slug}: {count} member(s) — {names} "
-        f"(bootstrap: {bootstrap_status}) | manifest: {manifest_path}"
-    )

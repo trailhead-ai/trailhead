@@ -70,13 +70,28 @@ def group_env(tmp_path):
                      "bootstrap": [], "base": "origin/main"}],
         "branch_pattern": "worktree-{slug}",
     }
-    env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+    # Isolate claude's session store so claude_session_exists is deterministic and
+    # never reads the developer's real ~/.claude (Axiom 6).
+    env = {
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "claude"),
+    }
     return {"group": group, "env": env, "tmp_path": tmp_path}
 
 
 def _workspace_dir(env, slug):
     from group_resolve import central_state_dir
     return central_state_dir("g", env=env) / "worktrees" / slug
+
+
+def _seed_claude_session(env, slug, group_name="g"):
+    """Create a fake claude session transcript so claude_session_exists() → True."""
+    from session_identity import session_id_for
+
+    sid = session_id_for(group_name, slug)
+    proj = Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / "anyproj"
+    proj.mkdir(parents=True, exist_ok=True)
+    (proj / f"{sid}.jsonl").write_text("{}\n")
 
 
 @pytest.fixture(autouse=True)
@@ -94,35 +109,60 @@ class TestNewVsResume:
         calls = []
         monkeypatch.setattr(
             harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume, profile=None: calls.append(is_resume),
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
+                calls.append(is_resume)
+            ),
         )
 
         g = group_env
         camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
 
-        assert calls == [False], "first launch should use the new template"
+        assert calls == [False], "first launch (no session) should use the new template"
         lock = session_lock.lock_path_for(_workspace_dir(g["env"], "feat-x"))
         data = json.loads(lock.read_text())
         assert data["pid"] == os.getpid()
         assert "started_at" in data
 
-    def test_second_ai_uses_resume_template(self, camp_cli, group_env, monkeypatch):
+    def test_resume_when_session_exists(self, camp_cli, group_env, monkeypatch):
+        """An existing claude session for (group, slug) → resume template."""
         import harness_launch
-        import session_lock
 
         g = group_env
-        # First launch creates the workspace; release the lock so the second can run.
-        monkeypatch.setattr(harness_launch, "launch", lambda *a, **k: None)
-        camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
-        session_lock.release_session_lock(_workspace_dir(g["env"], "feat-x"))
+        _seed_claude_session(g["env"], "feat-x")  # session transcript present
 
         calls = []
         monkeypatch.setattr(
             harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume, profile=None: calls.append(is_resume),
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
+                calls.append(is_resume)
+            ),
         )
         camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
-        assert calls == [True], "existing workspace should resume"
+        assert calls == [True], "an existing session should resume"
+
+    def test_missing_session_starts_fresh_with_message(
+        self, camp_cli, group_env, monkeypatch, capsys
+    ):
+        """Workspace dir exists but the session is gone → start fresh (NOT the
+        picker) and tell the user."""
+        import harness_launch
+
+        g = group_env
+        # Simulate a provisioned-but-never-launched workspace: dir exists, no session.
+        _workspace_dir(g["env"], "feat-x").mkdir(parents=True)
+
+        calls = []
+        monkeypatch.setattr(
+            harness_launch, "launch",
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
+                calls.append(is_resume)
+            ),
+        )
+        camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+
+        assert calls == [False], "missing session must start fresh, not resume"
+        err = capsys.readouterr().err
+        assert "no session found" in err and "feat-x" in err
 
 
 class TestRefuseConcurrent:

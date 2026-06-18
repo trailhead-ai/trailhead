@@ -4,20 +4,22 @@ The single launch point at the tail of `camp ai`. A group-level optional
 [harness] config block declares how to launch the harness:
 
     [harness]
-    new    = ["claude"]                  # first-ever launch
-    resume = ["claude", "-r", "{slug}"]  # existing workspace
-    cwd    = "{workspace}"               # launch dir
+    new    = ["claude", "--session-id", "{session_id}"]  # first-ever launch
+    resume = ["claude", "--resume", "{session_id}"]       # existing workspace
+    cwd    = "{workspace}"                                # launch dir
 
-with {slug} / {workspace} substitution. When the block is ABSENT, the baked-in
-claude default applies: new=["claude"] rooted at the workspace dir;
-resume=["claude","-r","{slug}"].
+with {slug} / {workspace} / {session_id} substitution. When the block is ABSENT,
+the baked-in claude default applies: new seeds a deterministic session id with
+`--session-id`, resume continues it with `--resume`, both rooted at the workspace
+dir. (Resume keys on the SESSION ID, not the slug — `claude --resume` resumes by
+id, never by name; see session_identity.session_id_for.)
 
 resolve_harness_profile merges the [harness] block over the claude default ONCE
-into a frozen HarnessProfile (launch argv + cwd + doc_files + inject). The legacy
-resolve_launch / resolve_doc_files / resolve_inject are thin views over it, kept
-for the callers/tests that read a single field. profile.launch() does the
-{slug}/{workspace} substitution → (argv, cwd); launch() chdirs + os.execvp's.
-Modality is terminal-exec (claude-specific); GUI/detached launch is deferred.
+into a frozen HarnessProfile (launch argv + cwd + doc_files + inject); callers
+read fields off it directly. profile.launch() does the
+{slug}/{workspace}/{session_id} substitution → (argv, cwd); launch() chdirs +
+os.execvp's. Modality is terminal-exec (claude-specific); GUI/detached launch is
+deferred.
 
 Tests stub launch() (trailhead.paths is not isolated for the real claude runner —
 memory: harness-cli-not-isolated-by-trailhead-env). The CAMP_TEST_NO_EXEC escape
@@ -32,15 +34,44 @@ from pathlib import Path
 from typing import Any
 
 # Baked-in claude default (applied when no [harness] block is configured).
+#
+# Resume keys on a deterministic SESSION ID, not the slug: `claude -r/--resume`
+# resumes by session id (a UUID), never by name, so the old `-r {slug}` never
+# matched and dumped the user in the resume picker. camp derives a stable id from
+# (group, slug) (session_identity.session_id_for) and seeds it on the first launch
+# with `--session-id`, then resumes it with `--resume`. (`--session-id` errors on
+# an already-existing id — verified — so the new/resume split is required.)
 _CLAUDE_DEFAULT = {
-    "new": ["claude"],
-    "resume": ["claude", "-r", "{slug}"],
+    "new": ["claude", "--session-id", "{session_id}"],
+    "resume": ["claude", "--resume", "{session_id}"],
     "cwd": "{workspace}",
 }
 
 
-def _substitute(token: str, *, slug: str, workspace: str) -> str:
-    return token.format(slug=slug, workspace=workspace)
+def _substitute(token: str, *, slug: str, workspace: str, session_id: str) -> str:
+    return token.format(slug=slug, workspace=workspace, session_id=session_id)
+
+
+def claude_session_exists(session_id: str, *, env: dict[str, str] | None = None) -> bool:
+    """Whether a claude session transcript already exists for `session_id`.
+
+    Claude stores transcripts at `<config>/projects/<encoded-cwd>/<uuid>.jsonl`.
+    The deterministic id is globally unique to its (group, slug), so we glob by id
+    across all projects — this is independent of claude's cwd-encoding scheme
+    (resolved realpath with `/` and `.` → `-`), which is brittle to predict.
+
+    Used to pick new-vs-resume by SESSION existence rather than workspace-dir
+    existence: a provisioned-but-never-launched (or deleted-session) workspace must
+    start fresh with `--session-id`, never `--resume` a missing id (→ picker).
+    """
+    import os
+
+    env = env if env is not None else os.environ
+    config_dir = env.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    projects = Path(config_dir) / "projects"
+    if not projects.is_dir():
+        return False
+    return any(projects.glob(f"*/{session_id}.jsonl"))
 
 
 @dataclass(frozen=True)
@@ -62,15 +93,23 @@ class HarnessProfile:
     inject: str  # "stdout" | "claude-hook"
     pretrust: bool  # opt-in to the claude trust pre-seed (see should_pretrust)
 
-    def resolved_cwd(self, *, slug: str, workspace: Path | str) -> Path:
+    def resolved_cwd(
+        self, *, slug: str, workspace: Path | str, session_id: str = ""
+    ) -> Path:
         """Single source of the substituted launch cwd.
 
         Accepts workspace as Path or str; returns the resolved Path after
-        {slug}/{workspace} substitution.  Used by launch() and by
-        pretrust_workspace (Slice 1) to determine the trust target without
-        having to duplicate the substitution logic.
+        {slug}/{workspace}/{session_id} substitution.  Used by launch() and by
+        pretrust_workspace to determine the trust target without duplicating the
+        substitution logic. session_id defaults to "" because the cwd template is
+        "{workspace}" by default and never references {session_id} in practice;
+        launch() passes the real id so a custom cwd that does reference it works.
         """
-        return Path(_substitute(self.cwd, slug=slug, workspace=str(workspace)))
+        return Path(
+            _substitute(
+                self.cwd, slug=slug, workspace=str(workspace), session_id=session_id
+            )
+        )
 
     def is_claude_launch(self) -> bool:
         """True when the new-launch binary is `claude` (by basename).
@@ -104,13 +143,33 @@ class HarnessProfile:
             self.is_claude_launch() or self.inject == "claude-hook"
         )
 
+    def has_resumable_session(
+        self, session_id: str, *, env: dict[str, str] | None = None
+    ) -> bool | None:
+        """Whether a resumable harness session exists for `session_id`.
+
+        The single declarative question the `camp ai` tail asks to choose new vs
+        resume — so harness scoping lives on the profile, not as an is_claude_launch
+        branch at the call site (mirrors should_pretrust).
+
+        Returns True/False when the harness exposes session state (claude: a session
+        transcript file, via claude_session_exists); returns None when it does NOT,
+        signaling the caller to fall back to its own signal (workspace-dir existence).
+        """
+        if self.is_claude_launch():
+            return claude_session_exists(session_id, env=env)
+        return None
+
     def launch(
-        self, *, slug: str, workspace: str, is_resume: bool
+        self, *, slug: str, workspace: str, is_resume: bool, session_id: str
     ) -> tuple[list[str], Path]:
-        """Substitute {slug}/{workspace} into the resolved templates → (argv, cwd)."""
+        """Substitute {slug}/{workspace}/{session_id} into the templates → (argv, cwd)."""
         template = self.resume if is_resume else self.new
-        argv = [_substitute(tok, slug=slug, workspace=workspace) for tok in template]
-        cwd = self.resolved_cwd(slug=slug, workspace=workspace)
+        argv = [
+            _substitute(tok, slug=slug, workspace=workspace, session_id=session_id)
+            for tok in template
+        ]
+        cwd = self.resolved_cwd(slug=slug, workspace=workspace, session_id=session_id)
         return argv, cwd
 
 
@@ -147,53 +206,32 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
     )
 
 
-def resolve_doc_files(group: dict[str, Any]) -> list[str]:
-    """Resolve the workspace doc filenames to write (thin view over the profile)."""
-    return resolve_harness_profile(group).doc_files
-
-
-def resolve_inject(group: dict[str, Any]) -> str:
-    """Resolve the mid-session context-injection strategy (thin view over the profile).
-
-    "stdout" is the universal floor (print the doc to stdout); "claude-hook"
-    enqueues the doc for the Claude Code PostToolUse → additionalContext channel.
-    """
-    return resolve_harness_profile(group).inject
-
-
-def resolve_launch(
-    group: dict[str, Any],
-    slug: str,
-    workspace_dir: Path,
-    *,
-    is_resume: bool,
-) -> tuple[list[str], Path]:
-    """Resolve (config | claude default) + is_resume → (argv, cwd).
-
-    Thin view over the unified profile: resolve once, then substitute.
-    """
-    return resolve_harness_profile(group).launch(
-        slug=slug, workspace=str(workspace_dir), is_resume=is_resume
-    )
-
-
 def launch(
     group: dict[str, Any],
     slug: str,
     workspace_dir: Path,
     *,
     is_resume: bool,
+    session_id: str | None = None,
     profile: HarnessProfile | None = None,
 ) -> None:
     """Resolve then chdir + os.execvp the harness (terminal-exec). Replaces this
     process image — does not return on success.
 
-    The caller may pass the once-resolved profile; otherwise it is resolved here.
+    The caller may pass the once-resolved profile and/or the deterministic
+    session id; either is derived here if omitted.
     """
     if profile is None:
         profile = resolve_harness_profile(group)
+    if session_id is None:
+        from session_identity import session_id_for
+
+        session_id = session_id_for(group["group"]["name"], slug)
     argv, cwd = profile.launch(
-        slug=slug, workspace=str(workspace_dir), is_resume=is_resume
+        slug=slug,
+        workspace=str(workspace_dir),
+        is_resume=is_resume,
+        session_id=session_id,
     )
 
     if os.environ.get("CAMP_TEST_NO_EXEC"):

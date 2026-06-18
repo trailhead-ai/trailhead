@@ -569,11 +569,12 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
     """Round-trip the groups.example commented [harness] block.
 
     The example shows [harness] + doc_files = ["AGENTS.md"] alone (no new/resume).
-    Uncommenting it must produce a valid config that loads, and resolve_doc_files
-    must return ["AGENTS.md"] while resolve_launch falls back to claude defaults.
+    Uncommenting it must produce a valid config that loads, and the profile's
+    doc_files must be ["AGENTS.md"] while launch falls back to claude defaults.
     """
     from group_config import load_group
-    from harness_launch import resolve_doc_files, resolve_launch
+    from harness_launch import resolve_harness_profile
+    from session_identity import session_id_for
 
     f = tmp_path / "trailhead.toml"
     f.write_text(
@@ -584,14 +585,19 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
     cfg = load_group(f)
     assert cfg["group"]["name"] == "trailhead"
 
-    doc_files = resolve_doc_files(cfg)
-    assert doc_files == ["AGENTS.md"]
+    profile = resolve_harness_profile(cfg)
+    assert profile.doc_files == ["AGENTS.md"]
 
     ws = tmp_path / "ws"
     ws.mkdir()
-    argv, cwd = resolve_launch(cfg, "feat-x", ws, is_resume=False)
-    assert argv == ["claude"]
+    sid = session_id_for("trailhead", "feat-x")
+    argv, cwd = profile.launch(
+        slug="feat-x", workspace=str(ws), is_resume=False, session_id=sid
+    )
+    assert argv == ["claude", "--session-id", sid]
     assert cwd == ws
 
-    argv_resume, _ = resolve_launch(cfg, "feat-x", ws, is_resume=True)
-    assert argv_resume == ["claude", "-r", "feat-x"]
+    argv_resume, _ = profile.launch(
+        slug="feat-x", workspace=str(ws), is_resume=True, session_id=sid
+    )
+    assert argv_resume == ["claude", "--resume", sid]
