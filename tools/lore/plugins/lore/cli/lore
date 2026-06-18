@@ -43,6 +43,7 @@ import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
 import record_model as record_model_mod  # noqa: E402
 import record_store as record_store_mod  # noqa: E402
+import session_store as session_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
@@ -1911,6 +1912,132 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- session ----------------------------------------------------------------
+
+def cmd_session(args: argparse.Namespace) -> int:
+    """Dispatch ``lore session <action>`` — candidate (AC20/AC21) / referenced (AC22) (Slice 6, S2).
+
+    A **separate** endpoint from ``lore record``: it does NOT route through the
+    record write path (``validate_and_write``), creates no ``.json`` sidecar, and
+    writes no derived index row (AC23, endpoint isolation). Session notes are
+    body-only files under ``<vault>/sessions/<session_id>.md`` whose lazy-create +
+    append is race-safe via ``session_store.create_or_append`` (``fcntl.flock``,
+    KU3).
+
+    **Confinement (council/Security):** the ``session_id`` becomes the note
+    filename, so it is sanitized at this entry point BEFORE any path is constructed
+    (``session_store.sanitize_session_id``). A crafted id containing a path
+    separator, ``..``, a NUL byte, or otherwise not matching the canonical GUID
+    shape is rejected with a non-zero exit + clear stderr — a session write can
+    never escape ``sessions/``.
+    """
+    action = getattr(args, "session_action", None)
+    if action == "candidate":
+        return _cmd_session_candidate(args)
+    if action == "referenced":
+        return _cmd_session_referenced(args)
+    print(
+        f"lore session: unknown action {action!r}. "
+        f"Use 'lore session candidate' or 'lore session referenced'.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _resolve_session_id(args: argparse.Namespace) -> tuple[str | None, int]:
+    """Resolve + sanitize the ``--session-id`` (or env) for a session subcommand.
+
+    Returns ``(session_id, 0)`` on success or ``(None, 1)`` on rejection (after
+    printing a clear stderr message). The sanitizer is the confinement boundary
+    for ``sessions/`` (council/Security) — call this BEFORE any path use.
+    """
+    raw = _session_id_from_args_or_env(args)
+    if not raw:
+        print(
+            "error: --session-id is required (or set $CLAUDE_CODE_SESSION_ID)",
+            file=sys.stderr,
+        )
+        return None, 1
+    try:
+        return session_store_mod.sanitize_session_id(raw), 0
+    except session_store_mod.InvalidSessionIdError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None, 1
+
+
+def _cmd_session_candidate(args: argparse.Namespace) -> int:
+    """``lore session candidate --session-id ID --kind KIND --phase PHASE`` (AC20/AC21, S2).
+
+    Body from stdin. Lazy-creates the session note on first use for ID (name = the
+    sanitized GUID, per S1) and appends a record-candidate entry carrying KIND +
+    PHASE. The body is fence-neutralized (AC-FENCE1) via
+    ``record_store.neutralize_fences``; the lazy-create + append is race-safe via
+    ``session_store.create_or_append`` (KU3).
+    """
+    session_id, rc = _resolve_session_id(args)
+    if session_id is None:
+        return rc
+
+    kind = getattr(args, "kind", None)
+    if not kind:
+        print("error: --kind is required", file=sys.stderr)
+        return 1
+    phase = getattr(args, "phase", None)
+    if not phase:
+        print("error: --phase is required", file=sys.stderr)
+        return 1
+
+    body = "" if sys.stdin.isatty() else sys.stdin.read()
+    safe_body = record_store_mod.neutralize_fences(body)
+
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # A single record-candidate entry: a one-line header carrying KIND + PHASE +
+    # timestamp, then the (possibly multi-line) neutralized body indented as a
+    # block so the append stays one logical entry.
+    entry_lines = [f"- candidate {now} kind={kind} phase={phase}"]
+    for line in safe_body.splitlines():
+        entry_lines.append(f"  {line}")
+    entry = "\n".join(entry_lines)
+
+    vault = Path(vault_mod.resolve_vault())
+    sessions_dir = vault / "sessions"
+    try:
+        session_store_mod.create_or_append(session_id, entry, sessions_dir)
+    except Exception as exc:
+        print(f"error: session candidate write failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_session_referenced(args: argparse.Namespace) -> int:
+    """``lore session referenced RECORD_ID --session-id ID`` (AC22, S2).
+
+    Logs that RECORD_ID was used this session (feeds finish-time
+    ``last-referenced-at``). Lazy-creates the session note on first use and appends
+    a reference entry via ``session_store.create_or_append`` (race-safe, KU3).
+    """
+    session_id, rc = _resolve_session_id(args)
+    if session_id is None:
+        return rc
+
+    record_id = getattr(args, "record_id", None)
+    if not record_id:
+        print("error: RECORD_ID is required", file=sys.stderr)
+        return 1
+
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry = f"- referenced {now} {record_id}"
+
+    vault = Path(vault_mod.resolve_vault())
+    sessions_dir = vault / "sessions"
+    try:
+        session_store_mod.create_or_append(session_id, entry, sessions_dir)
+    except Exception as exc:
+        print(f"error: session referenced write failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_record_update(args: argparse.Namespace) -> int:
     """``lore record update RECORD_ID`` (Slice 4, S2) — thin shell over ``record_store``.
 
@@ -2420,6 +2547,56 @@ def build_parser() -> argparse.ArgumentParser:
              "Intermediate directories are created. (AC14/AC14a)",
     )
     p_record_blob.set_defaults(func=cmd_record)
+
+    # session subcommand: ``lore session candidate|referenced`` (Slice 6, S2).
+    # A SEPARATE endpoint from ``lore record`` — it does NOT route through the
+    # record write path (AC23, endpoint isolation). Registered with EXPLICIT
+    # subcommand names; the action is required. The name is the exact string
+    # ``session`` — it does NOT clash with the existing flat ``session-note``
+    # command, because argparse prefers an exact subcommand match over an
+    # abbreviation (council/Advocate; the no-prefix-abbrev-clash test pins this).
+    p_session = sub.add_parser(
+        "session",
+        help="Log record candidates / references for a session (race-safe, AC20-23)",
+    )
+    p_session_sub = p_session.add_subparsers(dest="session_action", required=True)
+
+    # ``lore session candidate --session-id ID --kind KIND --phase PHASE`` (AC20/AC21).
+    p_session_candidate = p_session_sub.add_parser(
+        "candidate",
+        help="Log a record-candidate (lazy-creates the session note, race-safe)",
+    )
+    p_session_candidate.add_argument(
+        "--session-id", dest="session_id", default=None,
+        help="Session id (GUID) to log under (default: $CLAUDE_CODE_SESSION_ID). "
+             "Sanitized before any path use — separators/'..'/NUL/non-GUID rejected.",
+    )
+    p_session_candidate.add_argument(
+        "--kind", required=True,
+        help="The kind of record being proposed (e.g. spec, decision, lesson).",
+    )
+    p_session_candidate.add_argument(
+        "--phase", required=True,
+        help="The session phase the candidate was proposed in (e.g. Plan, Build).",
+    )
+    p_session_candidate.set_defaults(func=cmd_session)
+
+    # ``lore session referenced RECORD_ID --session-id ID`` (AC22).
+    p_session_referenced = p_session_sub.add_parser(
+        "referenced",
+        help="Log that a RECORD_ID was used this session (feeds last-referenced-at)",
+    )
+    p_session_referenced.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID referenced this session (<kind>/<name>).",
+    )
+    p_session_referenced.add_argument(
+        "--session-id", dest="session_id", default=None,
+        help="Session id (GUID) to log under (default: $CLAUDE_CODE_SESSION_ID). "
+             "Sanitized before any path use — separators/'..'/NUL/non-GUID rejected.",
+    )
+    p_session_referenced.set_defaults(func=cmd_session)
 
     return parser
 
