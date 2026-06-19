@@ -48,6 +48,7 @@ import record_store as record_store_mod  # noqa: E402
 import search as search_mod  # noqa: E402
 import session_store as session_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
+import settings_writer as settings_writer_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
 import vault_config as vault_config_mod  # noqa: E402
@@ -832,6 +833,50 @@ def _seed_or_merge_config(config_path: Path) -> None:
         print(f"Merged default vault entry into config at {config_path}")
 
 
+# The PreToolUse guard command. ``${CLAUDE_PLUGIN_ROOT}`` is expanded by Claude
+# Code at hook-run time, so the wired command stays valid wherever the plugin is
+# installed (and the hook canonicalizes paths on every invocation — Slice 3).
+_GUARD_COMMAND = (
+    'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/vault-guard.py"'
+)
+_GUARD_MATCHER = "Edit|Write"
+
+
+def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
+    """Install the vault write-protection guardrail into *settings_path*.
+
+    Wires (Slice 3, S5):
+      1. A PreToolUse ``Edit|Write`` hook running ``hooks/vault-guard.py`` — the
+         mandatory primary, runtime-canonicalizing mechanism (exit-2 deny).
+      2. ``env.LORE_VAULT_GUARD_ROOT`` = the absolute ``vaults`` dir AND
+         ``vaults/default`` (colon-separated). The hook ``realpath``s these on
+         every call, so the ``default`` symlink's *current* real target is always
+         covered — never an install-time snapshot.
+      3. A coarse static ``permissions.deny`` over ``vaults/**`` as
+         **defense-in-depth only** (it cannot cover a symlink's real target, so
+         the runtime hook above is the security-sufficient mechanism). Note the
+         ``//`` double-slash absolute-path grammar (single ``/`` is
+         project-root-relative — a silent footgun).
+
+    Idempotent: re-runs add no duplicate entries. All three upserts go through
+    ``settings_writer`` (stdlib json, atomic write, preserves unrelated keys);
+    a present-but-corrupt settings file raises ``ValueError`` (caller surfaces a
+    clean error rather than clobbering it).
+    """
+    default_link = vaults_root / "default"
+    guard_root_value = os.pathsep.join([str(vaults_root), str(default_link)])
+
+    settings_writer_mod.upsert_hook(
+        settings_path, "PreToolUse", _GUARD_COMMAND, matcher=_GUARD_MATCHER
+    )
+    settings_writer_mod.set_env_var(
+        settings_path, "LORE_VAULT_GUARD_ROOT", guard_root_value
+    )
+    settings_writer_mod.upsert_permission_deny(
+        settings_path, f"Write(//{str(vaults_root).lstrip('/')}/**)"
+    )
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Non-interactive, idempotent lore installer (Slice 1, S5).
 
@@ -849,7 +894,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     # Step 1: resolve targets — clean error for --local outside a git repo.
     local = getattr(args, "local", False)
     try:
-        installer_mod.resolve_targets(local=local)
+        settings_path, _rules_path = installer_mod.resolve_targets(local=local)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -871,6 +916,15 @@ def cmd_init(args: argparse.Namespace) -> int:
     config_path = _resolve_config_path()
     try:
         _seed_or_merge_config(config_path)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    # Step 5: install the vault write-protection guardrail (Slice 3).
+    # A present-but-corrupt settings.json raises ValueError from settings_writer —
+    # surface it as a clean error rather than clobbering the user's file.
+    try:
+        _install_guardrail(settings_path, vaults_root)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

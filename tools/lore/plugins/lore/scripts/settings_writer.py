@@ -15,6 +15,16 @@ upsert_hook(settings_path, event, command, *, matcher=None)
 remove_hook(settings_path, event, command)
     Remove any hook entry whose command matches *command* under hooks[event].
     If no such entry exists the call is a no-op (no write). Idempotent.
+
+upsert_permission_deny(settings_path, rule)
+    Ensure *rule* appears exactly once in ``permissions.deny``. Defense-in-depth
+    only (Slice 3): a coarse static prefix deny backing the runtime PreToolUse
+    guard. Idempotent; preserves unrelated permission rules and keys.
+
+set_env_var(settings_path, name, value)
+    Set ``env[name] = value`` in the settings file. Used to give the vault-guard
+    hook its ``LORE_VAULT_GUARD_ROOT``. Idempotent (no write when unchanged);
+    preserves unrelated env keys.
 """
 from __future__ import annotations
 
@@ -150,4 +160,52 @@ def remove_hook(settings_path: Path, event: str, command: str) -> None:
     else:
         hooks.pop(event, None)
 
+    _save(settings_path, data)
+
+
+def upsert_permission_deny(settings_path: Path, rule: str) -> None:
+    """Ensure *rule* appears exactly once in ``permissions.deny``.
+
+    Defense-in-depth only (Slice 3, S5): the static ``permissions.deny`` prefix
+    cannot cover an arbitrary symlink's real target, so it is breadth-only — the
+    runtime PreToolUse vault-guard hook is the mandatory primary mechanism. This
+    coarse rule (``Write(//abs/.../vaults/**)`` — note the ``//`` double-slash for
+    absolute paths) adds belt-and-braces breadth on top of the hook.
+
+    If the rule is already present, leave it untouched. Preserves all unrelated
+    keys and permission rules. Writes atomically.
+
+    Args:
+        settings_path: Path to the settings.json (or settings.local.json) file.
+        rule:          The permission rule string (e.g. ``"Write(//x/vaults/**)"``).
+    """
+    data = _load(settings_path)
+    permissions = data.setdefault("permissions", {})
+    deny = permissions.setdefault("deny", [])
+
+    if rule in deny:
+        return
+
+    deny.append(rule)
+    _save(settings_path, data)
+
+
+def set_env_var(settings_path: Path, name: str, value: str) -> None:
+    """Set ``env[name] = value`` in the settings file.
+
+    No-op (no file write) when the value is already set. Preserves all unrelated
+    env keys and top-level keys. Writes atomically.
+
+    Args:
+        settings_path: Path to the settings.json (or settings.local.json) file.
+        name:          The environment variable name.
+        value:         The environment variable value.
+    """
+    data = _load(settings_path)
+    env = data.setdefault("env", {})
+
+    if env.get(name) == value:
+        return
+
+    env[name] = value
     _save(settings_path, data)
