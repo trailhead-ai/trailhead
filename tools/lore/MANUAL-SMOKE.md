@@ -53,51 +53,31 @@ Pass criteria: no error; plugin named `lore` is listed as installed.
 
 ---
 
-### 3. Start a fresh session (confirm SessionStart hook fires)
+### 3. Confirm PostToolUse hook fires on Agent/Task tool use
 
-Either restart Claude Code, or start a new session. Look for the hook's
-`additionalContext` output in the session-start banner or the tool-use log.
+After installing, run an Agent or Task tool call and check the tool-use log.
+The PostToolUse hook (`plugins/lore/hooks/harvest-candidates.py`) runs on
+every `Agent|Task` tool result and scans for a `## Harvest candidates` block.
 
-Expected: a line similar to
+Pass criteria: no Python traceback or import error in the tool-use log.
 
-```
-lore vault: /home/<you>/lore
-```
-
-(or the value of `$LORE_VAULT` if you set it).
-
-**Variant:** set the env var before starting, then confirm it is honoured:
-
-```bash
-export LORE_VAULT=/tmp/my-test-vault
-claude   # start a new session
-```
-
-Expected context line:
-
-```
-lore vault: /tmp/my-test-vault
-```
-
-Pass criteria: the session-start context contains the resolved vault path.
+Note (S5, F5): lore is fully pull — the SessionStart and WorktreeRemove hooks
+were retired. Orientation lives in agent-rules and S6 skill descriptions;
+session finalization is explicit (`lore finish`). Only the PostToolUse
+harvest hook remains.
 
 ---
 
 ### 4. Confirm ${CLAUDE_PLUGIN_ROOT} resolved and sibling import succeeded
 
-The SessionStart hook (`plugins/lore/hooks/session-context.py`) runs via
-`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/session-context.py"`. It imports
-sibling modules (`vault`, `sessions`, `recall`) from the same plugin's
-`scripts/` directory.
+The PostToolUse hook (`plugins/lore/hooks/harvest-candidates.py`) runs via
+`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/harvest-candidates.py"`. It imports
+sibling modules from the same plugin's `scripts/` directory.
 
-Check: if the hook fired in step 3 and produced the vault-path context, both
-`${CLAUDE_PLUGIN_ROOT}` expansion and the sibling imports succeeded.
+For explicit confirmation, look at the tool-use log for any Python traceback
+or import error. There should be none.
 
-For explicit confirmation, look at the session startup log for any Python
-traceback or import error. There should be none.
-
-Pass criteria: no import errors; the `additionalContext` field in the hook's
-JSON output was populated (not `{}`).
+Pass criteria: no import errors; the hook completes without error on Agent/Task.
 
 ---
 
@@ -107,5 +87,4 @@ JSON output was populated (not `{}`).
 |---|---|
 | `/plugin marketplace add` fails | Wrong path; verify the repo root exists and has `.claude-plugin/marketplace.json` |
 | `lore@trailhead-local` not found | Marketplace not added, or `marketplace.json` `name`/`plugins[0].name` mismatch |
-| Hook fires but emits `{}` | Python error in `session-context.py`; run `python3 plugins/lore/hooks/session-context.py` manually with `echo '{}' | ...` to debug |
 | `${CLAUDE_PLUGIN_ROOT}` not expanded | Claude Code version too old; update Claude Code |

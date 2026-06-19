@@ -1,0 +1,144 @@
+"""Idempotent settings.json helper for the lore plugin (Slice 2, S5).
+
+Mirrors the pattern from camp's ``tools/camp/plugins/camp/scripts/hooks_writer.py``:
+stdlib ``json.load/dump`` only (no f-strings, no hand-rolled serializer), preserves
+unrelated keys, atomic write via tempfile + os.replace.
+
+No cross-plugin import: this module is lore-only.
+
+Public API
+----------
+upsert_hook(settings_path, event, command, *, matcher=None)
+    Ensure *command* appears exactly once under hooks[event]. Appends when absent;
+    leaves existing entry untouched when present. Idempotent.
+
+remove_hook(settings_path, event, command)
+    Remove any hook entry whose command matches *command* under hooks[event].
+    If no such entry exists the call is a no-op (no write). Idempotent.
+"""
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _load(settings_path: Path) -> dict:
+    """Load settings.json, returning {} when absent or unreadable."""
+    if not settings_path.is_file():
+        return {}
+    try:
+        return json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save(settings_path: Path, data: dict) -> None:
+    """Atomically write *data* to *settings_path* as indented JSON."""
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(settings_path.parent), prefix=".settings-", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, str(settings_path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _has_command(hook_list: list, command: str) -> bool:
+    """Return True if *command* already appears in any hook entry in *hook_list*."""
+    for entry in hook_list:
+        for h in entry.get("hooks", []):
+            if h.get("command") == command:
+                return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def upsert_hook(
+    settings_path: Path,
+    event: str,
+    command: str,
+    *,
+    matcher: str | None = None,
+) -> None:
+    """Ensure *command* appears exactly once under hooks[event].
+
+    If an entry with this exact command already exists, leave it untouched.
+    Otherwise append a new entry:
+        {"hooks": [{"type": "command", "command": <command>}]}
+    When *matcher* is given it is set on the new entry; idempotency keys on the
+    command string regardless of matcher.
+
+    Preserves all unrelated keys and events. Writes atomically.
+
+    Args:
+        settings_path: Path to the settings.json (or settings.local.json) file.
+        event:         Hook event name (e.g. ``"PreToolUse"``).
+        command:       The shell command string to register.
+        matcher:       Optional tool-name pattern (e.g. ``"Edit|Write"``).
+    """
+    data = _load(settings_path)
+    hooks = data.setdefault("hooks", {})
+    hook_list = hooks.setdefault(event, [])
+
+    if _has_command(hook_list, command):
+        return
+
+    entry: dict = {"hooks": [{"type": "command", "command": command}]}
+    if matcher is not None:
+        entry["matcher"] = matcher
+    hook_list.append(entry)
+    _save(settings_path, data)
+
+
+def remove_hook(settings_path: Path, event: str, command: str) -> None:
+    """Remove any hook entry whose command matches *command* under hooks[event].
+
+    If the target command is not present, this is a no-op (no file write).
+    Preserves all unrelated keys and events. When the event's hook list becomes
+    empty after removal, the event key is removed from ``hooks``. If ``hooks``
+    itself becomes empty, it is retained (preserves the top-level key).
+
+    Writes atomically.
+
+    Args:
+        settings_path: Path to the settings.json (or settings.local.json) file.
+        event:         Hook event name (e.g. ``"SessionStart"``).
+        command:       The shell command string to remove.
+    """
+    data = _load(settings_path)
+    hooks = data.get("hooks", {})
+    hook_list = hooks.get(event, [])
+
+    new_list = [
+        entry for entry in hook_list
+        if not any(h.get("command") == command for h in entry.get("hooks", []))
+    ]
+
+    if len(new_list) == len(hook_list):
+        return  # Nothing changed — skip write
+
+    if new_list:
+        hooks[event] = new_list
+    else:
+        hooks.pop(event, None)
+
+    _save(settings_path, data)

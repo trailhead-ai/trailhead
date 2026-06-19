@@ -1,17 +1,20 @@
 """Shared session-note lifecycle logic for the lore plugin.
 
-Importable by the SessionStart and WorktreeRemove hooks, the `lore` CLI, and
-tests. Every function takes the resolved vault path explicitly — there is no
-module-global vault. Reuses the frontmatter parser from this package's
-`frontmatter` module.
+Importable by the `lore` CLI and tests. Every function takes the resolved vault
+path explicitly — there is no module-global vault. Reuses the frontmatter parser
+from this package's `frontmatter` module.
 
 Responsibilities:
   - ensure_session_note: create-or-resume the per-worktree session note
   - session_note_path / all_session_notes_for_worktree: worktree-scoped finders
   - write_note_atomic: crash-safe file write (temp + os.replace)
   - finalize_note: set status: complete + ended: on a session note
-  - get_vault_stats: lightweight counts for the SessionStart index
-  - render_vault_index: the always-emitted baseline context block
+
+The SessionStart context-injection hook and its render helpers (render_vault_index,
+get_vault_stats, render_tool_notes, list_tool_notes, render_action_guards,
+build_action_index, and the capture-commands tuple) were removed in Slice 2, S5
+(F5: lore is fully pull — orientation lives in agent-rules + S6 skill descriptions;
+no SessionStart hook).
 """
 from __future__ import annotations
 
@@ -35,16 +38,6 @@ RESUME_WINDOW_SECONDS = 30 * 60
 # The capture skills (lore new …) backlink into these session-note headings, so
 # they are load-bearing — keep all five.
 REQUIRED_SECTIONS = ("What we did", "Decided", "Deferred", "Learned", "Open questions")
-
-# Slash commands surfaced in the baseline index so the model is reminded the
-# capture primitives exist.
-LORE_COMMANDS = (
-    "`/lore:defer`",
-    "`/lore:dead-end`",
-    "`/lore:decision`",
-    "`/lore:follow-up`",
-    "`/lore:area`",
-)
 
 
 def _filename_stamp(now_iso: str) -> str:
@@ -449,190 +442,3 @@ def find_shelved_notes(vault: Path, slug: str | None = None) -> list[Path]:
     return sorted(results, key=lambda p: (_ts_sort_key(p), p.stem), reverse=True)
 
 
-def build_action_index(vault: Path) -> dict[str, dict[str, int]]:
-    """Walk collaboration/ and dead-ends/, aggregate by action name.
-
-    Returns {action_name: {"collaboration": N, "dead_ends": M}}.
-    Notes with status graduated or obsolete are excluded.
-    """
-    vault = Path(vault)
-    index: dict[str, dict[str, int]] = {}
-
-    def _scan(directory: Path, bucket: str, recursive: bool = False) -> None:
-        if not directory.is_dir():
-            return
-        for p in iter_note_paths(directory, recursive=recursive):
-            fm = frontmatter.parse_frontmatter(p)
-            if fm.get("status") in ("graduated", "obsolete"):
-                continue
-            actions = fm.get("actions")
-            if isinstance(actions, str):
-                actions = [actions]
-            if not isinstance(actions, list):
-                continue
-            for a in actions:
-                if not isinstance(a, str) or not a:
-                    continue
-                entry = index.setdefault(a, {"collaboration": 0, "dead_ends": 0})
-                entry[bucket] += 1
-
-    # collaboration stays flat (out of scope); dead-ends is a living folder.
-    _scan(vault / "collaboration", "collaboration")
-    _scan(vault / "dead-ends", "dead_ends", recursive=True)
-    return index
-
-
-def render_action_guards(vault: Path) -> str | None:
-    """Short summary of action guards for always-on SessionStart injection.
-
-    Returns None when there are no active guards.
-    """
-    index = build_action_index(vault)
-    if not index:
-        return None
-    lines = [
-        "### Action guards — check before acting",
-        "",
-        "Active observations guard these actions. When you think \"I need to do X\", "
-        "check if X matches one of these, and if so, read the matching notes "
-        "before taking the action.",
-        "",
-    ]
-    for action in sorted(index.keys()):
-        counts = index[action]
-        parts = []
-        if counts.get("collaboration", 0) > 0:
-            parts.append(f"{counts['collaboration']} collaboration")
-        if counts.get("dead_ends", 0) > 0:
-            parts.append(f"{counts['dead_ends']} dead-end")
-        lines.append(f"- **`{action}`** — {', '.join(parts)}")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def list_tool_notes(vault: Path) -> list[tuple[str, str]]:
-    """Enumerate tools/*.md as (name, summary) tuples.
-
-    Name is frontmatter `name:` or falls back to filename stem.
-    Summary is frontmatter `summary:` or an empty string.
-    """
-    tools_dir = Path(vault) / "tools"
-    if not tools_dir.is_dir():
-        return []
-    out: list[tuple[str, str]] = []
-    for p in sorted(tools_dir.glob("*.md")):
-        if p.name.lower() == "readme.md":
-            continue
-        fm = frontmatter.parse_frontmatter(p)
-        name = fm.get("name") or p.stem
-        summary = fm.get("summary") or ""
-        if isinstance(name, str) and isinstance(summary, str):
-            out.append((name, summary))
-    return out
-
-
-def render_tool_notes(vault: Path) -> str | None:
-    """Short index of available tool notes for always-on SessionStart injection.
-
-    Returns None when no tool notes exist.
-    """
-    tools = list_tool_notes(vault)
-    if not tools:
-        return None
-    names = ", ".join(name for name, _ in tools)
-    return f"**Tool notes** (read `tools/<name>.md` before first use): {names}"
-
-
-def _count(directory: Path, predicate, recursive: bool = False) -> int:
-    if not directory.is_dir():
-        return 0
-    return sum(
-        1
-        for p in iter_note_paths(directory, recursive=recursive)
-        if predicate(frontmatter.parse_frontmatter(p))
-    )
-
-
-def get_vault_stats(vault: Path) -> dict:
-    """Lightweight counts for the SessionStart baseline index. Never raises."""
-    vault = Path(vault)
-    stats = {
-        "areas": 0,
-        "open_deferred": 0,
-        "dead_ends": 0,
-        "active_lessons": 0,
-        "sessions": 0,
-    }
-    if not vault.exists():
-        return stats
-    stats["areas"] = _count(vault / "areas", lambda fm: True)
-    stats["open_deferred"] = _count(
-        vault / "deferred",
-        lambda fm: fm.get("type") == "deferred"
-        and fm.get("status") in ("open", "scheduled", "resurfaced"),
-        recursive=True,
-    )
-    stats["dead_ends"] = _count(
-        vault / "dead-ends", lambda fm: fm.get("type") == "dead-end",
-        recursive=True,
-    )
-    stats["active_lessons"] = _count(
-        vault / "lessons",
-        lambda fm: fm.get("type") == "lesson" and fm.get("status", "active") == "active",
-        recursive=True,
-    )
-    stats["sessions"] = _count(
-        vault / "sessions", lambda fm: fm.get("type") == "session", recursive=True
-    )
-    return stats
-
-
-def render_vault_index(
-    vault: Path,
-    worktree_name: str,
-    project: str,
-    session_note: Path | None,
-    session_created: bool,
-    warning: str | None = None,
-) -> str:
-    """Build the always-emitted baseline context block."""
-    vault = Path(vault)
-    stats = get_vault_stats(vault)
-    lines: list[str] = [f"## Lore vault — {worktree_name} ({project})", ""]
-
-    if warning:
-        lines.append(f"**Warning:** {warning}")
-        lines.append("")
-
-    if session_note is not None:
-        try:
-            display = str(session_note.relative_to(vault))
-        except ValueError:
-            display = session_note.name
-        verb = "created" if session_created else "resumed"
-        lines.append(
-            f"**Session note:** `{display}` ({verb} for this worktree). "
-            "Append progress as work happens."
-        )
-        lines.append("")
-
-    lines.append(
-        f"**Vault state:** {stats['areas']} area profiles · "
-        f"{stats['open_deferred']} open deferred · "
-        f"{stats['dead_ends']} dead-ends · "
-        f"{stats['active_lessons']} active lessons · "
-        f"{stats['sessions']} session notes"
-    )
-    lines.append("")
-    lines.append("**Capture commands:** " + ", ".join(LORE_COMMANDS) + ".")
-    lines.append("")
-
-    tool_block = render_tool_notes(vault)
-    if tool_block:
-        lines.append(tool_block)
-
-    guard_block = render_action_guards(vault)
-    if guard_block:
-        lines.append(guard_block)
-
-    return "\n".join(lines)
