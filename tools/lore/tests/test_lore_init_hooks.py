@@ -23,6 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
@@ -156,6 +158,24 @@ class TestSettingsWriter:
         settings_path = tmp_path / ".claude" / "settings.json"
         sw.remove_hook(settings_path, "SessionStart", "lore-session-context.py")
         assert not settings_path.exists() or json.loads(settings_path.read_text()) == {}
+
+    def test_corrupt_settings_raises_not_clobbers(self, tmp_path):
+        """A present-but-unparseable settings.json must raise (clean error) and be
+        left BYTE-FOR-BYTE untouched — never silently treated as {} and clobbered
+        (Axiom 6: never corrupt the live install)."""
+        sw = self._sw()
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        corrupt = '{"hooks": {"PreToolUse": [ trailing comma, ] '  # invalid JSON
+        settings_path.write_text(corrupt)
+
+        with pytest.raises(ValueError):
+            sw.upsert_hook(settings_path, "PreToolUse", "my-guard.py", matcher="Edit|Write")
+        assert settings_path.read_text() == corrupt, "corrupt settings.json was clobbered"
+
+        with pytest.raises(ValueError):
+            sw.remove_hook(settings_path, "SessionStart", "anything.py")
+        assert settings_path.read_text() == corrupt, "corrupt settings.json was clobbered"
 
     def test_remove_hook_removes_matching_entry(self, tmp_path):
         """remove_hook removes the entry whose command matches."""

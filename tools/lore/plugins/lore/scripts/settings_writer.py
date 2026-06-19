@@ -30,13 +30,22 @@ from pathlib import Path
 
 
 def _load(settings_path: Path) -> dict:
-    """Load settings.json, returning {} when absent or unreadable."""
+    """Load settings.json, returning {} when ABSENT.
+
+    A present-but-unparseable settings file raises ``ValueError`` rather than
+    returning {} — silently treating a corrupt file as empty would let a
+    subsequent ``_save`` clobber the user's entire settings.json (data loss).
+    Axiom 6: never corrupt the live install. Callers surface this as a clean
+    named error.
+    """
     if not settings_path.is_file():
         return {}
     try:
         return json.loads(settings_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(
+            f"could not read existing settings at {settings_path}: {exc}"
+        ) from exc
 
 
 def _save(settings_path: Path, data: dict) -> None:
