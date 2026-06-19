@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import frontmatter  # noqa: E402
 import harvest as harvest_mod  # noqa: E402
 import index_store as index_store_mod  # noqa: E402
+import installer as installer_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
@@ -781,128 +782,93 @@ def cmd_seed(args: argparse.Namespace) -> int:
 
 # ---- init -------------------------------------------------------------------
 
-def _is_under_home(target: Path) -> bool:
-    home = Path.home().resolve()
+def _resolve_lore_state_dir() -> Path:
+    """Return ``state_dir("lore")``, honoring XDG overrides.
+
+    Mirrors the other lazy-import resolver patterns in this file.
+    """
     try:
-        target.relative_to(home)
-        return True
-    except ValueError:
-        return False
+        import _bootstrap
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+        return _paths.state_dir("lore")
+    except (ImportError, SystemExit):
+        base = os.environ.get("XDG_STATE_HOME", "").strip()
+        if base and os.path.isabs(base):
+            return Path(base) / "lore"
+        return Path.home() / ".local" / "state" / "lore"
 
 
-def _planned_tree(target: Path) -> str:
-    lines = [f"{target}/"]
-    for d in TAXONOMY:
-        lines.append(f"  {d}/")
-    lines.append("  .templates/")
-    for doc in STARTER_DOCS:
-        lines.append(f"  {doc}")
-    lines.append("  harvest-pending.md")
-    return "\n".join(lines)
+def _seed_or_merge_config(config_path: Path) -> None:
+    """Seed config.json if absent, or merge a default vault entry if missing.
+
+    - Absent config.json: write ``{"vaults": [{"name": "default", "scope": "default"}]}``.
+    - Present config.json without a ``default``-scope vault: append the entry
+      (never clobbers existing vaults).
+    - Present config.json that already has a ``default``-scope vault: no-op.
+    """
+    default_entry = {"name": "default", "scope": "default"}
+
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        vault_config_mod.write_config_atomic(config_path, {"vaults": [default_entry]})
+        print(f"Seeded lore vault config at {config_path}")
+        return
+
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+
+    vaults = raw.get("vaults", [])
+    has_default = any(v.get("scope") == "default" for v in vaults)
+    if not has_default:
+        vaults.append(default_entry)
+        raw["vaults"] = vaults
+        vault_config_mod.write_config_atomic(config_path, raw)
+        print(f"Merged default vault entry into config at {config_path}")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    target = Path(args.path).expanduser().resolve()
+    """Non-interactive, idempotent lore installer (Slice 1, S5).
 
-    if not _is_under_home(target) and not args.allow_outside_home:
-        print(
-            f"error: refusing to init outside $HOME: {target}\n"
-            "pass --allow-outside-home to override.",
-            file=sys.stderr,
-        )
+    Bootstraps the canonical default vault and global index location so the
+    machine is lore-ready. No ``input()`` prompts — safe to call from scripts
+    and ``trailhead install``.
+
+    Steps:
+      1. Resolve settings + rules paths based on ``--local``.
+      2. Bootstrap ``$XDG_STATE_HOME/lore/vaults/default`` as a git repo (or a
+         symlink to ``--vault <path>`` when provided). Idempotent.
+      3. Provision ``$XDG_STATE_HOME/lore/`` (the index parent). Idempotent.
+      4. Seed or merge ``config.json`` (seed-if-absent / merge default-if-missing).
+    """
+    # Step 1: resolve targets — clean error for --local outside a git repo.
+    local = getattr(args, "local", False)
+    try:
+        installer_mod.resolve_targets(local=local)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if target.exists() and any(target.iterdir()) and not args.force:
-        print(
-            f"error: refusing to init a non-empty directory: {target}\n"
-            "pass --force to scaffold into it anyway (existing files are kept).",
-            file=sys.stderr,
-        )
-        return 1
+    # Step 2: bootstrap the default vault.
+    lore_state = _resolve_lore_state_dir()
+    vaults_root = lore_state / "vaults"
 
-    print("Planned vault layout:")
-    print(_planned_tree(target))
-    print()
+    vault_path: Path | None = None
+    if getattr(args, "vault", None):
+        vault_path = Path(args.vault).expanduser().resolve()
 
-    if not args.yes:
-        try:
-            answer = input(f"Create this vault at {target}? [y/N] ").strip().lower()
-        except EOFError:
-            answer = ""
-        if answer not in ("y", "yes"):
-            print("Aborted; nothing written.", file=sys.stderr)
-            return 1
+    installer_mod.bootstrap_vault(vaults_root, vault_path=vault_path)
 
-    # Scaffold.
-    target.mkdir(parents=True, exist_ok=True)
-    for d in TAXONOMY:
-        (target / d).mkdir(exist_ok=True)
+    # Step 3: provision the index location (state/lore/ — sibling of vaults/).
+    installer_mod.provision_index_location(lore_state)
 
-    templates_out = target / ".templates"
-    templates_out.mkdir(exist_ok=True)
-    if TEMPLATES_DIR.is_dir():
-        for item in sorted(TEMPLATES_DIR.iterdir()):
-            if item.name == ".gitkeep":
-                continue
-            dest = templates_out / item.name
-            if item.is_dir():
-                shutil.copytree(item, dest, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, dest)
-
-    for doc in STARTER_DOCS:
-        src = STARTER_DIR / doc
-        (target / doc).write_text(src.read_text())
-
-    (target / "harvest-pending.md").write_text(
-        "# Harvest pending\n\n"
-        "Staging area for harvest candidates emitted by subagents. The session "
-        "wrap-up ritual reads and clears this file.\n"
-    )
-
-    # Git-init the vault if it isn't already a git repo.
-    git_dir = target / ".git"
-    if not git_dir.is_dir():
-        result = subprocess.run(
-            ["git", "init", str(target)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            print(f"warning: git init failed: {result.stderr.strip()}", file=sys.stderr)
-        else:
-            print(f"Initialized git repo at {target}")
-
-    # Install the pre-commit status guard.
-    installer = PLUGIN_ROOT / "hooks" / "install-vault-hooks.sh"
-    if installer.is_file():
-        env = dict(os.environ)
-        env["LORE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
-        result = subprocess.run(
-            ["bash", str(installer), str(target)],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            print(f"warning: guard install failed: {result.stderr.strip()}", file=sys.stderr)
-        else:
-            print(result.stdout.strip())
-
-    # Seed config.json with the single default-scope vault (Slice 4, S4) if it
-    # does not already exist. The config is the layered-vaults registry; init is
-    # the only command that creates it from scratch.
+    # Step 4: seed or merge config.json.
     config_path = _resolve_config_path()
-    if not config_path.exists():
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        vault_config_mod.write_config_atomic(
-            config_path, {"vaults": [{"name": "default", "scope": "default"}]}
-        )
-        print(f"Seeded lore vault config at {config_path}")
+    _seed_or_merge_config(config_path)
 
-    print(f"\nInitialized lore vault at {target}\n")
-    print(f"export LORE_VAULT={target}")
-    print(
-        "Add that line to your shell profile. Without LORE_VAULT set, lore "
-        "uses the default ~/lore instead of this vault."
-    )
+    print("lore: init complete")
     return 0
 
 
@@ -2684,11 +2650,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lore", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_init = sub.add_parser("init", help="Scaffold a new vault")
-    p_init.add_argument("path")
-    p_init.add_argument("--force", action="store_true", help="Scaffold into a non-empty dir")
-    p_init.add_argument("--allow-outside-home", action="store_true", help="Allow a target outside $HOME")
-    p_init.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+    p_init = sub.add_parser(
+        "init",
+        help="Bootstrap lore on this machine (non-interactive, idempotent)",
+    )
+    p_init.add_argument(
+        "--local",
+        action="store_true",
+        default=False,
+        help=(
+            "Install into the current git repo's project settings "
+            "(.claude/settings.local.json) instead of the global user settings. "
+            "Must be run inside a git repository."
+        ),
+    )
+    p_init.add_argument(
+        "--vault",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Use an existing git repo at PATH as the default vault "
+            "(creates vaults/default as a symlink; does not re-git-init the target)."
+        ),
+    )
     p_init.set_defaults(func=cmd_init)
 
     p_patch = sub.add_parser("patch", help="Append text under a section")

@@ -277,35 +277,61 @@ def test_guard_noop_for_non_md_file(tmp_path):
     assert r.returncode == 0, r.stderr + r.stdout
 
 
-# ── lore init git-init wiring ─────────────────────────────────────────────────
+# ── lore init git-init wiring (Slice 1, S5 — non-interactive installer) ──────
+#
+# The old tests verified lore init <path> --yes scaffolded a vault at an
+# arbitrary user-specified location. Slice 1 (S5) replaced that with a
+# non-interactive installer: init now bootstraps $XDG_STATE_HOME/lore/vaults/default.
+# The tests below verify the new semantics.
 
 def test_init_creates_git_repo(tmp_path):
-    target = tmp_path / "vault"
-    env = {**home(tmp_path), "LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)}
-    r = run_cli(["init", str(target), "--yes"], env=env)
+    """init bootstraps vaults/default as a git repo under XDG_STATE_HOME."""
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    state.mkdir(parents=True, exist_ok=True)
+    config.mkdir(parents=True, exist_ok=True)
+    env = {
+        "XDG_STATE_HOME": str(state),
+        "XDG_CONFIG_HOME": str(config),
+    }
+    r = run_cli(["init"], env=env)
     assert r.returncode == 0, r.stderr
-    assert (target / ".git").is_dir()
+    default_vault = state / "lore" / "vaults" / "default"
+    assert (default_vault / ".git").is_dir()
 
 
 def test_init_installs_pre_commit_hook(tmp_path):
-    target = tmp_path / "vault"
-    env = {**home(tmp_path), "LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)}
-    r = run_cli(["init", str(target), "--yes"], env=env)
+    """Slice 1, S5: init does NOT install any pre-commit hook (removed)."""
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    state.mkdir(parents=True, exist_ok=True)
+    config.mkdir(parents=True, exist_ok=True)
+    env = {
+        "XDG_STATE_HOME": str(state),
+        "XDG_CONFIG_HOME": str(config),
+    }
+    r = run_cli(["init"], env=env)
     assert r.returncode == 0, r.stderr
-    hook = target / ".git" / "hooks" / "pre-commit"
-    assert hook.exists()
-    assert os.access(hook, os.X_OK)
+    default_vault = state / "lore" / "vaults" / "default"
+    hook = default_vault / ".git" / "hooks" / "pre-commit"
+    # The old installer wrote a pre-commit hook; the new init must NOT.
+    assert not hook.exists()
 
 
 def test_init_skips_git_init_if_already_a_repo(tmp_path):
-    """If the target is already a git repo, init should not re-initialize."""
-    target = tmp_path / "vault"
-    _git_init(target)
-    (target / ".git").stat()
-    env = {**home(tmp_path), "LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)}
-    r = run_cli(["init", str(target), "--yes", "--force"], env=env)
+    """Re-running init on an existing vault does not re-initialize the git repo."""
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    state.mkdir(parents=True, exist_ok=True)
+    config.mkdir(parents=True, exist_ok=True)
+    env = {
+        "XDG_STATE_HOME": str(state),
+        "XDG_CONFIG_HOME": str(config),
+    }
+    run_cli(["init"], env=env)
+    r = run_cli(["init"], env=env)
     assert r.returncode == 0, r.stderr
-    assert (target / ".git").is_dir()
+    assert "Reinitialized" not in (r.stdout + r.stderr)
 
 
 # ── lore sync ─────────────────────────────────────────────────────────────────
@@ -660,23 +686,22 @@ def test_installer_chained_wrapper_passes_args(tmp_path):
     )
 
 
-# ── M3: lore init planned-tree preview matches what is actually written ───────
+# ── M3: lore init completes successfully (Slice 1, S5) ───────────────────────
+#
+# The old M3 tested that a planned-tree preview text matched directories created
+# by the interactive scaffolding. Slice 1 (S5) removed the interactive scaffolding
+# entirely. The new invariant is simply: init exits 0 and the canonical vault exists.
 
 def test_init_planned_tree_shows_both_template_dirs(tmp_path):
-    """M3: The planned-tree preview printed by lore init must list .templates/
-    (the hidden copy-target). Currently it only shows .templates/ but the code
-    creates that — verify they match what's actually created."""
-    target = tmp_path / "vault"
-    env = {**home(tmp_path), "LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)}
-    r = run_cli(["init", str(target), "--yes"], env=env)
+    """M3 (updated for S5): init exits 0 and bootstraps the default vault."""
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    state.mkdir(parents=True, exist_ok=True)
+    config.mkdir(parents=True, exist_ok=True)
+    env = {
+        "XDG_STATE_HOME": str(state),
+        "XDG_CONFIG_HOME": str(config),
+    }
+    r = run_cli(["init"], env=env)
     assert r.returncode == 0, r.stderr
-
-    # Find directories actually created
-    created_dirs = {d.name for d in target.iterdir() if d.is_dir() and d.name != ".git"}
-    # The preview output must mention all actually-created directories
-    output = r.stdout
-    for d in created_dirs:
-        assert d in output, (
-            f"init preview must mention dir {d!r} that was actually created; "
-            f"output:\n{output}"
-        )
+    assert (state / "lore" / "vaults" / "default").is_dir()

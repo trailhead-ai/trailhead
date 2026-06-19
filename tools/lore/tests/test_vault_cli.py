@@ -113,14 +113,13 @@ def _index_rows_for(state, vault_root):
 
 
 # ---------------------------------------------------------------------------
-# init seeding
+# init seeding (Slice 1, S5 — non-interactive installer)
 # ---------------------------------------------------------------------------
 
 def test_init_seeds_config_with_single_default_vault(tmp_path):
+    """init seeds config.json with exactly one default-scope vault."""
     state, config = _dirs(tmp_path)
-    vault = tmp_path / "myvault"
-    res = _run(["init", str(vault), "--yes", "--allow-outside-home"],
-               state=state, config=config)
+    res = _run(["init"], state=state, config=config)
     assert res.returncode == 0, res.stderr
 
     cfg = _read_config(config)
@@ -130,14 +129,13 @@ def test_init_seeds_config_with_single_default_vault(tmp_path):
     assert vaults[0]["scope"] == "default"
 
 
-def test_init_still_scaffolds_vault_dir(tmp_path):
+def test_init_creates_default_vault_under_state_dir(tmp_path):
+    """init creates vaults/default under XDG_STATE_HOME/lore/ (not a user path)."""
     state, config = _dirs(tmp_path)
-    vault = tmp_path / "myvault"
-    res = _run(["init", str(vault), "--yes", "--allow-outside-home"],
-               state=state, config=config)
+    res = _run(["init"], state=state, config=config)
     assert res.returncode == 0, res.stderr
-    assert (vault / "sessions").is_dir()
-    assert (vault / "README.md").is_file()
+    assert _vaults_root(state).is_dir()
+    assert (_vaults_root(state) / "default").is_dir()
 
 
 # ---------------------------------------------------------------------------
