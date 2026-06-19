@@ -839,24 +839,36 @@ def _seed_or_merge_config(config_path: Path) -> None:
 _GUARD_COMMAND = (
     'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/vault-guard.py"'
 )
-_GUARD_MATCHER = "Edit|Write"
+# The matcher covers every file-mutating tool that carries a target path:
+# Edit/Write/MultiEdit use ``file_path``; NotebookEdit uses ``notebook_path``.
+# Bash is intentionally absent — its writes are opaque at PreToolUse time and are
+# covered only by the agent-rules prohibition (Slice 4).
+_GUARD_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
+
+# The vault-root list delimiter passed to the hook via LORE_VAULT_GUARD_ROOT.
+# A newline cannot appear in a POSIX path, so (unlike ``os.pathsep`` = ':') it
+# never corrupts a vault root whose path contains a literal ':'.
+_GUARD_ROOT_DELIM = "\n"
 
 
 def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     """Install the vault write-protection guardrail into *settings_path*.
 
     Wires (Slice 3, S5):
-      1. A PreToolUse ``Edit|Write`` hook running ``hooks/vault-guard.py`` — the
-         mandatory primary, runtime-canonicalizing mechanism (exit-2 deny).
+      1. A PreToolUse ``Edit|Write|MultiEdit|NotebookEdit`` hook running
+         ``hooks/vault-guard.py`` — the mandatory primary, runtime-canonicalizing
+         mechanism (exit-2 deny).
       2. ``env.LORE_VAULT_GUARD_ROOT`` = the absolute ``vaults`` dir AND
-         ``vaults/default`` (colon-separated). The hook ``realpath``s these on
-         every call, so the ``default`` symlink's *current* real target is always
-         covered — never an install-time snapshot.
-      3. A coarse static ``permissions.deny`` over ``vaults/**`` as
-         **defense-in-depth only** (it cannot cover a symlink's real target, so
-         the runtime hook above is the security-sufficient mechanism). Note the
-         ``//`` double-slash absolute-path grammar (single ``/`` is
-         project-root-relative — a silent footgun).
+         ``vaults/default`` (NEWLINE-separated — a byte that cannot appear in a
+         POSIX path, so a vault path containing ':' is not corrupted). The hook
+         ``realpath``s these on every call, so the ``default`` symlink's *current*
+         real target is always covered — never an install-time snapshot.
+      3. Symmetric coarse static ``permissions.deny`` over ``vaults/**`` for both
+         ``Write`` and ``Edit`` as **defense-in-depth only** (it cannot cover a
+         symlink's real target, so the runtime hook above is the
+         security-sufficient mechanism). Note the ``//`` double-slash
+         absolute-path grammar (single ``/`` is project-root-relative — a silent
+         footgun).
 
     Idempotent: re-runs add no duplicate entries. All three upserts go through
     ``settings_writer`` (stdlib json, atomic write, preserves unrelated keys);
@@ -864,7 +876,7 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     clean error rather than clobbering it).
     """
     default_link = vaults_root / "default"
-    guard_root_value = os.pathsep.join([str(vaults_root), str(default_link)])
+    guard_root_value = _GUARD_ROOT_DELIM.join([str(vaults_root), str(default_link)])
 
     settings_writer_mod.upsert_hook(
         settings_path, "PreToolUse", _GUARD_COMMAND, matcher=_GUARD_MATCHER
@@ -872,9 +884,12 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     settings_writer_mod.set_env_var(
         settings_path, "LORE_VAULT_GUARD_ROOT", guard_root_value
     )
-    settings_writer_mod.upsert_permission_deny(
-        settings_path, f"Write(//{str(vaults_root).lstrip('/')}/**)"
-    )
+    # Defense-in-depth (breadth-only): symmetric static deny over Write AND Edit.
+    # The runtime hook above is the security-sufficient primary; these coarse
+    # //abs prefix rules cannot cover a symlink's real target.
+    vaults_glob = f"//{str(vaults_root).lstrip('/')}/**"
+    settings_writer_mod.upsert_permission_deny(settings_path, f"Write({vaults_glob})")
+    settings_writer_mod.upsert_permission_deny(settings_path, f"Edit({vaults_glob})")
 
 
 def cmd_init(args: argparse.Namespace) -> int:

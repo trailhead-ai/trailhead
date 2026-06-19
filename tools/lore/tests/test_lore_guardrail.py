@@ -59,10 +59,16 @@ def _make_payload(file_path: str, tool_name: str = "Write") -> str:
     })
 
 
+# The runtime guard reads the vault root list from LORE_VAULT_GUARD_ROOT split on
+# NEWLINE (fix 4 — a byte that cannot appear in a POSIX path, so a vault path
+# containing a literal ':' is not corrupted).
+GUARD_ROOT_DELIM = "\n"
+
+
 def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None):
     """Invoke the real guard hook with the given file_path and guard roots."""
     env = dict(os.environ)
-    env["LORE_VAULT_GUARD_ROOT"] = ":".join(str(r) for r in guard_roots)
+    env["LORE_VAULT_GUARD_ROOT"] = GUARD_ROOT_DELIM.join(str(r) for r in guard_roots)
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=payload if payload is not None else _make_payload(str(file_path), tool_name),
@@ -255,6 +261,166 @@ class TestGuardHookSymlinkResolution:
 
 
 # ===========================================================================
+# 2b. Security-audit fixes (Slice 3 hardening, S5)
+# ===========================================================================
+
+class TestGuardToolCoverage:
+    """Fix 1: MultiEdit/NotebookEdit must not bypass the matcher.
+
+    The guard extracts the target from ``tool_input.file_path`` OR
+    ``tool_input.notebook_path`` (whichever is present), so a MultiEdit
+    (``file_path``) and a NotebookEdit (``notebook_path``) under the vault are
+    both denied; outside the vault both are allowed.
+    """
+
+    def test_multiedit_under_vault_is_denied(self, tmp_path):
+        vault = tmp_path / "vaults" / "default"
+        vault.mkdir(parents=True)
+        target = vault / "records" / "note.md"
+        result = _run_guard(target, [vault.parent], tool_name="MultiEdit")
+        assert result.returncode == 2, (
+            f"MultiEdit under the vault must be denied; got {result.returncode}; "
+            f"stderr={result.stderr!r}"
+        )
+
+    def test_multiedit_outside_vault_is_allowed(self, tmp_path):
+        vault = tmp_path / "vaults" / "default"
+        vault.mkdir(parents=True)
+        outside = tmp_path / "project" / "main.py"
+        outside.parent.mkdir(parents=True)
+        result = _run_guard(outside, [vault.parent], tool_name="MultiEdit")
+        assert result.returncode == 0
+
+    def test_notebookedit_under_vault_is_denied(self, tmp_path):
+        """NotebookEdit's payload field is ``notebook_path``, not ``file_path``."""
+        vault = tmp_path / "vaults" / "default"
+        vault.mkdir(parents=True)
+        target = vault / "records" / "note.ipynb"
+        payload = json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "NotebookEdit",
+            "tool_input": {"notebook_path": str(target), "new_source": "x = 1"},
+        })
+        result = _run_guard("", [vault.parent], tool_name="NotebookEdit", payload=payload)
+        assert result.returncode == 2, (
+            "NotebookEdit (notebook_path) under the vault must be denied; "
+            f"got {result.returncode}; stderr={result.stderr!r}"
+        )
+
+    def test_notebookedit_outside_vault_is_allowed(self, tmp_path):
+        vault = tmp_path / "vaults" / "default"
+        vault.mkdir(parents=True)
+        outside = tmp_path / "project" / "analysis.ipynb"
+        outside.parent.mkdir(parents=True)
+        payload = json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "NotebookEdit",
+            "tool_input": {"notebook_path": str(outside), "new_source": "x = 1"},
+        })
+        result = _run_guard("", [vault.parent], tool_name="NotebookEdit", payload=payload)
+        assert result.returncode == 0
+
+
+class TestGuardUnsetRootWarns:
+    """Fix 2: an empty/unset LORE_VAULT_GUARD_ROOT must warn on stderr while
+    still exiting 0 — converting silent mis-protection into an observable signal.
+    """
+
+    def test_empty_guard_root_warns_on_stderr_but_allows(self, tmp_path):
+        target = tmp_path / "anywhere" / "note.md"
+        target.parent.mkdir(parents=True)
+        result = _run_guard(target, [])  # empty root list
+        assert result.returncode == 0, "empty root list must still allow (exit 0)"
+        assert result.stderr.strip(), (
+            "an empty/unset LORE_VAULT_GUARD_ROOT must emit a warning on stderr"
+        )
+        assert "unguarded" in result.stderr.lower()
+
+    def test_unset_guard_root_warns_on_stderr_but_allows(self, tmp_path):
+        """With the env var entirely absent, same observable warning + exit 0."""
+        target = tmp_path / "anywhere" / "note.md"
+        target.parent.mkdir(parents=True)
+        env = dict(os.environ)
+        env.pop("LORE_VAULT_GUARD_ROOT", None)
+        result = subprocess.run(
+            [sys.executable, str(GUARD_SCRIPT)],
+            input=_make_payload(str(target)),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0
+        assert result.stderr.strip(), "unset root must emit a stderr warning"
+
+
+class TestGuardCaseInsensitiveBypass:
+    """Fix 3: ``os.path.realpath`` preserves input case, so on a case-insensitive
+    FS an alternate-case spelling evades the prefix check. The guard casefolds
+    both the resolved target and the resolved root before comparing.
+    """
+
+    def test_alternate_case_path_is_denied(self, tmp_path):
+        vault = tmp_path / "vaults" / "default"
+        vault.mkdir(parents=True)
+        target = vault / "records" / "note.md"
+
+        # Spell the target with a swapped-case leading segment. On a
+        # case-insensitive FS this names the SAME file; the guard must still deny.
+        alt = str(target)
+        swapped = alt.swapcase()
+        result = _run_guard(swapped, [vault.parent])
+        assert result.returncode == 2, (
+            "an alternate-case spelling of a guarded vault path must be denied "
+            f"(casefold both sides); got {result.returncode}; stderr={result.stderr!r}"
+        )
+
+
+class TestGuardColonInPath:
+    """Fix 4: the root list delimiter is a NEWLINE, not ``os.pathsep`` (``:``),
+    so a vault root whose path contains a literal ':' still guards correctly.
+    """
+
+    def test_colon_in_vault_path_still_guards(self, tmp_path):
+        vaults = tmp_path / "weird:colon" / "vaults"
+        vaults.mkdir(parents=True)
+        inside = vaults / "default" / "note.md"
+        result = _run_guard(inside, [vaults])
+        assert result.returncode == 2, (
+            "a write inside a colon-containing vault root must be denied "
+            f"(newline-delimited root list); got {result.returncode}; "
+            f"stderr={result.stderr!r}"
+        )
+
+    def test_colon_in_vault_path_allows_outside(self, tmp_path):
+        vaults = tmp_path / "weird:colon" / "vaults"
+        vaults.mkdir(parents=True)
+        outside = tmp_path / "weird:colon" / "src" / "main.py"
+        outside.parent.mkdir(parents=True)
+        result = _run_guard(outside, [vaults])
+        assert result.returncode == 0
+
+
+class TestGuardDocstringScope:
+    """Fixes 6 & 7: accurate comment on the no-path allow branch, and an explicit
+    accepted-out-of-scope note for Bash-mediated writes.
+    """
+
+    def test_module_docstring_documents_accepted_bash_gap(self):
+        src = GUARD_SCRIPT.read_text()
+        # The module docstring must explicitly call Bash writes accepted/out-of-scope.
+        assert "Bash" in src
+        assert "out-of-scope" in src.lower() or "out of scope" in src.lower()
+
+    def test_no_path_allow_branch_comment_is_not_bash(self):
+        """The missing-path allow branch must NOT be commented as 'e.g. Bash'
+        (Bash never matches the matcher and never reaches the hook)."""
+        src = GUARD_SCRIPT.read_text()
+        assert "e.g. Bash" not in src, (
+            "the no-file-path allow branch comment must not claim it fires for Bash"
+        )
+
+
+# ===========================================================================
 # 3. settings_writer: permissions.deny upsert (defense-in-depth)
 # ===========================================================================
 
@@ -373,6 +539,44 @@ class TestInitInstallsGuardrail:
             f"got {guard_root!r}"
         )
 
+    def test_local_init_guard_root_uses_newline_delimiter(self, tmp_path):
+        """Fix 4: the install side must join the root list on NEWLINE (not ':'),
+        so a vault path containing a literal ':' is not corrupted. The value
+        covers both the vaults dir and vaults/default, so it must be multi-entry."""
+        state, config, home = _dirs(tmp_path)
+        repo = _git_repo(tmp_path)
+        res = _run_init(["init", "--local"], state=state, config=config,
+                        home=home, cwd=repo)
+        assert res.returncode == 0, res.stderr
+
+        _, data = self._read_local_settings(repo)
+        guard_root = data.get("env", {}).get("LORE_VAULT_GUARD_ROOT", "")
+        vaults = state / "lore" / "vaults"
+        default_link = vaults / "default"
+        assert "\n" in guard_root, (
+            f"LORE_VAULT_GUARD_ROOT must be newline-delimited; got {guard_root!r}"
+        )
+        parts = guard_root.split("\n")
+        assert str(vaults) in parts
+        assert str(default_link) in parts
+
+    def test_local_init_matcher_covers_multiedit_and_notebookedit(self, tmp_path):
+        """Fix 1: the PreToolUse matcher must also cover MultiEdit and NotebookEdit."""
+        state, config, home = _dirs(tmp_path)
+        repo = _git_repo(tmp_path)
+        res = _run_init(["init", "--local"], state=state, config=config,
+                        home=home, cwd=repo)
+        assert res.returncode == 0, res.stderr
+
+        _, data = self._read_local_settings(repo)
+        matchers = [e.get("matcher", "") for e in data["hooks"]["PreToolUse"]
+                    if any("vault-guard" in h.get("command", "")
+                           for h in e.get("hooks", []))]
+        assert matchers, "no guard matcher found"
+        for m in matchers:
+            assert "MultiEdit" in m, f"matcher must cover MultiEdit, got {m!r}"
+            assert "NotebookEdit" in m, f"matcher must cover NotebookEdit, got {m!r}"
+
     def test_local_init_adds_static_permission_deny(self, tmp_path):
         """Defense-in-depth: a coarse permissions.deny over the vaults subtree,
         using the // double-slash absolute-path grammar."""
@@ -387,6 +591,22 @@ class TestInitInstallsGuardrail:
         assert any("//" in r and "vaults" in r for r in deny), (
             f"expected a //abs vaults static deny rule, got {deny!r}"
         )
+
+    def test_local_init_adds_symmetric_write_and_edit_deny(self, tmp_path):
+        """Fix 5: the static deny must cover both Write( and Edit( over vaults/**,
+        each anchored with the // double-slash absolute grammar."""
+        state, config, home = _dirs(tmp_path)
+        repo = _git_repo(tmp_path)
+        res = _run_init(["init", "--local"], state=state, config=config,
+                        home=home, cwd=repo)
+        assert res.returncode == 0, res.stderr
+
+        _, data = self._read_local_settings(repo)
+        deny = data.get("permissions", {}).get("deny", [])
+        write_rules = [r for r in deny if r.startswith("Write(//") and "vaults" in r]
+        edit_rules = [r for r in deny if r.startswith("Edit(//") and "vaults" in r]
+        assert write_rules, f"missing Write(//…vaults/**) static deny: {deny!r}"
+        assert edit_rules, f"missing symmetric Edit(//…vaults/**) static deny: {deny!r}"
 
     def test_rerun_installs_no_duplicate_guard(self, tmp_path):
         state, config, home = _dirs(tmp_path)
@@ -404,7 +624,9 @@ class TestInitInstallsGuardrail:
         )
         deny = data.get("permissions", {}).get("deny", [])
         vault_denies = [r for r in deny if "vaults" in r]
-        assert len(vault_denies) == 1, f"re-run duplicated the deny rule: {vault_denies!r}"
+        # Two rules expected (Write + Edit, fix 5); re-run must not duplicate either.
+        assert len(vault_denies) == 2, f"re-run changed the deny rules: {vault_denies!r}"
+        assert len(set(vault_denies)) == 2, f"re-run duplicated a deny rule: {vault_denies!r}"
 
     def test_init_preserves_unrelated_settings(self, tmp_path):
         """An existing unrelated hook + permission rule survive the guardrail install."""
