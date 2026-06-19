@@ -1,6 +1,6 @@
-"""Installer helpers for ``lore init`` (Slice 1, S5).
+"""Installer helpers for ``lore init`` (Slices 1 + 4, S5).
 
-Provides three pure-ish functions used by ``cmd_init``:
+Provides five pure-ish functions used by ``cmd_init``:
 
 - ``resolve_targets(local)`` — return ``(settings_path, rules_path)`` for the
   target settings file and rules file based on whether ``--local`` was passed.
@@ -17,13 +17,80 @@ Provides three pure-ish functions used by ``cmd_init``:
   itself (the *sibling* of ``vaults/``) exists. The index lives there, never
   inside a vault.
 
+- ``inject_agent_rules(rules_path, extra_paths=None)`` — inject a
+  marker-delimited lore block into *rules_path* (always) and into each path in
+  *extra_paths* that already exists (never creates stray files). Re-runs replace
+  the block in place (no duplicates). A ``fcntl.flock`` exclusive lock guards
+  each injection so concurrent ``lore init`` runs cannot double-inject (KU3,
+  proven S2). (Slice 4, S5.)
+
+- ``scan_for_rules_drift(search_root)`` — scan *search_root* for known
+  rules-file candidates (``.cursorrules``, ``AGENTS.md``, ``.windsurfrules``)
+  that are present but lack the marker block, and return them as a list of
+  ``Path`` objects. Empty list means no drift. (Slice 4, S5.)
+
 All filesystem operations use ``pathlib.Path``; no third-party deps (Axiom:
-pure stdlib only).
+pure stdlib only). ``fcntl`` is POSIX stdlib (darwin/linux; trailhead targets
+macOS/Linux only — KU3).
 """
 from __future__ import annotations
 
+import fcntl
 import subprocess
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Agent-rules block content and markers (Slice 4, S5)
+# ---------------------------------------------------------------------------
+
+# Stable delimiters that bracket the injected block.  Every consumer that
+# checks for the block (scan_for_rules_drift, idempotent re-inject) keys on
+# the START marker; NEVER change these once deployed.
+_RULES_START_MARKER = "<!-- lore:agent-rules:start -->"
+_RULES_END_MARKER = "<!-- lore:agent-rules:end -->"
+
+# The injected content.
+#
+# CRITICAL content requirement (Slice 4 plan):
+#   (a) Vault records are written ONLY via the ``lore`` CLI — NEVER by direct
+#       file edits AND NEVER via Bash/shell redirection or file commands
+#       (``> file``, ``tee``, ``sed -i``, ``cp``, ``mv``).  The Claude Code
+#       PreToolUse guardrail covers Edit/Write/MultiEdit/NotebookEdit but is
+#       OPAQUE to Bash-mediated writes — this agent-rules block is the ONLY
+#       protection for that gap.
+#   (b) A brief pointer to the lore docs for agent-driven procedures.
+#   (c) Documentation of the non-Claude-Code degradation (rules-only guardrail
+#       — harnesses that lack a PreToolUse hook depend entirely on this block).
+_RULES_BLOCK_BODY = """\
+## Lore vault — mandatory write rules
+
+**All** lore vault records are written **only** via the `lore` CLI.
+**Never** write to vault files by any other means, including:
+
+- Direct file edits (Edit / Write / MultiEdit tools)
+- Bash or shell redirection: `> file`, `>> file`, `tee`, `sed -i`, `cp`, `mv`
+
+The Claude Code PreToolUse guardrail blocks Edit/Write/MultiEdit/NotebookEdit
+but is **opaque to Bash-mediated writes** — this rule is the **only**
+protection for that gap.  Violating it silently corrupts vault records.
+
+For harnesses without a PreToolUse hook (Cursor, Codex, etc.) this block is
+the **sole guardrail** — treat it as binding regardless of harness.
+
+Agent-driven lore procedures: see `lore --help` and the lore skills
+(`/lore:decision`, `/lore:defer`, `/lore:finish`, etc.).
+"""
+
+_RULES_BLOCK = (
+    f"{_RULES_START_MARKER}\n"
+    f"{_RULES_BLOCK_BODY}"
+    f"{_RULES_END_MARKER}\n"
+)
+
+# Known rules-file candidates to scan for drift (Slice 4 plan).
+# Also referenced by ``cmd_init`` to enumerate extra injection targets.
+RULES_CANDIDATES = [".cursorrules", "AGENTS.md", ".windsurfrules"]
 
 
 # ---------------------------------------------------------------------------
@@ -157,3 +224,114 @@ def provision_index_location(lore_state_dir: Path) -> None:
         lore_state_dir: ``$XDG_STATE_HOME/lore`` (sibling of ``vaults/``).
     """
     lore_state_dir.mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# inject_agent_rules (Slice 4, S5)
+# ---------------------------------------------------------------------------
+
+
+def inject_agent_rules(
+    rules_path: Path,
+    extra_paths: list[Path] | None = None,
+) -> None:
+    """Inject a marker-delimited lore block into *rules_path* and any already-present extras.
+
+    *rules_path* is always touched (created if absent; the canonical rules file
+    for the install target — ``~/CLAUDE.md`` for global, ``<git-root>/CLAUDE.md``
+    for ``--local``).
+
+    Each path in *extra_paths* is injected **only if it already exists** — never
+    creates stray files. This respects the plan invariant: "only touch rules files
+    that already exist plus the canonical one".
+
+    Injection is idempotent: the block between :data:`_RULES_START_MARKER` /
+    :data:`_RULES_END_MARKER` is replaced in-place on re-runs (no duplicates).
+
+    Concurrency: each file injection is guarded by a ``fcntl.flock`` LOCK_EX on
+    a sibling ``.lore-rules.lock`` file so concurrent ``lore init`` runs cannot
+    double-inject (KU3, proven S2 — same pattern as ``session_store.py``).
+
+    Args:
+        rules_path:   The canonical rules file to inject into (created if absent).
+        extra_paths:  Additional rules files to inject into IF they already exist.
+    """
+    targets = [rules_path]
+    for p in (extra_paths or []):
+        if p.exists():
+            targets.append(p)
+    for target in targets:
+        _inject_single(target)
+
+
+def _inject_single(path: Path) -> None:
+    """Inject the lore block into *path*, holding an exclusive flock (KU3)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.parent / ".lore-rules.lock"
+
+    lock_fd = open(lock_path, "a")  # create-or-open, no truncate
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)  # blocks until exclusive
+        _inject_locked(path)
+    finally:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        lock_fd.close()
+
+
+def _inject_locked(path: Path) -> None:
+    """Write the lore block into *path*, replacing an existing block in-place.
+
+    Must be called while holding the flock on the parent directory's lock file.
+    """
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+    else:
+        existing = ""
+
+    if _RULES_START_MARKER in existing:
+        # Replace the existing block (between markers, inclusive).
+        start = existing.index(_RULES_START_MARKER)
+        end = existing.index(_RULES_END_MARKER) + len(_RULES_END_MARKER)
+        # Consume a trailing newline after the end marker if present.
+        if end < len(existing) and existing[end] == "\n":
+            end += 1
+        new_content = existing[:start] + _RULES_BLOCK + existing[end:]
+    else:
+        # Append to existing content (with a blank separator if content exists).
+        if existing and not existing.endswith("\n\n"):
+            separator = "\n" if existing.endswith("\n") else "\n\n"
+        else:
+            separator = ""
+        new_content = existing + separator + _RULES_BLOCK
+
+    path.write_text(new_content, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# scan_for_rules_drift (Slice 4, S5)
+# ---------------------------------------------------------------------------
+
+
+def scan_for_rules_drift(search_root: Path) -> list[Path]:
+    """Return rules-file candidates under *search_root* that lack the marker block.
+
+    Checks each known candidate filename (``_RULES_CANDIDATES``) directly under
+    *search_root* (not recursive). A file is "drifted" if it exists AND does not
+    contain :data:`_RULES_START_MARKER`.
+
+    Returns an empty list when all present candidates carry the block.
+
+    Args:
+        search_root: Directory to scan (typically the git root or ``~``).
+
+    Returns:
+        List of ``Path`` objects for candidate files present but lacking the block.
+    """
+    drifted = []
+    for name in RULES_CANDIDATES:
+        candidate = search_root / name
+        if candidate.exists():
+            content = candidate.read_text(encoding="utf-8")
+            if _RULES_START_MARKER not in content:
+                drifted.append(candidate)
+    return drifted
