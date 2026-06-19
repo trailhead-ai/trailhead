@@ -78,8 +78,9 @@ protection for that gap.  Violating it silently corrupts vault records.
 For harnesses without a PreToolUse hook (Cursor, Codex, etc.) this block is
 the **sole guardrail** — treat it as binding regardless of harness.
 
-Agent-driven lore procedures: see `lore --help` and the lore skills
-(`/lore:decision`, `/lore:defer`, `/lore:finish`, etc.).
+Capture and read records via the CLI: `lore record …` / `lore session …` to
+write, `lore search …` to read. See `lore --help` and the lore skills
+(`/lore:record`, `/lore:search`, `/lore:finish`).
 """
 
 _RULES_BLOCK = (
