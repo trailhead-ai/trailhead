@@ -817,8 +817,11 @@ def _seed_or_merge_config(config_path: Path) -> None:
 
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
+    except (OSError, json.JSONDecodeError) as exc:
+        # Error-hygiene axiom: surface a corrupt/unreadable existing config as a
+        # clean named error rather than silently no-oping past it (which would
+        # leave the user "lore-ready" atop a broken config).
+        raise ValueError(f"could not read existing lore config at {config_path}: {exc}") from exc
 
     vaults = raw.get("vaults", [])
     has_default = any(v.get("scope") == "default" for v in vaults)
@@ -864,9 +867,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     # Step 3: provision the index location (state/lore/ — sibling of vaults/).
     installer_mod.provision_index_location(lore_state)
 
-    # Step 4: seed or merge config.json.
+    # Step 4: seed or merge config.json — clean error on a corrupt existing config.
     config_path = _resolve_config_path()
-    _seed_or_merge_config(config_path)
+    try:
+        _seed_or_merge_config(config_path)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     print("lore: init complete")
     return 0

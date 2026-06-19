@@ -341,3 +341,23 @@ def test_init_merges_default_vault_if_missing(tmp_path):
     assert "default" in names
     # team-alpha must be preserved
     assert "team-alpha" in names
+
+
+# ---------------------------------------------------------------------------
+# 11. Config: a corrupt existing config is a clean error, not a silent no-op
+# ---------------------------------------------------------------------------
+
+def test_init_corrupt_config_is_clean_error(tmp_path):
+    """Error-hygiene axiom: a present-but-unparseable config.json must surface a
+    clean named error on stderr + nonzero exit, never a silent exit-0 no-op."""
+    state, config = _dirs(tmp_path)
+    cfg_path = _config_path(config)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text("{ this is not valid json")
+
+    res = _run(["init"], state=state, config=config)
+    assert res.returncode != 0
+    assert "error:" in res.stderr
+    assert "config" in res.stderr.lower()
+    # The corrupt file is left untouched (not clobbered by a partial write).
+    assert cfg_path.read_text() == "{ this is not valid json"
