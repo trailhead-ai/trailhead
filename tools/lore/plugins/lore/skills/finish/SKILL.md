@@ -78,8 +78,9 @@ Committed and pushed (or: committed locally — no remote).
   `notice: no active session note found for worktree '<name>' — nothing to
   finalize.`, and **exits 0**. Relay that notice to the user so they know the
   session *was* handled — it is not a cryptic error and not a silent no-op.
-- **Non-git vault.** `lore finish` stamps the frontmatter but skips the commit,
-  printing a notice on stderr. Relay it.
+- **Non-git vault.** `lore finish` stamps the session metadata (into the
+  `sessions/<id>.json` sidecar) but skips the commit, printing a notice on
+  stderr. Relay it.
 - **`lore finish` exits non-zero.** Report the error; do not retry silently.
 - **Already finalized.** `lore finish` prints `notice: already complete —
   nothing to finalize.` and exits 0. Relay it.
