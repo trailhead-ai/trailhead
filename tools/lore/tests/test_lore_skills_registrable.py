@@ -53,12 +53,16 @@ def test_all_capture_and_ritual_skills_present():
     'check-in', 'dead-end', 'decision', 'defer', 'follow-up', 'seed'.
     These are replaced by the `lore record` / `lore session` CLI surface.
 
-    S6 Slice 3 MOVED 'brainstorm' to the craft plugin, so the retained lore
-    skills are: checkpoint, finish, sync (+ _shared, exempt).
+    S6 Slice 3 MOVED 'brainstorm' to the craft plugin. S6 Slice 5 ADDED the
+    three new skills 'search' (read path / replaces recall), 'record' (single
+    deliberate capture), and 'research' (dispatch investigator/researcher), so
+    the retained lore skills are: checkpoint, finish, sync, search, record,
+    research (+ _shared, exempt).
     """
     names = {p.parent.name for p in _skill_files()}
     expected = {
         "checkpoint", "finish", "sync",
+        "search", "record", "research",
     }
     missing = expected - names
     assert not missing, f"expected skills missing from the plugin: {sorted(missing)}"
