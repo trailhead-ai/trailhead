@@ -300,8 +300,10 @@ def _check_related(key: str, value: object) -> list[str]:
 # Allows single-char names like "x". No uppercase, no underscore, no digit-only ban.
 _KEBAB_SEGMENT = r"[a-z0-9]([a-z0-9-]*[a-z0-9])?"
 # A map key is one segment (bare) or two segments separated by exactly one slash
-# (namespace/name). More than one slash is rejected.
-_MAP_KEY_RE = re.compile(rf"^{_KEBAB_SEGMENT}(/{_KEBAB_SEGMENT})?$")
+# (namespace/name). More than one slash is rejected. Anchored with \Z (not $) so a
+# trailing newline cannot sneak past — $ matches just before a final \n, which would
+# admit keys like "foo\n" into the index.
+_MAP_KEY_RE = re.compile(rf"^{_KEBAB_SEGMENT}(/{_KEBAB_SEGMENT})?\Z")
 
 
 def _check_map_str_str(key: str, value: object) -> list[str]:

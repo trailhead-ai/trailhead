@@ -537,6 +537,14 @@ def test_labels_empty_namespace_segment_rejected_naming_key():
     assert any("/x" in e for e in result.errors)
 
 
+def test_labels_trailing_newline_key_rejected_naming_key():
+    """A key with a trailing newline is rejected — the regex anchors with \\Z, not
+    $, so 'foo\\n' cannot sneak past validation and into the index."""
+    sidecar = _base_sidecar_with(labels={"foo\n": "val"})
+    result = rm().validate(sidecar)
+    assert any("foo" in e for e in result.errors)
+
+
 def test_labels_absent_omitted_from_schema_not_unsupported():
     """Absent labels/annotations are simply absent (not flagged unsupported)."""
     sidecar = _base_sidecar_with()
