@@ -113,7 +113,7 @@ non-canonical values. See the vault's `glossary.md` for the full list.
 
 Key transitions:
 
-- **sessions:** `active` → `complete` (or `shelved` for handoffs)
+- **sessions:** `active` → `complete`
 - **deferred:** `open` → `resolved` / `dropped` / `graduated`
 - **follow-ups:** `active` → `resolved` / `dropped`
 - **dead-ends:** `active` → `archived`

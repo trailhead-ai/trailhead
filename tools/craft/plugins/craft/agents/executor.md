@@ -115,7 +115,7 @@ cleanup: <assumption-prover test files/ranges removed, or "none">
 
 ### Durable tail (write to commit body, not returned)
 
-The tail is not part of your returned reply. Write it as the body of the GPG-signed commit you author in Step 7. It retains these headings for scannability in commit logs and on `/pickup`:
+The tail is not part of your returned reply. Write it as the body of the GPG-signed commit you author in Step 7. It retains these headings for scannability in commit logs and when resuming an unfinished plan:
 
 ```
 ## What I built

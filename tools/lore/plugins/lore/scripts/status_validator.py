@@ -11,25 +11,13 @@ from __future__ import annotations
 
 # Canonical status sets per note type, keyed by the directory / plural name.
 CANONICAL: dict[str, frozenset[str]] = {
-    "plans": frozenset(
-        {"draft", "ready", "in-progress", "complete", "superseded", "dropped", "shelved"}
-    ),
-    "specs": frozenset(
-        {"draft", "ready", "planned", "complete", "superseded", "dropped", "shelved"}
-    ),
-    "sessions": frozenset({"active", "complete", "shelved", "finalized", "handoff"}),
+    "plans": frozenset({"draft", "ready", "in-progress", "complete", "superseded", "dropped"}),
+    "specs": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped"}),
+    "sessions": frozenset({"active", "complete"}),
     "deferred": frozenset({"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}),
     "follow-ups": frozenset({"active", "resolved", "dropped"}),
     "lessons": frozenset({"active", "superseded"}),
     "dead-ends": frozenset({"active", "archived"}),
-}
-
-# Statuses that are accepted (back-compat) but deprecated: a note carrying one
-# validates clean yet emits a one-line migration notice. `finalized`/`handoff`
-# are legacy session terminal statuses; the canonical terminal status is
-# `complete`. Accepting them keeps existing notes valid while signalling drift.
-DEPRECATED: dict[str, frozenset[str]] = {
-    "sessions": frozenset({"finalized", "handoff"}),
 }
 
 # Note `type:` frontmatter is usually singular ("deferred", "session",
@@ -62,19 +50,6 @@ def permitted_statuses(note_type: str | None) -> frozenset[str] | None:
     if key is None:
         return None
     return CANONICAL[key]
-
-
-def deprecated_statuses(note_type: str | None) -> frozenset[str]:
-    """Return the deprecated-but-accepted status set for a note type (possibly empty)."""
-    key = _canonical_key(note_type)
-    if key is None:
-        return frozenset()
-    return DEPRECATED.get(key, frozenset())
-
-
-def is_deprecated_status(note_type: str | None, status: str) -> bool:
-    """True if `status` is accepted for `note_type` but flagged for migration."""
-    return status in deprecated_statuses(note_type)
 
 
 def is_valid_status(note_type: str | None, status: str) -> bool:
@@ -110,7 +85,6 @@ def main(argv: list[str] | None = None) -> int:
 
     args = argv if argv is not None else sys.argv[1:]
     violations: list[str] = []
-    deprecations: list[str] = []
 
     for path_str in args:
         path = Path(path_str)
@@ -132,16 +106,6 @@ def main(argv: list[str] | None = None) -> int:
             violations.append(
                 f"  {path}: type={note_type!r} status={status!r} — not in canonical set"
             )
-        elif is_deprecated_status(note_type, status):
-            deprecations.append(
-                f"  {path}: status={status!r} accepted "
-                f"(deprecated — migrate to 'complete' before cutover)"
-            )
-
-    if deprecations:
-        print("status-validator: deprecated status value(s):", file=sys.stderr)
-        for d in deprecations:
-            print(d, file=sys.stderr)
 
     if violations:
         print("status-validator: invalid status value(s):", file=sys.stderr)

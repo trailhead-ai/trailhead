@@ -17,9 +17,9 @@ invent statuses outside these sets — drift makes recall unreliable.
 
 ### Work-tracking note types
 
-- **plans/** — `draft` → `ready` → `in-progress` → `complete`. Side-state: `shelved`. Off-path terminal: `superseded`, `dropped`.
-- **specs/** — `draft` → `ready` → `planned` → `complete`. Side-state: `shelved`. Off-path terminal: `superseded`, `dropped`.
-- **sessions/** — `active` (in flight) → `complete` (wrapped). Side-state: `shelved` (handed off, awaiting pickup).
+- **plans/** — `draft` → `ready` → `in-progress` → `complete`. Off-path terminal: `superseded`, `dropped`.
+- **specs/** — `draft` → `ready` → `planned` → `complete`. Off-path terminal: `superseded`, `dropped`.
+- **sessions/** — `active` (in flight) → `complete` (wrapped).
 
 ### Observation note types
 
@@ -27,12 +27,3 @@ invent statuses outside these sets — drift makes recall unreliable.
 - **follow-ups/** — `active` → `resolved` / `dropped`.
 - **lessons/** — `active` → `superseded` (when guarded structurally).
 - **dead-ends/** — `active` → `archived` (when the revive condition is obsolete).
-
-### `shelved` semantics
-
-`shelved` is a cross-note-type side-state meaning *"this work is paused;
-resume by going back to its prior in-flight state."* Set when work is handed
-off (on the active session note plus any linked in-progress plan) and cleared
-on pickup (flips back to the prior in-flight status). Distinct from `dropped`
-(not coming back) and individual `deferred/*` notes (a specific question to
-revisit, not a whole work-stream).

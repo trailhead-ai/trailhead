@@ -209,7 +209,7 @@ class TestEnsureSessionNote:
         assert note1 == note2
 
     def test_fresh_note_when_matching_session_is_terminal(self, tmp_path):
-        # An explicit finish/shelve is respected: even if the same session_id
+        # An explicit finish is respected: even if the same session_id
         # comes back, a terminal note is left alone and a fresh note is created.
         vault = _make_vault(tmp_path)
         s = load_sessions()
@@ -217,7 +217,7 @@ class TestEnsureSessionNote:
             vault=vault, worktree_name="wt", branch="b", project="p",
             now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
         )
-        s.finalize_note(note1, ended_iso="2026-06-02T12:30:00Z", status="complete")
+        s.finalize_note(note1, ended_iso="2026-06-02T12:30:00Z")
         old = time.time() - (s.RESUME_WINDOW_SECONDS + 60)
         os.utime(note1, (old, old))
         note2, c2 = s.ensure_session_note(

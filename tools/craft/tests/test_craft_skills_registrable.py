@@ -94,17 +94,18 @@ def test_execute_dispatched_agents_resolve():
         )
 
 
-def test_shelve_and_pickup_skills_present():
-    """Guard against a dev-ritual skill dir silently disappearing.
+def test_shelve_and_pickup_skills_absent():
+    """The shelve/pickup dev rituals were retired (Slice 2).
 
-    shelve (renamed from handoff in Spec A / Slice 4) + pickup are the dev
-    rituals craft owns (P3-B2). They are listed here so the expected-set is a
-    stable contract.
+    They backed the lore `handoff`/`shelved`/`resume` verbs and the `shelved`
+    session status, all of which are gone; camp session-resume is the
+    replacement. Guard that neither skill dir lingers in the plugin.
     """
     names = {p.parent.name for p in _skill_files()}
-    expected = {"shelve", "pickup"}
-    missing = expected - names
-    assert not missing, f"expected craft skills missing from the plugin: {sorted(missing)}"
+    lingering = {"shelve", "pickup"} & names
+    assert not lingering, (
+        f"retired craft skills must not be present in the plugin: {sorted(lingering)}"
+    )
 
 
 def test_brainstorm_skill_present_in_craft():

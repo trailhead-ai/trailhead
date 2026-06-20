@@ -54,8 +54,7 @@ project's own repo.
 
 ## Skills
 
-Base skills (always available): `/craft:shelve`, `/craft:pickup`,
-`/craft:polish`
+Base skills (always available): `/craft:polish`
 
 **Planning:** `/craft:plan`
 
@@ -66,17 +65,6 @@ membership is single-sourced from `skills/_shared/council.md`.
 **Execute:** `/craft:execute`
 
 **Review:** `/craft:review`
-
-`/craft:shelve` and `/craft:pickup` are a symmetric shelve/resume pair — record
-read-only git state and shelve a session note with pickup hints so a future
-session can resume. The git capture is strictly **read-only** — these rituals
-record state, they do not commit, push, or rebase your code.
-
-**lore-optional coupling:** the handoff/pickup pair drives the [lore](../lore)
-CLI when it's available, and degrades to a local craft handoff file at
-`~/.craft/handoffs/<slug>.md` when lore is absent, `$LORE_VAULT` is unset, or
-`lore stats` fails. This is the same one-directional optional dependency craft
-already has on lore (craft → lore is allowed; lore never depends on craft).
 
 ## Moved commands — shipping & deploy now live in portage / landing
 
@@ -93,6 +81,8 @@ and [landing](../landing) (get it deployed) plugins. If you reach for a removed
 | `/craft:watch-pr` | `/portage:monitor` |
 | `/craft:watch-preview` | `/landing:soak` |
 | `/craft:post-merge-decide` | `/landing:resolve` |
+| `/craft:shelve` | camp session-resume (`claude -r <slug>`) |
+| `/craft:pickup` | camp session-resume (`claude -r <slug>`) |
 
 ## Layout
 
@@ -168,9 +158,6 @@ python3 -m pytest -q
 ```
 
 Covers manifest validity (`marketplace.json` / `plugin.json`), agent + skill
-frontmatter registrability, structural genericity (no host-project-specific seams), and
-the deterministic handoff-capture helper (git-state survey, lore 3-state
-detection, degraded-file write) including a real cross-repo integration test
-that drives the actual `lore handoff` against a synthetic fixture vault. The
-plugin-system boundary (actual install + dispatch) is covered by
+frontmatter registrability, and structural genericity (no host-project-specific
+seams). The plugin-system boundary (actual install + dispatch) is covered by
 `MANUAL-SMOKE.md`, which unit tests can't reach.

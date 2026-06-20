@@ -50,10 +50,10 @@ Port the remaining session rituals as standalone lore skills. Each is currently
 coupled to a specific project's stack; the port strips those dependencies and
 makes them vault-generic.
 
-- **`/lore:handoff`** — snapshot in-flight state, set session `status: shelved`,
-  leave instructions for the next pickup.
-- **`/lore:pickup`** — load a shelved session note, restore context, flip status
-  back to `active`.
+- *(Session handoff/pickup was retired — the `shelved` session status and its
+  `/lore:handoff`/`/lore:pickup` rituals are gone. Resuming a paused worktree is
+  handled by **camp session-resume** (`claude -r <slug>`), which preserves the
+  session id so the same session note is reused on restart.)*
 - **`/lore:morning-briefing`** — synthesize what changed in the vault since the
   last session; surface open deferred items and active follow-up entries.
 - **`/lore:monthly-reflection`** — periodic review: what shipped, what's been

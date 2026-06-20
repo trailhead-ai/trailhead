@@ -152,14 +152,21 @@ class TestCraftInventory:
             assert name in m.subagents
 
     def test_lifecycle_skills_now_selectable(self):
-        # shelve/pickup/polish were base under the capability model; they have a
-        # SKILL.md and are now selectable.
+        # These skills each have a SKILL.md and are discovered as selectable.
         # S6 Slice 3 MOVED 'brainstorm' into craft (discovery → frozen spec, runs
-        # before planning) — it is now a selectable craft skill.
+        # before planning) — it is now a selectable craft skill. (shelve/pickup
+        # were retired in Slice 2 — see test_lifecycle_skills_shelve_pickup_retired.)
         m = load_manifest(_CRAFT_MANIFEST)
-        for name in ("shelve", "pickup", "polish", "plan", "execute", "review",
-                     "consult", "brainstorm"):
+        for name in ("polish", "plan", "execute", "review", "consult", "brainstorm"):
             assert name in m.skills
+
+    def test_lifecycle_skills_shelve_pickup_retired(self):
+        # Slice 2 retired the shelve/pickup dev rituals (the lore `handoff`/
+        # `shelved`/`resume` verbs + the `shelved` status they backed are gone;
+        # camp session-resume replaces them). They must no longer be selectable.
+        m = load_manifest(_CRAFT_MANIFEST)
+        assert "shelve" not in m.skills
+        assert "pickup" not in m.skills
 
     def test_shared_not_selectable(self):
         assert "_shared" not in load_manifest(_CRAFT_MANIFEST).skills
