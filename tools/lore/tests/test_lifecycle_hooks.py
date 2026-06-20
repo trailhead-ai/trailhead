@@ -3,15 +3,13 @@
 Covers (TDD — written before the hooks):
 - sessions.ensure_session_note: creates a note with valid `session` frontmatter
   and the five required body headings; resumes a note modified inside the window.
-- session-context.py (SessionStart): creates a session note, emits a baseline
-  vault index; resolves the vault via $LORE_VAULT; emits the footgun warning when
-  $LORE_VAULT is unset and ~/lore is absent; never raises (emits {} on error).
-- finalize-session-note.py (WorktreeRemove): sets status: complete + ended: and
-  commits ONLY when the git-toplevel assertion passes; skips cleanly otherwise;
-  an atomic write killed mid-write leaves the original note intact.
 - harvest-candidates.py: routes a `## Harvest candidates` block to
   harvest-pending.md; no-op when the block is absent.
 - permission-log.py: appends an entry.
+
+Slice 2, S5 (F5): the SessionStart hook and WorktreeRemove hook were deleted;
+their test coverage was removed here accordingly (lore is fully pull — orientation
+lives in agent-rules). Only PostToolUse (harvest-candidates) remains.
 """
 from __future__ import annotations
 
@@ -246,184 +244,6 @@ class TestEnsureSessionNote:
         assert note2.name.endswith("-beta.md")
 
 
-# ---------------------------------------------------------------------------
-# session-context.py (SessionStart)
-# ---------------------------------------------------------------------------
-
-def _run_session_context(stdin_payload: dict, env: dict, cwd: Path):
-    """Run session-context.py main() in-process with patched stdin/stdout/env."""
-    mod = load_hook("session-context")
-    out = io.StringIO()
-    with mock.patch.dict(os.environ, env, clear=True):
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(stdin_payload))):
-            with mock.patch("sys.stdout", out):
-                with mock.patch.object(os, "getcwd", return_value=str(cwd)):
-                    mod.main()
-    return out.getvalue()
-
-
-class TestSessionContext:
-    def test_creates_session_note_and_emits_index(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        cwd = tmp_path / "my-worktree"
-        cwd.mkdir()
-        env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", "")}
-        out = _run_session_context({"session_id": "abc"}, env, cwd)
-        data = json.loads(out)
-        ctx = data["hookSpecificOutput"]["additionalContext"]
-        # A session note was created in its YYYY-MM month bucket.
-        notes = list((vault / "sessions").glob("*/*.md"))
-        assert len(notes) == 1
-        assert notes[0].name.endswith("-my-worktree.md")
-        fm = load_script("frontmatter").parse_frontmatter(notes[0])
-        assert fm["type"] == "session"
-        sv = load_script("status_validator")
-        assert sv.is_valid_status(fm["type"], fm["status"])
-        # Index references the session note (via link) and lists lore commands.
-        # The note slug (without .md) appears in the session link.
-        assert "/lore:defer" in ctx
-        assert notes[0].stem in ctx
-
-    def test_resolves_vault_via_lore_vault(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        cwd = tmp_path / "wt"
-        cwd.mkdir()
-        env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", "")}
-        _run_session_context({"session_id": "x"}, env, cwd)
-        # The note landed in the $LORE_VAULT vault (its month bucket), not elsewhere
-        assert list((vault / "sessions").glob("*/*.md"))
-
-    def test_footgun_warning_when_unset_and_no_default(self, tmp_path):
-        """$LORE_VAULT unset AND ~/lore absent → visible warning in context."""
-        fake_home = tmp_path / "home"
-        fake_home.mkdir()
-        cwd = tmp_path / "wt"
-        cwd.mkdir()
-        env = {"HOME": str(fake_home), "PATH": os.environ.get("PATH", "")}
-        out = _run_session_context({"session_id": "x"}, env, cwd)
-        data = json.loads(out)
-        ctx = data.get("hookSpecificOutput", {}).get("additionalContext", "")
-        assert "LORE_VAULT unset" in ctx
-
-    def test_no_warning_when_lore_vault_set(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        cwd = tmp_path / "wt"
-        cwd.mkdir()
-        env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", "")}
-        out = _run_session_context({"session_id": "x"}, env, cwd)
-        assert "LORE_VAULT unset" not in out
-
-    def test_emits_empty_json_on_error(self, tmp_path):
-        """Broken stdin must not raise — emit valid JSON dict."""
-        mod = load_hook("session-context")
-        out = io.StringIO()
-        with mock.patch("sys.stdin", io.StringIO("NOT JSON {{{")):
-            with mock.patch("sys.stdout", out):
-                mod.main()
-        data = json.loads(out.getvalue())
-        assert isinstance(data, dict)
-
-
-# ---------------------------------------------------------------------------
-# finalize-session-note.py (WorktreeRemove)
-# ---------------------------------------------------------------------------
-
-def _seed_session_note(vault: Path, worktree: str = "wt") -> Path:
-    s = load_sessions()
-    note, _ = s.ensure_session_note(
-        vault=vault, worktree_name=worktree, branch="b", project="p",
-        now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
-    )
-    # Add real body content so it isn't treated as an empty skeleton (if such
-    # logic exists) and to make a meaningful finalize.
-    note.write_text(note.read_text() + "\nDid real work here.\n")
-    return note
-
-
-def _run_finalize(payload: dict, vault: Path):
-    mod = load_hook("finalize-session-note")
-    out = io.StringIO()
-    env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", ""),
-           "HOME": os.environ.get("HOME", "")}
-    with mock.patch.dict(os.environ, env, clear=True):
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))):
-            with mock.patch("sys.stdout", out):
-                mod.main()
-    return out.getvalue(), mod
-
-
-class TestFinalize:
-    def test_sets_status_complete_and_ended(self, tmp_path):
-        vault = _git_vault(tmp_path)
-        note = _seed_session_note(vault)
-        _run_finalize({"worktree": "wt"}, vault)
-        fm = load_script("frontmatter").parse_frontmatter(note)
-        assert fm["status"] == "complete"
-        assert fm["ended"]
-        assert fm["ended"] != ""
-
-    def test_commits_when_toplevel_matches(self, tmp_path):
-        vault = _git_vault(tmp_path)
-        _seed_session_note(vault)
-        _run_finalize({"worktree": "wt"}, vault)
-        log = subprocess.run(
-            ["git", "-C", str(vault), "log", "--oneline"],
-            capture_output=True, text=True,
-        )
-        assert log.returncode == 0
-        assert log.stdout.strip(), "expected a commit in the vault"
-
-    def test_skips_commit_when_vault_not_git_toplevel(self, tmp_path):
-        """Vault not a git repo → no commit, clean skip (logged notice)."""
-        vault = _make_vault(tmp_path)  # not a git repo
-        note = _seed_session_note(vault)
-        out, _ = _run_finalize({"worktree": "wt"}, vault)
-        # status still updated (file write is independent of commit)
-        fm = load_script("frontmatter").parse_frontmatter(note)
-        assert fm["status"] == "complete"
-        # No git repo was created/committed in the vault
-        assert not (vault / ".git").exists()
-
-    def test_skips_commit_when_toplevel_is_parent(self, tmp_path):
-        """$LORE_VAULT points at a subdir of a git repo → toplevel != vault →
-        skip the commit rather than operate on the parent tree."""
-        outer = tmp_path / "outer"
-        outer.mkdir()
-        subprocess.run(["git", "init", str(outer)], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(outer), "config", "user.email", "t@e.st"],
-                       check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(outer), "config", "user.name", "T"],
-                       check=True, capture_output=True)
-        vault = outer / "vault"
-        (vault / "sessions").mkdir(parents=True)
-        note = _seed_session_note(vault)
-        _run_finalize({"worktree": "wt"}, vault)
-        fm = load_script("frontmatter").parse_frontmatter(note)
-        assert fm["status"] == "complete"
-        # The outer repo must have NO commits (we refused to operate on it)
-        log = subprocess.run(
-            ["git", "-C", str(outer), "log", "--oneline"],
-            capture_output=True, text=True,
-        )
-        assert log.returncode != 0 or not log.stdout.strip()
-
-    def test_mid_write_crash_leaves_original_intact(self, tmp_path):
-        """If the finalize write fails after the temp file is written, the
-        ORIGINAL note must remain intact (atomic temp + os.replace)."""
-        vault = _git_vault(tmp_path)
-        note = _seed_session_note(vault)
-        original = note.read_text()
-        mod = load_hook("finalize-session-note")
-        # Patch os.replace to raise — simulates a kill after the temp write
-        # but before the atomic swap completes.
-        with mock.patch.object(mod.os, "replace", side_effect=OSError("boom")):
-            ok = mod.write_note_atomic(note, "TOTALLY DIFFERENT CONTENT")
-        assert ok is False
-        assert note.read_text() == original, "original note was clobbered"
-        # No stray temp files left behind in the note's month bucket (the temp
-        # file is created alongside the note via tempfile.mkstemp(dir=...)).
-        leftovers = [p for p in note.parent.iterdir() if p != note]
-        assert leftovers == [], f"temp files left behind: {leftovers}"
 
 
 # ---------------------------------------------------------------------------
@@ -515,31 +335,10 @@ class TestPermissionLog:
 
 
 # ---------------------------------------------------------------------------
-# hooks.json registration
+# hooks.json registration (Slice 2, S5: only PostToolUse remains)
 # ---------------------------------------------------------------------------
 
 class TestHooksJson:
-    def test_registers_all_three_events(self):
-        """hooks.json registers the three active lifecycle events.
-
-        Note: PreToolUse was removed; the active events are SessionStart,
-        PostToolUse (harvest-candidates), and WorktreeRemove (finalize).
-        """
-        data = json.loads((HOOKS_DIR / "hooks.json").read_text())
-        hooks = data["hooks"]
-        for event in ("SessionStart", "PostToolUse", "WorktreeRemove"):
-            assert event in hooks, f"missing {event}"
-
-    def test_session_start_points_at_session_context(self):
-        data = json.loads((HOOKS_DIR / "hooks.json").read_text())
-        cmds = [
-            h["command"]
-            for entry in data["hooks"]["SessionStart"]
-            for h in entry["hooks"]
-        ]
-        assert any("session-context.py" in c for c in cmds)
-        assert not any("session_smoke" in c for c in cmds)
-
     def test_post_tool_use_matches_agent(self):
         data = json.loads((HOOKS_DIR / "hooks.json").read_text())
         entries = data["hooks"]["PostToolUse"]
@@ -612,45 +411,3 @@ class TestSessionNoteNestedNameCollision:
 
 # ---------------------------------------------------------------------------
 # M2: commit_vault must not sweep unrelated dirty vault files
-# ---------------------------------------------------------------------------
-
-class TestFinalizeCommitScope:
-    def test_unrelated_dirty_file_stays_unstaged_after_finalize(self, tmp_path):
-        """An unrelated dirty vault file must NOT be included in the finalize commit."""
-        vault = _git_vault(tmp_path)
-
-        # Create an initial commit so there's a HEAD to diff against
-        readme = vault / "README.md"
-        readme.write_text("init\n")
-        subprocess.run(["git", "-C", str(vault), "add", "README.md"],
-                       check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(vault), "commit", "-m", "init"],
-                       check=True, capture_output=True)
-
-        # Seed the session note we'll finalize
-        _seed_session_note(vault, worktree="wt")
-
-        # Create an unrelated dirty file in the vault (not staged)
-        unrelated = vault / "decisions" / "foo.md"
-        unrelated.parent.mkdir(parents=True, exist_ok=True)
-        unrelated.write_text("---\ntype: decision\nstatus: accepted\n---\n\nfoo\n")
-
-        _run_finalize({"worktree": "wt"}, vault)
-
-        # The session note should be committed
-        log = subprocess.run(
-            ["git", "-C", str(vault), "log", "--oneline"],
-            capture_output=True, text=True,
-        )
-        assert "finalize wt" in log.stdout
-
-        # The unrelated file must still be untracked/dirty (not committed).
-        # Git may report the whole directory as untracked when none of its
-        # files have been staged, so check for either form.
-        status = subprocess.run(
-            ["git", "-C", str(vault), "status", "--porcelain"],
-            capture_output=True, text=True,
-        )
-        assert "decisions" in status.stdout, (
-            f"Expected decisions/ to remain dirty but status was: {status.stdout!r}"
-        )

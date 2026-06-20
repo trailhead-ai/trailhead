@@ -9,7 +9,11 @@ Config-driven, non-interactive, multi-harness:
      the harness (wire + harness registration tail), under the wire lock.
   4. Build the camp/lore CLI shim dir (harness-independent, additive). trailhead
      does NOT edit your shell rc — it tells you to add `eval "$(… shellenv)"`.
-  5. Print the summary.
+  5. Bootstrap the lore machine via `lore init` (non-interactive + idempotent):
+     vault + global index + write-protection guardrail + agent rules. A failed
+     bootstrap propagates as a non-zero install exit with the lore stderr — it is
+     never swallowed. Harness-agnostic (Axiom 1): no harness-specific branching.
+  6. Print the summary.
 
 No presets, no interactive prompts, no remote fetch, no install manifest — the
 repo checkout IS the source ("install = clone the repo").
@@ -46,6 +50,40 @@ _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 # CLI binaries shipped by the camp/lore plugins, keyed by the install flag.
 _CAMP_BIN = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "bin" / "camp"
 _LORE_BIN = _REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "bin" / "lore"
+
+
+def run_lore_init(
+    lore_bin: Path,
+    *,
+    env: dict[str, str],
+    runner=None,
+) -> tuple[int, str]:
+    """Invoke ``lore init`` non-interactively and return ``(returncode, stderr)``.
+
+    Harness-agnostic (Axiom 1): wires the lore bootstrap step the same way the
+    rest of install shells out to a CLI — there is NO harness-specific branching
+    here. ``lore init`` is itself non-interactive and idempotent, so this is safe
+    to run on every install / re-install.
+
+    The runner is injectable (B-3 / Axiom 6) so tests never invoke the real
+    ``lore init`` against the user's vault/state. The default captures output and
+    does NOT raise on a non-zero exit — the caller decides how to surface it (a
+    failed bootstrap must propagate as a non-zero install exit with the lore
+    stderr, never be swallowed).
+    """
+    if runner is None:
+        def runner(args, **kw):
+            import subprocess
+
+            return subprocess.run(args, **kw)
+
+    proc = runner(
+        [str(lore_bin), "init"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode, proc.stderr or ""
 
 
 def run_install(
@@ -129,6 +167,22 @@ def run_install(
                 f"  (the plugins are installed; the camp/lore CLIs just aren't shimmed)",
                 file=sys.stderr,
             )
+
+    # ------------------------------------------------------------------
+    # Bootstrap the lore machine (vault + index + guardrail + agent rules).
+    # `lore init` is non-interactive + idempotent; a failed bootstrap must
+    # surface as a non-zero install exit with the lore stderr — never swallowed.
+    # ------------------------------------------------------------------
+    if cfg.install_lore_cli and _LORE_BIN.exists():
+        rc, lore_stderr = run_lore_init(_LORE_BIN, env=_env, runner=runner)
+        if rc != 0:
+            if lore_stderr:
+                print(lore_stderr.rstrip(), file=sys.stderr)
+            print(
+                f"trailhead: lore init failed (exit {rc})",
+                file=sys.stderr,
+            )
+            return 1
 
     no_harness = not cfg.harnesses
 

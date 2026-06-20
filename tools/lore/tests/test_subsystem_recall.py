@@ -1,27 +1,18 @@
-"""Rederived recall + session-context integration tests (D23 area semantics).
+"""Recall API shape tests (D23 area semantics).
 
-These tests cover the D23 recall API (build_area_map, recall_areas) and
-the session-context pointer integration. The old subsystem-API tests
-(derive_subsystem_keywords, infer_subsystems, render_subsystem_block) were
-replaced by test_recall_core.py in Slice 0.
+Covers the D23 recall API (build_area_map, render_area_menu, render_area_pointer).
+The old subsystem-API tests (derive_subsystem_keywords, infer_subsystems,
+render_subsystem_block) were replaced by test_recall_core.py in Slice 0.
 
-This file is retained to assert the session-context.py integration contract:
-- A compact area POINTER (count + lore areas cue) is emitted at SessionStart,
-  not the full area map and not an auto-inject recall block. The agent calls
-  `lore areas` to list them, then `lore recall --areas` explicitly.
-- No automatic "Recalled (...)" block appears regardless of branch name.
-- A branch that contains an area keyword still only shows the pointer, not
-  matched content (the anti-injection regression guard).
+The SessionStart hook integration tests were removed in Slice 2, S5 (F5: no
+SessionStart hook; lore is fully pull — orientation lives in agent-rules +
+S6 skill descriptions).
 """
 from __future__ import annotations
 
 import importlib.util
-import io
-import json
-import os
 import sys
 from pathlib import Path
-from unittest import mock
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -74,17 +65,6 @@ def _write_area(vault: Path, name: str, keywords: list[str]) -> Path:
     return p
 
 
-def _run_session_context(stdin_payload: dict, env: dict, cwd: Path):
-    mod = load_hook("session-context")
-    out = io.StringIO()
-    with mock.patch.dict(os.environ, env, clear=True):
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(stdin_payload))):
-            with mock.patch("sys.stdout", out):
-                with mock.patch.object(os, "getcwd", return_value=str(cwd)):
-                    mod.main()
-    return out.getvalue()
-
-
 # ---------------------------------------------------------------------------
 # D23 API shape: old subsystem functions are absent
 # ---------------------------------------------------------------------------
@@ -133,83 +113,3 @@ class TestD23ApiShape:
         assert hasattr(recall, "render_area_pointer")
 
 
-# ---------------------------------------------------------------------------
-# Integration: session-context.py emits the area MAP menu, not auto-inject
-# ---------------------------------------------------------------------------
-
-class TestSessionContextWithSubsystemBlock:
-    def test_matching_branch_emits_area_pointer_not_auto_inject(self, tmp_path):
-        """A branch whose name contains an area keyword must show the area POINTER,
-        NOT an auto-injected 'Recalled (...)' block. The agent runs `lore areas`
-        to list them, then calls 'lore recall --areas' explicitly.
-
-        This is the anti-injection regression guard (the noise that got the old
-        recall deleted) rederived for D23: pointer ≠ matched content.
-        """
-        vault = _make_vault(tmp_path)
-        _write_area(vault, "auth", ["oauth"])
-        cwd = tmp_path / "my-worktree"
-        cwd.mkdir()
-        env = {
-            "LORE_VAULT": str(vault),
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-        }
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(
-                returncode=0, stdout="feature/oauth-login\n", stderr=""
-            )
-            out = _run_session_context({"session_id": "abc"}, env, cwd)
-        data = json.loads(out)
-        ctx = data["hookSpecificOutput"]["additionalContext"]
-        # The area pointer must be present (count + lore areas cue)
-        assert "lore areas" in ctx, (
-            f"Area pointer absent from context. Context:\n{ctx}"
-        )
-        # But NO auto-inject recall block — the agent must call lore recall explicitly
-        assert "Recalled (" not in ctx, (
-            "Auto-inject recall block must not appear; only the pointer should be "
-            f"emitted at SessionStart. Context:\n{ctx}"
-        )
-
-    def test_non_matching_branch_only_baseline(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        _write_area(vault, "payments", ["stripe"])
-        cwd = tmp_path / "my-worktree"
-        cwd.mkdir()
-        env = {
-            "LORE_VAULT": str(vault),
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-        }
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(
-                returncode=0, stdout="feature/completely-unrelated\n", stderr=""
-            )
-            out = _run_session_context({"session_id": "abc"}, env, cwd)
-        data = json.loads(out)
-        ctx = data["hookSpecificOutput"]["additionalContext"]
-        # Baseline index should be present
-        assert "/lore:defer" in ctx
-        # Area pointer is still present (always loaded, regardless of branch)
-        assert "lore areas" in ctx
-        # No auto-inject recall block
-        assert "Recalled (" not in ctx
-
-    def test_no_crash_with_empty_areas_dir(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        cwd = tmp_path / "my-worktree"
-        cwd.mkdir()
-        env = {
-            "LORE_VAULT": str(vault),
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-        }
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(
-                returncode=0, stdout="feature/oauth-login\n", stderr=""
-            )
-            out = _run_session_context({"session_id": "abc"}, env, cwd)
-        data = json.loads(out)
-        # No crash — valid JSON with hookSpecificOutput
-        assert "hookSpecificOutput" in data

@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import frontmatter  # noqa: E402
 import harvest as harvest_mod  # noqa: E402
 import index_store as index_store_mod  # noqa: E402
+import installer as installer_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
 import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
@@ -47,6 +48,7 @@ import record_store as record_store_mod  # noqa: E402
 import search as search_mod  # noqa: E402
 import session_store as session_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
+import settings_writer as settings_writer_mod  # noqa: E402
 import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
 import vault_config as vault_config_mod  # noqa: E402
@@ -781,128 +783,250 @@ def cmd_seed(args: argparse.Namespace) -> int:
 
 # ---- init -------------------------------------------------------------------
 
-def _is_under_home(target: Path) -> bool:
-    home = Path.home().resolve()
+def _resolve_lore_state_dir() -> Path:
+    """Return ``state_dir("lore")``, honoring XDG overrides.
+
+    Mirrors the other lazy-import resolver patterns in this file.
+    """
     try:
-        target.relative_to(home)
-        return True
-    except ValueError:
-        return False
+        import _bootstrap
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+        return _paths.state_dir("lore")
+    except (ImportError, SystemExit):
+        base = os.environ.get("XDG_STATE_HOME", "").strip()
+        if base and os.path.isabs(base):
+            return Path(base) / "lore"
+        return Path.home() / ".local" / "state" / "lore"
 
 
-def _planned_tree(target: Path) -> str:
-    lines = [f"{target}/"]
-    for d in TAXONOMY:
-        lines.append(f"  {d}/")
-    lines.append("  .templates/")
-    for doc in STARTER_DOCS:
-        lines.append(f"  {doc}")
-    lines.append("  harvest-pending.md")
-    return "\n".join(lines)
+def _seed_or_merge_config(config_path: Path) -> None:
+    """Seed config.json if absent, or merge a default vault entry if missing.
+
+    - Absent config.json: write ``{"vaults": [{"name": "default", "scope": "default"}]}``.
+    - Present config.json without a ``default``-scope vault: append the entry
+      (never clobbers existing vaults).
+    - Present config.json that already has a ``default``-scope vault: no-op.
+    """
+    default_entry = {"name": "default", "scope": "default"}
+
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        vault_config_mod.write_config_atomic(config_path, {"vaults": [default_entry]})
+        print(f"Seeded lore vault config at {config_path}")
+        return
+
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        # Error-hygiene axiom: surface a corrupt/unreadable existing config as a
+        # clean named error rather than silently no-oping past it (which would
+        # leave the user "lore-ready" atop a broken config).
+        raise ValueError(f"could not read existing lore config at {config_path}: {exc}") from exc
+
+    vaults = raw.get("vaults", [])
+    has_default = any(v.get("scope") == "default" for v in vaults)
+    if not has_default:
+        vaults.append(default_entry)
+        raw["vaults"] = vaults
+        vault_config_mod.write_config_atomic(config_path, raw)
+        print(f"Merged default vault entry into config at {config_path}")
+
+
+# The PreToolUse guard command. ``${CLAUDE_PLUGIN_ROOT}`` is expanded by Claude
+# Code at hook-run time, so the wired command stays valid wherever the plugin is
+# installed (and the hook canonicalizes paths on every invocation — Slice 3).
+_GUARD_COMMAND = (
+    'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/vault-guard.py"'
+)
+# The matcher covers every file-mutating tool that carries a target path:
+# Edit/Write/MultiEdit use ``file_path``; NotebookEdit uses ``notebook_path``.
+# Bash is intentionally absent — its writes are opaque at PreToolUse time and are
+# covered only by the agent-rules prohibition (Slice 4).
+_GUARD_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
+
+# The vault-root list delimiter passed to the hook via LORE_VAULT_GUARD_ROOT.
+# A newline cannot appear in a POSIX path, so (unlike ``os.pathsep`` = ':') it
+# never corrupts a vault root whose path contains a literal ':'.
+_GUARD_ROOT_DELIM = "\n"
+
+
+def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
+    """Install the vault write-protection guardrail into *settings_path*.
+
+    Wires (Slice 3, S5):
+      1. A PreToolUse ``Edit|Write|MultiEdit|NotebookEdit`` hook running
+         ``hooks/vault-guard.py`` — the mandatory primary, runtime-canonicalizing
+         mechanism (exit-2 deny).
+      2. ``env.LORE_VAULT_GUARD_ROOT`` = the absolute ``vaults`` dir AND
+         ``vaults/default`` (NEWLINE-separated — a byte that cannot appear in a
+         POSIX path, so a vault path containing ':' is not corrupted). The hook
+         ``realpath``s these on every call, so the ``default`` symlink's *current*
+         real target is always covered — never an install-time snapshot.
+      3. Symmetric coarse static ``permissions.deny`` over ``vaults/**`` for both
+         ``Write`` and ``Edit`` as **defense-in-depth only** (it cannot cover a
+         symlink's real target, so the runtime hook above is the
+         security-sufficient mechanism). Note the ``//`` double-slash
+         absolute-path grammar (single ``/`` is project-root-relative — a silent
+         footgun).
+
+    Idempotent: re-runs add no duplicate entries. All three upserts go through
+    ``settings_writer`` (stdlib json, atomic write, preserves unrelated keys);
+    a present-but-corrupt settings file raises ``ValueError`` (caller surfaces a
+    clean error rather than clobbering it).
+    """
+    default_link = vaults_root / "default"
+    guard_root_value = _GUARD_ROOT_DELIM.join([str(vaults_root), str(default_link)])
+
+    settings_writer_mod.upsert_hook(
+        settings_path, "PreToolUse", _GUARD_COMMAND, matcher=_GUARD_MATCHER
+    )
+    settings_writer_mod.set_env_var(
+        settings_path, "LORE_VAULT_GUARD_ROOT", guard_root_value
+    )
+    # Defense-in-depth (breadth-only): symmetric static deny over Write AND Edit.
+    # The runtime hook above is the security-sufficient primary; these coarse
+    # //abs prefix rules cannot cover a symlink's real target.
+    vaults_glob = f"//{str(vaults_root).lstrip('/')}/**"
+    settings_writer_mod.upsert_permission_deny(settings_path, f"Write({vaults_glob})")
+    settings_writer_mod.upsert_permission_deny(settings_path, f"Edit({vaults_glob})")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    target = Path(args.path).expanduser().resolve()
+    """Non-interactive, idempotent lore installer (Slices 1 + 4, S5).
 
-    if not _is_under_home(target) and not args.allow_outside_home:
-        print(
-            f"error: refusing to init outside $HOME: {target}\n"
-            "pass --allow-outside-home to override.",
-            file=sys.stderr,
-        )
+    Bootstraps the canonical default vault and global index location so the
+    machine is lore-ready. No ``input()`` prompts — safe to call from scripts
+    and ``trailhead install``.
+
+    Steps:
+      1. Resolve settings + rules paths based on ``--local``.
+      2. Bootstrap ``$XDG_STATE_HOME/lore/vaults/default`` as a git repo (or a
+         symlink to ``--vault <path>`` when provided). Idempotent.
+      3. Provision ``$XDG_STATE_HOME/lore/`` (the index parent). Idempotent.
+      4. Seed or merge ``config.json`` (seed-if-absent / merge default-if-missing).
+      5. Install the vault write-protection guardrail (PreToolUse hook, Slice 3).
+      6. Inject the marker-delimited agent-rules block into the resolved rules
+         file(s) (Slice 4); also inject into any already-present alternate rules
+         files (``.cursorrules`` etc.) in the same directory.
+      7. Emit a drift advisory if any candidate rules files in the same directory
+         still lack the block (added after a prior init run).
+    """
+    # Step 1: resolve targets — clean error for --local outside a git repo.
+    local = getattr(args, "local", False)
+    try:
+        settings_path, rules_path = installer_mod.resolve_targets(local=local)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if target.exists() and any(target.iterdir()) and not args.force:
-        print(
-            f"error: refusing to init a non-empty directory: {target}\n"
-            "pass --force to scaffold into it anyway (existing files are kept).",
-            file=sys.stderr,
-        )
+    # Step 2: bootstrap the default vault.
+    lore_state = _resolve_lore_state_dir()
+    vaults_root = lore_state / "vaults"
+
+    vault_path: Path | None = None
+    if getattr(args, "vault", None):
+        vault_path = Path(args.vault).expanduser().resolve()
+
+    # A failed `git init` (load-bearing vault-is-a-repo contract) surfaces as a
+    # clean named error rather than a silent half-bootstrap behind "complete".
+    try:
+        installer_mod.bootstrap_vault(vaults_root, vault_path=vault_path)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    print("Planned vault layout:")
-    print(_planned_tree(target))
-    print()
+    # Step 3: provision the index location (state/lore/ — sibling of vaults/).
+    installer_mod.provision_index_location(lore_state)
 
-    if not args.yes:
-        try:
-            answer = input(f"Create this vault at {target}? [y/N] ").strip().lower()
-        except EOFError:
-            answer = ""
-        if answer not in ("y", "yes"):
-            print("Aborted; nothing written.", file=sys.stderr)
-            return 1
-
-    # Scaffold.
-    target.mkdir(parents=True, exist_ok=True)
-    for d in TAXONOMY:
-        (target / d).mkdir(exist_ok=True)
-
-    templates_out = target / ".templates"
-    templates_out.mkdir(exist_ok=True)
-    if TEMPLATES_DIR.is_dir():
-        for item in sorted(TEMPLATES_DIR.iterdir()):
-            if item.name == ".gitkeep":
-                continue
-            dest = templates_out / item.name
-            if item.is_dir():
-                shutil.copytree(item, dest, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, dest)
-
-    for doc in STARTER_DOCS:
-        src = STARTER_DIR / doc
-        (target / doc).write_text(src.read_text())
-
-    (target / "harvest-pending.md").write_text(
-        "# Harvest pending\n\n"
-        "Staging area for harvest candidates emitted by subagents. The session "
-        "wrap-up ritual reads and clears this file.\n"
-    )
-
-    # Git-init the vault if it isn't already a git repo.
-    git_dir = target / ".git"
-    if not git_dir.is_dir():
-        result = subprocess.run(
-            ["git", "init", str(target)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            print(f"warning: git init failed: {result.stderr.strip()}", file=sys.stderr)
-        else:
-            print(f"Initialized git repo at {target}")
-
-    # Install the pre-commit status guard.
-    installer = PLUGIN_ROOT / "hooks" / "install-vault-hooks.sh"
-    if installer.is_file():
-        env = dict(os.environ)
-        env["LORE_PLUGIN_ROOT"] = str(PLUGIN_ROOT)
-        result = subprocess.run(
-            ["bash", str(installer), str(target)],
-            capture_output=True, text=True, env=env,
-        )
-        if result.returncode != 0:
-            print(f"warning: guard install failed: {result.stderr.strip()}", file=sys.stderr)
-        else:
-            print(result.stdout.strip())
-
-    # Seed config.json with the single default-scope vault (Slice 4, S4) if it
-    # does not already exist. The config is the layered-vaults registry; init is
-    # the only command that creates it from scratch.
+    # Step 4: seed or merge config.json — clean error on a corrupt existing config.
     config_path = _resolve_config_path()
-    if not config_path.exists():
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        vault_config_mod.write_config_atomic(
-            config_path, {"vaults": [{"name": "default", "scope": "default"}]}
-        )
-        print(f"Seeded lore vault config at {config_path}")
+    try:
+        _seed_or_merge_config(config_path)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
-    print(f"\nInitialized lore vault at {target}\n")
-    print(f"export LORE_VAULT={target}")
-    print(
-        "Add that line to your shell profile. Without LORE_VAULT set, lore "
-        "uses the default ~/lore instead of this vault."
-    )
+    # Step 5: install the vault write-protection guardrail (Slice 3).
+    # A present-but-corrupt settings.json raises ValueError from settings_writer —
+    # surface it as a clean error rather than clobbering the user's file.
+    try:
+        _install_guardrail(settings_path, vaults_root)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    # Step 6: inject marker-delimited agent-rules block (Slice 4).
+    # Scan for drift FIRST so the advisory fires for every file that needs
+    # (or will receive) the block — gives the operator visibility. Then
+    # inject into the canonical file and all already-present RULES_CANDIDATES.
+    rules_dir = rules_path.parent
+    extra_candidates = [
+        rules_dir / name
+        for name in installer_mod.RULES_CANDIDATES
+    ]
+
+    # Drift advisory: names candidate files that currently lack the block.
+    # Fires before injection so the operator sees what init is about to fix.
+    drifted = installer_mod.scan_for_rules_drift(rules_dir)
+    for p in drifted:
+        print(
+            f"lore: advisory: {p} lacks the lore agent-rules block "
+            f"— re-run `lore init` to inject it",
+            file=sys.stderr,
+        )
+
+    installer_mod.inject_agent_rules(rules_path, extra_paths=extra_candidates)
+
+    # Step 7: first-run git-identity advisory (Slice 5, S5).
+    # `lore init` only bootstraps — it does NOT require a git identity (the
+    # `*-by` author fallback is the write-path's concern, S2). But when no
+    # identity resolves ($LORE_EMAIL → `git config --global user.email`, both
+    # empty) the FIRST record write would fail with a typed error; surface a
+    # one-line advisory now so that failure isn't a surprise. Routed to STDERR
+    # (council Advocate/Security) so it survives even if `trailhead install`
+    # filters lore stdout.
+    if not vault_mod.resolve_committer_email():
+        print(
+            "lore: advisory: no git identity set "
+            "($LORE_EMAIL / `git config --global user.email` are empty) "
+            "— set one before your first record write, or it will be rejected",
+            file=sys.stderr,
+        )
+
+    print("lore: init complete")
+    return 0
+
+
+# ---- status -----------------------------------------------------------------
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Print lore installation status and surface rules-file drift (Slice 4, S5).
+
+    Scans for known rules-file candidates in the current directory (or the git
+    root when inside a repo) that lack the marker block and emits a drift line
+    for each one so the operator can detect post-init drift without re-running
+    init blind.
+
+    A rules file added after the last ``lore init`` will silently lack the
+    write-prohibition block (the PreToolUse guardrail is fine — the rules
+    injection is the Bash/shell gap protection). ``lore status`` surfaces that
+    so the operator can re-run ``lore init``.
+    """
+    # Determine where to scan: git root (for --local context) or cwd.
+    git_root = installer_mod._find_git_root(Path(os.getcwd()))
+    scan_root = git_root if git_root is not None else Path(os.getcwd())
+
+    drifted = installer_mod.scan_for_rules_drift(scan_root)
+    if drifted:
+        for p in drifted:
+            print(
+                f"lore: drift: {p} lacks the lore agent-rules block "
+                f"— re-run `lore init` to inject it",
+            )
+    else:
+        print("lore: status: agent-rules blocks present in all known rules files")
+
     return 0
 
 
@@ -2684,12 +2808,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lore", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_init = sub.add_parser("init", help="Scaffold a new vault")
-    p_init.add_argument("path")
-    p_init.add_argument("--force", action="store_true", help="Scaffold into a non-empty dir")
-    p_init.add_argument("--allow-outside-home", action="store_true", help="Allow a target outside $HOME")
-    p_init.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+    p_init = sub.add_parser(
+        "init",
+        help="Bootstrap lore on this machine (non-interactive, idempotent)",
+    )
+    p_init.add_argument(
+        "--local",
+        action="store_true",
+        default=False,
+        help=(
+            "Install into the current git repo's project settings "
+            "(.claude/settings.local.json) instead of the global user settings. "
+            "Must be run inside a git repository."
+        ),
+    )
+    p_init.add_argument(
+        "--vault",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Use an existing git repo at PATH as the default vault "
+            "(creates vaults/default as a symlink; does not re-git-init the target)."
+        ),
+    )
     p_init.set_defaults(func=cmd_init)
+
+    p_lore_status = sub.add_parser(
+        "status",
+        help="Show lore installation status and surface rules-file drift (Slice 4, S5)",
+    )
+    p_lore_status.set_defaults(func=cmd_status)
 
     p_patch = sub.add_parser("patch", help="Append text under a section")
     p_patch.add_argument("file")

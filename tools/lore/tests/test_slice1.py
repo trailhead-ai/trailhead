@@ -34,16 +34,23 @@ def test_plugin_json_parses_and_has_required_keys():
 # trailhead/tests/test_dev_marketplace.py at the monorepo level.
 
 
-def test_hooks_json_parses_and_registers_session_start():
-    """hooks/hooks.json is valid JSON with a hooks.SessionStart entry whose
-    command references the plugin via ${CLAUDE_PLUGIN_ROOT}."""
+def test_hooks_json_parses_and_registers_post_tool_use():
+    """hooks/hooks.json is valid JSON with a hooks.PostToolUse entry whose
+    command references the plugin via ${CLAUDE_PLUGIN_ROOT}.
+
+    Slice 2, S5 (F5): SessionStart and WorktreeRemove entries were removed —
+    lore is fully pull; orientation lives in agent-rules and S6 skill descriptions.
+    Only PostToolUse (harvest-candidates) remains.
+    """
     path = PLUGIN_ROOT / "hooks" / "hooks.json"
     assert path.exists(), f"Expected {path} to exist"
     data = json.loads(path.read_text())
     assert "hooks" in data, "hooks.json must have top-level 'hooks' key"
     hooks = data["hooks"]
-    assert "SessionStart" in hooks, "hooks.json must register SessionStart"
-    entries = hooks["SessionStart"]
+    assert "SessionStart" not in hooks, "hooks.json must NOT register SessionStart (F5)"
+    assert "WorktreeRemove" not in hooks, "hooks.json must NOT register WorktreeRemove (Slice 2)"
+    assert "PostToolUse" in hooks, "hooks.json must register PostToolUse (harvest)"
+    entries = hooks["PostToolUse"]
     assert isinstance(entries, list) and len(entries) >= 1
     for entry in entries:
         assert "hooks" in entry

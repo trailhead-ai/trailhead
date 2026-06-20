@@ -92,12 +92,12 @@ class TestNoRecallReferencesInExecutables:
 
 
 # ---------------------------------------------------------------------------
-# Call-site smoke test: SessionStart hook runs and points at `lore search`
+# Call-site: area pointer references search not recall
 # ---------------------------------------------------------------------------
 
-class TestSessionStartCallSite:
+class TestAreaPointerCallSite:
     def test_area_pointer_references_search_not_recall(self, tmp_path):
-        """The kept area-pointer (used by the SessionStart hook) must point at
+        """The area-pointer (serve `lore areas` / recall flows) must point at
         `lore search`, not the removed `lore recall`."""
         recall = load_script("recall")
         vault = tmp_path / "vault"
@@ -112,44 +112,6 @@ class TestSessionStartCallSite:
         )
         assert "lore recall" not in pointer, (
             f"area pointer must NOT reference the removed `lore recall`; got: {pointer!r}"
-        )
-
-    def test_session_start_hook_runs_and_emits_search_pointer(self, tmp_path):
-        """The whole SessionStart hook path runs without error and surfaces the
-        rewired `lore search` pointer — a regressed area-pointer would surface a
-        visible error, not a silent empty pointer."""
-        import json
-        import os
-        import subprocess
-
-        vault = tmp_path / "vault"
-        (vault / "areas").mkdir(parents=True)
-        (vault / "sessions").mkdir(parents=True)
-        (vault / "areas" / "penny.md").write_text(
-            "---\nname: penny\nsummary: the penny worker pipeline\n---\n"
-            "## Overview\nPenny worker.\n"
-        )
-        worktree = tmp_path / "worktree"
-        worktree.mkdir()
-        hook = HOOKS_DIR / "session-context.py"
-        env = dict(os.environ)
-        env["LORE_VAULT"] = str(vault)
-        env["LORE_EMAIL"] = "tester@example.com"
-        env["CLAUDE_PROJECT_DIR"] = str(worktree)
-        r = subprocess.run(
-            [sys.executable, str(hook)],
-            input=json.dumps({"session_id": "smoke-test"}),
-            capture_output=True, text=True, env=env,
-        )
-        assert r.returncode == 0, f"hook crashed: stderr={r.stderr!r}"
-        payload = json.loads(r.stdout)
-        context = payload.get("hookSpecificOutput", {}).get("additionalContext", "")
-        assert "lore search" in context, (
-            "SessionStart context must point at `lore search` (rewired pointer).\n"
-            f"stderr={r.stderr!r} context={context!r}"
-        )
-        assert "lore recall" not in context, (
-            f"SessionStart context still references the removed `lore recall`: {context!r}"
         )
 
 
