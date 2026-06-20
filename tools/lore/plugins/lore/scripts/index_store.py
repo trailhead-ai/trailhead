@@ -30,6 +30,13 @@ migration cost (``reindex`` repopulates):
   ``related-urls``). The sidecar's nested ``related`` map flattens to forward
   ``facet='related-<kind>', value=<target name>`` rows; reverse rows are materialized
   in ``reindex`` pass 2 (see I-4).
+- ``record_labels(id REFERENCES records(id) ON DELETE CASCADE, key, value)`` +
+  ``idx_labels`` — the indexed ``labels`` sidecar map, one row per ``(key, value)``
+  pair (Slice 3). Unlike ``record_facet``/``record_fts``, this table uses **FK
+  ``ON DELETE CASCADE``**, so ``_delete_projection`` needs no manual cleanup — the
+  ``records`` delete clears the linked label rows (relies on ``PRAGMA
+  foreign_keys=ON``). The ``annotations`` sidecar map is free-form and **not**
+  projected into any index table.
 - ``record_fts`` — a **populated** ``fts5(title, keywords, body,
   tokenize='unicode61 remove_diacritics 2')`` table with **NO ``content=`` option**
   (KU1, validated Slice 0). ``records`` has no ``body``/``keywords`` column, so
@@ -142,6 +149,14 @@ CREATE TABLE IF NOT EXISTS record_facet (
 );
 
 CREATE INDEX IF NOT EXISTS idx_facet ON record_facet(facet, value);
+
+CREATE TABLE IF NOT EXISTS record_labels (
+    id      TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+    key     TEXT NOT NULL,
+    value   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_labels ON record_labels(key, value);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS record_fts USING fts5(
     title, keywords, body,
@@ -286,6 +301,17 @@ def _project_record(
         "INSERT INTO record_fts(rowid, title, keywords, body) VALUES (?, ?, ?, ?)",
         (rowid, title, " ".join(keywords), body),
     )
+
+    # Indexed labels — one row per (key, value). ``annotations`` are sidecar-only
+    # and deliberately NOT projected. CASCADE-linked to ``records`` so a delete of
+    # the records row clears these (FK ON DELETE CASCADE; PRAGMA foreign_keys=ON).
+    labels = sidecar.get("labels")
+    if isinstance(labels, dict):
+        for key, value in labels.items():
+            conn.execute(
+                "INSERT INTO record_labels(id, key, value) VALUES (?, ?, ?)",
+                (record_id, key, value),
+            )
     return record_id
 
 

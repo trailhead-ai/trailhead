@@ -76,6 +76,8 @@ def _sidecar(
     related_files=None,
     related_urls=None,
     team=None,
+    labels=None,
+    annotations=None,
 ):
     s = {
         "version": "v1",
@@ -101,6 +103,10 @@ def _sidecar(
         s["related-files-or-folders"] = related_files
     if related_urls is not None:
         s["related-urls"] = related_urls
+    if labels is not None:
+        s["labels"] = labels
+    if annotations is not None:
+        s["annotations"] = annotations
     return s
 
 
@@ -145,7 +151,7 @@ def test_facet_fk_is_enforced(env):
 # ---------------------------------------------------------------------------
 
 def test_open_index_provisions_realized_tables(env):
-    """open_index provisions records, record_facet, idx_facet, and record_fts."""
+    """open_index provisions records, record_facet, idx_facet, record_fts, labels."""
     mod = load_index_store()
     conn = mod.open_index(env=env)
     try:
@@ -153,12 +159,16 @@ def test_open_index_provisions_realized_tables(env):
             r[0]
             for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE name IN "
-                "('records', 'record_facet', 'idx_facet', 'record_fts')"
+                "('records', 'record_facet', 'idx_facet', 'record_fts', "
+                "'record_labels', 'idx_labels')"
             ).fetchall()
         }
     finally:
         conn.close()
-    assert {"records", "record_facet", "idx_facet", "record_fts"} <= objs
+    assert {
+        "records", "record_facet", "idx_facet", "record_fts",
+        "record_labels", "idx_labels",
+    } <= objs
 
 
 def test_records_has_locked_columns(env):
@@ -684,3 +694,104 @@ def test_upsert_row_re_upsert_replaces_facets_and_fts(env, tmp_path):
     assert kw == ["new"], "stale keyword facet rows not replaced on re-upsert"
     assert fts_count == 1, "duplicate FTS rows on re-upsert"
     assert old_hit == 0, "stale FTS body content not replaced on re-upsert"
+
+
+# ---------------------------------------------------------------------------
+# Labels projection (Slice 3) — labels indexed, annotations NOT
+# ---------------------------------------------------------------------------
+
+def test_labels_project_one_row_per_key_value(env, tmp_path):
+    """A record with labels={"worktree": "s5"} yields a record_labels (id, key, value) row."""
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(
+        vault, "spec", "alpha",
+        _sidecar(title="Alpha", labels={"worktree": "s5"}),
+        "body",
+    )
+    rid = f"{vault}/spec/alpha"
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        rows = conn.execute(
+            "SELECT id, key, value FROM record_labels WHERE id=?", (rid,)
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [(rid, "worktree", "s5")]
+
+
+def test_annotations_are_not_projected(env, tmp_path):
+    """A record with ONLY annotations (no labels) yields zero record_labels rows."""
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(
+        vault, "spec", "alpha",
+        _sidecar(title="Alpha", annotations={"note": "free form text"}),
+        "body",
+    )
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        count = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 0, "annotations must never be projected into record_labels"
+
+
+def test_labels_projection_idempotent(env, tmp_path):
+    """Running rebuild twice yields no duplicate record_labels rows."""
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(
+        vault, "spec", "alpha",
+        _sidecar(title="Alpha", labels={"worktree": "s5", "claude-code/model": "x"}),
+        "body",
+    )
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        first = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        second = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+    finally:
+        conn.close()
+    assert first == 2
+    assert second == 2, "rebuild must not duplicate record_labels rows"
+
+
+def test_delete_projection_cascades_label_rows(env, tmp_path):
+    """_delete_projection leaves zero record_labels rows for the id (FK ON DELETE CASCADE).
+
+    Cleanup of record_labels relies on PRAGMA foreign_keys=ON being set by
+    open_index — proven directly here rather than assumed, since a connection
+    without the pragma would orphan the label rows.
+    """
+    mod = load_index_store()
+    vault = tmp_path / "vault"
+    _write_record(
+        vault, "spec", "alpha",
+        _sidecar(title="Alpha", labels={"worktree": "s5"}),
+        "body",
+    )
+    rid = f"{vault}/spec/alpha"
+    conn = mod.open_index(env=env)
+    try:
+        mod.rebuild([str(vault)], conn)
+        conn.commit()
+        before = conn.execute(
+            "SELECT COUNT(*) FROM record_labels WHERE id=?", (rid,)
+        ).fetchone()[0]
+        assert before == 1
+        mod._delete_projection(conn, rid)
+        conn.commit()
+        after = conn.execute(
+            "SELECT COUNT(*) FROM record_labels WHERE id=?", (rid,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert after == 0, "FK ON DELETE CASCADE must remove the linked record_labels rows"

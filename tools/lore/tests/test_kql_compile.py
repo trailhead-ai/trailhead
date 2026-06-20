@@ -791,6 +791,184 @@ class TestFullQueryShape:
 
 
 # ---------------------------------------------------------------------------
+# Slice 4 — label selectors (LabelEq / LabelExists)
+# ---------------------------------------------------------------------------
+
+def _label_sidecar(*, kind="spec", title="L", status="active", labels=None,
+                   annotations=None, updated_at="2026-06-17T10:00:00Z"):
+    s = _sidecar(kind=kind, title=title, status=status, updated_at=updated_at)
+    if labels is not None:
+        s["labels"] = labels
+    if annotations is not None:
+        s["annotations"] = annotations
+    return s
+
+
+@pytest.fixture()
+def label_index(tmp_path, index_store):
+    """Index with label-bearing records.
+
+      - spec/has-s5      labels={"worktree":"s5"}
+      - spec/has-s6      labels={"worktree":"s6"}
+      - spec/namespaced  labels={"claude-code/model":"opus"}
+      - spec/two-labels  labels={"worktree":"s5","phase":"build"}
+      - spec/no-labels   annotations={"note":"x"} only (no labels)
+    """
+    vault = tmp_path / "vault"
+    fake_state = tmp_path / "xdg-state"
+    fake_state.mkdir()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(fake_state)
+
+    _write_record(vault, "spec", "has-s5",
+                  _label_sidecar(title="Has S5", labels={"worktree": "s5"}),
+                  "body s5")
+    _write_record(vault, "spec", "has-s6",
+                  _label_sidecar(title="Has S6", labels={"worktree": "s6"}),
+                  "body s6")
+    _write_record(vault, "spec", "namespaced",
+                  _label_sidecar(title="Namespaced",
+                                 labels={"claude-code/model": "opus"}),
+                  "body ns")
+    _write_record(vault, "spec", "two-labels",
+                  _label_sidecar(title="Two",
+                                 labels={"worktree": "s5", "phase": "build"}),
+                  "body two")
+    _write_record(vault, "spec", "no-labels",
+                  _label_sidecar(title="None", annotations={"note": "x"}),
+                  "body none")
+
+    conn = index_store.open_index(env=env)
+    index_store.rebuild([str(vault)], conn)
+    conn.commit()
+    return conn, vault, env
+
+
+class TestLabelCompile:
+    """LabelEq / LabelExists compile to parameterized EXISTS subqueries."""
+
+    def test_label_eq_compiles_to_exists_with_bind_params(self, kql, compiler):
+        cq = compiler.compile(kql.parse("label.worktree:s5"))
+        assert "EXISTS" in cq.where
+        assert "record_labels" in cq.where
+        assert "key = ?" in cq.where
+        assert "value = ?" in cq.where
+        assert "worktree" in cq.params
+        assert "s5" in cq.params
+
+    def test_label_eq_key_and_value_are_not_interpolated(self, kql, compiler):
+        cq = compiler.compile(kql.parse("label.worktree:s5"))
+        # The literal key/value must NOT appear in the SQL text — only as params.
+        assert "worktree" not in cq.where
+        assert "s5" not in cq.where
+
+    def test_label_exists_compiles_to_key_only_exists(self, kql, compiler):
+        cq = compiler.compile(kql.parse("has:label.worktree"))
+        assert "EXISTS" in cq.where
+        assert "record_labels" in cq.where
+        assert "key = ?" in cq.where
+        assert "value = ?" not in cq.where
+        assert "worktree" in cq.params
+
+    def test_label_exists_key_not_interpolated(self, kql, compiler):
+        cq = compiler.compile(kql.parse("has:label.worktree"))
+        assert "worktree" not in cq.where
+
+    def test_namespaced_label_eq_binds_real_key(self, kql, compiler):
+        cq = compiler.compile(kql.parse("label.claude-code.model:opus"))
+        assert "claude-code/model" in cq.params
+        assert "opus" in cq.params
+
+    # -- executed against a fixture index ----------------------------------
+
+    def test_label_eq_returns_exact_records(self, kql, compiler, label_index):
+        conn, vault, env = label_index
+        cq = compiler.compile(kql.parse("label.worktree:s5"))
+        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
+        assert any(i.endswith("/spec/has-s5") for i in ids), ids
+        assert any(i.endswith("/spec/two-labels") for i in ids), ids
+        assert not any(i.endswith("/spec/has-s6") for i in ids), ids
+        assert not any(i.endswith("/spec/no-labels") for i in ids), ids
+
+    def test_label_exists_returns_any_with_key(self, kql, compiler, label_index):
+        conn, vault, env = label_index
+        cq = compiler.compile(kql.parse("has:label.worktree"))
+        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
+        assert any(i.endswith("/spec/has-s5") for i in ids), ids
+        assert any(i.endswith("/spec/has-s6") for i in ids), ids
+        assert any(i.endswith("/spec/two-labels") for i in ids), ids
+        assert not any(i.endswith("/spec/no-labels") for i in ids), ids
+        assert not any(i.endswith("/spec/namespaced") for i in ids), ids
+
+    def test_namespaced_label_eq_returns_record(self, kql, compiler, label_index):
+        conn, vault, env = label_index
+        cq = compiler.compile(kql.parse("label.claude-code.model:opus"))
+        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
+        assert [i for i in ids if i.endswith("/spec/namespaced")], ids
+        assert len(ids) == 1, ids
+
+    def test_two_label_terms_and_together(self, kql, compiler, label_index):
+        conn, vault, env = label_index
+        cq = compiler.compile(kql.parse("label.worktree:s5 label.phase:build"))
+        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
+        # only two-labels has BOTH worktree=s5 and phase=build
+        assert ids == [i for i in ids if i.endswith("/spec/two-labels")]
+        assert any(i.endswith("/spec/two-labels") for i in ids), ids
+
+    def test_nonexistent_label_returns_none(self, kql, compiler, label_index):
+        conn, vault, env = label_index
+        cq = compiler.compile(kql.parse("label.worktree:nope"))
+        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
+        assert ids == [], ids
+
+    def test_nonexistent_label_key_exists_returns_none(self, kql, compiler, label_index):
+        conn, vault, env = label_index
+        cq = compiler.compile(kql.parse("has:label.bogus"))
+        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
+        assert ids == [], ids
+
+    def test_annotations_not_queryable(self, kql, compiler, label_index):
+        """annotations are NOT indexed: a label query on an annotation key finds nothing."""
+        conn, vault, env = label_index
+        cq = compiler.compile(kql.parse("label.note:x"))
+        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
+        assert ids == [], ids
+
+
+class TestLabelInjectionSafety:
+    """SQL metachars in a label key/value are bound as params — no SQL executes."""
+
+    def test_label_value_with_sql_metachars_is_bound(self, kql, compiler):
+        node = kql.LabelEq(key="worktree", value="x'; DROP TABLE records;--")
+        cq = compiler.compile(node)
+        assert "DROP TABLE" not in cq.where
+        assert "x'; DROP TABLE records;--" in cq.params
+
+    def test_label_key_with_sql_metachars_is_bound(self, kql, compiler):
+        node = kql.LabelEq(key="evil'--", value="v")
+        cq = compiler.compile(node)
+        assert "evil'--" not in cq.where
+        assert "evil'--" in cq.params
+
+    def test_label_exists_key_with_metachars_is_bound(self, kql, compiler):
+        node = kql.LabelExists(key="evil'; DROP TABLE record_labels;--")
+        cq = compiler.compile(node)
+        assert "DROP TABLE" not in cq.where
+        assert "evil'; DROP TABLE record_labels;--" in cq.params
+
+    def test_sqli_label_executes_with_no_side_effect(self, kql, compiler, label_index):
+        conn, vault, env = label_index
+        before = conn.execute("SELECT count(*) FROM record_labels").fetchone()[0]
+        node = kql.LabelEq(key="worktree", value="s5'; DROP TABLE record_labels;--")
+        cq = compiler.compile(node)
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+        # The crafted value simply doesn't match; the table is untouched.
+        assert rows == []
+        after = conn.execute("SELECT count(*) FROM record_labels").fetchone()[0]
+        assert after == before
+
+
+# ---------------------------------------------------------------------------
 # CompiledQuery structure
 # ---------------------------------------------------------------------------
 

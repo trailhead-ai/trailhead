@@ -26,6 +26,13 @@ operators.
 - ``FacetMembership(facet, value)`` — membership in a list-valued facet (``area``,
   ``phase``, ``keyword``, ``related-area``, ``related-phases``, ``keywords``).
   ``facet`` is the surface field name.
+- ``LabelEq(key, value)`` — exact indexed-label match (``label.worktree:s5``).
+  Namespaced keys use the **dot-for-slash** convention: ``label.claude-code.model:opus``
+  selects the stored key ``claude-code/model`` (the lexer rejects a bare ``/``, so
+  the selector encodes ``/`` as ``.`` and the parser decodes it back). ``key`` is the
+  REAL stored key. ``annotations`` deliberately have NO selector.
+- ``LabelExists(key)`` — indexed-label key existence (``has:label.worktree``); same
+  dot-for-slash decoding on ``key``.
 - ``FullText(term)`` — a bare full-text term (``trailhead``).
 - ``Phrase(text)`` — a quoted adjacent-phrase (``"penny worker"``).
 - ``Compare(field, op, value)`` — range comparison on a date/number column;
@@ -101,6 +108,26 @@ class FacetMembership:
     """List-valued facet membership: ``area:penny``, ``phase:build``."""
     facet: str
     value: str
+
+
+@dataclass(frozen=True)
+class LabelEq:
+    """Exact indexed-label match: ``label.worktree:s5`` → ``LabelEq("worktree", "s5")``.
+
+    ``key`` is the REAL stored label key (dot-for-slash already decoded — see
+    ``_parse_field_rhs``). Only ``labels`` have a selector; ``annotations`` do not.
+    """
+    key: str
+    value: str
+
+
+@dataclass(frozen=True)
+class LabelExists:
+    """Indexed-label key existence: ``has:label.worktree`` → ``LabelExists("worktree")``.
+
+    ``key`` is the REAL stored label key (dot-for-slash already decoded).
+    """
+    key: str
 
 
 @dataclass(frozen=True)
@@ -322,6 +349,15 @@ def _tokenize(text):
             i = j
             continue
 
+        if c == '=':
+            # The old/wrong label form ``label:worktree=s5`` lands here ('=' is not
+            # a word char). Point users at the correct dot-form selector.
+            raise KqlParseError(
+                "unexpected character '=' in query: for labels use "
+                "label.<key>:<value> (e.g. label.worktree:s5) — "
+                "namespaced keys encode '/' as '.' (label.claude-code.model:opus)"
+            )
+
         raise KqlParseError(f"unexpected character '{c}' in query")
 
     tokens.append((_TK_EOF, ""))
@@ -458,10 +494,39 @@ class _Parser:
     def _parse_field_rhs(self, field):
         """Parse the RHS of a field:value expression.
 
-        Validates the field name; emits FacetMembership for facet fields, FieldEq
-        for scalar fields, and Compare for comparison fields (the latter only when
-        the field name appears in _COMPARE_FIELDS).
+        Routes the indexed-label selectors (``label.<key>:<value>`` and
+        ``has:label.<key>``) to ``LabelEq`` / ``LabelExists`` BEFORE the static
+        ``_ALL_FIELDS`` guard — those fields are deliberately NOT in the static set.
+        Then validates the field name; emits FacetMembership for facet fields,
+        FieldEq for scalar fields, and Compare for comparison fields (the latter
+        only when the field name appears in _COMPARE_FIELDS).
+
+        **Dot-for-slash key convention (labels only):** a namespaced label key
+        such as ``claude-code/model`` contains a ``/``, which the lexer rejects in a
+        bare token. The selector therefore encodes ``/`` as ``.`` —
+        ``label.claude-code.model:opus`` — and this routing decodes it back to the
+        real stored key by replacing ``.`` with ``/``. This is unambiguous because
+        stored keys are kebab-only (``[a-z0-9-]``, no dots) with at most one
+        namespace segment, so the post-prefix portion has at most one ``.``. Simple
+        keys (``label.worktree`` → ``worktree``) have no dot and are unaffected.
+        ``annotations`` deliberately have no selector.
         """
+        if field.startswith("label."):
+            key = field[len("label."):].replace(".", "/")
+            value = self._parse_value()
+            return LabelEq(key=key, value=value)
+
+        if field == "has":
+            if self._at(_TK_WORD):
+                _, rhs = self._peek()
+                if rhs.startswith("label."):
+                    self._consume()  # eat the label.<key> word
+                    key = rhs[len("label."):].replace(".", "/")
+                    return LabelExists(key=key)
+            raise KqlParseError(
+                "has: expects has:label.<key> (e.g. has:label.worktree)"
+            )
+
         if field not in _ALL_FIELDS:
             raise KqlParseError(_suggest_field(field))
 

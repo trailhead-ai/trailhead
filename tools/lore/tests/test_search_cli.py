@@ -188,6 +188,99 @@ def test_unbalanced_quote_nonzero(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Slice 4 — label.<key>:<value> / has:label.<key> selectors (end-to-end)
+# ---------------------------------------------------------------------------
+
+def _make_label_fixture(tmp_path: Path):
+    """A vault with label-bearing records, indexed. Returns (vault, state)."""
+    vault = tmp_path / "vault"
+    state = tmp_path / "state"
+    vault.mkdir()
+    state.mkdir()
+
+    _write_record(
+        vault, "spec", "labelled-s5",
+        {"title": "Labelled S5", "status": "active",
+         "created-at": "2026-01-01", "updated-at": "2026-01-02",
+         "labels": {"worktree": "s5"}},
+        "A record carrying the worktree=s5 label.",
+    )
+    _write_record(
+        vault, "spec", "labelled-s6",
+        {"title": "Labelled S6", "status": "active",
+         "created-at": "2026-01-01", "updated-at": "2026-01-02",
+         "labels": {"worktree": "s6"}},
+        "A record carrying the worktree=s6 label.",
+    )
+    _write_record(
+        vault, "spec", "model-opus",
+        {"title": "Model Opus", "status": "active",
+         "created-at": "2026-01-01", "updated-at": "2026-01-02",
+         "labels": {"claude-code/model": "opus"}},
+        "A namespaced label record.",
+    )
+    _write_record(
+        vault, "spec", "no-labels",
+        {"title": "No Labels", "status": "active",
+         "created-at": "2026-01-01", "updated-at": "2026-01-02"},
+        "A record without any labels.",
+    )
+
+    _build_index(state, [vault], owned=vault)
+    return vault, state
+
+
+def test_label_eq_returns_right_id(tmp_path):
+    vault, state = _make_label_fixture(tmp_path)
+    r = _run(["label.worktree:s5"], vault=vault, state=state)
+    assert r.returncode == 0, r.stderr
+    assert "labelled-s5" in r.stdout
+    assert "labelled-s6" not in r.stdout
+    assert "no-labels" not in r.stdout
+
+
+def test_label_exists_returns_keyed_records(tmp_path):
+    vault, state = _make_label_fixture(tmp_path)
+    r = _run(["has:label.worktree"], vault=vault, state=state)
+    assert r.returncode == 0, r.stderr
+    assert "labelled-s5" in r.stdout
+    assert "labelled-s6" in r.stdout
+    assert "model-opus" not in r.stdout
+    assert "no-labels" not in r.stdout
+
+
+def test_namespaced_label_eq_end_to_end(tmp_path):
+    vault, state = _make_label_fixture(tmp_path)
+    r = _run(["label.claude-code.model:opus"], vault=vault, state=state)
+    assert r.returncode == 0, r.stderr
+    assert "model-opus" in r.stdout
+    assert "labelled-s5" not in r.stdout
+
+
+def test_old_equals_label_form_errors_with_guidance(tmp_path):
+    vault, state = _make_label_fixture(tmp_path)
+    r = _run(["label:worktree=s5"], vault=vault, state=state)
+    assert r.returncode != 0
+    # The error must guide toward the correct dot-form.
+    assert "label." in r.stderr
+
+
+def test_label_sqli_value_no_results_no_error(tmp_path):
+    vault, state = _make_label_fixture(tmp_path)
+    # A quoted value carries SQL metachars past the lexer; it must reach the
+    # compiler as a BIND param — match nothing, execute cleanly, no side effect.
+    r = _run(['label.worktree:"s5\'; DROP TABLE record_labels;--"'],
+             vault=vault, state=state)
+    # Parses + executes as a bound param; simply matches nothing, no crash.
+    assert r.returncode == 0, r.stderr
+    assert "labelled-s5" not in r.stdout
+    # The index is intact: a subsequent legitimate query still works.
+    r2 = _run(["label.worktree:s5"], vault=vault, state=state)
+    assert r2.returncode == 0, r2.stderr
+    assert "labelled-s5" in r2.stdout
+
+
+# ---------------------------------------------------------------------------
 # --vault scope
 # ---------------------------------------------------------------------------
 

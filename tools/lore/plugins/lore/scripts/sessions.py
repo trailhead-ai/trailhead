@@ -296,11 +296,13 @@ def write_json_atomic(path: Path, obj: dict) -> bool:
     """Serialize *obj* to *path* atomically (temp file + os.replace).
 
     Mirrors :func:`write_note_atomic` and the record sidecar format
-    (``record_store.py``): ``json.dumps(obj, indent=2, sort_keys=True)``. A
-    crash before the replace leaves the original intact and cleans up the temp
+    (``record_store.py``): compact single-line JSON, sorted keys, no trailing
+    newline — lockstep with record_store to avoid mixed-format vault writes.
+    A crash before the replace leaves the original intact and cleans up the temp
     file. Returns True on success, False on failure.
     """
-    return write_note_atomic(path, json.dumps(obj, indent=2, sort_keys=True))
+    # Compact format: mirrors record_store.py — sorted keys, no trailing newline.
+    return write_note_atomic(path, json.dumps(obj, sort_keys=True, separators=(",", ":")))
 
 
 _SESSION_HEADER_RE = re.compile(r"^# session: (\S+)\s*$", re.MULTILINE)

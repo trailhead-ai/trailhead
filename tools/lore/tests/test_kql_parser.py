@@ -376,3 +376,137 @@ def test_product_field(kql):
     ast = kql.parse("product:lore")
     assert isinstance(ast, kql.FieldEq)
     assert ast.field == "product"
+
+
+# ---------------------------------------------------------------------------
+# Slice 4 — label.<key>:<value> and has:label.<key> selectors
+#
+# The dot-form is the resolved KU1 syntax: `.` is already a word char so
+# `label.worktree` is a single token, routed past the _ALL_FIELDS guard to a
+# LabelEq/LabelExists node. Namespaced keys encode `/` as `.` (dot-for-slash)
+# since a bare `/` is rejected by the lexer.
+# ---------------------------------------------------------------------------
+
+def test_label_eq_simple_key(kql):
+    ast = kql.parse("label.worktree:s5")
+    assert isinstance(ast, kql.LabelEq)
+    assert ast.key == "worktree"
+    assert ast.value == "s5"
+
+
+def test_label_exists_simple_key(kql):
+    ast = kql.parse("has:label.worktree")
+    assert isinstance(ast, kql.LabelExists)
+    assert ast.key == "worktree"
+
+
+def test_label_eq_namespaced_key_dot_for_slash(kql):
+    # label.claude-code.model:opus → stored key 'claude-code/model'
+    ast = kql.parse("label.claude-code.model:opus")
+    assert isinstance(ast, kql.LabelEq)
+    assert ast.key == "claude-code/model"
+    assert ast.value == "opus"
+
+
+def test_label_exists_namespaced_key_dot_for_slash(kql):
+    ast = kql.parse("has:label.claude-code.model")
+    assert isinstance(ast, kql.LabelExists)
+    assert ast.key == "claude-code/model"
+
+
+def test_label_eq_quoted_value(kql):
+    ast = kql.parse('label.worktree:"s5 env"')
+    assert isinstance(ast, kql.LabelEq)
+    assert ast.key == "worktree"
+    assert ast.value == "s5 env"
+
+
+def test_label_eq_composes_with_and(kql):
+    ast = kql.parse("label.worktree:s5 kind:spec")
+    assert isinstance(ast, kql.And)
+    assert isinstance(ast.left, kql.LabelEq)
+    assert ast.left.key == "worktree"
+    assert isinstance(ast.right, kql.FieldEq)
+    assert ast.right.field == "kind"
+
+
+def test_two_label_terms_and_together(kql):
+    ast = kql.parse("label.worktree:s5 label.phase:build")
+    assert isinstance(ast, kql.And)
+    assert isinstance(ast.left, kql.LabelEq)
+    assert isinstance(ast.right, kql.LabelEq)
+    assert ast.left.key == "worktree" and ast.left.value == "s5"
+    assert ast.right.key == "phase" and ast.right.value == "build"
+
+
+def test_label_exists_composes_with_label_eq(kql):
+    ast = kql.parse("has:label.worktree label.phase:build")
+    assert isinstance(ast, kql.And)
+    assert isinstance(ast.left, kql.LabelExists)
+    assert isinstance(ast.right, kql.LabelEq)
+
+
+def test_label_eq_negation(kql):
+    ast = kql.parse("-label.worktree:s5")
+    assert isinstance(ast, kql.Not)
+    assert isinstance(ast.operand, kql.LabelEq)
+
+
+# -- disallowed chars still rejected on the label path ----------------------
+
+def test_label_value_wildcard_rejected(kql):
+    with pytest.raises(kql.KqlParseError, match=r"wildcard|not supported"):
+        kql.parse("label.worktree:s5*")
+
+
+def test_label_value_fuzzy_rejected(kql):
+    with pytest.raises(kql.KqlParseError, match=r"fuzzy|not supported"):
+        kql.parse("label.worktree:s5~")
+
+
+def test_label_bare_slash_rejected(kql):
+    # A raw slash in the key (not the dot-for-slash form) is still a lexer error.
+    with pytest.raises(kql.KqlParseError):
+        kql.parse("label.claude-code/model:x")
+
+
+def test_label_key_wildcard_rejected(kql):
+    with pytest.raises(kql.KqlParseError, match=r"wildcard|not supported"):
+        kql.parse("label.worktree*:s5")
+
+
+# -- wrong form → actionable error pointing at the dot-form ------------------
+
+def test_old_equals_form_rejected_with_guidance(kql):
+    # label:worktree=s5 — the '=' is not a word char; the message must guide the
+    # user toward the correct label.<key>:<value> form.
+    with pytest.raises(kql.KqlParseError) as exc:
+        kql.parse("label:worktree=s5")
+    assert "label." in str(exc.value)
+
+
+# -- annotations get NO selector --------------------------------------------
+
+def test_annotation_field_is_unknown(kql):
+    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
+        kql.parse("annotation:foo")
+
+
+def test_annotation_dot_field_is_unknown(kql):
+    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
+        kql.parse("annotation.worktree:foo")
+
+
+def test_has_without_label_prefix_rejected(kql):
+    with pytest.raises(kql.KqlParseError) as exc:
+        kql.parse("has:worktree")
+    assert "label" in str(exc.value).lower()
+
+
+def test_label_nodes_are_immutable(kql):
+    eq = kql.LabelEq(key="worktree", value="s5")
+    exists = kql.LabelExists(key="worktree")
+    with pytest.raises(Exception):
+        eq.key = "other"
+    with pytest.raises(Exception):
+        exists.key = "other"

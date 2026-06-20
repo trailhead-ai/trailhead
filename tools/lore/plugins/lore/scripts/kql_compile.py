@@ -76,6 +76,13 @@ node at all) orders by ``updated_at DESC, last_referenced_at DESC`` (no bm25).
   ``area`` → ``related-area``,  ``phase`` → ``related-phases``,  ``keyword`` → ``keywords``
   Real keys (``related-area``, ``related-phases``, ``keywords``) pass through unchanged.
 
+**Indexed-label selectors (LOCKED — Slice 4):**
+  ``LabelEq(key, value)`` → ``EXISTS(SELECT 1 FROM record_labels WHERE id=records.id
+  AND key=? AND value=?)``;  ``LabelExists(key)`` → the same EXISTS without the
+  ``value`` predicate. BOTH ``key`` and ``value`` are BIND params — never
+  interpolated (the dot-for-slash key decoding happens in ``kql.py``, so ``key`` is
+  already the real stored key). ``annotations`` have NO selector.
+
 **Scalar field → column mapping (LOCKED):**
   ``kind``, ``status``, ``repo``, ``team``, ``product``, ``suite`` (identity).
 
@@ -264,6 +271,8 @@ class _Compiler:
         handler = {
             "FieldEq": self._compile_field_eq,
             "FacetMembership": self._compile_facet_membership,
+            "LabelEq": self._compile_label_eq,
+            "LabelExists": self._compile_label_exists,
             "FullText": self._compile_fulltext,
             "Phrase": self._compile_phrase,
             "Compare": self._compile_compare,
@@ -299,6 +308,25 @@ class _Compiler:
             "WHERE f.id = records.id AND f.facet = ? AND f.value = ?)"
         )
         return sql, [facet, node.value]
+
+    def _compile_label_eq(self, node) -> tuple:
+        # NOTE: ``key`` and ``value`` are BIND params (``key = ? AND value = ?``) —
+        # both are VALUES, never SQL column names, so a label key/value containing
+        # SQL metachars is structurally inert (mirrors FacetMembership). Do NOT
+        # string-interpolate either — this is a hard security requirement.
+        sql = (
+            "EXISTS (SELECT 1 FROM record_labels "
+            "WHERE id = records.id AND key = ? AND value = ?)"
+        )
+        return sql, [node.key, node.value]
+
+    def _compile_label_exists(self, node) -> tuple:
+        # ``key`` is a BIND param (existence-only — no value predicate).
+        sql = (
+            "EXISTS (SELECT 1 FROM record_labels "
+            "WHERE id = records.id AND key = ?)"
+        )
+        return sql, [node.key]
 
     def _compile_fulltext(self, node) -> tuple:
         match_str = _sanitize_bare_term(node.term)

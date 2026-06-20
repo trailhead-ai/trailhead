@@ -37,6 +37,7 @@ Invariants (Spec S1):
 # annotations eagerly (no future import) sidesteps that — every annotation here
 # is a valid runtime expression on 3.11+ and there are no forward references.
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import NamedTuple
@@ -107,6 +108,7 @@ _STR = "str"
 _LIST_STR = "list[str]"
 _DATETIME = "datetime"
 _RELATED_MAP = "related-map"
+_MAP_STR_STR = "map[str,str]"
 
 #: Keys that are ``required`` in the field table but never operator-supplied:
 #: ``status`` and ``version`` are defaulted by the validator when omitted.
@@ -134,6 +136,8 @@ FIELDS_V1: dict[str, FieldSpec] = {
     "related": FieldSpec(required=False, type_tag=_RELATED_MAP),
     "related-urls": FieldSpec(required=False, type_tag=_LIST_STR),
     "related-phases": FieldSpec(required=False, type_tag=_LIST_STR),
+    "labels": FieldSpec(required=False, type_tag=_MAP_STR_STR),
+    "annotations": FieldSpec(required=False, type_tag=_MAP_STR_STR),
 }
 
 #: Schema registry keyed by version (only ``v1`` exists today).
@@ -292,11 +296,52 @@ def _check_related(key: str, value: object) -> list[str]:
     return errors
 
 
+# A kebab segment: starts and ends with [a-z0-9]; interior may contain hyphens.
+# Allows single-char names like "x". No uppercase, no underscore, no digit-only ban.
+_KEBAB_SEGMENT = r"[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+# A map key is one segment (bare) or two segments separated by exactly one slash
+# (namespace/name). More than one slash is rejected. Anchored with \Z (not $) so a
+# trailing newline cannot sneak past — $ matches just before a final \n, which would
+# admit keys like "foo\n" into the index.
+_MAP_KEY_RE = re.compile(rf"^{_KEBAB_SEGMENT}(/{_KEBAB_SEGMENT})?\Z")
+
+
+def _check_map_str_str(key: str, value: object) -> list[str]:
+    """Validate a ``map[str,str]`` sidecar field (``labels`` or ``annotations``).
+
+    Enforces: value is a dict; every map value is a ``str``; every map key matches
+    ``[namespace/]name`` — a lowercase kebab segment (``[a-z0-9-]``, begins and
+    ends with alphanumeric) with an optional single namespace prefix + ``/``.
+
+    SECURITY NOTE: map values are untrusted free-form strings supplied by callers.
+    Any future read path that echoes them into a prompt or a fenced channel MUST
+    escape them before output. No such path exists in v1; this note is the standing
+    guard for when one is added.
+    """
+    if not isinstance(value, dict):
+        return [f"key {key!r} must be a map of string keys to string values"]
+    errors: list[str] = []
+    for map_key, map_val in value.items():
+        if not isinstance(map_val, str):
+            errors.append(
+                f"{key}: value for map key {map_key!r} must be a string"
+                f" (got {type(map_val).__name__})"
+            )
+        if not isinstance(map_key, str) or not _MAP_KEY_RE.match(map_key):
+            errors.append(
+                f"{key}: invalid map key {map_key!r} — must match"
+                " [namespace/]name (lowercase kebab, begins/ends alphanumeric,"
+                " at most one namespace segment)"
+            )
+    return errors
+
+
 _TYPE_CHECKS = {
     _STR: _check_str,
     _LIST_STR: _check_list_str,
     _DATETIME: _check_datetime,
     _RELATED_MAP: _check_related,
+    _MAP_STR_STR: _check_map_str_str,
 }
 
 

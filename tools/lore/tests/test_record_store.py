@@ -208,7 +208,7 @@ def test_resolve_committer_email_ignores_repo_local_override(rs, monkeypatch, tm
 # ---------------------------------------------------------------------------
 
 def test_validate_and_write_round_trip(rs, conn, tmp_path):
-    """Body verbatim .md + pretty sorted-key .json + matching index row."""
+    """Body verbatim .md + compact sorted-key .json + matching index row."""
     vault = tmp_path / "vault"
     vault.mkdir()
     loc = rs.place_record("My Spec", "spec", None, str(vault))
@@ -225,8 +225,8 @@ def test_validate_and_write_round_trip(rs, conn, tmp_path):
     raw = js.read_text()
     parsed = json.loads(raw)
     assert parsed["title"] == "My Spec"
-    # Pretty-printed, sorted-key.
-    assert raw == json.dumps(parsed, indent=2, sort_keys=True)
+    # Compact single-line, sorted keys, no trailing newline (Slice 0).
+    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
 
     row = conn.execute(
         "SELECT records.title, record_fts.body FROM records "
@@ -236,6 +236,22 @@ def test_validate_and_write_round_trip(rs, conn, tmp_path):
     ).fetchone()
     assert row[0] == "My Spec"
     assert row[1] == body
+
+
+def test_validate_and_write_sidecar_compact_json(rs, conn, tmp_path):
+    """Sidecar is single-line compact JSON, keys sorted, no trailing newline (Slice 0)."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    loc = rs.place_record("My Spec", "spec", None, str(vault))
+    rs.validate_and_write(loc, _sidecar(), "body", conn)
+    conn.commit()
+
+    raw = (vault / "spec" / "my-spec.json").read_text()
+    # Single-line compact: no embedded newlines, no trailing newline.
+    assert "\n" not in raw
+    # Parseable and round-trips stably.
+    parsed = json.loads(raw)
+    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
 
 
 def test_validate_and_write_stamps_provenance(rs, conn, tmp_path, monkeypatch):
@@ -523,3 +539,54 @@ def test_delete_record_missing_id_raises_not_found(rs, conn, tmp_path):
     vault.mkdir()
     with pytest.raises(rs.RecordNotFoundError):
         rs.delete_record("spec/nope", conn, vault_root=str(vault))
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: labels/annotations round-trip (plan 2026-06-20)
+# ---------------------------------------------------------------------------
+
+def test_labels_round_trip_byte_stable_sorted_inner_keys(rs, conn, tmp_path):
+    """labels map written compact with inner keys sorted; round-trips byte-stable."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    loc = rs.place_record("Label Test", "spec", None, str(vault))
+    sidecar = _sidecar(labels={"worktree": "s5", "claude-code/model": "x"})
+
+    rs.validate_and_write(loc, sidecar, "body", conn)
+    conn.commit()
+
+    raw = (vault / "spec" / "label-test.json").read_text()
+    parsed = json.loads(raw)
+    assert "labels" in parsed
+    assert parsed["labels"] == {"claude-code/model": "x", "worktree": "s5"}
+    # Compact single-line and byte-stable.
+    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+
+
+def test_annotations_round_trip_byte_stable(rs, conn, tmp_path):
+    """annotations map written compact; round-trips byte-stable."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    loc = rs.place_record("Annot Test", "spec", None, str(vault))
+    sidecar = _sidecar(annotations={"note": "executor slice-1"})
+
+    rs.validate_and_write(loc, sidecar, "body", conn)
+    conn.commit()
+
+    raw = (vault / "spec" / "annot-test.json").read_text()
+    parsed = json.loads(raw)
+    assert "annotations" in parsed
+    assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+
+
+def test_labels_absent_not_written_to_sidecar(rs, conn, tmp_path):
+    """When labels is absent from the sidecar, no 'labels' key is written (omit-when-absent)."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    loc = rs.place_record("No Labels", "spec", None, str(vault))
+    rs.validate_and_write(loc, _sidecar(), "body", conn)
+    conn.commit()
+
+    raw = (vault / "spec" / "no-labels.json").read_text()
+    assert "labels" not in raw
+    assert "annotations" not in raw

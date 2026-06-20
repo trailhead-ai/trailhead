@@ -144,15 +144,18 @@ class TestFinalizeBodyOnlyCaptureFile:
         assert f"# session: {_GUID}" in text  # body header preserved
         assert "a lesson captured during the session" in text  # candidate line preserved
 
-    def test_sidecar_is_sorted_indented_json(self, tmp_path):
+    def test_sidecar_is_compact_sorted_json(self, tmp_path):
+        """Session sidecar is compact JSON, keys sorted, no trailing newline (Slice 0)."""
         vault = _make_vault(tmp_path)
         note = _write_guid_capture(vault)
         sessions = load_script("sessions")
         sessions.finalize_note(note, "2026-06-02T13:00:00Z")
-        obj = json.loads(_sidecar_of(note).read_text())
-        assert _sidecar_of(note).read_text() == json.dumps(
-            obj, indent=2, sort_keys=True
-        )
+        raw = _sidecar_of(note).read_text()
+        # Single-line: no embedded newlines, no trailing newline.
+        assert "\n" not in raw
+        # Round-trips stably as compact sorted JSON.
+        obj = json.loads(raw)
+        assert raw == json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
     def test_preserves_existing_provenance_in_sidecar(self, tmp_path):
         vault = _make_vault(tmp_path)

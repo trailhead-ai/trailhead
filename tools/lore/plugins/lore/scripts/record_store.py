@@ -721,7 +721,9 @@ def validate_and_write(
     safe_body = neutralize_fences(body)
 
     # 5 — durable text first (atomic). Body before sidecar; both atomic.
-    sidecar_text = json.dumps(stamped, indent=2, sort_keys=True)
+    # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
+    # diff/grep and later slice round-trip asserts.
+    sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
     write_temp_then_rename(location.body_path, safe_body)
     write_temp_then_rename(location.sidecar_path, sidecar_text)
 
