@@ -11,12 +11,8 @@ S6 skill descriptions).
 from __future__ import annotations
 
 import importlib.util
-import io
-import json
-import os
 import sys
 from pathlib import Path
-from unittest import mock
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"

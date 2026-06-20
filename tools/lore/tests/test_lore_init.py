@@ -229,8 +229,8 @@ def test_vault_flag_does_not_regit_init_target(tmp_path):
     state, config = _dirs(tmp_path)
     target_repo = tmp_path / "existing-repo"
     target_repo.mkdir()
-    git_result = subprocess.run(["git", "init", str(target_repo)], check=True,
-                                capture_output=True, text=True)
+    subprocess.run(["git", "init", str(target_repo)], check=True,
+                   capture_output=True, text=True)
 
     # Record HEAD commit (or just check .git exists with no re-init text)
     initial_git_head = (target_repo / ".git" / "HEAD").read_text()

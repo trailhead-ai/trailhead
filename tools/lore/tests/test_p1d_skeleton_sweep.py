@@ -9,14 +9,11 @@ no real brain content, no real subsystem names (public repo leak-gate rule).
 from __future__ import annotations
 
 import importlib.util
-import io
-import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
-from unittest import mock
 
 
 REPO_ROOT = Path(__file__).parent.parent

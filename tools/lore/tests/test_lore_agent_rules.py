@@ -25,7 +25,6 @@ import sys
 import time
 from pathlib import Path
 
-import pytest
 
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
