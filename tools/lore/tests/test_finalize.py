@@ -145,7 +145,7 @@ class TestFinalizeBodyOnlyCaptureFile:
         assert "a lesson captured during the session" in text  # candidate line preserved
 
     def test_sidecar_is_compact_sorted_json(self, tmp_path):
-        """Session sidecar is single-line compact JSON, keys sorted, no trailing newline (Slice 0)."""
+        """Session sidecar is compact JSON, keys sorted, no trailing newline (Slice 0)."""
         vault = _make_vault(tmp_path)
         note = _write_guid_capture(vault)
         sessions = load_script("sessions")

@@ -564,4 +564,5 @@ def test_annotations_same_key_rules_as_labels():
     ]:
         sidecar = _base_sidecar_with(annotations={bad_key: "val"})
         result = rm().validate(sidecar)
-        assert any(bad_key in e for e in result.errors), f"expected error for {desc} key {bad_key!r}"
+        msg = f"expected error for {desc} key {bad_key!r}"
+        assert any(bad_key in e for e in result.errors), msg
