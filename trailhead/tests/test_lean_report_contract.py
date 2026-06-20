@@ -259,38 +259,21 @@ class TestExecutorSplitNegative:
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: INVARIANT — ## Harvest candidates is last ## section
+# craft–lore decoupling, Slice 1: the harvest-candidates emit was retired
 # ---------------------------------------------------------------------------
 
 
-class TestHarvestCandidatesIsLast:
-    """## Harvest candidates must remain the last ## section in executor.md.
+def test_executor_has_no_harvest_candidates_section():
+    """executor.md must NOT carry a '## Harvest candidates' section.
 
-    A downstream hook locates it by anchor — it must not be followed by any other
-    ## heading.
+    The harvest-candidates emit (and its downstream lore hook) was retired in the
+    craft–lore decoupling; the inverse — its absence — is the live invariant.
     """
-
-    def test_harvest_candidates_exists(self):
-        """executor.md must contain a '## Harvest candidates' section."""
-        text = _executor_text()
-        assert "## Harvest candidates" in text, (
-            "executor.md must contain a '## Harvest candidates' section "
-            "(required by the downstream hook)"
-        )
-
-    def test_harvest_candidates_is_last_double_hash_section(self):
-        """No ## section may follow '## Harvest candidates' in executor.md."""
-        text = _executor_text()
-        harvest_pos = text.find("## Harvest candidates")
-        assert harvest_pos >= 0, "executor.md must contain '## Harvest candidates'"
-        # Find any ## heading after the harvest block
-        after_harvest = text[harvest_pos + len("## Harvest candidates"):]
-        subsequent_sections = re.findall(r"^## .+", after_harvest, re.MULTILINE)
-        assert not subsequent_sections, (
-            f"executor.md has ## sections after '## Harvest candidates': {subsequent_sections}. "
-            "The harvest block must be the last ## section — a downstream hook "
-            "locates it by anchor."
-        )
+    text = _executor_text()
+    assert "## Harvest candidates" not in text, (
+        "executor.md still carries a '## Harvest candidates' section — the "
+        "harvest-candidates emit was retired (craft–lore decoupling, Slice 1)"
+    )
 
 
 # ---------------------------------------------------------------------------
