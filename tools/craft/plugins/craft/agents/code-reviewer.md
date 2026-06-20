@@ -52,9 +52,3 @@ Rules:
 ## Reading the plan
 
 When reviewing against a plan, use `Read` to load the plan file the caller provides. Read only the slice section and the overall goal/architecture — you need the intent, not the full plan.
-
-## Harvest candidates (end-of-message)
-
-If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
-
-For a code reviewer specifically, the highest-value emissions are **lessons** (recurring quality issues you keep flagging — "we keep making mistake X; the prevention check is Y" is gold for future plan templates) and **gotchas** (subsystem behavior you noticed that contradicts comments or surface intuition). Skip decisions (not your call) and dead-ends (you're reviewing, not trying); single-finding Critical issues belong in the report body, not the harvest block — only emit a lesson if the pattern is durable across reviews.

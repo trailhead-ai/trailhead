@@ -53,9 +53,3 @@ Hard caps: each option ≤80 words, recommendation ≤120 words. Total report �
 - Don't propose abstractions for hypothetical future requirements.
 - Don't write code. Sketches and pseudocode only when necessary to clarify an option.
 - Don't hedge to the point of uselessness. After laying out options, commit to a recommendation.
-
-## Harvest candidates (end-of-message)
-
-If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
-
-For an architect specifically, the highest-value emissions are **decisions** (your recommendation IS a decision worth recording — chose X over Y because Z, with the reversibility flag), **gotchas** (constraints not visible in the code that constrained your options — load-bearing context for the next time this area is touched), and **lessons** (durable invariants about the codebase's shape you uncovered during the survey). Skip dead-ends (you didn't try anything — you advised) and deferred (the caller decides what to defer, not you).

@@ -56,9 +56,3 @@ Hard cap: 600 words. Lead with the verified symptom + leading hypothesis; everyt
 - Don't jump to "just add a try/catch" — that hides bugs, it doesn't diagnose them.
 - Don't blame "flakiness" without evidence of a race, timing, or ordering dependency.
 - Don't trust that a recent commit is the cause just because it's recent. Verify via `git bisect` logic or by reading the diff.
-
-## Harvest candidates (end-of-message)
-
-If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
-
-For a troubleshooter specifically, the highest-value emissions are **gotchas** (the surprising subsystem behavior you uncovered at the root of the bug — exactly what belongs in a subsystem profile), **dead-ends** (hypotheses you ruled out with evidence — saves future-you from re-running the same diagnosis on the same symptom), and **lessons** (durable invariants like "X always fails when Y is set"). Skip decisions (not your call to make) and deferred (the caller decides what to do about the bug, not you).

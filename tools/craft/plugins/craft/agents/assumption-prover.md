@@ -91,9 +91,3 @@ Status: VALIDATED | INVALIDATED | NEEDS_CONTEXT | BLOCKED
 - INVALIDATED means you ran a test and watched it fail in the way that disproves the assumption. Document the failure precisely — the controller will use it to reshape the plan.
 - Never modify files outside the working directory the controller specified
 - Never extend scope beyond the single unknown — even if you spot adjacent issues, list them under "Surprises" and stop
-
-## Harvest candidates (end-of-message)
-
-If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
-
-For an assumption-prover specifically, the highest-value emissions are **lessons** (the invariant you actually proved or disproved — "the job's `unique` does dedupe across queues" is a durable fact future planners need) and **gotchas** (surprising library or framework behavior you hit while writing the probe — exactly what belongs in a subsystem profile). Skip dead-ends (you prove or disprove one assumption, you don't try multiple approaches), decisions, and deferred items (those belong to the controller, not you).
