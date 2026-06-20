@@ -523,3 +523,127 @@ class TestApplierAdjacentHunks:
         # No partial application of hunk 1 — body byte-for-byte unchanged.
         assert exc_info.value.original_body == stale
         assert len(exc_info.value.rejected) >= 1
+
+
+# ===========================================================================
+# Slice 2: --label / --annotation / --unset-label / --unset-annotation
+# ===========================================================================
+
+def test_update_label_overwrites_existing(tmp_path):
+    """update --label worktree=s6 upserts (overwrites) an existing label value."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    # First set a label via create then update to overwrite.
+    r = _run(
+        ["record", "update", record_id, "--label", "worktree=s5"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+
+    r2 = _run(
+        ["record", "update", record_id, "--label", "worktree=s6"],
+        vault=vault, state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["labels"]["worktree"] == "s6"
+
+
+def test_update_unset_label_removes_key(tmp_path):
+    """update --unset-label worktree removes just that key."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    # Set two labels first.
+    r = _run(
+        ["record", "update", record_id,
+         "--label", "worktree=s5",
+         "--label", "env=prod"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+
+    r2 = _run(
+        ["record", "update", record_id, "--unset-label", "worktree"],
+        vault=vault, state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert "worktree" not in sidecar["labels"]
+    assert sidecar["labels"]["env"] == "prod"
+
+
+def test_update_unset_last_label_drops_field(tmp_path):
+    """Unsetting the last label key drops the entire 'labels' field (no empty dict)."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--label", "worktree=s5"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+
+    r2 = _run(
+        ["record", "update", record_id, "--unset-label", "worktree"],
+        vault=vault, state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+
+    kind, name = record_id.split("/", 1)
+    raw = (vault / kind / f"{name}.json").read_text(encoding="utf-8")
+    # The labels key must be absent and no empty dict left behind.
+    assert "labels" not in raw
+    assert "{}" not in raw
+
+
+def test_update_unset_label_absent_key_silent_noop(tmp_path):
+    """--unset-label on an absent key → exit 0, silent no-op."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--unset-label", "nonexistent"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0
+    sidecar = _find_sidecar(vault, record_id)
+    assert "labels" not in sidecar
+
+
+def test_update_annotation_upsert_and_unset(tmp_path):
+    """update --annotation / --unset-annotation follow the same semantics as labels."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--annotation", "note=hello"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["annotations"]["note"] == "hello"
+
+    r2 = _run(
+        ["record", "update", record_id, "--unset-annotation", "note"],
+        vault=vault, state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+    kind, name = record_id.split("/", 1)
+    raw = (vault / kind / f"{name}.json").read_text(encoding="utf-8")
+    assert "annotations" not in raw
+    assert "{}" not in raw
+
+
+def test_update_label_bad_key_nonzero(tmp_path):
+    """update --label BadKey=x → non-zero, stderr names the bad key."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--label", "BadKey=x"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "BadKey" in r.stderr

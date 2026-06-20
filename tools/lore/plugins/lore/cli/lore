@@ -2177,6 +2177,59 @@ def _apply_set_unset(
     return result, errors
 
 
+def _apply_map_labels_annotations(
+    sidecar: dict,
+    label_pairs: list[str],
+    annotation_pairs: list[str],
+    unset_labels: list[str],
+    unset_annotations: list[str],
+) -> dict:
+    """Apply --label/--annotation/--unset-label/--unset-annotation to *sidecar*.
+
+    Map-field branch — intentionally separate from ``_apply_set_unset``'s
+    str/list logic (Slice 2, labels/annotations plan).
+
+    Semantics:
+      - set = upsert: ``--label k=v`` overwrites an existing key silently.
+        Split is on the FIRST ``=`` only, so ``k=a=b`` stores value ``a=b``.
+      - unset = remove one key from the map; when the map becomes empty the
+        whole field is dropped (omit-when-empty — no ``{}`` left behind).
+      - ``--unset-label`` on an absent key is a documented silent no-op (exit 0).
+
+    This function mutates a copy and returns it; the caller passes the result
+    through ``validate_and_write`` so bad keys are rejected there with a
+    non-zero exit naming the offender.
+    """
+    result = dict(sidecar)
+
+    def _upsert(field: str, pairs: list[str]) -> None:
+        if not pairs:
+            return
+        current: dict = dict(result.get(field) or {})
+        for pair in pairs:
+            key, _, value = pair.partition("=")
+            current[key] = value
+        result[field] = current
+
+    def _unset(field: str, keys: list[str]) -> None:
+        if not keys:
+            return
+        current: dict = dict(result.get(field) or {})
+        for key in keys:
+            current.pop(key, None)
+        if current:
+            result[field] = current
+        else:
+            result.pop(field, None)
+
+    _upsert("labels", label_pairs)
+    _upsert("annotations", annotation_pairs)
+    _unset("labels", unset_labels)
+    _unset("annotations", unset_annotations)
+
+    return result
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     """Dispatch ``lore record <action>`` — create (Slice 3) / update (Slice 4) /
     delete (Slice 5) / blob (Slice 5) (S2).
@@ -2341,6 +2394,15 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         for msg in set_errors:
             print(msg, file=sys.stderr)
         return 1
+
+    # Apply --label / --annotation / --unset-label / --unset-annotation (Slice 2).
+    sidecar = _apply_map_labels_annotations(
+        sidecar,
+        label_pairs=list(getattr(args, "label_pairs", None) or []),
+        annotation_pairs=list(getattr(args, "annotation_pairs", None) or []),
+        unset_labels=list(getattr(args, "unset_labels", None) or []),
+        unset_annotations=list(getattr(args, "unset_annotations", None) or []),
+    )
 
     # Body from stdin (AC1). No stdin → empty body.  The leading ``---``
     # check is intentionally absent — we read verbatim (AC-TX3).
@@ -2669,6 +2731,15 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                 for msg in set_errors:
                     print(msg, file=sys.stderr)
                 return 1
+
+            # Apply --label / --annotation / --unset-label / --unset-annotation (Slice 2).
+            sidecar = _apply_map_labels_annotations(
+                sidecar,
+                label_pairs=list(getattr(args, "label_pairs", None) or []),
+                annotation_pairs=list(getattr(args, "annotation_pairs", None) or []),
+                unset_labels=list(getattr(args, "unset_labels", None) or []),
+                unset_annotations=list(getattr(args, "unset_annotations", None) or []),
+            )
 
             # --- write in place (re-stamps updated-*, preserves created-*) -----
             new_id = record_store_mod.validate_and_write(
@@ -3015,6 +3086,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Unset a sidecar field (repeatable). --unset K=VALUE removes one list "
              "item (AC16). --unset K clears the whole key (AC18).",
     )
+    # Map flags (Slice 2): dedicated branch — NOT via --set/--unset str/list logic.
+    p_record_create.add_argument(
+        "--label", dest="label_pairs", action="append", default=[],
+        metavar="KEY=VALUE",
+        help="Set a label (repeatable, upsert). Split on first '=' so "
+             "'namespace/name=value' works unescaped.",
+    )
+    p_record_create.add_argument(
+        "--annotation", dest="annotation_pairs", action="append", default=[],
+        metavar="KEY=VALUE",
+        help="Set an annotation (repeatable, upsert). Split on first '='.",
+    )
+    p_record_create.add_argument(
+        "--unset-label", dest="unset_labels", action="append", default=[],
+        metavar="KEY",
+        help="Remove a label key (repeatable). Absent key is a silent no-op.",
+    )
+    p_record_create.add_argument(
+        "--unset-annotation", dest="unset_annotations", action="append", default=[],
+        metavar="KEY",
+        help="Remove an annotation key (repeatable). Absent key is a silent no-op.",
+    )
     p_record_create.set_defaults(func=cmd_record)
 
     # ``lore record update RECORD_ID`` (Slice 4, S2).
@@ -3053,6 +3146,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--unset", dest="unset_pairs", action="append", default=[],
         metavar="K[=VALUE]",
         help="Unset a sidecar field (repeatable). Same AC16/AC18 semantics as create.",
+    )
+    # Map flags (Slice 2): dedicated branch — NOT via --set/--unset str/list logic.
+    p_record_update.add_argument(
+        "--label", dest="label_pairs", action="append", default=[],
+        metavar="KEY=VALUE",
+        help="Set a label (repeatable, upsert). Split on first '=' so "
+             "'namespace/name=value' works unescaped.",
+    )
+    p_record_update.add_argument(
+        "--annotation", dest="annotation_pairs", action="append", default=[],
+        metavar="KEY=VALUE",
+        help="Set an annotation (repeatable, upsert). Split on first '='.",
+    )
+    p_record_update.add_argument(
+        "--unset-label", dest="unset_labels", action="append", default=[],
+        metavar="KEY",
+        help="Remove a label key (repeatable). Absent key is a silent no-op.",
+    )
+    p_record_update.add_argument(
+        "--unset-annotation", dest="unset_annotations", action="append", default=[],
+        metavar="KEY",
+        help="Remove an annotation key (repeatable). Absent key is a silent no-op.",
     )
     p_record_update.set_defaults(func=cmd_record)
 

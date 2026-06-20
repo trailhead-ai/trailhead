@@ -466,3 +466,79 @@ def test_unset_scalar_field_with_value_is_hard_error(tmp_path):
     assert list(vault.glob("**/*.md")) == []
     # Some kind of helpful message must appear.
     assert len(out.strip()) > 0
+
+
+# ---------------------------------------------------------------------------
+# Slice 2: --label / --annotation / --unset-label / --unset-annotation
+# ---------------------------------------------------------------------------
+
+def test_create_label_two_entries_both_stored(tmp_path):
+    """create --label worktree=s5 --label claude-code/model=x → both entries in labels."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + [
+            "--label", "worktree=s5",
+            "--label", "claude-code/model=x",
+        ],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar.get("labels") == {"worktree": "s5", "claude-code/model": "x"}
+
+
+def test_create_label_validates_compact_serialization(tmp_path):
+    """sidecar with labels is compact (single-line JSON, sorted keys)."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--label", "worktree=s5"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    raw = (vault / kind / f"{name}.json").read_text(encoding="utf-8")
+    # Compact: no newlines inside the JSON, and round-trips cleanly.
+    import json as _json
+    assert "\n" not in raw
+    parsed = _json.loads(raw)
+    assert parsed["labels"] == {"worktree": "s5"}
+
+
+def test_create_annotation_stored(tmp_path):
+    """create --annotation note=hello → annotations field in sidecar."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--annotation", "note=hello"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar.get("annotations") == {"note": "hello"}
+
+
+def test_create_label_bad_key_nonzero_names_key(tmp_path):
+    """--label BadKey=x → non-zero exit, stderr names the bad key."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--label", "BadKey=x"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "BadKey" in r.stderr
+    assert list(vault.glob("**/*.md")) == []
+
+
+def test_create_label_value_with_equals_splits_on_first(tmp_path):
+    """--annotation note=a=b → value is 'a=b' (split on first '=' only)."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--annotation", "note=a=b"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["annotations"]["note"] == "a=b"
