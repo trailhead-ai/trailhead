@@ -1431,10 +1431,12 @@ class TestSlice6ManifestAndTemplate:
         (they were deleted — replaced by lore record CLI surface)."""
         m = load_manifest(_LORE_MANIFEST)
         assert "follow-up" not in m.skills, (
-            f"lore must NOT ship the 'follow-up' skill (deleted in S6 Slice 2); got {sorted(m.skills)}"
+            "lore must NOT ship the 'follow-up' skill"
+            f" (deleted in S6 Slice 2); got {sorted(m.skills)}"
         )
         assert "check-in" not in m.skills, (
-            f"lore must NOT ship the 'check-in' skill (deleted in S6 Slice 2); got {sorted(m.skills)}"
+            "lore must NOT ship the 'check-in' skill"
+            f" (deleted in S6 Slice 2); got {sorted(m.skills)}"
         )
         assert "radar" not in m.skills, (
             "lore still ships old 'radar' skill — renamed to 'follow-up' then deleted"
