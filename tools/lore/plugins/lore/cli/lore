@@ -928,7 +928,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     if getattr(args, "vault", None):
         vault_path = Path(args.vault).expanduser().resolve()
 
-    installer_mod.bootstrap_vault(vaults_root, vault_path=vault_path)
+    # A failed `git init` (load-bearing vault-is-a-repo contract) surfaces as a
+    # clean named error rather than a silent half-bootstrap behind "complete".
+    try:
+        installer_mod.bootstrap_vault(vaults_root, vault_path=vault_path)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     # Step 3: provision the index location (state/lore/ — sibling of vaults/).
     installer_mod.provision_index_location(lore_state)

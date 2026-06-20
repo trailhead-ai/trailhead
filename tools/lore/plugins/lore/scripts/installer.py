@@ -200,17 +200,21 @@ def bootstrap_vault(vaults_root: Path, vault_path: Path | None = None) -> Path:
 
 
 def _git_init(path: Path) -> None:
-    """Run ``git init`` on *path*, ignoring failures (warning only)."""
+    """Run ``git init`` on *path*; raise ``ValueError`` on failure.
+
+    The vault-is-a-git-repo contract is load-bearing — downstream `lore sync`
+    and record-commit paths assume it. A silently-failed init that still let
+    ``lore init`` print "complete" would surface only later as a confusing
+    commit failure, so a failed init is a clean named error here, not a warning.
+    """
     result = subprocess.run(
         ["git", "init", str(path)],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        import sys
-        print(
-            f"lore: warning: git init failed: {result.stderr.strip()}",
-            file=sys.stderr,
+        raise ValueError(
+            f"git init failed for vault at {path}: {result.stderr.strip()}"
         )
 
 

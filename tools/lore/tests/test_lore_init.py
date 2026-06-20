@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
@@ -175,6 +177,20 @@ def test_no_precommit_hook_installed(tmp_path):
 # ---------------------------------------------------------------------------
 # 5. resolve_targets: --local vs global
 # ---------------------------------------------------------------------------
+
+def test_bootstrap_vault_raises_on_git_init_failure(tmp_path):
+    """The vault-is-a-git-repo contract is load-bearing: a failed `git init`
+    must raise (clean named error) so `lore init` cannot print "complete" over a
+    silently non-repo vault."""
+    from unittest import mock
+
+    installer = load_script("installer")
+    vaults_root = tmp_path / "state" / "vaults"
+    fail = mock.Mock(returncode=1, stderr="fatal: simulated git init failure")
+    with mock.patch.object(installer.subprocess, "run", return_value=fail):
+        with pytest.raises(ValueError, match="git init failed"):
+            installer.bootstrap_vault(vaults_root, vault_path=None)
+
 
 def test_resolve_targets_global_returns_user_paths(tmp_path):
     installer = load_script("installer")
