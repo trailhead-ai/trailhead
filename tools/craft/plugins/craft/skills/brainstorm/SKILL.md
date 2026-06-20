@@ -187,11 +187,13 @@ reads it to assign signal-emission ownership to slices.
 
 ### 6. Write the Spec
 
-Run `lore new spec --title "<topic>" --project "<project>"` to render the template and write the
-note to `$LORE_VAULT/specs/`. The template creates a dated file with valid frontmatter that passes
-the status validator.
+Persist the spec through the note_store `create` op (`../_shared/note-storage.md`): render craft's
+spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to the
+provider — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --set
+status=draft` (add `--set project="<project>"` if the git-remote inference can't resolve it). lore
+stores the body verbatim and owns the record sidecar / status vocab.
 
-The template (see `lore new spec`) renders these canonical sections — fill each in: **Problem**
+The spec body template (`templates/spec.md`) carries these canonical sections — fill each in: **Problem**
 (situation / gap, why now) · **Objectives** (measurable, outcome-framed) · **Acceptance Criteria**
 (bulleted, testable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical / business /
 timing) · **UI Direction** (verbal + design links, or `n/a`) · **Rollout & Gating** (mandatory; flag

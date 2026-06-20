@@ -207,13 +207,14 @@ _GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
     # skill stems renamed in Spec A / Slice 4 (followup→polish; the old code-review
     # request skill → review).
     "polish": [
+        # Slice 3: brief persistence goes through the note_store seam, not `lore new plan`.
         (
             "brain/plans/",
-            "lore new plan",
+            "_shared/note-storage.md",
         ),
         (
-            "aggregated by the cost reporter",
             "lore new plan",
+            "_shared/note-storage.md",
         ),
     ],
     "review": [
