@@ -22,16 +22,30 @@ def _env(tmp_path: Path) -> dict[str, str]:
 
 
 @contextmanager
-def _patched(*, detected=None):
-    """Patch wire, create_shims, detect_harnesses."""
+def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr=""):
+    """Patch wire, create_shims, detect_harnesses, run_lore_init.
+
+    ``run_lore_init`` is ALWAYS patched (B-3 / Axiom 6): these tests must never
+    invoke the real ``lore init`` against the user's vault/state. The default
+    stub reports success; tests that exercise the failure path pass a non-zero
+    ``lore_init_rc`` + ``lore_init_stderr``.
+    """
     sdr = ShimDirResult(shim_dir=Path("/shim/bin"), shims={})
+    lore_result = (lore_init_rc, lore_init_stderr)
     with patch("trailhead.install.wire") as wire_mock, patch(
         "trailhead.install.create_shims", return_value=sdr
     ) as pathint_mock, patch(
         "trailhead.install.detect_harnesses",
         return_value=([ClaudeCodeHarness()] if detected else []),
-    ) as detect_mock:
-        yield {"wire": wire_mock, "pathint": pathint_mock, "detect": detect_mock}
+    ) as detect_mock, patch(
+        "trailhead.install.run_lore_init", return_value=lore_result
+    ) as lore_mock:
+        yield {
+            "wire": wire_mock,
+            "pathint": pathint_mock,
+            "detect": detect_mock,
+            "lore_init": lore_mock,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -176,3 +190,40 @@ class TestJsonOutput:
         data = _json.loads(capsys.readouterr().out)
         assert data["no_harness"] is True
         assert data["harnesses"] == {}
+
+
+# ---------------------------------------------------------------------------
+# lore init integration (Slice 5, S5)
+# ---------------------------------------------------------------------------
+
+
+class TestLoreInitIntegration:
+    def test_install_invokes_lore_init(self, tmp_path):
+        with _patched(detected=True) as m:
+            run_install(env=_env(tmp_path), quiet=True)
+        m["lore_init"].assert_called_once()
+
+    def test_lore_init_failure_propagates_nonzero(self, tmp_path):
+        with _patched(
+            detected=True, lore_init_rc=1, lore_init_stderr="lore: boom"
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 1
+
+    def test_lore_init_failure_surfaces_stderr(self, tmp_path, capsys):
+        with _patched(
+            detected=True, lore_init_rc=3, lore_init_stderr="lore: vault create failed"
+        ):
+            run_install(env=_env(tmp_path), quiet=True)
+        err = capsys.readouterr().err
+        assert "lore: vault create failed" in err
+
+    def test_lore_init_success_keeps_install_zero(self, tmp_path):
+        with _patched(detected=True):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+
+    def test_no_lore_skips_lore_init(self, tmp_path):
+        with _patched(detected=True) as m:
+            run_install(env=_env(tmp_path), no_lore=True, quiet=True)
+        m["lore_init"].assert_not_called()

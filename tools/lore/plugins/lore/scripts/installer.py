@@ -81,6 +81,11 @@ the **sole guardrail** — treat it as binding regardless of harness.
 Capture and read records via the CLI: `lore record …` / `lore session …` to
 write, `lore search …` to read. See `lore --help` and the lore skills
 (`/lore:record`, `/lore:search`, `/lore:finish`).
+
+**Drift caveat:** this block is injected only into rules files present when
+`lore init` last ran. A rules file added afterward (e.g. a new `.cursorrules`)
+will **not** carry this block until you **re-run `lore init`** — until then that
+harness's agents lack the write-prohibition rule. `lore status` flags such drift.
 """
 
 _RULES_BLOCK = (

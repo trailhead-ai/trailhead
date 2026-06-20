@@ -82,6 +82,11 @@ def _patched_install(*, detected=True, pathint_exc=None):
     with patch("trailhead.install.wire"), pathint, patch(
         "trailhead.install.detect_harnesses",
         return_value=([ClaudeCodeHarness()] if detected else []),
+    ), patch(
+        # Hermetic (Axiom 6): never invoke the real `lore init` against the
+        # user's vault/state. Default stub reports success.
+        "trailhead.install.run_lore_init",
+        return_value=(0, ""),
     ):
         yield
 

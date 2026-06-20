@@ -972,6 +972,22 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     installer_mod.inject_agent_rules(rules_path, extra_paths=extra_candidates)
 
+    # Step 7: first-run git-identity advisory (Slice 5, S5).
+    # `lore init` only bootstraps — it does NOT require a git identity (the
+    # `*-by` author fallback is the write-path's concern, S2). But when no
+    # identity resolves ($LORE_EMAIL → `git config --global user.email`, both
+    # empty) the FIRST record write would fail with a typed error; surface a
+    # one-line advisory now so that failure isn't a surprise. Routed to STDERR
+    # (council Advocate/Security) so it survives even if `trailhead install`
+    # filters lore stdout.
+    if not vault_mod.resolve_committer_email():
+        print(
+            "lore: advisory: no git identity set "
+            "($LORE_EMAIL / `git config --global user.email` are empty) "
+            "— set one before your first record write, or it will be rejected",
+            file=sys.stderr,
+        )
+
     print("lore: init complete")
     return 0
 
