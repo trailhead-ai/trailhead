@@ -211,13 +211,23 @@ def find_session_note(vault: Path, worktree_name: str | None = None) -> Path | N
 
 
 def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None:
-    """Return the session note whose frontmatter carries ``session_id: <id>``.
+    """Return the session note for ``session_id``, by id — cwd-independent.
 
-    This is the exact, cwd-independent resolver: the id is written into the
-    note's frontmatter at creation time, so a match is unambiguous regardless
-    of where the caller's cwd happens to be (sibling repo, subdir, canonical
-    checkout). Only the frontmatter block is inspected — a ``session_id:``
-    string appearing in the body never counts.
+    Two on-disk shapes carry the id, and both resolve here (Slice 0.5, KU1):
+
+      1. **Body-only GUID capture file** ``sessions/<id>.md`` — what
+         ``session_store.create_or_append`` writes on first capture (header
+         ``# session: <id>``, no frontmatter). This is the live capture artifact
+         the session skills target. Matched by filename stem (``<id>.md``),
+         confirmed by the ``# session: <id>`` body header so a stray file named
+         like a GUID without the header is not mistaken for a capture note.
+      2. **Frontmatter note** carrying ``session_id: <id>`` in its frontmatter
+         block — the legacy date-prefixed shape produced by
+         ``ensure_session_note``. Only the frontmatter is inspected; a
+         ``session_id:`` string in the body never counts.
+
+    A stem match (shape 1) is preferred when present — it is the exact capture
+    file. Otherwise the newest frontmatter match (shape 2) wins.
 
     Returns None when the id is empty, the sessions dir is missing, or no note
     matches. Never raises.
@@ -228,23 +238,29 @@ def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None
     if not sessions_dir.is_dir():
         return None
 
+    header = f"# session: {session_id}"
     needle = f"session_id: {session_id}"
-    matches: list[Path] = []
+    frontmatter_matches: list[Path] = []
     for p in iter_note_paths(sessions_dir, recursive=True):
         try:
             text = p.read_text()
         except Exception:
             continue
         if not text.startswith("---"):
+            # Body-only capture file: match by stem, confirmed by the header.
+            if p.stem == session_id and any(
+                line.strip() == header for line in text.splitlines()
+            ):
+                return p
             continue
         end = text.find("\n---", 3)  # close of the frontmatter block
         front = text[:end] if end >= 0 else text
         if any(line.strip() == needle for line in front.splitlines()):
-            matches.append(p)
-    if not matches:
+            frontmatter_matches.append(p)
+    if not frontmatter_matches:
         return None
     # Pathological: two notes share an id → prefer the newest stem.
-    return sorted(matches, key=lambda p: p.name, reverse=True)[0]
+    return sorted(frontmatter_matches, key=lambda p: p.name, reverse=True)[0]
 
 
 # A `.claude/worktrees/<name>/` path segment marks a Claude Code worktree.
@@ -301,10 +317,12 @@ def resolve_session_note(
 ) -> Path | None:
     """Resolve the session note for the current session.
 
-    Order: exact session-id frontmatter match (cwd-independent) → worktree-name
-    fallback (newest by filename timestamp). ``worktree_name`` defaults to
-    :func:`detect_worktree_name` when not supplied. Returns None when nothing
-    resolves.
+    Order: exact session-id match (cwd-independent) → worktree-name fallback
+    (newest by filename timestamp). The id-first match covers BOTH the body-only
+    GUID capture file ``sessions/<id>.md`` (the live S1/S2 artifact) and the
+    legacy frontmatter note (see :func:`find_session_note_by_session_id`).
+    ``worktree_name`` defaults to :func:`detect_worktree_name` when not supplied.
+    Returns None when nothing resolves.
     """
     if session_id:
         hit = find_session_note_by_session_id(vault, session_id)

@@ -120,6 +120,58 @@ def test_by_session_id_no_sessions_dir_returns_none(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# find_session_note_by_session_id: body-only GUID capture file (Slice 0.5, KU1)
+# ---------------------------------------------------------------------------
+
+# A canonical GUID is what `session_store` names the capture file (`<GUID>.md`).
+_GUID = "11111111-2222-4333-8444-555555555555"
+_OTHER_GUID = "99999999-8888-4777-8666-555555555555"
+
+
+def _write_guid_capture(sessions_dir: Path, guid: str, *, extra: str = "") -> Path:
+    """Mimic session_store.create_or_append: body-only `# session: <GUID>`."""
+    p = sessions_dir / f"{guid}.md"
+    p.write_text(f"# session: {guid}\n\n{extra}")
+    return p
+
+
+def test_by_session_id_matches_body_only_guid_file(tmp_path):
+    """The capture file is body-only (`# session: <GUID>`, no frontmatter); the
+    id-first resolver must still match it by stem so finish/checkpoint find it."""
+    vault = tmp_path / "v"
+    sd = vault / "sessions"
+    sd.mkdir(parents=True)
+    want = _write_guid_capture(sd, _GUID, extra="- candidate ... kind=lesson phase=Build\n")
+
+    v = load_script("vault")
+    assert v.find_session_note_by_session_id(vault, _GUID) == want
+
+
+def test_by_session_id_body_only_requires_stem_match(tmp_path):
+    """A body-only capture file matches only when its stem equals the id — a
+    different GUID's file must not match."""
+    vault = tmp_path / "v"
+    sd = vault / "sessions"
+    sd.mkdir(parents=True)
+    _write_guid_capture(sd, _OTHER_GUID)
+
+    v = load_script("vault")
+    assert v.find_session_note_by_session_id(vault, _GUID) is None
+
+
+def test_by_session_id_frontmatter_still_wins_over_body_only(tmp_path):
+    """A frontmatter note carrying `session_id:` keeps matching (no regression of
+    the legacy date-note shape)."""
+    vault = tmp_path / "v"
+    sd = vault / "sessions"
+    sd.mkdir(parents=True)
+    want = _write_note(sd, "2026-06-01-1000", "feat", session_id="legacy")
+
+    v = load_script("vault")
+    assert v.find_session_note_by_session_id(vault, "legacy") == want
+
+
+# ---------------------------------------------------------------------------
 # detect_worktree_name
 # ---------------------------------------------------------------------------
 

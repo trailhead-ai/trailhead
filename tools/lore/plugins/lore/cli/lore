@@ -1300,8 +1300,11 @@ def cmd_finish(args: argparse.Namespace) -> int:
 
     Resolves the session note via `vault.resolve_session_note()` — exact
     session-id match first (so the *current* session's note is finalized even
-    when several exist for this worktree), then a worktree-name fallback. Sets
-    `status: complete` and `ended:` (atomic write), then expands the in-scope
+    when several exist for this worktree; this matches the body-only GUID capture
+    file `sessions/<id>.md` as well as the legacy frontmatter note, Slice 0.5),
+    then a worktree-name fallback. Sets
+    `status: complete` and `ended:` (atomic write, prepending frontmatter onto a
+    body-only capture file), then expands the in-scope
     harvest-pending entries + the note's `## Harvest candidates` block into full
     vault notes and commits the session note + new notes + the rewritten pending
     in ONE commit (explicit paths only). `gotcha` entries are surfaced (not

@@ -92,6 +92,126 @@ def _seed_session_note(vault: Path, worktree: str = "my-worktree") -> Path:
 
 
 # ---------------------------------------------------------------------------
+# finalize_note: body-only GUID capture file (Slice 0.5, KU1)
+# ---------------------------------------------------------------------------
+
+_GUID = "11111111-2222-4333-8444-555555555555"
+
+
+def _write_guid_capture(vault: Path, guid: str = _GUID) -> Path:
+    """Mimic session_store.create_or_append: body-only `# session: <GUID>`."""
+    sessions_dir = vault / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    note = sessions_dir / f"{guid}.md"
+    note.write_text(
+        f"# session: {guid}\n\n"
+        "- candidate 2026-06-02T12:00:00Z kind=lesson phase=Build\n"
+        "  a lesson captured during the session\n"
+    )
+    return note
+
+
+class TestFinalizeBodyOnlyCaptureFile:
+    def test_prepends_frontmatter_with_status_complete(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sessions = load_script("sessions")
+        ok = sessions.finalize_note(note, "2026-06-02T13:00:00Z")
+        assert ok
+        text = note.read_text()
+        assert text.startswith("---\n")
+        fm = load_script("frontmatter").parse_frontmatter(note)
+        assert fm["status"] == "complete"
+        assert fm.get("ended") == "2026-06-02T13:00:00Z"
+
+    def test_preserves_session_header_and_candidate_lines(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sessions = load_script("sessions")
+        assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
+        text = note.read_text()
+        assert text.startswith("---\n")  # frontmatter prepended
+        assert f"# session: {_GUID}" in text  # body header preserved
+        assert "a lesson captured during the session" in text  # candidate line preserved
+
+    def test_finalized_body_only_note_passes_status_validator(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sessions = load_script("sessions")
+        sessions.finalize_note(note, "2026-06-02T13:00:00Z")
+        fm = load_script("frontmatter").parse_frontmatter(note)
+        sv = load_script("status_validator")
+        assert sv.is_valid_status(fm["type"], fm["status"])
+
+    def test_idempotent_second_finalize_is_noop(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sessions = load_script("sessions")
+        assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
+        first = note.read_text()
+        # Already terminal → second call is a no-op and must not double-stamp.
+        assert sessions.finalize_note(note, "2026-06-02T14:00:00Z") is False
+        assert note.read_text() == first
+
+
+# ---------------------------------------------------------------------------
+# lore finish / session-note on the GUID capture file (Slice 0.5, KU1)
+# ---------------------------------------------------------------------------
+
+class TestFinishOnGuidCaptureFile:
+    def _candidate(self, vault: Path):
+        return run_cli(
+            ["session", "candidate", "--session-id", _GUID,
+             "--kind", "lesson", "--phase", "Build"],
+            env={"LORE_VAULT": str(vault)},
+            input_text="a lesson captured during the session\n",
+        )
+
+    def test_session_note_resolves_candidate_file(self, tmp_path):
+        vault = _git_vault(tmp_path)
+        assert self._candidate(vault).returncode == 0
+        r = run_cli(
+            ["session-note", "--session-id", _GUID],
+            env={"LORE_VAULT": str(vault)},
+        )
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == f"sessions/{_GUID}.md"
+
+    def test_finish_stamps_candidate_file(self, tmp_path):
+        vault = _git_vault(tmp_path)
+        assert self._candidate(vault).returncode == 0
+        capture = vault / "sessions" / f"{_GUID}.md"
+
+        r = run_cli(
+            ["finish", "--session-id", _GUID],
+            env={"LORE_VAULT": str(vault)},
+        )
+        assert r.returncode == 0, r.stderr
+        fm = load_script("frontmatter").parse_frontmatter(capture)
+        assert fm["status"] == "complete"
+        assert fm.get("ended")
+        text = capture.read_text()
+        assert f"# session: {_GUID}" in text
+        assert "a lesson captured during the session" in text
+
+
+class TestFinishEmptySession:
+    def test_empty_session_prints_notice_and_exits_zero(self, tmp_path):
+        """No candidate written, no file → finish must not error, must not create
+        a file, and must tell the user the session was handled."""
+        vault = _git_vault(tmp_path)
+        r = run_cli(
+            ["finish", "--session-id", _GUID],
+            env={"LORE_VAULT": str(vault)},
+        )
+        assert r.returncode == 0, r.stderr
+        combined = (r.stdout + r.stderr).lower()
+        assert "no active session note" in combined
+        assert "nothing to finalize" in combined
+        assert not (vault / "sessions" / f"{_GUID}.md").exists()
+
+
+# ---------------------------------------------------------------------------
 # lore finish: sets status: complete + ended:
 # ---------------------------------------------------------------------------
 

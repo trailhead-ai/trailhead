@@ -8,7 +8,9 @@ Responsibilities:
   - ensure_session_note: create-or-resume the per-worktree session note
   - session_note_path / all_session_notes_for_worktree: worktree-scoped finders
   - write_note_atomic: crash-safe file write (temp + os.replace)
-  - finalize_note: set status: complete + ended: on a session note
+  - finalize_note: set status: complete + ended: on a session note — stamping a
+    frontmatter note in-place, or prepending frontmatter onto the body-only GUID
+    capture file (Slice 0.5, KU1)
 
 The SessionStart context-injection hook and its render helpers (render_vault_index,
 get_vault_stats, render_tool_notes, list_tool_notes, render_action_guards,
@@ -288,22 +290,59 @@ def write_note_atomic(note: Path, text: str) -> bool:
         return False
 
 
+_SESSION_HEADER_RE = re.compile(r"^# session: (\S+)\s*$", re.MULTILINE)
+
+
+def _finalize_body_only(note: Path, ended_iso: str, status: str) -> bool:
+    """Finalize a body-only GUID capture file (Slice 0.5, KU1).
+
+    The capture file (``session_store.create_or_append``) is frontmatter-less:
+    a ``# session: <id>`` header followed by appended candidate/referenced
+    lines. To finalize, PREPEND a minimal session frontmatter block carrying
+    ``status`` + ``ended`` (plus ``type: session`` and the ``session_id`` lifted
+    from the header so the note round-trips through the resolver and
+    status-validator), preserving the existing body verbatim below it. Writes
+    atomically. Returns False if the body is empty/unreadable.
+    """
+    text = note.read_text()
+    m = _SESSION_HEADER_RE.search(text)
+    session_id = m.group(1) if m else note.stem
+    front = (
+        "---\n"
+        "type: session\n"
+        f"session_id: {session_id}\n"
+        f"status: {status}\n"
+        f"ended: {ended_iso}\n"
+        "---\n\n"
+    )
+    return write_note_atomic(note, front + text)
+
+
 def finalize_note(note: Path, ended_iso: str, status: str = "complete") -> bool:
     """Set status: <status> + ended: on a session note.
 
     Parameterized: pass ``status="shelved"`` to shelve a note rather than
     complete it. Default ``"complete"`` preserves all existing callers.
 
-    Returns False (no-op) if the note is already terminal or has no
-    frontmatter. Writes atomically so a mid-write crash leaves the original
-    intact.
+    Handles BOTH session-note shapes (Slice 0.5, KU1):
+
+      - **Frontmatter note** (legacy date-prefixed shape): stamp ``status`` +
+        ``ended`` in-place in the existing frontmatter block.
+      - **Body-only GUID capture file** (``# session: <id>``, no frontmatter —
+        what ``session_store.create_or_append`` writes): PREPEND a minimal
+        session frontmatter block carrying ``status`` + ``ended``, preserving
+        the existing body below. Once finalized, the file has frontmatter, so a
+        second call sees a terminal status and is a no-op.
+
+    Returns False (no-op) if the note is already terminal or has no body.
+    Writes atomically so a mid-write crash leaves the original intact.
     """
     try:
         text = note.read_text()
     except Exception:
         return False
     if not text.startswith("---"):
-        return False
+        return _finalize_body_only(note, ended_iso, status)
     end = text.find("\n---", 3)
     if end < 0:
         return False
