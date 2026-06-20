@@ -105,3 +105,18 @@ def test_shelve_and_pickup_skills_present():
     expected = {"shelve", "pickup"}
     missing = expected - names
     assert not missing, f"expected craft skills missing from the plugin: {sorted(missing)}"
+
+
+def test_brainstorm_skill_present_in_craft():
+    """S6 Slice 3 moved the brainstorm skill from lore into craft.
+
+    brainstorm runs BEFORE planning (discovery → frozen spec) and now lives in
+    the craft plugin alongside plan/execute/review. Guard its presence so the
+    move can't silently regress.
+    """
+    names = {p.parent.name for p in _skill_files()}
+    assert "brainstorm" in names, (
+        "brainstorm must exist under the craft plugin "
+        "(tools/craft/plugins/craft/skills/brainstorm/) — S6 Slice 3 moved it "
+        "from lore"
+    )

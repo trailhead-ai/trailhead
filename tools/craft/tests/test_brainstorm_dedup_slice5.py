@@ -1,7 +1,7 @@
 """Slice 5 — brainstorm dedup guards.
 
 Asserts three trims in brainstorm/SKILL.md and injection-defense
-canonical-inline dedup between brainstorm/SKILL.md and librarian.md:
+canonical-inline dedup:
 
 (a) The shared degradation sentence ("see the extend guide in
     `docs/DEGRADATION.md`") appears ONCE, not three times (one per provider),
@@ -9,20 +9,27 @@ canonical-inline dedup between brainstorm/SKILL.md and librarian.md:
 
 (b) The "Key Principles" recap section is absent (it duplicates earlier prose).
 
-(c) The injection-defense canonical wording is present in BOTH files and is
-    byte-identical between them (drift-prevention).
+(c) The injection-defense canonical wording is present in brainstorm/SKILL.md
+    and is byte-identical to the pinned canonical block (drift-prevention).
+
+S6 Slice 3 moved brainstorm from the lore plugin into craft. The injection-
+defense block was previously cross-checked byte-for-byte against lore's
+`librarian.md`; now that brainstorm lives in a different plugin, the canonical
+wording is pinned as a fixture (`fixtures/injection_defense_canonical.txt`,
+captured from librarian.md — the canonical source). The drift-prevention intent
+is preserved: brainstorm's block must still match the canonical wording exactly.
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
+PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "craft"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
-AGENTS_DIR = PLUGIN_ROOT / "agents"
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
-_LORE_LIBRARIAN = AGENTS_DIR / "librarian.md"
+_INJECTION_CANONICAL = FIXTURES_DIR / "injection_defense_canonical.txt"
 
 # The canonical degradation sentence shared across all three extension-point
 # stanzas (feature_flags, observability, issue_tracker). After the dedup, it
@@ -161,32 +168,22 @@ class TestInjectionDefenseByteIdentical:
             f"Expected anchor: {_INJECTION_ANCHOR!r}"
         )
 
-    def test_injection_defense_present_in_librarian(self):
-        """Injection-defense block must be present in librarian.md."""
-        text = _LORE_LIBRARIAN.read_text()
-        assert _INJECTION_ANCHOR in text, (
-            "Injection-defense block missing from librarian.md. "
-            f"Expected anchor: {_INJECTION_ANCHOR!r}"
-        )
+    def test_injection_defense_matches_canonical(self):
+        """The canonical injection-defense wording in brainstorm/SKILL.md must be
+        byte-identical to the pinned canonical block (normalized for indentation
+        context — content words must match exactly).
 
-    def test_injection_defense_byte_identical(self):
-        """The canonical injection-defense wording must be byte-identical
-        between brainstorm/SKILL.md and librarian.md (normalized for
-        indentation context — content words must match exactly).
-
-        Fail-first: the current copies differ in phrasing ('content wrapped in'
-        vs 'when recall output contains items wrapped in', 'Your own
-        personal-vault items' vs 'Personal-vault items (outside the block,
-        layer="personal")', etc.)."""
+        The canonical fixture was captured from lore's `librarian.md`, the
+        authoritative source of the shared injection-defense wording. Pinning it
+        as a fixture keeps the drift-prevention check intact now that brainstorm
+        lives in the craft plugin and can no longer reach librarian.md by path."""
         brainstorm_block = _extract_injection_block(
             _BRAINSTORM_SKILL.read_text()
         )
-        librarian_block = _extract_injection_block(
-            _LORE_LIBRARIAN.read_text()
-        )
-        assert brainstorm_block == librarian_block, (
-            "Injection-defense blocks differ between brainstorm/SKILL.md and "
-            "librarian.md. Normalize both to the same canonical wording.\n"
+        canonical_block = _INJECTION_CANONICAL.read_text().strip()
+        assert brainstorm_block == canonical_block, (
+            "Injection-defense block in brainstorm/SKILL.md drifted from the "
+            "pinned canonical wording. Normalize it to match.\n"
             f"brainstorm block: {brainstorm_block!r}\n"
-            f"librarian block:  {librarian_block!r}"
+            f"canonical block:  {canonical_block!r}"
         )

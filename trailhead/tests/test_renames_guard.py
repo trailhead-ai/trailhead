@@ -1714,8 +1714,9 @@ class TestSlice8ArtistCutover:
     deliberately out of this guard's scope.)
     """
 
+    # S6 Slice 3 moved brainstorm from the lore plugin into craft.
     _BRAINSTORM_SKILL = (
-        _LORE_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
+        _CRAFT_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
     )
     _DESIGN_AUTHORING = (
         _CRAFT_PLUGIN_ROOT / "docs" / "design-authoring.md"
@@ -1771,11 +1772,12 @@ _RADAR_ALLOWLIST_FILENAMES = {
 }
 
 # Filenames that legitimately carry the `design-mockup-writer` token: the
-# absence-assertion guard (`test_lore_skills_generic.py` — a ref that asserts
-# the name is GONE, not a live routing ref) and the historical de-zenith test
-# docstring.
+# absence-assertion guard (`test_brainstorm_generic.py` — a ref that asserts the
+# name is GONE, not a live routing ref; S6 Slice 3 moved this assertion here from
+# test_lore_skills_generic.py with the brainstorm skill) and the historical
+# de-zenith test docstring.
 _DESIGN_MOCKUP_WRITER_ALLOWLIST_FILENAMES = {
-    "test_lore_skills_generic.py",
+    "test_brainstorm_generic.py",
     "test_artist_dezenithed.py",
     "test_renames_guard.py",
 }

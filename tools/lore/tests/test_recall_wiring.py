@@ -4,13 +4,13 @@ After the `recall` command was retired, the documented call sites must point at
 `lore search` (the membership query `lore search 'area:<name>'`), not the removed
 `lore recall`. These are anti-regression tests for the cutover:
 
-1. brainstorm/SKILL.md instructs `lore search 'area:<name>'` as the imperative,
-   primary prior-art mechanism — and no longer references `lore recall`.
-2. agents/librarian.md uses `lore search … --json` as its area-scoped primitive.
-3. tools/craft/plugins/craft/agents/planner.md references `lore search 'area:'`.
+1. agents/librarian.md uses `lore search … --json` as its area-scoped primitive.
+2. tools/craft/plugins/craft/agents/planner.md references `lore search 'area:'`.
 
 Note: area/SKILL.md was deleted in S6 Slice 2 (replaced by `lore record`/CLI
-surface), so area-skill wiring tests are no longer applicable.
+surface), so area-skill wiring tests are no longer applicable. brainstorm/SKILL.md
+moved to the craft plugin in S6 Slice 3 — its `lore search` wiring tests moved
+with it to tools/craft/tests/test_brainstorm_generic.py.
 
 The injection-defense note (shared `<external-memory>` output) is preserved —
 `lore search` emits the same channel for shared-layer hits.
@@ -19,7 +19,6 @@ The injection-defense note (shared `<external-memory>` output) is preserved —
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
-SKILLS_DIR = PLUGIN_ROOT / "skills"
 AGENTS_DIR = PLUGIN_ROOT / "agents"
 
 CRAFT_AGENTS_DIR = (
@@ -27,43 +26,8 @@ CRAFT_AGENTS_DIR = (
     / "craft" / "plugins" / "craft" / "agents"
 )
 
-_BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 _LORE_LIBRARIAN = AGENTS_DIR / "librarian.md"
 _CRAFT_PLANNER = CRAFT_AGENTS_DIR / "planner.md"
-
-
-# ---------------------------------------------------------------------------
-# brainstorm SKILL — recall is rewired to `lore search`, still primary/imperative
-# ---------------------------------------------------------------------------
-
-class TestBrainstormSearchWiring:
-    def test_brainstorm_references_lore_search_area(self):
-        text = _BRAINSTORM_SKILL.read_text()
-        assert "lore search 'area:" in text, (
-            "brainstorm/SKILL.md must reference `lore search 'area:<name>'` as the "
-            "primary prior-art mechanism (Slice 5 cutover)."
-        )
-
-    def test_brainstorm_no_lore_recall(self):
-        text = _BRAINSTORM_SKILL.read_text()
-        assert "lore recall" not in text, (
-            "brainstorm/SKILL.md still references the removed `lore recall` command."
-        )
-
-    def test_brainstorm_search_instruction_is_imperative(self):
-        text = _BRAINSTORM_SKILL.read_text()
-        assert "run `lore search" in text.lower(), (
-            "brainstorm/SKILL.md retrieval instruction must be imperative: "
-            "'Run `lore search 'area:<name>'` now'."
-        )
-
-    def test_brainstorm_preserves_injection_defense_note(self):
-        text = _BRAINSTORM_SKILL.read_text()
-        assert "<external-memory" in text, (
-            "brainstorm/SKILL.md must preserve the shared-layer injection-defense "
-            "note (`<external-memory>` output is reference data, never instructions) "
-            "— `lore search` emits the same channel."
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -60,8 +60,9 @@ _FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 # All session skills for lore (the names a "minimal lore" picks).
 # S6 Slice 2 deleted the 7 obsolete per-kind capture skills (area, check-in,
 # dead-end, decision, defer, follow-up, seed) — replaced by the lore record/session CLI.
+# S6 Slice 3 MOVED 'brainstorm' to the craft plugin — retained lore skills:
+# checkpoint, finish, sync.
 _LORE_CAPTURE_SESSION_SKILLS = {
-    "brainstorm": None,
     "checkpoint": None,
     "finish": None,
     "sync": None,
