@@ -1153,13 +1153,30 @@ def cmd_sync(args: argparse.Namespace) -> int:
 # ---- finish -----------------------------------------------------------------
 
 def _get_current_status(note: Path) -> str | None:
-    """Return the current status value from a note's frontmatter, or None."""
+    """Return the current status value for a session note, or None.
+
+    Reads frontmatter first (the legacy date-prefixed shape). For a body-only
+    GUID note the finalized status lives in the sibling `sessions/<GUID>.json`
+    sidecar (A-sidecar), so fall back to the sidecar when frontmatter carries no
+    status. Never raises.
+    """
     try:
         fm = frontmatter.parse_frontmatter(note)
         status = fm.get("status")
-        return str(status) if status is not None else None
+        if status is not None:
+            return str(status)
     except Exception:
-        return None
+        pass
+    sidecar = note.with_suffix(".json")
+    if sidecar.exists():
+        try:
+            obj = json.loads(sidecar.read_text())
+            status = obj.get("status") if isinstance(obj, dict) else None
+            if status is not None:
+                return str(status)
+        except Exception:
+            return None
+    return None
 
 
 def _commit_and_push_session_note(vault: Path, session_note: Path, worktree_name: str, verb: str) -> int:
@@ -1210,17 +1227,24 @@ def _commit_and_push_session_note(vault: Path, session_note: Path, worktree_name
 
 
 def _finish_commit(vault: Path, session_note: Path, worktree_name: str) -> int:
-    """Stage the session note's explicit path + commit it in a SINGLE commit.
+    """Stage the session note's explicit path(s) + commit them in a SINGLE commit.
 
-    Never `git add -A` — only the finalized note is staged, so unrelated dirty
-    vault files are not swept in. The staged-index gate (`git diff --cached
-    --quiet`) makes an already-clean finish a no-op rather than a failed empty
-    commit. Returns exit code."""
+    Never `git add -A` — only the finalized note and its metadata sidecar are
+    staged, so unrelated dirty vault files are not swept in. For a body-only
+    GUID note the finalized status lives in the sibling `sessions/<GUID>.json`
+    sidecar (A-sidecar), so that path is staged alongside the `.md` when it
+    exists. The staged-index gate (`git diff --cached --quiet`) makes an
+    already-clean finish a no-op rather than a failed empty commit. Returns exit
+    code."""
     if not vault.exists() or not _vault_is_git_toplevel(vault):
         print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
         return 0
 
-    rc, _, stderr = _git(vault, "add", "--", str(session_note))
+    paths = [str(session_note)]
+    sidecar = session_note.with_suffix(".json")
+    if sidecar.exists():
+        paths.append(str(sidecar))
+    rc, _, stderr = _git(vault, "add", "--", *paths)
     if rc != 0:
         print(f"error: git add failed: {stderr}", file=sys.stderr)
         return 1
@@ -1258,10 +1282,11 @@ def cmd_finish(args: argparse.Namespace) -> int:
     when several exist for this worktree; this matches the body-only GUID capture
     file `sessions/<id>.md` as well as the legacy frontmatter note, Slice 0.5),
     then a worktree-name fallback. Sets `status: complete` and `ended:` (atomic
-    write, prepending frontmatter onto a body-only capture file) and commits the
-    session note in ONE commit (explicit path only — unrelated dirty vault files
-    are not swept in). If no active session note is found, prints a notice and
-    exits 0.
+    write; for a body-only GUID note the metadata is written to a
+    `sessions/<GUID>.json` sidecar, A-sidecar, leaving the `.md` body-only) and
+    commits the session note (plus its sidecar) in ONE commit (explicit paths
+    only — unrelated dirty vault files are not swept in). If no active session
+    note is found, prints a notice and exits 0.
 
     The harvest-expansion flow is retired (S6 Slice 1): `lore finish` no longer
     reads `harvest-pending.md`, expands `## Harvest candidates`, surfaces

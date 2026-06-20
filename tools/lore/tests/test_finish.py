@@ -17,6 +17,7 @@ ALL fixtures SYNTHETIC — zero private tokens (public repo).
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -113,20 +114,30 @@ class TestFinalizeSingleCommit:
 
         after = _commit_count(vault)
         assert after == before + 1, f"expected exactly one new commit ({before} -> {after})"
-        assert f"sessions/{_GUID}.md" in _committed_files_at_head(vault)
+        # The body-only .md was committed in the baseline and is now untouched by
+        # finalize (A-sidecar), so the finalize commit carries the metadata
+        # sidecar — the unit that actually changed.
+        committed = _committed_files_at_head(vault)
+        assert f"sessions/{_GUID}.json" in committed
 
     def test_finish_stamps_status_complete_and_ended(self, tmp_path):
         vault = _git_vault(tmp_path)
         assert _candidate(vault).returncode == 0
         capture = vault / "sessions" / f"{_GUID}.md"
+        before = capture.read_text()
         _commit_baseline(vault)
 
         r = run_cli(["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)})
         assert r.returncode == 0, r.stderr
 
-        fm = load_script("frontmatter").parse_frontmatter(capture)
-        assert fm["status"] == "complete"
-        assert fm.get("ended")
+        # Session metadata lands in the .json sidecar, NOT .md frontmatter.
+        sidecar = vault / "sessions" / f"{_GUID}.json"
+        assert sidecar.exists()
+        obj = json.loads(sidecar.read_text())
+        assert obj["type"] == "session"
+        assert obj["status"] == "complete"
+        assert obj["ended"]
+        assert capture.read_text() == before  # body-only .md untouched
 
 
 # ---------------------------------------------------------------------------

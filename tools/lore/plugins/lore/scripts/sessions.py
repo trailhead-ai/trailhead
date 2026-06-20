@@ -9,8 +9,9 @@ Responsibilities:
   - session_note_path / all_session_notes_for_worktree: worktree-scoped finders
   - write_note_atomic: crash-safe file write (temp + os.replace)
   - finalize_note: set status: complete + ended: on a session note — stamping a
-    frontmatter note in-place, or prepending frontmatter onto the body-only GUID
-    capture file (Slice 0.5, KU1)
+    frontmatter note in-place, or writing a ``sessions/<GUID>.json`` metadata
+    sidecar for the body-only GUID capture file (the ``.md`` stays body-only;
+    Slice 0.5, KU1)
 
 The SessionStart context-injection hook and its render helpers (render_vault_index,
 get_vault_stats, render_tool_notes, list_tool_notes, render_action_guards,
@@ -20,6 +21,7 @@ no SessionStart hook).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -290,32 +292,62 @@ def write_note_atomic(note: Path, text: str) -> bool:
         return False
 
 
+def write_json_atomic(path: Path, obj: dict) -> bool:
+    """Serialize *obj* to *path* atomically (temp file + os.replace).
+
+    Mirrors :func:`write_note_atomic` and the record sidecar format
+    (``record_store.py``): ``json.dumps(obj, indent=2, sort_keys=True)``. A
+    crash before the replace leaves the original intact and cleans up the temp
+    file. Returns True on success, False on failure.
+    """
+    return write_note_atomic(path, json.dumps(obj, indent=2, sort_keys=True))
+
+
 _SESSION_HEADER_RE = re.compile(r"^# session: (\S+)\s*$", re.MULTILINE)
 
 
 def _finalize_body_only(note: Path, ended_iso: str, status: str) -> bool:
-    """Finalize a body-only GUID capture file (Slice 0.5, KU1).
+    """Finalize a body-only GUID capture file via a JSON sidecar (Slice 0.5, KU1).
 
     The capture file (``session_store.create_or_append``) is frontmatter-less:
     a ``# session: <id>`` header followed by appended candidate/referenced
-    lines. To finalize, PREPEND a minimal session frontmatter block carrying
-    ``status`` + ``ended`` (plus ``type: session`` and the ``session_id`` lifted
-    from the header so the note round-trips through the resolver and
-    status-validator), preserving the existing body verbatim below it. Writes
-    atomically. Returns False if the body is empty/unreadable.
+    lines. To finalize, write session metadata into a sibling
+    ``sessions/<GUID>.json`` sidecar — consistent with vault records
+    (``<kind>/<name>.md`` + ``<kind>/<name>.json``) rather than as frontmatter
+    on the body. The sidecar carries ``{type: "session", session_id, status,
+    ended}`` (``session_id`` lifted from the ``# session: <id>`` header, falling
+    back to the file stem); any existing ``created-at``/``created-by``
+    provenance already on the sidecar is preserved. Serialized with
+    ``json.dumps(indent=2, sort_keys=True)`` to match the record sidecar format,
+    written atomically. The ``.md`` is left body-only and untouched (no
+    frontmatter is ever prepended).
+
+    Idempotency: the sidecar status is the idempotency source for GUID notes —
+    if a sidecar already exists with a terminal status, this is a no-op
+    (returns False). Returns False if the body is empty/unreadable.
     """
     text = note.read_text()
     m = _SESSION_HEADER_RE.search(text)
     session_id = m.group(1) if m else note.stem
-    front = (
-        "---\n"
-        "type: session\n"
-        f"session_id: {session_id}\n"
-        f"status: {status}\n"
-        f"ended: {ended_iso}\n"
-        "---\n\n"
-    )
-    return write_note_atomic(note, front + text)
+
+    sidecar_path = note.with_suffix(".json")
+    existing: dict = {}
+    if sidecar_path.exists():
+        try:
+            loaded = json.loads(sidecar_path.read_text())
+            if isinstance(loaded, dict):
+                existing = loaded
+        except Exception:
+            existing = {}
+    if existing.get("status") in _TERMINAL_STATUSES:
+        return False  # already finalized — a second finish is a no-op
+
+    obj = dict(existing)
+    obj["type"] = "session"
+    obj["session_id"] = session_id
+    obj["status"] = status
+    obj["ended"] = ended_iso
+    return write_json_atomic(sidecar_path, obj)
 
 
 def finalize_note(note: Path, ended_iso: str, status: str = "complete") -> bool:
@@ -327,12 +359,14 @@ def finalize_note(note: Path, ended_iso: str, status: str = "complete") -> bool:
     Handles BOTH session-note shapes (Slice 0.5, KU1):
 
       - **Frontmatter note** (legacy date-prefixed shape): stamp ``status`` +
-        ``ended`` in-place in the existing frontmatter block.
+        ``ended`` in-place in the existing frontmatter block. This path backs
+        craft's ``lore handoff``/``shelved``/``resume`` flow and is unchanged.
       - **Body-only GUID capture file** (``# session: <id>``, no frontmatter —
-        what ``session_store.create_or_append`` writes): PREPEND a minimal
-        session frontmatter block carrying ``status`` + ``ended``, preserving
-        the existing body below. Once finalized, the file has frontmatter, so a
-        second call sees a terminal status and is a no-op.
+        what ``session_store.create_or_append`` writes): write session metadata
+        into a sibling ``sessions/<GUID>.json`` sidecar (consistent with vault
+        records), leaving the ``.md`` body-only and untouched. The sidecar
+        status — not frontmatter on the ``.md`` — is the idempotency source: a
+        second call on an already-terminal sidecar is a no-op.
 
     Returns False (no-op) if the note is already terminal or has no body.
     Writes atomically so a mid-write crash leaves the original intact.

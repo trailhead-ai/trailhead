@@ -11,6 +11,7 @@ Covers (TDD — written before implementation):
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -111,47 +112,78 @@ def _write_guid_capture(vault: Path, guid: str = _GUID) -> Path:
     return note
 
 
+def _sidecar_of(note: Path) -> Path:
+    return note.with_suffix(".json")
+
+
 class TestFinalizeBodyOnlyCaptureFile:
-    def test_prepends_frontmatter_with_status_complete(self, tmp_path):
+    def test_writes_sidecar_with_status_complete(self, tmp_path):
         vault = _make_vault(tmp_path)
         note = _write_guid_capture(vault)
         sessions = load_script("sessions")
         ok = sessions.finalize_note(note, "2026-06-02T13:00:00Z")
         assert ok
-        text = note.read_text()
-        assert text.startswith("---\n")
-        fm = load_script("frontmatter").parse_frontmatter(note)
-        assert fm["status"] == "complete"
-        assert fm.get("ended") == "2026-06-02T13:00:00Z"
+        sidecar = _sidecar_of(note)
+        assert sidecar.exists()
+        obj = json.loads(sidecar.read_text())
+        assert obj["type"] == "session"
+        assert obj["status"] == "complete"
+        assert obj["ended"] == "2026-06-02T13:00:00Z"
+        assert obj["session_id"] == _GUID
 
-    def test_preserves_session_header_and_candidate_lines(self, tmp_path):
+    def test_md_left_body_only_and_untouched(self, tmp_path):
         vault = _make_vault(tmp_path)
         note = _write_guid_capture(vault)
+        before = note.read_text()
         sessions = load_script("sessions")
         assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
         text = note.read_text()
-        assert text.startswith("---\n")  # frontmatter prepended
+        # No frontmatter is ever prepended onto the body-only capture file.
+        assert not text.startswith("---")
+        assert text == before  # byte-for-byte unchanged
         assert f"# session: {_GUID}" in text  # body header preserved
         assert "a lesson captured during the session" in text  # candidate line preserved
 
-    def test_finalized_body_only_note_passes_status_validator(self, tmp_path):
+    def test_sidecar_is_sorted_indented_json(self, tmp_path):
         vault = _make_vault(tmp_path)
         note = _write_guid_capture(vault)
         sessions = load_script("sessions")
         sessions.finalize_note(note, "2026-06-02T13:00:00Z")
-        fm = load_script("frontmatter").parse_frontmatter(note)
-        sv = load_script("status_validator")
-        assert sv.is_valid_status(fm["type"], fm["status"])
+        obj = json.loads(_sidecar_of(note).read_text())
+        assert _sidecar_of(note).read_text() == json.dumps(
+            obj, indent=2, sort_keys=True
+        )
+
+    def test_preserves_existing_provenance_in_sidecar(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sidecar = _sidecar_of(note)
+        sidecar.write_text(
+            json.dumps(
+                {"created-at": "2026-06-01T09:00:00Z", "created-by": "tester"},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        sessions = load_script("sessions")
+        assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
+        obj = json.loads(sidecar.read_text())
+        assert obj["created-at"] == "2026-06-01T09:00:00Z"
+        assert obj["created-by"] == "tester"
+        assert obj["status"] == "complete"
 
     def test_idempotent_second_finalize_is_noop(self, tmp_path):
         vault = _make_vault(tmp_path)
         note = _write_guid_capture(vault)
         sessions = load_script("sessions")
         assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
-        first = note.read_text()
-        # Already terminal → second call is a no-op and must not double-stamp.
+        sidecar = _sidecar_of(note)
+        first = sidecar.read_text()
+        md_first = note.read_text()
+        # Sidecar status is terminal → second call is a no-op (no re-stamp).
         assert sessions.finalize_note(note, "2026-06-02T14:00:00Z") is False
-        assert note.read_text() == first
+        assert sidecar.read_text() == first
+        assert note.read_text() == md_first
 
 
 # ---------------------------------------------------------------------------
@@ -181,18 +213,44 @@ class TestFinishOnGuidCaptureFile:
         vault = _git_vault(tmp_path)
         assert self._candidate(vault).returncode == 0
         capture = vault / "sessions" / f"{_GUID}.md"
+        before = capture.read_text()
 
         r = run_cli(
             ["finish", "--session-id", _GUID],
             env={"LORE_VAULT": str(vault)},
         )
         assert r.returncode == 0, r.stderr
-        fm = load_script("frontmatter").parse_frontmatter(capture)
-        assert fm["status"] == "complete"
-        assert fm.get("ended")
+        sidecar = vault / "sessions" / f"{_GUID}.json"
+        assert sidecar.exists()
+        obj = json.loads(sidecar.read_text())
+        assert obj["type"] == "session"
+        assert obj["status"] == "complete"
+        assert obj["ended"]
+        # The .md stays body-only and byte-for-byte unchanged.
         text = capture.read_text()
+        assert text == before
+        assert not text.startswith("---")
         assert f"# session: {_GUID}" in text
         assert "a lesson captured during the session" in text
+
+    def test_finish_second_call_is_noop(self, tmp_path):
+        vault = _git_vault(tmp_path)
+        assert self._candidate(vault).returncode == 0
+        sidecar = vault / "sessions" / f"{_GUID}.json"
+
+        first = run_cli(
+            ["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)}
+        )
+        assert first.returncode == 0, first.stderr
+        sidecar_after_first = sidecar.read_text()
+
+        second = run_cli(
+            ["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)}
+        )
+        assert second.returncode == 0, second.stderr
+        # The sidecar status stays terminal and is not re-written.
+        assert sidecar.read_text() == sidecar_after_first
+        assert "already" in (second.stdout + second.stderr).lower()
 
 
 class TestFinishEmptySession:
