@@ -65,7 +65,6 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
 ```
 lore init <path>          Scaffold a new vault
 lore new <type>           Render a template and write a new vault note
-lore patch <file> <sec>   Append text under a named section (--text or stdin)
 lore set-status <f> <v>   Validate and flip a note's frontmatter status
 lore stats                Print vault counts
 lore finish               Finalize the session note, expand harvest-pending into vault notes, and commit

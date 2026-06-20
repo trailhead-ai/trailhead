@@ -5,7 +5,6 @@ Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
   lore new <type>           Render a template and write a new vault note.
   lore seed <name>          Scaffold an inbox capture under inbox/.
-  lore patch <file> <sec>   Append text under a section (--text or stdin).
   lore set-status <f> <v>   Validate + set a note's frontmatter status.
   lore stats                Print counts for the resolved vault.
   lore session-note         Print this session's note path (id-first resolve).
@@ -1026,21 +1025,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         print("lore: status: agent-rules blocks present in all known rules files")
 
-    return 0
-
-
-# ---- patch ------------------------------------------------------------------
-
-def cmd_patch(args: argparse.Namespace) -> int:
-    path = Path(args.file).expanduser()
-    if not path.is_file():
-        print(f"error: no such file: {path}", file=sys.stderr)
-        return 1
-    text = args.text if args.text is not None else sys.stdin.read()
-    if text == "":
-        print("error: no text to append (pass --text or pipe via stdin)", file=sys.stderr)
-        return 1
-    frontmatter.patch_section(path, args.section, text)
     return 0
 
 
@@ -2791,12 +2775,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show lore installation status and surface rules-file drift (Slice 4, S5)",
     )
     p_lore_status.set_defaults(func=cmd_status)
-
-    p_patch = sub.add_parser("patch", help="Append text under a section")
-    p_patch.add_argument("file")
-    p_patch.add_argument("section")
-    p_patch.add_argument("--text", default=None, help="Text to append (else read stdin)")
-    p_patch.set_defaults(func=cmd_patch)
 
     p_status = sub.add_parser("set-status", help="Validate + set a note's status")
     p_status.add_argument("file")

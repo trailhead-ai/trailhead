@@ -1,4 +1,4 @@
-"""Tests for the `lore` CLI (init / patch / set-status / stats).
+"""Tests for the `lore` CLI (init / set-status / stats).
 
 The CLI is exercised as a subprocess so we test the real executable + its
 sibling-module import path, exit codes, and stdout/stderr.
@@ -79,46 +79,18 @@ def test_init_no_harvest_pending(tmp_path):
     assert not (default_vault / "harvest-pending.md").exists()
 
 
-# ---- lore patch -------------------------------------------------------------
+# ---- lore patch is unregistered ---------------------------------------------
 
-def _session_doc():
-    return (
-        "---\ntype: session\nstatus: active\n---\n\n"
-        "# Session\n\n"
-        "## What we did\n"
-        "did stuff\n\n"
-        "## Decided\n"
-        "decided stuff\n"
-    )
-
-
-def test_patch_appends_under_section_via_arg(tmp_path):
+def test_patch_subcommand_is_unregistered(tmp_path):
+    """The orphaned `lore patch` subcommand was removed: invoking it is an
+    argparse 'invalid choice' error (exit 2), never a successful patch. The
+    internal `frontmatter.patch_section` helper (used by `lore handoff`) is
+    unaffected — only the user-facing subcommand is gone."""
     p = tmp_path / "s.md"
-    p.write_text(_session_doc())
+    p.write_text("---\ntype: session\nstatus: active\n---\n\n## What we did\nx\n")
     r = run_cli(["patch", str(p), "What we did", "--text", "- more work"])
-    assert r.returncode == 0, r.stderr
-    text = p.read_text()
-    what_idx = text.index("## What we did")
-    decided_idx = text.index("## Decided")
-    assert "- more work" in text[what_idx:decided_idx]
-
-
-def test_patch_leaves_sibling_byte_identical(tmp_path):
-    p = tmp_path / "s.md"
-    p.write_text(_session_doc())
-    r = run_cli(["patch", str(p), "What we did", "--text", "- more work"])
-    assert r.returncode == 0
-    decided_block = p.read_text()
-    decided_block = decided_block[decided_block.index("## Decided"):]
-    assert decided_block == "## Decided\ndecided stuff\n"
-
-
-def test_patch_reads_stdin(tmp_path):
-    p = tmp_path / "s.md"
-    p.write_text(_session_doc())
-    r = run_cli(["patch", str(p), "Decided"], input_text="- from stdin\n")
-    assert r.returncode == 0, r.stderr
-    assert "- from stdin" in p.read_text()
+    assert r.returncode == 2
+    assert "invalid choice: 'patch'" in r.stderr
 
 
 # ---- lore set-status --------------------------------------------------------
