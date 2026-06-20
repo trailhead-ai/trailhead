@@ -28,9 +28,6 @@ through capture commands (`/lore:defer`, `/lore:decision`, `/lore:dead-end`,
 | `gotchas/`, `tools/` | Sharp edges and tool-specific notes. |
 | `.templates/` | Note-type templates the capture commands render. |
 
-`harvest-pending.md` is the staging area for harvest candidates emitted by
-subagents; the session wrap-up ritual promotes them into the vault.
-
 ## Status vocabulary
 
 Every note type has a canonical `status:` vocabulary enforced by the
