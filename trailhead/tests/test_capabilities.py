@@ -88,9 +88,12 @@ class TestLoreInventory:
         m = load_manifest(_LORE_MANIFEST)
         assert m.subagents == {"librarian": "agents/librarian.md"}
 
-    def test_capture_skills_selectable(self):
+    def test_session_skills_selectable(self):
+        # S6 Slice 2: the 7 per-kind capture skills (area, check-in, dead-end, decision,
+        # defer, follow-up, seed) were deleted — replaced by the lore record/session CLI.
+        # The retained session/ritual skills are brainstorm, checkpoint, finish, sync.
         m = load_manifest(_LORE_MANIFEST)
-        for name in ("decision", "dead-end", "defer", "follow-up", "area", "seed", "brainstorm"):
+        for name in ("brainstorm", "checkpoint", "finish", "sync"):
             assert name in m.skills
             assert m.skills[name] == f"skills/{name}"
 
@@ -107,7 +110,8 @@ class TestLoreInventory:
         m = load_manifest(_LORE_MANIFEST)
         assert m.all_selectable() == set(m.subagents) | set(m.skills)
         assert "librarian" in m.all_selectable()
-        assert "decision" in m.all_selectable()
+        # S6 Slice 2: decision and other per-kind skills deleted; checkpoint retained.
+        assert "checkpoint" in m.all_selectable()
 
 
 # ---------------------------------------------------------------------------

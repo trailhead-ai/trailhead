@@ -7,8 +7,7 @@ lessons, and a running session log.
 
 The [lore](https://github.com) Claude Code plugin reads this vault at session
 start (recalling what's relevant to the branch you're on) and writes to it
-through capture commands (`/lore:defer`, `/lore:decision`, `/lore:dead-end`,
-`/lore:follow-up`, `/lore:area`) and the `lore` CLI.
+through the `lore record` and `lore session` CLI commands.
 
 ## Layout
 

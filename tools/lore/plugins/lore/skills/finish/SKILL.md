@@ -13,9 +13,8 @@ note from in-context synthesis, then calls `lore finish`, which:
    block; expands each typed one-liner of the five in-scope types
    (`deferred` / `decision` / `dead-end` / `follow-up` / `lesson`) into a full
    templated note in the matching vault directory.
-3. Surfaces `gotcha` entries in the finish report for manual
-   `/lore:area` patching — they are NOT auto-expanded and remain in
-   `harvest-pending.md`.
+3. Surfaces `gotcha` entries in the finish report for manual review — they are
+   NOT auto-expanded and remain in `harvest-pending.md`.
 4. Retains malformed or unmarked lines in `harvest-pending.md` with a
    warning rather than silently consuming them.
 5. Commits the session note + new notes + the rewritten `harvest-pending.md`
@@ -83,7 +82,7 @@ notes, and commits everything in one shot. Relay any notices printed (push
 failure, no remote, surfaced gotchas).
 
 **Gotchas in the report:** if `lore finish` prints surfaced `gotcha` entries,
-tell the user — they need a manual `/lore:area` patch to record them.
+tell the user so they can manually capture them via `lore record`.
 
 ### Step 5 — Report to the user
 

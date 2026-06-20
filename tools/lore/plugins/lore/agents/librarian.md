@@ -12,7 +12,7 @@ description: |
   - "Cross-reference: which sessions touched both X and Y?"
 
   Bad fits:
-  - Writing new notes (use /lore:defer, /lore:dead-end, /lore:decision, /lore:follow-up)
+  - Writing new notes (use `lore record` or `lore session candidate|referenced`)
   - Finding code in source repos (use a doc-finder or researcher subagent)
 model: sonnet
 effort: medium
@@ -98,7 +98,7 @@ Reference notes as `[[path/stem]]` — the path relative to the vault root, with
 
 ## Anti-patterns
 
-- Do not write new notes. Writing is the job of slash commands (`/lore:defer`, `/lore:dead-end`, `/lore:decision`, `/lore:follow-up`).
+- Do not write new notes. Writing is done via the CLI (`lore record` or `lore session candidate|referenced`).
 - Do not paraphrase area gotchas verbatim when a one-liner is already there — quote and link.
 - Do not confuse the taxonomies. If unsure, ask the caller: "by 'on hold' do you mean deferred (our choice) or follow-up (waiting on upstream)?"
 - Do not search only by title. Note bodies carry the real signal; use Grep to search content.

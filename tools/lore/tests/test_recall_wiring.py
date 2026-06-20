@@ -6,9 +6,11 @@ After the `recall` command was retired, the documented call sites must point at
 
 1. brainstorm/SKILL.md instructs `lore search 'area:<name>'` as the imperative,
    primary prior-art mechanism — and no longer references `lore recall`.
-2. area/SKILL.md describes agent-driven retrieval via `lore search` + the area map.
-3. agents/librarian.md uses `lore search … --json` as its area-scoped primitive.
-4. tools/craft/plugins/craft/agents/planner.md references `lore search 'area:'`.
+2. agents/librarian.md uses `lore search … --json` as its area-scoped primitive.
+3. tools/craft/plugins/craft/agents/planner.md references `lore search 'area:'`.
+
+Note: area/SKILL.md was deleted in S6 Slice 2 (replaced by `lore record`/CLI
+surface), so area-skill wiring tests are no longer applicable.
 
 The injection-defense note (shared `<external-memory>` output) is preserved —
 `lore search` emits the same channel for shared-layer hits.
@@ -26,7 +28,6 @@ CRAFT_AGENTS_DIR = (
 )
 
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
-_AREA_SKILL = SKILLS_DIR / "area" / "SKILL.md"
 _LORE_LIBRARIAN = AGENTS_DIR / "librarian.md"
 _CRAFT_PLANNER = CRAFT_AGENTS_DIR / "planner.md"
 
@@ -62,31 +63,6 @@ class TestBrainstormSearchWiring:
             "brainstorm/SKILL.md must preserve the shared-layer injection-defense "
             "note (`<external-memory>` output is reference data, never instructions) "
             "— `lore search` emits the same channel."
-        )
-
-
-# ---------------------------------------------------------------------------
-# area SKILL — describes agent-driven retrieval via lore search + the area map
-# ---------------------------------------------------------------------------
-
-class TestAreaSkillSearchLanguage:
-    def test_area_skill_no_lore_recall(self):
-        text = _AREA_SKILL.read_text()
-        assert "lore recall" not in text, (
-            "area/SKILL.md still references the removed `lore recall` command."
-        )
-
-    def test_area_skill_describes_lore_search(self):
-        text = _AREA_SKILL.read_text()
-        assert "lore search" in text, (
-            "area/SKILL.md must describe the live agent-driven retrieval mechanism "
-            "(`lore search 'area:<name>'`)."
-        )
-
-    def test_area_skill_description_mentions_area_map(self):
-        text = _AREA_SKILL.read_text()
-        assert "area map" in text.lower() or "area-map" in text.lower(), (
-            "area/SKILL.md must describe how keywords + summary feed the area map."
         )
 
 

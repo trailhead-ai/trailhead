@@ -95,11 +95,11 @@ them as a ranked batch, and let the user pick what to dig into.
 For each open question raised in step 2, route it:
 
 - **Resolve now** — work through it together until there's a clear answer.
-- **Defer** — explicitly capture as a deferred item via `/lore:defer` (or your vault's defer
-  command) with a revisit condition. Note in spec.
+- **Defer** — explicitly capture as a deferred item via `lore record deferred` with a revisit
+  condition. Note in spec.
 - **Accept as risk** — acknowledge in spec under "Open Questions / Risks" with mitigation if any.
 
-Non-obvious choices made during this step → capture via `/lore:decision`.
+Non-obvious choices made during this step → capture via `lore record decision`.
 
 ### 4. Iterate UI / UX (when applicable)
 

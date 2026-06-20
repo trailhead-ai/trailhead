@@ -49,11 +49,28 @@ def test_all_capture_and_ritual_skills_present():
     'finished' was renamed to 'finish'; the watchlist skill was renamed to
     'follow-up'; its polling companion was renamed to 'check-in'. Slice 7
     DELETED the 'reflect', 'tend'/'review', and 'ping' skills entirely.
+    S6 Slice 2 DELETED the 7 obsolete per-kind capture skills: 'area',
+    'check-in', 'dead-end', 'decision', 'defer', 'follow-up', 'seed'.
+    These are replaced by the `lore record` / `lore session` CLI surface.
     """
     names = {p.parent.name for p in _skill_files()}
     expected = {
-        "defer", "dead-end", "decision", "follow-up", "area",
-        "checkpoint", "finish", "sync", "check-in",
+        "brainstorm", "checkpoint", "finish", "sync",
     }
     missing = expected - names
     assert not missing, f"expected skills missing from the plugin: {sorted(missing)}"
+
+
+def test_obsolete_per_kind_capture_skills_absent():
+    """S6 Slice 2 deleted the 7 obsolete per-kind capture skills.
+
+    These skills are replaced by the `lore record` / `lore session` CLI surface.
+    Guard against them being accidentally re-added.
+    """
+    names = {p.parent.name for p in _skill_files()}
+    deleted = {"area", "check-in", "dead-end", "decision", "defer", "follow-up", "seed"}
+    present = deleted & names
+    assert not present, (
+        f"obsolete per-kind capture skills must not exist (S6 Slice 2 deleted them): "
+        f"{sorted(present)}"
+    )
