@@ -16,7 +16,7 @@ from pathlib import Path
 
 _BRAINSTORM = (
     Path(__file__).parent.parent
-    / "plugins" / "lore" / "skills" / "brainstorm" / "SKILL.md"
+    / "plugins" / "craft" / "skills" / "brainstorm" / "SKILL.md"
 )
 
 

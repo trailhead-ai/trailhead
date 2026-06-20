@@ -1387,10 +1387,12 @@ class TestSlice6RadarSkillDataForbids:
 
 
 class TestSlice6RenamedSkillsExistAndRegistrable:
-    """The renamed follow-up + check-in skill dirs must exist + be registrable.
+    """The renamed follow-up + check-in skill dirs were deleted in S6 Slice 2.
 
-    Assertions key on the exact skill DIR path / `name:` — never a bare
-    `follow-up`/`check-in` word — so they can't be falsely satisfied.
+    S6 Slice 2 deleted the 7 obsolete per-kind capture skills (including follow-up
+    and check-in), which are now replaced by the `lore record`/`lore session` CLI.
+    Guard that they are absent so they cannot be accidentally re-added without
+    updating the skill roster.
     """
 
     @pytest.mark.parametrize("stem,skill_md", [
@@ -1398,8 +1400,11 @@ class TestSlice6RenamedSkillsExistAndRegistrable:
         ("check-in", _CHECK_IN_SKILL),
     ])
     def test_renamed_skill_dir_exists_with_skill_md(self, stem: str, skill_md: Path):
-        assert skill_md.exists(), (
-            f"skills/{stem}/SKILL.md not found at {skill_md} — rename the old skill dir."
+        # S6 Slice 2: these skills were deleted — they must no longer exist.
+        assert not skill_md.exists(), (
+            f"skills/{stem}/SKILL.md found at {skill_md} — "
+            f"this skill was deleted in S6 Slice 2 (replaced by lore record CLI). "
+            f"Remove it or update the roster."
         )
 
     @pytest.mark.parametrize("stem,skill_md", [
@@ -1407,39 +1412,42 @@ class TestSlice6RenamedSkillsExistAndRegistrable:
         ("check-in", _CHECK_IN_SKILL),
     ])
     def test_renamed_skill_is_registrable_with_matching_name(self, stem: str, skill_md: Path):
-        assert skill_md.exists(), f"skills/{stem}/SKILL.md not found at {skill_md}"
-        assert _has_registrable_frontmatter(skill_md), (
-            f"skills/{stem}/SKILL.md must open with non-empty name: + description: frontmatter "
-            f"or Claude Code will not register /lore:{stem}"
-        )
-        name = _parse_frontmatter_name(skill_md)
-        assert name == stem, (
-            f"skills/{stem}/SKILL.md frontmatter name: is {name!r}, expected {stem!r}"
+        # S6 Slice 2: these skills were deleted — confirm they are absent.
+        assert not skill_md.exists(), (
+            f"skills/{stem}/SKILL.md found at {skill_md} — "
+            f"this skill was deleted in S6 Slice 2 (replaced by lore record CLI)."
         )
 
 
 class TestSlice6ManifestAndTemplate:
-    """lore capabilities.toml must repoint the two renamed skills + the template renamed."""
+    """lore capabilities.toml no longer includes the two Slice-6-renamed skills.
+
+    S6 Slice 2 deleted follow-up and check-in (they were replaced by lore record CLI).
+    The template files still exist (used by the CLI); the skills dirs are gone.
+    """
 
     def test_capture_capability_references_follow_up_and_check_in(self):
-        """lore capture capability must reference skills/follow-up + skills/check-in,
-        not the old skills/radar + skills/check-radar."""
+        """After S6 Slice 2, follow-up and check-in must NOT be in lore skills
+        (they were deleted — replaced by lore record CLI surface)."""
         m = load_manifest(_LORE_MANIFEST)
-        assert "follow-up" in m.skills, (
-            f"lore must ship the 'follow-up' skill; got {sorted(m.skills)}"
+        assert "follow-up" not in m.skills, (
+            "lore must NOT ship the 'follow-up' skill"
+            f" (deleted in S6 Slice 2); got {sorted(m.skills)}"
         )
-        assert "check-in" in m.skills, (
-            f"lore must ship the 'check-in' skill; got {sorted(m.skills)}"
+        assert "check-in" not in m.skills, (
+            "lore must NOT ship the 'check-in' skill"
+            f" (deleted in S6 Slice 2); got {sorted(m.skills)}"
         )
         assert "radar" not in m.skills, (
-            "lore still ships old 'radar' skill — renamed to 'follow-up'"
+            "lore still ships old 'radar' skill — renamed to 'follow-up' then deleted"
         )
         assert "check-radar" not in m.skills, (
-            "lore still ships old 'check-radar' skill — renamed to 'check-in'"
+            "lore still ships old 'check-radar' skill — renamed to 'check-in' then deleted"
         )
 
     def test_follow_up_template_exists_with_type_follow_up(self):
-        """templates/follow-up.md must exist with `type: follow-up` (was templates/radar.md)."""
+        """templates/follow-up.md must exist with `type: follow-up` (was templates/radar.md).
+        The skill dir is deleted but the template is retained for `lore record` CLI use."""
         tmpl = _LORE_TEMPLATES / "follow-up.md"
         assert tmpl.exists(), (
             f"templates/follow-up.md not found at {tmpl} — rename from templates/radar.md"
@@ -1453,17 +1461,17 @@ class TestSlice6ManifestAndTemplate:
         )
 
     def test_lore_manifest_validates_and_composes_capture(self, tmp_path):
-        """lore manifest validates and capture composes the renamed skill dirs on disk."""
+        """lore manifest validates and session skills compose correctly after S6 Slice 2."""
         m = load_manifest(_LORE_MANIFEST)
         plan = compose_plan(
-            m, {}, {"follow-up": None, "check-in": None}, tmp_path / "capture"
+            m, {}, {"checkpoint": None, "finish": None}, tmp_path / "session"
         )
         skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
-        assert "follow-up" in skill_srcs, (
-            f"compose(capture) must include the follow-up skill dir; got {skill_srcs}"
+        assert "checkpoint" in skill_srcs, (
+            f"compose must include the checkpoint skill dir; got {skill_srcs}"
         )
-        assert "check-in" in skill_srcs, (
-            f"compose(capture) must include the check-in skill dir; got {skill_srcs}"
+        assert "finish" in skill_srcs, (
+            f"compose must include the finish skill dir; got {skill_srcs}"
         )
 
 
@@ -1708,8 +1716,9 @@ class TestSlice8ArtistCutover:
     deliberately out of this guard's scope.)
     """
 
+    # S6 Slice 3 moved brainstorm from the lore plugin into craft.
     _BRAINSTORM_SKILL = (
-        _LORE_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
+        _CRAFT_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
     )
     _DESIGN_AUTHORING = (
         _CRAFT_PLUGIN_ROOT / "docs" / "design-authoring.md"
@@ -1765,11 +1774,12 @@ _RADAR_ALLOWLIST_FILENAMES = {
 }
 
 # Filenames that legitimately carry the `design-mockup-writer` token: the
-# absence-assertion guard (`test_lore_skills_generic.py` — a ref that asserts
-# the name is GONE, not a live routing ref) and the historical de-zenith test
-# docstring.
+# absence-assertion guard (`test_brainstorm_generic.py` — a ref that asserts the
+# name is GONE, not a live routing ref; S6 Slice 3 moved this assertion here from
+# test_lore_skills_generic.py with the brainstorm skill) and the historical
+# de-zenith test docstring.
 _DESIGN_MOCKUP_WRITER_ALLOWLIST_FILENAMES = {
-    "test_lore_skills_generic.py",
+    "test_brainstorm_generic.py",
     "test_artist_dezenithed.py",
     "test_renames_guard.py",
 }

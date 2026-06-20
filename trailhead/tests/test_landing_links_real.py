@@ -238,8 +238,8 @@ class TestForwardCheckPositive:
     def test_real_skill_claim_passes(self):
         """A claim for a known skill resolves without error."""
         anchor_set = build_real_anchor_set()
-        # lore has skills/check-in (skills/tend was deleted in Slice 7)
-        claim = {"kind": "skill", "tool": "lore", "ref": "skills/check-in", "source": "lore"}
+        # lore has skills/checkpoint (S6 Slice 2 deleted the 7 per-kind capture skills)
+        claim = {"kind": "skill", "tool": "lore", "ref": "skills/checkpoint", "source": "lore"}
         check_claim(claim, anchor_set)
 
     def test_real_agent_claim_passes(self):

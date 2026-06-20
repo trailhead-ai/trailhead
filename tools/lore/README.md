@@ -37,22 +37,21 @@ export LORE_VAULT=<path>   # add to ~/.bashrc, ~/.zshrc, or ~/.config/fish/confi
 `$LORE_VAULT` tells every hook and CLI call where the vault lives. If it is
 unset, lore defaults to `~/lore` and emits a one-time warning at session start.
 
-Open Claude Code in any project. The SessionStart hook creates a session note
-for your current worktree and loads the baseline vault index into context —
-with the area map already included so the agent knows which areas exist.
+Open Claude Code in any project. lore is fully pull: there is no SessionStart
+hook — the `lore` CLI resolves the active session note for your worktree itself
+and lazy-creates it on first capture. Orientation (the area map and vault index)
+is loaded via the agent-rules surface, and agents pull prior context on demand
+with `lore search`.
 
 ## Skills
 
 | Skill | Description |
 |---|---|
-| `/lore:defer` | Capture a deferred item |
-| `/lore:dead-end` | Record a dead-end approach |
-| `/lore:decision` | Record an architectural decision |
-| `/lore:follow-up` | Add a follow-up watch item |
-| `/lore:check-in` | Poll active follow-ups for movement |
-| `/lore:area` | Create or update an area profile |
-| `/lore:checkpoint` | Mid-session snapshot — harvest state into the session note |
-| `/lore:finish` | Canonical end-of-session finish — fill, finalize, expand harvest-pending, and commit |
+| `/lore:record` | Log a single deliberate item now (`lore record` / `lore session`) |
+| `/lore:search` | Query the vault (KQL-subset) — the read path |
+| `/lore:research` | Dispatch the `investigator` (deep) or `researcher` (light) agent |
+| `/lore:checkpoint` | Mid-session sweep — catch capture-worthy items not yet logged; status stays active |
+| `/lore:finish` | Canonical end-of-session finish — finalize (`status: complete` + `ended:`) and commit |
 | `/lore:sync` | Commit and push the vault |
 
 ## The `lore` CLI
@@ -65,10 +64,9 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
 ```
 lore init <path>          Scaffold a new vault
 lore new <type>           Render a template and write a new vault note
-lore patch <file> <sec>   Append text under a named section (--text or stdin)
 lore set-status <f> <v>   Validate and flip a note's frontmatter status
 lore stats                Print vault counts
-lore finish               Finalize the session note, expand harvest-pending into vault notes, and commit
+lore finish               Finalize the session note (status: complete + ended:) and commit
 lore sync                 Stage, commit, and push the vault
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore areas                List the area profiles in the vault
@@ -136,7 +134,6 @@ lore/
   plans/         Implementation plans
   designs/       Design artifacts
   inbox/         Raw captures awaiting triage
-  harvest-pending.md   Staging area for subagent harvest candidates
 ```
 
 ## Searching the vault

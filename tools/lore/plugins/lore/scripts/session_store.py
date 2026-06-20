@@ -2,10 +2,15 @@
 
 This module owns the **session** endpoint's storage primitive (Slice 6, S2). It is
 a deliberately separate owner from ``record_store.py`` (council/Builder): a session
-write is NOT a first-class record — it never produces a ``.json`` sidecar, never
-touches the derived SQLite index, and never routes through ``validate_and_write``
-(AC23, endpoint isolation). Pinning the owner here keeps S7's import site
-unambiguous when it migrates session logging.
+write is NOT a first-class record — the **capture** write (:func:`create_or_append`)
+is body-only and produces no ``.json`` sidecar, never touches the derived SQLite
+index, and never routes through ``validate_and_write`` (AC23, endpoint isolation).
+**Finalize** (``sessions.finalize_note``, a separate module) DOES write a
+``sessions/<GUID>.json`` metadata sidecar so session metadata lives in a sidecar —
+consistent with records (``<kind>/<name>.md`` + ``<kind>/<name>.json``) rather than
+in ``.md`` frontmatter; that is a finalize concern and does not change the capture
+path here. Pinning the owner here keeps S7's import site unambiguous when it migrates
+session logging.
 
 Two responsibilities live here:
 

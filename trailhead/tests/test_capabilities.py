@@ -84,15 +84,29 @@ class TestLoreInventory:
     def test_hooks_json(self):
         assert load_manifest(_LORE_MANIFEST).hooks_json == "hooks/hooks.json"
 
-    def test_librarian_subagent_discovered(self):
+    def test_lore_agents_discovered(self):
+        # S6 Slice 3 established the lore agent roster: librarian (unchanged) +
+        # investigator (deep investigation, opus/xhigh) + researcher (lighter
+        # lookups + tracking-backlog polling, haiku/low).
         m = load_manifest(_LORE_MANIFEST)
-        assert m.subagents == {"librarian": "agents/librarian.md"}
+        assert m.subagents == {
+            "librarian": "agents/librarian.md",
+            "investigator": "agents/investigator.md",
+            "researcher": "agents/researcher.md",
+        }
 
-    def test_capture_skills_selectable(self):
+    def test_session_skills_selectable(self):
+        # S6 Slice 2: the 7 per-kind capture skills (area, check-in, dead-end, decision,
+        # defer, follow-up, seed) were deleted — replaced by the lore record/session CLI.
+        # S6 Slice 3 MOVED 'brainstorm' to the craft plugin. The retained
+        # session/ritual lore skills are checkpoint, finish, sync.
         m = load_manifest(_LORE_MANIFEST)
-        for name in ("decision", "dead-end", "defer", "follow-up", "area", "seed", "brainstorm"):
+        for name in ("checkpoint", "finish", "sync"):
             assert name in m.skills
             assert m.skills[name] == f"skills/{name}"
+        assert "brainstorm" not in m.skills, (
+            "brainstorm moved to the craft plugin (S6 Slice 3)"
+        )
 
     def test_sync_is_now_selectable(self):
         # sync was always-on (base) under the capability model; it has a SKILL.md
@@ -107,7 +121,8 @@ class TestLoreInventory:
         m = load_manifest(_LORE_MANIFEST)
         assert m.all_selectable() == set(m.subagents) | set(m.skills)
         assert "librarian" in m.all_selectable()
-        assert "decision" in m.all_selectable()
+        # S6 Slice 2: decision and other per-kind skills deleted; checkpoint retained.
+        assert "checkpoint" in m.all_selectable()
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +154,11 @@ class TestCraftInventory:
     def test_lifecycle_skills_now_selectable(self):
         # shelve/pickup/polish were base under the capability model; they have a
         # SKILL.md and are now selectable.
+        # S6 Slice 3 MOVED 'brainstorm' into craft (discovery → frozen spec, runs
+        # before planning) — it is now a selectable craft skill.
         m = load_manifest(_CRAFT_MANIFEST)
-        for name in ("shelve", "pickup", "polish", "plan", "execute", "review", "consult"):
+        for name in ("shelve", "pickup", "polish", "plan", "execute", "review",
+                     "consult", "brainstorm"):
             assert name in m.skills
 
     def test_shared_not_selectable(self):

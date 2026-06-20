@@ -3,8 +3,9 @@
 # selectable subagents from agents/*.md. No capability groups — install selects
 # subagents/skills by name (see trailhead/install_config.py).
 #
-# skills/_shared ships always (base): it holds VAULT_WRITE_PATTERN.md, referenced
-# at runtime by the capture skills, and has no SKILL.md so it is never selectable.
+# skills/_shared ships always (base): it holds VAULT_WRITE_PATTERN.md (the shared
+# `lore record`/`lore session` capture reference), and has no SKILL.md so it is
+# never selectable.
 
 [tool]
 name = "lore"

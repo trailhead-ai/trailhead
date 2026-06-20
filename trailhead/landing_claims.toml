@@ -45,12 +45,6 @@ source = "root"
 [[claim]]
 kind = "skill"
 tool = "lore"
-ref = "skills/area"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
 ref = "skills/finish"
 source = "lore"
 
@@ -216,31 +210,8 @@ source = "portage"
 
 # ---------------------------------------------------------------------------
 # lore tool README anchors — skills (kind=skill)
+# S6 Slice 2: deleted area, defer, dead-end, decision, follow-up, check-in, seed
 # ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "skill"
-tool = "lore"
-ref = "skills/defer"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
-ref = "skills/dead-end"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
-ref = "skills/decision"
-source = "lore"
-
-[[claim]]
-kind = "skill"
-tool = "lore"
-ref = "skills/follow-up"
-source = "lore"
 
 [[claim]]
 kind = "skill"

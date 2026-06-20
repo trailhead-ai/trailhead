@@ -14,8 +14,10 @@ Two failure modes this guard catches:
 
 The set of real extension points is DISCOVERED from the source tree at test time
 (not hard-coded), so adding or renaming a seam upstream forces the cookbook to
-keep pace. The craft tree is the dev-agent half; lore ships its own seamed
-skills (brainstorm/intake). Both are scanned.
+keep pace. The craft tree is the dev-agent half. S6 Slice 3 moved the brainstorm
+skill (and its `design_mockup` seam) from lore into craft, so the seamed skills
+now live craft-side; the lore skills tree is still scanned for any lore-resident
+seams. Both trees are scanned.
 
 `design_mockup`, the `librarian` knowledge-synthesis seam, and other tokens
 appearing in this file are STRUCTURAL extension-point identifiers, not private
@@ -49,6 +51,10 @@ def _find_craft_plugin() -> Path | None:
     env = os.environ.get("CRAFT_PLUGIN_ROOT")
     if env and Path(env).exists():
         return Path(env)
+    # In-monorepo sibling: tools/craft/plugins/craft (REPO_ROOT is tools/lore).
+    monorepo_craft = REPO_ROOT.parent / "craft" / "plugins" / "craft"
+    if monorepo_craft.exists():
+        return monorepo_craft
     for base in (Path.home() / "code", REPO_ROOT.parent.parent.parent):
         candidate = base / "craft" / "plugins" / "craft"
         if candidate.exists():
@@ -92,15 +98,13 @@ def test_real_extension_points_discovered():
     """Sanity: the discovery actually found the known-real seams. If this list
     shrinks unexpectedly, the discovery regex broke (not the doc).
 
-    `design_mockup` ships in lore's own skills and is always discoverable. The
-    craft-sourced seams are only asserted when a craft checkout is present."""
-    assert "design_mockup" in REAL_POINTS, (
-        f"discovery did not find 'design_mockup' in lore's skills; "
-        f"found: {REAL_POINTS}"
-    )
+    S6 Slice 3 moved the brainstorm skill (and its `design_mockup` seam) from
+    lore into craft, so `design_mockup` — along with the other brainstorm-sourced
+    seams — is now discovered in the craft tree, only when a craft checkout is
+    present."""
     if CRAFT_PLUGIN is not None:
-        for expected in ("feature_flags", "observability", "issue_tracker",
-                         "build_test_commands"):
+        for expected in ("design_mockup", "feature_flags", "observability",
+                         "issue_tracker", "build_test_commands"):
             assert expected in REAL_POINTS, (
                 f"discovery did not find {expected!r} in the craft tree; "
                 f"found: {REAL_POINTS}"

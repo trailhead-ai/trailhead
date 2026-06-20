@@ -36,7 +36,7 @@ def _load_cli():
         sys.path.insert(0, str(SCRIPTS_DIR))
     for cached in list(sys.modules):
         if cached in ("recall", "vault", "frontmatter", "sessions", "layers",
-                      "status_validator", "regenerate_indices", "harvest",
+                      "status_validator", "regenerate_indices",
                       "promote", "review"):
             sys.modules.pop(cached, None)
     loader = SourceFileLoader("lore_cli_areas_test", str(CLI_PATH))

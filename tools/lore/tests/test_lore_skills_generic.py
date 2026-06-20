@@ -103,90 +103,12 @@ def test_template_has_no_private_tokens(template_md: Path):
 
 
 # ---------------------------------------------------------------------------
-# brainstorm — positive assertions (council 3-lens requirement)
-# Each stripped seam must ANNOUNCE its absence with a visible-skip phrase,
-# not silently omit the step.  A skill that passes the token-absent test but
-# omits the skip notice fails here.
+# brainstorm — moved to the craft plugin (S6 Slice 3).
 #
-# Visible-skip phrases are constructed at runtime where they contain tokens
-# that appear on the leak-gate denylist (the P1-F self-referential trap).
-# Phrases that contain NO denylisted token are embedded as literals.
+# The brainstorm skill and its generic-hygiene / visible-skip assertions moved to
+# craft (tools/craft/tests/test_brainstorm_generic.py). The structural-brain-seam
+# and private-token scans above still cover whatever lore skills remain.
 # ---------------------------------------------------------------------------
-
-_BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
-
-# The four extension-point skip notices plus the cross-plugin craft handoff.
-# Each tuple is: (test_id, phrase) — phrase is a SINGLE DISTINCTIVE CONTIGUOUS
-# substring that must appear verbatim. These are deliberately not split into
-# common-word parts: a "parts present anywhere" check is vacuous (the council
-# Advocate craft-handoff guard would pass even if the whole notice were deleted,
-# as long as "craft"/"plugin"/"planning" survived elsewhere). Each phrase below
-# is load-bearing — deleting the seam's notice deletes the only occurrence.
-#
-# design_mockup is no longer a stripped seam: the artist brainstorm cutover
-# (Slice 8) wires it LIVE, so brainstorm now dispatches the craft `artist` as the
-# DEFAULT provider rather than announcing the step's absence. Its assertion moved
-# to test_brainstorm_dispatches_artist below. The fallback ("note the mockup step
-# is skipped") still surfaces verbally when design work isn't applicable, but it
-# is no longer the default path, so it is not asserted as a stripped-seam notice.
-_BRAINSTORM_SKIP_PHRASES: list[tuple[str, str]] = [
-    ("feature_flags_skip", "no feature-flag provider configured"),
-    ("observability_skip", "no observability provider configured"),
-    ("issue_tracker_skip", "no issue tracker configured"),
-    ("craft_planning_handoff", "skill lives in the craft plugin"),
-]
-
-
-@pytest.mark.parametrize(
-    "test_id,phrase",
-    _BRAINSTORM_SKIP_PHRASES,
-    ids=[t[0] for t in _BRAINSTORM_SKIP_PHRASES],
-)
-def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
-    """brainstorm/SKILL.md must announce each stripped seam with a visible-skip
-    phrase — a silent omission must fail this test. The phrase is a distinctive
-    contiguous substring, so deleting the seam's notice fails the test."""
-    assert _BRAINSTORM_SKILL.exists(), (
-        "brainstorm/SKILL.md does not exist — create it before these tests pass"
-    )
-    text = _BRAINSTORM_SKILL.read_text()
-    assert phrase in text, (
-        f"brainstorm/SKILL.md missing visible-skip phrase {phrase!r} "
-        f"(test: {test_id}). Every stripped private seam must announce itself — "
-        "a silent omission defeats the degradation contract."
-    )
-
-
-def test_brainstorm_dispatches_artist_as_design_mockup_provider():
-    """The design_mockup seam is LIVE: brainstorm names the craft `artist` as its
-    default provider (Slice 8 cutover). The genericized skill may name `artist`
-    (a craft agent stem, not a private app token) but never the retired
-    `design-mockup-writer`."""
-    assert _BRAINSTORM_SKILL.exists(), "brainstorm/SKILL.md does not exist"
-    text = _BRAINSTORM_SKILL.read_text()
-    assert "design_mockup" in text, (
-        "brainstorm/SKILL.md no longer documents the design_mockup extension point"
-    )
-    assert "artist" in text, (
-        "brainstorm/SKILL.md must name the craft `artist` as the design_mockup "
-        "provider — the cutover dispatches it by default"
-    )
-    assert "design-mockup-writer" not in text, (
-        "brainstorm/SKILL.md must not name the retired `design-mockup-writer`"
-    )
-
-
-def test_brainstorm_skill_has_no_private_tokens():
-    """brainstorm/SKILL.md must contain zero private app-specific tokens."""
-    assert _BRAINSTORM_SKILL.exists(), (
-        "brainstorm/SKILL.md does not exist"
-    )
-    text = _BRAINSTORM_SKILL.read_text().lower()
-    for token in _PRIVATE_TOKENS:
-        assert token.lower() not in text, (
-            f"brainstorm/SKILL.md contains the private token {token!r}. "
-            "Genericize: strip all app-specific tokens."
-        )
 
 
 # ---------------------------------------------------------------------------

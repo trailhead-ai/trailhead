@@ -11,6 +11,7 @@ Covers (TDD — written before implementation):
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -89,6 +90,183 @@ def _seed_session_note(vault: Path, worktree: str = "my-worktree") -> Path:
         f"## Open questions\n"
     )
     return note
+
+
+# ---------------------------------------------------------------------------
+# finalize_note: body-only GUID capture file (Slice 0.5, KU1)
+# ---------------------------------------------------------------------------
+
+_GUID = "11111111-2222-4333-8444-555555555555"
+
+
+def _write_guid_capture(vault: Path, guid: str = _GUID) -> Path:
+    """Mimic session_store.create_or_append: body-only `# session: <GUID>`."""
+    sessions_dir = vault / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    note = sessions_dir / f"{guid}.md"
+    note.write_text(
+        f"# session: {guid}\n\n"
+        "- candidate 2026-06-02T12:00:00Z kind=lesson phase=Build\n"
+        "  a lesson captured during the session\n"
+    )
+    return note
+
+
+def _sidecar_of(note: Path) -> Path:
+    return note.with_suffix(".json")
+
+
+class TestFinalizeBodyOnlyCaptureFile:
+    def test_writes_sidecar_with_status_complete(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sessions = load_script("sessions")
+        ok = sessions.finalize_note(note, "2026-06-02T13:00:00Z")
+        assert ok
+        sidecar = _sidecar_of(note)
+        assert sidecar.exists()
+        obj = json.loads(sidecar.read_text())
+        assert obj["type"] == "session"
+        assert obj["status"] == "complete"
+        assert obj["ended"] == "2026-06-02T13:00:00Z"
+        assert obj["session_id"] == _GUID
+
+    def test_md_left_body_only_and_untouched(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        before = note.read_text()
+        sessions = load_script("sessions")
+        assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
+        text = note.read_text()
+        # No frontmatter is ever prepended onto the body-only capture file.
+        assert not text.startswith("---")
+        assert text == before  # byte-for-byte unchanged
+        assert f"# session: {_GUID}" in text  # body header preserved
+        assert "a lesson captured during the session" in text  # candidate line preserved
+
+    def test_sidecar_is_sorted_indented_json(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sessions = load_script("sessions")
+        sessions.finalize_note(note, "2026-06-02T13:00:00Z")
+        obj = json.loads(_sidecar_of(note).read_text())
+        assert _sidecar_of(note).read_text() == json.dumps(
+            obj, indent=2, sort_keys=True
+        )
+
+    def test_preserves_existing_provenance_in_sidecar(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sidecar = _sidecar_of(note)
+        sidecar.write_text(
+            json.dumps(
+                {"created-at": "2026-06-01T09:00:00Z", "created-by": "tester"},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        sessions = load_script("sessions")
+        assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
+        obj = json.loads(sidecar.read_text())
+        assert obj["created-at"] == "2026-06-01T09:00:00Z"
+        assert obj["created-by"] == "tester"
+        assert obj["status"] == "complete"
+
+    def test_idempotent_second_finalize_is_noop(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        note = _write_guid_capture(vault)
+        sessions = load_script("sessions")
+        assert sessions.finalize_note(note, "2026-06-02T13:00:00Z") is True
+        sidecar = _sidecar_of(note)
+        first = sidecar.read_text()
+        md_first = note.read_text()
+        # Sidecar status is terminal → second call is a no-op (no re-stamp).
+        assert sessions.finalize_note(note, "2026-06-02T14:00:00Z") is False
+        assert sidecar.read_text() == first
+        assert note.read_text() == md_first
+
+
+# ---------------------------------------------------------------------------
+# lore finish / session-note on the GUID capture file (Slice 0.5, KU1)
+# ---------------------------------------------------------------------------
+
+class TestFinishOnGuidCaptureFile:
+    def _candidate(self, vault: Path):
+        return run_cli(
+            ["session", "candidate", "--session-id", _GUID,
+             "--kind", "lesson", "--phase", "Build"],
+            env={"LORE_VAULT": str(vault)},
+            input_text="a lesson captured during the session\n",
+        )
+
+    def test_session_note_resolves_candidate_file(self, tmp_path):
+        vault = _git_vault(tmp_path)
+        assert self._candidate(vault).returncode == 0
+        r = run_cli(
+            ["session-note", "--session-id", _GUID],
+            env={"LORE_VAULT": str(vault)},
+        )
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == f"sessions/{_GUID}.md"
+
+    def test_finish_stamps_candidate_file(self, tmp_path):
+        vault = _git_vault(tmp_path)
+        assert self._candidate(vault).returncode == 0
+        capture = vault / "sessions" / f"{_GUID}.md"
+        before = capture.read_text()
+
+        r = run_cli(
+            ["finish", "--session-id", _GUID],
+            env={"LORE_VAULT": str(vault)},
+        )
+        assert r.returncode == 0, r.stderr
+        sidecar = vault / "sessions" / f"{_GUID}.json"
+        assert sidecar.exists()
+        obj = json.loads(sidecar.read_text())
+        assert obj["type"] == "session"
+        assert obj["status"] == "complete"
+        assert obj["ended"]
+        # The .md stays body-only and byte-for-byte unchanged.
+        text = capture.read_text()
+        assert text == before
+        assert not text.startswith("---")
+        assert f"# session: {_GUID}" in text
+        assert "a lesson captured during the session" in text
+
+    def test_finish_second_call_is_noop(self, tmp_path):
+        vault = _git_vault(tmp_path)
+        assert self._candidate(vault).returncode == 0
+        sidecar = vault / "sessions" / f"{_GUID}.json"
+
+        first = run_cli(
+            ["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)}
+        )
+        assert first.returncode == 0, first.stderr
+        sidecar_after_first = sidecar.read_text()
+
+        second = run_cli(
+            ["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)}
+        )
+        assert second.returncode == 0, second.stderr
+        # The sidecar status stays terminal and is not re-written.
+        assert sidecar.read_text() == sidecar_after_first
+        assert "already" in (second.stdout + second.stderr).lower()
+
+
+class TestFinishEmptySession:
+    def test_empty_session_prints_notice_and_exits_zero(self, tmp_path):
+        """No candidate written, no file → finish must not error, must not create
+        a file, and must tell the user the session was handled."""
+        vault = _git_vault(tmp_path)
+        r = run_cli(
+            ["finish", "--session-id", _GUID],
+            env={"LORE_VAULT": str(vault)},
+        )
+        assert r.returncode == 0, r.stderr
+        combined = (r.stdout + r.stderr).lower()
+        assert "no active session note" in combined
+        assert "nothing to finalize" in combined
+        assert not (vault / "sessions" / f"{_GUID}.md").exists()
 
 
 # ---------------------------------------------------------------------------

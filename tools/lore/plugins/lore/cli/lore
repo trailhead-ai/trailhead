@@ -5,7 +5,6 @@ Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
   lore new <type>           Render a template and write a new vault note.
   lore seed <name>          Scaffold an inbox capture under inbox/.
-  lore patch <file> <sec>   Append text under a section (--text or stdin).
   lore set-status <f> <v>   Validate + set a note's frontmatter status.
   lore stats                Print counts for the resolved vault.
   lore session-note         Print this session's note path (id-first resolve).
@@ -37,7 +36,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import frontmatter  # noqa: E402
-import harvest as harvest_mod  # noqa: E402
 import index_store as index_store_mod  # noqa: E402
 import installer as installer_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
@@ -65,7 +63,7 @@ TAXONOMY = [
     "briefings", "reviews", "gotchas", "audits", "tools", "templates",
 ]
 
-STARTER_DOCS = ["README.md", "glossary.md", "phases.md", "harvest-protocol.md"]
+STARTER_DOCS = ["README.md", "glossary.md", "phases.md"]
 
 
 # ---- new --------------------------------------------------------------------
@@ -1030,21 +1028,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---- patch ------------------------------------------------------------------
-
-def cmd_patch(args: argparse.Namespace) -> int:
-    path = Path(args.file).expanduser()
-    if not path.is_file():
-        print(f"error: no such file: {path}", file=sys.stderr)
-        return 1
-    text = args.text if args.text is not None else sys.stdin.read()
-    if text == "":
-        print("error: no text to append (pass --text or pipe via stdin)", file=sys.stderr)
-        return 1
-    frontmatter.patch_section(path, args.section, text)
-    return 0
-
-
 # ---- set-status -------------------------------------------------------------
 
 def cmd_set_status(args: argparse.Namespace) -> int:
@@ -1154,13 +1137,30 @@ def cmd_sync(args: argparse.Namespace) -> int:
 # ---- finish -----------------------------------------------------------------
 
 def _get_current_status(note: Path) -> str | None:
-    """Return the current status value from a note's frontmatter, or None."""
+    """Return the current status value for a session note, or None.
+
+    Reads frontmatter first (the legacy date-prefixed shape). For a body-only
+    GUID note the finalized status lives in the sibling `sessions/<GUID>.json`
+    sidecar (A-sidecar), so fall back to the sidecar when frontmatter carries no
+    status. Never raises.
+    """
     try:
         fm = frontmatter.parse_frontmatter(note)
         status = fm.get("status")
-        return str(status) if status is not None else None
+        if status is not None:
+            return str(status)
     except Exception:
-        return None
+        pass
+    sidecar = note.with_suffix(".json")
+    if sidecar.exists():
+        try:
+            obj = json.loads(sidecar.read_text())
+            status = obj.get("status") if isinstance(obj, dict) else None
+            if status is not None:
+                return str(status)
+        except Exception:
+            return None
+    return None
 
 
 def _commit_and_push_session_note(vault: Path, session_note: Path, worktree_name: str, verb: str) -> int:
@@ -1210,61 +1210,24 @@ def _commit_and_push_session_note(vault: Path, session_note: Path, worktree_name
     return 0
 
 
-def _harvest_expand(vault: Path, session_note: Path) -> harvest_mod.ExpansionResult | None:
-    """Expand harvest-pending + the session note's candidates block to disk.
+def _finish_commit(vault: Path, session_note: Path, worktree_name: str) -> int:
+    """Stage the session note's explicit path(s) + commit them in a SINGLE commit.
 
-    Writes the expanded notes (idempotent by harvest-hash) but does NOT touch
-    the pending file or git — the caller folds the pending rewrite into the
-    same atomic commit. Returns None when there is no pending file to read.
-    """
-    pending = vault / "harvest-pending.md"
-    pending_text = pending.read_text(encoding="utf-8") if pending.exists() else ""
-    try:
-        session_text = session_note.read_text(encoding="utf-8")
-    except Exception:
-        session_text = ""
-
-    project = vault_mod.resolve_project()
-    return harvest_mod.expand(
-        vault=vault,
-        pending_text=pending_text,
-        session_text=session_text,
-        templates_dir=TEMPLATES_DIR,
-        today=_today(),
-        project=project,
-    )
-
-
-def _report_harvest(result: harvest_mod.ExpansionResult) -> None:
-    for path in result.written:
-        print(f"Harvested: {path}")
-    for warning in result.warnings:
-        print(warning, file=sys.stderr)
-    if result.gotchas:
-        print("Surfaced gotchas (not expanded — patch via /lore:area):")
-        for g in result.gotchas:
-            print(f"  - gotcha: {g.body}")
-
-
-def _finish_commit(
-    vault: Path,
-    session_note: Path,
-    pending: Path,
-    new_notes: list[Path],
-    worktree_name: str,
-) -> int:
-    """Stage explicit paths + commit the session note, new notes, and pending
-    in a SINGLE commit. Never `git add -A`. On commit failure the notes remain
-    on disk and the (unrewritten) pending still holds the entries, so a re-run
-    re-expands cleanly (dedup-by-hash). Returns exit code."""
+    Never `git add -A` — only the finalized note and its metadata sidecar are
+    staged, so unrelated dirty vault files are not swept in. For a body-only
+    GUID note the finalized status lives in the sibling `sessions/<GUID>.json`
+    sidecar (A-sidecar), so that path is staged alongside the `.md` when it
+    exists. The staged-index gate (`git diff --cached --quiet`) makes an
+    already-clean finish a no-op rather than a failed empty commit. Returns exit
+    code."""
     if not vault.exists() or not _vault_is_git_toplevel(vault):
         print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
         return 0
 
-    paths = [str(session_note)] + [str(p) for p in new_notes]
-    if pending.exists():
-        paths.append(str(pending))
-
+    paths = [str(session_note)]
+    sidecar = session_note.with_suffix(".json")
+    if sidecar.exists():
+        paths.append(str(sidecar))
     rc, _, stderr = _git(vault, "add", "--", *paths)
     if rc != 0:
         print(f"error: git add failed: {stderr}", file=sys.stderr)
@@ -1296,19 +1259,22 @@ def _finish_commit(
 
 
 def cmd_finish(args: argparse.Namespace) -> int:
-    """Finalize the active session note for the current worktree.
+    """Finalize the active session note for the current worktree (finalize + commit).
 
     Resolves the session note via `vault.resolve_session_note()` — exact
     session-id match first (so the *current* session's note is finalized even
-    when several exist for this worktree), then a worktree-name fallback. Sets
-    `status: complete` and `ended:` (atomic write), then expands the in-scope
-    harvest-pending entries + the note's `## Harvest candidates` block into full
-    vault notes and commits the session note + new notes + the rewritten pending
-    in ONE commit (explicit paths only). `gotcha` entries are surfaced (not
-    expanded) and left in pending; malformed lines are retained + warned. On
-    commit failure the notes are on disk and pending is restored, so a re-run
-    re-expands idempotently. If no active session note is found, prints a notice
-    and exits 0.
+    when several exist for this worktree; this matches the body-only GUID capture
+    file `sessions/<id>.md` as well as the legacy frontmatter note, Slice 0.5),
+    then a worktree-name fallback. Sets `status: complete` and `ended:` (atomic
+    write; for a body-only GUID note the metadata is written to a
+    `sessions/<GUID>.json` sidecar, A-sidecar, leaving the `.md` body-only) and
+    commits the session note (plus its sidecar) in ONE commit (explicit paths
+    only — unrelated dirty vault files are not swept in). If no active session
+    note is found, prints a notice and exits 0.
+
+    The harvest-expansion flow is retired (S6 Slice 1): `lore finish` no longer
+    reads `harvest-pending.md`, expands `## Harvest candidates`, surfaces
+    `gotcha` entries, or creates kind-notes.
     """
     vault = Path(vault_mod.resolve_vault())
     session_id = _session_id_from_args_or_env(args)
@@ -1329,43 +1295,14 @@ def cmd_finish(args: argparse.Namespace) -> int:
     if ok:
         print(f"Finalized: {session_note.name}")
     else:
-        # Already terminal. Still attempt harvest expansion: a prior finish may
-        # have finalized the note but failed to commit the harvest (e.g. a
-        # failed commit), leaving pending entries to recover. If there is no
-        # pending work, the expansion + commit are both no-ops.
+        # Already terminal: nothing to re-stamp. Still attempt the commit so a
+        # prior finalize that failed to commit can be recovered; if the index is
+        # clean the commit is a no-op.
         current_status = _get_current_status(session_note)
         label = current_status if current_status else "terminal"
-        print(f"notice: already {label} — checking for unharvested pending entries.")
+        print(f"notice: already {label} — nothing to finalize.")
 
-    # Expand harvest entries to disk FIRST (notes survive a failed commit).
-    result = _harvest_expand(vault, session_note)
-    if result is not None:
-        _report_harvest(result)
-
-    if not _vault_is_git_toplevel(vault):
-        # Non-git vault: status is set, notes are written, but no commit.
-        print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
-        return 0
-
-    # Rewrite pending to drop consumed entries — but ONLY as part of the same
-    # commit. We write it to disk here, then stage+commit; if the commit fails,
-    # the consumed entries were already cleared from the working tree, so we
-    # restore the file on failure to keep the entries recoverable.
-    pending = vault / "harvest-pending.md"
-    pending_before = pending.read_text(encoding="utf-8") if pending.exists() else None
-    if result is not None and result.consumed_hashes and pending_before is not None:
-        pending.write_text(
-            harvest_mod.rewrite_pending(pending_before, result.consumed_hashes),
-            encoding="utf-8",
-        )
-
-    new_notes = result.written if result is not None else []
-    rc = _finish_commit(vault, session_note, pending, new_notes, worktree_name)
-    if rc != 0 and pending_before is not None:
-        # Commit failed: restore pending so no entry is lost; notes stay on disk
-        # and a clean re-run re-expands idempotently (dedup-by-hash).
-        pending.write_text(pending_before, encoding="utf-8")
-    return rc
+    return _finish_commit(vault, session_note, worktree_name)
 
 
 # ---- handoff ----------------------------------------------------------------
@@ -2838,12 +2775,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show lore installation status and surface rules-file drift (Slice 4, S5)",
     )
     p_lore_status.set_defaults(func=cmd_status)
-
-    p_patch = sub.add_parser("patch", help="Append text under a section")
-    p_patch.add_argument("file")
-    p_patch.add_argument("section")
-    p_patch.add_argument("--text", default=None, help="Text to append (else read stdin)")
-    p_patch.set_defaults(func=cmd_patch)
 
     p_status = sub.add_parser("set-status", help="Validate + set a note's status")
     p_status.add_argument("file")

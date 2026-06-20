@@ -112,3 +112,18 @@ def test_complete_session_emits_no_deprecation_notice(tmp_path, capsys):
     captured = capsys.readouterr()
     assert rc == 0
     assert "deprecated" not in captured.err.lower()
+
+
+def test_body_only_guid_session_note_passes_clean(tmp_path, capsys):
+    """A finalized body-only GUID note keeps its status in the `.json` sidecar
+    (A-sidecar), so the `.md` carries no frontmatter status — the validator must
+    pass it cleanly (exit 0, no violation) rather than choke on the missing
+    frontmatter."""
+    sv = load_script("status_validator")
+    guid = "11111111-2222-4333-8444-555555555555"
+    note = tmp_path / f"{guid}.md"
+    note.write_text(f"# session: {guid}\n\n- candidate ... kind=lesson\n")
+    rc = sv.main([str(note)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "invalid" not in captured.err.lower()

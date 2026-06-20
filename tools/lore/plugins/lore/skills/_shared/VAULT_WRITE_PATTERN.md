@@ -1,26 +1,39 @@
 # Vault write pattern — shared reference
 
-All capture skills follow this pattern:
+All vault writes go through the `lore` CLI — never edit vault files directly.
+There are two capture surfaces:
+
+## A persistent vault record — `lore record create`
+
+For a durable, standalone record (a decision, lesson, area profile, spec, …):
 
 1. **Gather fields** conversationally — only ask for what is missing; infer what you can.
-2. **Run `lore new <type>`** with `--title` and any other flags to render the template and write the note.
-3. **Open the written file** and fill in the body sections with the user's answers using the Edit tool.
-4. **Confirm the note path** to the user.
+2. **Run `lore record create`** with `--kind` and `--title`, plus any `--set K=V`
+   sidecar fields and routing flags (`--repo`/`--product`/`--suite`/`--team`):
 
-## No-session fallback
+   ```bash
+   lore record create --kind <kind> --title "<title>" [--set K=V …]
+   ```
 
-When no active session note is found, `lore new` prints a skip notice to stderr and exits 0. This is not an error — continue normally.
+3. **Confirm the record** to the user. Run `lore record create --help` for the
+   full flag set; related sub-actions are `lore record update|delete|blob`.
 
-## Inferring project
+## A session-scoped marker — `lore session …`
 
-If the user hasn't stated a project name, run:
+For an item that belongs to the *active session* (a candidate to promote at
+finish, or a reference to an existing record used this session):
 
 ```bash
-git remote get-url origin
+printf '%s' "<the item, in your own words>" \
+  | lore session candidate --kind <kind> --phase <phase>
+
+lore session referenced <kind>/<record-name>
 ```
 
-and extract the repo name (last path segment, without `.git`). Pass it as `--project`.
+The session note is lazy-created on first capture, and the session id auto-resolves
+from `$CLAUDE_CODE_SESSION_ID` — no note needs to exist beforehand.
 
 ## Vault path
 
-The vault is resolved via `$LORE_VAULT` automatically. Pass `--vault "$LORE_VAULT"` explicitly only when the env var is not set in the current shell.
+The vault is resolved via `$LORE_VAULT` automatically. Pass `--vault "$LORE_VAULT"`
+explicitly only when the env var is not set in the current shell.
