@@ -42,6 +42,16 @@ class HarnessError(Exception):
     """Raised for unknown / unsupported harness names."""
 
 
+#: Emitted by the base-class ``install_user_ruleset`` default when a harness has
+#: no user-ruleset support.  Degrade VISIBLY: a no-op install must never leave a
+#: user believing the ruleset was written (Axiom 2 — widen the seam with a safe,
+#: honest default).  Pinned by ``test_harness.py``.
+UNSUPPORTED_RULESET_NOTICE = (
+    "trailhead: this harness has no user-level ruleset support; "
+    "nothing was installed."
+)
+
+
 class Harness(ABC):
     """Abstract installer for one AI code harness.
 
@@ -107,3 +117,31 @@ class Harness(ABC):
     @abstractmethod
     def unregister_marketplace(self, composed_root: Path, *, runner=None) -> None:
         """Remove the harness registration for the composed tree (once, after all tools)."""
+
+    # -- user-level rulesets --------------------------------------------------
+    #
+    # A *user-level ruleset* is harness-global agent guidance (e.g. lore's
+    # write-prohibition rules) installed once per machine, NOT per project.  This
+    # capability is deliberately CONCRETE with a safe default — unlike every
+    # method above, it is NOT ``@abstractmethod``.  That asymmetry is the point:
+    # a harness that can't express user rulesets shouldn't have to (Axiom 2 — to
+    # use a capability the seam doesn't yet express, widen the seam with a safe
+    # default rather than forcing every harness to implement it).
+    #
+    # The safe default DEGRADES VISIBLY: ``user_ruleset_path`` → ``None``,
+    # ``user_ruleset_status`` → ``"unsupported"``, and ``install_user_ruleset``
+    # writes nothing but emits ``UNSUPPORTED_RULESET_NOTICE`` so a user is never
+    # left believing the ruleset installed.  Harnesses that DO support it (e.g.
+    # Claude Code → ``~/.claude/rules/<name>.md``) override all three.
+
+    def install_user_ruleset(self, name: str, content: str) -> None:
+        """Install a user-level ruleset; default no-op that announces itself."""
+        print(UNSUPPORTED_RULESET_NOTICE)
+
+    def user_ruleset_path(self, name: str) -> Path | None:
+        """Path to the installed ruleset, or ``None`` when unsupported."""
+        return None
+
+    def user_ruleset_status(self, name: str, content: str) -> str:
+        """One of ``current`` / ``stale`` / ``missing`` / ``unsupported``."""
+        return "unsupported"

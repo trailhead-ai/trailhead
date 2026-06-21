@@ -109,13 +109,6 @@ def _dirs(tmp_path):
     return state, config, home
 
 
-def _git_repo(tmp_path, name="repo"):
-    repo = tmp_path / name
-    repo.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-    return repo
-
-
 # ===========================================================================
 # 1. The guard hook script: deny under vault, allow outside (exit-2 contract)
 # ===========================================================================
@@ -490,9 +483,15 @@ class TestSettingsWriterPermissionDeny:
 # ===========================================================================
 
 class TestInitInstallsGuardrail:
-    def _read_local_settings(self, repo):
-        settings = repo / ".claude" / "settings.local.json"
-        assert settings.is_file(), "lore init --local did not write settings.local.json"
+    """The guardrail install is user-global: ``lore init`` writes the PreToolUse
+    vault-guard into ``~/.claude/settings.json`` (HOME isolated via Axiom 6).
+    ``--local`` is gone, but this REAL guardrail-install behavior must survive the
+    rewire, so these point at the user-global settings file.
+    """
+
+    def _read_user_settings(self, home):
+        settings = home / ".claude" / "settings.json"
+        assert settings.is_file(), "lore init did not write ~/.claude/settings.json"
         return settings, json.loads(settings.read_text())
 
     def _pretooluse_commands(self, data):
@@ -502,14 +501,12 @@ class TestInitInstallsGuardrail:
                 out.append(h.get("command", ""))
         return out
 
-    def test_local_init_installs_pretooluse_guard(self, tmp_path):
+    def test_init_installs_pretooluse_guard(self, tmp_path):
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        _, data = self._read_local_settings(repo)
+        _, data = self._read_user_settings(home)
         cmds = self._pretooluse_commands(data)
         assert any("vault-guard" in c for c in cmds), (
             f"no PreToolUse vault-guard entry installed; PreToolUse cmds={cmds!r}"
@@ -522,16 +519,14 @@ class TestInitInstallsGuardrail:
             "Edit" in m and "Write" in m for m in matchers
         ), f"guard matcher must be Edit|Write, got {matchers!r}"
 
-    def test_local_init_sets_guard_root_env(self, tmp_path):
+    def test_init_sets_guard_root_env(self, tmp_path):
         """The settings must give the hook the vault root via LORE_VAULT_GUARD_ROOT,
         pointing at the absolute vaults dir under XDG_STATE_HOME."""
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        _, data = self._read_local_settings(repo)
+        _, data = self._read_user_settings(home)
         guard_root = data.get("env", {}).get("LORE_VAULT_GUARD_ROOT", "")
         vaults = state / "lore" / "vaults"
         assert str(vaults) in guard_root, (
@@ -539,17 +534,15 @@ class TestInitInstallsGuardrail:
             f"got {guard_root!r}"
         )
 
-    def test_local_init_guard_root_uses_newline_delimiter(self, tmp_path):
+    def test_init_guard_root_uses_newline_delimiter(self, tmp_path):
         """Fix 4: the install side must join the root list on NEWLINE (not ':'),
         so a vault path containing a literal ':' is not corrupted. The value
         covers both the vaults dir and vaults/default, so it must be multi-entry."""
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        _, data = self._read_local_settings(repo)
+        _, data = self._read_user_settings(home)
         guard_root = data.get("env", {}).get("LORE_VAULT_GUARD_ROOT", "")
         vaults = state / "lore" / "vaults"
         default_link = vaults / "default"
@@ -560,15 +553,13 @@ class TestInitInstallsGuardrail:
         assert str(vaults) in parts
         assert str(default_link) in parts
 
-    def test_local_init_matcher_covers_multiedit_and_notebookedit(self, tmp_path):
+    def test_init_matcher_covers_multiedit_and_notebookedit(self, tmp_path):
         """Fix 1: the PreToolUse matcher must also cover MultiEdit and NotebookEdit."""
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        _, data = self._read_local_settings(repo)
+        _, data = self._read_user_settings(home)
         matchers = [e.get("matcher", "") for e in data["hooks"]["PreToolUse"]
                     if any("vault-guard" in h.get("command", "")
                            for h in e.get("hooks", []))]
@@ -577,31 +568,27 @@ class TestInitInstallsGuardrail:
             assert "MultiEdit" in m, f"matcher must cover MultiEdit, got {m!r}"
             assert "NotebookEdit" in m, f"matcher must cover NotebookEdit, got {m!r}"
 
-    def test_local_init_adds_static_permission_deny(self, tmp_path):
+    def test_init_adds_static_permission_deny(self, tmp_path):
         """Defense-in-depth: a coarse permissions.deny over the vaults subtree,
         using the // double-slash absolute-path grammar."""
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        _, data = self._read_local_settings(repo)
+        _, data = self._read_user_settings(home)
         deny = data.get("permissions", {}).get("deny", [])
         assert any("//" in r and "vaults" in r for r in deny), (
             f"expected a //abs vaults static deny rule, got {deny!r}"
         )
 
-    def test_local_init_adds_symmetric_write_and_edit_deny(self, tmp_path):
+    def test_init_adds_symmetric_write_and_edit_deny(self, tmp_path):
         """Fix 5: the static deny must cover both Write( and Edit( over vaults/**,
         each anchored with the // double-slash absolute grammar."""
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        _, data = self._read_local_settings(repo)
+        _, data = self._read_user_settings(home)
         deny = data.get("permissions", {}).get("deny", [])
         write_rules = [r for r in deny if r.startswith("Write(//") and "vaults" in r]
         edit_rules = [r for r in deny if r.startswith("Edit(//") and "vaults" in r]
@@ -610,13 +597,11 @@ class TestInitInstallsGuardrail:
 
     def test_rerun_installs_no_duplicate_guard(self, tmp_path):
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        _run_init(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        _run_init(["init"], state=state, config=config, home=home)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        _, data = self._read_local_settings(repo)
+        _, data = self._read_user_settings(home)
         cmds = self._pretooluse_commands(data)
         guard_cmds = [c for c in cmds if "vault-guard" in c]
         assert len(guard_cmds) == 1, (
@@ -631,9 +616,8 @@ class TestInitInstallsGuardrail:
     def test_init_preserves_unrelated_settings(self, tmp_path):
         """An existing unrelated hook + permission rule survive the guardrail install."""
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        settings = repo / ".claude" / "settings.local.json"
-        settings.parent.mkdir(parents=True)
+        settings = home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text(json.dumps({
             "hooks": {
                 "PreToolUse": [
@@ -645,8 +629,7 @@ class TestInitInstallsGuardrail:
             "env": {"FOO": "bar"},
         }))
 
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
         data = json.loads(settings.read_text())
@@ -659,14 +642,12 @@ class TestInitInstallsGuardrail:
         """A present-but-corrupt settings file → clean `error:` + nonzero, no traceback
         (mirrors the Slice 1 config-seed pattern; settings_writer raises ValueError)."""
         state, config, home = _dirs(tmp_path)
-        repo = _git_repo(tmp_path)
-        settings = repo / ".claude" / "settings.local.json"
-        settings.parent.mkdir(parents=True)
+        settings = home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
         corrupt = "{ broken json ]"
         settings.write_text(corrupt)
 
-        res = _run_init(["init", "--local"], state=state, config=config,
-                        home=home, cwd=repo)
+        res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode != 0, "corrupt settings must fail init"
         assert "error:" in res.stderr.lower()
         assert "Traceback" not in res.stderr, "must not leak a raw traceback"

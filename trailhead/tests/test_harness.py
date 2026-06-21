@@ -13,6 +13,7 @@ from trailhead.harness import (
     known_harness_names,
     resolve_harnesses,
 )
+from trailhead.harness.base import UNSUPPORTED_RULESET_NOTICE
 
 
 class TestFactory:
@@ -104,3 +105,128 @@ class TestDelegationToRegistry:
         # markers written after success
         assert h.is_registered(tmp_path)
         assert h.is_installed("lore", tmp_path)
+
+
+class _BareHarness(Harness):
+    """Minimal concrete Harness that does NOT override the user-ruleset methods.
+
+    Exercises the base-class safe defaults (degrade-visibly) in isolation.
+    """
+
+    name = "bare"
+
+    @classmethod
+    def detect(cls, env):
+        return False
+
+    def generate_manifest(self, tools, composed_root):
+        raise NotImplementedError
+
+    def is_registered(self, composed_root):
+        raise NotImplementedError
+
+    def is_installed(self, tool, composed_root):
+        raise NotImplementedError
+
+    def register(self, composed_root, *, runner=None):
+        raise NotImplementedError
+
+    def install_tool(self, tool, composed_root, *, runner=None):
+        raise NotImplementedError
+
+    def rewire_tool(self, tool, composed_root, *, runner=None):
+        raise NotImplementedError
+
+    def unregister_tool(self, tool, composed_root, *, runner=None):
+        raise NotImplementedError
+
+    def unregister_marketplace(self, composed_root, *, runner=None):
+        raise NotImplementedError
+
+
+class TestUserRulesetBaseDefault:
+    """Base default degrades VISIBLY — never silently no-ops, never crashes."""
+
+    def test_user_ruleset_path_is_none(self):
+        assert _BareHarness().user_ruleset_path("trailhead-lore") is None
+
+    def test_user_ruleset_status_is_unsupported(self):
+        assert _BareHarness().user_ruleset_status("trailhead-lore", "x") == "unsupported"
+
+    def test_install_user_ruleset_no_write_no_error_fixed_notice(self, capsys):
+        h = _BareHarness()
+        # Performs no write and raises no error; emits the FIXED notice string.
+        assert h.install_user_ruleset("trailhead-lore", "body") is None
+        out = capsys.readouterr().out
+        assert out.strip() == UNSUPPORTED_RULESET_NOTICE
+        assert "trailhead-lore" not in out  # static notice, no per-name interpolation
+
+
+class TestClaudeCodeUserRuleset:
+    """ClaudeCodeHarness writes ~/.claude/rules/<name>.md, atomically + idempotently."""
+
+    def _env(self, claude_dir):
+        return {"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+
+    def test_install_writes_byte_exact(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        content = "## rules\nbody\n"
+        h.install_user_ruleset("trailhead-lore", content, env=self._env(claude_dir))
+        target = claude_dir / "rules" / "trailhead-lore.md"
+        assert target.read_text() == content
+
+    def test_path_points_at_rules_file(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        assert h.user_ruleset_path("trailhead-lore", env=self._env(claude_dir)) == (
+            claude_dir / "rules" / "trailhead-lore.md"
+        )
+
+    def test_reinstall_identical_is_noop(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        content = "## rules\nbody\n"
+        env = self._env(claude_dir)
+        h.install_user_ruleset("trailhead-lore", content, env=env)
+        target = claude_dir / "rules" / "trailhead-lore.md"
+        before = target.stat().st_mtime_ns
+        # No leftover temp files from the first write.
+        assert list((claude_dir / "rules").iterdir()) == [target]
+        h.install_user_ruleset("trailhead-lore", content, env=env)
+        assert target.read_text() == content
+        assert target.stat().st_mtime_ns == before  # untouched: true no-op
+        assert list((claude_dir / "rules").iterdir()) == [target]
+
+    def test_status_current_after_clean_install(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        content = "## rules\nbody\n"
+        env = self._env(claude_dir)
+        h.install_user_ruleset("trailhead-lore", content, env=env)
+        assert h.user_ruleset_status("trailhead-lore", content, env=env) == "current"
+
+    def test_status_stale_after_mutation(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        content = "## rules\nbody\n"
+        env = self._env(claude_dir)
+        h.install_user_ruleset("trailhead-lore", content, env=env)
+        target = claude_dir / "rules" / "trailhead-lore.md"
+        target.write_text(content + "drift\n")
+        assert h.user_ruleset_status("trailhead-lore", content, env=env) == "stale"
+
+    def test_status_missing_after_removal(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        content = "## rules\nbody\n"
+        env = self._env(claude_dir)
+        h.install_user_ruleset("trailhead-lore", content, env=env)
+        (claude_dir / "rules" / "trailhead-lore.md").unlink()
+        assert h.user_ruleset_status("trailhead-lore", content, env=env) == "missing"

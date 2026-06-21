@@ -1,27 +1,27 @@
-"""Slice 4 tests: session lifecycle + harvest hooks.
+"""Slice 4 tests: session lifecycle hooks.
 
 Covers (TDD — written before the hooks):
 - sessions.ensure_session_note: creates a note with valid `session` frontmatter
   and the five required body headings; resumes a note modified inside the window.
-- harvest-candidates.py: routes a `## Harvest candidates` block to
-  harvest-pending.md; no-op when the block is absent.
 - permission-log.py: appends an entry.
 
 Slice 2, S5 (F5): the SessionStart hook and WorktreeRemove hook were deleted;
 their test coverage was removed here accordingly (lore is fully pull — orientation
-lives in agent-rules). Only PostToolUse (harvest-candidates) remains.
+lives in agent-rules).
+
+Slice 1 (lore-agent-interface): the PostToolUse harvest-candidates hook was
+deleted; lore installs zero push hooks. harvest-candidates.py is gone and
+hooks.json carries no PostToolUse entry.
 """
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
-from unittest import mock
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -247,75 +247,6 @@ class TestEnsureSessionNote:
 
 
 # ---------------------------------------------------------------------------
-# harvest-candidates.py
-# ---------------------------------------------------------------------------
-
-HARVEST_TEXT = (
-    "Here is my report.\n\n"
-    "## Harvest candidates\n\n"
-    "- gotcha: the widget frobnicates on tuesdays\n"
-    "- dead-end: tried caching, made it slower (revive if cache is shared)\n"
-)
-
-
-def _run_harvest(payload: dict, vault: Path):
-    mod = load_hook("harvest-candidates")
-    env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", ""),
-           "HOME": os.environ.get("HOME", "")}
-    with mock.patch.dict(os.environ, env, clear=True):
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))):
-            with mock.patch("sys.stdout", io.StringIO()):
-                rc = mod.main()
-    return rc
-
-
-class TestHarvest:
-    def test_routes_block_to_pending_file(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        payload = {
-            "tool_name": "Agent",
-            "tool_input": {"subagent_type": "executor"},
-            "tool_response": {"content": HARVEST_TEXT},
-            "cwd": str(tmp_path / "wt"),
-        }
-        _run_harvest(payload, vault)
-        pending = vault / "harvest-pending.md"
-        assert pending.exists()
-        text = pending.read_text()
-        assert "frobnicates on tuesdays" in text
-        assert "tried caching" in text
-
-    def test_noop_when_block_absent(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        payload = {
-            "tool_name": "Agent",
-            "tool_input": {},
-            "tool_response": {"content": "Just a normal report, no harvest."},
-            "cwd": str(tmp_path / "wt"),
-        }
-        _run_harvest(payload, vault)
-        assert not (vault / "harvest-pending.md").exists()
-
-    def test_noop_when_not_agent_tool(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        payload = {
-            "tool_name": "Bash",
-            "tool_response": {"content": HARVEST_TEXT},
-        }
-        _run_harvest(payload, vault)
-        assert not (vault / "harvest-pending.md").exists()
-
-    def test_never_raises_on_garbage(self, tmp_path):
-        vault = _make_vault(tmp_path)
-        mod = load_hook("harvest-candidates")
-        env = {"LORE_VAULT": str(vault), "PATH": os.environ.get("PATH", "")}
-        with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch("sys.stdin", io.StringIO("not json {{{")):
-                with mock.patch("sys.stdout", io.StringIO()):
-                    assert mod.main() == 0
-
-
-# ---------------------------------------------------------------------------
 # permission-log.py
 # ---------------------------------------------------------------------------
 
@@ -335,19 +266,39 @@ class TestPermissionLog:
 
 
 # ---------------------------------------------------------------------------
-# hooks.json registration (Slice 2, S5: only PostToolUse remains)
+# hooks.json registration (Slice 1, lore-agent-interface: zero push hooks)
 # ---------------------------------------------------------------------------
 
 class TestHooksJson:
-    def test_post_tool_use_matches_agent(self):
+    def test_no_post_tool_use_harvest_entry(self):
+        """hooks.json must carry no PostToolUse entry — harvest hook is retired.
+
+        lore is fully pull: zero push hooks remain.
+        """
         data = json.loads((HOOKS_DIR / "hooks.json").read_text())
-        entries = data["hooks"]["PostToolUse"]
-        matchers = [e.get("matcher", "") for e in entries]
-        assert any("Agent" in m or "subagent" in m.lower() for m in matchers)
+        hooks = data.get("hooks", {})
+        assert "PostToolUse" not in hooks, (
+            "hooks.json must NOT register PostToolUse — harvest hook was deleted "
+            "(lore-agent-interface Slice 1)"
+        )
+
+    def test_zero_push_hooks(self):
+        """hooks.json registers zero push hooks (lore is fully pull)."""
+        data = json.loads((HOOKS_DIR / "hooks.json").read_text())
+        hooks = data.get("hooks", {})
+        assert hooks == {}, (
+            f"hooks.json must have empty hooks dict, got keys: {list(hooks.keys())}"
+        )
 
     def test_smoke_files_deleted(self):
         assert not (HOOKS_DIR / "session_smoke.py").exists()
         assert not (HOOKS_DIR / "_shared_smoke.py").exists()
+
+    def test_harvest_candidates_hook_file_deleted(self):
+        """harvest-candidates.py must not be present — it was deleted in Slice 1."""
+        assert not (HOOKS_DIR / "harvest-candidates.py").exists(), (
+            "harvest-candidates.py must be removed — lore installs zero push hooks."
+        )
 
 
 # ---------------------------------------------------------------------------

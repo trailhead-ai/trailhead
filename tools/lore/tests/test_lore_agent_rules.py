@@ -1,28 +1,31 @@
-"""Tests for Slice 4, S5: agent-rules injection (marker-delimited, idempotent, lock-guarded).
+"""Tests for lore agent-interface Slice 3: user-level ruleset install via the seam.
 
-Covers every bullet of the Slice 4 test contract:
-  - The lore block is injected between stable markers.
-  - Re-run replaces in place (single block, no dupes).
-  - Only pre-existing rules files (plus the canonical one) are touched; no stray files.
-  - Concurrent inject (two processes, barrier-synced) yields exactly one block (flock smoke test).
-  - ``--local`` injects into the project rules file; global into the user rules file.
-  - The injected block documents the non-Claude-Code degradation (rules-only guardrail).
-  - Drift advisory: with a rules-file candidate present but missing the marker block,
-    ``lore init`` (and ``lore status``) names it in an advisory; with all candidates
-    carrying the block, no advisory.
-  - CRITICAL: the injected block explicitly prohibits Bash/shell vault writes (e.g.
-    ``> file``, ``tee``, ``sed -i``, ``cp``, ``mv``), not just direct file edits.
+``lore init`` installs lore's static ruleset into every detected harness through
+the trailhead ``Harness`` seam (for Claude Code: ``~/.claude/rules/trailhead-lore.md``).
+There is NO ``CLAUDE.md`` block injection, NO ``lore:agent-rules`` markers, and NO
+``--local`` mode — the old S5 marker-delimited injection machinery is gone.
 
-All tests inject XDG_STATE_HOME / XDG_CONFIG_HOME / HOME via env and use tmp_path so
-they NEVER touch real config, state, vault, or ``~/.claude`` data (Axiom 6).
+This file owns the ``lore init`` / ``lore status`` integration coverage:
+  - ``lore init`` writes ``~/.claude/rules/trailhead-lore.md`` byte-exact AND the
+    PreToolUse guardrail into ``~/.claude/settings.json``; it writes NO ``CLAUDE.md``
+    and leaves zero ``lore:agent-rules`` markers on disk; re-run is a no-op; it emits
+    a per-harness ``installed …``/``up to date`` confirmation line.
+  - ``lore init --local`` is an unknown-flag error (``SystemExit(2)``), writing nothing.
+  - ``lore status`` reports ``current`` on a clean install, ``stale`` after the file
+    is mutated, ``missing`` after it is removed.
+
+Seam-unit coverage (``install_user_ruleset`` / ``user_ruleset_status`` /
+``UNSUPPORTED_RULESET_NOTICE`` degrade-visibly) lives in
+``trailhead/tests/test_harness.py`` (Slice 2).
+
+All tests isolate via a tmp ``HOME`` + ``TRAILHEAD_CLAUDE_DIR`` so they NEVER touch
+the real ``~/.claude`` (Axiom 6).
 """
 from __future__ import annotations
 
-import multiprocessing
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
@@ -36,15 +39,22 @@ from conftest import load_script  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Harness helpers
+# Harness
 # ---------------------------------------------------------------------------
 
 def _run(args, *, state, config, home, cwd=None, extra=None):
-    """Run lore CLI with fully isolated XDG dirs and a fake HOME."""
+    """Run lore CLI with isolated XDG dirs, a fake HOME, and an isolated Claude dir.
+
+    ``TRAILHEAD_CLAUDE_DIR`` is set to ``$HOME/.claude`` so the trailhead harness
+    (a) detects Claude Code as present and (b) writes the ruleset into the SAME
+    isolated tree the guardrail's ``settings.json`` lands in — never the real
+    ``~/.claude`` (Axiom 6).
+    """
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CONFIG_HOME"] = str(config)
     env["HOME"] = str(home)
+    env["TRAILHEAD_CLAUDE_DIR"] = str(home / ".claude")
     env["LORE_EMAIL"] = "tester@example.com"
     if extra:
         env.update(extra)
@@ -61,426 +71,199 @@ def _dirs(tmp_path):
     state = tmp_path / "state"
     config = tmp_path / "config"
     home = tmp_path / "home"
+    # The Claude dir must already exist for detect() to find the harness — this
+    # mirrors a machine that has Claude Code installed.
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
     state.mkdir(parents=True, exist_ok=True)
     config.mkdir(parents=True, exist_ok=True)
-    home.mkdir(parents=True, exist_ok=True)
     return state, config, home
 
 
-def _load_installer():
-    return load_script("installer")
+def _ruleset_path(home):
+    return home / ".claude" / "rules" / "trailhead-lore.md"
+
+
+def _ruleset_content():
+    return load_script("agent_ruleset").RULESET_CONTENT
 
 
 # ---------------------------------------------------------------------------
-# 1. Block injected between stable markers
+# 1. lore init writes the user-level ruleset byte-exact
 # ---------------------------------------------------------------------------
 
-class TestMarkerDelimitedInjection:
-    def test_inject_creates_markers_in_new_file(self, tmp_path):
-        """inject_agent_rules writes LORE_START and LORE_END markers in a new file."""
-        installer = _load_installer()
-        rules = tmp_path / "CLAUDE.md"
-        installer.inject_agent_rules(rules)
-        content = rules.read_text()
-        assert "<!-- lore:agent-rules:start -->" in content
-        assert "<!-- lore:agent-rules:end -->" in content
-
-    def test_inject_appends_to_existing_file(self, tmp_path):
-        """inject_agent_rules preserves existing content before the block."""
-        installer = _load_installer()
-        rules = tmp_path / "CLAUDE.md"
-        rules.write_text("# My existing rules\n\nSome content.\n")
-        installer.inject_agent_rules(rules)
-        content = rules.read_text()
-        assert "# My existing rules" in content
-        assert "<!-- lore:agent-rules:start -->" in content
-
-    def test_inject_block_between_markers(self, tmp_path):
-        """The lore content appears between the start and end markers."""
-        installer = _load_installer()
-        rules = tmp_path / "CLAUDE.md"
-        installer.inject_agent_rules(rules)
-        content = rules.read_text()
-        start = content.index("<!-- lore:agent-rules:start -->")
-        end = content.index("<!-- lore:agent-rules:end -->")
-        assert start < end, "start marker must precede end marker"
-        block = content[start:end]
-        assert len(block) > len("<!-- lore:agent-rules:start -->"), (
-            "block between markers must have substantive content"
+class TestInitWritesRuleset:
+    def test_init_writes_ruleset_file(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        res = _run(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+        assert _ruleset_path(home).is_file(), (
+            "lore init must write ~/.claude/rules/trailhead-lore.md"
         )
 
-    def test_rerun_replaces_in_place_no_dupes(self, tmp_path):
-        """Re-running inject_agent_rules replaces the block in place (no duplicate markers)."""
-        installer = _load_installer()
-        rules = tmp_path / "CLAUDE.md"
-        installer.inject_agent_rules(rules)
-        installer.inject_agent_rules(rules)
-        content = rules.read_text()
-        assert content.count("<!-- lore:agent-rules:start -->") == 1
-        assert content.count("<!-- lore:agent-rules:end -->") == 1
-
-    def test_rerun_via_lore_init_no_dupes(self, tmp_path):
-        """lore init called twice does not duplicate the agent-rules block."""
+    def test_ruleset_content_is_byte_exact(self, tmp_path):
         state, config, home = _dirs(tmp_path)
         _run(["init"], state=state, config=config, home=home)
-        _run(["init"], state=state, config=config, home=home)
-        rules = home / "CLAUDE.md"
-        content = rules.read_text()
-        assert content.count("<!-- lore:agent-rules:start -->") == 1
-        assert content.count("<!-- lore:agent-rules:end -->") == 1
-
-
-# ---------------------------------------------------------------------------
-# 2. Only pre-existing rules files (plus canonical) are touched
-# ---------------------------------------------------------------------------
-
-class TestOnlyExistingFilesTouched:
-    def test_canonical_rules_file_created_if_absent(self, tmp_path):
-        """inject_agent_rules creates the canonical rules file if absent (CLAUDE.md)."""
-        installer = _load_installer()
-        rules = tmp_path / "CLAUDE.md"
-        assert not rules.exists()
-        installer.inject_agent_rules(rules)
-        assert rules.exists()
-
-    def test_cursorrules_only_touched_if_already_present(self, tmp_path):
-        """inject_agent_rules only injects into .cursorrules if it already exists."""
-        installer = _load_installer()
-        canonical = tmp_path / "CLAUDE.md"
-        cursorrules = tmp_path / ".cursorrules"
-        assert not cursorrules.exists()
-        # Inject into both with existing .cursorrules
-        cursorrules.write_text("# Cursor rules\n")
-        installer.inject_agent_rules(canonical, extra_paths=[cursorrules])
-        assert "<!-- lore:agent-rules:start -->" in cursorrules.read_text()
-
-    def test_no_stray_rules_files_created(self, tmp_path):
-        """inject_agent_rules does not create extra rules files that were absent."""
-        installer = _load_installer()
-        canonical = tmp_path / "CLAUDE.md"
-        cursorrules = tmp_path / ".cursorrules"
-        # Don't create .cursorrules — it should stay absent
-        installer.inject_agent_rules(canonical, extra_paths=[cursorrules])
-        assert not cursorrules.exists(), (
-            "inject_agent_rules created a stray .cursorrules file that did not exist before"
+        assert _ruleset_path(home).read_text() == _ruleset_content(), (
+            "the installed ruleset must be byte-exact RULESET_CONTENT"
         )
 
-    def test_lore_init_does_not_create_stray_cursorrules(self, tmp_path):
-        """lore init must not create .cursorrules if it was absent."""
+    def test_init_emits_per_harness_confirmation_line(self, tmp_path):
         state, config, home = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-
-        _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-        assert not (repo / ".cursorrules").exists(), (
-            "lore init --local created a stray .cursorrules file"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 3. Concurrent inject yields exactly one block (flock smoke test)
-# ---------------------------------------------------------------------------
-
-def _inject_with_barrier(rules_path, barrier_path, done_path, installer_scripts_dir):
-    """Worker: wait for barrier, then inject, signal done."""
-    import importlib.util
-    import sys
-    sys.path.insert(0, str(installer_scripts_dir))
-    spec = importlib.util.spec_from_file_location(
-        "installer", str(installer_scripts_dir) + "/installer.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-
-    # Wait for barrier (poll until barrier file appears)
-    for _ in range(50):
-        if Path(barrier_path).exists():
-            break
-        time.sleep(0.01)
-
-    mod.inject_agent_rules(Path(rules_path))
-    Path(done_path).touch()
-
-
-class TestConcurrentInject:
-    def test_concurrent_inject_yields_exactly_one_block(self, tmp_path):
-        """Two processes racing inject_agent_rules produce exactly one marker block (KU3)."""
-        rules = tmp_path / "CLAUDE.md"
-        barrier = tmp_path / "barrier"
-        done1 = tmp_path / "done1"
-        done2 = tmp_path / "done2"
-
-        p1 = multiprocessing.Process(
-            target=_inject_with_barrier,
-            args=(str(rules), str(barrier), str(done1), str(SCRIPTS_DIR)),
-        )
-        p2 = multiprocessing.Process(
-            target=_inject_with_barrier,
-            args=(str(rules), str(barrier), str(done2), str(SCRIPTS_DIR)),
-        )
-        p1.start()
-        p2.start()
-
-        # Signal both to start simultaneously
-        barrier.touch()
-
-        p1.join(timeout=10)
-        p2.join(timeout=10)
-
-        assert p1.exitcode == 0, f"process 1 exited with {p1.exitcode}"
-        assert p2.exitcode == 0, f"process 2 exited with {p2.exitcode}"
-
-        content = rules.read_text()
-        assert content.count("<!-- lore:agent-rules:start -->") == 1, (
-            f"Expected exactly 1 start marker, got "
-            f"{content.count('<!-- lore:agent-rules:start -->')}:\n{content}"
-        )
-        assert content.count("<!-- lore:agent-rules:end -->") == 1, (
-            f"Expected exactly 1 end marker, got "
-            f"{content.count('<!-- lore:agent-rules:end -->')}:\n{content}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 4. --local vs global target routing
-# ---------------------------------------------------------------------------
-
-class TestLocalVsGlobalTargets:
-    def test_global_init_injects_into_user_rules_file(self, tmp_path):
-        """Global lore init injects the block into ~/CLAUDE.md."""
-        state, config, home = _dirs(tmp_path)
-        _run(["init"], state=state, config=config, home=home)
-        rules = home / "CLAUDE.md"
-        assert rules.exists(), "global lore init must create ~/CLAUDE.md"
-        content = rules.read_text()
-        assert "<!-- lore:agent-rules:start -->" in content
-
-    def test_local_init_injects_into_project_rules_file(self, tmp_path):
-        """lore init --local injects the block into the git repo's CLAUDE.md."""
-        state, config, home = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-
-        _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-        rules = repo / "CLAUDE.md"
-        assert rules.exists(), "lore init --local must create <git-root>/CLAUDE.md"
-        content = rules.read_text()
-        assert "<!-- lore:agent-rules:start -->" in content
-
-    def test_local_init_does_not_touch_user_rules_file(self, tmp_path):
-        """lore init --local must NOT inject into ~/CLAUDE.md."""
-        state, config, home = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-
-        _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-        user_rules = home / "CLAUDE.md"
-        if user_rules.exists():
-            content = user_rules.read_text()
-            assert "<!-- lore:agent-rules:start -->" not in content, (
-                "lore init --local injected into ~/CLAUDE.md (should only touch project CLAUDE.md)"
-            )
-
-
-# ---------------------------------------------------------------------------
-# 5. Block content requirements
-# ---------------------------------------------------------------------------
-
-class TestBlockContent:
-    def _get_block(self, tmp_path):
-        installer = _load_installer()
-        rules = tmp_path / "CLAUDE.md"
-        installer.inject_agent_rules(rules)
-        content = rules.read_text()
-        start = content.index("<!-- lore:agent-rules:start -->")
-        end = content.index("<!-- lore:agent-rules:end -->")
-        return content[start:end + len("<!-- lore:agent-rules:end -->")]
-
-    def test_block_states_cli_is_only_write_path(self, tmp_path):
-        """The injected block must state that the lore CLI is the only write path."""
-        block = self._get_block(tmp_path)
-        block_lower = block.lower()
-        assert "lore" in block_lower
-        assert any(w in block_lower for w in ("cli", "command", "only")), (
-            "block must state lore CLI is the only write path"
-        )
-
-    def test_block_prohibits_direct_file_edits(self, tmp_path):
-        """The injected block must explicitly prohibit direct file edits."""
-        block = self._get_block(tmp_path)
-        block_lower = block.lower()
-        assert any(w in block_lower for w in ("direct", "never", "do not", "not by")), (
-            "block must explicitly prohibit direct file edits"
-        )
-
-    def test_block_prohibits_bash_shell_writes(self, tmp_path):
-        """CRITICAL: the injected block must explicitly prohibit Bash/shell vault writes.
-
-        Slice 3's runtime guardrail does NOT cover Bash-mediated writes (> file, tee,
-        sed -i, cp, mv) — those are covered ONLY by this agent-rules prohibition. The
-        block MUST state this unambiguously, not just imply it.
-        """
-        block = self._get_block(tmp_path)
-        block_lower = block.lower()
-        # Must mention Bash or shell explicitly
-        assert any(w in block_lower for w in ("bash", "shell", "redirect", ">", "tee", "sed")), (
-            "CRITICAL: block must explicitly mention Bash/shell writes (>, tee, sed -i, cp, mv) "
-            "— these are NOT covered by the PreToolUse guardrail and this is the only protection"
-        )
-
-    def test_block_documents_non_claude_degradation(self, tmp_path):
-        """The injected block must document the non-Claude-Code degradation (rules-only)."""
-        block = self._get_block(tmp_path)
-        block_lower = block.lower()
-        # Must reference other harnesses or the rules-only nature
-        assert any(w in block_lower for w in (
-            "non-claude", "other harness", "rules-only", "harness", "cursor", "codex",
-            "rules only", "only protection", "without claude"
-        )), (
-            "block must document the non-Claude-Code degradation (rules-only guardrail)"
-        )
-
-    def test_block_includes_docs_pointer(self, tmp_path):
-        """The injected block must include a pointer to the lore docs."""
-        block = self._get_block(tmp_path)
-        block_lower = block.lower()
-        assert any(w in block_lower for w in ("doc", "lore:", "see ", "refer", "guide")), (
-            "block must include a pointer to lore docs / agent-driven procedures"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 6. Drift advisory
-# ---------------------------------------------------------------------------
-
-class TestDriftAdvisory:
-    def test_lore_init_emits_advisory_for_candidate_missing_block(self, tmp_path):
-        """lore init emits an advisory when a candidate rules file lacks the marker block."""
-        state, config, home = _dirs(tmp_path)
-        # Create a .cursorrules WITHOUT the block — simulates a file added after init
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-        cursorrules = repo / ".cursorrules"
-        cursorrules.write_text("# Cursor rules without lore block\n")
-
-        res = _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-        # Advisory should mention the file and "re-run lore init"
+        res = _run(["init"], state=state, config=config, home=home)
         combined = res.stdout + res.stderr
-        assert ".cursorrules" in combined or "cursorrules" in combined.lower(), (
-            f"lore init must name the uninjected rules file in an advisory:\n{combined}"
+        assert "trailhead-lore.md" in combined and "installed" in combined.lower(), (
+            f"lore init must emit a per-harness 'installed …' line:\n{combined}"
         )
 
-    def test_lore_init_silent_when_all_candidates_have_block(self, tmp_path):
-        """lore init emits no drift advisory when all candidate rules files carry the block."""
+    def test_rerun_emits_up_to_date_line(self, tmp_path):
         state, config, home = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        _run(["init"], state=state, config=config, home=home)
+        res = _run(["init"], state=state, config=config, home=home)
+        combined = res.stdout + res.stderr
+        assert "up to date" in combined.lower(), (
+            f"a re-run must report the ruleset is 'up to date':\n{combined}"
+        )
 
-        # First run: injects the block (no .cursorrules present, so no advisory)
-        res = _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
+
+# ---------------------------------------------------------------------------
+# 2. lore init also installs the PreToolUse guardrail (must SURVIVE the rewire)
+# ---------------------------------------------------------------------------
+
+class TestInitInstallsGuardrail:
+    def test_init_writes_pretooluse_guard(self, tmp_path):
+        import json
+
+        state, config, home = _dirs(tmp_path)
+        res = _run(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        # Run again: everything already has the block — should be advisory-free
-        res2 = _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-        combined = res2.stdout + res2.stderr
-        assert "re-run" not in combined.lower() or "advisory" not in combined.lower(), (
-            "lore init emitted a drift advisory when all rules files already have the block"
+        settings = home / ".claude" / "settings.json"
+        assert settings.is_file(), "lore init must write ~/.claude/settings.json"
+        data = json.loads(settings.read_text())
+        cmds = [
+            h.get("command", "")
+            for e in data.get("hooks", {}).get("PreToolUse", [])
+            for h in e.get("hooks", [])
+        ]
+        assert any("vault-guard" in c for c in cmds), (
+            f"lore init must install the PreToolUse vault-guard; got {cmds!r}"
         )
 
-    def test_lore_init_advisory_mentions_rerun(self, tmp_path):
-        """The drift advisory from lore init says 're-run lore init'."""
+
+# ---------------------------------------------------------------------------
+# 3. No CLAUDE.md block, no markers, no project files
+# ---------------------------------------------------------------------------
+
+class TestNoBlockInjection:
+    def test_init_writes_no_claude_md(self, tmp_path):
         state, config, home = _dirs(tmp_path)
+        _run(["init"], state=state, config=config, home=home)
+        assert not (home / "CLAUDE.md").exists(), (
+            "lore init must not write a ~/CLAUDE.md (block injection is gone)"
+        )
+
+    def test_no_agent_rules_markers_anywhere_on_disk(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        _run(["init"], state=state, config=config, home=home)
+        for root in (home, state, config):
+            for p in root.rglob("*"):
+                if p.is_file():
+                    try:
+                        text = p.read_text()
+                    except (UnicodeDecodeError, OSError):
+                        continue
+                    assert "lore:agent-rules" not in text, (
+                        f"found a stale lore:agent-rules marker in {p}"
+                    )
+
+    def test_init_creates_no_project_files(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        # Run from a git repo dir to prove init does NOT touch project files.
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-        cursorrules = repo / ".cursorrules"
-        cursorrules.write_text("# Cursor rules without lore block\n")
+        _run(["init"], state=state, config=config, home=home, cwd=repo)
+        assert not (repo / "CLAUDE.md").exists()
+        assert not (repo / ".cursorrules").exists()
+        assert not (repo / ".claude" / "settings.local.json").exists()
 
-        res = _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-        combined = res.stdout + res.stderr
-        assert "re-run" in combined.lower() or "lore init" in combined.lower(), (
-            f"drift advisory must say 're-run lore init':\n{combined}"
-        )
 
-    def test_lore_status_emits_drift_line_for_uninjected_candidate(self, tmp_path):
-        """lore status emits a drift line naming rules-file candidates missing the block."""
+# ---------------------------------------------------------------------------
+# 4. Idempotency: re-run leaves the ruleset byte-for-byte unchanged
+# ---------------------------------------------------------------------------
+
+class TestIdempotency:
+    def test_rerun_leaves_ruleset_byte_for_byte_unchanged(self, tmp_path):
         state, config, home = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        _run(["init"], state=state, config=config, home=home)
+        first = _ruleset_path(home).read_bytes()
+        _run(["init"], state=state, config=config, home=home)
+        second = _ruleset_path(home).read_bytes()
+        assert second == first, "ruleset file must be byte-for-byte stable on re-run"
 
-        # Run init first so vault/config are set up
-        _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
 
-        # Now add a .cursorrules WITHOUT the block AFTER init
-        cursorrules = repo / ".cursorrules"
-        cursorrules.write_text("# Cursor rules without lore block\n")
+# ---------------------------------------------------------------------------
+# 5. --local is gone (unknown flag → SystemExit(2), writes nothing)
+# ---------------------------------------------------------------------------
 
-        res = _run(["status"], state=state, config=config, home=home, cwd=repo)
-        combined = res.stdout + res.stderr
-        assert ".cursorrules" in combined or "cursorrules" in combined.lower(), (
-            f"lore status must name the uninjected rules file in a drift line:\n{combined}"
-        )
-
-    def test_lore_status_no_drift_when_all_blocks_present(self, tmp_path):
-        """lore status emits no drift advisory when all candidate rules files have the block."""
+class TestLocalFlagRemoved:
+    def test_local_flag_is_unknown_flag_error(self, tmp_path):
         state, config, home = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-
-        # Init with .cursorrules present — both get injected
-        cursorrules = repo / ".cursorrules"
-        cursorrules.write_text("# Cursor rules\n")
-        _run(["init", "--local"], state=state, config=config, home=home, cwd=repo)
-
-        # Verify .cursorrules got the block
-        assert "<!-- lore:agent-rules:start -->" in cursorrules.read_text(), (
-            "pre-existing .cursorrules must have been injected during init"
+        res = _run(["init", "--local"], state=state, config=config, home=home)
+        assert res.returncode == 2, (
+            f"lore init --local must be an argparse usage error (exit 2); "
+            f"got {res.returncode}; stderr={res.stderr!r}"
         )
 
-        res = _run(["status"], state=state, config=config, home=home, cwd=repo)
+    def test_local_flag_writes_no_ruleset(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        _run(["init", "--local"], state=state, config=config, home=home)
+        assert not _ruleset_path(home).exists(), (
+            "the rejected --local run must not have installed the ruleset"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 6. lore status: current → stale → missing
+# ---------------------------------------------------------------------------
+
+class TestStatus:
+    def test_status_reports_current_after_clean_install(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        _run(["init"], state=state, config=config, home=home)
+        res = _run(["status"], state=state, config=config, home=home)
         combined = res.stdout + res.stderr
-        assert "re-run" not in combined.lower(), (
-            f"lore status emitted drift advisory when all rules files have the block:\n{combined}"
+        assert "current" in combined.lower(), (
+            f"lore status must report 'current' on a clean install:\n{combined}"
         )
 
-    def test_scan_for_rules_drift_returns_uninjected_candidates(self, tmp_path):
-        """scan_for_rules_drift returns paths of candidate rules files lacking the marker block."""
-        installer = _load_installer()
-        search_root = tmp_path
-        cursorrules = search_root / ".cursorrules"
-        cursorrules.write_text("# Cursor rules without block\n")
-        # CLAUDE.md has the block
-        claude_md = search_root / "CLAUDE.md"
-        installer.inject_agent_rules(claude_md)
-
-        drifted = installer.scan_for_rules_drift(search_root)
-        # .cursorrules is present and lacks the block → should be in drifted
-        assert any(p.name == ".cursorrules" for p in drifted), (
-            f"scan_for_rules_drift must return .cursorrules (lacks block); got: {drifted}"
-        )
-        # CLAUDE.md has the block → must NOT be in drifted
-        assert not any(p.name == "CLAUDE.md" for p in drifted), (
-            "CLAUDE.md has the block and must not appear in scan_for_rules_drift"
+    def test_status_reports_stale_after_mutation(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        _run(["init"], state=state, config=config, home=home)
+        ruleset = _ruleset_path(home)
+        ruleset.write_text(ruleset.read_text() + "\nmutated\n")
+        res = _run(["status"], state=state, config=config, home=home)
+        combined = res.stdout + res.stderr
+        assert "stale" in combined.lower(), (
+            f"lore status must report 'stale' after the ruleset is mutated:\n{combined}"
         )
 
-    def test_scan_for_rules_drift_empty_when_all_injected(self, tmp_path):
-        """scan_for_rules_drift returns empty list when all candidates have the block."""
-        installer = _load_installer()
-        search_root = tmp_path
-        claude_md = search_root / "CLAUDE.md"
-        cursorrules = search_root / ".cursorrules"
-        cursorrules.write_text("# Cursor rules\n")
-        installer.inject_agent_rules(claude_md)
-        installer.inject_agent_rules(cursorrules)
+    def test_status_reports_missing_after_removal(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        _run(["init"], state=state, config=config, home=home)
+        _ruleset_path(home).unlink()
+        res = _run(["status"], state=state, config=config, home=home)
+        combined = res.stdout + res.stderr
+        assert "missing" in combined.lower(), (
+            f"lore status must report 'missing' after the ruleset is removed:\n{combined}"
+        )
 
-        drifted = installer.scan_for_rules_drift(search_root)
-        assert drifted == [], (
-            f"scan_for_rules_drift must return [] when all blocks present; got: {drifted}"
+    def test_status_offers_rerun_remedy_when_drifted(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        _run(["init"], state=state, config=config, home=home)
+        _ruleset_path(home).unlink()
+        res = _run(["status"], state=state, config=config, home=home)
+        combined = res.stdout + res.stderr
+        assert "lore init" in combined, (
+            f"a drifted lore status must offer a 're-run lore init' remedy:\n{combined}"
         )

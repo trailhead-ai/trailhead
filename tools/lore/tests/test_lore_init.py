@@ -192,33 +192,12 @@ def test_bootstrap_vault_raises_on_git_init_failure(tmp_path):
             installer.bootstrap_vault(vaults_root, vault_path=None)
 
 
-def test_resolve_targets_global_returns_user_paths(tmp_path):
+def test_resolve_targets_returns_user_global_settings(tmp_path):
     installer = load_script("installer")
-    result = installer.resolve_targets(local=False)
-    settings, rules = result
-    # Global: ~/.claude/settings.json
+    settings = installer.resolve_targets()
+    # User-global only: ~/.claude/settings.json (no --local project mode).
     assert settings.name == "settings.json"
     assert ".claude" in str(settings)
-    # Global rules: a CLAUDE.md under home or similar
-    assert rules is not None
-
-
-def test_resolve_targets_local_returns_project_paths(tmp_path):
-    installer = load_script("installer")
-    # Create a fake git repo so resolve_targets(local=True) can find it
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / ".git").mkdir()
-    orig_cwd = os.getcwd()
-    try:
-        os.chdir(repo)
-        result = installer.resolve_targets(local=True)
-        settings, rules = result
-        # Local: ./.claude/settings.local.json in the git root
-        assert settings.name == "settings.local.json"
-        assert ".claude" in str(settings)
-    finally:
-        os.chdir(orig_cwd)
 
 
 # ---------------------------------------------------------------------------
@@ -278,20 +257,18 @@ def test_vault_flag_existing_symlink_is_noop(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 7. --local outside a git repo → clean non-zero error, no traceback
+# 7. --local is gone → argparse unknown-flag usage error (SystemExit 2)
 # ---------------------------------------------------------------------------
 
-def test_local_outside_git_repo_fails_cleanly(tmp_path):
+def test_local_flag_is_unknown_flag_error(tmp_path):
+    """``--local`` was removed (single user-level install). argparse rejects the
+    unknown flag with a usage error (exit 2), writing nothing."""
     state, config = _dirs(tmp_path)
-    non_git_dir = tmp_path / "no-git-here"
-    non_git_dir.mkdir()
-
-    res = _run(["init", "--local"], state=state, config=config, cwd=non_git_dir)
-    assert res.returncode != 0
-    # Should say something about git repo
-    assert "git" in res.stderr.lower() or "repository" in res.stderr.lower()
-    # Must NOT be a raw Python traceback
-    assert "Traceback" not in res.stderr
+    res = _run(["init", "--local"], state=state, config=config)
+    assert res.returncode == 2, (
+        f"lore init --local must be an argparse usage error (exit 2); "
+        f"got {res.returncode}; stderr={res.stderr!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

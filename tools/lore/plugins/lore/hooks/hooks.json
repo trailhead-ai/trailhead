@@ -1,15 +1,3 @@
 {
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Agent|Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/harvest-candidates.py\""
-          }
-        ]
-      }
-    ]
-  }
+  "hooks": {}
 }

@@ -82,7 +82,7 @@ class TestLoreInventory:
         assert load_manifest(_LORE_MANIFEST).base == ["skills/_shared"]
 
     def test_hooks_json(self):
-        assert load_manifest(_LORE_MANIFEST).hooks_json == "hooks/hooks.json"
+        assert load_manifest(_LORE_MANIFEST).hooks_json is None
 
     def test_lore_agents_discovered(self):
         # S6 Slice 3 established the lore agent roster: librarian (unchanged) +
