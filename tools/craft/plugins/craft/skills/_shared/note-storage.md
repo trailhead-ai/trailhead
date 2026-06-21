@@ -1,7 +1,7 @@
 # note_store — plan/spec persistence seam (shared reference)
 
 The **note_store** is the single indirection point through which craft persists and
-mutates plan/spec documents. The four planning skills (`brainstorm`, `plan`, `polish`)
+mutates plan/spec documents. The three planning skills (`brainstorm`, `plan`, `polish`)
 and the `planner` agent perform their plan/spec lifecycle operations **through this
 contract**, never by inlining a storage command. Centralizing here is deliberate: a
 future provider (repo-local markdown files, a `craft` CLI) slots in by editing this one
