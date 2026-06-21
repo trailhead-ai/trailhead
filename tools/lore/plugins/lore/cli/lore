@@ -42,7 +42,6 @@ import search as search_mod  # noqa: E402
 import session_store as session_store_mod  # noqa: E402
 import sessions as sessions_mod  # noqa: E402
 import settings_writer as settings_writer_mod  # noqa: E402
-import status_validator  # noqa: E402
 import vault as vault_mod  # noqa: E402
 import vault_config as vault_config_mod  # noqa: E402
 import vault_resolve as vault_resolve_mod  # noqa: E402
@@ -473,15 +472,21 @@ def _load_vault_config():
 
 
 def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
-    """Resolve the vault root that ``record update``/``delete`` should act on.
+    """Resolve the vault root that ``record delete`` should act on.
 
     Symmetric with ``record create`` (S4): when a ``config.json`` exists, the
     target vault is chosen by the SAME config resolution — the record's ``kind``
     (from ``record_id``) plus the command's routing flags (``--repo/--product/
-    --suite/--team``) — so update/delete operate on the very vault create routed
-    the record to (a no-scope record lands in, and is updated from, the
-    ``default`` vault). When **no** config exists, fall back to the active vault
+    --suite/--team``) — so delete operates on the very vault create routed the
+    record to (a no-scope record lands in, and is deleted from, the ``default``
+    vault). When **no** config exists, fall back to the active vault
     (``vault.resolve_vault()``) — vanilla usage is unchanged (Axiom 3).
+
+    NOTE: ``record update`` no longer uses this resolver. Since the
+    dedicated-field-flags change (Slice 3) its scope flags express the
+    *destination*, not the current location, so update locates the record via
+    ``_find_current_record_location`` (a config scan independent of the flag
+    values) and re-resolves the destination via ``_resolve_destination_root``.
 
     NOTE (scoped fix, 2026-06-18): this reconciles the create-vs-update/delete
     location split that the config-routing work introduced. The broader removal
