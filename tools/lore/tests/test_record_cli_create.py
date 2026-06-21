@@ -24,6 +24,20 @@ patch idiom with dedicated per-field flags. This file now exercises:
   - ``--set``/``--unset`` are gone (argparse-unrecognized).
   - provenance fields remain unwritable (no flag exists for them).
 
+Slice 2 (dedicated-field-flags plan) unifies scope flags on ``create``: the
+routing flags ``--team``/``--suite``/``--product``/``--repo`` additionally write
+their raw value into the namesake sidecar field, from the same loop that builds
+the routing scope.  One input, both effects — field value and routing value
+always agree.  This file exercises:
+  - ``--team alpha`` with a config routing ``team:alpha`` → its vault: sidecar
+    has ``team: alpha`` AND the record lands in that vault.
+  - ``--team alpha`` with no config: sidecar has ``team: alpha``, record in the
+    active vault.
+  - Multiple scope flags (``--team alpha --repo r1``) write both fields.
+  - Cannot decouple: no flag sets the ``team`` sidecar field to a value other
+    than the routed scope (``--set team=…`` is rejected; no other ``team``-field
+    flag exists).
+
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern).  Never
 writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
 """
@@ -42,6 +56,24 @@ SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _write_config(config_home: Path, vaults: list[dict]) -> Path:
+    """Write a config.json under config_home/lore/ and return its path."""
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    cfg_path = lore_cfg / "config.json"
+    cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
+    return cfg_path
+
+
+def _run_with_config(args, *, vault, state, config_home, stdin_text=None):
+    return _run(
+        args,
+        vault=vault,
+        state_dir=state,
+        stdin_text=stdin_text,
+        env_extra={"XDG_CONFIG_HOME": str(config_home)},
+    )
 
 def _find_sidecar(vault: Path, record_id: str) -> dict:
     """Read and JSON-parse the sidecar for a RECORD_ID (``<kind>/<name>``)."""
@@ -553,3 +585,143 @@ def test_create_label_value_with_equals_splits_on_first(tmp_path):
     record_id = r.stdout.strip()
     sidecar = _find_sidecar(vault, record_id)
     assert sidecar["annotations"]["note"] == "a=b"
+
+
+# ---------------------------------------------------------------------------
+# Slice 2 (dedicated-field-flags plan): scope flags write the namesake sidecar
+# field AND drive vault routing — one input, both effects (AC-ROUTE1 positive).
+# ---------------------------------------------------------------------------
+
+def test_scope_team_with_config_writes_field_and_routes(tmp_path):
+    """--team alpha with a config routing team:alpha → its vault: sidecar has
+    ``team: alpha`` and the record physically lands in the scoped vault.
+
+    One input drives both the field write and vault selection; the field value
+    and the routing value always agree (Slice 2, dedicated-field-flags plan).
+
+    Note: the config vault's ``name`` must equal ``normalize_vault_name("alpha")``
+    == "alpha" for resolution to elect the scoped vault (KU-1 VALIDATED).
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+
+    scoped_vault = tmp_path / "team_alpha_vault"
+    scoped_vault.mkdir(parents=True)
+
+    _write_config(config_home, [
+        {"name": "default", "scope": "default", "path": str(vault)},
+        {
+            "name": "alpha",
+            "scope": "team",
+            "records": ["decision"],
+            "path": str(scoped_vault),
+        },
+    ])
+
+    r = _run_with_config(
+        ["record", "create", "--kind", "decision", "--title", "T", "--team", "alpha"],
+        vault=vault, state=state, config_home=config_home,
+        stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+
+    record_id = r.stdout.strip()
+    assert record_id.startswith("decision/")
+
+    # Field written: sidecar carries team: alpha
+    sidecar = _find_sidecar(scoped_vault, record_id)
+    assert sidecar.get("team") == "alpha"
+
+    # Routing: record physically in the scoped vault, not the active vault
+    kind, name = record_id.split("/", 1)
+    assert (scoped_vault / kind / f"{name}.md").exists()
+    assert not (vault / kind / f"{name}.md").exists()
+
+
+def test_scope_team_no_config_writes_field_in_active_vault(tmp_path):
+    """--team alpha with no config: sidecar has ``team: alpha``, record in the
+    active vault (KU-1 state (b) — vanilla routing, field write still fires).
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "decision", "--title", "T", "--team", "alpha"],
+        vault=vault, state_dir=state,
+        stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+
+    record_id = r.stdout.strip()
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar.get("team") == "alpha"
+
+    # Record lands in the active vault
+    kind, name = record_id.split("/", 1)
+    assert (vault / kind / f"{name}.md").exists()
+
+
+def test_scope_multiple_flags_write_all_fields(tmp_path):
+    """--team alpha --repo r1 writes both ``team: alpha`` and ``repo: r1`` into
+    the sidecar; each flag contributes its own field independently.
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        [
+            "record", "create", "--kind", "decision", "--title", "T",
+            "--team", "alpha", "--repo", "r1",
+        ],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar.get("team") == "alpha"
+    assert sidecar.get("repo") == "r1"
+
+
+def test_scope_field_raw_value_not_scope_string(tmp_path):
+    """The sidecar value is the raw flag value (``'my-team'``), NOT the scope-string
+    form (``'team:my-team'``) — guards against wrong value derivation.
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "decision", "--title", "T", "--team", "my-team"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar.get("team") == "my-team"
+    assert sidecar.get("team") != "team:my-team"
+
+
+def test_scope_cannot_decouple_set_team_rejected(tmp_path):
+    """``--set team=…`` is gone (Slice 1): no decoupled setter can write ``team``
+    to a value that differs from the routing scope.  Argparse rejects ``--set``.
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--set", "team=other"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    assert list(vault.glob("**/*.md")) == []
+
+
+def test_scope_no_other_team_field_flag(tmp_path):
+    """No other flag (besides ``--team``) can set the ``team`` sidecar field;
+    the field value always matches the routing flag's value.
+
+    Verified by asserting that a create WITHOUT ``--team`` produces no ``team``
+    field in the sidecar — if a second write path existed it would set the field
+    through some other means and appear here.
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "decision", "--title", "T"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    # No --team supplied → no team field in sidecar (no other write path exists).
+    assert sidecar.get("team") is None

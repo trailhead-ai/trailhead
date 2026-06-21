@@ -1987,12 +1987,14 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
     Body is read verbatim from stdin — a leading ``---`` block is **never**
     parsed as frontmatter (AC-TX3); it is stored as body text.
 
-    Routing flags (--repo / --product / --suite / --team) are passed to
-    ``place_record`` as ``scope`` for the S4 multi-vault hook.  Non-scope sidecar
-    fields are set through the dedicated per-field flags (``--status``,
-    ``--keyword``, ``--related-*``, ``--related``) applied by
-    :func:`_apply_record_fields` (Slice 1, dedicated-field-flags plan); the scope
-    flags' sidecar-write semantics are owned by Slice 2.
+    Routing flags (--repo / --product / --suite / --team) are dual-purpose
+    (Slice 2, dedicated-field-flags plan): they both select the destination vault
+    via ``place_record``'s ``scope`` argument AND write the namesake sidecar field
+    with the same value.  One input drives both effects, so the field value and the
+    routing vault always agree — a record cannot carry ``team: beta`` while living
+    in alpha's vault.  Non-scope sidecar fields are set through the dedicated
+    per-field flags (``--status``, ``--keyword``, ``--related-*``, ``--related``)
+    applied by :func:`_apply_record_fields` (Slice 1).
     """
     # --kind is required (AC2).
     kind = getattr(args, "kind", None)
@@ -2056,6 +2058,7 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         val = getattr(args, flag, None)
         if val:
             participating_scopes[flag] = val
+            sidecar[flag] = val  # one input → both routing and field; field can never contradict vault
 
     shared_flag = 0
     routing_line: str | None = None
