@@ -1443,19 +1443,21 @@ class TestSlice6ManifestAndTemplate:
             "lore still ships old 'check-radar' skill — renamed to 'check-in' then deleted"
         )
 
-    def test_follow_up_template_exists_with_type_follow_up(self):
-        """templates/follow-up.md must exist with `type: follow-up` (was templates/radar.md).
-        The skill dir is deleted but the template is retained for `lore record` CLI use."""
-        tmpl = _LORE_TEMPLATES / "follow-up.md"
-        assert tmpl.exists(), (
-            f"templates/follow-up.md not found at {tmpl} — rename from templates/radar.md"
-        )
-        text = tmpl.read_text()
-        assert re.search(r"^type: follow-up\b", text, re.MULTILINE), (
-            "templates/follow-up.md must carry `type: follow-up` frontmatter"
+    def test_follow_up_template_is_gone(self):
+        """templates/follow-up.md must NOT exist after Slice 4.
+
+        The `lore new` template-renderer (the sole consumer of the per-kind
+        templates) was removed wholesale in the craft–lore decoupling Slice 4;
+        the surviving `lore record create` surface is body-agnostic and never
+        reads templates, so the follow-up template (renamed from radar.md in S6)
+        is deleted alongside the other seven cmd_new-only templates. The old
+        radar.md must also stay gone."""
+        assert not (_LORE_TEMPLATES / "follow-up.md").exists(), (
+            f"templates/follow-up.md still exists at {_LORE_TEMPLATES / 'follow-up.md'} — "
+            "it was deleted in Slice 4 (lore new removal); lore record is body-agnostic."
         )
         assert not (_LORE_TEMPLATES / "radar.md").exists(), (
-            "old templates/radar.md still exists — rename to follow-up.md"
+            "old templates/radar.md still exists — removed in S6 rename + Slice 4."
         )
 
     def test_lore_manifest_validates_and_composes_capture(self, tmp_path):

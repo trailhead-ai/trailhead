@@ -93,6 +93,19 @@ def test_patch_subcommand_is_unregistered(tmp_path):
     assert "invalid choice: 'patch'" in r.stderr
 
 
+# ---- lore new is unregistered (Slice 4) -------------------------------------
+
+def test_new_subcommand_is_unregistered(tmp_path):
+    """`lore new` (the template-renderer) was removed wholesale in Slice 4:
+    invoking it is an argparse 'invalid choice' error (exit 2), never a
+    successful note creation. The shared `_render_template`/`TEMPLATES_DIR`
+    helpers survive for `lore seed` (inbox.md) — only the user-facing `new`
+    subcommand is gone."""
+    r = run_cli(["new", "plan", "--title", "Whatever"])
+    assert r.returncode == 2
+    assert "invalid choice: 'new'" in r.stderr
+
+
 # ---- lore set-status --------------------------------------------------------
 
 def test_set_status_rejects_noncanonical(tmp_path):

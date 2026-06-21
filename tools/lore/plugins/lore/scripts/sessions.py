@@ -42,8 +42,9 @@ _TERMINAL_STATUSES = frozenset(("complete",))
 # this many seconds — covers Claude Code restarts/crashes mid-session.
 RESUME_WINDOW_SECONDS = 30 * 60
 
-# The capture skills (lore new …) backlink into these session-note headings, so
-# they are load-bearing — keep all five.
+# The canonical session-note skeleton: every session note carries these five
+# headings so the finish/checkpoint skills have a stable structure to fill in.
+# Load-bearing — keep all five.
 REQUIRED_SECTIONS = ("What we did", "Decided", "Deferred", "Learned", "Open questions")
 
 

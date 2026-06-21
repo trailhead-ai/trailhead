@@ -3,7 +3,6 @@
 
 Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
-  lore new <type>           Render a template and write a new vault note.
   lore seed <name>          Scaffold an inbox capture under inbox/.
   lore set-status <f> <v>   Validate + set a note's frontmatter status.
   lore stats                Print counts for the resolved vault.
@@ -60,42 +59,6 @@ TAXONOMY = [
 ]
 
 STARTER_DOCS = ["README.md", "glossary.md", "phases.md"]
-
-
-# ---- new --------------------------------------------------------------------
-
-# Map each note type to its vault directory.
-_NOTE_DIRS: dict[str, str] = {
-    "deferred": "deferred",
-    "dead-end": "dead-ends",
-    "decision": "decisions",
-    "follow-up": "follow-ups",
-    "area": "areas",
-    "spec": "specs",
-    "plan": "plans",
-}
-
-# Types that carry a project: field. dead-end is intentionally absent.
-_PROJECT_BEARING: frozenset[str] = frozenset({"deferred", "decision", "follow-up", "area", "spec", "plan"})
-
-# Note types stored in date-bucketed YYYY-MM subdirs (the date-bucketed archive
-# layout). The date-based living folders (deferred/dead-ends/decisions/follow-ups)
-# join the archive types; only singleton area profiles (name-keyed) stay
-# flat at the folder root.
-_BUCKETED_TYPES: frozenset[str] = frozenset(
-    {"spec", "plan", "deferred", "decision", "follow-up", "dead-end"}
-)
-
-# Which section of the session note gets the backlink (None = no backlink).
-_BACKLINK_SECTIONS: dict[str, str | None] = {
-    "deferred": "Deferred",
-    "dead-end": "Learned",
-    "decision": "Decided",
-    "follow-up": None,
-    "area": None,
-    "spec": None,
-    "plan": None,
-}
 
 
 def _resolve_groups_dir() -> "Path | None":
@@ -185,185 +148,6 @@ def _render_template(template_path: Path, substitutions: dict[str, str]) -> str:
     for key, value in substitutions.items():
         text = text.replace("{{" + key + "}}", value)
     return text
-
-
-def _csv_to_inline_list(csv: str | None) -> str:
-    """Convert a comma-separated string to an inline YAML list string.
-
-    'a, b, c' → '[a, b, c]'
-    None or empty → '[]'
-    """
-    if not csv:
-        return "[]"
-    items = [k.strip() for k in csv.split(",") if k.strip()]
-    if not items:
-        return "[]"
-    return "[" + ", ".join(items) + "]"
-
-
-def cmd_new(args: argparse.Namespace) -> int:
-    note_type = args.type
-    if note_type not in _NOTE_DIRS:
-        print(
-            f"error: unknown note type {note_type!r}. "
-            f"Choose from: {', '.join(sorted(_NOTE_DIRS))}",
-            file=sys.stderr,
-        )
-        return 1
-
-    vault = Path(args.vault).expanduser().resolve() if args.vault else Path(vault_mod.resolve_vault())
-
-    # D-5: if --vault explicitly points at a shared layer, refuse it.
-    # The raw writer must never reach a shared root.
-    if args.vault:
-        groups_dir = _resolve_groups_dir()
-        try:
-            layers = layers_mod.resolve_layers(
-                cwd=Path.cwd(),
-                groups_dir=groups_dir,
-            )
-        except Exception:
-            layers = []
-        shared_roots = {
-            lay.root.resolve()
-            for lay in layers
-            if lay.kind == "shared"
-        }
-        if vault.resolve() in shared_roots:
-            print(
-                f"error: {args.vault} is a shared vault; "
-                f"use 'lore promote' to write there.",
-                file=sys.stderr,
-            )
-            return 1
-    today = _today()
-    user = vault_mod.resolve_user()
-
-    # Resolve project: explicit flag wins; for project-bearing types fall back
-    # to git remote inference; dead-end carries no project field at all.
-    if note_type in _PROJECT_BEARING:
-        project = args.project or vault_mod.resolve_project()
-    else:
-        project = args.project or ""
-
-    # Build template substitutions — common fields.
-    subs: dict[str, str] = {
-        "date": today,
-        "user": user,
-        "project": project,
-        "name": args.title,
-    }
-
-    # Per-type substitutions: populate frontmatter fields from CLI flags.
-    if note_type == "deferred":
-        subs["surfaces"] = _csv_to_inline_list(getattr(args, "surfaces", None))
-        subs["next-check"] = getattr(args, "next_check", None) or ""
-        revisit_after = getattr(args, "revisit_after", None) or ""
-        subs["revisit-after"] = revisit_after
-        # status: scheduled when revisit-after is provided, open otherwise.
-        subs["status"] = "scheduled" if revisit_after else "open"
-
-    elif note_type == "dead-end":
-        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
-        subs["tried"] = getattr(args, "tried", None) or today
-        subs["revive-condition"] = getattr(args, "revive_condition", None) or ""
-
-    elif note_type == "decision":
-        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
-
-    elif note_type == "follow-up":
-        subs["source"] = getattr(args, "source", None) or ""
-        subs["target"] = getattr(args, "target", None) or ""
-        subs["check"] = getattr(args, "check", None) or ""
-
-    elif note_type == "area":
-        subs["keywords"] = _csv_to_inline_list(getattr(args, "keywords", None))
-        subs["key-files"] = _csv_to_inline_list(getattr(args, "key_files", None))
-
-    elif note_type == "spec":
-        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
-
-    elif note_type == "plan":
-        subs["related-areas"] = _csv_to_inline_list(getattr(args, "related_areas", None))
-        subs["related-spec"] = getattr(args, "related_spec", None) or ""
-        subs["slug"] = _kebab(args.title)
-
-    template_path = TEMPLATES_DIR / f"{note_type}.md"
-    if not template_path.is_file():
-        print(f"error: template not found: {template_path}", file=sys.stderr)
-        return 1
-
-    rendered = _render_template(template_path, subs)
-
-    # Validate status if the note type has one.
-    fm = frontmatter.parse_frontmatter_str(rendered)
-    note_status = fm.get("status")
-    if note_status is not None:
-        if not status_validator.is_valid_status(note_type, note_status):
-            permitted = status_validator.permitted_statuses(note_type)
-            print(
-                f"error: template status {note_status!r} is not canonical for "
-                f"type {note_type!r}. permitted: {sorted(permitted) if permitted else '(unconstrained)'}",
-                file=sys.stderr,
-            )
-            return 1
-
-    # Write the note — area profiles are singletons identified by their
-    # bare kebab name (no date prefix). All other types get YYYY-MM-DD-<slug>
-    # naming with collision handling.
-    note_dir = vault / _NOTE_DIRS[note_type]
-    if note_type in _BUCKETED_TYPES:
-        note_dir = vault_mod.bucket_dir(note_dir, today)
-    note_dir.mkdir(parents=True, exist_ok=True)
-    if note_type == "area":
-        stem = _kebab(args.title)
-        note_path = note_dir / f"{stem}.md"
-        if note_path.exists():
-            print(
-                f"error: area profile '{stem}' already exists at {note_path} — "
-                "edit it directly (lore new area creates a new profile).",
-                file=sys.stderr,
-            )
-            return 1
-    else:
-        stem = f"{today}-{_kebab(args.title)}"
-        note_path = _unique_path(note_dir, stem)
-    note_path.write_text(rendered)
-
-    # D-4: print [personal] label only when a shared vault is declared.
-    # Resolving layers here is cheap (cached from the D-5 check above when --vault
-    # was passed; resolved fresh otherwise).
-    groups_dir = _resolve_groups_dir()
-    try:
-        all_layers = layers_mod.resolve_layers(cwd=Path.cwd(), groups_dir=groups_dir)
-    except Exception:
-        all_layers = []
-    has_shared = any(lay.kind == "shared" for lay in all_layers)
-    if has_shared:
-        print(f"Created: {note_path} [personal]")
-    else:
-        print(f"Created: {note_path}")
-
-    # Backlink to session note (deferred/dead-end/decision only).
-    section = _BACKLINK_SECTIONS[note_type]
-    if section is not None:
-        worktree_name = Path.cwd().name
-        session_note = vault_mod.find_session_note(vault, worktree_name=worktree_name)
-        if session_note is None:
-            print(
-                f"note: no active session note found — backlink to {section!r} skipped.",
-                file=sys.stderr,
-            )
-        else:
-            # Use the note's full vault-relative path (minus suffix) so the
-            # wikilink resolves whether the note is flat or YYYY-MM-bucketed —
-            # `[[deferred/<stem>]]` would not resolve once bucketed.
-            rel_link = note_path.relative_to(vault).with_suffix("").as_posix()
-            title_display = args.title
-            backlink = f"- [[{rel_link}]] — {title_display}"
-            frontmatter.patch_section(session_note, section, backlink)
-
-    return 0
 
 
 # ---- promote ----------------------------------------------------------------
@@ -2693,31 +2477,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Commit message (default: {DEFAULT_SYNC_MSG!r})",
     )
     p_sync.set_defaults(func=cmd_sync)
-
-    p_new = sub.add_parser("new", help="Render a template and write a new vault note")
-    p_new.add_argument("type", choices=list(_NOTE_DIRS), help="Note type to create")
-    p_new.add_argument("--title", required=True, help="Title for the note (used in slug)")
-    p_new.add_argument("--vault", default=None, help="Vault path (overrides $LORE_VAULT)")
-    p_new.add_argument("--project", default=None, help="Project name to stamp in frontmatter")
-    # deferred
-    p_new.add_argument("--surfaces", default=None, help="CSV area names this item surfaces on (deferred)")
-    p_new.add_argument("--next-check", dest="next_check", default=None, help="When to next check (deferred)")
-    p_new.add_argument("--revisit-after", dest="revisit_after", default=None, help="Date-bound revisit trigger (deferred)")
-    # dead-end
-    p_new.add_argument("--areas", default=None, help="CSV area names (dead-end, decision)")
-    p_new.add_argument("--tried", default=None, help="Date the approach was tried (dead-end; defaults to today)")
-    p_new.add_argument("--revive-condition", dest="revive_condition", default=None, help="Condition to retry (dead-end)")
-    # follow-up
-    p_new.add_argument("--source", default=None, help="Where updates appear (follow-up)")
-    p_new.add_argument("--target", default=None, help="Version or state being waited for (follow-up)")
-    p_new.add_argument("--check", default=None, help="Check cadence (follow-up)")
-    # area
-    p_new.add_argument("--keywords", default=None, help="CSV keywords for branch-based recall (area)")
-    p_new.add_argument("--key-files", dest="key_files", default=None, help="CSV key file paths (area)")
-    # plan
-    p_new.add_argument("--related-areas", dest="related_areas", default=None, help="CSV area names (plan)")
-    p_new.add_argument("--related-spec", dest="related_spec", default=None, help="Related spec path or wikilink (plan)")
-    p_new.set_defaults(func=cmd_new)
 
     p_promote = sub.add_parser(
         "promote",

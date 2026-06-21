@@ -63,7 +63,6 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
      inverse gate, which would require every line's subcommand to be registered. -->
 ```
 lore init <path>          Scaffold a new vault
-lore new <type>           Render a template and write a new vault note
 lore set-status <f> <v>   Validate and flip a note's frontmatter status
 lore stats                Print vault counts
 lore finish               Finalize the session note (status: complete + ended:) and commit
