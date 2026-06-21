@@ -154,7 +154,9 @@ def test_agent_has_no_middle_band_tokens(agent_md: Path):
 # removed separately; these tests guard the agent-prompt side.
 # ---------------------------------------------------------------------------
 
-PORTAGE_AGENTS_DIR = AGENTS_DIR.parent.parent.parent.parent / "portage" / "plugins" / "portage" / "agents"
+PORTAGE_AGENTS_DIR = (
+    AGENTS_DIR.parent.parent.parent.parent / "portage" / "plugins" / "portage" / "agents"
+)
 
 
 @pytest.mark.parametrize("agent_md", _agent_files(), ids=lambda p: p.stem)
