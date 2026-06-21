@@ -1,8 +1,10 @@
 """Canonical-status validator for vault notes.
 
-Each note type has a fixed `status:` vocabulary. The pre-commit guard and
-the `lore set-status` command both validate against these sets so a note
-can never carry an off-vocabulary status.
+Each note type has a fixed `status:` vocabulary. The pre-commit guard and the
+legacy inline-frontmatter write helpers (e.g. `frontmatter.set_status`) validate
+against these sets so a note can never carry an off-vocabulary status. (The
+`lore set-status` CLI command was retired; record status is set via
+`lore record update --status`, validated by `record_model`.)
 
 The canonical sets are the single source of truth for the whole plugin —
 do not invent statuses; add them here and to the scaffolded glossary.

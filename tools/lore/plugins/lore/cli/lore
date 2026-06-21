@@ -2226,18 +2226,23 @@ def _find_current_record_location(record_id: str):
     raise record_store_mod.RecordNotFoundError(f"record not found: {record_id}")
 
 
-def _resolve_destination_root(merged_sidecar: dict, kind: str) -> str:
-    """Resolve the DESTINATION vault root from the merged scope (Slice 3).
+def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int]:
+    """Resolve the DESTINATION ``(vault_root, shared_flag)`` from the merged scope (Slice 3).
 
     Merged scope = the existing sidecar scope fields overlaid with the new flag
     values (the merge is already baked into ``merged_sidecar`` by the caller).
     Resolved via the **same create-side resolver** (:func:`vault_resolve.explain_resolution`)
     so a zero-prior-scope record + ``--team beta`` resolves exactly like a fresh
     create. Falls back to the active vault when no config exists (vanilla).
+
+    Also returns the destination vault's ``shared`` trust flag (0 = own/trusted,
+    1 = ``shared: true``) so the caller stamps the index row with the trust of the
+    vault the record actually lands in — symmetric with create (which passes
+    ``vault_config.shared_flag(chosen)``). Vanilla (no config) is always 0.
     """
     loaded = _load_vault_config()
     if loaded is None:
-        return str(vault_mod.resolve_vault())
+        return str(vault_mod.resolve_vault()), 0
     _, vaults = loaded
     participating_scopes = {
         flag: merged_sidecar[flag]
@@ -2245,7 +2250,7 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> str:
         if merged_sidecar.get(flag)
     }
     resolution = vault_resolve_mod.explain_resolution(participating_scopes, kind, vaults)
-    return str(resolution.chosen.path)
+    return str(resolution.chosen.path), vault_config_mod.shared_flag(resolution.chosen)
 
 
 def _cmd_record_update(args: argparse.Namespace) -> int:
@@ -2392,17 +2397,20 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                 unset_annotations=list(getattr(args, "unset_annotations", None) or []),
             )
 
-            # (3) re-resolve the DESTINATION from the merged scope.
-            dest_root = _resolve_destination_root(sidecar, location.kind)
+            # (3) re-resolve the DESTINATION (root + shared trust) from the merged scope.
+            dest_root, dest_shared = _resolve_destination_root(sidecar, location.kind)
             same_vault = (
                 Path(dest_root).resolve() == Path(location.vault_root).resolve()
             )
 
             moved_line: str | None = None
             if same_vault:
-                # (4a) no move — normal in-place write (validates + stamps).
+                # (4a) no move — normal in-place write (validates + stamps). Pass the
+                # resolved vault's shared trust so an in-place update of a record in a
+                # shared vault does not silently un-fence its index row (reset to 0).
                 new_id = record_store_mod.validate_and_write(
                     location=location, sidecar=sidecar, body=new_body, conn=conn,
+                    shared=dest_shared,
                 )
             else:
                 # (4b) validate + stamp + neutralize the mutated record IN MEMORY,
@@ -2427,6 +2435,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                     old_vault_root=location.vault_root,
                     new_sidecar=stamped,
                     new_body=safe_body,
+                    shared=dest_shared,
                 )
                 moved_line = f"moved: {location.record_id} → {new_id}"
 

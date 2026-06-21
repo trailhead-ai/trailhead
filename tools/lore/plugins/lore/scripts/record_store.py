@@ -772,6 +772,7 @@ def move_record(
     old_vault_root: str | None = None,
     new_sidecar: dict | None = None,
     new_body: str | None = None,
+    shared: int = 0,
 ) -> RecordId:
     """Relocate a record to a new vault/path (AC-LIB3 / AC12).
 
@@ -798,6 +799,11 @@ def move_record(
     :func:`_realpath_is_descendant` against the declared dest vault root, so a
     destination that escapes its vault root is rejected before any write
     (re-review Important — the destination was previously trusted from the caller).
+
+    ``shared`` is the destination vault's trust flag (0 = own/trusted, 1 =
+    ``shared: true``), stamped on the repointed index row so a relocation into a
+    shared vault fences the moved record correctly — the caller computes it from
+    ``vault_config.shared_flag(dest_vault)`` (symmetric with the create path).
 
     Returns the new ``RecordId``.
     """
@@ -840,9 +846,12 @@ def move_record(
     write_temp_then_rename(new_location.body_path, body)
     write_temp_then_rename(new_location.sidecar_path, sidecar_text)
 
-    # index-repoint: drop the old keyed row, upsert the new one.
+    # index-repoint: drop the old keyed row, upsert the new one. ``shared`` is the
+    # destination vault's trust flag (Slice 3): a relocation INTO a ``shared: true``
+    # vault must stamp the new row shared=1, not the default 0 — otherwise the moved
+    # record leaks into ``search`` as own-vault until the next ``lore reindex``.
     index_store.delete_row(conn, old_root, old_kind, old_name)
-    update_index(conn, new_location.record_id, sidecar, body, new_location.vault_root)
+    update_index(conn, new_location.record_id, sidecar, body, new_location.vault_root, shared=shared)
 
     # delete-old (last — a crash here is the safe, self-healing direction).
     if old_body_path.exists():

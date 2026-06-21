@@ -277,6 +277,83 @@ def test_shared_true_vault_record_indexed_shared_one(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Update-path shared trust (dedicated-field-flags Slice 3): the resolved vault's
+# shared flag is threaded through BOTH the auto-move and in-place index writes,
+# so an update never silently un-fences (or fails to fence) a record's row.
+# ---------------------------------------------------------------------------
+
+def test_update_automove_into_shared_vault_indexes_shared_one(tmp_path):
+    """`update --team <shared-vault>` relocates the record INTO a ``shared: true``
+    vault → the destination index row carries shared=1 (not the default 0); the
+    old vault's row is gone."""
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    vaults = _spec_config_vaults(state)
+    for v in vaults:
+        if v["name"] == "product-engineering":
+            v["shared"] = True
+    _write_config(config_home, vaults)
+
+    # Create a blob in the default vault (no scope flag → default, shared=0).
+    r = _run_with_config(
+        ["record", "create", "--kind", "blob", "--title", "Grape", "--keyword", "foo"],
+        vault=vault, state=state, config_home=config_home, stdin_text="x\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    _, name = record_id.split("/", 1)
+    default_path = _vault_path(state, "default")
+    assert _row_shared(state, default_path, "blob", name) == 0
+
+    # Move it into the shared product-engineering vault.
+    r2 = _run_with_config(
+        ["record", "update", record_id, "--team", "product-engineering"],
+        vault=vault, state=state, config_home=config_home,
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert "moved:" in r2.stdout
+
+    pe_path = _vault_path(state, "product-engineering")
+    # Destination row is fenced (shared=1); the old default row is gone (no orphan).
+    assert _row_shared(state, pe_path, "blob", name) == 1
+    assert _row_shared(state, default_path, "blob", name) is None
+
+
+def test_update_in_place_preserves_shared_trust(tmp_path):
+    """An in-place `update` of a record living in a ``shared: true`` vault must NOT
+    reset its index row to shared=0 — the trust flag is recomputed from the
+    resolved vault, not defaulted."""
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    vaults = _spec_config_vaults(state)
+    for v in vaults:
+        if v["name"] == "product-engineering":
+            v["shared"] = True
+    _write_config(config_home, vaults)
+
+    # Create a blob directly in the shared team vault (shared=1).
+    r = _run_with_config(
+        ["record", "create", "--kind", "blob", "--title", "Grape", "--keyword", "foo",
+         "--team", "product-engineering"],
+        vault=vault, state=state, config_home=config_home, stdin_text="x\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    _, name = record_id.split("/", 1)
+    pe_path = _vault_path(state, "product-engineering")
+    assert _row_shared(state, pe_path, "blob", name) == 1
+
+    # In-place update (no scope change → same vault); the row must stay shared=1.
+    r2 = _run_with_config(
+        ["record", "update", record_id, "--keyword", "bar"],
+        vault=vault, state=state, config_home=config_home,
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert "moved:" not in r2.stdout
+    assert _row_shared(state, pe_path, "blob", name) == 1
+
+
+# ---------------------------------------------------------------------------
 # Deliverable 4 + 5: multi-vault reindex, config-sourced shared, freshness
 # ---------------------------------------------------------------------------
 
