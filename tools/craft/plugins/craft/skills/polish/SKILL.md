@@ -86,7 +86,7 @@ If items span multiple working directories, group them by directory. You will di
 
 ### 4. Write the brief
 
-Write one brief per working directory, persisting it through the note_store `create` op (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind plan --title "<brief>" --set status=draft`:
+Write one brief per working directory, persisting it through the note_store `create` op (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind plan --title "<brief>" --status draft`:
 
 ```
 YYYY-MM-DD-<parent-slug-stripped>-followup-<n>

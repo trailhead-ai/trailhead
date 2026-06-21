@@ -189,9 +189,8 @@ reads it to assign signal-emission ownership to slices.
 
 Persist the spec through the note_store `create` op (`../_shared/note-storage.md`): render craft's
 spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to the
-provider — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --set
-status=draft` (add `--set project="<project>"` if the git-remote inference can't resolve it). lore
-stores the body verbatim and owns the record sidecar / status vocab.
+provider — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status
+draft`. lore stores the body verbatim and owns the record sidecar / status vocab.
 
 The spec body template (`templates/spec.md`) carries these canonical sections — fill each in: **Problem**
 (situation / gap, why now) · **Objectives** (measurable, outcome-framed) · **Acceptance Criteria**

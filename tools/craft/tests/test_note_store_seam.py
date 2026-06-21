@@ -5,7 +5,7 @@ TDD contract (Slice 3):
      canonical section headers. They are bodies — lore owns the record sidecar/frontmatter — so
      this checks the section skeleton, NOT a `status:` frontmatter block.
   2. `_shared/note-storage.md` (the note_store contract) documents all THREE lifecycle ops
-     (create / set-status / link), each with a concrete lore-provider command.
+     (create / status / link), each with a concrete lore-provider command.
 
 Write BEFORE the implementation — these tests must fail RED first, then green after.
 """
@@ -98,22 +98,28 @@ def test_note_storage_documents_create_op():
     )
 
 
-def test_note_storage_documents_set_status_op():
+def test_note_storage_documents_status_op():
     text = NOTE_STORAGE_MD.read_text()
-    assert "set-status" in text, (
-        "note-storage.md must document the `set-status` lifecycle op."
+    assert "status(" in text or "`status`" in text, (
+        "note-storage.md must document the `status` lifecycle op."
     )
-    # Records carry status in a JSON sidecar, mutated via `lore record update --set status=`.
-    assert "lore record update" in text and "status=" in text, (
-        "the set-status op must name the concrete record-provider command "
-        "`lore record update <id> --set status=<value>`."
+    # Records carry status in a JSON sidecar, mutated via the dedicated `--status` flag
+    # (the legacy `--set status=` / `lore set-status` surface was removed).
+    assert "lore record update" in text and "--status " in text, (
+        "the status op must name the concrete record-provider command "
+        "`lore record update <id> --status <value>`."
+    )
+    assert "--set " not in text and "set-status" not in text, (
+        "the seam must NOT reference the removed `--set` flag or `lore set-status` command."
     )
 
 
 def test_note_storage_documents_link_op():
     text = NOTE_STORAGE_MD.read_text()
-    assert "link" in text and "related-spec" in text, (
-        "note-storage.md must document the `link` op (set `related-spec`)."
+    # Linking a plan to its spec uses the `related` map under the `spec` kind via the
+    # dedicated `--related <kind>=<name>` flag (the `related-spec` sidecar field is gone).
+    assert "link" in text and "--related spec=" in text, (
+        "note-storage.md must document the `link` op via `--related spec=<spec-name>`."
     )
     assert "lore record update" in text, (
         "the link op must name the concrete record-provider command `lore record update`."
