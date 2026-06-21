@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -365,6 +366,60 @@ def _run_bootstrap(member: dict[str, Any], wt_path: Path) -> None:
         )
 
 
+def _finalize_lore_session(ws_dir: Path, slug: str) -> None:
+    """Best-effort finalize the workspace's active lore session note (Slice 1).
+
+    Runs `lore finish --worktree <slug>` with `cwd=ws_dir` so no torn-down camp
+    workspace leaves its lore session note stuck in `status: active`. The note is
+    resolved by the explicit `--worktree <slug>` selector (deterministic — camp
+    owns the slug, and `--worktree` bypasses lore's cwd-based
+    `detect_worktree_name()`); `cwd=ws_dir` is set only because the dir still
+    exists at this point and is harmless, NOT as a resolution fallback.
+
+    This is BEST-EFFORT: every failure path warns on stderr and returns. It NEVER
+    raises and is NEVER appended to reconcile_break's `errors` list — a lore-side
+    problem must never block or fail camp rm teardown. Three outcome branches:
+
+      - lore absent (FileNotFoundError): subprocess.run *raises* rather than
+        returning a non-zero code when the binary is not on PATH, so a bare
+        returncode guard would miss it — catch it explicitly and warn.
+      - non-zero exit: warn with the exit code + lore's stderr.
+      - exit 0: lore prints `Finalized: <name>` only when it actually finalized a
+        note; echo a concise confirmation so the success path is as visible as the
+        failure path. The "nothing to finalize" notice (no active note existed)
+        stays silent — nothing to announce.
+
+    CWE-426 (PATH-hijack via ambient `$PATH` resolution of `lore`) is noted and
+    NOT guarded: single-user local CLI, the operator owns their PATH; the absent-
+    binary case is covered by the FileNotFoundError catch.
+    """
+    try:
+        result = subprocess.run(
+            ["lore", "finish", "--worktree", slug],
+            cwd=str(ws_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        print(
+            "camp rm: warning: lore not found on PATH; session note may remain active",
+            file=sys.stderr,
+        )
+        return
+
+    if result.returncode != 0:
+        print(
+            f"camp rm: warning: lore finish failed (exit {result.returncode}): "
+            f"{result.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return
+
+    if "Finalized:" in result.stdout:
+        print("camp rm: finalized session note")
+
+
 def _remove_worktree_for_member(
     member: dict[str, Any],
     wt_path: Path,
@@ -526,8 +581,11 @@ def reconcile_break(
          rejected (ConfinementError); an old-layout path under a repo_root is
          rejected with a legible LegacyLayoutError. The pre-check aborts the whole
          break — never a half-applied removal.
-      4. Remove each member worktree via git worktree remove.
-      5. Remove the central manifest ONLY if all removals succeeded (break
+      4. Best-effort finalize the workspace's active lore session note
+         (`_finalize_lore_session`, Slice 1) — runs while ws_dir still exists and
+         before any path removal. Never raises, never gates removal.
+      5. Remove each member worktree via git worktree remove.
+      6. Remove the central manifest ONLY if all removals succeeded (break
          atomicity symmetry — never leave a manifest listing a removed member).
 
     Returns a result dict with status, removed members, and any errors.
@@ -581,6 +639,11 @@ def reconcile_break(
             f"camp: worktree path {wt_path} resolves outside the workspace dir "
             f"{ws_dir} for member {entry['name']!r} — refusing removal"
         )
+
+    # Slice 1: best-effort finalize of the workspace's active lore session note,
+    # while ws_dir still exists and BEFORE any path removal. Never raises, never
+    # gates removal — a lore-side problem must not block camp rm teardown.
+    _finalize_lore_session(ws_dir, slug)
 
     # Remove each member worktree; track removals for atomicity symmetry
     removed: list[str] = []
