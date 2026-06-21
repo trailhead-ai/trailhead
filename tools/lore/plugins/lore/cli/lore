@@ -4,7 +4,6 @@
 Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
   lore seed <name>          Scaffold an inbox capture under inbox/.
-  lore set-status <f> <v>   Validate + set a note's frontmatter status.
   lore stats                Print counts for the resolved vault.
   lore session-note         Print this session's note path (id-first resolve).
   lore finish               Finalize the active session note for this worktree.
@@ -777,30 +776,6 @@ def cmd_status(args: argparse.Namespace) -> int:
                 f"— re-run `lore init` to install it"
             )
 
-    return 0
-
-
-# ---- set-status -------------------------------------------------------------
-
-def cmd_set_status(args: argparse.Namespace) -> int:
-    path = Path(args.file).expanduser()
-    if not path.is_file():
-        print(f"error: no such file: {path}", file=sys.stderr)
-        return 1
-    meta = frontmatter.parse_frontmatter(path)
-    note_type = meta.get("type")
-    if not status_validator.is_valid_status(note_type, args.value):
-        permitted = status_validator.permitted_statuses(note_type)
-        permitted_str = sorted(permitted) if permitted else "(unconstrained)"
-        print(
-            f"error: status {args.value!r} is not canonical for type {note_type!r}\n"
-            f"  permitted: {permitted_str}",
-            file=sys.stderr,
-        )
-        return 1
-    if not frontmatter.set_status(path, args.value):
-        print(f"error: {path} has no frontmatter block", file=sys.stderr)
-        return 1
     return 0
 
 
@@ -2486,7 +2461,10 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
 # ``search``; this entry redirects an agent that still types the old command to
 # its replacement so the retired ``recall`` subcommand resolves to a clear
 # non-zero error with a "did you mean 'lore search'?" hint, never a silent no-op.
-_DISPATCH_HINTS: dict[str, str] = {"recall": "search"}
+_DISPATCH_HINTS: dict[str, str] = {
+    "recall": "search",
+    "set-status": "record update --status",
+}
 
 
 def _unknown_command_hint(command: str) -> str:
@@ -2523,11 +2501,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show lore installation status and surface rules-file drift (Slice 4, S5)",
     )
     p_lore_status.set_defaults(func=cmd_status)
-
-    p_status = sub.add_parser("set-status", help="Validate + set a note's status")
-    p_status.add_argument("file")
-    p_status.add_argument("value")
-    p_status.set_defaults(func=cmd_set_status)
 
     p_stats = sub.add_parser("stats", help="Print counts for the resolved vault")
     p_stats.set_defaults(func=cmd_stats)

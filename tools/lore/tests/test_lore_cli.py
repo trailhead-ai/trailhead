@@ -1,4 +1,4 @@
-"""Tests for the `lore` CLI (init / set-status / stats).
+"""Tests for the `lore` CLI (init / stats).
 
 The CLI is exercised as a subprocess so we test the real executable + its
 sibling-module import path, exit codes, and stdout/stderr.
@@ -106,24 +106,18 @@ def test_new_subcommand_is_unregistered(tmp_path):
     assert "invalid choice: 'new'" in r.stderr
 
 
-# ---- lore set-status --------------------------------------------------------
+# ---- lore set-status (removed — redirects via dispatch hint) ----------------
 
-def test_set_status_rejects_noncanonical(tmp_path):
-    p = tmp_path / "d.md"
-    original = "---\ntype: deferred\nstatus: open\n---\n\nbody\n"
-    p.write_text(original)
-    r = run_cli(["set-status", str(p), "bogus"])
-    assert r.returncode != 0
-    assert p.read_text() == original  # no write
-
-
-def test_set_status_accepts_canonical(tmp_path):
+def test_set_status_removed_and_hints_replacement(tmp_path):
+    """`lore set-status` was removed in Slice 4 (lore-record-dedicated-field-flags).
+    It must exit non-zero and stderr must carry the `_DISPATCH_HINTS` redirect
+    pointing agents to `lore record update --status`."""
     p = tmp_path / "d.md"
     p.write_text("---\ntype: deferred\nstatus: open\n---\n\nbody\n")
-    r = run_cli(["set-status", str(p), "resolved"])
-    assert r.returncode == 0, r.stderr
-    fm = load_script("frontmatter")
-    assert fm.parse_frontmatter(p)["status"] == "resolved"
+    r = run_cli(["set-status", str(p), "ready"])
+    assert r.returncode != 0
+    assert "unknown command 'set-status'" in r.stderr
+    assert "did you mean 'lore record update --status'?" in r.stderr
 
 
 # ---- lore stats -------------------------------------------------------------
