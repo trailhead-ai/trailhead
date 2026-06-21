@@ -416,6 +416,10 @@ def _finalize_lore_session(ws_dir: Path, slug: str) -> None:
         )
         return
 
+    # `Finalized:` is a cross-CLI output contract with lore's `finish` command
+    # (cli/lore prints it only on a real finalize). If lore ever rephrases that
+    # line, this confirmation silently disappears — degrading to silent success,
+    # never to a teardown failure. Keep the two ends in sync.
     if "Finalized:" in result.stdout:
         print("camp rm: finalized session note")
 
