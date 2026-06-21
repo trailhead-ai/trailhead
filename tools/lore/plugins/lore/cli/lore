@@ -117,23 +117,6 @@ def _kebab(title: str) -> str:
     return slug
 
 
-def _unique_path(directory: Path, stem: str) -> Path:
-    """Return a path in directory for <stem>.md that does not exist.
-
-    If <stem>.md is free, return it. Otherwise append -2, -3, … until the
-    path is free. Never overwrites an existing file.
-    """
-    candidate = directory / f"{stem}.md"
-    if not candidate.exists():
-        return candidate
-    counter = 2
-    while True:
-        candidate = directory / f"{stem}-{counter}.md"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
 def _today() -> str:
     """Return today's date as YYYY-MM-DD, honoring $LORE_TODAY for tests."""
     override = os.environ.get("LORE_TODAY", "").strip()
