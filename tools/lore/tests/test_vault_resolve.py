@@ -92,17 +92,16 @@ def test_worked_b_team_marketing_no_match_resolves_to_default():
 
 
 # ---------------------------------------------------------------------------
-# Worked example (c): --set team= does not participate → default
+# Worked example (c): a scope absent from participating_scopes → default
 # ---------------------------------------------------------------------------
 
 
-def test_worked_c_set_team_not_in_participants_resolves_to_default():
-    """(c) ``--set team=product-engineering`` sets frontmatter only; resolution
-    only sees the participating_scopes map — if team is absent from it, the
-    product-engineering vault is never considered."""
+def test_worked_c_absent_team_scope_resolves_to_default():
+    """(c) resolution only sees the participating_scopes map — if ``team`` is
+    absent from it, the product-engineering vault is never considered."""
     mod = vr()
     config = _spec_config()
-    # participating_scopes is empty (--set does not add to it)
+    # participating_scopes is empty
     result = mod.resolve_vault({}, "blob", config)
     assert result.name == "default"
     assert result.scope == "default"

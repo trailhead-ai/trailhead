@@ -8,11 +8,13 @@ There are two capture surfaces:
 For a durable, standalone record (a decision, lesson, area profile, spec, …):
 
 1. **Gather fields** conversationally — only ask for what is missing; infer what you can.
-2. **Run `lore record create`** with `--kind` and `--title`, plus any `--set K=V`
-   sidecar fields and routing flags (`--repo`/`--product`/`--suite`/`--team`):
+2. **Run `lore record create`** with `--kind` and `--title`, plus any dedicated
+   per-field flags (`--status`, repeatable `--keyword`/`--related-file`/
+   `--related-url`/`--related-phase`, `--related KIND=NAME`) and routing flags
+   (`--repo`/`--product`/`--suite`/`--team`):
 
    ```bash
-   lore record create --kind <kind> --title "<title>" [--set K=V …]
+   lore record create --kind <kind> --title "<title>" [--status S] [--keyword K …]
    ```
 
 3. **Confirm the record** to the user. Run `lore record create --help` for the

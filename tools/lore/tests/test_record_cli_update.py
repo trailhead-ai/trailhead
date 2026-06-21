@@ -87,7 +87,7 @@ _CREATE_ARGS = [
     "record", "create",
     "--kind", "spec",
     "--title", "My Record",
-    "--set", "keywords=foo",
+    "--keyword", "foo",
 ]
 
 
@@ -177,7 +177,7 @@ def test_update_metadata_only_leaves_body_byte_identical(tmp_path):
     record_id = _create(vault, state, body=body)
 
     r = _run(
-        ["record", "update", record_id, "--set", "keywords=bar"],
+        ["record", "update", record_id, "--keyword", "bar"],
         vault=vault, state_dir=state,
         # no stdin_text → metadata-only path
     )
@@ -193,7 +193,7 @@ def test_update_metadata_only_prints_no_stdin_notice_to_stderr(tmp_path):
     record_id = _create(vault, state)
 
     r = _run(
-        ["record", "update", record_id, "--set", "keywords=bar"],
+        ["record", "update", record_id, "--keyword", "bar"],
         vault=vault, state_dir=state,
     )
     assert r.returncode == 0, r.stderr
@@ -210,7 +210,7 @@ def test_update_metadata_only_advances_updated_keeps_created(tmp_path):
     before = _find_sidecar(vault, record_id)
 
     r = _run(
-        ["record", "update", record_id, "--set", "keywords=bar"],
+        ["record", "update", record_id, "--keyword", "bar"],
         vault=vault, state_dir=state,
         env_extra={"LORE_EMAIL": "later@example.com"},
     )
@@ -219,6 +219,70 @@ def test_update_metadata_only_advances_updated_keeps_created(tmp_path):
     assert after["created-at"] == before["created-at"]
     assert after["created-by"] == before["created-by"]
     assert after["updated-by"] == "later@example.com"
+
+
+# ===========================================================================
+# Slice 1 (dedicated-field-flags): dedicated per-field setters on update
+# ===========================================================================
+
+def test_update_title_overwrites(tmp_path):
+    """--title on update is an optional setter that overwrites the title field."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--title", "New Title"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["title"] == "New Title"
+
+
+def test_update_status_sets_field(tmp_path):
+    """--status on update sets an in-vocab status value."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--status", "ready"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["status"] == "ready"
+
+
+def test_update_keyword_appends_and_unsets(tmp_path):
+    """--keyword appends to the existing list; --unset-keyword removes one item."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)  # keywords == ["foo"]
+
+    r = _run(
+        ["record", "update", record_id, "--keyword", "bar"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, record_id)["keywords"] == ["foo", "bar"]
+
+    r2 = _run(
+        ["record", "update", record_id, "--unset-keyword", "foo"],
+        vault=vault, state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+    assert _find_sidecar(vault, record_id)["keywords"] == ["bar"]
+
+
+def test_update_set_flag_is_unrecognized(tmp_path):
+    """--set is removed from update: argparse rejects it (unrecognized argument)."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--set", "title=x"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
 
 
 # ===========================================================================

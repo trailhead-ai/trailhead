@@ -30,12 +30,15 @@ lore record create --kind <kind> --title "<title>"
 `<kind>` is one of: `area`, `backlog`, `blob`, `collaboration`, `decision`,
 `lesson`, `plan`, `session`, `spec`. The title derives the record name slug.
 
-Set sidecar metadata with repeatable `--set K=V`, and route to a specific vault
-with the routing flags (`--repo`, `--product`, `--suite`, `--team`):
+Set sidecar metadata with the dedicated per-field flags — `--status` (scalar),
+the repeatable list flags `--keyword` / `--related-file` / `--related-url` /
+`--related-phase` (each with a matching `--unset-<field> VALUE` to remove one
+entry), and `--related KIND=NAME` — and route to a specific vault with the
+routing flags (`--repo`, `--product`, `--suite`, `--team`):
 
 ```bash
 lore record create --kind decision --title "Use frontmatter for session status" \
-  --set area=vault
+  --status active --keyword frontmatter --related plan=session-status-rollout
 ```
 
 Run `lore record create --help` for the full flag set. Related sub-actions:

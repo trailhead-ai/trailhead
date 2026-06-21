@@ -7,8 +7,7 @@ here we exercise the *wired* end-to-end behavior through the CLI subprocess, wit
 Covers the Slice 5 test contract (plan ``lore-layered-vaults-s4.md``):
 
   - End-to-end routing: ``--team product-engineering --repo trailhead-ai/trailhead``
-    (worked example d) lands in ``product-engineering``; ``--set team=...`` does NOT
-    route (default); no scope flags → default.
+    (worked example d) lands in ``product-engineering``; no scope flags → default.
   - Routing confirmation line names the elected vault + scope (every create); names
     the fall-through reason on example-d.
   - The created record's index row carries the resolved vault's ``shared``: own-vault
@@ -132,7 +131,7 @@ def test_routing_example_d_lands_in_team_vault(tmp_path):
     r = _run_with_config(
         [
             "record", "create", "--kind", "blob", "--title", "Grape",
-            "--set", "keywords=foo",
+            "--keyword", "foo",
             "--team", "product-engineering",
             "--repo", "trailhead-ai/trailhead",
         ],
@@ -149,25 +148,11 @@ def test_routing_example_d_lands_in_team_vault(tmp_path):
     assert list((pe_path / "blob").glob("*.md")), "record body not in team vault"
 
 
-def test_routing_set_team_does_not_route(tmp_path):
-    """``--set team=product-engineering`` (frontmatter only) does NOT route; the
-    record lands in the default vault."""
-    vault, state = _make_vault(tmp_path)
-    config_home = tmp_path / "config"
-    _write_config(config_home, _spec_config_vaults(state))
-
-    r = _run_with_config(
-        [
-            "record", "create", "--kind", "blob", "--title", "Orange",
-            "--set", "keywords=foo",
-            "--set", "team=product-engineering",
-        ],
-        vault=vault, state=state, config_home=config_home,
-        stdin_text="orange body\n",
-    )
-    assert r.returncode == 0, r.stderr
-    default_path = Path(_vault_path(state, "default"))
-    assert list((default_path / "blob").glob("*.md")), "should land in default vault"
+# NOTE: the former ``test_routing_set_team_does_not_route`` exercised the deleted
+# ``--set team=...`` frontmatter-only-without-routing path. Slice 1
+# (dedicated-field-flags plan) removed the generic ``--set`` patch idiom; Slice 2
+# unifies the scope flags so a scope value can no longer be set without routing.
+# The test was removed with the flag it tested.
 
 
 def test_routing_no_scope_flags_lands_in_default(tmp_path):
@@ -178,7 +163,7 @@ def test_routing_no_scope_flags_lands_in_default(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Apple",
-         "--set", "keywords=foo"],
+         "--keyword", "foo"],
         vault=vault, state=state, config_home=config_home,
         stdin_text="apple body\n",
     )
@@ -195,7 +180,7 @@ def test_record_id_is_sole_stdout_line(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Apple",
-         "--set", "keywords=foo", "--team", "product-engineering"],
+         "--keyword", "foo", "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home,
         stdin_text="x\n",
     )
@@ -214,7 +199,7 @@ def test_routing_confirmation_names_vault_and_scope(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Apple",
-         "--set", "keywords=foo", "--team", "product-engineering"],
+         "--keyword", "foo", "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home,
         stdin_text="x\n",
     )
@@ -231,7 +216,7 @@ def test_routing_confirmation_names_fallthrough_reason(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--set", "keywords=foo",
+         "--keyword", "foo",
          "--team", "product-engineering",
          "--repo", "trailhead-ai/trailhead"],
         vault=vault, state=state, config_home=config_home,
@@ -254,7 +239,7 @@ def test_own_vault_record_indexed_shared_zero(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--set", "keywords=foo",
+         "--keyword", "foo",
          "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home,
         stdin_text="x\n",
@@ -279,7 +264,7 @@ def test_shared_true_vault_record_indexed_shared_one(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--set", "keywords=foo",
+         "--keyword", "foo",
          "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home,
         stdin_text="x\n",
@@ -305,7 +290,7 @@ def test_reindex_flip_shared_updates_rows(tmp_path):
     # Create a record in the team vault (shared: false → shared=0).
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--set", "keywords=foo", "--team", "product-engineering"],
+         "--keyword", "foo", "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home,
         stdin_text="x\n",
     )
@@ -337,12 +322,12 @@ def test_reindex_spans_all_configured_vaults(tmp_path):
     # Put one record in the repo vault and one in the team vault.
     _run_with_config(
         ["record", "create", "--kind", "spec", "--title", "RepoSpec",
-         "--set", "keywords=foo", "--repo", "trailhead-ai/trailhead"],
+         "--keyword", "foo", "--repo", "trailhead-ai/trailhead"],
         vault=vault, state=state, config_home=config_home, stdin_text="a\n",
     )
     _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "TeamBlob",
-         "--set", "keywords=foo", "--team", "product-engineering"],
+         "--keyword", "foo", "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home, stdin_text="b\n",
     )
 
@@ -399,7 +384,7 @@ def test_update_in_unconfigured_vault_errors(tmp_path):
     # Create a record in the team vault.
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--set", "keywords=foo", "--team", "product-engineering"],
+         "--keyword", "foo", "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home, stdin_text="x\n",
     )
     assert r.returncode == 0, r.stderr
@@ -411,7 +396,7 @@ def test_update_in_unconfigured_vault_errors(tmp_path):
 
     # Update targeting the now-orphaned vault.
     r2 = _run_with_config(
-        ["record", "update", record_id, "--set", "keywords=bar",
+        ["record", "update", record_id, "--keyword", "bar",
          "--move-to", _vault_path(state, "product-engineering")],
         vault=Path(_vault_path(state, "product-engineering")),
         state=state, config_home=config_home,
@@ -437,7 +422,7 @@ def test_delete_in_removed_vault_is_unreachable(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--set", "keywords=foo", "--team", "product-engineering"],
+         "--keyword", "foo", "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home, stdin_text="x\n",
     )
     assert r.returncode == 0, r.stderr
@@ -484,7 +469,7 @@ def test_default_record_updatable_and_deletable_with_config(tmp_path):
     # Create with NO scope flags → routes to the default config vault.
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Apple",
-         "--set", "keywords=foo"],
+         "--keyword", "foo"],
         vault=vault, state=state, config_home=config_home, stdin_text="apple body\n",
     )
     assert r.returncode == 0, r.stderr
@@ -493,7 +478,7 @@ def test_default_record_updatable_and_deletable_with_config(tmp_path):
 
     # Update (metadata-only, no flags) must reach the record in the default vault.
     r2 = _run_with_config(
-        ["record", "update", record_id, "--set", "keywords=bar"],
+        ["record", "update", record_id, "--keyword", "bar"],
         vault=vault, state=state, config_home=config_home,
     )
     assert r2.returncode == 0, f"update should reach default-vault record: {r2.stderr}"
@@ -519,7 +504,7 @@ def test_scoped_record_updatable_and_deletable_with_same_flags(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--set", "keywords=foo", "--team", "product-engineering"],
+         "--keyword", "foo", "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home, stdin_text="grape body\n",
     )
     assert r.returncode == 0, r.stderr
@@ -528,7 +513,7 @@ def test_scoped_record_updatable_and_deletable_with_same_flags(tmp_path):
 
     # Update WITH the same --team flag reaches the scoped record.
     r2 = _run_with_config(
-        ["record", "update", record_id, "--set", "keywords=bar",
+        ["record", "update", record_id, "--keyword", "bar",
          "--team", "product-engineering"],
         vault=vault, state=state, config_home=config_home,
     )
@@ -555,7 +540,7 @@ def test_vanilla_no_config_create_uses_active_vault(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Plain",
-         "--set", "keywords=foo", "--team", "whatever"],
+         "--keyword", "foo", "--team", "whatever"],
         vault=vault, state=state, config_home=config_home, stdin_text="x\n",
     )
     assert r.returncode == 0, r.stderr
@@ -575,14 +560,14 @@ def test_vanilla_no_config_update_delete_no_orphan_guard(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Plain",
-         "--set", "keywords=foo"],
+         "--keyword", "foo"],
         vault=vault, state=state, config_home=config_home, stdin_text="x\n",
     )
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
 
     r_upd = _run_with_config(
-        ["record", "update", record_id, "--set", "keywords=bar"],
+        ["record", "update", record_id, "--keyword", "bar"],
         vault=vault, state=state, config_home=config_home, stdin_text="new\n",
     )
     assert r_upd.returncode == 0, r_upd.stderr
@@ -602,7 +587,7 @@ def test_vanilla_no_config_reindex_single_vault(tmp_path):
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Plain",
-         "--set", "keywords=foo"],
+         "--keyword", "foo"],
         vault=vault, state=state, config_home=config_home, stdin_text="x\n",
     )
     assert r.returncode == 0, r.stderr

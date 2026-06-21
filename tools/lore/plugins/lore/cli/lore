@@ -1660,115 +1660,158 @@ def _cmd_vault_config(args: argparse.Namespace) -> int:
 
 # ---- record -----------------------------------------------------------------
 
-# Provenance keys that the CLI auto-sets on every write — the operator must
-# never be able to override these via --set / --unset (AC-PROV1). Derived from
-# the record_model ``auto_set`` attribute so it stays in sync with S1's schema.
-_PROVENANCE_KEYS: frozenset[str] = record_model_mod.auto_set_keys("v1")
+# Provenance keys (``created/updated-at/by``) are auto-set on every write and
+# have no operator flag — there is no generic setter to override them through
+# (the old ``--set``/``--unset`` patch idiom is gone; Slice 1, dedicated-field-flags
+# plan). Provenance protection is structural: no flag exists, nothing to block.
 
 
-def _list_typed_keys() -> frozenset[str]:
-    """Return the set of sidecar keys whose type_tag is ``list[str]`` (v1).
+# Dedicated non-scope list fields: each maps a repeatable ``--<flag>`` /
+# ``--unset-<flag> VALUE`` pair to its sidecar key (Slice 1, dedicated-field-flags
+# plan). Scalars (--status, --title) and the --related map flag are handled
+# inline by the applier. Scope fields (team/suite/product/repo) are NOT here —
+# they remain routing flags owned by Slice 2/3.
+_LIST_FIELD_FLAGS: dict[str, str] = {
+    "keyword": "keywords",
+    "related_file": "related-files-or-folders",
+    "related_url": "related-urls",
+    "related_phase": "related-phases",
+}
 
-    Used by the --set/--unset matrix (AC15-AC18) to distinguish scalar fields
-    from list fields without hardcoding a key list.  Derived from S1's
-    FIELDS_V1 so it stays in sync with the model.
-    """
-    return frozenset(
-        key
-        for key, spec in record_model_mod.FIELDS_V1.items()
-        if spec.type_tag == "list[str]"
-    )
 
-
-def _apply_set_unset(
+def _apply_record_fields(
     sidecar: dict,
-    set_pairs: list[str],
-    unset_pairs: list[str],
+    args: argparse.Namespace,
 ) -> tuple[dict, list[str]]:
-    """Apply --set K=V / --unset K to *sidecar*; return (updated, errors).
+    """Apply the dedicated per-field flags to *sidecar*; return (updated, errors).
 
-    Implements the full AC15–AC18 + AC-PROV1 matrix:
-      - AC-PROV1: --set / --unset on a provenance key → error, nothing applied.
-      - AC15: --set K="" on a scalar key ≡ --unset K (clears the key).
-      - AC16: --unset K=VALUE removes one item from a list-valued key.
-      - AC17: --set K="" on a list-valued key → hard error naming correct forms.
-      - AC18: --unset K (no =VALUE) clears the whole list / scalar key.
+    Structural mirror of :func:`_apply_map_labels_annotations` (upsert/unset on a
+    copy, errors surfaced to the caller), but with heterogeneous type dispatch
+    (Slice 1, dedicated-field-flags plan):
 
-    Returns the (possibly mutated copy of) sidecar and a list of error strings
-    (non-empty means nothing should be written).
+      - scalars: ``--status`` (always), ``--title`` (update-only setter; create
+        builds it from the required positional) overwrite the scalar key.
+      - repeatable list flags (``--keyword`` / ``--related-file`` /
+        ``--related-url`` / ``--related-phase``) **append** to their list key;
+        each ``--unset-<field> VALUE`` removes one matching item (a value not
+        present is a tolerated no-op, mirroring the deleted AC16 semantics).
+      - ``--related <kind>=<name>`` (repeatable) splits on the FIRST ``=`` and
+        appends ``name`` to ``related[kind]``. An empty kind (``=foo``) or empty
+        name (``plan=``) is rejected HERE, before ``validate()`` ever sees it.
+
+    All mutations still flow through ``validate()`` downstream (A3): off-vocab
+    ``--status`` and bad ``related`` kinds are caught there. This helper only
+    guards the degenerate ``--related`` split that ``validate()`` could not name.
+
+    Returns a mutated copy and a list of error strings (non-empty → nothing
+    should be written).
     """
-    list_keys = _list_typed_keys()
     errors: list[str] = []
     result = dict(sidecar)
 
-    for pair in set_pairs:
-        if "=" in pair:
-            key, value = pair.split("=", 1)
-        else:
-            key, value = pair, ""
+    # --- scalars -----------------------------------------------------------
+    status = getattr(args, "status", None)
+    if status is not None:
+        result["status"] = status
+    # ``--title`` is an optional setter on update; on create it is the required
+    # positional and already seeded into the sidecar before this runs.
+    title = getattr(args, "title", None)
+    if title is not None:
+        result["title"] = title
 
-        if key in _PROVENANCE_KEYS:
-            errors.append(
-                f"error: --set {key!r} is a provenance field; "
-                f"it is auto-set by lore and cannot be changed (AC-PROV1)"
-            )
-            continue
-
-        if key in list_keys:
-            if value == "":
-                # AC17: --set K="" on a list field is a hard error.
-                errors.append(
-                    f"error: --set {key!r}=\"\" is not valid for a list field; "
-                    f"to remove one item use --unset {key}=VALUE; "
-                    f"to clear the whole list use --unset {key}"
-                )
-                continue
-            # Append the value to the list (create if missing).
+    # --- repeatable list flags (append) ------------------------------------
+    for dest, key in _LIST_FIELD_FLAGS.items():
+        values = getattr(args, dest, None) or []
+        if values:
             current = result.get(key, [])
             if not isinstance(current, list):
                 current = []
-            result[key] = current + [value]
-        else:
-            # Scalar field.
-            if value == "":
-                # AC15: --set K="" ≡ --unset K on a scalar.
-                result.pop(key, None)
-            else:
-                result[key] = value
+            result[key] = current + list(values)
 
-    for pair in unset_pairs:
-        if "=" in pair:
-            key, value = pair.split("=", 1)
-        else:
-            key, value = pair, None
-
-        if key in _PROVENANCE_KEYS:
-            errors.append(
-                f"error: --unset {key!r} is a provenance field; "
-                f"it is auto-set by lore and cannot be changed (AC-PROV1)"
-            )
-            continue
-
-        if value is not None:
-            # AC16: --unset K=VALUE removes one item from a list. The K=VALUE
-            # form is only meaningful for list fields; on a scalar key it would
-            # be a silent no-op (an agent footgun), so reject it explicitly.
-            if key not in list_keys:
-                errors.append(
-                    f"error: --unset {key}=VALUE is only valid for list fields; "
-                    f"to clear a scalar field use --unset {key}"
-                )
-                continue
+    # --- repeatable list-flag removals (remove one matching item) ----------
+    for dest, key in _LIST_FIELD_FLAGS.items():
+        removals = getattr(args, f"unset_{dest}", None) or []
+        for value in removals:
             current = result.get(key, [])
             if isinstance(current, list) and value in current:
-                current = [v for v in current if v != value]
-                result[key] = current
-            # Removing a value not present in the list is a tolerated no-op.
-        else:
-            # AC18: --unset K (no value) clears the scalar or whole list.
-            result.pop(key, None)
+                result[key] = [v for v in current if v != value]
+
+    # --- --related <kind>=<name> map flag (append name to that kind) -------
+    related_pairs = getattr(args, "related_pairs", None) or []
+    if related_pairs:
+        related: dict = dict(result.get("related") or {})
+        for pair in related_pairs:
+            kind, sep, name = pair.partition("=")
+            if not sep or not kind or not name:
+                errors.append(
+                    f"error: --related {pair!r} must be KIND=NAME with a "
+                    f"non-empty kind and name"
+                )
+                continue
+            related[kind] = list(related.get(kind, [])) + [name]
+        if related:
+            result["related"] = related
 
     return result, errors
+
+
+def _add_record_field_flags(parser: argparse.ArgumentParser) -> None:
+    """Register the shared dedicated per-field flags on a record subparser.
+
+    Adds the non-scope field flags common to ``create`` and ``update``
+    (Slice 1, dedicated-field-flags plan): the ``--status`` scalar, the
+    repeatable list flags with their per-item ``--unset-<field> VALUE`` removers,
+    and the ``--related <kind>=<name>`` map flag. ``--title`` is NOT added here —
+    create declares it as a required argument and update as an optional setter.
+    Scope flags (``--team`` etc.) are NOT added here either.
+    """
+    parser.add_argument(
+        "--status", default=None,
+        help="Set the record's status (must be in the kind's vocabulary).",
+    )
+    parser.add_argument(
+        "--keyword", dest="keyword", action="append", default=[], metavar="VALUE",
+        help="Append a keyword (repeatable). Use --unset-keyword VALUE to remove one entry.",
+    )
+    parser.add_argument(
+        "--unset-keyword", dest="unset_keyword", action="append", default=[], metavar="VALUE",
+        help="Remove one keyword entry (repeatable). Absent value is a silent no-op.",
+    )
+    parser.add_argument(
+        "--related-file", dest="related_file", action="append", default=[], metavar="VALUE",
+        help="Append a related file/folder (repeatable). Use --unset-related-file VALUE "
+             "to remove one entry.",
+    )
+    parser.add_argument(
+        "--unset-related-file", dest="unset_related_file", action="append", default=[],
+        metavar="VALUE",
+        help="Remove one related file/folder entry (repeatable). Absent value is a no-op.",
+    )
+    parser.add_argument(
+        "--related-url", dest="related_url", action="append", default=[], metavar="VALUE",
+        help="Append a related URL (repeatable). Use --unset-related-url VALUE to remove "
+             "one entry.",
+    )
+    parser.add_argument(
+        "--unset-related-url", dest="unset_related_url", action="append", default=[],
+        metavar="VALUE",
+        help="Remove one related URL entry (repeatable). Absent value is a silent no-op.",
+    )
+    parser.add_argument(
+        "--related-phase", dest="related_phase", action="append", default=[], metavar="VALUE",
+        help="Append a related phase (repeatable). Use --unset-related-phase VALUE to "
+             "remove one entry.",
+    )
+    parser.add_argument(
+        "--unset-related-phase", dest="unset_related_phase", action="append", default=[],
+        metavar="VALUE",
+        help="Remove one related phase entry (repeatable). Absent value is a no-op.",
+    )
+    parser.add_argument(
+        "--related", dest="related_pairs", action="append", default=[], metavar="KIND=NAME",
+        help="Append NAME to the related[KIND] list (repeatable). Split on the first '='; "
+             "KIND must be a valid record kind and both KIND and NAME must be non-empty.",
+    )
 
 
 def _apply_map_labels_annotations(
@@ -1780,8 +1823,8 @@ def _apply_map_labels_annotations(
 ) -> dict:
     """Apply --label/--annotation/--unset-label/--unset-annotation to *sidecar*.
 
-    Map-field branch — intentionally separate from ``_apply_set_unset``'s
-    str/list logic (Slice 2, labels/annotations plan).
+    Map-field branch — intentionally separate from ``_apply_record_fields``'s
+    scalar/list logic (Slice 2, labels/annotations plan).
 
     Semantics:
       - set = upsert: ``--label k=v`` overwrites an existing key silently.
@@ -1945,10 +1988,11 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
     parsed as frontmatter (AC-TX3); it is stored as body text.
 
     Routing flags (--repo / --product / --suite / --team) are passed to
-    ``place_record`` as ``scope`` for the S4 multi-vault hook.  The
-    ``--team`` routing flag is distinct from ``--set team=X`` (AC-ROUTE1):
-    the routing flag influences vault selection (S4); ``--set team=X`` writes
-    the ``team`` metadata field in the sidecar.
+    ``place_record`` as ``scope`` for the S4 multi-vault hook.  Non-scope sidecar
+    fields are set through the dedicated per-field flags (``--status``,
+    ``--keyword``, ``--related-*``, ``--related``) applied by
+    :func:`_apply_record_fields` (Slice 1, dedicated-field-flags plan); the scope
+    flags' sidecar-write semantics are owned by Slice 2.
     """
     # --kind is required (AC2).
     kind = getattr(args, "kind", None)
@@ -1962,9 +2006,8 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         print("error: --title is required", file=sys.stderr)
         return 1
 
-    # Build the scope string from routing flags (AC5, AC-ROUTE1).
-    # These are routing hints passed to place_record; they do NOT go into
-    # the sidecar (that is --set team=X / --set repo=X, which is separate).
+    # Build the scope string from routing flags (AC5). These are routing hints
+    # passed to place_record; their sidecar-write semantics are Slice 2's.
     scope_parts: list[str] = []
     for flag in ("repo", "product", "suite", "team"):
         val = getattr(args, flag, None)
@@ -1972,20 +2015,19 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
             scope_parts.append(f"{flag}:{val}")
     scope = ",".join(scope_parts) if scope_parts else None
 
-    # Seed the sidecar with the required operator fields.
+    # Seed the sidecar with the required operator fields. ``keywords`` is optional
+    # (relaxed in Slice 1) — it is populated only when --keyword is supplied.
     sidecar: dict = {
         "kind": kind,
         "title": title,
-        "keywords": [],
     }
 
-    # Apply --set / --unset mutations (AC15-AC18, AC-PROV1).
-    set_pairs: list[str] = list(getattr(args, "set_pairs", None) or [])
-    unset_pairs: list[str] = list(getattr(args, "unset_pairs", None) or [])
-
-    sidecar, set_errors = _apply_set_unset(sidecar, set_pairs, unset_pairs)
-    if set_errors:
-        for msg in set_errors:
+    # Apply the dedicated per-field flags (--status / --keyword / --related-* /
+    # --related) — Slice 1, dedicated-field-flags plan. On create --title is the
+    # required positional already seeded above, so the applier leaves it alone.
+    sidecar, field_errors = _apply_record_fields(sidecar, args)
+    if field_errors:
+        for msg in field_errors:
             print(msg, file=sys.stderr)
         return 1
 
@@ -2004,7 +2046,7 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
 
     # --- vault routing (Slice 5, S4) ---------------------------------------
     # ``participating_scopes`` is built ONLY from the routing FLAGS
-    # (--repo/--product/--suite/--team) — NOT from --set (sidecar-only). When a
+    # (--repo/--product/--suite/--team). When a
     # config.json exists & loads, resolution picks the destination vault; a
     # confirmation line names the elected vault + scope (+ any fall-through
     # reason). With NO config we keep vanilla behavior: the active vault, shared=0.
@@ -2213,8 +2255,8 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
         (council/Security — the diff path is not a neutralization bypass). Any hunk
         failing → non-zero, record byte-for-byte unmodified, no index update
         (AC-DIFF1); rejected hunks print to stderr one-line-per-hunk for agent retry.
-      - **Metadata-only** (no stdin): the body is unchanged and only ``--set`` /
-        ``--unset`` sidecar params apply (AC10/AC11). A ``note: no stdin — body
+      - **Metadata-only** (no stdin): the body is unchanged and only the
+        dedicated per-field flags apply (AC10/AC11). A ``note: no stdin — body
         unchanged, metadata-only update`` is printed to **stderr** (exit stays 0)
         so an agent that *forgot* to pipe a body can detect the mode
         (council/Advocate).
@@ -2269,7 +2311,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
             # Resolve the existing record in place (AC8 → RecordNotFoundError).
             location = record_store_mod.locate_record(record_id, vault_root=vault_root)
 
-            # Load the existing sidecar so --set/--unset mutate the live record.
+            # Load the existing sidecar so the field flags mutate the live record.
             existing_sidecar: dict = {}
             if location.sidecar_path.exists():
                 try:
@@ -2315,14 +2357,12 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
 
-            # --- apply --set / --unset to the sidecar -------------------------
-            set_pairs: list[str] = list(getattr(args, "set_pairs", None) or [])
-            unset_pairs: list[str] = list(getattr(args, "unset_pairs", None) or [])
-            sidecar, set_errors = _apply_set_unset(
-                existing_sidecar, set_pairs, unset_pairs
-            )
-            if set_errors:
-                for msg in set_errors:
+            # --- apply the dedicated per-field flags to the sidecar -----------
+            # (--status / --title / --keyword / --related-* / --related; Slice 1,
+            # dedicated-field-flags plan). --title is an optional setter here.
+            sidecar, field_errors = _apply_record_fields(existing_sidecar, args)
+            if field_errors:
+                for msg in field_errors:
                     print(msg, file=sys.stderr)
                 return 1
 
@@ -2555,8 +2595,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.set_defaults(func=cmd_search)
 
     # record subcommand: ``lore record create`` (Slice 3, S2).
-    # ``--team`` is the *routing* flag (scope → place_record; AC-ROUTE1); it is
-    # distinct from ``--set team=X``, which writes the sidecar ``team`` field.
+    # ``--team`` etc. are the *routing* flags (scope → place_record); their
+    # sidecar-write semantics are owned by Slice 2 (dedicated-field-flags plan).
     p_record = sub.add_parser(
         "record",
         help="Create, update, delete, or manage vault records",
@@ -2573,40 +2613,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--title", required=True,
         help="Human-readable title (used to derive the record name slug)",
     )
-    # Routing flags (AC5, AC-ROUTE1): passed to place_record as scope.
-    # These influence vault selection (S4 hook) and do NOT write sidecar fields.
+    # Routing flags (AC5): passed to place_record as scope. These influence vault
+    # selection (S4 hook); their sidecar-write semantics are owned by Slice 2.
     p_record_create.add_argument(
         "--repo", default=None,
-        help="Routing scope: restrict to this repo's vault (AC5; no sidecar effect)",
+        help="Routing scope: restrict to this repo's vault (AC5)",
     )
     p_record_create.add_argument(
         "--product", default=None,
-        help="Routing scope: restrict to this product's vault (AC5; no sidecar effect)",
+        help="Routing scope: restrict to this product's vault (AC5)",
     )
     p_record_create.add_argument(
         "--suite", default=None,
-        help="Routing scope: restrict to this suite's vault (AC5; no sidecar effect)",
+        help="Routing scope: restrict to this suite's vault (AC5)",
     )
     p_record_create.add_argument(
         "--team", default=None,
-        help="Routing scope: restrict to this team's vault (AC5; no sidecar effect). "
-             "To set the 'team' sidecar metadata field, use --set team=VALUE instead "
-             "(AC-ROUTE1).",
+        help="Routing scope: restrict to this team's vault (AC5)",
     )
-    p_record_create.add_argument(
-        "--set", dest="set_pairs", action="append", default=[],
-        metavar="K=V",
-        help="Set a sidecar field (repeatable). Use K=VALUE to set a scalar or "
-             "append to a list. --set K=\"\" on a scalar clears the key (AC15). "
-             "--set K=\"\" on a list field is a hard error (AC17; use --unset instead).",
-    )
-    p_record_create.add_argument(
-        "--unset", dest="unset_pairs", action="append", default=[],
-        metavar="K[=VALUE]",
-        help="Unset a sidecar field (repeatable). --unset K=VALUE removes one list "
-             "item (AC16). --unset K clears the whole key (AC18).",
-    )
-    # Map flags (Slice 2): dedicated branch — NOT via --set/--unset str/list logic.
+    _add_record_field_flags(p_record_create)
+    # Map flags (labels/annotations): dedicated branch.
     p_record_create.add_argument(
         "--label", dest="label_pairs", action="append", default=[],
         metavar="KEY=VALUE",
@@ -2657,17 +2683,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_record_update.add_argument("--product", default=None, help=argparse.SUPPRESS)
     p_record_update.add_argument("--suite", default=None, help=argparse.SUPPRESS)
     p_record_update.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    # ``--title`` is an optional setter on update (it is the required positional
+    # on create); the rest of the per-field flags are shared.
     p_record_update.add_argument(
-        "--set", dest="set_pairs", action="append", default=[],
-        metavar="K=V",
-        help="Set a sidecar field (repeatable). Same AC15-AC18 semantics as create.",
+        "--title", default=None,
+        help="Overwrite the record's title (optional on update).",
     )
-    p_record_update.add_argument(
-        "--unset", dest="unset_pairs", action="append", default=[],
-        metavar="K[=VALUE]",
-        help="Unset a sidecar field (repeatable). Same AC16/AC18 semantics as create.",
-    )
-    # Map flags (Slice 2): dedicated branch — NOT via --set/--unset str/list logic.
+    _add_record_field_flags(p_record_update)
+    # Map flags (labels/annotations): dedicated branch.
     p_record_update.add_argument(
         "--label", dest="label_pairs", action="append", default=[],
         metavar="KEY=VALUE",

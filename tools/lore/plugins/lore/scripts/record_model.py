@@ -10,7 +10,7 @@ data + pure predicate/accessor functions) but is a **new** module: the legacy
 validator keeps guarding old-vocabulary notes until the S7 migration cuts over.
 Nothing here reads files or touches the search index — the validator operates on
 an already-parsed dict and is shared verbatim by S2 (the `lore record` CLI) and
-S7 (the migration). The file/`--set`/`--unset` wrapper is S2; the index is S3.
+S7 (the migration). The file/dedicated-per-field-flag wrapper is S2; the index is S3.
 
 Invariants (Spec S1):
 - The kind set is closed: exactly the 9 kinds in ``KINDS``; any other ``kind`` is
@@ -121,7 +121,7 @@ FIELDS_V1: dict[str, FieldSpec] = {
     "version": FieldSpec(required=True, type_tag=_STR),
     "kind": FieldSpec(required=True, type_tag=_STR),
     "title": FieldSpec(required=True, type_tag=_STR),
-    "keywords": FieldSpec(required=True, type_tag=_LIST_STR),
+    "keywords": FieldSpec(required=False, type_tag=_LIST_STR),
     "status": FieldSpec(required=True, type_tag=_STR),
     "team": FieldSpec(required=False, type_tag=_STR),
     "suite": FieldSpec(required=False, type_tag=_STR),
@@ -217,8 +217,8 @@ def required_operator_keys(version: str = "v1") -> frozenset[str]:
     """Return the keys an operator must supply.
 
     Required keys minus the auto-set keys (filled by the CLI) and the defaulted
-    keys (``status``/``version``). For ``v1`` this is exactly
-    ``{kind, title, keywords}``.
+    keys (``status``/``version``). For ``v1`` this is exactly ``{kind, title}``
+    (``keywords`` is optional — Slice 1, dedicated-field-flags plan).
     """
     return _REQUIRED_OPERATOR_KEYS[version]
 

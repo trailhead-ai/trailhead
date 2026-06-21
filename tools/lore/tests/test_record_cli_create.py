@@ -11,15 +11,18 @@ Covers every bullet in the Slice 3 test contract
     created.
   - body whose first line is ``---`` is stored verbatim (sidecar unaffected)
     (AC-TX3: a leading ``---`` block is NOT parsed as frontmatter).
-  - ``--set``/``--unset`` matrix:
-      - AC15: ``--set K=""`` ≡ ``--unset K`` (scalar).
-      - AC16: ``--unset K=VALUE`` removes one list item.
-      - AC17: list ``--set K=""`` → non-zero with corrective message.
-      - AC18: ``--unset K`` (no value) clears the whole list.
-      - AC-PROV1: ``--set``/``--unset`` on provenance field → non-zero.
-  - ``--team X`` routes scope while ``--set team=X`` writes only the sidecar
-    field — asserted distinctly (AC-ROUTE1).
   - unknown subcommand → non-zero with a "did you mean" hint (AC-DISP1).
+
+Slice 1 (dedicated-field-flags plan) replaced the generic ``--set``/``--unset``
+patch idiom with dedicated per-field flags. This file now exercises:
+  - ``--status`` (scalar) sets the field; off-vocab status → non-zero, vocab named.
+  - list flags ``--keyword`` / ``--related-file`` / ``--related-url`` /
+    ``--related-phase`` append; ``--unset-<field> VALUE`` removes one item.
+  - ``--related <kind>=<name>`` appends to that kind's list; empty kind/name and a
+    bad kind are rejected.
+  - ``keywords`` is optional: create with no ``--keyword`` succeeds.
+  - ``--set``/``--unset`` are gone (argparse-unrecognized).
+  - provenance fields remain unwritable (no flag exists for them).
 
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern).  Never
 writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
@@ -60,7 +63,7 @@ _BASE_ARGS = [
     "record", "create",
     "--kind", "spec",
     "--title", "My Record",
-    "--set", "keywords=foo",
+    "--keyword", "foo",
 ]
 
 
@@ -183,7 +186,7 @@ def test_create_missing_kind_exits_nonzero(tmp_path):
     """Missing --kind → non-zero exit; nothing written (AC2)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        ["record", "create", "--title", "Test", "--set", "keywords=foo"],
+        ["record", "create", "--title", "Test", "--keyword", "foo"],
         vault=vault, state_dir=state,
     )
     assert r.returncode != 0
@@ -217,118 +220,150 @@ def test_create_leading_triple_dash_body_stored_verbatim(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC15: --set K="" ≡ --unset K (scalar field cleared)
+# Slice 1: --status (scalar) sets the field; off-vocab → non-zero, vocab named
 # ---------------------------------------------------------------------------
 
-def test_set_empty_string_scalar_equiv_unset(tmp_path):
-    """--set status="" clears status (empty str → unset/default) (AC15)."""
-    vault, state = _make_vault(tmp_path)
-    # status is a known scalar field; --set status="" should clear/omit it so
-    # validate_and_write defaults it.
-    r = _run(
-        _BASE_ARGS + ["--set", "status="],
-        vault=vault, state_dir=state,
-    )
-    # status is not required and is defaulted by the validator, so clearing it
-    # deterministically succeeds — and must NOT be stored as the empty string.
-    assert r.returncode == 0, r.stderr
-    record_id = r.stdout.strip()
-    sidecar = _find_sidecar(vault, record_id)
-    status = sidecar.get("status")
-    # Empty string → status absent or defaulted to a non-empty value, never "".
-    assert status != ""
-    assert status is None or isinstance(status, str) and status
-
-
-# ---------------------------------------------------------------------------
-# AC16: --unset K=VALUE removes one list item
-# ---------------------------------------------------------------------------
-
-def test_unset_list_item_removes_single_value(tmp_path):
-    """--unset keywords=foo removes only 'foo' from the keywords list (AC16)."""
+def test_status_flag_sets_field(tmp_path):
+    """--status sets the sidecar status to an in-vocab value."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        [
-            "record", "create",
-            "--kind", "spec",
-            "--title", "My Record",
-            "--set", "keywords=foo",
-            "--set", "keywords=bar",
-            "--unset", "keywords=foo",
-        ],
+        _BASE_ARGS + ["--status", "ready"],
         vault=vault, state_dir=state,
     )
     assert r.returncode == 0, r.stderr
-    record_id = r.stdout.strip()
-    sidecar = _find_sidecar(vault, record_id)
-    assert sidecar["keywords"] == ["bar"]
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["status"] == "ready"
 
 
-# ---------------------------------------------------------------------------
-# AC17: list --set K="" is a hard error naming correct forms
-# ---------------------------------------------------------------------------
-
-def test_set_empty_list_field_is_hard_error(tmp_path):
-    """--set keywords="" on a list field → non-zero exit with corrective message (AC17)."""
+def test_status_off_vocab_nonzero_names_vocab(tmp_path):
+    """An off-vocab --status → non-zero; stderr names the permitted vocab (A3)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        [
-            "record", "create",
-            "--kind", "spec",
-            "--title", "My Record",
-            "--set", "keywords=foo",
-            "--set", "keywords=",   # empty value on a list field → hard error
-        ],
+        ["record", "create", "--kind", "decision", "--title", "T",
+         "--keyword", "foo", "--status", "nonsense"],
         vault=vault, state_dir=state,
     )
     assert r.returncode != 0
-    # Corrective message must name the correct forms (e.g., --unset).
-    err_out = r.stderr + r.stdout
-    assert "unset" in err_out.lower() or "--unset" in err_out
+    err = r.stderr.lower()
+    # Validation still fires and names the allowed values for the kind.
+    assert "active" in err and "superseded" in err
+    assert list(vault.glob("**/*.md")) == []
 
 
 # ---------------------------------------------------------------------------
-# AC18: --unset K (no value) clears the whole list
+# Slice 1: repeatable list flags append; --unset-<field> VALUE removes one
 # ---------------------------------------------------------------------------
 
-def test_unset_list_field_no_value_clears_whole_list(tmp_path):
-    """--unset K (no =VALUE) clears the entire list field (AC18).
-
-    Uses a NON-required list field (related-urls) so the write succeeds and the
-    cleared state is deterministic — clearing the required 'keywords' field is
-    covered separately below.
-    """
+def test_keyword_flag_appends(tmp_path):
+    """--keyword a --keyword b → keywords == ['a', 'b'] (append order preserved)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        [
-            "record", "create",
-            "--kind", "spec",
-            "--title", "My Record",
-            "--set", "keywords=foo",
-            "--set", "related-urls=https://a.example",
-            "--set", "related-urls=https://b.example",
-            "--unset", "related-urls",   # clears whole list
+        ["record", "create", "--kind", "spec", "--title", "My Record",
+         "--keyword", "a", "--keyword", "b"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["keywords"] == ["a", "b"]
+
+
+def test_unset_keyword_removes_single_item(tmp_path):
+    """--unset-keyword a removes only 'a' from the keywords list."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "spec", "--title", "My Record",
+         "--keyword", "a", "--keyword", "b", "--unset-keyword", "a"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["keywords"] == ["b"]
+
+
+def test_related_url_flag_appends_and_unsets(tmp_path):
+    """--related-url appends to related-urls; --unset-related-url removes one."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + [
+            "--related-url", "https://a.example",
+            "--related-url", "https://b.example",
+            "--unset-related-url", "https://a.example",
         ],
         vault=vault, state_dir=state,
     )
     assert r.returncode == 0, r.stderr
-    record_id = r.stdout.strip()
-    sidecar = _find_sidecar(vault, record_id)
-    # The whole list is gone (key absent or empty), never a leftover item.
-    assert sidecar.get("related-urls") in (None, [])
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["related-urls"] == ["https://b.example"]
 
 
-def test_unset_required_list_field_fails_validation(tmp_path):
-    """--unset keywords removes a required key → deterministic non-zero, nothing written."""
+def test_related_file_flag_maps_to_related_files_or_folders(tmp_path):
+    """--related-file appends to the related-files-or-folders sidecar key."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        [
-            "record", "create",
-            "--kind", "spec",
-            "--title", "My Record",
-            "--set", "keywords=foo",
-            "--unset", "keywords",   # removes a required operator key
-        ],
+        _BASE_ARGS + ["--related-file", "src/foo.py", "--related-file", "src/bar.py"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["related-files-or-folders"] == ["src/foo.py", "src/bar.py"]
+
+
+def test_related_phase_flag_appends(tmp_path):
+    """--related-phase appends to related-phases (a valid phase passes validation)."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--related-phase", "frame", "--related-phase", "build"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["related-phases"] == ["frame", "build"]
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: --related <kind>=<name> map flag
+# ---------------------------------------------------------------------------
+
+def test_related_map_flag_appends_under_kind(tmp_path):
+    """--related plan=foo --related plan=bar → related == {'plan': ['foo','bar']}."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--related", "plan=foo", "--related", "plan=bar"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["related"] == {"plan": ["foo", "bar"]}
+
+
+def test_related_map_invalid_kind_nonzero_names_kind(tmp_path):
+    """--related bogus=x (invalid kind) → non-zero; stderr names the bad kind."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--related", "bogus=x"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "bogus" in r.stderr
+    assert list(vault.glob("**/*.md")) == []
+
+
+def test_related_map_empty_name_rejected_by_guard(tmp_path):
+    """--related plan= (empty name) → non-zero from the applier guard (before validate)."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--related", "plan="],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    assert list(vault.glob("**/*.md")) == []
+
+
+def test_related_map_empty_kind_rejected_by_guard(tmp_path):
+    """--related =foo (empty kind) → non-zero from the applier guard (before validate)."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--related", "=foo"],
         vault=vault, state_dir=state,
     )
     assert r.returncode != 0
@@ -336,65 +371,56 @@ def test_unset_required_list_field_fails_validation(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC-PROV1: --set/--unset on provenance field → hard error, nothing written
+# Slice 1: keywords optional — create with no --keyword succeeds
 # ---------------------------------------------------------------------------
 
-def test_set_provenance_field_is_hard_error(tmp_path):
-    """--set created-at=... → non-zero exit, nothing written (AC-PROV1)."""
+def test_create_no_keyword_succeeds(tmp_path):
+    """create with NO --keyword now validates and succeeds (keywords optional)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + ["--set", "created-at=2026-01-01T00:00:00Z"],
+        ["record", "create", "--kind", "spec", "--title", "My Record"],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar.get("keywords") in (None, [])
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: --set/--unset are gone; provenance remains unwritable
+# ---------------------------------------------------------------------------
+
+def test_set_flag_is_unrecognized(tmp_path):
+    """--set is removed: argparse rejects it as an unrecognized argument."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--set", "title=x"],
         vault=vault, state_dir=state,
     )
     assert r.returncode != 0
     assert list(vault.glob("**/*.md")) == []
 
 
-def test_unset_provenance_field_is_hard_error(tmp_path):
-    """--unset updated-by → non-zero exit, nothing written (AC-PROV1)."""
+def test_unset_flag_is_unrecognized(tmp_path):
+    """--unset is removed: argparse rejects it as an unrecognized argument."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + ["--unset", "updated-by"],
+        _BASE_ARGS + ["--unset", "keywords"],
         vault=vault, state_dir=state,
     )
     assert r.returncode != 0
     assert list(vault.glob("**/*.md")) == []
 
 
-# ---------------------------------------------------------------------------
-# AC-ROUTE1: --team X (routing) vs --set team=X (sidecar metadata) distinction
-# ---------------------------------------------------------------------------
-
-def test_routing_team_flag_vs_set_team_metadata(tmp_path):
-    """--team X routes scope; --set team=X writes the sidecar field (AC-ROUTE1).
-
-    Both can succeed but must be treated as distinct semantics:
-    - --team passes scope to place_record (no sidecar metadata effect).
-    - --set team=X writes the sidecar 'team' field.
-    """
+def test_no_flag_for_provenance_fields(tmp_path):
+    """No dedicated flag exists for provenance keys (created-at etc.)."""
     vault, state = _make_vault(tmp_path)
-
-    # --set team=X: writes sidecar team field.
-    r_meta = _run(
-        _BASE_ARGS + ["--set", "team=alpha"],
-        vault=vault, state_dir=state,
-    )
-    assert r_meta.returncode == 0, r_meta.stderr
-    record_id_meta = r_meta.stdout.strip()
-    sidecar_meta = _find_sidecar(vault, record_id_meta)
-    assert sidecar_meta.get("team") == "alpha"
-
-    # --team X: routing flag only; does not set team in sidecar.
-    vault2, state2 = _make_vault(tmp_path / "v2")
-    r_route = _run(
-        _BASE_ARGS + ["--team", "beta"],
-        vault=vault2, state_dir=state2,
-    )
-    assert r_route.returncode == 0, r_route.stderr
-    record_id_route = r_route.stdout.strip()
-    sidecar_route = _find_sidecar(vault2, record_id_route)
-    # --team as a routing flag must NOT write 'team' into the sidecar metadata.
-    assert sidecar_route.get("team") is None
+    for prov_flag in ("--created-at", "--created-by", "--updated-at", "--updated-by"):
+        r = _run(
+            _BASE_ARGS + [prov_flag, "x"],
+            vault=vault, state_dir=state,
+        )
+        assert r.returncode != 0, f"{prov_flag} should be unrecognized"
 
 
 # ---------------------------------------------------------------------------
@@ -451,21 +477,6 @@ def test_valid_command_bad_arg_does_not_emit_unknown_command_hint(tmp_path):
     assert r.returncode != 0
     out = (r.stdout + r.stderr).lower()
     assert "unknown command" not in out
-
-
-def test_unset_scalar_field_with_value_is_hard_error(tmp_path):
-    """--unset K=VALUE on a scalar field → non-zero, not a silent no-op."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--unset", "status=draft"],
-        vault=vault, state_dir=state,
-    )
-    assert r.returncode != 0
-    out = (r.stderr + r.stdout).lower()
-    assert "list field" in out or "scalar" in out
-    assert list(vault.glob("**/*.md")) == []
-    # Some kind of helpful message must appear.
-    assert len(out.strip()) > 0
 
 
 # ---------------------------------------------------------------------------
