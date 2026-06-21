@@ -473,33 +473,6 @@ def _load_vault_config():
     return config_path, vaults
 
 
-def _orphan_vault_guard(vault_root: str) -> str | None:
-    """Return an error message iff *vault_root* is not a currently-configured vault.
-
-    The orphaned-RECORD_ID guard (Slice 5, S4): a record's target vault may have
-    been removed by a later ``config.json`` edit / ``vault delete``. ``record
-    update``/``delete`` call this **only when a config exists**; when it returns a
-    message the caller fails non-zero rather than acting on an orphaned target.
-
-    Conservative + vanilla-safe (Axiom 3): returns ``None`` (no guard) when no
-    config is present, so single-vault usage is never rejected. When a config IS
-    present, the resolved vault root path is matched against the configured vaults'
-    resolved paths (the index ``vault`` column stores the resolved root path, not
-    the config name — so path identity, realpath-normalized, is the right key).
-    """
-    loaded = _load_vault_config()
-    if loaded is None:
-        return None
-    _, vaults = loaded
-    target = os.path.realpath(vault_root)
-    configured = {os.path.realpath(str(v.path)) for v in vaults}
-    if target in configured:
-        return None
-    return (
-        f"lore: vault {vault_root} is not currently configured"
-    )
-
-
 def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     """Resolve the vault root that ``record update``/``delete`` should act on.
 
@@ -2246,15 +2219,64 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
     return 0
 
 
+def _find_current_record_location(record_id: str):
+    """Locate the record's CURRENT vault, independent of the new scope-flag values.
+
+    The scope flags (``--team`` etc.) now mean **destination** (Slice 3), so the
+    current location can no longer be derived from them (that is what produced the
+    spurious ``RecordNotFoundError`` KU-2 reproduced). Strategy: scan every
+    configured vault path with :func:`record_store.locate_record` until the record
+    is found — config-driven, index-independent, and with no circular dependence on
+    the sidecar's own scope fields. Falls back to the active vault when no config
+    exists (vanilla, Axiom 3).
+
+    Raises :class:`record_store.RecordNotFoundError` when no configured vault holds
+    the record.
+    """
+    loaded = _load_vault_config()
+    if loaded is None:
+        root = str(vault_mod.resolve_vault())
+        return record_store_mod.locate_record(record_id, vault_root=root)
+    _, vaults = loaded
+    for v in vaults:
+        try:
+            return record_store_mod.locate_record(record_id, vault_root=str(v.path))
+        except record_store_mod.RecordNotFoundError:
+            continue
+    raise record_store_mod.RecordNotFoundError(f"record not found: {record_id}")
+
+
+def _resolve_destination_root(merged_sidecar: dict, kind: str) -> str:
+    """Resolve the DESTINATION vault root from the merged scope (Slice 3).
+
+    Merged scope = the existing sidecar scope fields overlaid with the new flag
+    values (the merge is already baked into ``merged_sidecar`` by the caller).
+    Resolved via the **same create-side resolver** (:func:`vault_resolve.explain_resolution`)
+    so a zero-prior-scope record + ``--team beta`` resolves exactly like a fresh
+    create. Falls back to the active vault when no config exists (vanilla).
+    """
+    loaded = _load_vault_config()
+    if loaded is None:
+        return str(vault_mod.resolve_vault())
+    _, vaults = loaded
+    participating_scopes = {
+        flag: merged_sidecar[flag]
+        for flag in ("repo", "product", "suite", "team")
+        if merged_sidecar.get(flag)
+    }
+    resolution = vault_resolve_mod.explain_resolution(participating_scopes, kind, vaults)
+    return str(resolution.chosen.path)
+
+
 def _cmd_record_update(args: argparse.Namespace) -> int:
-    """``lore record update RECORD_ID`` (Slice 4, S2) — thin shell over ``record_store``.
+    """``lore record update RECORD_ID`` (Slice 4, S2; auto-move Slice 3) — thin shell.
 
     Body sources (mutually exclusive on stdin):
       - **Full-body** (default, piped stdin): stdin replaces the whole body (AC9).
       - **``--diff``**: stdin is a unified diff applied to the existing body via
         ``record_store.apply_unified_diff`` (KU2). The post-hunk body flows through
-        ``validate_and_write`` → ``neutralize_fences`` before the atomic rename, so
-        a hunk injecting an ``<external-memory>`` token cannot land a live fence
+        the shared validate/stamp/neutralize step before the atomic rename, so a
+        hunk injecting an ``<external-memory>`` token cannot land a live fence
         (council/Security — the diff path is not a neutralization bypass). Any hunk
         failing → non-zero, record byte-for-byte unmodified, no index update
         (AC-DIFF1); rejected hunks print to stderr one-line-per-hunk for agent retry.
@@ -2264,13 +2286,31 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
         so an agent that *forgot* to pipe a body can detect the mode
         (council/Advocate).
 
-    ``updated-at``/``updated-by`` are re-stamped every update; ``created-*`` are
-    preserved (``validate_and_write`` recovers them from the on-disk sidecar).
+    **Scope flags drive automatic relocation (Slice 3, dedicated-field-flags plan).**
+    ``--team/--suite/--product/--repo`` are field-setters that also re-resolve the
+    destination vault from the **merged scope** (existing sidecar scope fields
+    overlaid with the new flag values). The flow: (1) locate the record's CURRENT
+    vault via a config scan (decoupled from the now-destination-meaning scope flags
+    — :func:`_find_current_record_location`); (2) apply ALL field mutations in
+    memory; (3) re-resolve the destination via the create-side resolver
+    (:func:`_resolve_destination_root`); (4) validate + stamp + neutralize the
+    mutated record, then write it ONCE at its final location:
 
-    ``--move-to VAULT`` relocates the record to a different vault root via
-    ``record_store.move_record`` (AC12): the record physically moves, the new ID is
-    returned. In S2 the move *primitive* is exercised by injecting a second vault
-    root; the scope→different-vault routing *trigger* is S4's resolution.
+      - destination == current vault (compared on ``Path.resolve()``-normalized
+        roots, so a trailing-slash / symlink / ``~`` mismatch never triggers a
+        spurious self-move): a normal in-place ``validate_and_write``, no move.
+      - destination != current vault: a single durable write AT the destination via
+        ``move_record``'s in-memory overrides (the mutated sidecar is NEVER written
+        at the old location and then moved — re-review Critical-1), old artifacts
+        removed last (copy→repoint→delete, A11). A structured
+        ``moved: <old id> → <new id>`` line is printed to **stdout** in addition to
+        the RECORD_ID so a tool can detect the relocation (re-review Critical-2 —
+        no silent move).
+
+    ``updated-at``/``updated-by`` are re-stamped every update; ``created-*`` are
+    preserved. The relocation is automatic; there is no manual ``--move-to`` flag —
+    removing it also closed an unconfined-destination write path (the dest is now
+    only ever a config-declared vault root, and ``move_record`` confines it too).
 
     Invalid/nonexistent RECORD_ID → non-zero (AC8).
     """
@@ -2285,7 +2325,6 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
         return 1
 
     use_diff = bool(getattr(args, "diff", False))
-    move_to = getattr(args, "move_to", None)
 
     # stdin detection: a TTY is never "piped"; otherwise read what's there. An
     # empty read (no pipe / /dev/null / closed stdin) is the metadata-only signal
@@ -2295,24 +2334,12 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
     stdin_text = _read_stdin_body()
     has_stdin = stdin_text != ""
 
-    # Resolve the target vault via config (symmetric with `record create`) when a
-    # config exists, else the active vault (vanilla).
-    vault_root = _resolve_record_op_vault(record_id, args)
-
-    # Orphan-ID guard (Slice 5, S4): a `--move-to VAULT` names an explicit
-    # destination vault by path; refuse to relocate a record into a vault that is
-    # not currently configured (when a config exists). Vanilla (no config) skips.
-    if move_to is not None:
-        orphan_err = _orphan_vault_guard(str(Path(move_to).expanduser()))
-        if orphan_err is not None:
-            print(orphan_err, file=sys.stderr)
-            return 1
-
     try:
         conn = index_store_mod.open_index()
         try:
-            # Resolve the existing record in place (AC8 → RecordNotFoundError).
-            location = record_store_mod.locate_record(record_id, vault_root=vault_root)
+            # (1) Resolve the CURRENT location, decoupled from the scope flags
+            # (which now mean destination). AC8 → RecordNotFoundError.
+            location = _find_current_record_location(record_id)
 
             # Load the existing sidecar so the field flags mutate the live record.
             existing_sidecar: dict = {}
@@ -2360,10 +2387,17 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
 
-            # --- apply the dedicated per-field flags to the sidecar -----------
-            # (--status / --title / --keyword / --related-* / --related; Slice 1,
-            # dedicated-field-flags plan). --title is an optional setter here.
-            sidecar, field_errors = _apply_record_fields(existing_sidecar, args)
+            # (2) --- apply ALL field mutations to the sidecar IN MEMORY --------
+            # Scope flags (--team etc.) become field-setters that drive the merged
+            # scope; the non-scope per-field flags (--status / --title / --keyword
+            # / --related-*) reuse the shared applier. --title is optional here.
+            sidecar = dict(existing_sidecar)
+            for flag in ("repo", "product", "suite", "team"):
+                val = getattr(args, flag, None)
+                if val:
+                    sidecar[flag] = val
+
+            sidecar, field_errors = _apply_record_fields(sidecar, args)
             if field_errors:
                 for msg in field_errors:
                     print(msg, file=sys.stderr)
@@ -2378,32 +2412,43 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                 unset_annotations=list(getattr(args, "unset_annotations", None) or []),
             )
 
-            # --- write in place (re-stamps updated-*, preserves created-*) -----
-            new_id = record_store_mod.validate_and_write(
-                location=location,
-                sidecar=sidecar,
-                body=new_body,
-                conn=conn,
+            # (3) re-resolve the DESTINATION from the merged scope.
+            dest_root = _resolve_destination_root(sidecar, location.kind)
+            same_vault = (
+                Path(dest_root).resolve() == Path(location.vault_root).resolve()
             )
 
-            # --- vault-move (AC12): relocate to a different vault root ---------
-            if move_to:
-                dest_root = str(Path(move_to).expanduser())
-                if dest_root != location.vault_root:
-                    dest_location = record_store_mod.RecordLocation(
-                        vault_root=dest_root,
-                        kind=location.kind,
-                        name=location.name,
-                        record_id=location.record_id,
-                        body_path=Path(dest_root) / location.kind / f"{location.name}.md",
-                        sidecar_path=Path(dest_root) / location.kind / f"{location.name}.json",
-                    )
-                    new_id = record_store_mod.move_record(
-                        old_id=location.record_id,
-                        new_location=dest_location,
-                        conn=conn,
-                        old_vault_root=location.vault_root,
-                    )
+            moved_line: str | None = None
+            if same_vault:
+                # (4a) no move — normal in-place write (validates + stamps).
+                new_id = record_store_mod.validate_and_write(
+                    location=location, sidecar=sidecar, body=new_body, conn=conn,
+                )
+            else:
+                # (4b) validate + stamp + neutralize the mutated record IN MEMORY,
+                # then write it ONCE at the destination via move_record overrides —
+                # the mutated sidecar is NEVER written at the old location and then
+                # moved (single durable write at destination; re-review Critical-1).
+                stamped, safe_body = record_store_mod.validate_stamp_neutralize(
+                    location, sidecar, new_body
+                )
+                dest_location = record_store_mod.RecordLocation(
+                    vault_root=dest_root,
+                    kind=location.kind,
+                    name=location.name,
+                    record_id=location.record_id,  # ID is vault-root-agnostic
+                    body_path=Path(dest_root) / location.kind / f"{location.name}.md",
+                    sidecar_path=Path(dest_root) / location.kind / f"{location.name}.json",
+                )
+                new_id = record_store_mod.move_record(
+                    old_id=location.record_id,
+                    new_location=dest_location,
+                    conn=conn,
+                    old_vault_root=location.vault_root,
+                    new_sidecar=stamped,
+                    new_body=safe_body,
+                )
+                moved_line = f"moved: {location.record_id} → {new_id}"
 
             conn.commit()
         finally:
@@ -2425,6 +2470,11 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
         print(f"error: record update failed: {exc}", file=sys.stderr)
         return 1
 
+    # The relocation signal (re-review Critical-2 — no silent move) precedes the
+    # RECORD_ID so the existing stdout contract for the no-move case is unchanged
+    # (RECORD_ID stays the trailing parseable line); the moved case adds the signal.
+    if moved_line is not None:
+        print(moved_line)
     print(new_id)
     return 0
 
@@ -2674,18 +2724,26 @@ def build_parser() -> argparse.ArgumentParser:
              "(KU2). On any non-applying hunk the record is left byte-for-byte "
              "unmodified and the rejected hunks print to stderr (AC-DIFF1).",
     )
+    # Scope flags (Slice 3, dedicated-field-flags plan): dual field-setter +
+    # routing on update too. Each writes its namesake sidecar field AND re-resolves
+    # the destination vault from the merged scope; when the destination differs from
+    # the record's current vault the record is auto-moved (no manual --move-to).
     p_record_update.add_argument(
-        "--move-to", dest="move_to", default=None, metavar="VAULT",
-        help="Relocate the record to a different vault root via move_record "
-             "(AC12). The record physically moves and the new ID is printed.",
+        "--repo", default=None,
+        help="Set the repo scope; re-routes + auto-moves the record on a change.",
     )
-    # Routing flags (AC5, AC-ROUTE1): accepted for parity with create; the
-    # scope→different-vault routing trigger is S4's resolution (--move-to is the
-    # S2 hook that exercises the move primitive directly).
-    p_record_update.add_argument("--repo", default=None, help=argparse.SUPPRESS)
-    p_record_update.add_argument("--product", default=None, help=argparse.SUPPRESS)
-    p_record_update.add_argument("--suite", default=None, help=argparse.SUPPRESS)
-    p_record_update.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    p_record_update.add_argument(
+        "--product", default=None,
+        help="Set the product scope; re-routes + auto-moves the record on a change.",
+    )
+    p_record_update.add_argument(
+        "--suite", default=None,
+        help="Set the suite scope; re-routes + auto-moves the record on a change.",
+    )
+    p_record_update.add_argument(
+        "--team", default=None,
+        help="Set the team scope; re-routes + auto-moves the record on a change.",
+    )
     # ``--title`` is an optional setter on update (it is the required positional
     # on create); the rest of the per-field flags are shared.
     p_record_update.add_argument(

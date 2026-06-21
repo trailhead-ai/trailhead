@@ -516,6 +516,112 @@ def test_move_record_interrupted_keeps_old_intact(rs, conn, tmp_path, monkeypatc
 
 
 # ---------------------------------------------------------------------------
+# move_record — in-memory overrides (Slice 3: single durable write at dest)
+# ---------------------------------------------------------------------------
+
+def test_move_record_overrides_write_mutated_record_at_dest_only(rs, conn, tmp_path):
+    """``new_sidecar``/``new_body`` write the mutated record AT the destination only.
+
+    Slice 3 single-durable-write requirement (re-review Critical-1): the mutated
+    sidecar must NEVER appear at the old location, only at the destination. The
+    overrides bypass the verbatim disk re-read so the already-mutated record lands
+    at the destination directly.
+    """
+    src_vault = tmp_path / "vault-a"
+    dst_vault = tmp_path / "vault-b"
+    src_vault.mkdir()
+    dst_vault.mkdir()
+
+    loc = rs.place_record("My Spec", "spec", None, str(src_vault))
+    old_id = rs.validate_and_write(loc, _sidecar(team="alpha"), "old body", conn)
+    conn.commit()
+
+    new_loc = rs.place_record("My Spec", "spec", None, str(dst_vault))
+    # The caller (the update CLI handler) hands move_record an already
+    # validated + provenance-stamped sidecar; move_record writes it verbatim.
+    mutated = _sidecar(team="beta")
+    mutated["created-at"] = "2026-06-21T00:00:00Z"
+    mutated["created-by"] = "tester@example.com"
+    mutated["updated-at"] = "2026-06-21T00:00:01Z"
+    mutated["updated-by"] = "tester@example.com"
+    new_id = rs.move_record(
+        old_id, new_loc, conn,
+        old_vault_root=str(src_vault),
+        new_sidecar=mutated,
+        new_body="new body",
+    )
+    conn.commit()
+
+    # The destination holds the MUTATED record (the new value).
+    dst_sidecar = json.loads(
+        (dst_vault / "spec" / "my-spec.json").read_text(encoding="utf-8")
+    )
+    assert dst_sidecar["team"] == "beta"
+    assert (dst_vault / "spec" / "my-spec.md").read_text() == "new body"
+
+    # The mutated record never touched the old location — old artifacts are gone.
+    assert not (src_vault / "spec" / "my-spec.md").exists()
+    assert not (src_vault / "spec" / "my-spec.json").exists()
+    assert new_id == "spec/my-spec"
+
+
+def test_move_record_rejects_dest_outside_dest_vault_root(rs, conn, tmp_path):
+    """``move_record`` confines the DESTINATION to its declared vault root.
+
+    Slice 3 dest-confinement guard (re-review Important): a destination whose
+    realpath escapes the declared dest vault root is rejected
+    (``InvalidRecordIdError``), mirroring the existing source ``_confine_record_id``.
+    The library offers no guard if a direct caller hands it an unconfined dest;
+    this closes that.
+    """
+    src_vault = tmp_path / "vault-a"
+    dst_vault = tmp_path / "vault-b"
+    src_vault.mkdir()
+    dst_vault.mkdir()
+
+    loc = rs.place_record("My Spec", "spec", None, str(src_vault))
+    old_id = rs.validate_and_write(loc, _sidecar(), "body", conn)
+    conn.commit()
+
+    # A dest location whose paths point OUTSIDE the declared dest vault root.
+    outside_dir = tmp_path / "outside" / "spec"
+    outside_dir.mkdir(parents=True)
+    bad_loc = rs.RecordLocation(
+        vault_root=str(dst_vault),
+        kind="spec",
+        name="my-spec",
+        record_id="spec/my-spec",
+        body_path=outside_dir / "my-spec.md",
+        sidecar_path=outside_dir / "my-spec.json",
+    )
+
+    with pytest.raises(rs.InvalidRecordIdError):
+        rs.move_record(old_id, bad_loc, conn, old_vault_root=str(src_vault))
+
+    # Nothing written outside; the old record survives (move did not proceed).
+    assert not (outside_dir / "my-spec.md").exists()
+    assert (src_vault / "spec" / "my-spec.md").read_text() == "body"
+
+
+def test_realpath_is_descendant_guard(rs, tmp_path):
+    """``_realpath_is_descendant`` is the shared dest-confinement predicate.
+
+    True for the root itself and a strict descendant; False for a sibling sharing a
+    name prefix (the ``+ os.sep`` guard) and for a path that escapes via realpath.
+    """
+    root = tmp_path / "vault"
+    root.mkdir()
+    root_real = os.path.realpath(root)
+
+    assert rs._realpath_is_descendant(root, root_real)
+    assert rs._realpath_is_descendant(root / "spec" / "x.md", root_real)
+    # A sibling dir sharing a name prefix is NOT a descendant.
+    sibling = tmp_path / "vault2"
+    sibling.mkdir()
+    assert not rs._realpath_is_descendant(sibling / "x.md", root_real)
+
+
+# ---------------------------------------------------------------------------
 # delete_record
 # ---------------------------------------------------------------------------
 

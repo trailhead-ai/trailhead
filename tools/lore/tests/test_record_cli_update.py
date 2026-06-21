@@ -407,90 +407,239 @@ def test_update_invalid_record_id_nonzero(tmp_path):
 
 
 # ===========================================================================
-# CLI: vault-move via move_record (two injected vault roots; AC12)
+# CLI: automatic relocation on a scope change (Slice 3, dedicated-field-flags)
 # ===========================================================================
+#
+# ``--move-to`` is removed — relocation is an automatic byproduct of a scope-flag
+# change. The scope flags (--team/--suite/--product/--repo) on ``update`` are
+# field-setters that re-resolve the destination vault from the merged scope and
+# auto-move when it differs (compared on Path.resolve()-normalized roots). A move
+# prints a structured ``moved: <old id> → <new id>`` line to stdout (no silent
+# move); a no-op scope update prints only the normal RECORD_ID line.
 
-def test_update_vault_move_relocates_record(tmp_path):
-    """``--move-to`` relocates the record to a second vault; new ID returned.
+def _write_config(config_home: Path, vaults: list[dict]) -> Path:
+    """Write a lore ``config.json`` under XDG_CONFIG_HOME/lore for routed-vault tests."""
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    cfg_path = lore_cfg / "config.json"
+    cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
+    return cfg_path
 
-    In S2 the move *primitive* is exercised by injecting a second vault root; the
-    scope→different-vault routing trigger is S4's resolution (noted, not built).
-    """
-    vault, state = _make_vault(tmp_path)
-    vault2 = tmp_path / "vault2"
-    vault2.mkdir(parents=True, exist_ok=True)
 
-    body = "movable body\n"
-    record_id = _create(vault, state, body=body)
-    kind, name = record_id.split("/", 1)
+def _run_cfg(args, *, vault, state, config_home, stdin_text=None):
+    """Run the CLI with an explicit XDG_CONFIG_HOME so config-driven routing fires."""
+    return _run(
+        args, vault=vault, state_dir=state, stdin_text=stdin_text,
+        env_extra={"XDG_CONFIG_HOME": str(config_home)},
+    )
 
-    r = _run(
-        ["record", "update", record_id, "--move-to", str(vault2)],
-        vault=vault, state_dir=state,
+
+def _two_team_config(tmp_path):
+    """Active vault A (default + team:alpha) and vault B (team:beta), with config."""
+    vault_a, state = _make_vault(tmp_path)
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(config_home, [
+        {"name": "default", "scope": "default", "path": str(vault_a)},
+        {"name": "alpha", "scope": "team", "records": ["decision"], "path": str(vault_a)},
+        {"name": "beta", "scope": "team", "records": ["decision"], "path": str(vault_b)},
+    ])
+    return vault_a, vault_b, state, config_home
+
+
+def _create_routed(vault_a, state, config_home, *, scope_args=()):
+    """Create a decision record in vault A (optionally with scope flags)."""
+    args = ["record", "create", "--kind", "decision", "--title", "T", "--keyword", "k", *scope_args]
+    r = _run_cfg(args, vault=vault_a, state=state, config_home=config_home, stdin_text="orig body\n")
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_update_scope_change_auto_moves_to_routed_vault(tmp_path):
+    """``update --team beta`` moves both artifacts to B; index re-keyed; stdout moved:."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
+    assert _find_sidecar(vault_a, rid)["team"] == "alpha"
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
     )
     assert r.returncode == 0, r.stderr
-    new_id = r.stdout.strip()
 
-    # New artifacts under the second vault.
-    assert (vault2 / kind / f"{name}.md").exists()
-    assert (vault2 / kind / f"{name}.json").exists()
-    assert _find_body(vault2, new_id) == body
+    # Both artifacts under B, gone from A.
+    assert (vault_b / kind / f"{name}.md").exists()
+    assert (vault_b / kind / f"{name}.json").exists()
+    assert not (vault_a / kind / f"{name}.md").exists()
+    assert not (vault_a / kind / f"{name}.json").exists()
 
-    # Old copy gone from the first vault.
-    assert not (vault / kind / f"{name}.md").exists()
-    assert not (vault / kind / f"{name}.json").exists()
+    # The moved sidecar carries the NEW value.
+    assert _find_sidecar(vault_b, rid)["team"] == "beta"
 
-    # Index re-keyed: old vault row gone, new vault row present.
-    assert _index_rows(state, vault, kind, name) == []
-    assert len(_index_rows(state, vault2, kind, name)) == 1
+    # Index resolves the new vault, not the old — no stale row, no orphan.
+    assert _index_rows(state, vault_a, kind, name) == []
+    assert len(_index_rows(state, vault_b, kind, name)) == 1
+
+    # Structured stdout signal — no silent move (re-review Critical-2).
+    assert f"moved: {rid} →" in r.stdout
 
 
-def test_update_crash_simulated_move_then_reindex_leaves_one_copy(tmp_path):
-    """A crash-simulated move (old copy stranded) + ``reindex`` leaves only the new copy.
+def test_update_no_scope_change_stays_in_place_no_moved_line(tmp_path):
+    """``update --status …`` (no scope flag) stays in A, prints no moved: line."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
 
-    Simulates the move_record stranded-duplicate window: the new copy is durable
-    and indexed, but the old artifacts linger. ``lore reindex`` over both vaults
-    must reconcile to exactly the new copy's row.
-    """
-    vault, state = _make_vault(tmp_path)
-    vault2 = tmp_path / "vault2"
-    vault2.mkdir(parents=True, exist_ok=True)
-
-    body = "stranded body\n"
-    record_id = _create(vault, state, body=body)
-    kind, name = record_id.split("/", 1)
-
-    # Perform the move normally (new copy under vault2, old removed).
-    r = _run(
-        ["record", "update", record_id, "--move-to", str(vault2)],
-        vault=vault, state_dir=state,
+    r = _run_cfg(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
     )
     assert r.returncode == 0, r.stderr
 
-    # Simulate the crash window: re-strand the old artifacts on disk (as if the
-    # delete-old step never ran), leaving a duplicate body+sidecar in vault1.
-    (vault / kind).mkdir(parents=True, exist_ok=True)
-    (vault / kind / f"{name}.md").write_text(body, encoding="utf-8")
-    (vault / kind / f"{name}.json").write_text(
-        (vault2 / kind / f"{name}.json").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
+    assert (vault_a / kind / f"{name}.md").exists()
+    assert not (vault_b / kind / f"{name}.md").exists()
+    assert _find_sidecar(vault_a, rid)["status"] == "superseded"
+    assert "moved:" not in r.stdout
+    assert "moved:" not in r.stderr
 
-    # reindex over BOTH vaults; the stranded copy in vault1 is reconciled away
-    # only when reindex is scoped to vault2 (the active vault). Reindex vault2.
-    r_idx = _run(
-        ["reindex", "--vault", str(vault2)],
-        vault=vault2, state_dir=state,
-    )
-    assert r_idx.returncode == 0, r_idx.stderr
 
-    # AC12 self-healing: reindex reconciles the index to EXACTLY the new copy.
-    # The new copy's row exists...
-    assert len(_index_rows(state, vault2, kind, name)) == 1
-    # ...and the stranded old copy no longer resolves in the index (reindex is
-    # index-only — the orphaned vault1 disk artifacts are harmless and not
-    # re-indexed because vault1 is outside the reindex scope).
-    assert _index_rows(state, vault, kind, name) == []
+def test_update_same_scope_is_noop_with_symlinked_vault_root(tmp_path):
+    """``update --team alpha`` on a record already in A is a no-op (normalized-path eq).
+
+    A symlinked alias of vault A's root is in play so a symlink/trailing-slash
+    mismatch never triggers a spurious self-move (re-review Important).
+    """
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
+    body_before = (vault_a / kind / f"{name}.md").read_text()
+
+    symlinked = tmp_path / "vault_a_symlink"
+    symlinked.symlink_to(vault_a, target_is_directory=True)
+    assert Path(symlinked).resolve() == Path(vault_a).resolve()
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "alpha"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_a / kind / f"{name}.md").read_text() == body_before
+    assert not (vault_b / kind / f"{name}.md").exists()
+    assert "moved:" not in r.stdout
+
+
+def test_update_zero_prior_scope_resolves_fresh_and_moves(tmp_path):
+    """A record with no team field + ``--team beta`` resolves fresh and moves to B."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=())  # no scope → default (A)
+    kind, name = rid.split("/", 1)
+    assert "team" not in _find_sidecar(vault_a, rid)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_b / kind / f"{name}.json").exists()
+    assert not (vault_a / kind / f"{name}.json").exists()
+    assert _find_sidecar(vault_b, rid)["team"] == "beta"
+    assert f"moved: {rid} →" in r.stdout
+
+
+def test_update_scope_change_is_idempotent(tmp_path):
+    """Re-running ``update --team beta`` on a record already in B is a clean no-op."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
+
+    r1 = _run_cfg(["record", "update", rid, "--team", "beta"],
+                  vault=vault_a, state=state, config_home=config_home, stdin_text="")
+    assert r1.returncode == 0, r1.stderr
+    assert "moved:" in r1.stdout
+
+    r2 = _run_cfg(["record", "update", rid, "--team", "beta"],
+                  vault=vault_a, state=state, config_home=config_home, stdin_text="")
+    assert r2.returncode == 0, r2.stderr
+    assert "moved:" not in r2.stdout  # already in B — no double-move
+    assert (vault_b / kind / f"{name}.json").exists()
+    assert _find_sidecar(vault_b, rid)["team"] == "beta"
+    assert len(_index_rows(state, vault_b, kind, name)) == 1
+
+
+def test_update_scope_change_single_durable_write_at_destination(tmp_path):
+    """The mutated ``team: beta`` sidecar only ever appears under B (crash-safety shape)."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    # A holds NOTHING — the mutated sidecar was never written there then moved.
+    assert not (vault_a / kind / f"{name}.json").exists()
+    assert _find_sidecar(vault_b, rid)["team"] == "beta"
+
+
+def test_update_scope_change_field_equals_vault_invariant(tmp_path):
+    """After a scope-changing update the persisted scope field == the vault it lives in."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    # beta routes to vault_b, and the persisted field is beta.
+    assert _find_sidecar(vault_b, rid)["team"] == "beta"
+
+
+def test_update_scope_change_restamps_updated_preserves_created(tmp_path):
+    """A moved record's ``updated-*`` is re-stamped fresh; ``created-*`` preserved.
+
+    Finding KU-2 #4: move_record writes verbatim, so the auto-move path must stamp
+    via the shared helper BEFORE the write — the moved sidecar must carry fresh
+    ``updated-*`` and the original ``created-*``, not stale/missing provenance.
+    """
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    created_before = _find_sidecar(vault_a, rid)["created-at"]
+
+    import time
+    time.sleep(1.1)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    moved = _find_sidecar(vault_b, rid)
+    assert moved["created-at"] == created_before          # created-* preserved
+    assert moved["updated-at"] != created_before          # updated-* re-stamped
+    assert moved["updated-by"]                              # present, non-empty
+
+
+def test_update_move_to_flag_is_removed(tmp_path):
+    """``--move-to`` is gone — passing it exits non-zero (argparse unrecognized)."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state, body="body\n")
+    other = tmp_path / "other"
+    other.mkdir()
+
+    r = _run(
+        ["record", "update", record_id, "--move-to", str(other)],
+        vault=vault, state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "move-to" in r.stderr or "unrecognized" in r.stderr.lower()
 
 
 # ===========================================================================

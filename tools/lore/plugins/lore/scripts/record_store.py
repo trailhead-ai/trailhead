@@ -661,34 +661,28 @@ def update_index(
 # ---------------------------------------------------------------------------
 
 
-def validate_and_write(
+def validate_stamp_neutralize(
     location: RecordLocation,
     sidecar: dict[str, Any],
     body: str,
-    conn,
-    shared: int = 0,
-) -> RecordId:
-    """Validate, stamp provenance, and durably write a record (AC-TX1/LIB3).
+) -> tuple[dict[str, Any], str]:
+    """Validate + provenance-stamp the sidecar and neutralize the body's fences.
 
-    Pipeline (text-wins / index-derived):
+    The shared pre-write step (Slice 3) factored out of :func:`validate_and_write`
+    so the in-place write path and the override-move write path stamp + neutralize
+    **identically** (finding KU-2 #4): :func:`move_record` writes its overrides
+    VERBATIM (it does NOT stamp or neutralize), so the auto-move update path runs
+    this first and hands the result to ``move_record``. Steps:
+
       1. Validate via S1 ``record_model.validate``; non-empty errors →
-         :class:`RecordValidationError`, **nothing written**.
-      2. Resolve the committer email; empty → :class:`ProvenanceError` (KU4),
-         **nothing written**.
+         :class:`RecordValidationError`, returns nothing.
+      2. Resolve the committer email; empty → :class:`ProvenanceError` (KU4).
       3. Stamp provenance on the (normalized) sidecar: ``created-at``/``-by`` set
-         once (preserved if already present on rewrite), ``updated-at``/``-by``
-         re-stamped every write.
+         once (preserved if already present on rewrite, recovered from the on-disk
+         sidecar at ``location`` otherwise), ``updated-at``/``-by`` re-stamped.
       4. Neutralize ``<external-memory>`` fences in the body (AC-FENCE1).
-      5. Atomically write body then sidecar (write-temp-then-rename).
-      6. Update the index with the resolved vault's ``shared`` trust flag (S4 —
-         default 0/own preserves vanilla). **If this raises, the text is already
-         durable and wins** (AC-TX2) — we do not roll back; the exception propagates.
 
-    ``shared`` is the trust flag for the destination vault (0 = own/trusted, 1 =
-    untrusted/shared). The caller (the CLI) computes it from
-    ``vault_config.is_shared(resolved_vault)`` when a config is present, else 0.
-
-    Returns the vault-relative ``RecordId``.
+    Returns ``(stamped_sidecar, safe_body)``.
     """
     # 1 — validation (pure; never raises).
     result = record_model.validate(sidecar, kind=location.kind)
@@ -718,6 +712,35 @@ def validate_and_write(
 
     # 4 — fence neutralization (structural backstop).
     safe_body = neutralize_fences(body)
+    return stamped, safe_body
+
+
+def validate_and_write(
+    location: RecordLocation,
+    sidecar: dict[str, Any],
+    body: str,
+    conn,
+    shared: int = 0,
+) -> RecordId:
+    """Validate, stamp provenance, and durably write a record (AC-TX1/LIB3).
+
+    Pipeline (text-wins / index-derived):
+      1-4. Validate + stamp provenance + neutralize fences via
+         :func:`validate_stamp_neutralize` (the shared pre-write step). Non-empty
+         validation errors → :class:`RecordValidationError`, an empty committer
+         email → :class:`ProvenanceError` (KU4) — **nothing written** in either case.
+      5. Atomically write body then sidecar (write-temp-then-rename).
+      6. Update the index with the resolved vault's ``shared`` trust flag (S4 —
+         default 0/own preserves vanilla). **If this raises, the text is already
+         durable and wins** (AC-TX2) — we do not roll back; the exception propagates.
+
+    ``shared`` is the trust flag for the destination vault (0 = own/trusted, 1 =
+    untrusted/shared). The caller (the CLI) computes it from
+    ``vault_config.is_shared(resolved_vault)`` when a config is present, else 0.
+
+    Returns the vault-relative ``RecordId``.
+    """
+    stamped, safe_body = validate_stamp_neutralize(location, sidecar, body)
 
     # 5 — durable text first (atomic). Body before sidecar; both atomic.
     # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
@@ -747,6 +770,8 @@ def move_record(
     new_location: RecordLocation,
     conn,
     old_vault_root: str | None = None,
+    new_sidecar: dict | None = None,
+    new_body: str | None = None,
 ) -> RecordId:
     """Relocate a record to a new vault/path (AC-LIB3 / AC12).
 
@@ -755,29 +780,61 @@ def move_record(
     leaves a stranded old artifact whose ID the index no longer resolves — no data
     loss (the new copy is durable + indexed), self-healing via ``lore reindex``.
 
-    Reads the old body+sidecar, writes them atomically under *new_location*,
-    repoints the index (delete old row → upsert new row), then deletes the old
-    artifacts. Returns the new ``RecordId``.
+    By default the old body+sidecar are read verbatim and written atomically under
+    *new_location*. **In-memory overrides (Slice 3)** — ``new_sidecar`` /
+    ``new_body`` — write the *already-mutated, validated, provenance-stamped* record
+    AT the destination instead of re-reading the old disk. This is the
+    single-durable-write-at-destination requirement (re-review Critical-1): a
+    scope-changing ``record update`` stamps + validates the mutated sidecar in
+    memory, then moves it here, so the mutated sidecar (e.g. ``team: beta``) is
+    NEVER written at the old location and then relocated. The overrides are written
+    VERBATIM — provenance stamping and fence neutralization live in
+    :func:`validate_and_write` (and its shared helper), so the caller MUST have
+    already stamped/neutralized before passing them here.
 
-    ``old_id`` is confined via :func:`_confine_record_id` so a direct library
-    caller (e.g. S7 migration) cannot read/unlink ``.md``/``.json`` files outside
-    the source vault — every RECORD_ID-bearing op is guarded at the boundary.
+    Both endpoints are confined at the library boundary: ``old_id`` via
+    :func:`_confine_record_id` (a direct caller cannot read/unlink ``.md``/``.json``
+    outside the source vault), and *new_location*'s paths via
+    :func:`_realpath_is_descendant` against the declared dest vault root, so a
+    destination that escapes its vault root is rejected before any write
+    (re-review Important — the destination was previously trusted from the caller).
+
+    Returns the new ``RecordId``.
     """
     old_root = old_vault_root if old_vault_root is not None else vault_mod.resolve_vault()
     old_kind, old_name, old_body_path, old_sidecar_path = _confine_record_id(
         old_id, old_root
     )
 
+    # Dest-confinement (Slice 3): the destination paths must be descendants of the
+    # declared dest vault root (mirrors the source-side _confine_record_id guard).
+    dest_root_real = os.path.realpath(new_location.vault_root)
+    for p in (new_location.body_path, new_location.sidecar_path):
+        if not _realpath_is_descendant(p, dest_root_real):
+            raise InvalidRecordIdError(
+                f"destination resolves outside the dest vault root: "
+                f"{new_location.record_id!r}"
+            )
+
     if not old_body_path.exists() and not old_sidecar_path.exists():
         raise RecordNotFoundError(f"record not found: {old_id}")
 
-    body = old_body_path.read_text(encoding="utf-8") if old_body_path.exists() else ""
-    sidecar_text = (
-        old_sidecar_path.read_text(encoding="utf-8")
-        if old_sidecar_path.exists()
-        else "{}"
-    )
-    sidecar = json.loads(sidecar_text)
+    # In-memory overrides write the already-mutated record at the destination;
+    # otherwise the old disk is re-read verbatim.
+    if new_body is not None:
+        body = new_body
+    else:
+        body = old_body_path.read_text(encoding="utf-8") if old_body_path.exists() else ""
+    if new_sidecar is not None:
+        sidecar = new_sidecar
+        sidecar_text = json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
+    else:
+        sidecar_text = (
+            old_sidecar_path.read_text(encoding="utf-8")
+            if old_sidecar_path.exists()
+            else "{}"
+        )
+        sidecar = json.loads(sidecar_text)
 
     # copy-new (atomic).
     write_temp_then_rename(new_location.body_path, body)

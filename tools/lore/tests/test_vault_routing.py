@@ -372,39 +372,13 @@ def test_stale_config_index_surfaces_freshness_warning(tmp_path):
 # ---------------------------------------------------------------------------
 # Deliverable 6: orphan-ID guard
 # ---------------------------------------------------------------------------
-
-def test_update_in_unconfigured_vault_errors(tmp_path):
-    """``lore record update`` for a record whose vault is no longer configured →
-    clear non-zero 'vault not configured' error."""
-    vault, state = _make_vault(tmp_path)
-    config_home = tmp_path / "config"
-    vaults = _spec_config_vaults(state)
-    cfg_path = _write_config(config_home, vaults)
-
-    # Create a record in the team vault.
-    r = _run_with_config(
-        ["record", "create", "--kind", "blob", "--title", "Grape",
-         "--keyword", "foo", "--team", "product-engineering"],
-        vault=vault, state=state, config_home=config_home, stdin_text="x\n",
-    )
-    assert r.returncode == 0, r.stderr
-    record_id = r.stdout.strip()
-
-    # Remove the team vault from config.
-    vaults = [v for v in vaults if v["name"] != "product-engineering"]
-    cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
-
-    # Update targeting the now-orphaned vault.
-    r2 = _run_with_config(
-        ["record", "update", record_id, "--keyword", "bar",
-         "--move-to", _vault_path(state, "product-engineering")],
-        vault=Path(_vault_path(state, "product-engineering")),
-        state=state, config_home=config_home,
-        stdin_text="new body\n",
-    )
-    assert r2.returncode != 0
-    assert "not currently configured" in (r2.stdout + r2.stderr)
-
+#
+# The ``record update --move-to`` orphan-guard test was removed with the
+# ``--move-to`` flag (Slice 3, dedicated-field-flags plan): relocation is now an
+# automatic byproduct of a scope-flag change and the destination is only ever a
+# config-declared vault root (resolved via the create-side resolver), so the
+# explicit-unconfigured-destination path the guard protected no longer exists.
+# The ``delete`` orphan path below is unaffected and stays.
 
 def test_delete_in_removed_vault_is_unreachable(tmp_path):
     """``lore record delete`` after the record's vault was removed from config.
