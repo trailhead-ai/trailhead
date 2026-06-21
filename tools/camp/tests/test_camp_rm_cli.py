@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -283,4 +284,247 @@ class TestCampRmInvokesReconcileBreak:
         ), (
             f"camp rm should surface the LegacyLayoutError from reconcile_break.\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: best-effort `lore finish` in `camp rm` teardown.
+#
+# reconcile_break() runs `lore finish --worktree <slug>` (cwd=ws_dir) after the
+# confinement pre-check and before the member-removal loop. Failures NEVER raise
+# and NEVER gate path removal. Three outcome branches, each with distinct
+# operator feedback (FileNotFoundError / non-zero exit / exit-0 finalize).
+#
+# Fixture discipline (per plan): the happy path needs a REAL lore + vault so the
+# note actually transitions; the failure cases inject a fake `lore` shim on PATH.
+# The two paths are kept separate so a stub never bleeds into the happy-path
+# assertion.
+# ---------------------------------------------------------------------------
+
+_LORE_CLI = (
+    _REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
+)
+
+
+def _git_vault(tmp_path: Path) -> Path:
+    """Create a minimal git-backed lore vault (commit.gpgsign=false for a
+    deterministic test commit — mirrors tools/lore/tests/test_finalize.py)."""
+    vault = tmp_path / "lore-vault"
+    (vault / "sessions").mkdir(parents=True)
+    subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.name", "Tester"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
+                   check=True, capture_output=True)
+    return vault
+
+
+def _seed_camp_session_note(vault: Path, slug: str, *, status: str = "active") -> Path:
+    """Write a camp-shaped session note whose worktree-name == slug (KU-1)."""
+    sessions_dir = vault / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    note = sessions_dir / f"2026-06-21-1200-{slug}.md"
+    note.write_text(
+        f"---\n"
+        f"type: session\n"
+        f"project: test-project\n"
+        f"worktree: {slug}\n"
+        f"branch: worktree-{slug}\n"
+        f"started: 2026-06-21T12:00:00Z\n"
+        f"ended:\n"
+        f"areas: []\n"
+        f"phase: Orient\n"
+        f"session_id:\n"
+        f"status: {status}\n"
+        f"---\n\n"
+        f"# Session: {slug}\n\n"
+        f"## What we did\n\n"
+        f"## Decided\n\n"
+        f"## Learned\n\n"
+        f"## Open questions\n"
+    )
+    return note
+
+
+def _parse_frontmatter(note: Path) -> dict:
+    text = note.read_text()
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end < 0:
+        return {}
+    fm: dict = {}
+    for line in text[4:end].splitlines():
+        if ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        fm[key.strip()] = val.strip()
+    return fm
+
+
+def _real_lore_env(tmp_path: Path, vault: Path) -> dict[str, str]:
+    """Env additions so the `camp rm` subprocess resolves a REAL `lore` against
+    `vault`. Prepends a PATH dir holding a `lore` shim that execs the lore CLI."""
+    bindir = tmp_path / "lore-bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    shim = bindir / "lore"
+    shim.write_text(
+        "#!/bin/sh\n"
+        f'exec "{sys.executable}" "{_LORE_CLI}" "$@"\n'
+    )
+    shim.chmod(0o755)
+    return {
+        "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", ""),
+        "LORE_VAULT": str(vault),
+        "XDG_STATE_HOME": str(tmp_path / "lore-state"),
+        "XDG_CONFIG_HOME": str(tmp_path / "lore-config"),
+        "LORE_EMAIL": "tester@example.com",
+    }
+
+
+def _stub_lore_env(tmp_path: Path, *, exit_code: int, stderr: str) -> dict[str, str]:
+    """Env additions so the `camp rm` subprocess resolves a STUB `lore` that
+    exits with `exit_code` and writes `stderr` to its stderr."""
+    bindir = tmp_path / "lore-stub-bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    shim = bindir / "lore"
+    shim.write_text(
+        "#!/bin/sh\n"
+        f'echo "{stderr}" 1>&2\n'
+        f"exit {exit_code}\n"
+    )
+    shim.chmod(0o755)
+    return {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+
+
+def _absent_lore_env(tmp_path: Path) -> dict[str, str]:
+    """Env additions so the `camp rm` subprocess finds NO `lore` on PATH (so the
+    subprocess.run call raises FileNotFoundError) while `git` stays resolvable.
+
+    A real `lore` may be installed on the developer's PATH, so we cannot just
+    inherit it — that would run the real CLI against a real vault (Axiom 6).
+    Instead PATH is a dedicated bindir holding only a `git` symlink: `lore` is
+    genuinely absent, `git` (the one other binary reconcile shells out to) works.
+    """
+    bindir = tmp_path / "git-only-bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    git_real = shutil.which("git")
+    assert git_real, "git must be available for the teardown to run"
+    (bindir / "git").symlink_to(git_real)
+    return {"PATH": str(bindir)}
+
+
+class TestCampRmFinalizesLoreSession:
+    """Slice 1 — camp rm finalizes the workspace's active lore session note."""
+
+    def test_happy_path_finalizes_note_and_confirms(self, rm_env):
+        """Real finalize: an active session note transitions to complete with an
+        ended: timestamp, and camp rm emits the confirmation."""
+        tmp_path = rm_env["tmp_path"]
+        vault = _git_vault(tmp_path)
+        note = _seed_camp_session_note(vault, "ws-slug")
+        assert _parse_frontmatter(note)["status"] == "active"
+
+        r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup",
+                  extra_env=_real_lore_env(tmp_path, vault))
+
+        assert r.returncode == 0, (
+            f"camp rm should exit 0.\nstdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        fm = _parse_frontmatter(note)
+        assert fm.get("status") == "complete", (
+            f"note should transition to complete.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}\n{note.read_text()}"
+        )
+        assert fm.get("ended", ""), "note should get a non-empty ended: timestamp"
+        combined = r.stdout + r.stderr
+        assert "finalized session note" in combined.lower(), (
+            f"camp rm should confirm the finalize.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+
+    def test_no_active_note_is_silent(self, rm_env):
+        """A workspace whose note is already finished: exit 0, worktree removed,
+        no warning, and NO finalize confirmation (silent)."""
+        tmp_path = rm_env["tmp_path"]
+        vault = _git_vault(tmp_path)
+        _seed_camp_session_note(vault, "ws-slug", status="complete")
+
+        r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup",
+                  extra_env=_real_lore_env(tmp_path, vault))
+
+        assert r.returncode == 0, (
+            f"camp rm should exit 0.\nstdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert not _manifest_path(rm_env).exists(), "manifest should be removed"
+        combined = (r.stdout + r.stderr).lower()
+        assert "finalized session note" not in combined, (
+            f"no confirmation when nothing was finalized.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert "warning" not in combined, (
+            f"no warning when there is simply no active note.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+
+    def test_nonzero_exit_warns_and_teardown_completes(self, rm_env):
+        """lore finish exiting non-zero: camp rm logs the failure warning and
+        STILL removes the worktree + manifest (failure not appended to errors)."""
+        tmp_path = rm_env["tmp_path"]
+        r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup",
+                  extra_env=_stub_lore_env(tmp_path, exit_code=3,
+                                           stderr="boom from lore"))
+
+        assert r.returncode == 0, (
+            f"teardown must complete despite lore failure.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert not _manifest_path(rm_env).exists(), "manifest should be removed"
+        assert not rm_env["ws_dir"].exists(), "workspace dir should be removed"
+        combined = r.stdout + r.stderr
+        assert "lore finish failed (exit 3)" in combined, (
+            f"camp rm should warn with the exit code.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+
+    def test_lore_absent_warns_and_teardown_completes(self, rm_env):
+        """lore not on PATH (FileNotFoundError): camp rm logs the not-found
+        warning and STILL removes the worktree + manifest."""
+        tmp_path = rm_env["tmp_path"]
+        r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup",
+                  extra_env=_absent_lore_env(tmp_path))
+
+        assert r.returncode == 0, (
+            f"teardown must complete when lore is absent.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert not _manifest_path(rm_env).exists(), "manifest should be removed"
+        assert not rm_env["ws_dir"].exists(), "workspace dir should be removed"
+        combined = r.stdout + r.stderr
+        assert "lore not found on PATH" in combined, (
+            f"camp rm should warn that lore is absent.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+
+    def test_finalize_runs_before_path_removal(self, rm_env):
+        """Ordering: finalize runs while ws_dir still exists, so the note ends up
+        complete even though the worktree is gone afterward (load-bearing
+        end-state assertion). Confinement preserved: only the workspace dir is
+        removed."""
+        tmp_path = rm_env["tmp_path"]
+        vault = _git_vault(tmp_path)
+        note = _seed_camp_session_note(vault, "ws-slug")
+
+        r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup",
+                  extra_env=_real_lore_env(tmp_path, vault))
+
+        assert r.returncode == 0, (
+            f"camp rm should exit 0.\nstdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert not rm_env["ws_dir"].exists(), "workspace dir should be removed"
+        assert _parse_frontmatter(note).get("status") == "complete", (
+            "note must be finalized even though the worktree is now gone "
+            "(proves finalize ran before path removal)"
         )
