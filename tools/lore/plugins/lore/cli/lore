@@ -1034,10 +1034,6 @@ def cmd_finish(args: argparse.Namespace) -> int:
     commits the session note (plus its sidecar) in ONE commit (explicit paths
     only — unrelated dirty vault files are not swept in). If no active session
     note is found, prints a notice and exits 0.
-
-    The harvest-expansion flow is retired (S6 Slice 1): `lore finish` no longer
-    reads `harvest-pending.md`, expands `## Harvest candidates`, surfaces
-    `gotcha` entries, or creates kind-notes.
     """
     vault = Path(vault_mod.resolve_vault())
     session_id = _session_id_from_args_or_env(args)

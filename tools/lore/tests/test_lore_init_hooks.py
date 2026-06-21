@@ -110,11 +110,18 @@ class TestHooksJson:
             "hooks.json still has a WorktreeRemove entry"
         )
 
-    def test_hooks_json_retains_post_tool_use(self):
-        """PostToolUse harvest entry must remain in hooks.json (S6 owns it)."""
+    def test_hooks_json_has_no_post_tool_use(self):
+        """PostToolUse harvest entry must be absent from hooks.json.
+
+        lore-agent-interface Slice 1 retired the harvest hook — lore installs
+        zero push hooks. hooks.json carries an empty hooks dict.
+        """
         data = json.loads(HOOKS_JSON.read_text())
         hooks = data.get("hooks", {})
-        assert "PostToolUse" in hooks, "hooks.json lost the PostToolUse entry"
+        assert "PostToolUse" not in hooks, (
+            "hooks.json still has a PostToolUse entry — harvest hook was deleted "
+            "(lore-agent-interface Slice 1)"
+        )
 
 
 # ---------------------------------------------------------------------------
