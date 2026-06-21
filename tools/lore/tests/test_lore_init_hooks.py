@@ -40,11 +40,12 @@ from conftest import load_script  # noqa: E402
 # Harness
 # ---------------------------------------------------------------------------
 
-def _run(args, *, state, config, cwd=None, extra=None):
-    """Run lore CLI with isolated XDG dirs."""
+def _run(args, *, state, config, home, cwd=None, extra=None):
+    """Run lore CLI with isolated XDG dirs and an isolated HOME (Axiom 6)."""
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CONFIG_HOME"] = str(config)
+    env["HOME"] = str(home)
     env["LORE_EMAIL"] = "tester@example.com"
     if extra:
         env.update(extra)
@@ -60,9 +61,10 @@ def _run(args, *, state, config, cwd=None, extra=None):
 def _dirs(tmp_path):
     state = tmp_path / "state"
     config = tmp_path / "config"
-    state.mkdir(parents=True, exist_ok=True)
-    config.mkdir(parents=True, exist_ok=True)
-    return state, config
+    home = tmp_path / "home"
+    for d in (state, config, home):
+        d.mkdir(parents=True, exist_ok=True)
+    return state, config, home
 
 
 # ---------------------------------------------------------------------------
@@ -290,11 +292,11 @@ class TestSettingsWriter:
 class TestInitInstallsNoHooks:
     def test_init_writes_no_session_start_hook(self, tmp_path):
         """After lore init, settings.json must have no SessionStart entry."""
-        state, config = _dirs(tmp_path)
-        res = _run(["init"], state=state, config=config)
+        state, config, home = _dirs(tmp_path)
+        res = _run(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        settings_path = Path.home() / ".claude" / "settings.json"
+        settings_path = home / ".claude" / "settings.json"
         if not settings_path.exists():
             return  # no settings file written at all → no hooks installed
         data = json.loads(settings_path.read_text())
@@ -308,11 +310,11 @@ class TestInitInstallsNoHooks:
 
     def test_init_writes_no_worktree_remove_hook(self, tmp_path):
         """After lore init, settings.json must have no WorktreeRemove/finalize entry."""
-        state, config = _dirs(tmp_path)
-        res = _run(["init"], state=state, config=config)
+        state, config, home = _dirs(tmp_path)
+        res = _run(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
-        settings_path = Path.home() / ".claude" / "settings.json"
+        settings_path = home / ".claude" / "settings.json"
         if not settings_path.exists():
             return
         data = json.loads(settings_path.read_text())
@@ -324,59 +326,12 @@ class TestInitInstallsNoHooks:
                     f"lore init installed a WorktreeRemove hook: {cmd!r}"
                 )
 
-    def test_local_init_writes_no_session_start_hook(self, tmp_path):
-        """lore init --local must write no SessionStart hook into settings.local.json."""
-        state, config = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-
-        res = _run(["init", "--local"], state=state, config=config, cwd=repo)
-        assert res.returncode == 0, res.stderr
-
-        settings_path = repo / ".claude" / "settings.local.json"
-        if not settings_path.exists():
-            return
-        data = json.loads(settings_path.read_text())
-        session_start = data.get("hooks", {}).get("SessionStart", [])
-        for entry in session_start:
-            for h in entry.get("hooks", []):
-                cmd = h.get("command", "")
-                assert "lore" not in cmd.lower(), (
-                    f"lore init --local installed a SessionStart hook: {cmd!r}"
-                )
-
-    def test_local_init_writes_no_worktree_remove_hook(self, tmp_path):
-        """lore init --local must write no WorktreeRemove hook into settings.local.json."""
-        state, config = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-
-        res = _run(["init", "--local"], state=state, config=config, cwd=repo)
-        assert res.returncode == 0, res.stderr
-
-        settings_path = repo / ".claude" / "settings.local.json"
-        if not settings_path.exists():
-            return
-        data = json.loads(settings_path.read_text())
-        wtr = data.get("hooks", {}).get("WorktreeRemove", [])
-        for entry in wtr:
-            for h in entry.get("hooks", []):
-                cmd = h.get("command", "")
-                assert "lore" not in cmd.lower() and "finalize" not in cmd.lower(), (
-                    f"lore init --local installed a WorktreeRemove hook: {cmd!r}"
-                )
-
     def test_init_preserves_unrelated_existing_hook(self, tmp_path):
         """lore init must not remove a pre-existing unrelated hook from settings.json."""
-        state, config = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        state, config, home = _dirs(tmp_path)
 
-        # Pre-populate settings.local.json with an unrelated hook
-        settings_path = repo / ".claude" / "settings.local.json"
+        # Pre-populate the user-global settings.json with an unrelated hook.
+        settings_path = home / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         pre_existing = {
             "hooks": {
@@ -388,36 +343,27 @@ class TestInitInstallsNoHooks:
         }
         settings_path.write_text(json.dumps(pre_existing))
 
-        res = _run(["init", "--local"], state=state, config=config, cwd=repo)
+        res = _run(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
         data = json.loads(settings_path.read_text())
         pre = data.get("hooks", {}).get("PreToolUse", [])
         cmds = [h.get("command") for e in pre for h in e.get("hooks", [])]
         assert "unrelated-guard.py" in cmds, (
-            "lore init removed an unrelated PreToolUse hook from settings.local.json"
+            "lore init removed an unrelated PreToolUse hook from settings.json"
         )
 
     def test_init_rerun_is_noop(self, tmp_path):
-        """Second lore init produces an identical settings.local.json (no-op)."""
-        state, config = _dirs(tmp_path)
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+        """Second lore init produces an identical settings.json (no-op)."""
+        state, config, home = _dirs(tmp_path)
 
-        settings_path = repo / ".claude" / "settings.local.json"
-        _run(["init", "--local"], state=state, config=config, cwd=repo)
-        if settings_path.exists():
-            after_first = settings_path.read_text()
-        else:
-            after_first = None
+        settings_path = home / ".claude" / "settings.json"
+        _run(["init"], state=state, config=config, home=home)
+        after_first = settings_path.read_text() if settings_path.exists() else None
 
-        _run(["init", "--local"], state=state, config=config, cwd=repo)
-        if settings_path.exists():
-            after_second = settings_path.read_text()
-        else:
-            after_second = None
+        _run(["init"], state=state, config=config, home=home)
+        after_second = settings_path.read_text() if settings_path.exists() else None
 
         assert after_first == after_second, (
-            "lore init --local changed settings.local.json on second run (not idempotent)"
+            "lore init changed settings.json on second run (not idempotent)"
         )

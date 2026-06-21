@@ -7,13 +7,12 @@ only supplies the bytes.
 
 The content is two parts:
 
-  * ``_WRITE_PROHIBITION`` — the mandatory vault-write rules, re-homed from the
-    old ``installer._RULES_BLOCK_BODY``.  The Claude Code PreToolUse guardrail
-    blocks Edit/Write/MultiEdit/NotebookEdit but is OPAQUE to Bash-mediated
-    writes — these rules are the ONLY protection for that gap, and the SOLE
-    guardrail for harnesses without a PreToolUse hook.  The old "Drift caveat"
-    paragraph (describing the now-deleted ``--local``/multi-rules-file model) is
-    intentionally dropped.
+  * ``_WRITE_PROHIBITION`` — the mandatory vault-write rules.  The Claude Code
+    PreToolUse guardrail blocks Edit/Write/MultiEdit/NotebookEdit but is OPAQUE
+    to Bash-mediated writes — these rules are the ONLY protection for that gap,
+    and the SOLE guardrail for harnesses without a PreToolUse hook.  The old
+    "Drift caveat" paragraph (which described a since-removed per-project
+    multi-rules-file model) is intentionally dropped.
   * ``PRIMER`` — a short (≤20-line) disposition primer: what lore is, the three
     entry commands, and the trigger conditions for reaching for lore.
 

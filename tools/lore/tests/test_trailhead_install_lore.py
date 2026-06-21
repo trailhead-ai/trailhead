@@ -6,13 +6,13 @@ Covers the lore half of the Slice 5 contract:
     prints a one-line advisory **to stderr** (so it survives even if
     ``trailhead install`` filters lore stdout).
   - With a git identity set, no advisory is printed.
-  - The injected agent-rules block documents the rules-file-divergence caveat
-    (a rules file added after the last ``lore init`` won't carry the block until
-    re-run).
+  - The installed user-level ruleset (``~/.claude/rules/trailhead-lore.md``)
+    carries the write-prohibition rules byte-exact.
   - **End-to-end byte-for-byte idempotency:** a second full ``lore init``
-    (global) leaves ``settings.json`` AND the rules file byte-for-byte unchanged.
-    This exercises every writer delivered across Slices 1–4 (config seed,
-    settings_writer hook/deny/env, agent-rules inject) for true idempotency.
+    (global) leaves ``settings.json`` AND the user-level ruleset file
+    byte-for-byte unchanged. This exercises every writer delivered across the
+    init flow (config seed, settings_writer hook/deny/env, seam ruleset install)
+    for true idempotency.
 
 All tests inject XDG_STATE_HOME / XDG_CONFIG_HOME / HOME via env and use
 tmp_path so they NEVER touch real config, state, or vault (Axiom 6). The git
@@ -41,6 +41,8 @@ def _dirs(tmp_path):
     home = tmp_path / "home"
     for d in (state, config, home):
         d.mkdir(parents=True, exist_ok=True)
+    # Claude Code must appear present for the harness to install the ruleset.
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
     return state, config, home
 
 
@@ -56,6 +58,9 @@ def _run(args, *, state, config, home, identity: str | None):
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CONFIG_HOME"] = str(config)
     env["HOME"] = str(home)
+    # Point the trailhead harness at the isolated Claude dir so it detects Claude
+    # Code and installs the ruleset there — never the real ~/.claude (Axiom 6).
+    env["TRAILHEAD_CLAUDE_DIR"] = str(home / ".claude")
     # Isolate git's global config so the developer's real ~/.gitconfig is never
     # consulted (deterministic identity for the unset-case test).
     gitconfig = home / "isolated.gitconfig"
@@ -79,7 +84,7 @@ def _settings_path(home):
 
 
 def _rules_path(home):
-    return home / "CLAUDE.md"
+    return home / ".claude" / "rules" / "trailhead-lore.md"
 
 
 # ---------------------------------------------------------------------------
@@ -121,22 +126,21 @@ def test_init_with_identity_emits_no_advisory(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 2. Rules-file-divergence caveat documented in the injected block
+# 2. The installed user-level ruleset carries the write-prohibition rules
 # ---------------------------------------------------------------------------
 
-def test_injected_block_documents_rules_file_divergence(tmp_path):
+def test_installed_ruleset_carries_write_prohibition(tmp_path):
     state, config, home = _dirs(tmp_path)
     _run(["init"], state=state, config=config, home=home,
          identity="dev@example.com")
     rules = _rules_path(home).read_text()
-    # The block must warn that a rules file added after the last init won't
-    # carry the block until `lore init` is re-run.
-    assert "re-run" in rules.lower()
-    assert "lore init" in rules
+    # The write-prohibition (Bash/shell gap) must be present in the ruleset.
+    assert "Lore vault — mandatory write rules" in rules
+    assert "**only** via the `lore` CLI" in rules
 
 
 # ---------------------------------------------------------------------------
-# 3. End-to-end byte-for-byte idempotency (every writer, Slices 1–4)
+# 3. End-to-end byte-for-byte idempotency (every init-flow writer)
 # ---------------------------------------------------------------------------
 
 def test_second_init_leaves_settings_byte_for_byte_unchanged(tmp_path):
@@ -150,7 +154,7 @@ def test_second_init_leaves_settings_byte_for_byte_unchanged(tmp_path):
     assert second == first, "settings.json must be byte-for-byte stable on re-run"
 
 
-def test_second_init_leaves_rules_byte_for_byte_unchanged(tmp_path):
+def test_second_init_leaves_ruleset_byte_for_byte_unchanged(tmp_path):
     state, config, home = _dirs(tmp_path)
     _run(["init"], state=state, config=config, home=home,
          identity="dev@example.com")
@@ -158,4 +162,6 @@ def test_second_init_leaves_rules_byte_for_byte_unchanged(tmp_path):
     _run(["init"], state=state, config=config, home=home,
          identity="dev@example.com")
     second = _rules_path(home).read_bytes()
-    assert second == first, "CLAUDE.md must be byte-for-byte stable on re-run"
+    assert second == first, (
+        "the user-level ruleset must be byte-for-byte stable on re-run"
+    )

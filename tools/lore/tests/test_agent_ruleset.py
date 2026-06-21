@@ -1,10 +1,9 @@
 """Tests for lore's static agent-ruleset content (Slice 2).
 
 ``scripts/agent_ruleset.py`` renders lore's user-level ruleset: the
-write-prohibition rules (re-homed from the old ``installer._RULES_BLOCK_BODY``,
-minus the stale ``--local``/multi-rules-file "Drift caveat") plus a short
-disposition primer. The content is STATIC — no computed/per-session state — so
-two renders must be byte-identical.
+write-prohibition rules (minus the stale per-project multi-rules-file "Drift
+caveat") plus a short disposition primer. The content is STATIC — no
+computed/per-session state — so two renders must be byte-identical.
 """
 from __future__ import annotations
 
