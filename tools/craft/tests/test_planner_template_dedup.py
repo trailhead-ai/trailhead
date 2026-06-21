@@ -4,7 +4,8 @@ TDD contract (Slice 4):
   1. The two large inline literal template blocks (spec frontmatter `type: spec` block
      and the plan `# [Feature Name] Implementation Plan` literal) do NOT appear on the
      common path — they must only appear after the manual-write fallback marker.
-  2. `planner.md` still references `lore new spec` and `lore new plan` (CLI pointer preserved).
+  2. `planner.md` references the `note_store` contract (`_shared/note-storage.md`) and the
+     craft template path — NOT `lore new spec` / `lore new plan` (Slice 3 decoupling).
   3. `planner.md` still contains the required section names the checklist must carry
      (every section a spec/plan needs, including Observability & Failure Visibility and
      Known Unknowns).
@@ -111,27 +112,37 @@ def test_plan_template_literal_absent_from_common_path():
 
 
 # ---------------------------------------------------------------------------
-# CLI pointer preserved
+# note_store seam pointer (Slice 3) — `lore new` is decoupled
 # ---------------------------------------------------------------------------
 
 
-def test_lore_new_spec_referenced():
-    """planner.md must still reference `lore new spec` so the agent scaffolds
-    specs via the CLI on the common path."""
+def test_note_store_contract_referenced():
+    """planner.md must reference the `note_store` contract (`_shared/note-storage.md`)
+    so the agent persists plans/specs through the seam, not `lore new`."""
     text = _text()
-    assert "lore new spec" in text, (
-        "planner.md must reference 'lore new spec' (CLI pointer for spec scaffolding). "
-        "The CLI call is the common path; the fallback is manual-write only."
+    assert "_shared/note-storage.md" in text, (
+        "planner.md must reference '_shared/note-storage.md' (the note_store seam) so the "
+        "agent persists plans/specs through the centralized contract rather than `lore new`."
     )
 
 
-def test_lore_new_plan_referenced():
-    """planner.md must still reference `lore new plan` so the agent scaffolds
-    plans via the CLI on the common path."""
+def test_craft_template_path_referenced():
+    """planner.md must reference the craft-owned template path so the agent knows
+    where the plan/spec body skeleton lives."""
     text = _text()
-    assert "lore new plan" in text, (
-        "planner.md must reference 'lore new plan' (CLI pointer for plan scaffolding). "
-        "The CLI call is the common path; the fallback is manual-write only."
+    assert "templates/plan.md" in text and "templates/spec.md" in text, (
+        "planner.md must reference the craft-owned 'templates/plan.md' and "
+        "'templates/spec.md' bodies (craft owns the template bodies; lore is body-agnostic)."
+    )
+
+
+def test_lore_new_not_referenced():
+    """planner.md must NOT reference `lore new spec` / `lore new plan` — Slice 3
+    decouples craft from the `lore new` template-renderer."""
+    text = _text()
+    assert "lore new spec" not in text and "lore new plan" not in text, (
+        "planner.md must not reference 'lore new spec' / 'lore new plan'. Craft persists "
+        "plans/specs via the note_store seam (`lore record create`), not `lore new`."
     )
 
 

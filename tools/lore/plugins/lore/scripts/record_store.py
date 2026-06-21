@@ -454,8 +454,7 @@ def _stem_occupied(kind_dir: Path, stem: str) -> bool:
 def _unique_stem(kind_dir: Path, base: str) -> str:
     """Return ``base`` (or ``base-2``/``base-3``/…) for the first free stem.
 
-    Importable, pair-aware equivalent of the CLI's ``_unique_path`` (cli/lore:143)
-    — checks both artifacts (:func:`_stem_occupied`), not just ``.md``.
+    Pair-aware: checks both artifacts (:func:`_stem_occupied`), not just ``.md``.
     """
     if not _stem_occupied(kind_dir, base):
         return base

@@ -174,32 +174,6 @@ class TestSweepOrphanSkeletons:
 
 
 # ---------------------------------------------------------------------------
-# sessions.find_shelved_notes
-# ---------------------------------------------------------------------------
-
-class TestFindShelvedNotes:
-    def test_finds_bucketed_shelved(self, vault):
-        shelved = _session_note(
-            vault, "2026-06/2026-06-01-1000-alpha-worktree.md",
-            status="shelved", ended="2026-06-01T11:00:00Z",
-        )
-        sessions = load_script("sessions")
-        assert sessions.find_shelved_notes(vault) == [shelved]
-
-    def test_finds_flat_and_bucketed_shelved(self, vault):
-        flat = _session_note(
-            vault, "2026-07-01-0800-alpha-worktree.md",
-            status="shelved", ended="2026-07-01T09:00:00Z",
-        )
-        bucketed = _session_note(
-            vault, "2026-06/2026-06-01-1000-beta-worktree.md",
-            worktree="beta-worktree", status="shelved", ended="2026-06-01T11:00:00Z",
-        )
-        sessions = load_script("sessions")
-        assert sessions.find_shelved_notes(vault) == [flat, bucketed]
-
-
-# ---------------------------------------------------------------------------
 # recall._recent_sessions (recursive) vs out-of-scope folders (flat)
 # ---------------------------------------------------------------------------
 

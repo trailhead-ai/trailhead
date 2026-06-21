@@ -85,7 +85,10 @@ def test_recall_primary_and_spec_scaffold_anchors_present():
     # `lore search` is the imperative primary lookup post Slice-5 cutover
     # (also covered by test_recall_wiring).
     assert "run `lore search" in text.lower()
-    # the CLI scaffold pointer (the spec-template authority) must remain
-    assert "lore new spec" in text
+    # Slice 3: spec scaffolding goes through the note_store seam + craft template
+    # body, NOT `lore new spec` (which Slice 4 removes).
+    assert "_shared/note-storage.md" in text
+    assert "templates/spec.md" in text
+    assert "lore new spec" not in text
     # the design-mockup provider seam must remain
     assert "design_mockup" in text and "artist" in text

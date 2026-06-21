@@ -6,7 +6,7 @@ description: >
   orchestrates; subagents do the work.
   TRIGGER when: user says "execute", "execute the plan", "start building", "let's build", "build it",
   "implement this", "run the plan", "work the slices", "start the slices", "go" (following plan approval),
-  "ship it", or picks up a plan with unfinished slices via `/pickup`. Also triggers as the natural
+  "ship it", or resumes a plan with unfinished slices. Also triggers as the natural
   handoff after `/planning` when the user approves the written plan.
   DO NOT TRIGGER when: no plan exists yet (use `/planning` or `planner` first), the plan has ≤2 slices
   with no unknowns and small scope (just build it yourself), or the user is debugging rather than

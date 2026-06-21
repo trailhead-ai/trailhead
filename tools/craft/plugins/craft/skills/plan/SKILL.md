@@ -118,17 +118,17 @@ Slices don't need step-by-step implementation detail. The subagent figures out h
 
 ### 9. Write the Plan
 
-Scaffold the plan with `lore new plan --title "<topic>"` — it renders the generic plan template into your vault's `plans/` directory with valid frontmatter (today's date, kebab-case slug). Then fill in the body sections. Writing the plan into the vault keeps it linkable from session notes and future planning.
+Persist the plan through the note_store `create` op (`../_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to the provider — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --set status=draft`. The default provider stores it as a searchable lore `plan` record, which keeps it linkable from session notes and future planning.
 
 If the `lore` CLI is not on PATH, write the plan to a `plans/` directory in your vault manually, mirroring the template shape below.
 
 **Populate `related-subsystems:` frontmatter** from your vault's subsystem profiles, if present — this drives branch-based subsystem recall and links the plan to the areas it touches. List every subsystem the plan touches, not just the primary one. The CLI infers `project:` from the git remote; if it can't, set it explicitly.
 
-If an upstream spec exists, reference it at the top of the plan (`related-spec:` frontmatter) and bump its frontmatter `status: ready` → `status: planned` after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
+If an upstream spec exists, `link` the plan to it via the note_store seam (`lore record update <plan-id> --set related-spec=<spec-path>`) and `set-status` the spec `ready → planned` (`lore record update <spec-id> --set status=planned`) after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
 
 **Issue tracker (extension point — `issue_tracker`):** after writing the plan and before presenting for approval, if an issue tracker is configured in your environment, advance the corresponding ticket to the appropriate status (e.g. "Requirements Under Development" or equivalent). If no issue tracker configured — status sync skipped. The plan write still happens; only the ticket advancement is skipped.
 
-The plan template (`lore new plan`) renders these canonical sections — fill each in:
+The plan body template (`templates/plan.md`) carries these canonical sections — fill each in:
 
 - **Goal** — one or two sentences
 - **Architecture** — 2-3 sentences about the approach

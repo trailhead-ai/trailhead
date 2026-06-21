@@ -31,11 +31,10 @@ VAULT = Path(os.environ.get("LORE_VAULT", Path.home() / "lore"))
 # ---- Status bucketing for plans/specs/designs --------------------------------
 
 IN_PROGRESS = {"in-progress", "draft", "active"}
-SHELVED = {"shelved"}
 READY = {"ready", "planned"}
 COMPLETED = {"complete", "superseded", "dropped", "archived", "graduated", "resolved"}
 
-BUCKET_ORDER = ["In progress", "Shelved", "Ready", "Completed", "Uncategorized"]
+BUCKET_ORDER = ["In progress", "Ready", "Completed", "Uncategorized"]
 
 
 def classify_status(raw: str | None) -> str:
@@ -47,8 +46,6 @@ def classify_status(raw: str | None) -> str:
         return "Uncategorized"
     if s in IN_PROGRESS:
         return "In progress"
-    if s in SHELVED:
-        return "Shelved"
     if s in READY:
         return "Ready"
     if s in COMPLETED:

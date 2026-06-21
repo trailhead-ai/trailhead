@@ -12,17 +12,19 @@ from conftest import load_script
 
 def test_canonical_vocab_matches_source():
     """The canonical sets match the reconciled vocabulary (source validator +
-    glossary's `scheduled` for deferred)."""
+    glossary's `scheduled` for deferred).
+
+    Slice 2 retired the `shelved` status from plans/specs/sessions and the
+    legacy `finalized`/`handoff` session terminal statuses — none are canonical.
+    """
     sv = load_script("status_validator")
     assert sv.CANONICAL["plans"] == frozenset(
-        {"draft", "ready", "in-progress", "complete", "superseded", "dropped", "shelved"}
+        {"draft", "ready", "in-progress", "complete", "superseded", "dropped"}
     )
     assert sv.CANONICAL["specs"] == frozenset(
-        {"draft", "ready", "planned", "complete", "superseded", "dropped", "shelved"}
+        {"draft", "ready", "planned", "complete", "superseded", "dropped"}
     )
-    assert sv.CANONICAL["sessions"] == frozenset(
-        {"active", "complete", "shelved", "finalized", "handoff"}
-    )
+    assert sv.CANONICAL["sessions"] == frozenset({"active", "complete"})
     assert sv.CANONICAL["deferred"] == frozenset(
         {"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}
     )
@@ -71,40 +73,51 @@ def test_permitted_statuses_lists_canonical():
     assert sv.permitted_statuses("nonexistent") is None
 
 
-# ---- P1-B: back-compat for brain's legacy session terminal statuses ---------
+# ---- Slice 2: shelved + legacy session terminal statuses are retired --------
 
-def test_legacy_session_statuses_accepted():
-    """Existing brain session notes use `finalized`/`handoff`; lore must accept
-    them so they pass the guard at cutover."""
+def test_shelved_rejected_for_plans_specs_sessions():
+    """`shelved` is no longer canonical for any note type — the shelve/pickup
+    feature it backed was retired (Slice 2)."""
     sv = load_script("status_validator")
-    assert sv.is_valid_status("session", "finalized") is True
-    assert sv.is_valid_status("sessions", "handoff") is True
+    assert sv.is_valid_status("plan", "shelved") is False
+    assert sv.is_valid_status("plans", "shelved") is False
+    assert sv.is_valid_status("spec", "shelved") is False
+    assert sv.is_valid_status("specs", "shelved") is False
+    assert sv.is_valid_status("session", "shelved") is False
+    assert sv.is_valid_status("sessions", "shelved") is False
 
 
-def test_legacy_session_statuses_are_deprecated():
+def test_legacy_session_statuses_rejected():
+    """`finalized`/`handoff` were the deprecated back-compat session terminal
+    statuses; the DEPRECATED accommodation is removed (Slice 2), so they reject."""
     sv = load_script("status_validator")
-    assert sv.deprecated_statuses("sessions") == frozenset({"finalized", "handoff"})
-    assert sv.is_deprecated_status("session", "finalized") is True
-    assert sv.is_deprecated_status("session", "handoff") is True
-    # canonical terminal status is NOT deprecated
-    assert sv.is_deprecated_status("session", "complete") is False
-    # other note types have no deprecated statuses
-    assert sv.deprecated_statuses("plans") == frozenset()
+    assert sv.is_valid_status("session", "finalized") is False
+    assert sv.is_valid_status("sessions", "handoff") is False
 
 
-def test_finalized_session_accepted_with_deprecation_notice(tmp_path, capsys):
-    """A `finalized` session note passes (exit 0) but emits a migration notice."""
+def test_deprecated_status_machinery_removed():
+    """The DEPRECATED dict + helper machinery is gone — no status is `deprecated`."""
+    sv = load_script("status_validator")
+    assert not hasattr(sv, "DEPRECATED")
+    assert not hasattr(sv, "deprecated_statuses")
+    assert not hasattr(sv, "is_deprecated_status")
+
+
+def test_finalized_session_rejected_with_violation(tmp_path, capsys):
+    """A `finalized` session note now FAILS validation (exit 1) — no migration
+    notice, a hard rejection."""
     sv = load_script("status_validator")
     note = tmp_path / "x.md"
     note.write_text("---\ntype: session\nstatus: finalized\n---\n# x\n")
     rc = sv.main([str(note)])
     captured = capsys.readouterr()
-    assert rc == 0
-    assert "deprecated" in captured.err.lower()
+    assert rc == 1
+    assert "invalid" in captured.err.lower()
     assert "finalized" in captured.err
+    assert "deprecated" not in captured.err.lower()
 
 
-def test_complete_session_emits_no_deprecation_notice(tmp_path, capsys):
+def test_complete_session_passes_clean(tmp_path, capsys):
     sv = load_script("status_validator")
     note = tmp_path / "x.md"
     note.write_text("---\ntype: session\nstatus: complete\n---\n# x\n")
@@ -112,6 +125,7 @@ def test_complete_session_emits_no_deprecation_notice(tmp_path, capsys):
     captured = capsys.readouterr()
     assert rc == 0
     assert "deprecated" not in captured.err.lower()
+    assert "invalid" not in captured.err.lower()
 
 
 def test_body_only_guid_session_note_passes_clean(tmp_path, capsys):

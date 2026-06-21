@@ -1,12 +1,3 @@
----
-type: spec
-project: {{project}}
-status: draft
-areas: {{areas}}
-created: {{date}}
-updated: {{date}}
----
-
 # {{name}}
 
 ## Problem

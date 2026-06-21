@@ -86,7 +86,7 @@ If items span multiple working directories, group them by directory. You will di
 
 ### 4. Write the brief
 
-Write one brief per working directory using `lore new plan`:
+Write one brief per working directory, persisting it through the note_store `create` op (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind plan --title "<brief>" --set status=draft`:
 
 ```
 YYYY-MM-DD-<parent-slug-stripped>-followup-<n>
@@ -196,5 +196,5 @@ Do NOT try to write a single brief that asks the executor to operate on multiple
 
 ## Notes
 
-- Briefs are a useful artifact — they document what changed and why during the iteration phase. Use `lore new plan` to write them into your vault.
+- Briefs are a useful artifact — they document what changed and why during the iteration phase. Persist them through the note_store seam (`../_shared/note-storage.md`) to write them into your vault.
 - This skill does NOT touch an issue tracker hook. Fix-ups are post-implementation polish, not status transitions. If a fix-up is large enough that the tracker state should advance again, the user should run `/plan`, not `/polish`.

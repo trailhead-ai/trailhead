@@ -65,9 +65,3 @@ Keep the report tight. A 400-word report with five precise citations beats a 200
 - Don't paraphrase code. Quote the relevant snippet and cite the line.
 - Don't speculate about history without checking `git log` / `git blame`.
 - Don't recommend an action — that's the caller's job. You inform; they decide.
-
-## Harvest candidates (end-of-message)
-
-If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
-
-For a researcher specifically, the highest-value emissions are **lessons** (durable invariants you discovered) and **gotchas** (surprising subsystem behavior worth patching into a subsystem profile). Skip dead-ends — those belong to troubleshooters/implementers who actually tried things.

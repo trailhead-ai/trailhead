@@ -58,9 +58,3 @@ End with a **summary table** of findings by severity and an overall **risk read*
 - Don't flag every shell command or regex call — context matters.
 - Don't write patches. Direction only.
 - Don't miss the obvious while hunting the exotic: check the basics (authz, input validation, secrets) first.
-
-## Harvest candidates (end-of-message)
-
-If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
-
-For a security auditor specifically, the highest-value emissions are **lessons** (recurring anti-patterns across audits — "we keep hardcoding X; the prevention check is Y" — these compound across reviews into a real defensive posture), **gotchas** (platform-specific security pitfalls in web frameworks, mobile bridges, deep links, or project-specific subsystems), and **follow-ups** (known-CVE packages or upstream advisories the team should watch). Skip decisions (not your call to make) and dead-ends (you audit, you don't try); a single Critical finding belongs in the report body, not the harvest block — only emit a lesson if the pattern is durable across audits.

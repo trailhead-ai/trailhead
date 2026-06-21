@@ -987,7 +987,6 @@ class TestPlanningExecuteHandoff:
 # ---------------------------------------------------------------------------
 
 _POLISH_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "polish" / "SKILL.md"
-_SHELVE_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "shelve" / "SKILL.md"
 _PLAN_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "plan" / "SKILL.md"
 _REVIEW_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "review" / "SKILL.md"
 
@@ -1156,7 +1155,6 @@ class TestSlice4RenamedSkillsExistAndRegistrable:
 
     @pytest.mark.parametrize("stem,skill_md", [
         ("polish", _POLISH_SKILL),
-        ("shelve", _SHELVE_SKILL),
         ("plan", _PLAN_SKILL),
         ("review", _REVIEW_SKILL),
     ])
@@ -1167,7 +1165,6 @@ class TestSlice4RenamedSkillsExistAndRegistrable:
 
     @pytest.mark.parametrize("stem,skill_md", [
         ("polish", _POLISH_SKILL),
-        ("shelve", _SHELVE_SKILL),
         ("plan", _PLAN_SKILL),
         ("review", _REVIEW_SKILL),
     ])
@@ -1186,14 +1183,15 @@ class TestSlice4RenamedSkillsExistAndRegistrable:
 class TestSlice4ManifestRepointed:
     """capabilities.toml must repoint the four renamed skills atomically."""
 
-    def test_base_skills_repointed_to_shelve_and_polish(self):
-        """craft must ship the renamed shelve + polish skills (pickup stays); the old
-        handoff + followup skills must be gone."""
+    def test_base_skills_repointed_to_polish(self):
+        """craft must ship the renamed polish skill; the old handoff + followup
+        skills must be gone. shelve + pickup were retired in Slice 2 (the lore
+        `handoff`/`shelved`/`resume` verbs they backed are gone)."""
         m = load_manifest(_CRAFT_MANIFEST)
         skills = m.skills
-        assert "shelve" in skills, f"craft must ship the 'shelve' skill; got {sorted(skills)}"
         assert "polish" in skills, f"craft must ship the 'polish' skill; got {sorted(skills)}"
-        assert "pickup" in skills, f"craft must keep the 'pickup' skill; got {sorted(skills)}"
+        assert "shelve" not in skills, "craft still ships the retired 'shelve' skill"
+        assert "pickup" not in skills, "craft still ships the retired 'pickup' skill"
         assert "handoff" not in skills, "craft still ships old 'handoff' skill"
         assert "followup" not in skills, "craft still ships old 'followup' skill"
 
@@ -1445,19 +1443,21 @@ class TestSlice6ManifestAndTemplate:
             "lore still ships old 'check-radar' skill — renamed to 'check-in' then deleted"
         )
 
-    def test_follow_up_template_exists_with_type_follow_up(self):
-        """templates/follow-up.md must exist with `type: follow-up` (was templates/radar.md).
-        The skill dir is deleted but the template is retained for `lore record` CLI use."""
-        tmpl = _LORE_TEMPLATES / "follow-up.md"
-        assert tmpl.exists(), (
-            f"templates/follow-up.md not found at {tmpl} — rename from templates/radar.md"
-        )
-        text = tmpl.read_text()
-        assert re.search(r"^type: follow-up\b", text, re.MULTILINE), (
-            "templates/follow-up.md must carry `type: follow-up` frontmatter"
+    def test_follow_up_template_is_gone(self):
+        """templates/follow-up.md must NOT exist after Slice 4.
+
+        The `lore new` template-renderer (the sole consumer of the per-kind
+        templates) was removed wholesale in the craft–lore decoupling Slice 4;
+        the surviving `lore record create` surface is body-agnostic and never
+        reads templates, so the follow-up template (renamed from radar.md in S6)
+        is deleted alongside the other seven cmd_new-only templates. The old
+        radar.md must also stay gone."""
+        assert not (_LORE_TEMPLATES / "follow-up.md").exists(), (
+            f"templates/follow-up.md still exists at {_LORE_TEMPLATES / 'follow-up.md'} — "
+            "it was deleted in Slice 4 (lore new removal); lore record is body-agnostic."
         )
         assert not (_LORE_TEMPLATES / "radar.md").exists(), (
-            "old templates/radar.md still exists — rename to follow-up.md"
+            "old templates/radar.md still exists — removed in S6 rename + Slice 4."
         )
 
     def test_lore_manifest_validates_and_composes_capture(self, tmp_path):

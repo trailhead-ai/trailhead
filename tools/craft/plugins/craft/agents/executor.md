@@ -115,7 +115,7 @@ cleanup: <assumption-prover test files/ranges removed, or "none">
 
 ### Durable tail (write to commit body, not returned)
 
-The tail is not part of your returned reply. Write it as the body of the GPG-signed commit you author in Step 7. It retains these headings for scannability in commit logs and on `/pickup`:
+The tail is not part of your returned reply. Write it as the body of the GPG-signed commit you author in Step 7. It retains these headings for scannability in commit logs and when resuming an unfinished plan:
 
 ```
 ## What I built
@@ -138,9 +138,3 @@ The tail is not part of your returned reply. Write it as the body of the GPG-sig
 - Prefer editing existing files over creating new ones
 - If the slice spec is ambiguous, take the most conservative interpretation and call it out in "Surprises"
 - Do not run the full lint/CI pipeline across the whole repo — that's the controller's after-all-slices job
-
-## Harvest candidates (end-of-message)
-
-If your work surfaced anything durable, append a `## Harvest candidates` block as the LAST section of your message, with `- <type>: <body>` entry lines using: `lesson:` `dead-end:` `deferred:` `follow-up:` `decision:` `gotcha:`. Omit entirely if nothing qualifies; empty headers are noise.
-
-For an executor specifically, the highest-value emissions are **gotchas** (subsystem behavior that bit you mid-slice — the kind of thing a future plan should warn about), **dead-ends** (approaches you actually code-tried that didn't work, with the revive condition — you have unique signal here because you ran the code), and **lessons** (TDD or scope-discipline mistakes you made that a future plan or slice check could catch). Skip decisions (the plan already made them) and follow-ups (rarely surface during implementation).

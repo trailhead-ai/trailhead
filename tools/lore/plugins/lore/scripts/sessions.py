@@ -32,15 +32,19 @@ from pathlib import Path
 import frontmatter
 from vault import bucket_dir, iter_note_paths
 
-# Statuses that mean a session note is already finalized — do not re-stamp.
-_TERMINAL_STATUSES = frozenset(("complete", "shelved", "finalized", "handoff"))
+# Statuses that mean a session note is already finalized — do not re-stamp or
+# re-create. `complete` is the only terminal status the CLI writes (Slice 2
+# retired shelve/handoff). Per no-backwards-compat, the legacy
+# `shelved`/`finalized`/`handoff` values are gone — no migration-window shim.
+_TERMINAL_STATUSES = frozenset(("complete",))
 
 # Reuse an existing session note for the same worktree if it was touched within
 # this many seconds — covers Claude Code restarts/crashes mid-session.
 RESUME_WINDOW_SECONDS = 30 * 60
 
-# The capture skills (lore new …) backlink into these session-note headings, so
-# they are load-bearing — keep all five.
+# The canonical session-note skeleton: every session note carries these five
+# headings so the finish/checkpoint skills have a stable structure to fill in.
+# Load-bearing — keep all five.
 REQUIRED_SECTIONS = ("What we did", "Decided", "Deferred", "Learned", "Open questions")
 
 
@@ -209,8 +213,8 @@ def ensure_session_note(
     # restarts, so a note carrying this session_id belongs to the session being
     # resumed — reuse it regardless of how long ago it was last touched. Without
     # this, resuming past RESUME_WINDOW_SECONDS forks a duplicate note. A
-    # terminal note (finished/shelved) is left alone: an explicit finish means
-    # the next start earns a fresh note.
+    # terminal note (see _TERMINAL_STATUSES) is left alone: an explicit finish
+    # means the next start earns a fresh note.
     if session_id:
         for note in all_session_notes_for_worktree(vault, worktree_name):
             try:
@@ -308,7 +312,7 @@ def write_json_atomic(path: Path, obj: dict) -> bool:
 _SESSION_HEADER_RE = re.compile(r"^# session: (\S+)\s*$", re.MULTILINE)
 
 
-def _finalize_body_only(note: Path, ended_iso: str, status: str) -> bool:
+def _finalize_body_only(note: Path, ended_iso: str) -> bool:
     """Finalize a body-only GUID capture file via a JSON sidecar (Slice 0.5, KU1).
 
     The capture file (``session_store.create_or_append``) is frontmatter-less:
@@ -347,22 +351,21 @@ def _finalize_body_only(note: Path, ended_iso: str, status: str) -> bool:
     obj = dict(existing)
     obj["type"] = "session"
     obj["session_id"] = session_id
-    obj["status"] = status
+    obj["status"] = "complete"
     obj["ended"] = ended_iso
     return write_json_atomic(sidecar_path, obj)
 
 
-def finalize_note(note: Path, ended_iso: str, status: str = "complete") -> bool:
-    """Set status: <status> + ended: on a session note.
+def finalize_note(note: Path, ended_iso: str) -> bool:
+    """Set status: complete + ended: on a session note.
 
-    Parameterized: pass ``status="shelved"`` to shelve a note rather than
-    complete it. Default ``"complete"`` preserves all existing callers.
+    The only terminal status a session note reaches via the CLI is
+    ``complete`` (``lore finish``).
 
     Handles BOTH session-note shapes (Slice 0.5, KU1):
 
       - **Frontmatter note** (legacy date-prefixed shape): stamp ``status`` +
-        ``ended`` in-place in the existing frontmatter block. This path backs
-        craft's ``lore handoff``/``shelved``/``resume`` flow and is unchanged.
+        ``ended`` in-place in the existing frontmatter block.
       - **Body-only GUID capture file** (``# session: <id>``, no frontmatter —
         what ``session_store.create_or_append`` writes): write session metadata
         into a sibling ``sessions/<GUID>.json`` sidecar (consistent with vault
@@ -378,7 +381,7 @@ def finalize_note(note: Path, ended_iso: str, status: str = "complete") -> bool:
     except Exception:
         return False
     if not text.startswith("---"):
-        return _finalize_body_only(note, ended_iso, status)
+        return _finalize_body_only(note, ended_iso)
     end = text.find("\n---", 3)
     if end < 0:
         return False
@@ -399,7 +402,7 @@ def finalize_note(note: Path, ended_iso: str, status: str = "complete") -> bool:
     for line in fm_lines:
         stripped = line.strip()
         if stripped.startswith("status:"):
-            new_fm_lines.append(f"status: {status}")
+            new_fm_lines.append("status: complete")
             status_seen = True
         elif stripped.startswith("ended:"):
             new_fm_lines.append(f"ended: {ended_iso}")
@@ -407,113 +410,11 @@ def finalize_note(note: Path, ended_iso: str, status: str = "complete") -> bool:
         else:
             new_fm_lines.append(line)
     if not status_seen:
-        new_fm_lines.append(f"status: {status}")
+        new_fm_lines.append("status: complete")
     if not ended_seen:
         new_fm_lines.append(f"ended: {ended_iso}")
 
     new_text = "---" + "\n".join(new_fm_lines) + body
     return write_note_atomic(note, new_text)
-
-
-# Statuses from which a note can be resumed (flipped back to active).
-_RESUMABLE_STATUSES = frozenset(("shelved", "handoff"))
-
-
-def resume_note(note: Path) -> bool:
-    """Flip a shelved or handoff session note back to active.
-
-    Returns False (no-op) when the note is not in a resumable status
-    (active, complete, finalized) or has no frontmatter.
-    Writes atomically.
-    """
-    try:
-        text = note.read_text()
-    except Exception:
-        return False
-    if not text.startswith("---"):
-        return False
-    end = text.find("\n---", 3)
-    if end < 0:
-        return False
-    fm_text = text[3:end]
-    body = text[end:]
-    fm_lines = fm_text.splitlines()
-
-    current_status: str | None = None
-    for line in fm_lines:
-        stripped = line.strip()
-        if stripped.startswith("status:"):
-            current_status = stripped.split(":", 1)[1].strip().strip('"').strip("'")
-            break
-
-    if current_status not in _RESUMABLE_STATUSES:
-        return False
-
-    new_fm_lines: list[str] = []
-    for line in fm_lines:
-        stripped = line.strip()
-        if stripped.startswith("status:"):
-            new_fm_lines.append("status: active")
-        else:
-            new_fm_lines.append(line)
-
-    new_text = "---" + "\n".join(new_fm_lines) + body
-    return write_note_atomic(note, new_text)
-
-
-def _ts_sort_key(note: Path) -> str:
-    """Return a sortable timestamp string for a session note.
-
-    Prefers the ``ended:`` frontmatter field; falls back to ``started:``.
-    Returns an empty string when neither is set so missing-timestamp notes
-    sort last (empty string < any ISO timestamp).
-    """
-    try:
-        fm = frontmatter.parse_frontmatter(note)
-    except Exception:
-        return ""
-    ended = fm.get("ended") or ""
-    if isinstance(ended, str) and ended.strip():
-        return ended.strip()
-    started = fm.get("started") or ""
-    if isinstance(started, str) and started.strip():
-        return started.strip()
-    return ""
-
-
-def find_shelved_notes(vault: Path, slug: str | None = None) -> list[Path]:
-    """Return session notes whose status is in {shelved, handoff}.
-
-    Sorted most-recent-first by frontmatter timestamp (``ended:`` falling
-    back to ``started:``); notes missing both timestamps sort last.
-
-    When *slug* is given, only notes whose filename encodes exactly that
-    worktree slug are returned (same stem-parse logic as
-    ``all_session_notes_for_worktree``).
-
-    Never raises — returns [] when the sessions directory is missing or
-    unreadable.
-    """
-    sessions_dir = Path(vault) / "sessions"
-    if not sessions_dir.is_dir():
-        return []
-
-    _shelved = frozenset(("shelved", "handoff"))
-    results: list[Path] = []
-
-    for p in iter_note_paths(sessions_dir, recursive=True):
-        if slug is not None and _worktree_from_stem(p.stem) != slug:
-            continue
-        try:
-            fm = frontmatter.parse_frontmatter(p)
-        except Exception:
-            continue
-        if fm.get("status") in _shelved:
-            results.append(p)
-
-    # Secondary key (filename stem, which embeds YYYY-MM-DD-HHMM) makes the
-    # order deterministic across machines when frontmatter timestamps tie or are
-    # absent — otherwise ties fall back to filesystem glob() order.
-    return sorted(results, key=lambda p: (_ts_sort_key(p), p.stem), reverse=True)
 
 

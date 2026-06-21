@@ -1,13 +1,3 @@
----
-type: plan
-project: {{project}}
-status: draft
-slug: {{slug}}
-created: {{date}}
-related-areas: {{related-areas}}
-related-spec: {{related-spec}}
----
-
 # {{name}} Implementation Plan
 
 **Goal:** <!-- One or two sentences: what this plan achieves when complete. -->

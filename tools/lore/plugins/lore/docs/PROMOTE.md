@@ -5,12 +5,12 @@
 lore's memory model has two layers:
 
 - **Personal vault** (`$LORE_VAULT`): always present, always private, always trusted.
-  All `lore new …` commands write here by default.
+  All `lore record …` capture writes here by default.
 - **Shared vault(s)**: declared in your group's camp config (`[[shared_vaults]]`). Content
   here is visible to everyone with access to that vault's repository.
 
-Capture targets the personal layer by default. `lore new decision …` always writes to
-your personal vault — no flag required, no config needed.
+Capture targets the personal layer by default. `lore record create --kind decision …`
+always writes to your personal vault — no flag required, no config needed.
 
 ## `lore promote` — the only path into a shared vault
 

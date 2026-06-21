@@ -146,18 +146,68 @@ def test_agent_has_no_middle_band_tokens(agent_md: Path):
 # Slice P3A-2 behavioral tests
 # ---------------------------------------------------------------------------
 
-# Agents that carry a harvest block and must retain lore-hook-compatible heading.
-# Extend this list as new harvest-bearing agents are genericized (P3A-3 adds
-# researcher, assumption-prover, and executor).
-_HARVEST_BEARING_AGENTS: list[str] = [
-    "architect",
-    "code-reviewer",
-    "security-auditor",
-    "troubleshooter",
-    "researcher",
-    "assumption-prover",
-    "executor",
-]
+# ---------------------------------------------------------------------------
+# Slice 1: Harvest-candidates emit retired (absence assertions)
+#
+# No craft or portage agent may carry a '## Harvest candidates' heading or any
+# 'harvest-protocol' mention. The lore-side hook (harvest-candidates.py) is
+# removed separately; these tests guard the agent-prompt side.
+# ---------------------------------------------------------------------------
+
+PORTAGE_AGENTS_DIR = (
+    AGENTS_DIR.parent.parent.parent.parent / "portage" / "plugins" / "portage" / "agents"
+)
+
+
+@pytest.mark.parametrize("agent_md", _agent_files(), ids=lambda p: p.stem)
+def test_agent_has_no_harvest_candidates_heading(agent_md: Path):
+    """No craft agent may carry a '## Harvest candidates' section heading.
+
+    The harvest-candidates emit convention has been retired (Slice 1). Agents
+    must not prompt callers to append harvest blocks.
+    """
+    text = agent_md.read_text()
+    assert "## Harvest candidates" not in text, (
+        f"{agent_md.name} still contains a '## Harvest candidates' heading. "
+        "Remove the entire harvest-candidates section from this agent."
+    )
+
+
+@pytest.mark.parametrize("agent_md", _agent_files(), ids=lambda p: p.stem)
+def test_agent_has_no_harvest_protocol_mention(agent_md: Path):
+    """No craft agent may mention 'harvest-protocol'.
+
+    The harvest-protocol reference (both the .md variant caught by
+    STRUCTURAL_SEAMS and bare mentions) must be absent from all craft agents.
+    """
+    text = agent_md.read_text()
+    assert "harvest-protocol" not in text, (
+        f"{agent_md.name} still contains a 'harvest-protocol' reference. "
+        "Remove all harvest-protocol mentions from this agent."
+    )
+
+
+def test_portage_agents_have_no_harvest_candidates():
+    """Backstop: no portage agent may carry '## Harvest candidates' or 'harvest-protocol'.
+
+    Covers the portage plugin's agent directory as a whole, catching any agent
+    that carries harvest blocks (monitor.md was the known case at Slice 1).
+    """
+    assert PORTAGE_AGENTS_DIR.is_dir(), (
+        f"Portage agents directory not found at {PORTAGE_AGENTS_DIR}. "
+        "Update the path if the portage plugin has moved."
+    )
+    for agent_md in sorted(PORTAGE_AGENTS_DIR.glob("*.md")):
+        text = agent_md.read_text()
+        assert "## Harvest candidates" not in text, (
+            f"portage/{agent_md.name} still contains a '## Harvest candidates' heading. "
+            "Remove the entire harvest-candidates section from this agent."
+        )
+        assert "harvest-protocol" not in text, (
+            f"portage/{agent_md.name} still contains a 'harvest-protocol' reference. "
+            "Remove all harvest-protocol mentions from this agent."
+        )
+
 
 # Agents that dispatched brain-librarian and must now carry a visible skip notice
 # so callers know the prior-art synthesis pass was skipped.
@@ -171,25 +221,6 @@ _VISIBLE_SKIP_AGENTS: list[str] = [
     "attacker",
     "advocate",
 ]
-
-
-@pytest.mark.parametrize("stem", _HARVEST_BEARING_AGENTS)
-def test_harvest_bearing_agent_retains_heading(stem: str):
-    """Genericized harvest-bearing agents must keep the literal '## Harvest candidates'
-    heading so lore's harvest hook (path-agnostic, matches heading + entry format)
-    continues to consume their output unchanged.
-    """
-    agent_md = AGENTS_DIR / f"{stem}.md"
-    assert agent_md.exists(), (
-        f"Expected harvest-bearing agent {stem}.md to exist in {AGENTS_DIR}. "
-        "Add the genericized agent before this test can pass."
-    )
-    text = agent_md.read_text()
-    assert "## Harvest candidates" in text, (
-        f"{agent_md.name} is expected to carry a harvest block but is missing the "
-        "literal '## Harvest candidates' heading. Keep the heading and inline the "
-        "entry-format rules (drop the harvest-protocol.md path reference instead)."
-    )
 
 
 # ---------------------------------------------------------------------------

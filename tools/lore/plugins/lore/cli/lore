@@ -3,16 +3,11 @@
 
 Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
-  lore new <type>           Render a template and write a new vault note.
   lore seed <name>          Scaffold an inbox capture under inbox/.
   lore set-status <f> <v>   Validate + set a note's frontmatter status.
   lore stats                Print counts for the resolved vault.
   lore session-note         Print this session's note path (id-first resolve).
   lore finish               Finalize the active session note for this worktree.
-  lore handoff              Shelve the active session note for pickup later.
-  lore shelved              List shelved/handoff session notes for pickup.
-  lore resume [note|slug]   Flip a shelved/handoff note back to active
-                            (omit the target to resume the current session).
   lore areas                List all vault areas (names, one-liners, keywords).
   lore sync                 Stage, commit, and push the vault.
 
@@ -64,42 +59,6 @@ TAXONOMY = [
 ]
 
 STARTER_DOCS = ["README.md", "glossary.md", "phases.md"]
-
-
-# ---- new --------------------------------------------------------------------
-
-# Map each note type to its vault directory.
-_NOTE_DIRS: dict[str, str] = {
-    "deferred": "deferred",
-    "dead-end": "dead-ends",
-    "decision": "decisions",
-    "follow-up": "follow-ups",
-    "area": "areas",
-    "spec": "specs",
-    "plan": "plans",
-}
-
-# Types that carry a project: field. dead-end is intentionally absent.
-_PROJECT_BEARING: frozenset[str] = frozenset({"deferred", "decision", "follow-up", "area", "spec", "plan"})
-
-# Note types stored in date-bucketed YYYY-MM subdirs (the date-bucketed archive
-# layout). The date-based living folders (deferred/dead-ends/decisions/follow-ups)
-# join the archive types; only singleton area profiles (name-keyed) stay
-# flat at the folder root.
-_BUCKETED_TYPES: frozenset[str] = frozenset(
-    {"spec", "plan", "deferred", "decision", "follow-up", "dead-end"}
-)
-
-# Which section of the session note gets the backlink (None = no backlink).
-_BACKLINK_SECTIONS: dict[str, str | None] = {
-    "deferred": "Deferred",
-    "dead-end": "Learned",
-    "decision": "Decided",
-    "follow-up": None,
-    "area": None,
-    "spec": None,
-    "plan": None,
-}
 
 
 def _resolve_groups_dir() -> "Path | None":
@@ -158,23 +117,6 @@ def _kebab(title: str) -> str:
     return slug
 
 
-def _unique_path(directory: Path, stem: str) -> Path:
-    """Return a path in directory for <stem>.md that does not exist.
-
-    If <stem>.md is free, return it. Otherwise append -2, -3, … until the
-    path is free. Never overwrites an existing file.
-    """
-    candidate = directory / f"{stem}.md"
-    if not candidate.exists():
-        return candidate
-    counter = 2
-    while True:
-        candidate = directory / f"{stem}-{counter}.md"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
 def _today() -> str:
     """Return today's date as YYYY-MM-DD, honoring $LORE_TODAY for tests."""
     override = os.environ.get("LORE_TODAY", "").strip()
@@ -189,185 +131,6 @@ def _render_template(template_path: Path, substitutions: dict[str, str]) -> str:
     for key, value in substitutions.items():
         text = text.replace("{{" + key + "}}", value)
     return text
-
-
-def _csv_to_inline_list(csv: str | None) -> str:
-    """Convert a comma-separated string to an inline YAML list string.
-
-    'a, b, c' → '[a, b, c]'
-    None or empty → '[]'
-    """
-    if not csv:
-        return "[]"
-    items = [k.strip() for k in csv.split(",") if k.strip()]
-    if not items:
-        return "[]"
-    return "[" + ", ".join(items) + "]"
-
-
-def cmd_new(args: argparse.Namespace) -> int:
-    note_type = args.type
-    if note_type not in _NOTE_DIRS:
-        print(
-            f"error: unknown note type {note_type!r}. "
-            f"Choose from: {', '.join(sorted(_NOTE_DIRS))}",
-            file=sys.stderr,
-        )
-        return 1
-
-    vault = Path(args.vault).expanduser().resolve() if args.vault else Path(vault_mod.resolve_vault())
-
-    # D-5: if --vault explicitly points at a shared layer, refuse it.
-    # The raw writer must never reach a shared root.
-    if args.vault:
-        groups_dir = _resolve_groups_dir()
-        try:
-            layers = layers_mod.resolve_layers(
-                cwd=Path.cwd(),
-                groups_dir=groups_dir,
-            )
-        except Exception:
-            layers = []
-        shared_roots = {
-            lay.root.resolve()
-            for lay in layers
-            if lay.kind == "shared"
-        }
-        if vault.resolve() in shared_roots:
-            print(
-                f"error: {args.vault} is a shared vault; "
-                f"use 'lore promote' to write there.",
-                file=sys.stderr,
-            )
-            return 1
-    today = _today()
-    user = vault_mod.resolve_user()
-
-    # Resolve project: explicit flag wins; for project-bearing types fall back
-    # to git remote inference; dead-end carries no project field at all.
-    if note_type in _PROJECT_BEARING:
-        project = args.project or vault_mod.resolve_project()
-    else:
-        project = args.project or ""
-
-    # Build template substitutions — common fields.
-    subs: dict[str, str] = {
-        "date": today,
-        "user": user,
-        "project": project,
-        "name": args.title,
-    }
-
-    # Per-type substitutions: populate frontmatter fields from CLI flags.
-    if note_type == "deferred":
-        subs["surfaces"] = _csv_to_inline_list(getattr(args, "surfaces", None))
-        subs["next-check"] = getattr(args, "next_check", None) or ""
-        revisit_after = getattr(args, "revisit_after", None) or ""
-        subs["revisit-after"] = revisit_after
-        # status: scheduled when revisit-after is provided, open otherwise.
-        subs["status"] = "scheduled" if revisit_after else "open"
-
-    elif note_type == "dead-end":
-        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
-        subs["tried"] = getattr(args, "tried", None) or today
-        subs["revive-condition"] = getattr(args, "revive_condition", None) or ""
-
-    elif note_type == "decision":
-        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
-
-    elif note_type == "follow-up":
-        subs["source"] = getattr(args, "source", None) or ""
-        subs["target"] = getattr(args, "target", None) or ""
-        subs["check"] = getattr(args, "check", None) or ""
-
-    elif note_type == "area":
-        subs["keywords"] = _csv_to_inline_list(getattr(args, "keywords", None))
-        subs["key-files"] = _csv_to_inline_list(getattr(args, "key_files", None))
-
-    elif note_type == "spec":
-        subs["areas"] = _csv_to_inline_list(getattr(args, "areas", None))
-
-    elif note_type == "plan":
-        subs["related-areas"] = _csv_to_inline_list(getattr(args, "related_areas", None))
-        subs["related-spec"] = getattr(args, "related_spec", None) or ""
-        subs["slug"] = _kebab(args.title)
-
-    template_path = TEMPLATES_DIR / f"{note_type}.md"
-    if not template_path.is_file():
-        print(f"error: template not found: {template_path}", file=sys.stderr)
-        return 1
-
-    rendered = _render_template(template_path, subs)
-
-    # Validate status if the note type has one.
-    fm = frontmatter.parse_frontmatter_str(rendered)
-    note_status = fm.get("status")
-    if note_status is not None:
-        if not status_validator.is_valid_status(note_type, note_status):
-            permitted = status_validator.permitted_statuses(note_type)
-            print(
-                f"error: template status {note_status!r} is not canonical for "
-                f"type {note_type!r}. permitted: {sorted(permitted) if permitted else '(unconstrained)'}",
-                file=sys.stderr,
-            )
-            return 1
-
-    # Write the note — area profiles are singletons identified by their
-    # bare kebab name (no date prefix). All other types get YYYY-MM-DD-<slug>
-    # naming with collision handling.
-    note_dir = vault / _NOTE_DIRS[note_type]
-    if note_type in _BUCKETED_TYPES:
-        note_dir = vault_mod.bucket_dir(note_dir, today)
-    note_dir.mkdir(parents=True, exist_ok=True)
-    if note_type == "area":
-        stem = _kebab(args.title)
-        note_path = note_dir / f"{stem}.md"
-        if note_path.exists():
-            print(
-                f"error: area profile '{stem}' already exists at {note_path} — "
-                "edit it directly (lore new area creates a new profile).",
-                file=sys.stderr,
-            )
-            return 1
-    else:
-        stem = f"{today}-{_kebab(args.title)}"
-        note_path = _unique_path(note_dir, stem)
-    note_path.write_text(rendered)
-
-    # D-4: print [personal] label only when a shared vault is declared.
-    # Resolving layers here is cheap (cached from the D-5 check above when --vault
-    # was passed; resolved fresh otherwise).
-    groups_dir = _resolve_groups_dir()
-    try:
-        all_layers = layers_mod.resolve_layers(cwd=Path.cwd(), groups_dir=groups_dir)
-    except Exception:
-        all_layers = []
-    has_shared = any(lay.kind == "shared" for lay in all_layers)
-    if has_shared:
-        print(f"Created: {note_path} [personal]")
-    else:
-        print(f"Created: {note_path}")
-
-    # Backlink to session note (deferred/dead-end/decision only).
-    section = _BACKLINK_SECTIONS[note_type]
-    if section is not None:
-        worktree_name = Path.cwd().name
-        session_note = vault_mod.find_session_note(vault, worktree_name=worktree_name)
-        if session_note is None:
-            print(
-                f"note: no active session note found — backlink to {section!r} skipped.",
-                file=sys.stderr,
-            )
-        else:
-            # Use the note's full vault-relative path (minus suffix) so the
-            # wikilink resolves whether the note is flat or YYYY-MM-bucketed —
-            # `[[deferred/<stem>]]` would not resolve once bucketed.
-            rel_link = note_path.relative_to(vault).with_suffix("").as_posix()
-            title_display = args.title
-            backlink = f"- [[{rel_link}]] — {title_display}"
-            frontmatter.patch_section(session_note, section, backlink)
-
-    return 0
 
 
 # ---- promote ----------------------------------------------------------------
@@ -1303,187 +1066,6 @@ def cmd_finish(args: argparse.Namespace) -> int:
         print(f"notice: already {label} — nothing to finalize.")
 
     return _finish_commit(vault, session_note, worktree_name)
-
-
-# ---- handoff ----------------------------------------------------------------
-
-def cmd_handoff(args: argparse.Namespace) -> int:
-    """Shelve the active session note for the current worktree.
-
-    Mirrors `lore finish` but writes ``status: shelved`` instead of
-    ``status: complete``.  Idempotent: when the note is already in a
-    terminal status, prints a notice and returns 0 without committing.
-
-    When ``--pickup-hints-file`` is given, the file's content is written
-    under a ``## Pickup hints`` section of the session note BEFORE shelving
-    (atomic: hints + shelve happen together, never hints-only).  If the note
-    is already terminal, the idempotency guard fires BEFORE writing hints so
-    an already-shelved note is never double-written.
-
-    Resolves the note via `vault.resolve_session_note()` (session-id first,
-    worktree-name fallback) so the *current* session's note is shelved.
-    """
-    vault = Path(vault_mod.resolve_vault())
-    session_id = _session_id_from_args_or_env(args)
-    worktree_name = args.worktree or vault_mod.detect_worktree_name()
-
-    session_note = vault_mod.resolve_session_note(
-        vault, session_id=session_id, worktree_name=worktree_name
-    )
-    if session_note is None:
-        print(
-            f"notice: no active session note found for worktree {worktree_name!r} — "
-            "nothing to shelve.",
-        )
-        return 0
-
-    hints_file: Path | None = getattr(args, "pickup_hints_file", None)
-    if hints_file is not None:
-        hints_file = Path(hints_file)
-
-    now_iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    ok = sessions_mod.finalize_note(session_note, now_iso, status="shelved")
-    if not ok:
-        current_status = _get_current_status(session_note)
-        label = current_status if current_status else "terminal"
-        print(f"notice: already {label} — nothing to do.")
-        return 0
-
-    if hints_file is not None:
-        try:
-            hints_text = hints_file.read_text()
-        except Exception as exc:
-            print(f"error: cannot read --pickup-hints-file {hints_file}: {exc}", file=sys.stderr)
-            return 1
-        frontmatter.patch_section(session_note, "Pickup hints", hints_text)
-
-    print(f"Shelved: {session_note.name}")
-    return _commit_and_push_session_note(vault, session_note, worktree_name, "shelve")
-
-
-# ---- shelved / resume (pickup surface) --------------------------------------
-
-def _pickup_hints_fragment(note: Path) -> str:
-    """Return a one-line context fragment for a shelved note.
-
-    Prefers the first non-empty line under a ``## Pickup hints`` heading; falls
-    back to the note's ``# `` title line, then the filename stem. Truncated so a
-    list stays scannable. Never raises.
-    """
-    try:
-        text = note.read_text()
-    except Exception:
-        return note.stem
-
-    lines = text.splitlines()
-    in_hints = False
-    for line in lines:
-        if line.strip().lower().startswith("## pickup hints"):
-            in_hints = True
-            continue
-        if in_hints:
-            if line.strip().startswith("## "):
-                break
-            if line.strip():
-                return line.strip()[:80]
-
-    for line in lines:
-        if line.startswith("# "):
-            return line[2:].strip()[:80]
-    return note.stem
-
-
-def _note_timestamp(note: Path) -> str:
-    """Return the note's ended:/started: frontmatter timestamp, or '(no timestamp)'."""
-    try:
-        fm = frontmatter.parse_frontmatter(note)
-    except Exception:
-        return "(no timestamp)"
-    for key in ("ended", "started"):
-        val = fm.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-    return "(no timestamp)"
-
-
-def cmd_shelved(args: argparse.Namespace) -> int:
-    """List shelved/handoff session notes, most-recent-first.
-
-    Prints each note's path + frontmatter timestamp + a short context fragment
-    (first Pickup-hints line, else the title) so an interactive picker is
-    usable. Optional ``--slug`` narrows to one worktree slug.
-    """
-    vault = Path(vault_mod.resolve_vault())
-    slug = getattr(args, "slug", None)
-    notes = sessions_mod.find_shelved_notes(vault, slug=slug)
-
-    if not notes:
-        if slug:
-            print(f"Nothing shelved for slug {slug!r}.")
-        else:
-            print("Nothing shelved — no notes to resume.")
-        return 0
-
-    for note in notes:
-        ts = _note_timestamp(note)
-        fragment = _pickup_hints_fragment(note)
-        print(f"{note}")
-        print(f"  {ts} — {fragment}")
-    return 0
-
-
-def _resolve_resume_target(vault: Path, target: str) -> Path | None:
-    """Resolve a resume target — an explicit file path OR a worktree slug.
-
-    A path that exists is used directly. Otherwise *target* is treated as a
-    slug and matched against shelved/handoff notes (most-recent-first). Returns
-    None when nothing matches.
-    """
-    as_path = Path(target).expanduser()
-    if as_path.is_file():
-        return as_path
-    matches = sessions_mod.find_shelved_notes(vault, slug=target)
-    return matches[0] if matches else None
-
-
-def _resolve_implicit_resume_target(vault: Path, args: argparse.Namespace) -> Path | None:
-    """Resolve the resume target when no positional was given: exact
-    session-id match (any status — `resume_note` rejects non-shelved notes),
-    else the most-recent shelved note for the worktree (override or detected)."""
-    session_id = _session_id_from_args_or_env(args)
-    if session_id:
-        return vault_mod.find_session_note_by_session_id(vault, session_id)
-    worktree_name = args.worktree or vault_mod.detect_worktree_name()
-    matches = sessions_mod.find_shelved_notes(vault, slug=worktree_name)
-    return matches[0] if matches else None
-
-
-def cmd_resume(args: argparse.Namespace) -> int:
-    """Flip a shelved/handoff session note back to active.
-
-    With a positional target, accepts an explicit note path OR a worktree slug.
-    With no target, resolves the current session's shelved note (``--session-id``
-    → ``--worktree`` → auto-detected worktree). On a non-resumable note
-    (active/complete/finalized) prints a clear no-op message and returns 0.
-    A target that resolves to nothing is an error (non-zero).
-    """
-    vault = Path(vault_mod.resolve_vault())
-    if args.target:
-        note = _resolve_resume_target(vault, args.target)
-    else:
-        note = _resolve_implicit_resume_target(vault, args)
-    if note is None:
-        label = args.target or args.worktree or _session_id_from_args_or_env(args) or "current worktree"
-        print(f"error: no shelved note found for {label!r}", file=sys.stderr)
-        return 1
-
-    if sessions_mod.resume_note(note):
-        print(f"Resumed: {note.name} (status: active)")
-        return 0
-
-    current = _get_current_status(note) or "unknown"
-    print(f"notice: {note.name} is not shelved (status: {current}) — nothing to resume.")
-    return 0
 
 
 # ---- stats ------------------------------------------------------------------
@@ -2879,31 +2461,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sync.set_defaults(func=cmd_sync)
 
-    p_new = sub.add_parser("new", help="Render a template and write a new vault note")
-    p_new.add_argument("type", choices=list(_NOTE_DIRS), help="Note type to create")
-    p_new.add_argument("--title", required=True, help="Title for the note (used in slug)")
-    p_new.add_argument("--vault", default=None, help="Vault path (overrides $LORE_VAULT)")
-    p_new.add_argument("--project", default=None, help="Project name to stamp in frontmatter")
-    # deferred
-    p_new.add_argument("--surfaces", default=None, help="CSV area names this item surfaces on (deferred)")
-    p_new.add_argument("--next-check", dest="next_check", default=None, help="When to next check (deferred)")
-    p_new.add_argument("--revisit-after", dest="revisit_after", default=None, help="Date-bound revisit trigger (deferred)")
-    # dead-end
-    p_new.add_argument("--areas", default=None, help="CSV area names (dead-end, decision)")
-    p_new.add_argument("--tried", default=None, help="Date the approach was tried (dead-end; defaults to today)")
-    p_new.add_argument("--revive-condition", dest="revive_condition", default=None, help="Condition to retry (dead-end)")
-    # follow-up
-    p_new.add_argument("--source", default=None, help="Where updates appear (follow-up)")
-    p_new.add_argument("--target", default=None, help="Version or state being waited for (follow-up)")
-    p_new.add_argument("--check", default=None, help="Check cadence (follow-up)")
-    # area
-    p_new.add_argument("--keywords", default=None, help="CSV keywords for branch-based recall (area)")
-    p_new.add_argument("--key-files", dest="key_files", default=None, help="CSV key file paths (area)")
-    # plan
-    p_new.add_argument("--related-areas", dest="related_areas", default=None, help="CSV area names (plan)")
-    p_new.add_argument("--related-spec", dest="related_spec", default=None, help="Related spec path or wikilink (plan)")
-    p_new.set_defaults(func=cmd_new)
-
     p_promote = sub.add_parser(
         "promote",
         help="Copy a personal note into a shared vault (interactive, TTY-gated)",
@@ -2950,45 +2507,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_session_selectors(p_finish)
     p_finish.set_defaults(func=cmd_finish)
-
-    p_handoff = sub.add_parser(
-        "handoff",
-        help="Shelve the active session note for this worktree (for pickup later)",
-    )
-    _add_session_selectors(p_handoff)
-    p_handoff.add_argument(
-        "--pickup-hints-file",
-        dest="pickup_hints_file",
-        default=None,
-        metavar="PATH",
-        help="File whose content is written under '## Pickup hints' before shelving",
-    )
-    p_handoff.set_defaults(func=cmd_handoff)
-
-    p_shelved = sub.add_parser(
-        "shelved",
-        help="List shelved/handoff session notes (most-recent-first) for pickup",
-    )
-    p_shelved.add_argument(
-        "--slug",
-        default=None,
-        help="Narrow to one worktree slug",
-    )
-    p_shelved.set_defaults(func=cmd_shelved)
-
-    p_resume = sub.add_parser(
-        "resume",
-        help="Flip a shelved/handoff session note back to active",
-    )
-    p_resume.add_argument(
-        "target",
-        nargs="?",
-        default=None,
-        help="Session note path OR worktree slug to resume "
-             "(omit to resume the current session's shelved note)",
-    )
-    _add_session_selectors(p_resume)
-    p_resume.set_defaults(func=cmd_resume)
 
     p_areas = sub.add_parser(
         "areas",

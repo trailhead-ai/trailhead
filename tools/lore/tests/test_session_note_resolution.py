@@ -312,11 +312,11 @@ def test_cli_miss_exits_1_with_diagnostic(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# finish / handoff / resume: --session-id and --worktree overrides
+# finish: --session-id and --worktree overrides
 # ---------------------------------------------------------------------------
 
 def _git_vault(tmp_path: Path) -> Path:
-    """A vault that is its own git repo (so finish/handoff can commit)."""
+    """A vault that is its own git repo (so finish can commit)."""
     vault = tmp_path / "v"
     (vault / "sessions").mkdir(parents=True)
     subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
@@ -356,73 +356,3 @@ def test_finish_worktree_flag_overrides_detection(tmp_path):
     r = run_cli(["finish", "--worktree", "beta"], env={"LORE_VAULT": str(vault)}, cwd=str(tmp_path))
     assert r.returncode == 0, r.stderr
     assert _status_of(beta) == "complete"
-
-
-def test_handoff_session_id_flag_targets_exact_note(tmp_path):
-    vault = _git_vault(tmp_path)
-    sd = vault / "sessions"
-    mine = _write_note(sd, "2026-06-01-1000", "feat", session_id="mine")
-    newer = _write_note(sd, "2026-06-02-1000", "feat", session_id="other")
-
-    r = run_cli(["handoff", "--session-id", "mine"], env={"LORE_VAULT": str(vault)})
-    assert r.returncode == 0, r.stderr
-    assert _status_of(mine) == "shelved"
-    assert _status_of(newer) == "active"
-
-
-def _write_shelved(sd: Path, stem: str, worktree: str, session_id: str) -> Path:
-    p = sd / f"{stem}-{worktree}.md"
-    p.write_text(
-        "---\n"
-        "type: session\n"
-        f"worktree: {worktree}\n"
-        f"session_id: {session_id}\n"
-        "status: shelved\n"
-        "---\n\n"
-        f"# Session: {worktree}\n"
-    )
-    return p
-
-
-def test_resume_no_target_uses_session_id(tmp_path):
-    """`lore resume` with no positional, --session-id given → flips that note."""
-    vault = _git_vault(tmp_path)
-    sd = vault / "sessions"
-    want = _write_shelved(sd, "2026-06-01-1000", "feat", "mine")
-    _write_shelved(sd, "2026-06-02-1000", "feat", "other")  # newer, different id
-
-    r = run_cli(["resume", "--session-id", "mine"], env={"LORE_VAULT": str(vault)})
-    assert r.returncode == 0, r.stderr
-    assert _status_of(want) == "active"
-
-
-def test_resume_no_target_uses_worktree(tmp_path):
-    """`lore resume --worktree X` (no id) → most-recent shelved note for X."""
-    vault = _git_vault(tmp_path)
-    sd = vault / "sessions"
-    _write_shelved(sd, "2026-06-01-1000", "feat", "a")
-    newest = _write_shelved(sd, "2026-06-02-1000", "feat", "b")
-
-    r = run_cli(["resume", "--worktree", "feat"], env={"LORE_VAULT": str(vault)}, cwd=str(tmp_path))
-    assert r.returncode == 0, r.stderr
-    assert _status_of(newest) == "active"
-
-
-def test_resume_explicit_target_still_works(tmp_path):
-    """The positional target path is unchanged (regression guard)."""
-    vault = _git_vault(tmp_path)
-    sd = vault / "sessions"
-    note = _write_shelved(sd, "2026-06-01-1000", "feat", "x")
-
-    r = run_cli(["resume", str(note)], env={"LORE_VAULT": str(vault)})
-    assert r.returncode == 0, r.stderr
-    assert _status_of(note) == "active"
-
-
-def test_resume_no_target_no_match_errors(tmp_path):
-    vault = _git_vault(tmp_path)
-    r = run_cli(
-        ["resume", "--worktree", "ghost"], env={"LORE_VAULT": str(vault)}, cwd=str(tmp_path)
-    )
-    assert r.returncode == 1
-    assert "ghost" in (r.stdout + r.stderr)
