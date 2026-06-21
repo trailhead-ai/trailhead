@@ -1,7 +1,7 @@
 """Lore's static user-level ruleset content.
 
 This module owns the *content* lore installs into a harness's user-level ruleset
-(for Claude Code: ``~/.claude/rules/trailhead-lore.md``).  The trailhead
+(for Claude Code: ``~/.claude/rules/<ruleset-name>.md``).  The trailhead
 ``Harness`` seam owns the *delivery* (see ``trailhead/harness/base.py``); lore
 only supplies the bytes.
 

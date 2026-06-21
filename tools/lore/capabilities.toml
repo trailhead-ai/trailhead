@@ -10,4 +10,3 @@
 [tool]
 name = "lore"
 base = ["skills/_shared"]
-hooks_json = "hooks/hooks.json"

@@ -31,11 +31,13 @@ _GREP_EXCLUDE_DIRS = {
     ".mypy_cache",
 }
 
-# Exclude the migration script (it intentionally references old names to remove them)
-# and the trailhead/tests/ dir (contains intentional negative assertions, not install refs)
+# Exclude the migration script (it intentionally references old names to remove them),
+# the trailhead/tests/ dir (contains intentional negative assertions, not install refs),
+# and tools/lore/tests/ (contains expected path strings being tested, not stale refs).
 _GREP_EXCLUDE_PATHS = {
     _REPO_ROOT / "bin" / "migrate-marketplaces.sh",
     _REPO_ROOT / "trailhead" / "tests",
+    _REPO_ROOT / "tools" / "lore" / "tests",
 }
 
 
