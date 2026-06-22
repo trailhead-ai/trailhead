@@ -229,7 +229,7 @@ class TestEndpointIsolation:
         # The session write must NOT route through the record path, so the index
         # must carry no ``sessions`` row for this session_id.
         index_store = load_script("index_store")
-        conn = index_store.open_index()
+        conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
         try:
             rows = conn.execute(
                 "SELECT vault, kind, name FROM records WHERE kind = 'session'"

@@ -526,7 +526,12 @@ def test_rebuild_skips_orphan_json_without_md(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _run_lore(args: list[str], env: dict) -> subprocess.CompletedProcess:
-    """Run the lore CLI as a subprocess."""
+    """Run the lore CLI as a subprocess.
+
+    Callers MUST fence both XDG_STATE_HOME and XDG_CONFIG_HOME in ``env``.
+    LORE_VAULT alone is insufficient: cmd_reindex calls _load_vault_config()
+    first and ignores LORE_VAULT when a real config.json is present.
+    """
     return subprocess.run(
         [sys.executable, str(CLI_PATH)] + args,
         capture_output=True,
@@ -544,6 +549,7 @@ def test_lore_reindex_exits_0(tmp_path):
 
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env)
@@ -564,6 +570,7 @@ def test_lore_reindex_prints_row_count_to_stdout(tmp_path):
 
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env)
@@ -588,6 +595,7 @@ def test_lore_reindex_count_reflects_vault_records(tmp_path):
 
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env)
