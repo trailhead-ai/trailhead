@@ -996,3 +996,277 @@ def test_dry_run_runs_phase_a_but_writes_nothing(tmp_path, monkeypatch):
 
     assert rc == 0
     assert before == after, "dry_run must not write"
+
+
+# ===========================================================================
+# Slice 3 — vault relocation to canonical home + config + final reindex
+#
+# These tests drive `relocate_vault(source, canonical, *, config_path=None)`.
+# A temp git-repo vault is moved to a canonical XDG path; the lore config.json
+# is updated atomically; a final index_store.rebuild targets the canonical home.
+# XDG_STATE_HOME / XDG_CONFIG_HOME are isolated per test (Axiom 6).
+# ===========================================================================
+
+
+def git_vault_with_history(path: Path, *, with_remote: bool = False) -> Path:
+    """Create a committed git repo at *path* with one valid v1 record.
+
+    The record is written through the real ``record_store.validate_and_write``
+    seam so its sidecar satisfies the index schema (NOT NULL ``created_at`` etc.).
+    """
+    path.mkdir(parents=True)
+    _git(path, "init", "-q")
+    _git(path, "config", "user.email", "histauthor@example.com")
+    _git(path, "config", "user.name", "Hist Author")
+
+    mod = _mod()
+    record_store = mod.record_store
+    index_store = mod.index_store
+    loc = record_store.place_record("use-sqlite", "decision", scope=None, vault_root=str(path))
+    sidecar = {
+        "version": "v1",
+        "kind": "decision",
+        "title": "use-sqlite",
+        "status": "active",
+        "keywords": [],
+        "created-at": "2026-06-04T00:00:00Z",
+        "created-by": "histauthor@example.com",
+    }
+    conn = index_store.open_index()
+    try:
+        record_store.validate_and_write(loc, sidecar, "\nBody.\n", conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    _git(path, "add", "-A")
+    _git(path, "commit", "-q", "-m", "seed canonical content")
+    if with_remote:
+        _git(path, "remote", "add", "origin", "https://example.com/lore-vault.git")
+    return path
+
+
+def write_config(config_path: Path, source: Path) -> None:
+    """Write a config.json whose `default` vault points (via path) at *source*."""
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        '{"vaults": [{"name": "default", "scope": "default", "path": "%s"}]}'
+        % str(source),
+        encoding="utf-8",
+    )
+
+
+def isolate_xdg(monkeypatch, tmp_path) -> tuple[Path, Path]:
+    """Isolate XDG_STATE_HOME + XDG_CONFIG_HOME; return (state, config) roots."""
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    state.mkdir(exist_ok=True)
+    config.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    monkeypatch.setenv("LORE_EMAIL", "migrator@example.com")
+    return state, config
+
+
+def canonical_default(state: Path) -> Path:
+    """The canonical default-vault home: state_dir(lore)/vaults/default."""
+    return state / "lore" / "vaults" / "default"
+
+
+# ---------------------------------------------------------------------------
+# Idempotent — already at canonical
+# ---------------------------------------------------------------------------
+
+
+def test_relocate_already_at_canonical_is_noop(tmp_path, monkeypatch):
+    mod = _mod()
+    state, config = isolate_xdg(monkeypatch, tmp_path)
+    canonical = canonical_default(state)
+    git_vault_with_history(canonical)
+    before = _snapshot_tree(canonical)
+
+    rc = mod.relocate_vault(canonical, canonical, config_path=config / "lore" / "config.json")
+
+    after = _snapshot_tree(canonical)
+    assert rc == 0
+    assert before == after, "no-op must not change the vault"
+
+
+# ---------------------------------------------------------------------------
+# Git-aware move preserves history + remote
+# ---------------------------------------------------------------------------
+
+
+def test_relocate_git_aware_move_preserves_history(tmp_path, monkeypatch):
+    mod = _mod()
+    state, config = isolate_xdg(monkeypatch, tmp_path)
+    source = git_vault_with_history(tmp_path / "lore-vault", with_remote=True)
+    canonical = canonical_default(state)
+    config_path = config / "lore" / "config.json"
+    write_config(config_path, source)
+
+    orig_log = subprocess.run(
+        ["git", "-C", str(source), "log", "--format=%H %s"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+
+    rc = mod.relocate_vault(source, canonical, config_path=config_path)
+    assert rc == 0
+
+    new_log = subprocess.run(
+        ["git", "-C", str(canonical), "log", "--format=%H %s"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert new_log == orig_log, "history must be preserved"
+
+    remotes = subprocess.run(
+        ["git", "-C", str(canonical), "remote", "-v"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "https://example.com/lore-vault.git" in remotes
+
+    assert not source.exists(), "old source path must be gone"
+    assert not canonical.is_symlink(), "canonical must not be a symlink back to source"
+
+
+# ---------------------------------------------------------------------------
+# Config resolves to canonical (no explicit path override)
+# ---------------------------------------------------------------------------
+
+
+def test_relocate_config_resolves_to_canonical(tmp_path, monkeypatch):
+    mod = _mod()
+    state, config = isolate_xdg(monkeypatch, tmp_path)
+    source = git_vault_with_history(tmp_path / "lore-vault")
+    canonical = canonical_default(state)
+    config_path = config / "lore" / "config.json"
+    write_config(config_path, source)
+
+    rc = mod.relocate_vault(source, canonical, config_path=config_path)
+    assert rc == 0
+
+    import json as _json
+    data = _json.loads(config_path.read_text())
+    default_entries = [v for v in data["vaults"] if v.get("name") == "default"]
+    assert len(default_entries) == 1
+    assert "path" not in default_entries[0], "default entry must have no explicit path"
+
+    # Sanity: the canonical home is exactly state_dir(lore)/vaults/default.
+    vault_config = load_script("vault_config")
+    vaults = vault_config.load_config(str(config_path))
+    default = next(v for v in vaults if v.scope == "default")
+    assert default.path.resolve() == canonical.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Config-write failure rolls back the move
+# ---------------------------------------------------------------------------
+
+
+def test_relocate_config_write_failure_rolls_back_move(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    state, config = isolate_xdg(monkeypatch, tmp_path)
+    source = git_vault_with_history(tmp_path / "lore-vault", with_remote=True)
+    canonical = canonical_default(state)
+    config_path = config / "lore" / "config.json"
+    write_config(config_path, source)
+
+    source_before = _snapshot_tree(source)
+    config_before = config_path.read_bytes()
+
+    # Stub the atomic config write to raise AFTER the move has already happened.
+    def boom(path, cfg):
+        raise OSError("config write failed")
+
+    monkeypatch.setattr(mod.vault_config, "write_config_atomic", boom)
+
+    rc = mod.relocate_vault(source, canonical, config_path=config_path)
+    err = capsys.readouterr().err
+
+    assert rc != 0
+    assert source.exists(), "repo must be moved back to source on config failure"
+    assert not canonical.exists(), "canonical must be cleaned up on rollback"
+    assert _snapshot_tree(source) == source_before, "source must be intact after rollback"
+    assert config_path.read_bytes() == config_before, "prior config must be intact"
+    assert "Recovery" in err, "recovery banner must be printed"
+
+
+# ---------------------------------------------------------------------------
+# Cross-filesystem copy preserves the source until verified
+# ---------------------------------------------------------------------------
+
+
+def test_relocate_cross_filesystem_preserves_source_until_verified(tmp_path, monkeypatch):
+    mod = _mod()
+    state, config = isolate_xdg(monkeypatch, tmp_path)
+    source = git_vault_with_history(tmp_path / "lore-vault")
+    canonical = canonical_default(state)
+    config_path = config / "lore" / "config.json"
+    write_config(config_path, source)
+
+    source_before = _snapshot_tree(source)
+
+    # Simulate cross-filesystem: Path.rename raises OSError so the copy fallback fires.
+    real_rename = Path.rename
+
+    def fake_rename(self, target):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+
+    # The remove-source step fails after a successful copy → source must survive.
+    real_rmtree = mod.shutil.rmtree
+
+    def boom_rmtree(path, *a, **k):
+        raise OSError("rmtree failed")
+
+    monkeypatch.setattr(mod.shutil, "rmtree", boom_rmtree)
+
+    rc = mod.relocate_vault(source, canonical, config_path=config_path)
+
+    assert rc != 0
+    assert source.exists(), "source must survive when remove-source fails"
+    assert _snapshot_tree(source) == source_before, "no data loss across mounts"
+
+
+# ---------------------------------------------------------------------------
+# Final index targets canonical
+# ---------------------------------------------------------------------------
+
+
+def test_relocate_final_index_targets_canonical(tmp_path, monkeypatch):
+    mod = _mod()
+    index_store = load_script("index_store")
+    state, config = isolate_xdg(monkeypatch, tmp_path)
+    source = git_vault_with_history(tmp_path / "lore-vault")
+    canonical = canonical_default(state)
+    config_path = config / "lore" / "config.json"
+    write_config(config_path, source)
+
+    rc = mod.relocate_vault(source, canonical, config_path=config_path)
+    assert rc == 0
+
+    def projected_rows(conn):
+        return conn.execute(
+            "SELECT vault, kind, name, title, status FROM records ORDER BY id"
+        ).fetchall()
+
+    conn = index_store.open_index()
+    try:
+        run_rows = projected_rows(conn)
+    finally:
+        conn.close()
+
+    assert run_rows, "index must have rows after relocation"
+    for vault, *_ in run_rows:
+        assert str(canonical) in vault, f"index vault_root must be canonical: {vault}"
+
+    # A fresh rebuild over the canonical tree reproduces the same logical rows.
+    conn = index_store.open_index()
+    try:
+        index_store.rebuild([str(canonical)], conn)
+        conn.commit()
+        fresh_rows = projected_rows(conn)
+    finally:
+        conn.close()
+    assert run_rows == fresh_rows

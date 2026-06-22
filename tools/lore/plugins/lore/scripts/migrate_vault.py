@@ -41,7 +41,9 @@ Design (expanded for the KU-2 live-vault findings):
 # absent (see record_model.py's matching note). Every annotation here is a valid
 # runtime expression on 3.11+ with no forward references.
 
+import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -55,6 +57,7 @@ import index_store
 import record_model
 import record_store
 import vault as vault_mod
+import vault_config
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -1104,3 +1107,227 @@ def _prune_empty_dirs(root: Path) -> None:
             dir_path.rmdir()
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Slice 3 — vault relocation to canonical home + config + final reindex
+#
+# The FINAL cutover step, run only after the content transcode (Slice 2) is
+# reviewed in git. A directory move is **not** git-reversible (unlike the
+# transcode, which `git reset --hard` undoes), so this step owns its OWN
+# rollback: a move that succeeds while the config update fails would strand the
+# vault at canonical while `default` still resolves to the old location, and
+# `lore` would silently miss the vault. The sequence is rollback-safe end to end:
+#
+#   0. Idempotent  — source == canonical → no-op, exit 0.
+#   1. Recovery banner printed to stderr BEFORE any move.
+#   2. Move the repo (git-aware): try `source.rename(canonical)` (atomic on the
+#      same filesystem); on OSError (cross-filesystem) fall back to
+#      copytree → verify (.git + history + file count) → rmtree(source). If the
+#      copy/verify fails the source is left intact and we raise.
+#   3. Atomic config update: strip the explicit `path` from the `default` vault
+#      entry so it resolves to state_dir(lore)/vaults/default (A7).
+#   4. On config failure AFTER the move: move the repo back to source, restore
+#      the prior config, exit non-zero with the recovery banner.
+#   5. Final index_store.rebuild over the canonical home (the index stores
+#      vault_root paths, so the authoritative rebuild happens after move+config).
+#
+# Recovery: if lore stops finding the vault after this step, either move
+# <canonical> back to <source>, or set the 'default' vault path in
+# $XDG_CONFIG_HOME/lore/config.json to the current vault location.
+# ---------------------------------------------------------------------------
+
+
+def relocate_vault(
+    source: "str | Path",
+    canonical: "str | Path",
+    *,
+    config_path: "str | Path | None" = None,
+) -> int:
+    """Move the vault git repo to canonical home and update lore config.
+
+    Returns 0 on success, 1 on error. ``config_path`` defaults to
+    ``config_dir("lore") / "config.json"``.
+    """
+    source = Path(source)
+    canonical = Path(canonical)
+    if config_path is None:
+        config_path = _resolve_config_path()
+    config_path = Path(config_path)
+
+    # --- 0. Idempotent: already at canonical. -------------------------------
+    if source.resolve() == canonical.resolve():
+        print("vault already at canonical")
+        return 0
+
+    # --- 1. Recovery instruction printed BEFORE any move. -------------------
+    _print_recovery_banner(source, canonical)
+
+    # --- 2. Move the vault repo (git-aware, cross-filesystem safe). ---------
+    try:
+        _move_repo(source, canonical)
+    except OSError as exc:
+        print(f"abort: vault move failed ({exc})", file=sys.stderr)
+        _print_recovery_banner(source, canonical)
+        return 1
+
+    # --- 3 & 4. Update config atomically; roll back the move on failure. ----
+    prior_config = config_path.read_bytes() if config_path.exists() else None
+    try:
+        _update_config(config_path, source)
+    except Exception as exc:  # noqa: BLE001 — any failure must roll the move back.
+        _rollback_move(canonical, source)
+        _restore_config(config_path, prior_config)
+        print(f"abort: config update failed ({exc}); vault moved back to {source}", file=sys.stderr)
+        _print_recovery_banner(source, canonical)
+        return 1
+
+    # --- 5. Final index rebuild against the canonical home. -----------------
+    conn = index_store.open_index()
+    try:
+        index_store.rebuild([str(canonical)], conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return 0
+
+
+def _print_recovery_banner(source: Path, canonical: Path) -> None:
+    print(
+        "Recovery: if lore stops finding the vault after this step, either\n"
+        f"  move {canonical} back to {source}, or set the 'default' vault\n"
+        "  path in $XDG_CONFIG_HOME/lore/config.json to the current vault location.",
+        file=sys.stderr,
+    )
+
+
+def _move_repo(source: Path, canonical: Path) -> None:
+    """Move *source* → *canonical*, preserving ``.git``, history, and ``origin``.
+
+    Tries ``rename`` first (atomic on the same filesystem). On ``OSError``
+    (the cross-filesystem case) falls back to copy → verify → remove-source,
+    leaving the source intact if the copy or verification fails.
+    """
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        source.rename(canonical)
+        return
+    except OSError:
+        pass
+
+    # Cross-filesystem fallback: copy everything (incl. .git), verify, then
+    # remove the source ONLY after the copy is proven good (no data loss). If the
+    # copy or verify fails, tear down the partial canonical so the source remains
+    # the single intact copy and the operator can safely retry.
+    try:
+        shutil.copytree(source, canonical)
+        _verify_copy(source, canonical)
+    except OSError:
+        shutil.rmtree(canonical, ignore_errors=True)
+        raise
+    shutil.rmtree(source)
+
+
+def _verify_copy(source: Path, canonical: Path) -> None:
+    """Assert the cross-filesystem copy is complete before the source is removed."""
+    if not (canonical / ".git").exists():
+        raise OSError(f"verify failed: {canonical}/.git missing after copy")
+    result = subprocess.run(
+        ["git", "-C", str(canonical), "log", "--oneline", "-1"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise OSError(f"verify failed: git history unreadable at {canonical}")
+    if _file_count(canonical) != _file_count(source):
+        raise OSError(f"verify failed: file count mismatch between {source} and {canonical}")
+
+
+def _file_count(root: Path) -> int:
+    return sum(1 for p in root.rglob("*") if p.is_file())
+
+
+def _rollback_move(canonical: Path, source: Path) -> None:
+    """Move the repo back to *source* after a post-move failure (best effort)."""
+    if source.exists():
+        return
+    try:
+        canonical.rename(source)
+        return
+    except OSError:
+        pass
+    try:
+        shutil.copytree(canonical, source)
+        shutil.rmtree(canonical)
+    except OSError:
+        pass
+
+
+def _restore_config(config_path: Path, prior: "bytes | None") -> None:
+    """Restore the prior config bytes (or remove the file if there was none)."""
+    if prior is None:
+        if config_path.exists():
+            try:
+                config_path.unlink()
+            except OSError:
+                pass
+        return
+    try:
+        config_path.write_bytes(prior)
+    except OSError:
+        pass
+
+
+def _update_config(config_path: Path, source: Path) -> None:
+    """Point the ``default`` vault at canonical by stripping its explicit ``path``.
+
+    A7: a ``default``-named vault with NO ``path`` resolves to
+    ``state_dir("lore")/vaults/default``. We locate the entry whose ``name`` is
+    ``default`` (or whose explicit ``path`` matches *source*) and remove its
+    ``path`` key, then write atomically (temp file + ``os.replace``).
+    """
+    import json
+
+    config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {"vaults": []}
+    entry = _find_default_entry(config, source)
+    if entry is None:
+        raise ValueError("config has no 'default' vault entry to repoint")
+    entry.pop("path", None)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    vault_config.write_config_atomic(config_path, config)
+
+
+def _find_default_entry(config: dict, source: Path) -> "dict | None":
+    """Return the ``default`` vault entry, or the one whose ``path`` matches *source*."""
+    entries = config.get("vaults", [])
+    for entry in entries:
+        if entry.get("name") == "default":
+            return entry
+    src = source.resolve()
+    for entry in entries:
+        path = entry.get("path")
+        if path and Path(path).resolve() == src:
+            return entry
+    return None
+
+
+def _resolve_config_path() -> Path:
+    """Return ``config_dir("lore")/config.json``, honoring XDG overrides.
+
+    Mirrors the resolver pattern in ``cli/lore`` and ``index_store``: lazy-import
+    ``_bootstrap`` + ``trailhead.paths`` and fall back to the XDG default on any
+    import failure so the script works in a vanilla checkout.
+    """
+    try:
+        import _bootstrap
+
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+
+        return _paths.config_dir("lore") / "config.json"
+    except (ImportError, SystemExit):
+        base = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        if base and os.path.isabs(base):
+            return Path(base) / "lore" / "config.json"
+        return Path.home() / ".config" / "lore" / "config.json"
