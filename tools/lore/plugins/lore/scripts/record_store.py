@@ -128,16 +128,6 @@ class InvalidRecordIdError(RecordStoreError):
     """
 
 
-class InvalidBlobPathError(RecordStoreError):
-    """A ``lore record blob`` path is malformed or would escape the blob root (AC14a).
-
-    Same confinement posture as :class:`InvalidRecordIdError` but for free-form
-    blob paths under ``<vault>/blob/`` — rejects NUL bytes, absolute paths, and any
-    empty / ``.`` / ``..`` segment, then asserts the realpath of the target is a
-    descendant of ``realpath(blob_root)`` (catching symlink escapes).
-    """
-
-
 class DiffRejectError(RecordStoreError):
     """A unified diff is valid format but its context doesn't match the body (Slice 4, KU2).
 
@@ -515,45 +505,6 @@ def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, 
                 f"RECORD_ID resolves outside the vault root: {record_id!r}"
             )
     return kind, name, body_path, sidecar_path
-
-
-def confine_blob_path(blob_path: str, blob_root: str | Path) -> Path:
-    """Validate a relative blob path and return its confined absolute target (AC14a).
-
-    The library-boundary guard for ``lore record blob`` paths, the blob-root
-    counterpart of :func:`_confine_record_id`. Rejects NUL bytes, absolute paths,
-    and any empty / ``.`` / ``..`` segment, then asserts ``realpath(target)`` is a
-    descendant of ``realpath(blob_root)`` (catching symlink escapes). Raises
-    :class:`InvalidBlobPathError` on any violation; returns the confined ``Path``.
-
-    ``blob_root`` is created if absent so ``realpath`` resolves through real
-    directories (a directory-level symlink under an not-yet-created tree would not
-    otherwise be caught — this mkdir is load-bearing for the confinement check).
-    """
-    if not blob_path:
-        raise InvalidBlobPathError("blob path is required")
-    if "\x00" in blob_path:
-        raise InvalidBlobPathError("blob path must not contain NUL bytes")
-    if os.path.isabs(blob_path):
-        raise InvalidBlobPathError(
-            f"blob path must be relative, got absolute path: {blob_path!r}"
-        )
-    parts = Path(blob_path).parts
-    if not parts or any(seg in ("", ".", "..") for seg in parts):
-        raise InvalidBlobPathError(
-            f"blob path must be a relative path with no '..'/'.' segments: {blob_path!r}"
-        )
-
-    blob_root = Path(blob_root)
-    blob_root.mkdir(parents=True, exist_ok=True)
-    blob_root_real = os.path.realpath(blob_root)
-    target = blob_root / blob_path
-    if not _realpath_is_descendant(target, blob_root_real):
-        raise InvalidBlobPathError(
-            f"blob path {blob_path!r} escapes the blob root "
-            f"(resolved to {os.path.realpath(target)!r}, outside {blob_root_real!r})"
-        )
-    return target
 
 
 # ---------------------------------------------------------------------------

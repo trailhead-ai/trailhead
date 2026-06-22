@@ -63,7 +63,6 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
      inverse gate, which would require every line's subcommand to be registered. -->
 ```
 lore init <path>          Scaffold a new vault
-lore stats                Print vault counts
 lore finish               Finalize the session note (status: complete + ended:) and commit
 lore sync                 Stage, commit, and push the vault
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)

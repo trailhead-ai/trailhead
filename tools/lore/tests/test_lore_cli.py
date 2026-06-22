@@ -98,9 +98,7 @@ def test_patch_subcommand_is_unregistered(tmp_path):
 def test_new_subcommand_is_unregistered(tmp_path):
     """`lore new` (the template-renderer) was removed wholesale in Slice 4:
     invoking it is an argparse 'invalid choice' error (exit 2), never a
-    successful note creation. The shared `_render_template`/`TEMPLATES_DIR`
-    helpers survive for `lore seed` (inbox.md) — only the user-facing `new`
-    subcommand is gone."""
+    successful note creation."""
     r = run_cli(["new", "plan", "--title", "Whatever"])
     assert r.returncode == 2
     assert "invalid choice: 'new'" in r.stderr
@@ -119,18 +117,3 @@ def test_set_status_removed_and_hints_replacement(tmp_path):
     assert "unknown command 'set-status'" in r.stderr
     assert "did you mean 'lore record update --status'?" in r.stderr
 
-
-# ---- lore stats -------------------------------------------------------------
-
-def test_stats_counts_resolved_vault(tmp_path):
-    # Build a minimal vault directory by hand (init no longer scaffolds taxonomy
-    # dirs in a user-specified location — it bootstraps vaults/default).
-    target = tmp_path / "vault"
-    (target / "deferred").mkdir(parents=True)
-    (target / "deferred" / "x.md").write_text(
-        "---\ntype: deferred\nstatus: open\n---\n\n# X\n"
-    )
-    r = run_cli(["stats"], env={"LORE_VAULT": str(target)})
-    assert r.returncode == 0, r.stderr
-    assert "deferred" in r.stdout.lower()
-    assert "1" in r.stdout

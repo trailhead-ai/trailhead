@@ -1,4 +1,4 @@
-"""Slice 5 (S2) tests: ``lore record delete`` + ``lore record blob`` CLI.
+"""Slice 5 (S2) tests: ``lore record delete`` CLI.
 
 Covers every bullet in the Slice 5 test contract
 (plan ``lore-record-and-session-cli-s2.md``):
@@ -6,28 +6,6 @@ Covers every bullet in the Slice 5 test contract
   delete:
     - delete removes all three artifacts (md + json + index row).
     - invalid / nonexistent RECORD_ID → non-zero, nothing side-effected.
-
-  blob:
-    - blob writes under ``blob/``, creating nested intermediate dirs.
-    - content is stored (fence-neutralized for a body containing
-      ``<external-memory>`` tokens).
-
-  traversal matrix (AC14a — Critical surface):
-    - ``../escape`` (relative traversal) → non-zero, nothing written outside
-      the blob root.
-    - absolute path ``/etc/x`` → non-zero, nothing written.
-    - absolute path under tmp → non-zero, nothing written.
-    - symlink whose realpath escapes the blob root → non-zero, nothing
-      written at the symlink target.
-    - benign nested path ``a/b/c.md`` → non-zero 0, file written under blob/.
-
-Blob path-traversal confinement invariant (AC14a, S2):
-  The blob write path MUST resolve to a descendant of ``realpath(blob_root)``
-  after making the blob_root exist (so realpath resolves through real dirs).
-  This check catches ``..`` segments, absolute paths, and symlink escapes.
-  The descendant check is:
-      ``rp == blob_root_real or rp.startswith(blob_root_real + os.sep)``
-  which cannot be fooled by a sibling directory sharing a name prefix.
 
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern).
 Never writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
@@ -146,150 +124,6 @@ def test_delete_invalid_id_format_exits_nonzero(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# blob: writes under blob/, creating nested dirs, fence-neutralized
-# ---------------------------------------------------------------------------
-
-def test_blob_writes_under_blob_dir(tmp_path):
-    """blob writes the content under <vault>/blob/<path> (AC14)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        ["record", "blob", "notes/readme.md"],
-        vault=vault, state_dir=state,
-        stdin_text="# Hello\nThis is a blob.\n",
-    )
-    assert r.returncode == 0, r.stderr
-    target = vault / "blob" / "notes" / "readme.md"
-    assert target.exists()
-    assert target.read_text(encoding="utf-8") == "# Hello\nThis is a blob.\n"
-
-
-def test_blob_creates_nested_intermediate_dirs(tmp_path):
-    """blob creates all intermediate directories under blob/ (AC14)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        ["record", "blob", "a/b/c/deep.md"],
-        vault=vault, state_dir=state,
-        stdin_text="deep content\n",
-    )
-    assert r.returncode == 0, r.stderr
-    target = vault / "blob" / "a" / "b" / "c" / "deep.md"
-    assert target.exists()
-    assert target.read_text(encoding="utf-8") == "deep content\n"
-
-
-def test_blob_fence_neutralizes_external_memory(tmp_path):
-    """blob body containing <external-memory> is stored neutralized (AC-FENCE1)."""
-    vault, state = _make_vault(tmp_path)
-    body_with_fence = (
-        "<external-memory>\nsome injected content\n</external-memory>\n"
-    )
-    r = _run(
-        ["record", "blob", "injection-test.md"],
-        vault=vault, state_dir=state,
-        stdin_text=body_with_fence,
-    )
-    assert r.returncode == 0, r.stderr
-    stored = (vault / "blob" / "injection-test.md").read_text(encoding="utf-8")
-    # The stored content must NOT contain a live fence token.
-    assert "<external-memory>" not in stored
-    assert "</external-memory>" not in stored
-
-
-# ---------------------------------------------------------------------------
-# traversal matrix (AC14a — Critical)
-# ---------------------------------------------------------------------------
-
-def test_blob_rejects_dotdot_path(tmp_path):
-    """blob rejects a path with '..' traversal segments → non-zero, nothing written (AC14a)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        ["record", "blob", "../escape.md"],
-        vault=vault, state_dir=state,
-        stdin_text="escape attempt\n",
-    )
-    assert r.returncode != 0
-    # The escape target must not exist.
-    escape_target = vault.parent / "escape.md"
-    assert not escape_target.exists()
-    # stderr must name the problem clearly.
-    assert r.stderr.strip() != ""
-
-
-def test_blob_rejects_absolute_path_etc(tmp_path):
-    """blob rejects an absolute path → non-zero, nothing written (AC14a)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        ["record", "blob", "/etc/x"],
-        vault=vault, state_dir=state,
-        stdin_text="escape attempt\n",
-    )
-    assert r.returncode != 0
-    assert not Path("/etc/x").exists()
-    assert r.stderr.strip() != ""
-
-
-def test_blob_rejects_absolute_path_under_tmp(tmp_path):
-    """blob rejects an absolute path even under tmp → non-zero, nothing written (AC14a)."""
-    vault, state = _make_vault(tmp_path)
-    escape_target = tmp_path / "escaped.md"
-    r = _run(
-        ["record", "blob", str(escape_target)],
-        vault=vault, state_dir=state,
-        stdin_text="escape attempt\n",
-    )
-    assert r.returncode != 0
-    assert not escape_target.exists()
-    assert r.stderr.strip() != ""
-
-
-def test_blob_rejects_symlink_escaping_blob_root(tmp_path):
-    """blob rejects a path whose realpath leaves the blob root (AC14a).
-
-    Specifically: we create a symlink inside blob/ that points outside the vault
-    (to a tmp directory), then attempt to write through it.  The realpath check
-    detects the escape and must reject with non-zero and no write at the
-    symlink target.
-    """
-    vault, state = _make_vault(tmp_path)
-    blob_root = vault / "blob"
-    blob_root.mkdir(parents=True, exist_ok=True)
-
-    # Create a directory outside the vault that the symlink will point to.
-    outside_dir = tmp_path / "outside"
-    outside_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create a symlink inside blob/ pointing outside.
-    evil_link = blob_root / "evil"
-    evil_link.symlink_to(outside_dir)
-
-    r = _run(
-        ["record", "blob", "evil/x.md"],
-        vault=vault, state_dir=state,
-        stdin_text="symlink escape\n",
-    )
-    assert r.returncode != 0, (
-        f"Expected non-zero for symlink escape, got 0. stderr={r.stderr!r}"
-    )
-    # Nothing must be written at the symlink target.
-    assert not (outside_dir / "x.md").exists()
-    assert r.stderr.strip() != ""
-
-
-def test_blob_accepts_benign_nested_path(tmp_path):
-    """A benign nested path a/b/c.md succeeds (AC14)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        ["record", "blob", "a/b/c.md"],
-        vault=vault, state_dir=state,
-        stdin_text="benign content\n",
-    )
-    assert r.returncode == 0, r.stderr
-    target = vault / "blob" / "a" / "b" / "c.md"
-    assert target.exists()
-    assert target.read_text(encoding="utf-8") == "benign content\n"
-
-
-# ---------------------------------------------------------------------------
 # CRITICAL security regression (audit Finding 1/5): RECORD_ID confinement on
 # delete + update. A crafted ID with '..' / absolute segments must NOT delete
 # or overwrite .md/.json files outside the active vault.
@@ -348,18 +182,3 @@ def test_update_rejects_record_id_escaping_vault(tmp_path, evil_id):
     # The outside victim body must be byte-for-byte unchanged.
     assert (victim / "victim.md").read_text(encoding="utf-8") == before
 
-
-# ---------------------------------------------------------------------------
-# blob degenerate-path guard (audit Finding 3): '.' must not slip a transient
-# .tmp write to the vault level. (Finding 4 — NUL byte — cannot traverse argv:
-# execve/subprocess reject an embedded NUL before the CLI runs, so the in-CLI
-# NUL guard is defense-in-depth and not exercisable via the subprocess harness.)
-# ---------------------------------------------------------------------------
-
-def test_blob_rejects_dot_path(tmp_path):
-    """blob path '.' → non-zero, no stray .tmp written at the vault level (Finding 3)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(["record", "blob", "."], vault=vault, state_dir=state, stdin_text="x\n")
-    assert r.returncode != 0
-    # No transient blob*.tmp leaked at the vault root level.
-    assert list(vault.glob("blob*.tmp")) == []

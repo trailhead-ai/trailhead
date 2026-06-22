@@ -3,8 +3,6 @@
 
 Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
-  lore seed <name>          Scaffold an inbox capture under inbox/.
-  lore stats                Print counts for the resolved vault.
   lore session-note         Print this session's note path (id-first resolve).
   lore finish               Finalize the active session note for this worktree.
   lore areas                List all vault areas (names, one-liners, keywords).
@@ -34,7 +32,6 @@ import frontmatter  # noqa: E402
 import index_store as index_store_mod  # noqa: E402
 import installer as installer_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
-import promote as promote_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
 import record_model as record_model_mod  # noqa: E402
 import record_store as record_store_mod  # noqa: E402
@@ -47,8 +44,6 @@ import vault_config as vault_config_mod  # noqa: E402
 import vault_resolve as vault_resolve_mod  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-STARTER_DIR = PLUGIN_ROOT / "starter"
-TEMPLATES_DIR = PLUGIN_ROOT / "templates"
 
 # The generic directory taxonomy every vault gets.
 TAXONOMY = [
@@ -56,8 +51,6 @@ TAXONOMY = [
     "follow-ups", "collaboration", "specs", "plans", "designs", "inbox",
     "briefings", "reviews", "gotchas", "audits", "tools", "templates",
 ]
-
-STARTER_DOCS = ["README.md", "glossary.md", "phases.md"]
 
 
 def _resolve_groups_dir() -> "Path | None":
@@ -96,17 +89,6 @@ def _detect_harnesses():
     return detect_harnesses()
 
 
-def _is_tty() -> bool:
-    """Return True if stdin is a real interactive TTY.
-
-    This is the PRIMARY wall on the private→shared boundary (A-1).  There is
-    intentionally NO override path — not an env-var, not a flag.  Tests that
-    need to exercise the TTY path patch sys.stdin.isatty in-process via
-    monkeypatch; a separate agent subprocess cannot patch production's isatty.
-    """
-    return sys.stdin.isatty()
-
-
 def _read_stdin_body() -> str:
     """Return the piped stdin body, or ``""`` when stdin is a TTY (no pipe).
 
@@ -142,281 +124,11 @@ def _today() -> str:
     return date.today().isoformat()
 
 
-def _render_template(template_path: Path, substitutions: dict[str, str]) -> str:
-    """Replace {{key}} placeholders in the template with provided values."""
-    text = template_path.read_text()
-    for key, value in substitutions.items():
-        text = text.replace("{{" + key + "}}", value)
-    return text
-
-
-# ---- promote ----------------------------------------------------------------
-
-def cmd_promote(args: argparse.Namespace) -> int:
-    """Copy a personal note into a shared vault, gated by interactive TTY confirm.
-
-    A-1: refused immediately if sys.stdin.isatty() is False (no override path).
-    D-2: --yes is refused.
-    D-1: actionable error when no shared vault is declared.
-    C-4: overlap blocks promote (unlike recall which degrades).
-    """
-    note_path = Path(args.note).expanduser().resolve()
-
-    # A-1 (FIRST line of cmd_promote, before any I/O / preview / token):
-    # Refuse if stdin is not a real TTY. No override path exists.
-    if not _is_tty():
-        note_arg = str(args.note)
-        to_arg = f" --to {args.to}" if getattr(args, "to", None) else ""
-        print(
-            f"lore: promote refused — stdin is not an interactive terminal.\n"
-            f"The agent cannot self-approve a shared vault write.\n"
-            f"Run this yourself in an interactive terminal:  "
-            f"lore promote {note_arg}{to_arg}",
-            file=sys.stderr,
-        )
-        return 1
-
-    # D-2: --yes is refused.
-    if getattr(args, "yes", False):
-        note_arg = str(args.note)
-        to_arg = f" --to {args.to}" if getattr(args, "to", None) else ""
-        print(
-            f"lore: promote refused — non-interactive promote is not allowed.\n"
-            f"The interactive confirm is mandatory (no --yes path).\n"
-            f"Run this yourself in an interactive terminal:  "
-            f"lore promote {note_arg}{to_arg}",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Note must exist.
-    if not note_path.exists():
-        print(
-            f"lore: promote refused — note not found: {note_path}",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Resolve layers — using the camp-aware path, NOT the recall degradation path.
-    # C-4: overlap blocks promote (we need an unambiguous target).
-    groups_dir = _resolve_groups_dir()
-    try:
-        all_layers = _resolve_layers_for_promote(groups_dir)
-    except _PromoteOverlapError as exc:
-        print(f"lore: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:
-        print(f"lore: could not resolve layers: {exc}", file=sys.stderr)
-        return 1
-
-    shared_layers = [lay for lay in all_layers if lay.kind == "shared"]
-
-    # D-1: no shared vault declared → actionable error.
-    if not shared_layers:
-        config_path = groups_dir / "*.toml" if groups_dir else Path("~/.config/camp/groups/")
-        # Try to give the actual group config path if we can
-        if groups_dir and groups_dir.exists():
-            toml_files = list(groups_dir.glob("*.toml"))
-            if toml_files:
-                config_path = toml_files[0]
-            else:
-                config_path = groups_dir / "<group>.toml"
-        elif groups_dir:
-            config_path = groups_dir / "<group>.toml"
-        else:
-            config_path = Path("~/.config/camp/groups/<group>.toml")
-
-        print(
-            f"lore: no shared vault declared for this group.\n"
-            f"add a [[shared_vaults]] block to your group config at {config_path}:\n"
-            f"\n"
-            f"    [[shared_vaults]]\n"
-            f'    name = "team"\n'
-            f'    root = "/path/to/team-vault"\n',
-            file=sys.stderr,
-        )
-        return 1
-
-    # Resolve target shared layer.
-    to_name = getattr(args, "to", None)
-    if len(shared_layers) == 1 and not to_name:
-        target_layer = shared_layers[0]
-    elif to_name:
-        matching = [lay for lay in shared_layers if lay.name == to_name]
-        if not matching:
-            available = ", ".join(lay.name for lay in shared_layers)
-            print(
-                f"lore: unknown shared layer {to_name!r}. "
-                f"Available: {available}",
-                file=sys.stderr,
-            )
-            return 1
-        target_layer = matching[0]
-    else:
-        # Multiple shared layers, no --to specified.
-        available = ", ".join(lay.name for lay in shared_layers)
-        print(
-            f"lore: multiple shared vaults declared; specify --to <name>. "
-            f"Available: {available}",
-            file=sys.stderr,
-        )
-        return 1
-
-    dest = target_layer.root / note_path.name
-
-    # Preview (D-5): source, exact destination, WARNING: SHARED prefix.
-    print(f"  Source: {note_path}")
-    print(f"  Destination: {dest}")
-    print(f"  WARNING: writing to SHARED vault [{target_layer.name}]")
-    print()
-
-    # Interactive confirm.
-    try:
-        answer = input("Promote? [y/N] ").strip().lower()
-    except EOFError:
-        answer = ""
-
-    if answer not in ("y", "yes"):
-        print("Aborted; nothing written.")
-        return 0
-
-    # Resolve the token store.
-    token_dir = _resolve_token_dir()
-
-    # Mint token (A-1: tty_confirmed=True because _is_tty() passed above).
-    try:
-        token = promote_mod.mint_token(
-            token_dir, note_path, target_layer.name, tty_confirmed=True
-        )
-    except promote_mod.PromoteRefusedError as exc:
-        print(f"lore: {exc}", file=sys.stderr)
-        return 1
-
-    # Write to shared (the single gated entry point).
-    try:
-        result_dest = promote_mod.write_to_shared(
-            note_path, target_layer, token=token, token_dir=token_dir
-        )
-    except promote_mod.PromoteRefusedError as exc:
-        print(f"lore: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:
-        print(f"lore: promote failed: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"Promoted: {note_path} → [shared:{target_layer.name}] {result_dest}")
-    return 0
-
-
-class _PromoteOverlapError(Exception):
-    """Raised when multiple groups claim the cwd and promote cannot pick one."""
-
-
-def _resolve_layers_for_promote(groups_dir: "Path | None") -> list:
-    """Resolve layers for promote, raising _PromoteOverlapError on group overlap.
-
-    Unlike recall (which degrades on overlap), promote must have an unambiguous
-    target (C-4). This re-runs the discovery but surfaces the overlap rather than
-    swallowing it.
-    """
-    camp_plugin_root = None
-    for _p in (Path(__file__).resolve(), *Path(__file__).resolve().parents):
-        if (_p / "trailhead" / "paths.py").exists():
-            camp_plugin_root = _p / "tools" / "camp" / "plugins"
-            break
-
-    if camp_plugin_root is not None and str(camp_plugin_root) not in sys.path:
-        sys.path.insert(0, str(camp_plugin_root))
-
-    try:
-        import camp.scripts.group_config as _gc
-        import camp.scripts.group_resolve as _gr
-        from camp.scripts.group_config import GroupConfigError
-        from camp.scripts.group_resolve import GroupResolutionError
-    except ImportError:
-        # camp absent — personal-only, no shared vaults.
-        from vault import resolve_vault
-        personal_root = Path(resolve_vault())
-        return [layers_mod.VaultLayer(
-            name="personal", root=personal_root, kind="personal", trusted=True
-        )]
-
-    if groups_dir is None or not groups_dir.exists():
-        from vault import resolve_vault
-        personal_root = Path(resolve_vault())
-        return [layers_mod.VaultLayer(
-            name="personal", root=personal_root, kind="personal", trusted=True
-        )]
-
-    try:
-        group_configs = _gc.load_all_groups(groups_dir)
-    except GroupConfigError as exc:
-        from vault import resolve_vault
-        personal_root = Path(resolve_vault())
-        return [layers_mod.VaultLayer(
-            name="personal", root=personal_root, kind="personal", trusted=True
-        )]
-
-    from vault import resolve_vault
-    personal_root = Path(resolve_vault())
-    personal_layer = layers_mod.VaultLayer(
-        name="personal", root=personal_root, kind="personal", trusted=True
-    )
-
-    if not group_configs:
-        return [personal_layer]
-
-    cwd = Path.cwd()
-    try:
-        group_name, _slug = _gr.resolve_from_cwd(cwd, group_configs)
-    except GroupResolutionError as exc:
-        exc_msg = str(exc)
-        # C-4: overlap blocks promote
-        if "multiple groups" in exc_msg or "multiple" in exc_msg.lower():
-            raise _PromoteOverlapError(exc_msg) from exc
-        # cwd not in any group → no shared vaults
-        return [personal_layer]
-
-    for cfg in group_configs:
-        if cfg["group"]["name"] == group_name:
-            shared_vaults_raw = cfg.get("shared_vaults", [])
-            toml_path = cfg.get("_toml_path", "")
-            layers = [personal_layer]
-            for sv in shared_vaults_raw:
-                sv_name = sv["name"]
-                sv_root_str = sv["root"]
-                sv_root = Path(sv_root_str)
-                if not sv_root.is_absolute() and toml_path:
-                    sv_root = Path(toml_path).parent / sv_root
-                resolved = sv_root.resolve()
-                if resolved.is_dir() and resolved != personal_root.resolve():
-                    layers.append(layers_mod.VaultLayer(
-                        name=sv_name, root=resolved, kind="shared", trusted=False
-                    ))
-            return layers
-
-    return [personal_layer]
-
-
-def _resolve_token_dir() -> Path:
-    """Return the token store directory, using trailhead.paths if available."""
-    try:
-        import _bootstrap
-        _bootstrap.ensure_trailhead_importable()
-        import trailhead.paths as _paths
-        token_dir = _paths.state_dir("lore") / "promote-tokens"
-    except (ImportError, SystemExit):
-        # Fallback: use ~/.local/state/lore/promote-tokens
-        token_dir = Path.home() / ".local" / "state" / "lore" / "promote-tokens"
-    return token_dir
-
-
 def _resolve_config_path() -> Path:
     """Return ``config_dir("lore")/config.json``, honoring XDG overrides.
 
-    Mirrors the promote-token / index path resolver pattern: lazy-import
-    ``_bootstrap`` + ``trailhead.paths`` and fall back to the XDG default on any
-    import failure so the CLI works in a vanilla checkout.
+    Lazy-imports ``_bootstrap`` + ``trailhead.paths`` and falls back to the XDG
+    default on any import failure so the CLI works in a vanilla checkout.
     """
     try:
         import _bootstrap
@@ -505,37 +217,6 @@ def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     }
     chosen = vault_resolve_mod.resolve_vault(participating_scopes, kind, vaults)
     return str(chosen.path)
-
-
-# ---- seed -------------------------------------------------------------------
-
-def cmd_seed(args: argparse.Namespace) -> int:
-    """Scaffold an inbox capture named <slug> under inbox/.
-
-    Idempotent: the note is keyed by name alone (no date prefix), so if a note
-    for this name already exists it is left as-is, never overwritten. The note
-    carries minimal frontmatter (type: inbox, date, status: new) and an H1 of
-    the human-readable name.
-    """
-    vault = Path(args.vault).expanduser().resolve() if args.vault else Path(vault_mod.resolve_vault())
-    today = _today()
-
-    note_dir = vault / "inbox"
-    note_dir.mkdir(parents=True, exist_ok=True)
-    note_path = note_dir / f"{_kebab(args.name)}.md"
-
-    if note_path.exists():
-        print(f"Exists: {note_path}")
-        return 0
-
-    template_path = TEMPLATES_DIR / "inbox.md"
-    if not template_path.is_file():
-        print(f"error: template not found: {template_path}", file=sys.stderr)
-        return 1
-    rendered = _render_template(template_path, {"date": today, "name": args.name})
-    note_path.write_text(rendered)
-    print(f"Created: {note_path}")
-    return 0
 
 
 # ---- init -------------------------------------------------------------------
@@ -1031,45 +712,6 @@ def cmd_finish(args: argparse.Namespace) -> int:
         print(f"notice: already {label} — nothing to finalize.")
 
     return _finish_commit(vault, session_note, worktree_name)
-
-
-# ---- stats ------------------------------------------------------------------
-
-def _count(directory: Path, predicate, recursive: bool = False) -> int:
-    if not directory.is_dir():
-        return 0
-    return sum(
-        1
-        for p in vault_mod.iter_note_paths(directory, recursive=recursive)
-        if predicate(frontmatter.parse_frontmatter(p))
-    )
-
-
-def cmd_stats(args: argparse.Namespace) -> int:
-    vault = Path(vault_mod.resolve_vault())
-    areas = _count(vault / "areas", lambda fm: True)
-    open_deferred = _count(
-        vault / "deferred",
-        lambda fm: fm.get("status") in ("open", "resurfaced"),
-        recursive=True,
-    )
-    active_lessons = _count(
-        vault / "lessons",
-        lambda fm: fm.get("status", "active") == "active",
-        recursive=True,
-    )
-    dead_ends = _count(
-        vault / "dead-ends", lambda fm: fm.get("type") == "dead-end", recursive=True
-    )
-    sessions = _count(vault / "sessions", lambda fm: fm.get("type") == "session", recursive=True)
-
-    print(f"vault: {vault}")
-    print(f"areas:          {areas}")
-    print(f"open deferred:  {open_deferred}")
-    print(f"active lessons: {active_lessons}")
-    print(f"dead-ends:      {dead_ends}")
-    print(f"sessions:       {sessions}")
-    return 0
 
 
 # ---- session-note -----------------------------------------------------------
@@ -1822,16 +1464,11 @@ def _apply_map_labels_annotations(
 
 def cmd_record(args: argparse.Namespace) -> int:
     """Dispatch ``lore record <action>`` — create (Slice 3) / update (Slice 4) /
-    delete (Slice 5) / blob (Slice 5) (S2).
+    delete (Slice 5) (S2).
 
     Thin shell over ``record_store`` (Slice 2). Routes to the appropriate handler
     by ``record_action``; all handlers are argv→library adapters with no
     validation or I/O logic of their own.
-
-    **Blob confinement invariant (AC14a, Slice 5, S2):** the blob write path MUST
-    resolve to a descendant of ``realpath(blob_root)`` after the blob_root directory
-    exists. This check catches ``..`` segments, absolute paths, and symlink escapes.
-    Non-zero + clear stderr on rejection; no write occurs.
     """
     action = getattr(args, "record_action", None)
     if action == "create":
@@ -1840,12 +1477,10 @@ def cmd_record(args: argparse.Namespace) -> int:
         return _cmd_record_update(args)
     if action == "delete":
         return _cmd_record_delete(args)
-    if action == "blob":
-        return _cmd_record_blob(args)
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"'lore record delete', or 'lore record blob'.",
+        f"or 'lore record delete'.",
         file=sys.stderr,
     )
     return 1
@@ -1891,40 +1526,6 @@ def _cmd_record_delete(args: argparse.Namespace) -> int:
         return 1
     except Exception as exc:
         print(f"error: record delete failed: {exc}", file=sys.stderr)
-        return 1
-
-    return 0
-
-
-def _cmd_record_blob(args: argparse.Namespace) -> int:
-    """``lore record blob <path>`` (Slice 5, S2) — write a blob under ``<vault>/blob/``.
-
-    A **distinct** subcommand (not ``--kind blob``): reads the body from stdin and
-    writes it to ``<vault>/blob/<path>``, creating intermediate directories.  The
-    body is fence-neutralized (AC-FENCE1) via :func:`record_store.neutralize_fences`
-    and written via :func:`record_store.write_temp_then_rename` (AC-TX1).
-
-    **Path-traversal confinement (AC14a — Critical, Slice 5, S2)** is delegated to
-    :func:`record_store.confine_blob_path`, the library-boundary guard (NUL /
-    absolute / ``..`` / ``.`` rejection + realpath-descendant check). On any
-    violation it raises :class:`InvalidBlobPathError`; we surface that as a non-zero
-    exit + clear stderr, **no write**.
-    """
-    blob_path = getattr(args, "blob_path", None)
-    blob_root = Path(vault_mod.resolve_vault()) / "blob"
-
-    try:
-        target = record_store_mod.confine_blob_path(blob_path, blob_root)
-    except record_store_mod.InvalidBlobPathError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-
-    safe_body = record_store_mod.neutralize_fences(_read_stdin_body())
-
-    try:
-        record_store_mod.write_temp_then_rename(target, safe_body)
-    except Exception as exc:
-        print(f"error: blob write failed: {exc}", file=sys.stderr)
         return 1
 
     return 0
@@ -2516,9 +2117,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_lore_status.set_defaults(func=cmd_status)
 
-    p_stats = sub.add_parser("stats", help="Print counts for the resolved vault")
-    p_stats.set_defaults(func=cmd_stats)
-
     p_session_note = sub.add_parser(
         "session-note",
         help="Print the session note path for this session (id-first, worktree fallback)",
@@ -2542,35 +2140,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Commit message (default: {DEFAULT_SYNC_MSG!r})",
     )
     p_sync.set_defaults(func=cmd_sync)
-
-    p_promote = sub.add_parser(
-        "promote",
-        help="Copy a personal note into a shared vault (interactive, TTY-gated)",
-    )
-    p_promote.add_argument(
-        "note",
-        help="Path to the personal note to promote",
-    )
-    p_promote.add_argument(
-        "--to",
-        default=None,
-        help="Name of the target shared layer (required when multiple shared vaults declared)",
-    )
-    p_promote.add_argument(
-        "--yes",
-        action="store_true",
-        default=False,
-        help=argparse.SUPPRESS,  # Accepted but refused — keeps help clean
-    )
-    p_promote.set_defaults(func=cmd_promote)
-
-    p_seed = sub.add_parser(
-        "seed",
-        help="Scaffold an inbox capture (named <name>) under inbox/",
-    )
-    p_seed.add_argument("name", help="Human-readable name; slugified for the filename")
-    p_seed.add_argument("--vault", default=None, help="Vault path (overrides $LORE_VAULT)")
-    p_seed.set_defaults(func=cmd_seed)
 
     def _add_session_selectors(p: argparse.ArgumentParser) -> None:
         """Shared overrides for the auto-detected session note."""
@@ -2780,25 +2349,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_record_delete.add_argument("--suite", default=None, help=argparse.SUPPRESS)
     p_record_delete.add_argument("--team", default=None, help=argparse.SUPPRESS)
     p_record_delete.set_defaults(func=cmd_record)
-
-    # ``lore record blob <path>`` (Slice 5, S2).
-    # A DISTINCT subcommand — NOT ``--kind blob``.  Body from stdin; path is the
-    # relative path under ``<vault>/blob/`` to write to.  Path-traversal is
-    # hardened (AC14a): absolute paths, ``..`` segments, and symlink escapes are
-    # all rejected before any write occurs (see ``_cmd_record_blob`` for the full
-    # confinement invariant).
-    p_record_blob = p_record_sub.add_parser(
-        "blob",
-        help="Write stdin as a blob under <vault>/blob/<path> (path-traversal hardened, AC14/AC14a)",
-    )
-    p_record_blob.add_argument(
-        "blob_path",
-        metavar="PATH",
-        help="Relative path under <vault>/blob/ to write (e.g. notes/readme.md). "
-             "Must be relative (no leading /), must not contain '..' segments. "
-             "Intermediate directories are created. (AC14/AC14a)",
-    )
-    p_record_blob.set_defaults(func=cmd_record)
 
     # vault subcommand: ``lore vault add|delete|ls|config`` (Slice 4, S4).
     p_vault = sub.add_parser(

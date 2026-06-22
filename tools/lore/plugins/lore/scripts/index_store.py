@@ -94,9 +94,9 @@ from typing import Any
 def _resolve_index_path(env: dict[str, str] | None = None) -> Path:
     """Return the canonical path for the SQLite index.
 
-    Mirrors the promote-token pattern at ``cli/lore:602-612`` exactly, substituting
-    ``"index.sqlite"`` for ``"promote-tokens"``.  Catches ``(ImportError, SystemExit)``
-    so the fallback fires on any import failure.
+    Uses the same lazy-import resolver pattern as other path helpers in this
+    module, substituting ``"index.sqlite"`` for the resolved state path.
+    Catches ``(ImportError, SystemExit)`` so the fallback fires on any import failure.
 
     Args:
         env: Optional environment dict (for test isolation via XDG_STATE_HOME).

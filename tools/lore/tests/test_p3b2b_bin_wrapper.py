@@ -6,7 +6,6 @@ TDD: tests written before implementation. All fixtures are SYNTHETIC
 Covers:
 - bin/lore exists and is executable
 - bin/lore --help produces byte-identical stdout + exit code to python3 cli/lore --help
-- bin/lore stats delegates correctly (byte-identical output + exit code)
 - bin/lore with invalid subcommand forwards the CLI's non-zero exit code
 - invoking bin/lore from an arbitrary cwd (e.g. /tmp) still resolves cli/lore
   (location-independence — not just relative to plugin dir)
@@ -47,21 +46,6 @@ def run_cli_direct(args, env=None, cwd=None):
     )
 
 
-def _make_vault(tmp_path: Path) -> Path:
-    """Scaffold a minimal synthetic vault for stats tests."""
-    vault = tmp_path / "synth-vault"
-    vault.mkdir()
-    for d in ("sessions", "deferred", "subsystems", "decisions", "dead-ends",
-              "lessons", "follow-ups", "collaboration", "specs", "plans", "designs",
-              "inbox", "briefings", "reviews", "gotchas", "audits", "tools",
-              "templates"):
-        (vault / d).mkdir()
-    (vault / "sessions" / "2099-01-01-test-alpha.md").write_text(
-        "---\ntype: session\nstatus: active\n---\n\n# Alpha session\n"
-    )
-    return vault
-
-
 # ---- existence + permissions ------------------------------------------------
 
 def test_bin_lore_exists():
@@ -86,24 +70,6 @@ def test_bin_help_stdout_matches_cli():
     assert bin_result.stdout == cli_result.stdout
 
 
-# ---- delegation correctness: stats ------------------------------------------
-
-def test_bin_stats_exit_code_matches_cli(tmp_path):
-    vault = _make_vault(tmp_path)
-    env = {"LORE_VAULT": str(vault)}
-    bin_result = run_bin(["stats"], env=env)
-    cli_result = run_cli_direct(["stats"], env=env)
-    assert bin_result.returncode == cli_result.returncode
-
-
-def test_bin_stats_stdout_matches_cli(tmp_path):
-    vault = _make_vault(tmp_path)
-    env = {"LORE_VAULT": str(vault)}
-    bin_result = run_bin(["stats"], env=env)
-    cli_result = run_cli_direct(["stats"], env=env)
-    assert bin_result.stdout == cli_result.stdout
-
-
 # ---- non-zero exit code forwarding ------------------------------------------
 
 def test_bin_invalid_subcommand_forwards_nonzero():
@@ -124,16 +90,6 @@ def test_bin_help_from_tmp_cwd():
     bin_result = run_bin(["--help"], cwd="/tmp")
     assert bin_result.returncode == 0
     assert "lore" in bin_result.stdout.lower()
-
-
-def test_bin_stats_from_tmp_cwd(tmp_path):
-    """bin/lore stats resolves correctly when cwd is unrelated to the plugin dir."""
-    vault = _make_vault(tmp_path)
-    env = {"LORE_VAULT": str(vault)}
-    bin_result = run_bin(["stats"], env=env, cwd="/tmp")
-    cli_result = run_cli_direct(["stats"], env=env)
-    assert bin_result.returncode == cli_result.returncode
-    assert bin_result.stdout == cli_result.stdout
 
 
 # ---- no machine-specific paths baked in -------------------------------------

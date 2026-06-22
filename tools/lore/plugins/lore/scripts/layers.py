@@ -307,11 +307,11 @@ def resolve_layers(
             sv_root_path = Path(toml_path).parent / sv_root_path
         resolved_root = sv_root_path.resolve()
 
-        # A-4: reject promote-to-self collision
+        # A-4: reject same-path collision
         if resolved_root == personal_root.resolve():
             print(
                 f"lore: shared vault {sv_name!r} resolves to the same path as the "
-                f"personal vault; skipped (promote-to-self collision)",
+                f"personal vault; skipped (same-path collision)",
                 file=sys.stderr,
             )
             continue
