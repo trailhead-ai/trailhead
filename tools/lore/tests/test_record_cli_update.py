@@ -451,7 +451,9 @@ def _two_team_config(tmp_path):
 def _create_routed(vault_a, state, config_home, *, scope_args=()):
     """Create a decision record in vault A (optionally with scope flags)."""
     args = ["record", "create", "--kind", "decision", "--title", "T", "--keyword", "k", *scope_args]
-    r = _run_cfg(args, vault=vault_a, state=state, config_home=config_home, stdin_text="orig body\n")
+    r = _run_cfg(
+        args, vault=vault_a, state=state, config_home=config_home, stdin_text="orig body\n"
+    )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
 

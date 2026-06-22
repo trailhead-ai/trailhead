@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 
-from conftest import CLI_PATH, load_script
+from conftest import CLI_PATH
 
 
 def run_cli(args, env=None, input_text=None, cwd=None):

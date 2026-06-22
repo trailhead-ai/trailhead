@@ -851,7 +851,9 @@ def move_record(
     # vault must stamp the new row shared=1, not the default 0 — otherwise the moved
     # record leaks into ``search`` as own-vault until the next ``lore reindex``.
     index_store.delete_row(conn, old_root, old_kind, old_name)
-    update_index(conn, new_location.record_id, sidecar, body, new_location.vault_root, shared=shared)
+    update_index(
+        conn, new_location.record_id, sidecar, body, new_location.vault_root, shared=shared
+    )
 
     # delete-old (last — a crash here is the safe, self-healing direction).
     if old_body_path.exists():
