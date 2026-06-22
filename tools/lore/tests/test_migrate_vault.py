@@ -543,3 +543,456 @@ def test_round_trip_dead_end_to_lesson(tmp_path):
     assert t.sidecar["status"] == "conditional"
     assert "Revisit when:" in t.body
     assert "What we tried." in t.body
+
+
+# ===========================================================================
+# Slice 2 — write orchestrator + pre-write summary + abort gate
+#
+# These tests drive `run_migration(vault_root, *, dry_run=False)` end-to-end.
+# A temp git-repo vault is seeded with real-shaped legacy records; the index DB
+# is isolated under a per-test XDG_STATE_HOME so nothing touches the live index
+# (Axiom 6). LORE_EMAIL is pinned so committer provenance resolves deterministically.
+# ===========================================================================
+
+
+def _git(cwd, *args):
+    subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def make_git_vault(tmp_path) -> Path:
+    """Create a committed git repo to act as the legacy vault root."""
+    vault = tmp_path / "lore-vault"
+    vault.mkdir(parents=True)
+    _git(vault, "init", "-q")
+    _git(vault, "config", "user.email", "histauthor@example.com")
+    _git(vault, "config", "user.name", "Hist Author")
+    return vault
+
+
+def commit_all(vault: Path, message: str = "seed") -> None:
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-q", "-m", message)
+
+
+def isolate_index(monkeypatch, tmp_path) -> Path:
+    """Point the lore index DB at a throwaway state dir (Axiom 6)."""
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    monkeypatch.setenv("LORE_EMAIL", "migrator@example.com")
+    return state
+
+
+def seed_typical_vault(vault: Path) -> dict:
+    """Seed one representative of several legacy kinds + a DROP + a lossy rehome.
+
+    Returns a dict describing the seeded counts for summary assertions.
+    """
+    write_legacy(vault, "decisions/2026-06/use-sqlite.md", "type: decision\ndate: 2026-06-04\nstatus: active")
+    write_legacy(
+        vault,
+        "dead-ends/2026-05/tried-threads.md",
+        "type: dead-end\nstatus: active\nseverity: medium",  # lossy rehome (severity)
+        body="\nWhat we tried.\n",
+    )
+    write_legacy(vault, "designs/the-shape.md", "type: design\nstatus: draft")  # → blob
+    write_legacy(
+        vault,
+        "sessions/2026-05/s.md",
+        "type: session\nstatus: complete\nsession_id: 295a0017-7f96-4505-ba49-a3fc3026debb",
+    )
+    write_legacy(vault, "briefings/old.md", "type: briefing\nstatus: active")  # DROP
+    return {
+        "migrated": 4,  # decision, lesson, blob, session
+        "dropped": 1,  # briefing
+        "session_id": "295a0017-7f96-4505-ba49-a3fc3026debb",
+    }
+
+
+def md_dirs_present(vault: Path) -> set:
+    return {p.name for p in vault.iterdir() if p.is_dir() and p.name != ".git"}
+
+
+def all_md_files(vault: Path) -> list:
+    return [p for p in vault.rglob("*.md") if ".git" not in p.parts]
+
+
+# ---------------------------------------------------------------------------
+# End-to-end happy path
+# ---------------------------------------------------------------------------
+
+
+def test_run_migration_happy_path_flat_layout(tmp_path, monkeypatch):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed = seed_typical_vault(vault)
+    commit_all(vault)
+
+    rc = mod.run_migration(str(vault))
+    assert rc == 0
+
+    # Each migrated record exists as <kind>/<name>.md + .json at the flat path.
+    assert (vault / "decision" / "use-sqlite.md").exists()
+    assert (vault / "decision" / "use-sqlite.json").exists()
+    assert (vault / "lesson" / "tried-threads.md").exists()
+    assert (vault / "blob" / "the-shape.md").exists()
+    # Session named by session_id.
+    assert (vault / "session" / f"{seed['session_id']}.md").exists()
+    assert (vault / "session" / f"{seed['session_id']}.json").exists()
+
+
+def test_run_migration_removes_legacy_dirs_and_buckets(tmp_path, monkeypatch):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    mod.run_migration(str(vault))
+
+    legacy_dirs = {
+        "dead-ends", "gotchas", "follow-ups", "deferred", "designs",
+        "audits", "reviews", "ops", "briefings", "post-merge-incidents",
+        "decisions", "sessions", "plans", "specs",
+    }
+    present = md_dirs_present(vault)
+    assert not (present & legacy_dirs), f"legacy dirs survived: {present & legacy_dirs}"
+    # No YYYY-MM bucket survives anywhere under the flat layout.
+    import re as _re
+    for p in vault.rglob("*"):
+        if ".git" in p.parts:
+            continue
+        assert not _re.fullmatch(r"\d{4}-\d{2}", p.name), f"date bucket survived: {p}"
+
+
+def test_run_migration_no_md_starts_with_frontmatter(tmp_path, monkeypatch):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    mod.run_migration(str(vault))
+
+    for md in all_md_files(vault):
+        assert not md.read_text().lstrip().startswith("---"), f"{md} still has frontmatter"
+
+
+def test_run_migration_record_count_accounts_for_all(tmp_path, monkeypatch):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed = seed_typical_vault(vault)
+    commit_all(vault)
+
+    mod.run_migration(str(vault))
+
+    # post-migration written records == migrated (dropped records are gone).
+    written = [p for p in vault.rglob("*.json") if ".git" not in p.parts]
+    assert len(written) == seed["migrated"]
+
+
+def test_run_migration_every_sidecar_validates(tmp_path, monkeypatch):
+    mod = _mod()
+    record_model = load_script("record_model")
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    mod.run_migration(str(vault))
+
+    import json as _json
+    for sc in vault.rglob("*.json"):
+        if ".git" in sc.parts:
+            continue
+        kind = sc.parent.name
+        result = record_model.validate(_json.loads(sc.read_text()), kind=kind)
+        assert result.errors == [], f"{sc}: {result.errors}"
+
+
+# ---------------------------------------------------------------------------
+# Byte-identical to the CLI write primitive
+# ---------------------------------------------------------------------------
+
+
+def test_migrated_record_byte_identical_to_validate_and_write(tmp_path, monkeypatch):
+    """A migrated sidecar/body matches what record_store.validate_and_write produces."""
+    mod = _mod()
+    record_store = mod.record_store  # same module instance the migrator writes through
+    index_store = mod.index_store
+    isolate_index(monkeypatch, tmp_path)
+    # Freeze updated-* time so the two independent writes stamp identical bytes.
+    monkeypatch.setattr(record_store, "_now_utc_z", lambda: "2026-06-22T00:00:00Z")
+
+    # Run the migration over a vault with a single known record.
+    vault = make_git_vault(tmp_path)
+    write_legacy(vault, "decisions/2026-06/use-sqlite.md", "type: decision\ndate: 2026-06-04\nstatus: active", body="\nThe body.\n")
+    commit_all(vault)
+    mod.run_migration(str(vault))
+
+    migrated_md = (vault / "decision" / "use-sqlite.md").read_text()
+    migrated_json = (vault / "decision" / "use-sqlite.json").read_text()
+
+    # Reproduce the same logical input through the CLI write primitive directly,
+    # from a fresh copy of the same legacy input under the same authorship.
+    src = make_git_vault(tmp_path / "ref")
+    p = write_legacy(src, "decisions/2026-06/use-sqlite.md", "type: decision\ndate: 2026-06-04\nstatus: active", body="\nThe body.\n")
+    commit_all(src)
+    t = mod.transcode(mod.read_legacy(p))
+
+    ref_vault = tmp_path / "refvault"
+    ref_vault.mkdir()
+    loc = record_store.place_record(t.name, t.kind, scope=None, vault_root=str(ref_vault))
+    conn = index_store.open_index()
+    try:
+        record_store.validate_and_write(loc, t.sidecar, t.body, conn)
+        conn.commit()
+    finally:
+        conn.close()
+    ref_md = (ref_vault / "decision" / "use-sqlite.md").read_text()
+    ref_json = (ref_vault / "decision" / "use-sqlite.json").read_text()
+
+    assert migrated_md == ref_md
+    assert migrated_json == ref_json
+
+
+# ---------------------------------------------------------------------------
+# Summary counts + ordering
+# ---------------------------------------------------------------------------
+
+
+def test_summary_counts_and_ordering_on_clean_run(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    mod.run_migration(str(vault))
+    out = capsys.readouterr().out
+
+    # DROP record itemized (destructive — A11).
+    assert "briefings/old.md" in out
+    # Lossy rehome surfaced.
+    assert "lossy" in out.lower()
+
+
+def test_summary_review_required_before_informational(tmp_path, monkeypatch, capsys):
+    """An aborting run lists review-required items before informational counts."""
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    # Add a review-required item: a non-empty post-merge-incidents/ dir.
+    write_legacy(vault, "post-merge-incidents/inc.md", "type: incident\nstatus: active")
+    commit_all(vault)
+
+    rc = mod.run_migration(str(vault))
+    out = capsys.readouterr().out
+    assert rc != 0
+
+    review_pos = out.lower().find("review")
+    info_pos = out.lower().find("informational")
+    assert review_pos != -1 and info_pos != -1
+    assert review_pos < info_pos
+
+
+def test_summary_aborting_run_ends_with_what_to_do_next(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    write_legacy(vault, "post-merge-incidents/inc.md", "type: incident\nstatus: active")
+    commit_all(vault)
+
+    rc = mod.run_migration(str(vault))
+    out = capsys.readouterr().out
+    assert rc != 0
+    assert "What to do next" in out
+    # numbered, fix-before-rerun ordering.
+    assert "1." in out
+    assert "re-run" in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# Abort gate writes nothing
+# ---------------------------------------------------------------------------
+
+
+def test_abort_gate_writes_nothing(tmp_path, monkeypatch):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    write_legacy(vault, "post-merge-incidents/inc.md", "type: incident\nstatus: active")
+    commit_all(vault)
+
+    before = _snapshot_tree(vault)
+    rc = mod.run_migration(str(vault))
+    after = _snapshot_tree(vault)
+
+    assert rc != 0
+    assert before == after, "abort gate must leave the vault byte-identical"
+
+
+def _snapshot_tree(vault: Path) -> dict:
+    """Map every non-.git file to its bytes — for before/after equality."""
+    snap = {}
+    for p in sorted(vault.rglob("*")):
+        if ".git" in p.parts or not p.is_file():
+            continue
+        snap[str(p.relative_to(vault))] = p.read_bytes()
+    return snap
+
+
+# ---------------------------------------------------------------------------
+# Mid-pass failure surfaces split-state
+# ---------------------------------------------------------------------------
+
+
+def test_mid_pass_failure_surfaces_split_state(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    # Stub validate_and_write to raise on the 2nd record.
+    record_store = mod.record_store
+    real = record_store.validate_and_write
+    calls = {"n": 0}
+
+    def flaky(location, sidecar, body, conn, shared=0):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("disk full")
+        return real(location, sidecar, body, conn, shared=shared)
+
+    monkeypatch.setattr(record_store, "validate_and_write", flaky)
+
+    rc = mod.run_migration(str(vault))
+    err = capsys.readouterr().err
+    assert rc != 0
+    assert "wrote 1 of" in err
+    assert "SPLIT state" in err
+    assert "git reset --hard" in err
+
+
+# ---------------------------------------------------------------------------
+# Index reproducibility
+# ---------------------------------------------------------------------------
+
+
+def test_index_reproducible_by_fresh_rebuild(tmp_path, monkeypatch):
+    mod = _mod()
+    index_store = load_script("index_store")
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    mod.run_migration(str(vault))
+
+    def projected_rows(conn):
+        rows = conn.execute(
+            "SELECT vault, kind, name, title, status FROM records ORDER BY id"
+        ).fetchall()
+        facets = conn.execute(
+            "SELECT id, facet, value FROM record_facet ORDER BY id, facet, value"
+        ).fetchall()
+        return rows, facets
+
+    conn = index_store.open_index()
+    try:
+        run_rows = projected_rows(conn)
+    finally:
+        conn.close()
+
+    # A fresh rebuild over the same on-disk tree must reproduce the logical rows.
+    conn = index_store.open_index()
+    try:
+        index_store.rebuild([str(vault)], conn)
+        conn.commit()
+        fresh_rows = projected_rows(conn)
+    finally:
+        conn.close()
+
+    assert run_rows == fresh_rows
+
+
+# ---------------------------------------------------------------------------
+# Provenance preflight
+# ---------------------------------------------------------------------------
+
+
+def test_preflight_aborts_when_committer_email_unset(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    monkeypatch.delenv("LORE_EMAIL", raising=False)
+    # Force git config user.email empty by pinning HOME to an empty dir so
+    # `git config --global user.email` resolves nothing.
+    empty_home = tmp_path / "empty_home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    before = _snapshot_tree(vault)
+    rc = mod.run_migration(str(vault))
+    after = _snapshot_tree(vault)
+    out = capsys.readouterr().out
+
+    assert rc != 0
+    assert "email" in out.lower()
+    assert before == after, "preflight must abort before any write"
+
+
+# ---------------------------------------------------------------------------
+# Dirty-tree preflight
+# ---------------------------------------------------------------------------
+
+
+def test_preflight_aborts_on_dirty_working_tree(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+    # Introduce an uncommitted change.
+    write_legacy(vault, "decisions/2026-06/dirty.md", "type: decision\nstatus: active")
+
+    before = _snapshot_tree(vault)
+    rc = mod.run_migration(str(vault))
+    after = _snapshot_tree(vault)
+    out = capsys.readouterr().out
+
+    assert rc != 0
+    assert "clean" in out.lower() or "dirty" in out.lower() or "uncommitted" in out.lower()
+    assert before == after, "dirty-tree preflight must abort before any write"
+
+
+def test_dry_run_runs_phase_a_but_writes_nothing(tmp_path, monkeypatch):
+    """dry_run=True prints the summary but skips Phase B (no writes)."""
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_typical_vault(vault)
+    commit_all(vault)
+
+    before = _snapshot_tree(vault)
+    rc = mod.run_migration(str(vault), dry_run=True)
+    after = _snapshot_tree(vault)
+
+    assert rc == 0
+    assert before == after, "dry_run must not write"

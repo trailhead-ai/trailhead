@@ -43,9 +43,18 @@ Design (expanded for the KU-2 live-vault findings):
 
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+# The S1/S2/S3 in-process write APIs (reused, never the CLI subprocess). Imported
+# at module level so tests patch them on this module's collaborators (the project's
+# DI convention). They resolve because conftest.load_script puts scripts/ on path.
+import index_store
+import record_model
+import record_store
+import vault as vault_mod
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -783,3 +792,315 @@ def _fold_breadcrumb(body: str, notes: list[str]) -> str:
         return body
     block = "\n".join(notes)
     return f"{block}\n\n{body.lstrip(chr(10))}"
+
+
+# ---------------------------------------------------------------------------
+# Slice 2 — write orchestrator + pre-write summary + abort gate
+#
+# The cutover runs as two strictly-ordered phases so the abort gate can never
+# leave the vault half-written:
+#   Preflight  — vault git tree clean + committer email resolves (else abort).
+#   Phase A    — walk + transcode + place + validate EVERY record; write NOTHING.
+#   Summary    — review-required items first, then informational counts; an
+#                aborting run ends with a numbered "What to do next" block.
+#   Abort gate — any review-required item (validation failure / Flag.review /
+#                non-empty post-merge-incidents/) exits non-zero, writes nothing.
+#                DROP records (Flag.drop) are itemized for acknowledgment but do
+#                NOT abort (git is the safety net for the destructive drop, A11).
+#   Phase B    — write each non-DROP record in place via validate_and_write;
+#                print `wrote N of M`; on any mid-pass raise, print the split-
+#                state recovery banner to stderr and exit non-zero. After a clean
+#                pass, rebuild the index in-process.
+#
+# This whole module (and its tests) is deleted in the post-cutover commit.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Planned:
+    """One record's Phase-A plan: the transcode + its computed write location."""
+
+    source_path: str
+    transcoded: Transcoded
+    location: Any  # record_store.RecordLocation
+    validation_errors: list[str]
+
+
+@dataclass
+class _Plan:
+    """The full Phase-A result: what to write, what to drop, what blocks the run."""
+
+    to_write: list[_Planned] = field(default_factory=list)
+    drops: list[Flag] = field(default_factory=list)
+    drop_paths: list[str] = field(default_factory=list)
+    review_flags: list[Flag] = field(default_factory=list)
+    validation_failures: list[tuple[str, list[str]]] = field(default_factory=list)
+    incident_count: int = 0
+    lossy_count: int = 0
+    kind_moves: int = 0
+
+    @property
+    def blocked(self) -> bool:
+        return bool(self.review_flags or self.validation_failures or self.incident_count)
+
+
+def run_migration(vault_root: str, *, dry_run: bool = False) -> int:
+    """Migrate a legacy vault in place to the v1 body + JSON sidecar model.
+
+    Main entry point; returns an exit code (0 = success, 1 = abort/error). Runs
+    the preflight + Phase A (plan/validate, no writes) + the pre-write summary +
+    the abort gate, then — only if Phase A is clean and ``dry_run`` is False —
+    Phase B (write each non-DROP record in place) followed by an in-process index
+    rebuild. ``dry_run`` stops after the summary (used by tests to exercise the
+    gate without touching the vault).
+    """
+    root = Path(vault_root)
+
+    # --- Preflight 1: vault git working tree must be clean. -----------------
+    dirty = _git_porcelain(root)
+    if dirty is None:
+        print(f"abort: {root} is not a git repository (git is the only safety net)")
+        return 1
+    if dirty:
+        print(
+            f"abort: vault working tree at {root} is dirty — commit or stash first "
+            "(git reset --hard cannot recover uncommitted edits)"
+        )
+        return 1
+
+    # --- Preflight 2: committer email must resolve (A5) before Phase B. -----
+    email = vault_mod.resolve_committer_email()
+    if not email:
+        print(
+            "abort: committer email is unset — set $LORE_EMAIL or "
+            "`git config --global user.email` before migrating "
+            "(provenance is required and cannot be defaulted)"
+        )
+        return 1
+
+    # --- Phase A: plan + validate; write NOTHING. --------------------------
+    plan = _plan_phase_a(root)
+
+    # --- Pre-write summary (review-required first, then informational). -----
+    _print_summary(plan, root)
+
+    # --- Abort gate. -------------------------------------------------------
+    if plan.blocked:
+        return 1
+
+    if dry_run:
+        return 0
+
+    # --- Phase B: write in place, then rebuild the index. ------------------
+    return _write_phase_b(plan, root)
+
+
+def _git_porcelain(root: Path) -> str | None:
+    """Return ``git status --porcelain`` output for *root* (empty = clean).
+
+    Returns ``None`` when *root* is not a git repo (no safety net to abort against).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _plan_phase_a(root: Path) -> _Plan:
+    """Walk every ``.md`` under *root*, transcode, place, and validate. No writes."""
+    plan = _Plan()
+    for md_path in sorted(root.rglob("*.md")):
+        if ".git" in md_path.parts:
+            continue
+        legacy = read_legacy(md_path)
+        transcoded = transcode(legacy)
+
+        # Partition the transcode flags.
+        is_drop = False
+        for flag in transcoded.flags:
+            if flag.kind == "drop":
+                plan.drops.append(flag)
+                plan.drop_paths.append(str(md_path))
+                is_drop = True
+            else:  # "review"
+                plan.review_flags.append(flag)
+
+        # Abort-gate directories (post-merge-incidents/) surface as review flags
+        # and produce no kind/name — count them and move on (never placed).
+        if not transcoded.kind:
+            if legacy.directory in ABORT_GATE_DIRS:
+                plan.incident_count += 1
+            continue
+
+        if is_drop:
+            continue
+
+        # Informational counts.
+        if KIND_BY_DIR.get(legacy.directory) != legacy.directory:
+            plan.kind_moves += 1
+        annotations = transcoded.sidecar.get("annotations", {})
+        if "legacy/severity" in annotations or "legacy/closure-reason" in annotations:
+            plan.lossy_count += 1
+
+        location = record_store.place_record(
+            transcoded.name, transcoded.kind, scope=None, vault_root=str(root)
+        )
+        result = record_model.validate(transcoded.sidecar, kind=transcoded.kind)
+        if result.errors:
+            plan.validation_failures.append((str(md_path), list(result.errors)))
+        plan.to_write.append(
+            _Planned(
+                source_path=str(md_path),
+                transcoded=transcoded,
+                location=location,
+                validation_errors=list(result.errors),
+            )
+        )
+    return plan
+
+
+def _print_summary(plan: _Plan, root: Path) -> None:
+    """Print the pre-write summary: review-required first, then informational."""
+    print("=== lore vault migration — pre-write summary ===")
+    print("")
+    print("Review-required items:")
+    if not (plan.validation_failures or plan.review_flags or plan.incident_count or plan.drops):
+        print("  (none)")
+    else:
+        if plan.incident_count:
+            print(
+                f"  - {plan.incident_count} record(s) pending extraction in "
+                f"post-merge-incidents/ (manual lesson-extraction backlog)"
+            )
+        if plan.validation_failures:
+            print(f"  - {len(plan.validation_failures)} record(s) fail S1 validation:")
+            for path, errors in plan.validation_failures:
+                print(f"      {path}: {'; '.join(errors)}")
+        if plan.review_flags:
+            print(f"  - {len(plan.review_flags)} record(s) flagged for review:")
+            for flag in plan.review_flags:
+                print(f"      {flag.detail}")
+        if plan.drops:
+            print(
+                f"  - {len(plan.drops)} record(s) will be DROPPED (destructive — "
+                "recover via git if unintended):"
+            )
+            for flag in plan.drops:
+                print(f"      {flag.detail}")
+
+    print("")
+    print("Informational counts:")
+    print(f"  - records to migrate: {len(plan.to_write)}")
+    print(f"  - kind moves (consolidated to a new kind): {plan.kind_moves}")
+    print(f"  - lossy rehomes (severity/closure-reason → annotations): {plan.lossy_count}")
+    print(f"  - planned relocation: in place at {root} (canonical move is a later step)")
+
+    if plan.blocked:
+        _print_next_steps(plan)
+
+
+def _print_next_steps(plan: _Plan) -> None:
+    """Numbered "What to do next" block, ordered by fix-before-rerun priority."""
+    print("")
+    print("ABORTED — write nothing. What to do next:")
+    step = 1
+    if plan.incident_count:
+        print(
+            f"  {step}. extract lessons from {plan.incident_count} incident(s) at "
+            "post-merge-incidents/, then delete the raw reports"
+        )
+        step += 1
+    sessions_missing = sum(1 for f in plan.review_flags if "session_id" in f.detail)
+    if sessions_missing:
+        print(f"  {step}. resolve {sessions_missing} session(s) missing session_id")
+        step += 1
+    other_flags = len(plan.review_flags) - sessions_missing
+    if other_flags > 0:
+        print(f"  {step}. resolve {other_flags} flagged record(s) (links / status / unmapped)")
+        step += 1
+    if plan.validation_failures:
+        print(f"  {step}. fix {len(plan.validation_failures)} record(s) failing validation")
+        step += 1
+    print(f"  {step}. then re-run the migration")
+
+
+def _write_phase_b(plan: _Plan, root: Path) -> int:
+    """Phase B: write each planned record in place, then rebuild the index."""
+    total = len(plan.to_write)
+    conn = index_store.open_index()
+    try:
+        written = 0
+        for planned in plan.to_write:
+            try:
+                record_store.validate_and_write(
+                    planned.location, planned.transcoded.sidecar, planned.transcoded.body, conn
+                )
+                # The new flat record is durable — retire the legacy source so the
+                # whole cutover is one reviewable rename in `git diff`.
+                _retire_legacy_source(planned.source_path, planned.location.body_path)
+            except Exception as exc:  # noqa: BLE001 — any raise means a split vault.
+                conn.commit()
+                print(
+                    f"wrote {written} of {total}; vault is in a SPLIT state "
+                    "(some records v1, some legacy); recover with: "
+                    "git reset --hard <pre-migrate-commit>",
+                    file=sys.stderr,
+                )
+                print(f"  cause: {exc}", file=sys.stderr)
+                return 1
+            written += 1
+            print(f"wrote {written} of {total}")
+        # DROP records are intentionally not migrated — remove the legacy source
+        # (recoverable via the pre-migrate git commit; itemized in the summary).
+        for drop_path in plan.drop_paths:
+            _unlink_quietly(Path(drop_path))
+        _prune_empty_dirs(root)
+        # Clean write pass — rebuild the index in-process over the canonical tree.
+        index_store.rebuild([str(root)], conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return 0
+
+
+def _retire_legacy_source(source_path: str, dest_body_path: Path) -> None:
+    """Remove the legacy ``.md`` source unless it IS the new flat destination."""
+    source = Path(source_path)
+    if source.resolve() == Path(dest_body_path).resolve():
+        return
+    _unlink_quietly(source)
+
+
+def _unlink_quietly(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _prune_empty_dirs(root: Path) -> None:
+    """Remove now-empty legacy directories (date buckets + kind dirs) under root.
+
+    Walks bottom-up so a date bucket is removed before its parent kind dir. The
+    vault root and ``.git`` are never removed.
+    """
+    for dir_path in sorted(
+        (p for p in root.rglob("*") if p.is_dir() and ".git" not in p.parts),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    ):
+        try:
+            next(dir_path.iterdir())
+        except StopIteration:
+            dir_path.rmdir()
+        except OSError:
+            pass
