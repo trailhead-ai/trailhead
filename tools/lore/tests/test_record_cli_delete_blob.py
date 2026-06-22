@@ -53,7 +53,7 @@ def _create_record(vault, state, *, kind="spec", title="Test Record", body="body
     """Create a record via the CLI and return its RECORD_ID."""
     r = _run(
         ["record", "create", "--kind", kind, "--title", title,
-         "--set", "keywords=test"],
+         "--keyword", "test"],
         vault=vault, state_dir=state,
         stdin_text=body,
     )

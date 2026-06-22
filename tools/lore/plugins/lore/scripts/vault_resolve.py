@@ -26,9 +26,9 @@ config validation (Slice 1) forbids a ``records`` allowlist on the default vault
 guaranteeing the eligible set is never empty.
 
 **Scope-vs-frontmatter distinction:**  Resolution only considers scopes present in
-``participating_scopes``.  ``--set scope=X`` (frontmatter-only) must NOT add an
-entry to this map; that enforcement is the CLI's responsibility (Slice 4 / S2),
-not this module's.
+``participating_scopes``.  Only the routing flags (``--team`` etc.) add entries to
+this map; populating it is the CLI's responsibility (Slice 4 / S2), not this
+module's.
 
 Pure stdlib: no I/O.  References: Slice 2, S4 plan.
 """

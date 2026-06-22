@@ -32,7 +32,7 @@ concrete **lore-provider command** that implements it.
 ### `create(kind, title, initial-status, body)`
 
 Render craft's template body for `kind`, then pipe it on **stdin** to `lore record create`.
-`--kind` selects the record kind; `--title` derives the name slug; `--set status=<initial>`
+`--kind` selects the record kind; `--title` derives the name slug; `--status <initial>`
 stamps the starting status (omit to take the kind's default — the first vocab element).
 The new record ID (`<kind>/<name>`) is printed on stdout.
 
@@ -40,33 +40,33 @@ The new record ID (`<kind>/<name>`) is printed on stdout.
 printf '%s' "$BODY" | lore record create \
   --kind plan \
   --title "<topic>" \
-  --set status=draft
+  --status draft
 ```
 
 This **replaces** the old `lore new <kind>` + `Write`-the-body flow: there is no separate
 file write — body authoring goes through the lore CLI in one call.
 
-### `set-status(handle, status)`
+### `status(handle, status)`
 
 Advance a record's status. A plan/spec record stores its status in a JSON **sidecar**, so
-the provider command is `lore record update` with `--set status=<value>` (the status is
-validated against the kind's vocab):
+the provider command is `lore record update` with the dedicated `--status <value>` flag (the
+status is validated against the kind's vocab):
 
 ```sh
-lore record update <kind>/<name> --set status=ready
+lore record update <kind>/<name> --status ready
 ```
 
 This covers brainstorm's `draft → ready`, planning's `ready → planned`, and execute's
-`in-progress → complete`. (`lore set-status <file> <status>` is the sibling command for a
-frontmatter-bearing *note*; records carry status in the sidecar, so use `lore record
-update --set status=` for plan/spec records.)
+`in-progress → complete`. Records carry status in the sidecar, so `lore record update
+--status` is the sole status path for plan/spec records.
 
 ### `link(plan → spec)`
 
-Point a plan at its upstream spec by setting the `related-spec` sidecar field:
+Point a plan at its upstream spec by adding the spec to the plan's `related` map under the
+`spec` kind (the dedicated `--related <kind>=<name>` flag, which appends to that kind's list):
 
 ```sh
-lore record update <plan-kind>/<plan-name> --set related-spec=<spec-path>
+lore record update <plan-kind>/<plan-name> --related spec=<spec-name>
 ```
 
 ## Deferred (out of scope for this seam, by design)

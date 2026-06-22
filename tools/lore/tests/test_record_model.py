@@ -95,13 +95,15 @@ def test_is_valid_phase():
 
 def test_fields_v1_required_optional_and_autoset_flags():
     fields = rm().FIELDS_V1
-    for key in ("version", "kind", "title", "keywords", "status"):
+    # ``keywords`` is relaxed to optional (Slice 1, dedicated-field-flags plan).
+    for key in ("version", "kind", "title", "status"):
         assert fields[key].required is True
         assert fields[key].auto_set is False
     for key in ("created-at", "created-by", "updated-at", "updated-by"):
         assert fields[key].auto_set is True
         assert fields[key].required is True
     for key in (
+        "keywords",
         "team",
         "suite",
         "product",
@@ -152,8 +154,12 @@ def test_auto_set_keys_exact():
 
 
 def test_required_operator_keys_exact_equality():
-    """Exact equality, not superset (status/version defaulted; auto-set excluded)."""
-    assert rm().required_operator_keys() == {"kind", "title", "keywords"}
+    """Exact equality, not superset (status/version defaulted; auto-set excluded).
+
+    ``keywords`` is relaxed to optional (Slice 1, dedicated-field-flags plan), so
+    the required operator key set is exactly ``{kind, title}``.
+    """
+    assert rm().required_operator_keys() == {"kind", "title"}
 
 
 # --- Slice 2: KU1 — datetime Z-suffix parsing -------------------------------
@@ -237,10 +243,16 @@ def test_missing_operator_required_keys_error():
     m = rm()
     sidecar = _worked_example_spec_sidecar()
     del sidecar["title"]
-    del sidecar["keywords"]
     result = m.validate(sidecar)
     assert any("title" in e for e in result.errors)
-    assert any("keywords" in e for e in result.errors)
+
+
+def test_missing_keywords_validates_clean():
+    """``keywords`` is optional (Slice 1): a sidecar without it validates clean."""
+    sidecar = _worked_example_spec_sidecar()
+    del sidecar["keywords"]
+    result = rm().validate(sidecar)
+    assert result.errors == []
 
 
 def test_missing_auto_set_keys_tolerated():
