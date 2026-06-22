@@ -564,6 +564,7 @@ def test_lore_reindex_prints_row_count_to_stdout(tmp_path):
 
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env)
@@ -588,6 +589,7 @@ def test_lore_reindex_count_reflects_vault_records(tmp_path):
 
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env)
