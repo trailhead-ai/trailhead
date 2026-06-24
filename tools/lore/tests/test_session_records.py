@@ -247,6 +247,33 @@ class TestReferenced:
         text = _record_md(vault, SID).read_text()
         assert "- referenced" in text and "spec/lore-search" in text
 
+    def test_referenced_on_body_only_legacy_does_not_corrupt_index(self, tmp_path):
+        # A legacy/migrated session can exist as a body-only ``session/<key>.md`` with
+        # NO ``.json`` sidecar. ``referenced`` must append the body line but must NOT
+        # fabricate a ``{}`` sidecar nor project an off-vocab ``status:""`` row into the
+        # index (it never materializes a record — KU2).
+        vault, state = _make_vault(tmp_path)
+        body_path = _record_md(vault, SID)
+        body_path.parent.mkdir(parents=True, exist_ok=True)
+        body_path.write_text("# session: legacy\n\n- candidate ...\n")
+
+        r = _run(
+            ["session", "referenced", "spec/lore-search", "--session-id", SID],
+            vault=vault, state_dir=state,
+        )
+        assert r.returncode == 0, f"referenced failed: {r.stderr}"
+
+        assert not _record_json(vault, SID).exists(), (
+            "referenced must not fabricate a sidecar for a body-only legacy record"
+        )
+        assert _index_rows(state, SID) == [], (
+            "referenced must not project a malformed status:'' row into the index"
+        )
+        text = body_path.read_text()
+        assert "- referenced" in text and "spec/lore-search" in text, (
+            "the referenced line is still appended to the existing body"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Confinement guard — worktree-name key (council/Security Critical 3)

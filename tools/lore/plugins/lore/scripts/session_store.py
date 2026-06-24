@@ -312,29 +312,36 @@ def capture_referenced(
             return False
         now = _now_utc_z()
 
-        sidecar = json.loads(sidecar_path.read_text()) if sidecar_path.exists() else {}
-        annotations = sidecar.get("annotations")
-        if not isinstance(annotations, dict):
-            annotations = {}
-        annotations["last-referenced-at"] = now
-        sidecar["annotations"] = annotations
-        sidecar["updated-at"] = now
-        sidecar["updated-by"] = committer
-        record_store_mod.write_temp_then_rename(
-            sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
-        )
-
+        # Body: lazy-create header on first use, then append the referenced line.
         if not body_path.exists():
             body_path.write_text(_header(key))
         with open(body_path, "a") as bf:
             bf.write(entry + "\n")
 
-        body = body_path.read_text()
-        conn = open_index()
-        try:
-            _reindex(conn, str(vault_root), key, sidecar, body)
-        finally:
-            conn.close()
+        # Bump last-referenced-at + reindex ONLY when a proper sidecar exists. A
+        # body-only legacy record (no sidecar) is never indexed and carries no status;
+        # fabricating a ``{}`` sidecar would write a malformed sidecar to disk and
+        # project an off-vocab ``status:""`` row into the index — and would violate the
+        # KU2 rule that ``referenced`` never materializes a record. Touch the body only
+        # here and leave normalization of legacy shapes to the S7 migration.
+        if sidecar_path.exists():
+            sidecar = json.loads(sidecar_path.read_text())
+            annotations = sidecar.get("annotations")
+            if not isinstance(annotations, dict):
+                annotations = {}
+            annotations["last-referenced-at"] = now
+            sidecar["annotations"] = annotations
+            sidecar["updated-at"] = now
+            sidecar["updated-by"] = committer
+            record_store_mod.write_temp_then_rename(
+                sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
+            )
+            body = body_path.read_text()
+            conn = open_index()
+            try:
+                _reindex(conn, str(vault_root), key, sidecar, body)
+            finally:
+                conn.close()
         return True
     finally:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
