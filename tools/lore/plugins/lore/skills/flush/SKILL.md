@@ -1,86 +1,137 @@
 ---
-name: finish
-description: "Canonical end-of-session finish — optionally sweep for any capture-worthy items not yet logged, then run `lore finish` to finalize (status=complete + ended:) and commit the session note. Finalize + commit only. Use for /finish, \"I'm done\", \"wrap up\", \"close this out\", \"finalize the session\"."
+name: flush
+description: "Evaluate outstanding session candidates into vault records, then flip the session clean. Runnable at any time — not just at session end. Clean session → nothing to flush. Dirty session → read the candidate log, apply agent judgment to evaluate each outstanding candidate (those after the flushed-at watermark) into a record via `lore record create`, then call `lore flush` to stamp clean + commit. Use for /lore:flush, \"flush the session\", \"evaluate candidates\", \"finalize the session\", \"I'm done\", \"wrap up\", \"close this out\"."
 ---
 
-# Finish — canonical end-of-session finish
+# /lore:flush — Evaluate candidates and flip the session clean
 
-`lore:finish` finalizes the active session note. It does an optional final
-capture sweep (the same mechanism `/checkpoint` uses) for anything not yet
-logged, then calls `lore finish`, which:
+`lore:flush` is the **judgment skill** for session finalization. It is runnable
+at any time — not just at session end. The flow:
 
-1. Resolves the active session note for this worktree (session-id first, then
-   worktree-name fallback).
-2. Stamps `status: complete` and `ended:` onto it.
-3. Commits the note in one commit (explicit path only — unrelated dirty vault
-   files are not swept in).
+1. Read the current session's candidate log.
+2. Identify **outstanding candidates** — those logged after the last `flushed-at`
+   watermark (read directly from the sidecar `.json`; `annotations` is not indexed).
+3. Apply agent judgment to evaluate each outstanding candidate into a durable vault
+   record via `lore record create`.
+4. Call `lore flush` (the CLI verb) to flip the session `clean`, stamp the new
+   `flushed-at` watermark, and commit.
 
-`lore finish` is **finalize + commit only**. It does no candidate expansion,
-creates no kind-notes, and surfaces nothing extra — the capture you did during
-the session (and in the sweep below) is already in the note.
+The **CLI** (`lore flush`) carries the mechanical flip; this **skill** carries the
+judgment (candidate evaluation). The two are separate by design.
+
+## Scoping
+
+No-arg (current session):
+```bash
+lore flush
+```
+
+All dirty sessions:
+```bash
+lore flush all
+```
+
+A KQL search (e.g. a date window or area filter — "this week" is just a date
+filter KQL query, not a dedicated form):
+```bash
+lore flush 'updated-at:>=2026-06-17'
+```
 
 ## Process
 
-### Step 1 — Read what's been captured
+### Step 1 — Check session status
 
-The session note is lazy-created on first capture, so it may not exist yet.
-Try to read it:
-
-```bash
-cat "$LORE_VAULT/$(lore session-note)"
-```
-
-If `lore session-note` exits non-zero, nothing was captured this session — that
-is the **empty-session** path; jump to Step 3 (`lore finish` handles it cleanly).
-
-### Step 2 — Final capture sweep (optional)
-
-Review the session for any capture-worthy item not already in the note and log
-each as a session candidate — same mechanism as `/checkpoint`. Body from STDIN;
-session id auto-resolves from `$CLAUDE_CODE_SESSION_ID`:
+Read the current session record's sidecar `.json` directly to determine its
+status and the last `flushed-at` watermark. The sidecar is at
+`$LORE_VAULT/session/<key>.json`. `annotations` is sidecar-only and NOT indexed —
+read the `.json` file directly, NOT via KQL:
 
 ```bash
-printf '%s' "<the captured item>" \
-  | lore session candidate --kind <kind> --phase <phase>
+lore session-note
 ```
 
-`<kind>`: `decision`, `lesson`, `dead-end`, `deferred`, `follow-up`, `gotcha`,
-`spec`. For an existing record used this session, log a reference instead:
+Use the key it prints to locate the sidecar and body:
+- `$LORE_VAULT/session/<key>.json` — sidecar (status + annotations)
+- `$LORE_VAULT/session/<key>.md` — body (candidate log)
+
+**Outcomes:**
+- **Clean session** (`status: clean`): nothing to flush — report this and stop.
+- **No session**: report that no session exists for this worktree — nothing to do.
+- **Dirty session** (`status: dirty`): proceed to Step 2.
+
+### Step 2 — Read the candidate log and identify outstanding candidates
+
+Read the session body. Candidate lines have the form:
+```
+- candidate <ts> kind=<kind> phase=<phase>
+```
+
+The body text for each candidate follows its header line.
+
+Identify **outstanding candidates**: those with a `<ts>` timestamp strictly
+**after** `annotations["flushed-at"]` in the sidecar. Parse the watermark as
+ISO-8601 UTC (`%Y-%m-%dT%H:%M:%SZ`). If the key is missing or unparseable,
+treat ALL candidates as outstanding — never silently drop candidates.
+
+### Step 3 — Evaluate outstanding candidates into vault records
+
+For each outstanding candidate, apply agent judgment:
+
+- **Promote to a vault record**: if the candidate describes a durable finding
+  (decision, lesson, dead-end, deferred item, follow-up, gotcha, spec) worth
+  finding later on its own, create a record:
+
+  ```bash
+  lore record create --kind <kind> --title "<title>"
+  ```
+
+  Log the new record as referenced by this session:
+
+  ```bash
+  lore session referenced <kind>/<record-name>
+  ```
+
+- **Discard**: if the candidate is session-local noise not worth preserving,
+  skip it — no record is created.
+
+- **Ask the user** (via AskUserQuestion) when disposition is genuinely ambiguous.
+  Subagents are recall-blind — run this skill in the main session so the full
+  conversation context is available for judgment.
+
+If no outstanding candidates exist (all already evaluated), proceed directly
+to Step 4.
+
+### Step 4 — Flip the session clean
 
 ```bash
-lore session referenced <kind>/<record-name>
+lore flush
 ```
 
-Skip this step if the session note is already complete from prior checkpoints.
+This stamps `status: clean`, records the new `flushed-at` watermark in
+`annotations`, reindexes the session record, and commits the vault. Relay any
+notices it prints (e.g. non-git vault, push failure).
 
-### Step 3 — Finalize and commit
-
-```bash
-lore finish
-```
-
-This stamps `status: complete` + `ended:` on the session note and commits it.
-Relay any notices it prints (e.g. push failure, no remote).
-
-### Step 4 — Report to the user
+### Step 5 — Report to the user
 
 ```
-Finalized `sessions/<file>` (status: complete) and committed the vault.
+Flushed session `<key>` (status: clean).
 
-What we did: <one-line summary>
-Committed and pushed (or: committed locally — no remote).
+Evaluated N candidate(s) → M record(s) created, K discarded.
+Committed the vault.
 ```
 
 ## Edge cases
 
-- **Empty session (nothing captured, no note exists).** This is normal and
-  handled — not an error. `lore finish` prints a clear notice,
-  `notice: no active session note found for worktree '<name>' — nothing to
-  finalize.`, and **exits 0**. Relay that notice to the user so they know the
-  session *was* handled — it is not a cryptic error and not a silent no-op.
-- **Non-git vault.** `lore finish` stamps the session metadata (into the
-  `sessions/<id>.json` sidecar) but skips the commit, printing a notice on
-  stderr. Relay it.
-- **`lore finish` exits non-zero.** Report the error; do not retry silently.
-- **Already finalized.** `lore finish` prints `notice: already complete —
-  nothing to finalize.` and exits 0. Relay it.
+- **Clean session (nothing outstanding).** `lore flush` exits 0 with "clean —
+  nothing to flush". Relay it.
+- **No session exists.** `lore flush` exits 0 with a notice about no session
+  for this worktree. Relay it.
+- **`lore flush` exits non-zero.** Report the error; do not retry silently.
+- **Corrupt or missing `flushed-at` watermark.** Treat ALL candidates as
+  outstanding (conservative — never drop candidates silently).
+- **Non-git vault.** `lore flush` stamps the sidecar but skips the commit,
+  printing a notice on stderr. Relay it.
+- **`lore flush all` or `lore flush <search>`.** The same evaluation loop applies
+  per session. Each session is flushed atomically; a mid-batch failure names the
+  failed session and states that already-flushed sessions are clean — a re-run
+  safely retries.

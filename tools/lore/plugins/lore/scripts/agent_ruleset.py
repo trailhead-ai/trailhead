@@ -39,7 +39,10 @@ the **sole guardrail** — treat it as binding regardless of harness.
 
 Capture and read records via the CLI: `lore record …` / `lore session …` to
 write, `lore search …` to read. See `lore --help` and the lore skills
-(`/lore:record`, `/lore:search`, `/lore:finish`).
+(`/lore:record`, `/lore:search`, `/lore:flush`).
+
+Mid-task capture: `lore session candidate` — continuous capture during a session;
+`/lore:flush` evaluates outstanding candidates and finalizes the session.
 """
 
 PRIMER = """\
