@@ -397,6 +397,7 @@ def revert_flush(
     key: str,
     *,
     vault_root: str,
+    committer: str,
     open_index: Callable[[], Any],
 ) -> None:
     """Roll a session back ``clean`` → ``dirty`` + drop the ``flushed-at`` stamp (Slice 3).
@@ -429,11 +430,17 @@ def revert_flush(
         sidecar = json.loads(sidecar_path.read_text())
         if sidecar.get("status") != "clean":
             return
+        now = _now_utc_z()
         sidecar["status"] = "dirty"
         annotations = sidecar.get("annotations")
         if isinstance(annotations, dict):
             annotations.pop(FLUSHED_AT_KEY, None)
             sidecar["annotations"] = annotations
+        # Re-stamp provenance to the revert: leaving updated-at/by at the rolled-back
+        # flush's timestamp would show an update that never committed. The revert is
+        # itself the most recent real mutation of the record.
+        sidecar["updated-at"] = now
+        sidecar["updated-by"] = committer
         record_store_mod.write_temp_then_rename(
             sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
         )

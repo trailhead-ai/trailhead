@@ -679,7 +679,36 @@ def _flush_current_session(args: argparse.Namespace) -> int:
         return 0
 
     print(f"Flushed: session/{key} (dirty -> clean)")
-    return _flush_commit(vault, key)
+    rc = _flush_commit(vault, key)
+    if rc != 0:
+        # Same orphan-gap guarantee as the batch path: `flush_session` flips the
+        # record `clean` on disk BEFORE the commit, so a commit failure would leave
+        # a clean-on-disk-but-uncommitted record that `status:dirty` re-discovery
+        # could never re-find. Revert the flip so a re-run can retry it
+        # (council/Reliability — the single path shares the batch's atomicity need).
+        try:
+            session_store_mod.revert_flush(
+                key,
+                vault_root=str(vault),
+                committer=committer,
+                open_index=_session_index_factory(),
+            )
+        except Exception as exc:
+            print(
+                f"warning: flush commit failed AND rollback failed for session/{key}: "
+                f"{exc}\n  the record may be clean-on-disk but uncommitted — inspect "
+                "manually before re-running.",
+                file=sys.stderr,
+            )
+    return rc
+
+
+# Discovery must return EVERY dirty session, not the search facade's default page
+# (`run_search` defaults to limit=20). The live vault holds dozens of session
+# records, so an `all`/`<search>` flush capped at 20 would silently leave the rest
+# dirty (a Slice 3 correctness bug). Use a high ceiling AND assert non-truncation
+# so an overflow is a loud error, never a silent partial flush.
+_FLUSH_DISCOVERY_LIMIT = 100_000
 
 
 def _discover_dirty_session_keys(query: str) -> list[str]:
@@ -691,17 +720,26 @@ def _discover_dirty_session_keys(query: str) -> list[str]:
     so a malicious `<search>` string cannot inject SQL. A facade parse/compile error
     raises so the caller can report it and exit non-zero.
 
+    Discovery passes `limit=_FLUSH_DISCOVERY_LIMIT` (well above any realistic dirty
+    count) and treats a `truncated` result as a hard error — a flush must never
+    silently skip dirty sessions beyond the facade's default page.
+
     Intersects with `dirty` here (not only in the query) so a `<search>` that matches
     clean sessions still only flushes the dirty ones: a hit is kept iff its `kind` is
     `session` AND its `status` is `dirty`. The session KEY is the last path segment of
     the index `id` (`<vault>/session/<key>`); session keys never contain `/`.
     """
     text, code = search_mod.run_search(
-        query, env=dict(os.environ), as_json=True
+        query, env=dict(os.environ), as_json=True, limit=_FLUSH_DISCOVERY_LIMIT
     )
     if code != 0:
         raise ValueError(text)
     payload = json.loads(text)
+    if payload.get("truncated"):
+        raise ValueError(
+            f"dirty-session discovery exceeded {_FLUSH_DISCOVERY_LIMIT} results — "
+            "refusing to flush a partial set; narrow the <search> scope"
+        )
     keys: list[str] = []
     for hit in payload.get("hits", []):
         if hit.get("kind") != "session" or hit.get("status") != "dirty":
@@ -763,10 +801,19 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
                     session_store_mod.revert_flush(
                         key,
                         vault_root=str(vault),
+                        committer=committer,
                         open_index=_session_index_factory(),
                     )
-                except Exception:
-                    pass
+                except Exception as revert_exc:
+                    # A failed rollback re-creates the very orphan revert exists to
+                    # prevent — never swallow it silently; surface it so the operator
+                    # knows this session may be clean-on-disk but uncommitted.
+                    print(
+                        f"warning: rollback failed for session/{key}: {revert_exc}\n"
+                        f"  the record may be clean-on-disk but uncommitted — inspect "
+                        "manually.",
+                        file=sys.stderr,
+                    )
             print(f"Flushed: {len(flushed)} session(s) before the failure:")
             for done in flushed:
                 print(f"  - session/{done} (dirty -> clean)")

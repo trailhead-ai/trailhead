@@ -166,6 +166,29 @@ class TestFlushAll:
         assert r.returncode == 0, r.stderr
         assert _commit_count(vault) == 0, "no dirty sessions → no commit"
 
+    def test_all_flushes_more_than_the_search_default_page(self, tmp_path):
+        """`all` must flush EVERY dirty session, not the facade's default page (20).
+
+        Discovery passes a high limit + rejects a truncated result, so a vault with
+        more dirty sessions than the default `run_search` limit is flushed in full
+        rather than silently leaving the overflow dirty (Slice 3 discovery-limit
+        correctness — the live vault holds dozens of session records).
+        """
+        vault, state = _make_vault(tmp_path)
+        _git_init(vault)
+        n = 25  # > the 20-row default page
+        sids = [f"{i:08d}-4444-4444-8444-444444444444" for i in range(n)]
+        for sid in sids:
+            assert _candidate(vault, state, sid).returncode == 0
+        _commit_baseline(vault)
+
+        r = _flush(vault, state, "all")
+        assert r.returncode == 0, r.stderr
+        for sid in sids:
+            assert _sidecar(vault, sid)["status"] == "clean", (
+                f"session {sid} was left dirty — discovery capped at the default page"
+            )
+
 
 # ---------------------------------------------------------------------------
 # `<search>` — KQL filter intersected with dirty
