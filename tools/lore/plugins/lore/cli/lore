@@ -45,13 +45,6 @@ import vault_resolve as vault_resolve_mod  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
-# The generic directory taxonomy every vault gets.
-TAXONOMY = [
-    "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
-    "follow-ups", "collaboration", "specs", "plans", "designs", "inbox",
-    "briefings", "reviews", "gotchas", "audits", "tools", "templates",
-]
-
 
 def _resolve_groups_dir() -> "Path | None":
     """Return the camp groups directory, or None if unavailable.
