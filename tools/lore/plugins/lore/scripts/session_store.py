@@ -393,6 +393,61 @@ def flush_session(
         lock_fd.close()
 
 
+def revert_flush(
+    key: str,
+    *,
+    vault_root: str,
+    open_index: Callable[[], Any],
+) -> None:
+    """Roll a session back ``clean`` → ``dirty`` + drop the ``flushed-at`` stamp (Slice 3).
+
+    The batch-flush recovery primitive: :func:`flush_session` flips the sidecar +
+    index ``clean`` BEFORE the git commit, so a commit failure would otherwise leave
+    the session clean-on-disk-but-uncommitted — and the discovery query
+    (``kind:session status:dirty``) would never re-find it, so a re-run could not
+    retry it. Reverting the flip keeps the per-session unit atomic FROM THE USER'S
+    VIEW (fully flushed+committed, or left dirty for retry) and makes a batch re-run
+    rediscover the failed session.
+
+    Idempotent + best-effort: a session that is already ``dirty`` (or has no record)
+    is left untouched. Runs under the same per-key lock as :func:`flush_session`.
+    """
+    session_dir = Path(vault_root) / "session"
+    sidecar_path = session_dir / f"{key}.json"
+    body_path = session_dir / f"{key}.md"
+    lock_path = session_dir / f"{key}.lock"
+
+    if not sidecar_path.exists():
+        return
+
+    session_dir.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(lock_path, "a")
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        if not sidecar_path.exists():
+            return
+        sidecar = json.loads(sidecar_path.read_text())
+        if sidecar.get("status") != "clean":
+            return
+        sidecar["status"] = "dirty"
+        annotations = sidecar.get("annotations")
+        if isinstance(annotations, dict):
+            annotations.pop(FLUSHED_AT_KEY, None)
+            sidecar["annotations"] = annotations
+        record_store_mod.write_temp_then_rename(
+            sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
+        )
+        body = body_path.read_text() if body_path.exists() else ""
+        conn = open_index()
+        try:
+            _reindex(conn, str(vault_root), key, sidecar, body)
+        finally:
+            conn.close()
+    finally:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        lock_fd.close()
+
+
 def capture_referenced(
     key: str,
     entry: str,
