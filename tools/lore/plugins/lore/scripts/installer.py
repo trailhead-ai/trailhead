@@ -83,21 +83,24 @@ def bootstrap_vault(vaults_root: Path, vault_path: Path | None = None) -> Path:
     if default.exists() or default.is_symlink():
         # Already present — check if git init is needed.
         if default.is_dir() and not (default / ".git").is_dir():
-            _git_init(default)
+            git_init(default)
         return default
 
     default.mkdir(parents=True, exist_ok=True)
-    _git_init(default)
+    git_init(default)
     return default
 
 
-def _git_init(path: Path) -> None:
+def git_init(path: Path) -> None:
     """Run ``git init`` on *path*; raise ``ValueError`` on failure.
 
-    The vault-is-a-git-repo contract is load-bearing — downstream `lore sync`
-    and record-commit paths assume it. A silently-failed init that still let
-    ``lore init`` print "complete" would surface only later as a confusing
-    commit failure, so a failed init is a clean named error here, not a warning.
+    The single implementation of the vault-is-a-git-repo contract, shared by
+    ``bootstrap_vault`` (``lore init``) and ``lore vault add`` so vault
+    scaffolding has one source of truth. The contract is load-bearing —
+    downstream `lore sync` and record-commit paths assume it. A silently-failed
+    init that still let the caller report success would surface only later as a
+    confusing commit failure, so a failed init is a clean named error here, not
+    a warning.
     """
     result = subprocess.run(
         ["git", "init", str(path)],

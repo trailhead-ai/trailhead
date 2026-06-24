@@ -1055,15 +1055,12 @@ def _cmd_vault_add(args: argparse.Namespace) -> int:
         except OSError as exc:
             print(f"lore: failed to create vault directory {vault.path}: {exc}", file=sys.stderr)
             return 1
-        result = subprocess.run(
-            ["git", "init", str(vault.path)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            print(
-                f"lore: git init failed for {vault.path}: {result.stderr.strip()}",
-                file=sys.stderr,
-            )
+        # Reuse the shared scaffolding helper so the vault-is-a-git-repo contract
+        # has one implementation (also used by `lore init`'s bootstrap_vault).
+        try:
+            installer_mod.git_init(vault.path)
+        except ValueError as exc:
+            print(f"lore: {exc}", file=sys.stderr)
             return 1
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
