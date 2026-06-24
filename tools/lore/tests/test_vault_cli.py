@@ -156,6 +156,22 @@ def test_add_writes_config_entry(tmp_path):
     assert names["team-vault"]["scope"] == "team"
 
 
+def test_add_creates_vault_directory_when_absent(tmp_path):
+    """vault add creates the vault directory and git-inits it when it doesn't exist."""
+    state, config = _dirs(tmp_path)
+    _seed_default_config(config, state)
+
+    vault_dir = _vaults_root(state) / "product-vault"
+    assert not vault_dir.exists()
+
+    res = _run(["vault", "add", "product-vault", "--scope", "product"],
+               state=state, config=config)
+    assert res.returncode == 0, res.stderr
+
+    assert vault_dir.is_dir(), "vault directory was not created"
+    assert (vault_dir / ".git").is_dir(), "vault was not git-initialized"
+
+
 def test_add_scans_populated_dir_into_index(tmp_path):
     state, config = _dirs(tmp_path)
     _seed_default_config(config, state)
