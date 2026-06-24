@@ -213,32 +213,44 @@ def find_session_note(vault: Path, worktree_name: str | None = None) -> Path | N
 def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None:
     """Return the session note for ``session_id``, by id — cwd-independent.
 
-    Two on-disk shapes carry the id, and both resolve here (Slice 0.5, KU1):
+    Three on-disk shapes carry the id, resolved in priority order:
 
-      1. **Body-only GUID capture file** ``sessions/<id>.md`` — what
-         ``session_store.create_or_append`` writes on first capture (header
-         ``# session: <id>``, no frontmatter). This is the live capture artifact
-         the session skills target. Matched by filename stem (``<id>.md``),
-         confirmed by the ``# session: <id>`` body header so a stray file named
-         like a GUID without the header is not mistaken for a capture note.
-      2. **Frontmatter note** carrying ``session_id: <id>`` in its frontmatter
-         block — the legacy date-prefixed shape produced by
-         ``ensure_session_note``. Only the frontmatter is inspected; a
-         ``session_id:`` string in the body never counts.
+      1. **Singular session record** ``session/<id>.{md,json}`` — the live capture
+         artifact since Slice 1 (a first-class indexed record: ``# session: <id>``
+         body header + a ``.json`` sidecar). Matched by filename stem (``<id>.md``),
+         confirmed by the body header so a stray GUID-named file is not mistaken for
+         a capture record. Preferred over the legacy plural shapes.
+      2. **Legacy body-only GUID capture file** ``sessions/<id>.md`` (pre-Slice-1) —
+         same shape, plural dir. Resolved for back-compat reads only; nothing writes
+         here anymore.
+      3. **Frontmatter note** carrying ``session_id: <id>`` in its frontmatter block
+         (``sessions/``, the date-prefixed ``ensure_session_note`` shape). Only the
+         frontmatter is inspected; a ``session_id:`` string in the body never counts.
 
-    A stem match (shape 1) is preferred when present — it is the exact capture
-    file. Otherwise the newest frontmatter match (shape 2) wins.
+    A stem match (shapes 1/2) is preferred when present — it is the exact capture
+    file. Otherwise the newest frontmatter match (shape 3) wins.
 
-    Returns None when the id is empty, the sessions dir is missing, or no note
-    matches. Never raises.
+    Returns None when the id is empty or no note matches. Never raises.
     """
     if not session_id:
         return None
+
+    header = f"# session: {session_id}"
+
+    # Shape 1: the singular session record (the Slice 1 capture home), preferred.
+    record_md = Path(vault) / "session" / f"{session_id}.md"
+    try:
+        if record_md.is_file() and any(
+            line.strip() == header for line in record_md.read_text().splitlines()
+        ):
+            return record_md
+    except Exception:
+        pass
+
     sessions_dir = Path(vault) / "sessions"
     if not sessions_dir.is_dir():
         return None
 
-    header = f"# session: {session_id}"
     needle = f"session_id: {session_id}"
     frontmatter_matches: list[Path] = []
     for p in iter_note_paths(sessions_dir, recursive=True):

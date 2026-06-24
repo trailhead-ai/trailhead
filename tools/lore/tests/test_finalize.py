@@ -210,12 +210,12 @@ class TestFinishOnGuidCaptureFile:
             env={"LORE_VAULT": str(vault)},
         )
         assert r.returncode == 0, r.stderr
-        assert r.stdout.strip() == f"sessions/{_GUID}.md"
+        assert r.stdout.strip() == f"session/{_GUID}.md"
 
     def test_finish_stamps_candidate_file(self, tmp_path):
         vault = _git_vault(tmp_path)
         assert self._candidate(vault).returncode == 0
-        capture = vault / "sessions" / f"{_GUID}.md"
+        capture = vault / "session" / f"{_GUID}.md"
         before = capture.read_text()
 
         r = run_cli(
@@ -223,7 +223,7 @@ class TestFinishOnGuidCaptureFile:
             env={"LORE_VAULT": str(vault)},
         )
         assert r.returncode == 0, r.stderr
-        sidecar = vault / "sessions" / f"{_GUID}.json"
+        sidecar = vault / "session" / f"{_GUID}.json"
         assert sidecar.exists()
         obj = json.loads(sidecar.read_text())
         assert obj["type"] == "session"
@@ -239,7 +239,7 @@ class TestFinishOnGuidCaptureFile:
     def test_finish_second_call_is_noop(self, tmp_path):
         vault = _git_vault(tmp_path)
         assert self._candidate(vault).returncode == 0
-        sidecar = vault / "sessions" / f"{_GUID}.json"
+        sidecar = vault / "session" / f"{_GUID}.json"
 
         first = run_cli(
             ["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)}
@@ -269,7 +269,7 @@ class TestFinishEmptySession:
         combined = (r.stdout + r.stderr).lower()
         assert "no active session note" in combined
         assert "nothing to finalize" in combined
-        assert not (vault / "sessions" / f"{_GUID}.md").exists()
+        assert not (vault / "session" / f"{_GUID}.md").exists()
 
 
 # ---------------------------------------------------------------------------

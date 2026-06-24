@@ -118,12 +118,12 @@ class TestFinalizeSingleCommit:
         # finalize (A-sidecar), so the finalize commit carries the metadata
         # sidecar — the unit that actually changed.
         committed = _committed_files_at_head(vault)
-        assert f"sessions/{_GUID}.json" in committed
+        assert f"session/{_GUID}.json" in committed
 
     def test_finish_stamps_status_complete_and_ended(self, tmp_path):
         vault = _git_vault(tmp_path)
         assert _candidate(vault).returncode == 0
-        capture = vault / "sessions" / f"{_GUID}.md"
+        capture = vault / "session" / f"{_GUID}.md"
         before = capture.read_text()
         _commit_baseline(vault)
 
@@ -131,7 +131,7 @@ class TestFinalizeSingleCommit:
         assert r.returncode == 0, r.stderr
 
         # Session metadata lands in the .json sidecar, NOT .md frontmatter.
-        sidecar = vault / "sessions" / f"{_GUID}.json"
+        sidecar = vault / "session" / f"{_GUID}.json"
         assert sidecar.exists()
         obj = json.loads(sidecar.read_text())
         assert obj["type"] == "session"

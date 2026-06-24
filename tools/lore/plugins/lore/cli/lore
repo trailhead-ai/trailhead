@@ -1675,21 +1675,25 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
 # ---- session ----------------------------------------------------------------
 
 def cmd_session(args: argparse.Namespace) -> int:
-    """Dispatch ``lore session <action>`` — candidate (AC20/AC21) / referenced (AC22) (Slice 6, S2).
+    """Dispatch ``lore session <action>`` — candidate / referenced (Slice 1).
 
-    A **separate** endpoint from ``lore record``: it does NOT route through the
-    record write path (``validate_and_write``), creates no ``.json`` sidecar, and
-    writes no derived index row (AC23, endpoint isolation). Session notes are
-    body-only files under ``<vault>/sessions/<session_id>.md`` whose lazy-create +
-    append is race-safe via ``session_store.create_or_append`` (``fcntl.flock``,
-    KU3).
+    A session **is a first-class record** under the singular ``session/`` kind dir
+    (``session/<key>.{md,json}``): the capture path writes the sidecar AND reindexes
+    the one record, so the session is KQL-discoverable
+    (``lore search 'kind:session status:dirty'``). This is the Slice 1 collapse of the
+    former "two worlds" defect (the pre-Slice-1 endpoint wrote a body-only, unindexed
+    file under plural ``sessions/``). ``candidate`` materializes/dirties; ``referenced``
+    never dirties and no-ops on a non-existent session (KU2). The
+    sidecar-ensure-dirty + body-append + reindex are one race-safe critical section
+    via the ``session_store`` capture primitives (``fcntl.flock``, KU1).
 
-    **Confinement (council/Security):** the ``session_id`` becomes the note
-    filename, so it is sanitized at this entry point BEFORE any path is constructed
-    (``session_store.sanitize_session_id``). A crafted id containing a path
-    separator, ``..``, a NUL byte, or otherwise not matching the canonical GUID
-    shape is rejected with a non-zero exit + clear stderr — a session write can
-    never escape ``sessions/``.
+    **Confinement (council/Security Critical 3):** the session KEY becomes the record
+    filename, so it is sanitized at this entry point BEFORE any path is constructed.
+    A GUID key goes through ``session_store.sanitize_session_id``; the worktree-name
+    fallback key through ``session_store.sanitize_worktree_name`` (the GUID guard
+    cannot guard a worktree name). A key containing a path separator, ``..``, a NUL
+    byte, or otherwise off-shape is rejected non-zero with a clear stderr — a session
+    write can never escape ``session/``.
     """
     action = getattr(args, "session_action", None)
     if action == "candidate":
@@ -1704,38 +1708,67 @@ def cmd_session(args: argparse.Namespace) -> int:
     return 1
 
 
-def _resolve_session_id(args: argparse.Namespace) -> tuple[str | None, int]:
-    """Resolve + sanitize the ``--session-id`` (or env) for a session subcommand.
+def _resolve_session_key(args: argparse.Namespace) -> tuple[str | None, int]:
+    """Resolve + sanitize the session record KEY for a session subcommand (Slice 1).
 
-    Returns ``(session_id, 0)`` on success or ``(None, 1)`` on rejection (after
-    printing a clear stderr message). The sanitizer is the confinement boundary
-    for ``sessions/`` (council/Security) — call this BEFORE any path use.
+    A session record is keyed by ``--session-id`` (or ``$CLAUDE_CODE_SESSION_ID``) —
+    a GUID — **or**, when neither is set, the worktree-name fallback (``--worktree``
+    or ``detect_worktree_name()``). The two keys have DIFFERENT confinement guards
+    (council/Security Critical 3): a GUID via :func:`session_store.sanitize_session_id`,
+    a worktree name via :func:`session_store.sanitize_worktree_name` (the GUID guard
+    would reject every worktree name and so cannot guard that path).
+
+    Returns ``(key, 0)`` on success or ``(None, 1)`` on rejection (after printing a
+    clear stderr message). The sanitizer is the confinement boundary for ``session/``
+    — call this BEFORE any path is constructed.
     """
-    raw = _session_id_from_args_or_env(args)
-    if not raw:
+    raw_id = _session_id_from_args_or_env(args)
+    if raw_id:
+        try:
+            return session_store_mod.sanitize_session_id(raw_id), 0
+        except session_store_mod.InvalidSessionIdError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return None, 1
+
+    worktree = getattr(args, "worktree", None) or vault_mod.detect_worktree_name()
+    if not worktree:
         print(
-            "error: --session-id is required (or set $CLAUDE_CODE_SESSION_ID)",
+            "error: no session key — set --session-id / $CLAUDE_CODE_SESSION_ID "
+            "or run inside a named worktree",
             file=sys.stderr,
         )
         return None, 1
     try:
-        return session_store_mod.sanitize_session_id(raw), 0
+        return session_store_mod.sanitize_worktree_name(worktree), 0
     except session_store_mod.InvalidSessionIdError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return None, 1
 
 
-def _cmd_session_candidate(args: argparse.Namespace) -> int:
-    """``lore session candidate --session-id ID --kind KIND --phase PHASE`` (AC20/AC21, S2).
+def _session_index_factory():
+    """Return a no-arg factory opening a fresh global index connection.
 
-    Body from stdin. Lazy-creates the session note on first use for ID (name = the
-    sanitized GUID, per S1) and appends a record-candidate entry carrying KIND +
-    PHASE. The body is fence-neutralized (AC-FENCE1) via
-    ``record_store.neutralize_fences``; the lazy-create + append is race-safe via
-    ``session_store.create_or_append`` (KU3).
+    Passed into the ``session_store`` capture primitives so the lock-spanning reindex
+    opens the index inside the held lock (KU1) while honoring ``XDG_STATE_HOME`` test
+    isolation via ``os.environ`` — the same env ``index_store.open_index`` reads.
     """
-    session_id, rc = _resolve_session_id(args)
-    if session_id is None:
+    return lambda: index_store_mod.open_index(env=dict(os.environ))
+
+
+def _cmd_session_candidate(args: argparse.Namespace) -> int:
+    """``lore session candidate --session-id ID --kind KIND --phase PHASE`` (Slice 1).
+
+    Body from stdin. The first candidate for the resolved KEY materializes the
+    singular session record ``session/<key>.{md,json}`` born ``dirty``; a candidate
+    on a ``clean`` record flips it back to ``dirty``. In both cases a record-candidate
+    entry carrying KIND + PHASE is appended to the body and the one record is
+    reindexed. The body is fence-neutralized (AC-FENCE1) via
+    ``record_store.neutralize_fences``; the sidecar-ensure-dirty + body-append +
+    reindex are ONE race-safe critical section via ``session_store.capture_candidate``
+    (KU1).
+    """
+    key, rc = _resolve_session_key(args)
+    if key is None:
         return rc
 
     kind = getattr(args, "kind", None)
@@ -1758,10 +1791,15 @@ def _cmd_session_candidate(args: argparse.Namespace) -> int:
         entry_lines.append(f"  {line}")
     entry = "\n".join(entry_lines)
 
-    vault = Path(vault_mod.resolve_vault())
-    sessions_dir = vault / "sessions"
+    vault_root = str(vault_mod.resolve_vault())
+    committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
     try:
-        session_store_mod.create_or_append(session_id, entry, sessions_dir)
+        session_store_mod.capture_candidate(
+            key, entry,
+            vault_root=vault_root,
+            committer=committer,
+            open_index=_session_index_factory(),
+        )
     except Exception as exc:
         print(f"error: session candidate write failed: {exc}", file=sys.stderr)
         return 1
@@ -1769,14 +1807,16 @@ def _cmd_session_candidate(args: argparse.Namespace) -> int:
 
 
 def _cmd_session_referenced(args: argparse.Namespace) -> int:
-    """``lore session referenced RECORD_ID --session-id ID`` (AC22, S2).
+    """``lore session referenced RECORD_ID --session-id ID`` (Slice 1, KU2).
 
-    Logs that RECORD_ID was used this session (feeds finish-time
-    ``last-referenced-at``). Lazy-creates the session note on first use and appends
-    a reference entry via ``session_store.create_or_append`` (race-safe, KU3).
+    Logs that RECORD_ID was used this session. KU2 contract: on a **non-existent**
+    session this is a **no-op — it creates NOTHING**; on an **existing** session it
+    appends the reference line and bumps ``last-referenced-at`` in the sidecar
+    ``annotations`` map, but **never flips status**. The append + bump + reindex are
+    one race-safe critical section via ``session_store.capture_referenced`` (KU1).
     """
-    session_id, rc = _resolve_session_id(args)
-    if session_id is None:
+    key, rc = _resolve_session_key(args)
+    if key is None:
         return rc
 
     record_id = getattr(args, "record_id", None)
@@ -1786,14 +1826,19 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
 
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Neutralize fences in the entry (AC-FENCE1): RECORD_ID is a free-form arg, so
-    # a `<external-memory>` token in it must not land live in the session note —
+    # a `<external-memory>` token in it must not land live in the session record —
     # the referenced boundary neutralizes uniformly like candidate/create/blob.
     entry = record_store_mod.neutralize_fences(f"- referenced {now} {record_id}")
 
-    vault = Path(vault_mod.resolve_vault())
-    sessions_dir = vault / "sessions"
+    vault_root = str(vault_mod.resolve_vault())
+    committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
     try:
-        session_store_mod.create_or_append(session_id, entry, sessions_dir)
+        session_store_mod.capture_referenced(
+            key, entry,
+            vault_root=vault_root,
+            committer=committer,
+            open_index=_session_index_factory(),
+        )
     except Exception as exc:
         print(f"error: session referenced write failed: {exc}", file=sys.stderr)
         return 1
@@ -2417,6 +2462,11 @@ def build_parser() -> argparse.ArgumentParser:
              "Sanitized before any path use — separators/'..'/NUL/non-GUID rejected.",
     )
     p_session_candidate.add_argument(
+        "--worktree", dest="worktree", default=None,
+        help="Worktree-name key when no --session-id/env is set (default: detected). "
+             "Sanitized to [A-Za-z0-9_-]+ before any path use.",
+    )
+    p_session_candidate.add_argument(
         "--kind", required=True,
         help="The kind of record being proposed (e.g. spec, decision, lesson).",
     )
@@ -2440,6 +2490,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--session-id", dest="session_id", default=None,
         help="Session id (GUID) to log under (default: $CLAUDE_CODE_SESSION_ID). "
              "Sanitized before any path use — separators/'..'/NUL/non-GUID rejected.",
+    )
+    p_session_referenced.add_argument(
+        "--worktree", dest="worktree", default=None,
+        help="Worktree-name key when no --session-id/env is set (default: detected). "
+             "Sanitized to [A-Za-z0-9_-]+ before any path use.",
     )
     p_session_referenced.set_defaults(func=cmd_session)
 
