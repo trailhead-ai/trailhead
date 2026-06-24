@@ -163,8 +163,49 @@ def sanitize_worktree_name(name: str) -> str:
     return name
 
 
+# --- flushed-at: the cross-slice flush watermark (Slice 2, KU3) ---------------
+#
+# `lore flush` (Slice 2, producer) stamps this; the `/lore:flush` skill (Slice 4,
+# consumer) reads it to tell already-flushed candidate lines from new ones. Both
+# the KEY and the FORMAT are PINNED here as the single source of truth — drift
+# between producer and consumer would silently drop candidates.
+#
+#   - Stored inside the free-form sidecar ``annotations`` map (NOT a top-level
+#     key — ``record_model``'s schema is closed at the top level and would reject
+#     it). ``annotations`` is sidecar-only: it is NOT projected to the index, so
+#     readers load the ``.json`` sidecar directly (there is no ``annotations``
+#     column / KQL field).
+#   - Format ``%Y-%m-%dT%H:%M:%SZ`` (whole-second UTC, ``Z`` suffix) — identical
+#     to the candidate-line timestamp, so "outstanding = candidate line
+#     timestamped after flushed-at" is a plain lexicographic / ISO comparison.
+FLUSHED_AT_KEY = "flushed-at"
+FLUSHED_AT_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def parse_flushed_at(raw: Any) -> dt.datetime | None:
+    """Validate-before-trust reader for the flush watermark (Slice 2, KU3, Slice 4).
+
+    Parse *raw* (the value at ``annotations[FLUSHED_AT_KEY]``) and return an
+    aware UTC ``datetime``, or ``None`` on ANY failure — missing, empty, non-str,
+    corrupt, naive (no tzinfo), or a non-UTC offset. ``None`` means "no prior
+    flush": the consumer treats EVERY candidate as outstanding (conservative — it
+    never silently drops candidates on a corrupt watermark). A valid *future*
+    value parses successfully (a future watermark is an application concern, not a
+    parse error). Never raises.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0):
+        return None
+    return parsed
+
+
 def _now_utc_z() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.datetime.now(dt.timezone.utc).strftime(FLUSHED_AT_FORMAT)
 
 
 def _header(key: str) -> str:
@@ -270,6 +311,83 @@ def capture_candidate(
             _reindex(conn, str(vault_root), key, sidecar, body)
         finally:
             conn.close()
+    finally:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        lock_fd.close()
+
+
+# Flush verdicts (Slice 2). The CLI maps these to user-facing notices + the
+# commit decision: only ``"flushed"`` mutates the record and warrants a commit.
+FLUSH_FLUSHED = "flushed"      # a dirty session was flipped clean + stamped
+FLUSH_ALREADY_CLEAN = "clean"  # session exists but was already clean — no-op
+FLUSH_NO_SESSION = "no-session"  # no record for this key — distinct from clean
+
+
+def flush_session(
+    key: str,
+    *,
+    vault_root: str,
+    committer: str,
+    open_index: Callable[[], Any],
+) -> str:
+    """Mechanically flush ONE session record by *key* (Slice 2, KU3).
+
+    Resolves ``session/<key>.json``:
+      - no sidecar → returns :data:`FLUSH_NO_SESSION` (the CLI distinguishes this
+        from an already-clean session — council/Advocate Minor); writes nothing.
+      - status already ``clean`` → returns :data:`FLUSH_ALREADY_CLEAN`; idempotent
+        no-op, no write, no reindex.
+      - status ``dirty`` → flips it ``clean``, stamps ``annotations[FLUSHED_AT_KEY]``
+        with the pinned ISO-UTC format, bumps ``updated-at``, reindexes the one
+        record, and returns :data:`FLUSH_FLUSHED`.
+
+    The flip never writes ``status: complete`` / ``active`` — those vocab values
+    were retired in Slice 0; a session status is only ever ``dirty`` / ``clean``.
+
+    Same KU1 critical section as :func:`capture_candidate`: the existence/status
+    check, the sidecar rewrite, and the ``upsert_row``+commit are ONE held-lock
+    unit, so a concurrent candidate cannot interleave between the status read and
+    the reindex. Caller MUST pass an already-sanitized *key*.
+    """
+    session_dir = Path(vault_root) / "session"
+    sidecar_path = session_dir / f"{key}.json"
+    body_path = session_dir / f"{key}.md"
+    lock_path = session_dir / f"{key}.lock"
+
+    # Fast path: no record at all → no-op, create nothing. Re-checked under lock.
+    if not sidecar_path.exists():
+        return FLUSH_NO_SESSION
+
+    session_dir.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(lock_path, "a")
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        if not sidecar_path.exists():
+            return FLUSH_NO_SESSION
+        sidecar = json.loads(sidecar_path.read_text())
+        if sidecar.get("status") == "clean":
+            return FLUSH_ALREADY_CLEAN
+
+        now = _now_utc_z()
+        sidecar["status"] = "clean"
+        annotations = sidecar.get("annotations")
+        if not isinstance(annotations, dict):
+            annotations = {}
+        annotations[FLUSHED_AT_KEY] = now
+        sidecar["annotations"] = annotations
+        sidecar["updated-at"] = now
+        sidecar["updated-by"] = committer
+        record_store_mod.write_temp_then_rename(
+            sidecar_path, json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
+        )
+
+        body = body_path.read_text() if body_path.exists() else ""
+        conn = open_index()
+        try:
+            _reindex(conn, str(vault_root), key, sidecar, body)
+        finally:
+            conn.close()
+        return FLUSH_FLUSHED
     finally:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
         lock_fd.close()

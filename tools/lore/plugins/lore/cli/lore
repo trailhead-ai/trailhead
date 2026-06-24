@@ -4,7 +4,7 @@
 Subcommands:
   lore init <path>          Scaffold a new vault (taxonomy + starter docs).
   lore session-note         Print this session's note path (id-first resolve).
-  lore finish               Finalize the active session note for this worktree.
+  lore flush                Flush the current session (dirty -> clean + commit).
   lore areas                List all vault areas (names, one-liners, keywords).
   lore sync                 Stage, commit, and push the vault.
 
@@ -28,7 +28,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import agent_ruleset as agent_ruleset_mod  # noqa: E402
-import frontmatter  # noqa: E402
 import index_store as index_store_mod  # noqa: E402
 import installer as installer_mod  # noqa: E402
 import layers as layers_mod  # noqa: E402
@@ -37,7 +36,6 @@ import record_model as record_model_mod  # noqa: E402
 import record_store as record_store_mod  # noqa: E402
 import search as search_mod  # noqa: E402
 import session_store as session_store_mod  # noqa: E402
-import sessions as sessions_mod  # noqa: E402
 import settings_writer as settings_writer_mod  # noqa: E402
 import vault as vault_mod  # noqa: E402
 import vault_config as vault_config_mod  # noqa: E402
@@ -547,100 +545,31 @@ def cmd_sync(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---- finish -----------------------------------------------------------------
+# ---- flush ------------------------------------------------------------------
 
-def _get_current_status(note: Path) -> str | None:
-    """Return the current status value for a session note, or None.
+def _flush_commit(vault: Path, key: str) -> int:
+    """Stage the flushed session record's EXPLICIT path(s) + commit in ONE commit.
 
-    Reads frontmatter first (the legacy date-prefixed shape). For a body-only
-    GUID note the finalized status lives in the sibling `sessions/<GUID>.json`
-    sidecar (A-sidecar), so fall back to the sidecar when frontmatter carries no
-    status. Never raises.
+    Never `git add -A` — only `session/<key>.json` (the flipped sidecar) and its
+    `.md` body are staged, so unrelated dirty vault files are never swept in
+    (Slice 2 test contract). The staged-index gate (`git diff --cached --quiet`)
+    makes an already-clean flush a no-op rather than a failed empty commit.
+    Returns exit code.
     """
-    try:
-        fm = frontmatter.parse_frontmatter(note)
-        status = fm.get("status")
-        if status is not None:
-            return str(status)
-    except Exception:
-        pass
-    sidecar = note.with_suffix(".json")
-    if sidecar.exists():
-        try:
-            obj = json.loads(sidecar.read_text())
-            status = obj.get("status") if isinstance(obj, dict) else None
-            if status is not None:
-                return str(status)
-        except Exception:
-            return None
-    return None
-
-
-def _commit_and_push_session_note(vault: Path, session_note: Path, worktree_name: str, verb: str) -> int:
-    """Stage, commit, and push a single session note. Returns exit code."""
-    if not vault.exists():
-        print(f"notice: vault not found: {vault} — skipping commit.", file=sys.stderr)
-        return 0
-
-    if not _vault_is_git_toplevel(vault):
-        print(
-            "notice: vault is not its own git toplevel — skipping commit.",
-            file=sys.stderr,
-        )
-        return 0
-
-    rc, _, stderr = _git(vault, "add", "--", str(session_note))
-    if rc != 0:
-        print(f"error: git add failed: {stderr}", file=sys.stderr)
-        return 1
-
-    rc, status_out, _ = _git(vault, "status", "--porcelain")
-    if rc != 0 or not status_out.strip():
-        print("Nothing to commit — vault is clean.")
-        return 0
-
-    message = f"session: {verb} {worktree_name}"
-    rc, _, stderr = _git(vault, "commit", "-m", message)
-    if rc != 0:
-        print(f"error: git commit failed: {stderr}", file=sys.stderr)
-        return 1
-    print(f"Committed: {message}")
-
-    rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
-    if rc_remote != 0 or not remote_url:
-        print("No origin remote — skipping push.")
-        return 0
-
-    rc_push, _, stderr_push = _git(vault, "push", "origin")
-    if rc_push != 0:
-        print(
-            "notice: committed locally; push failed — re-run `lore sync` when online",
-            file=sys.stderr,
-        )
-        print(f"  push error: {stderr_push}", file=sys.stderr)
-        return 0
-    print("Pushed to origin.")
-    return 0
-
-
-def _finish_commit(vault: Path, session_note: Path, worktree_name: str) -> int:
-    """Stage the session note's explicit path(s) + commit them in a SINGLE commit.
-
-    Never `git add -A` — only the finalized note and its metadata sidecar are
-    staged, so unrelated dirty vault files are not swept in. For a body-only
-    GUID note the finalized status lives in the sibling `sessions/<GUID>.json`
-    sidecar (A-sidecar), so that path is staged alongside the `.md` when it
-    exists. The staged-index gate (`git diff --cached --quiet`) makes an
-    already-clean finish a no-op rather than a failed empty commit. Returns exit
-    code."""
     if not vault.exists() or not _vault_is_git_toplevel(vault):
         print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
         return 0
 
-    paths = [str(session_note)]
-    sidecar = session_note.with_suffix(".json")
-    if sidecar.exists():
-        paths.append(str(sidecar))
+    session_dir = vault / "session"
+    paths = []
+    for suffix in (".json", ".md"):
+        p = session_dir / f"{key}{suffix}"
+        if p.exists():
+            paths.append(str(p))
+    if not paths:
+        print("Nothing to commit — no session record on disk.")
+        return 0
+
     rc, _, stderr = _git(vault, "add", "--", *paths)
     if rc != 0:
         print(f"error: git add failed: {stderr}", file=sys.stderr)
@@ -651,7 +580,7 @@ def _finish_commit(vault: Path, session_note: Path, worktree_name: str) -> int:
         print("Nothing to commit — index is clean.")
         return 0
 
-    message = f"session: finalize {worktree_name}"
+    message = f"session: flush {key}"
     rc, _, stderr = _git(vault, "commit", "-m", message)
     if rc != 0:
         print(f"error: git commit failed: {stderr}", file=sys.stderr)
@@ -671,47 +600,50 @@ def _finish_commit(vault: Path, session_note: Path, worktree_name: str) -> int:
     return 0
 
 
-def cmd_finish(args: argparse.Namespace) -> int:
-    """Finalize the active session note for the current worktree (finalize + commit).
+def cmd_flush(args: argparse.Namespace) -> int:
+    """Flush the current session record: dirty → clean + commit, else no-op (Slice 2).
 
-    Resolves the session note via `vault.resolve_session_note()` — exact
-    session-id match first (so the *current* session's note is finalized even
-    when several exist for this worktree; this matches the body-only GUID capture
-    file `sessions/<id>.md` as well as the legacy frontmatter note, Slice 0.5),
-    then a worktree-name fallback. Sets `status: complete` and `ended:` (atomic
-    write; for a body-only GUID note the metadata is written to a
-    `sessions/<GUID>.json` sidecar, A-sidecar, leaving the `.md` body-only) and
-    commits the session note (plus its sidecar) in ONE commit (explicit paths
-    only — unrelated dirty vault files are not swept in). If no active session
-    note is found, prints a notice and exits 0.
+    Resolves the CURRENT session record by the same key the capture path uses
+    (`--session-id` / `$CLAUDE_CODE_SESSION_ID` GUID, else the sanitized
+    worktree-name fallback — `_resolve_session_key`), reading `session/<key>.json`:
+
+      - no record → exit 0 with a "no session exists" notice (distinct from a
+        clean session, council/Advocate Minor); writes nothing, no commit.
+      - already `clean` → exit 0 with a "clean — nothing to flush" notice; an
+        idempotent no-op, no commit.
+      - `dirty` → flip `status` to `clean`, stamp `annotations[flushed-at]` (the
+        pinned KU3 key/ISO-UTC format), reindex the one record, then commit the
+        record's EXPLICIT paths only (the `.json` + `.md`; never `git add -A`).
+
+    No code path writes `status: complete` / `active` — that vocab was retired in
+    Slice 0; a session status is only ever `dirty` / `clean`.
     """
     vault = Path(vault_mod.resolve_vault())
-    session_id = _session_id_from_args_or_env(args)
-    worktree_name = args.worktree or vault_mod.detect_worktree_name()
+    key, rc = _resolve_session_key(args)
+    if key is None:
+        return rc
 
-    session_note = vault_mod.resolve_session_note(
-        vault, session_id=session_id, worktree_name=worktree_name
-    )
-    if session_note is None:
-        print(
-            f"notice: no active session note found for worktree {worktree_name!r} — "
-            "nothing to finalize.",
+    committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
+    try:
+        verdict = session_store_mod.flush_session(
+            key,
+            vault_root=str(vault),
+            committer=committer,
+            open_index=_session_index_factory(),
         )
+    except Exception as exc:
+        print(f"error: session flush failed: {exc}", file=sys.stderr)
+        return 1
+
+    if verdict == session_store_mod.FLUSH_NO_SESSION:
+        print(f"notice: no session exists for {key!r} — nothing to flush.")
+        return 0
+    if verdict == session_store_mod.FLUSH_ALREADY_CLEAN:
+        print(f"notice: session {key!r} is clean — nothing to flush.")
         return 0
 
-    now_iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    ok = sessions_mod.finalize_note(session_note, now_iso)
-    if ok:
-        print(f"Finalized: {session_note.name}")
-    else:
-        # Already terminal: nothing to re-stamp. Still attempt the commit so a
-        # prior finalize that failed to commit can be recovered; if the index is
-        # clean the commit is a no-op.
-        current_status = _get_current_status(session_note)
-        label = current_status if current_status else "terminal"
-        print(f"notice: already {label} — nothing to finalize.")
-
-    return _finish_commit(vault, session_note, worktree_name)
+    print(f"Flushed: session/{key} (dirty -> clean)")
+    return _flush_commit(vault, key)
 
 
 # ---- session-note -----------------------------------------------------------
@@ -2197,12 +2129,12 @@ def build_parser() -> argparse.ArgumentParser:
             help="Worktree name for the fallback (default: auto-detected)",
         )
 
-    p_finish = sub.add_parser(
-        "finish",
-        help="Finalize the active session note for this worktree",
+    p_flush = sub.add_parser(
+        "flush",
+        help="Flush the current session: dirty -> clean + commit, else no-op",
     )
-    _add_session_selectors(p_finish)
-    p_finish.set_defaults(func=cmd_finish)
+    _add_session_selectors(p_flush)
+    p_flush.set_defaults(func=cmd_flush)
 
     p_areas = sub.add_parser(
         "areas",

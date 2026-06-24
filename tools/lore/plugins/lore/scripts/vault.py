@@ -224,8 +224,9 @@ def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None
          same shape, plural dir. Resolved for back-compat reads only; nothing writes
          here anymore.
       3. **Frontmatter note** carrying ``session_id: <id>`` in its frontmatter block
-         (``sessions/``, the date-prefixed ``ensure_session_note`` shape). Only the
-         frontmatter is inspected; a ``session_id:`` string in the body never counts.
+         (``sessions/``, the legacy date-prefixed shape; its CREATE path was retired
+         in Slice 2). Only the frontmatter is inspected; a ``session_id:`` string in
+         the body never counts.
 
     A stem match (shapes 1/2) is preferred when present — it is the exact capture
     file. Otherwise the newest frontmatter match (shape 3) wins.
