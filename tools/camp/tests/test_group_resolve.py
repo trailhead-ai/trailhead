@@ -25,6 +25,7 @@ Test contract:
 - The central state path equals state_dir("camp")/<group>/ for a CAMP_STATE_DIR-
   overridden fixture (proving the override flows through).
 """
+
 from __future__ import annotations
 
 import sys
@@ -214,9 +215,7 @@ class TestStateDirResolverMatrix:
             self._resolve(stray, group_configs, camp_state)
 
     # Position 7: renamed/sibling slug dir → resolves to correct slug
-    def test_7_different_slug_same_group(
-        self, camp_state: Path, group_configs: list[dict]
-    ) -> None:
+    def test_7_different_slug_same_group(self, camp_state: Path, group_configs: list[dict]) -> None:
         slug_a = camp_state / "mygroup" / "worktrees" / "feature-alpha"
         slug_b = camp_state / "mygroup" / "worktrees" / "feature-beta"
         slug_a.mkdir(parents=True)
@@ -248,18 +247,9 @@ class TestStateDirResolverMatrix:
 
         member_repo = tmp_path / "repos" / "deep-member"
         member_repo.mkdir(parents=True)
-        configs = [
-            _make_group_config("deep-group", [member_repo], member_names=["deep-member"])
-        ]
+        configs = [_make_group_config("deep-group", [member_repo], member_names=["deep-member"])]
 
-        ws = (
-            deep_state
-            / "deep-group"
-            / "worktrees"
-            / "deep-slug"
-            / "deep-member"
-            / "src"
-        )
+        ws = deep_state / "deep-group" / "worktrees" / "deep-slug" / "deep-member" / "src"
         ws.mkdir(parents=True)
 
         group, slug = resolve_from_cwd(ws, configs, camp_state_dir=deep_state)
@@ -397,9 +387,7 @@ def test_repo_in_two_groups_surfaces_on_cwd_resolve(tmp_path: Path) -> None:
         "foo\x00bar",
     ],
 )
-def test_group_name_confinement_rejects_path_traversal(
-    tmp_path: Path, bad_name: str
-) -> None:
+def test_group_name_confinement_rejects_path_traversal(tmp_path: Path, bad_name: str) -> None:
     """D-E: group names with path separators / '..' / null → named confinement error."""
     from group_resolve import GroupConfinementError, validate_group_name
 

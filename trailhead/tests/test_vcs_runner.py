@@ -10,6 +10,7 @@ Copied from craft's runner_protocol.py contract. Proves:
         '$(...)') is passed LITERALLY — no subshell spawned.
   SHELL_FALSE invariant sentinel is True.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -22,24 +23,28 @@ from trailhead.vcs import runner as rp
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _git_init_repo(path: Path) -> None:
     """Create a minimal git repo with one commit under path."""
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
     subprocess.run(
         ["git", "-C", str(path), "config", "user.email", "test@example.com"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "-C", str(path), "config", "user.name", "Test"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     readme = path / "README.md"
     readme.write_text("init\n")
     subprocess.run(["git", "-C", str(path), "add", "."], check=True, capture_output=True)
     subprocess.run(
         ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -144,9 +149,7 @@ class TestShellSafety:
         assert calls[0][3] == branch
 
     def test_no_shell_flag_is_false(self) -> None:
-        assert rp.SHELL_FALSE is True, (
-            "runner.SHELL_FALSE must be True (documents shell=False)"
-        )
+        assert rp.SHELL_FALSE is True, "runner.SHELL_FALSE must be True (documents shell=False)"
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +162,7 @@ class TestRunnerTimeout:
         captured: list[dict] = []
 
         import subprocess as _sp
+
         original_run = _sp.run
 
         def spy(*args, **kwargs):
@@ -166,15 +170,14 @@ class TestRunnerTimeout:
             return original_run(*args, **kwargs)
 
         import unittest.mock as mock
+
         repo = tmp_path / "repo"
         _git_init_repo(repo)
         with mock.patch("subprocess.run", side_effect=spy):
             rp._default_runner(["git", "rev-parse", "HEAD"], cwd=str(repo))
 
         assert captured, "subprocess.run was not called"
-        assert "timeout" in captured[0], (
-            "_default_runner must pass timeout= to subprocess.run"
-        )
+        assert "timeout" in captured[0], "_default_runner must pass timeout= to subprocess.run"
 
     def test_rp_run_forwards_timeout_to_stub(self) -> None:
         captured_kwargs: list[dict] = []

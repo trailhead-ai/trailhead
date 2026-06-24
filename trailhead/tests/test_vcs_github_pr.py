@@ -4,6 +4,7 @@ Ports the craft test coverage (test_pr_evaluate.py, test_merge_prs.py) rewritten
 against the provider interface. All gh/git calls go through an injected stub
 runner — zero network. No hardcoded review-bot login (a passed param).
 """
+
 from __future__ import annotations
 
 import json
@@ -25,6 +26,7 @@ from trailhead.vcs.github import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _pr_payload(
     mergeable: str = "MERGEABLE",
@@ -54,6 +56,7 @@ def _make_gh_stub(view_payload: dict, checks_payload: list[dict] | None = None):
         if "remote" in cmd_str and "get-url" in cmd_str:
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
     return stub
 
 
@@ -76,23 +79,35 @@ def _make_pr_stub(pr_statuses: dict[str, str], fail_on: set[str] | None = None):
             status = pr_statuses.get(str(pr_number), "MERGEABLE_CLEAN")
             if status == "MERGED":
                 payload = {
-                    "state": "MERGED", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                    "isDraft": False, "headRefName": "feat",
+                    "state": "MERGED",
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "isDraft": False,
+                    "headRefName": "feat",
                 }
             elif status == "DRAFT":
                 payload = {
-                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                    "isDraft": True, "headRefName": "feat",
+                    "state": "OPEN",
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "isDraft": True,
+                    "headRefName": "feat",
                 }
             elif status == "BLOCKED":
                 payload = {
-                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
-                    "isDraft": False, "headRefName": "feat",
+                    "state": "OPEN",
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "BLOCKED",
+                    "isDraft": False,
+                    "headRefName": "feat",
                 }
             else:
                 payload = {
-                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                    "isDraft": False, "headRefName": "feat",
+                    "state": "OPEN",
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "isDraft": False,
+                    "headRefName": "feat",
                 }
             return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
         if "gh" in cmd_str and "pr" in cmd_str and "merge" in cmd_str:
@@ -110,8 +125,13 @@ def _make_pr_stub(pr_statuses: dict[str, str], fail_on: set[str] | None = None):
 def _write_manifest(tmp_path: Path, members: list[dict]) -> Path:
     path = tmp_path / "camp-state" / "grp" / "worktrees" / "feat" / "manifest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {"schema_version": 1, "group": "grp", "slug": "feat",
-            "branch": "worktree-feat", "members": members}
+    data = {
+        "schema_version": 1,
+        "group": "grp",
+        "slug": "feat",
+        "branch": "worktree-feat",
+        "members": members,
+    }
     path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
@@ -129,12 +149,18 @@ def _write_toml(tmp_path: Path, content: str) -> Path:
 
 class TestPrStatus:
     def test_done_when_mergeable_and_clean(self) -> None:
-        provider = get_provider("github", runner=_make_gh_stub(
-            {
-                "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                "isDraft": False, "reviews": [],
-            },
-            []))
+        provider = get_provider(
+            "github",
+            runner=_make_gh_stub(
+                {
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "isDraft": False,
+                    "reviews": [],
+                },
+                [],
+            ),
+        )
         result = provider.pr.status("some/path", "42")
         assert result["mergeable"] == "MERGEABLE"
         assert result["mergeStateStatus"] == "CLEAN"
@@ -142,7 +168,9 @@ class TestPrStatus:
 
     def test_bot_reviews_present_when_configured(self) -> None:
         view = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "isDraft": False,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "BLOCKED",
+            "isDraft": False,
             "reviews": [
                 {"author": {"login": "my-bot"}, "state": "CHANGES_REQUESTED", "body": "fix"},
             ],
@@ -154,7 +182,9 @@ class TestPrStatus:
 
     def test_wrong_login_filtered(self) -> None:
         view = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": False,
             "reviews": [
                 {"author": {"login": "other-bot"}, "state": "CHANGES_REQUESTED", "body": "x"},
             ],
@@ -172,10 +202,18 @@ class TestPrStatus:
             cmd_str = " ".join(cmd)
             if "pr" in cmd_str and "view" in cmd_str:
                 return subprocess.CompletedProcess(
-                    cmd, 0, json.dumps({
-                        "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                        "isDraft": False, "reviews": [],
-                    }), "")
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "reviews": [],
+                        }
+                    ),
+                    "",
+                )
             return subprocess.CompletedProcess(cmd, 0, "[]", "")
 
         provider = get_provider("github", runner=stub)
@@ -186,18 +224,29 @@ class TestPrStatus:
     def test_since_filter_excludes_older_bot_reviews(self) -> None:
         """M-2: bot reviews with submittedAt <= since are filtered out."""
         view = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": False,
             "reviews": [
-                {"author": {"login": "my-bot"}, "state": "CHANGES_REQUESTED",
-                 "body": "old review", "submittedAt": "2024-01-01T10:00:00Z"},
-                {"author": {"login": "my-bot"}, "state": "APPROVED",
-                 "body": "new review", "submittedAt": "2024-06-01T10:00:00Z"},
+                {
+                    "author": {"login": "my-bot"},
+                    "state": "CHANGES_REQUESTED",
+                    "body": "old review",
+                    "submittedAt": "2024-01-01T10:00:00Z",
+                },
+                {
+                    "author": {"login": "my-bot"},
+                    "state": "APPROVED",
+                    "body": "new review",
+                    "submittedAt": "2024-06-01T10:00:00Z",
+                },
             ],
         }
         provider = get_provider("github", runner=_make_gh_stub(view, []))
         # since is set after the old review but before the new one
         result = provider.pr.status(
-            "some/path", "42",
+            "some/path",
+            "42",
             review_bot_login="my-bot",
             since="2024-03-01T00:00:00Z",
         )
@@ -215,13 +264,26 @@ class TestCiChecks:
     def test_annotation_gh_api_call_issued(self) -> None:
         calls: list[list[str]] = []
         view_data = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
-            "isDraft": False, "reviews": [],
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "BLOCKED",
+            "isDraft": False,
+            "reviews": [],
         }
-        checks_data = [{"name": "ci", "state": "FAILURE",
-                        "link": "https://github.com/myorg/myrepo/actions/runs/111/job/222"}]
-        annotations_data = [{"path": "src/foo.py", "start_line": 10, "message": "assertion failed",
-                             "annotation_level": "failure"}]
+        checks_data = [
+            {
+                "name": "ci",
+                "state": "FAILURE",
+                "link": "https://github.com/myorg/myrepo/actions/runs/111/job/222",
+            }
+        ]
+        annotations_data = [
+            {
+                "path": "src/foo.py",
+                "start_line": 10,
+                "message": "assertion failed",
+                "annotation_level": "failure",
+            }
+        ]
 
         def stub(cmd, **kwargs):
             calls.append(list(cmd))
@@ -268,16 +330,34 @@ class TestPrEvaluate:
         assert result["action"] == "rebase"
 
     def test_rerun_ci_on_failing_no_annotations(self) -> None:
-        status = _pr_payload("MERGEABLE", "BLOCKED", failing_checks=[
-            {"name": "tests", "state": "FAILURE",
-             "link": "https://github.com/o/r/actions/runs/123/job/456", "annotations": []}])
+        status = _pr_payload(
+            "MERGEABLE",
+            "BLOCKED",
+            failing_checks=[
+                {
+                    "name": "tests",
+                    "state": "FAILURE",
+                    "link": "https://github.com/o/r/actions/runs/123/job/456",
+                    "annotations": [],
+                }
+            ],
+        )
         result = self._provider().pr.evaluate(status)
         assert result["action"] in ("rerun_ci", "fix_ci")
 
     def test_fix_ci_on_failing_with_annotations(self) -> None:
-        status = _pr_payload("MERGEABLE", "BLOCKED", failing_checks=[
-            {"name": "tests", "state": "FAILURE", "link": "https://github.com/o/r/actions/runs/99",
-             "annotations": [{"path": "lib/foo.py", "start_line": 1, "message": "err"}]}])
+        status = _pr_payload(
+            "MERGEABLE",
+            "BLOCKED",
+            failing_checks=[
+                {
+                    "name": "tests",
+                    "state": "FAILURE",
+                    "link": "https://github.com/o/r/actions/runs/99",
+                    "annotations": [{"path": "lib/foo.py", "start_line": 1, "message": "err"}],
+                }
+            ],
+        )
         result = self._provider().pr.evaluate(status, fail_count=0)
         assert result["action"] == "fix_ci"
 
@@ -291,15 +371,18 @@ class TestPrEvaluate:
 
     def test_no_bot_configured_ignores_reviews(self) -> None:
         status = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-            "isDraft": False, "failingChecks": [],
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": False,
+            "failingChecks": [],
         }
         result = self._provider().pr.evaluate(status, review_bot_login=None)
         assert result["action"] == "done"
 
     def test_with_bot_configured_changes_requested_yields_review(self) -> None:
         status = _pr_payload(
-            "MERGEABLE", "CLEAN", reviews=[{"state": "CHANGES_REQUESTED", "body": "fix"}])
+            "MERGEABLE", "CLEAN", reviews=[{"state": "CHANGES_REQUESTED", "body": "fix"}]
+        )
         result = self._provider().pr.evaluate(status, review_bot_login="my-review-bot")
         assert result["action"] == "review"
 
@@ -315,10 +398,13 @@ class TestPrMerge:
         wt_b = tmp_path / "wt" / "beta"
         wt_a.mkdir(parents=True)
         wt_b.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
-            {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
+                {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
+            ],
+        )
         toml = _write_toml(tmp_path, '[release]\nmerge_order = ["beta", "alpha"]\n')
         merge_calls: list[str] = []
 
@@ -326,15 +412,31 @@ class TestPrMerge:
             if "merge" in cmd and "--merge" in cmd:
                 for tok in cmd:
                     if tok not in (
-                        "gh", "pr", "merge", "--merge", "--author-email", "test@example.com",
+                        "gh",
+                        "pr",
+                        "merge",
+                        "--merge",
+                        "--author-email",
+                        "test@example.com",
                     ) and not tok.startswith("-"):
                         merge_calls.append(tok)
                         break
                 return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
             if "view" in cmd and "--json" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps({
-                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                    "isDraft": False, "headRefName": "feat"}), "")
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "state": "OPEN",
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "headRefName": "feat",
+                        }
+                    ),
+                    "",
+                )
             if "config" in cmd and "user.email" in cmd:
                 return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
             return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -352,10 +454,13 @@ class TestPrMerge:
         wt_b = tmp_path / "wt" / "beta"
         wt_a.mkdir(parents=True)
         wt_b.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
-            {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
+                {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
+            ],
+        )
         toml = _write_toml(tmp_path, "[group]\nname = 'grp'\n")
         provider = get_provider("github", runner=lambda cmd, **kw: None)
         pr_pairs = [
@@ -371,9 +476,12 @@ class TestPrMerge:
     def test_merge_order_names_nonexistent_member_raises(self, tmp_path: Path) -> None:
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+            ],
+        )
         toml = _write_toml(tmp_path, '[release]\nmerge_order = ["alpha", "nonexistent"]\n')
         provider = get_provider("github", runner=lambda cmd, **kw: None)
         pr_pairs = [PRPair(repo_path=str(wt), pr_number="1", member_name="alpha")]
@@ -386,13 +494,20 @@ class TestPrMerge:
         wt_b = tmp_path / "wt" / "beta"
         wt_a.mkdir(parents=True)
         wt_b.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
-            {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
+                {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
+            ],
+        )
         toml = _write_toml(tmp_path, '[release]\nmerge_order = ["alpha", "beta"]\n')
-        provider = get_provider("github", runner=_make_pr_stub(
-            {"10": "MERGEABLE_CLEAN", "20": "MERGEABLE_CLEAN"}, fail_on={"20"}))
+        provider = get_provider(
+            "github",
+            runner=_make_pr_stub(
+                {"10": "MERGEABLE_CLEAN", "20": "MERGEABLE_CLEAN"}, fail_on={"20"}
+            ),
+        )
         pr_pairs = [
             PRPair(repo_path=str(wt_a), pr_number="10", member_name="alpha"),
             PRPair(repo_path=str(wt_b), pr_number="20", member_name="beta"),
@@ -408,14 +523,19 @@ class TestPrMerge:
         wt_c = tmp_path / "wt" / "c"
         for p in (wt_a, wt_b, wt_c):
             p.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "a", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
-            {"name": "b", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
-            {"name": "c", "repo_root": str(tmp_path), "worktree_path": str(wt_c)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "a", "repo_root": str(tmp_path), "worktree_path": str(wt_a)},
+                {"name": "b", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
+                {"name": "c", "repo_root": str(tmp_path), "worktree_path": str(wt_c)},
+            ],
+        )
         toml = _write_toml(tmp_path, '[release]\nmerge_order = ["a", "b", "c"]\n')
-        provider = get_provider("github", runner=_make_pr_stub(
-            {"1": "BLOCKED", "2": "MERGEABLE_CLEAN", "3": "MERGEABLE_CLEAN"}))
+        provider = get_provider(
+            "github",
+            runner=_make_pr_stub({"1": "BLOCKED", "2": "MERGEABLE_CLEAN", "3": "MERGEABLE_CLEAN"}),
+        )
         pr_pairs = [
             PRPair(repo_path=str(wt_a), pr_number="1", member_name="a"),
             PRPair(repo_path=str(wt_b), pr_number="2", member_name="b"),
@@ -429,9 +549,12 @@ class TestPrMerge:
     def test_already_merged_pr_skipped(self, tmp_path: Path) -> None:
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+            ],
+        )
         toml = _write_toml(tmp_path, "[group]\nname = 'grp'\n")
         merge_call_count = [0]
 
@@ -440,9 +563,20 @@ class TestPrMerge:
                 merge_call_count[0] += 1
                 return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
             if "view" in cmd and "--json" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps({
-                    "state": "MERGED", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                    "isDraft": False, "headRefName": "feat"}), "")
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "state": "MERGED",
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "headRefName": "feat",
+                        }
+                    ),
+                    "",
+                )
             if "config" in cmd and "user.email" in cmd:
                 return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
             return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -456,9 +590,12 @@ class TestPrMerge:
     def test_pr_number_non_numeric_rejected(self, tmp_path: Path) -> None:
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+            ],
+        )
         toml = _write_toml(tmp_path, "[group]\nname='g'\n")
         provider = get_provider("github", runner=lambda cmd, **kw: None)
         pr_pairs = [PRPair(repo_path=str(wt), pr_number="abc123", member_name="alpha")]
@@ -468,9 +605,12 @@ class TestPrMerge:
     def test_branch_with_leading_dash_skips_delete(self, tmp_path: Path) -> None:
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)
-        manifest = _write_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
-        ])
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+            ],
+        )
         toml = _write_toml(tmp_path, "[group]\nname='g'\n")
         delete_calls: list[list[str]] = []
 
@@ -481,9 +621,20 @@ class TestPrMerge:
             if "config" in cmd and "user.email" in cmd:
                 return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
             if "view" in cmd and "--json" in cmd:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps({
-                    "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                    "isDraft": False, "headRefName": "--upload-pack=x"}), "")
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "state": "OPEN",
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "headRefName": "--upload-pack=x",
+                        }
+                    ),
+                    "",
+                )
             if "merge" in cmd and "--merge" in cmd:
                 return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
             return subprocess.CompletedProcess(cmd, 0, "", "")
@@ -502,7 +653,10 @@ class TestPrMerge:
 class TestCiWait:
     def test_returns_immediately_when_actionable(self) -> None:
         view_data = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": False, "reviews": [],
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": False,
+            "reviews": [],
         }
 
         def stub(cmd, **kwargs):
@@ -520,7 +674,10 @@ class TestCiWait:
 
     def test_times_out_when_always_waiting(self) -> None:
         draft_view = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "reviews": [],
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": True,
+            "reviews": [],
         }
 
         def stub(cmd, **kwargs):
@@ -538,7 +695,10 @@ class TestCiWait:
     def test_total_slept_does_not_exceed_timeout(self) -> None:
         """I-1: the loop must never sleep past timeout (no overshoot on terminal iteration)."""
         draft_view = {
-            "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "isDraft": True, "reviews": [],
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": True,
+            "reviews": [],
         }
         slept: list[float] = []
 
@@ -554,6 +714,7 @@ class TestCiWait:
             return subprocess.CompletedProcess(cmd, 0, "[]", "")
 
         import trailhead.vcs.github as gh_module
+
         original_sleep = gh_module.time.sleep
         gh_module.time.sleep = fake_sleep  # type: ignore[method-assign]
         try:
@@ -579,8 +740,12 @@ class TestCiWait:
                 # Return actionable immediately so the loop exits after one iteration.
                 return {"action": "done", "reason": "captured"}
 
-        view_data = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                     "isDraft": False, "reviews": []}
+        view_data = {
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": False,
+            "reviews": [],
+        }
 
         def stub(cmd, **kw):
             cmd_str = " ".join(cmd)

@@ -19,6 +19,7 @@ land in an "Uncategorized" bucket so they're visible.
 Invoked from the vault pre-commit hook before every vault commit.
 Idempotent — safe to run any time.
 """
+
 from __future__ import annotations
 
 import os

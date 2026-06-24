@@ -16,6 +16,7 @@ Covers every bullet of the Slice 1 test contract:
 All tests inject XDG_STATE_HOME / XDG_CONFIG_HOME via env and use tmp_path so
 they NEVER touch the real config, state, or vault (Axiom 6).
 """
+
 from __future__ import annotations
 
 import json
@@ -38,6 +39,7 @@ from conftest import load_script  # noqa: E402
 # ---------------------------------------------------------------------------
 # Harness
 # ---------------------------------------------------------------------------
+
 
 def _run(args, *, state, config, cwd=None, extra=None):
     """Run lore CLI with isolated XDG dirs."""
@@ -84,6 +86,7 @@ def _default_vault(state):
 # 1. Fresh init: creates vaults/default as a git repo; exits 0
 # ---------------------------------------------------------------------------
 
+
 def test_fresh_init_exits_zero(tmp_path):
     state, config = _dirs(tmp_path)
     res = _run(["init"], state=state, config=config)
@@ -113,6 +116,7 @@ def test_fresh_init_provisions_index_parent(tmp_path):
 # 2. Index path is NOT under any vault root
 # ---------------------------------------------------------------------------
 
+
 def test_index_location_not_under_vault_root(tmp_path):
     state, config = _dirs(tmp_path)
     _run(["init"], state=state, config=config)
@@ -130,6 +134,7 @@ def test_index_location_not_under_vault_root(tmp_path):
 # ---------------------------------------------------------------------------
 # 3. Re-run is a pure no-op
 # ---------------------------------------------------------------------------
+
 
 def test_rerun_exits_zero(tmp_path):
     state, config = _dirs(tmp_path)
@@ -160,6 +165,7 @@ def test_rerun_does_not_regit_init(tmp_path):
 # 4. No harvest-pending.md; no pre-commit hook from install-vault-hooks.sh
 # ---------------------------------------------------------------------------
 
+
 def test_no_harvest_pending_created(tmp_path):
     state, config = _dirs(tmp_path)
     _run(["init"], state=state, config=config)
@@ -177,6 +183,7 @@ def test_no_precommit_hook_installed(tmp_path):
 # ---------------------------------------------------------------------------
 # 5. resolve_targets: --local vs global
 # ---------------------------------------------------------------------------
+
 
 def test_bootstrap_vault_raises_on_git_init_failure(tmp_path):
     """The vault-is-a-git-repo contract is load-bearing: a failed `git init`
@@ -204,12 +211,12 @@ def test_resolve_targets_returns_user_global_settings(tmp_path):
 # 6. --vault <path> → symlink; does NOT re-git-init the target
 # ---------------------------------------------------------------------------
 
+
 def test_vault_flag_creates_symlink(tmp_path):
     state, config = _dirs(tmp_path)
     target_repo = tmp_path / "existing-repo"
     target_repo.mkdir()
-    subprocess.run(["git", "init", str(target_repo)], check=True,
-                   capture_output=True)
+    subprocess.run(["git", "init", str(target_repo)], check=True, capture_output=True)
 
     res = _run(["init", "--vault", str(target_repo)], state=state, config=config)
     assert res.returncode == 0, res.stderr
@@ -224,8 +231,7 @@ def test_vault_flag_does_not_regit_init_target(tmp_path):
     state, config = _dirs(tmp_path)
     target_repo = tmp_path / "existing-repo"
     target_repo.mkdir()
-    subprocess.run(["git", "init", str(target_repo)], check=True,
-                   capture_output=True, text=True)
+    subprocess.run(["git", "init", str(target_repo)], check=True, capture_output=True, text=True)
 
     # Record HEAD commit (or just check .git exists with no re-init text)
     initial_git_head = (target_repo / ".git" / "HEAD").read_text()
@@ -260,6 +266,7 @@ def test_vault_flag_existing_symlink_is_noop(tmp_path):
 # 7. --local is gone → argparse unknown-flag usage error (SystemExit 2)
 # ---------------------------------------------------------------------------
 
+
 def test_local_flag_is_unknown_flag_error(tmp_path):
     """``--local`` was removed (single user-level install). argparse rejects the
     unknown flag with a usage error (exit 2), writing nothing."""
@@ -275,6 +282,7 @@ def test_local_flag_is_unknown_flag_error(tmp_path):
 # 8. Config: seed-if-absent
 # ---------------------------------------------------------------------------
 
+
 def test_init_seeds_config_if_absent(tmp_path):
     state, config = _dirs(tmp_path)
     _run(["init"], state=state, config=config)
@@ -289,6 +297,7 @@ def test_init_seeds_config_if_absent(tmp_path):
 # ---------------------------------------------------------------------------
 # 9. Config: pre-existing config not clobbered
 # ---------------------------------------------------------------------------
+
 
 def test_init_does_not_clobber_existing_config(tmp_path):
     state, config = _dirs(tmp_path)
@@ -317,14 +326,13 @@ def test_init_does_not_clobber_existing_config(tmp_path):
 # 10. Config: missing default vault entry gets it merged in
 # ---------------------------------------------------------------------------
 
+
 def test_init_merges_default_vault_if_missing(tmp_path):
     state, config = _dirs(tmp_path)
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     # Config exists but has only a team vault (no default)
-    cfg_path.write_text(json.dumps({
-        "vaults": [{"name": "team-alpha", "scope": "team"}]
-    }))
+    cfg_path.write_text(json.dumps({"vaults": [{"name": "team-alpha", "scope": "team"}]}))
 
     res = _run(["init"], state=state, config=config)
     assert res.returncode == 0, res.stderr
@@ -339,6 +347,7 @@ def test_init_merges_default_vault_if_missing(tmp_path):
 # ---------------------------------------------------------------------------
 # 11. Config: a corrupt existing config is a clean error, not a silent no-op
 # ---------------------------------------------------------------------------
+
 
 def test_init_corrupt_config_is_clean_error(tmp_path):
     """Error-hygiene axiom: a present-but-unparseable config.json must surface a

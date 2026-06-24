@@ -86,28 +86,23 @@ import tempfile
 from pathlib import Path
 
 
-_TOOL_NAME_RE = re.compile(r'^[a-z][a-z0-9_-]*$')
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 _REGISTERED_MARKER = ".trailhead-registered"
 _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "lore": (
-        "Portable knowledge-management plugin: session lifecycle, "
-        "capture skills, and vault recall."
+        "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall."
     ),
     "camp": (
         "Portable worktree-orchestration plugin: group config, "
         "dev-env orchestration, and worktree management."
     ),
     "craft": (
-        "Portable software-development plugin: general-purpose dev "
-        "agents and dev-ritual skills."
+        "Portable software-development plugin: general-purpose dev agents and dev-ritual skills."
     ),
-    "portage": (
-        "Get the PR merged: PR lifecycle, CI watch, and merge ordering "
-        "for a camp group."
-    ),
+    "portage": ("Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group."),
     "landing": (
         "Get it deployed: post-merge deploy soak and deploy-health "
         "incident handling for a camp group."
@@ -125,9 +120,7 @@ def _tool_description(tool: str) -> str:
 def _validate_tool(tool: str) -> None:
     """Raise ValueError if tool does not match ^[a-z][a-z0-9_-]*$."""
     if not isinstance(tool, str) or not _TOOL_NAME_RE.match(tool):
-        raise ValueError(
-            f"Invalid tool name {tool!r}: must match ^[a-z][a-z0-9_-]*$"
-        )
+        raise ValueError(f"Invalid tool name {tool!r}: must match ^[a-z][a-z0-9_-]*$")
 
 
 def _default_runner(args, **kw):
@@ -169,9 +162,7 @@ def generate_marketplace_json(tools: list[str], composed_root: Path) -> None:
     out = claude_plugin_dir / "marketplace.json"
     # Atomic write: render to a sibling temp file, then os.replace() into place.
     # A crash mid-write can never leave a torn shared marketplace.json.
-    fd, tmp_path = tempfile.mkstemp(
-        dir=claude_plugin_dir, prefix=".marketplace-", suffix=".tmp"
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=claude_plugin_dir, prefix=".marketplace-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(json.dumps(marketplace, indent=2))
@@ -207,11 +198,17 @@ def register_marketplace(
     if runner is None:
         runner = _default_runner
 
-    runner([
-        "claude", "plugin", "marketplace", "add",
-        "--scope", "user",
-        str(composed_root),
-    ])
+    runner(
+        [
+            "claude",
+            "plugin",
+            "marketplace",
+            "add",
+            "--scope",
+            "user",
+            str(composed_root),
+        ]
+    )
     (composed_root / _REGISTERED_MARKER).write_text("{}")
 
 
@@ -239,11 +236,16 @@ def install_tool(
     if runner is None:
         runner = _default_runner
 
-    runner([
-        "claude", "plugin", "install",
-        f"{tool}@trailhead",
-        "--scope", "user",
-    ])
+    runner(
+        [
+            "claude",
+            "plugin",
+            "install",
+            f"{tool}@trailhead",
+            "--scope",
+            "user",
+        ]
+    )
     (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").write_text("{}")
 
 
@@ -283,20 +285,30 @@ def rewire_tool(
     marker.unlink(missing_ok=True)
 
     try:
-        runner([
-            "claude", "plugin", "uninstall",
-            f"{tool}@trailhead",
-            "--scope", "user",
-        ])
+        runner(
+            [
+                "claude",
+                "plugin",
+                "uninstall",
+                f"{tool}@trailhead",
+                "--scope",
+                "user",
+            ]
+        )
     except Exception:
         # Tolerate "not installed" — install must still run.
         pass
 
-    runner([
-        "claude", "plugin", "install",
-        f"{tool}@trailhead",
-        "--scope", "user",
-    ])
+    runner(
+        [
+            "claude",
+            "plugin",
+            "install",
+            f"{tool}@trailhead",
+            "--scope",
+            "user",
+        ]
+    )
 
     marker.write_text("{}")
 
@@ -334,13 +346,18 @@ def unregister_tool(
         runner = _default_runner
 
     try:
-        runner([
-            "claude", "plugin", "uninstall",
-            f"{tool}@trailhead",
-            "--scope", "user",
-            "--keep-data",
-            "--yes",
-        ])
+        runner(
+            [
+                "claude",
+                "plugin",
+                "uninstall",
+                f"{tool}@trailhead",
+                "--scope",
+                "user",
+                "--keep-data",
+                "--yes",
+            ]
+        )
     finally:
         (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").unlink(missing_ok=True)
 
@@ -368,10 +385,16 @@ def unregister_marketplace(
         runner = _default_runner
 
     try:
-        runner([
-            "claude", "plugin", "marketplace", "remove",
-            "trailhead",
-            "--scope", "user",
-        ])
+        runner(
+            [
+                "claude",
+                "plugin",
+                "marketplace",
+                "remove",
+                "trailhead",
+                "--scope",
+                "user",
+            ]
+        )
     finally:
         (composed_root / _REGISTERED_MARKER).unlink(missing_ok=True)

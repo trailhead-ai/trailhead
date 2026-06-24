@@ -61,7 +61,8 @@ def test_resolve_user_falls_back_to_git_config():
     with mock.patch.dict(os.environ, env, clear=True):
         v = load_script("vault")
         with mock.patch.object(
-            subprocess, "run",
+            subprocess,
+            "run",
             return_value=subprocess.CompletedProcess([], 0, stdout="Grace Hopper\n", stderr=""),
         ):
             assert v.resolve_user() == "Grace Hopper"
@@ -72,7 +73,8 @@ def test_resolve_user_falls_back_to_literal_you():
     with mock.patch.dict(os.environ, env, clear=True):
         v = load_script("vault")
         with mock.patch.object(
-            subprocess, "run",
+            subprocess,
+            "run",
             return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="not set"),
         ):
             assert v.resolve_user() == "you"
@@ -89,6 +91,7 @@ def test_resolve_user_git_failure_falls_back_to_you():
 # ---------------------------------------------------------------------------
 # find_session_note: worktree-scoped filtering (I1)
 # ---------------------------------------------------------------------------
+
 
 def _make_session_note(sessions_dir: Path, stem: str, worktree: str) -> Path:
     """Write a minimal session note with worktree frontmatter."""

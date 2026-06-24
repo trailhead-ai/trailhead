@@ -8,6 +8,7 @@ Covers (TDD — written before implementation):
 - The commit is made (atomic write + git) when vault is a proper git toplevel.
 - A non-git vault: status is set but commit is skipped (soft-fail).
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -30,7 +31,11 @@ def run_cli(args, env=None, cwd=None, input_text=None):
         full_env.update(env)
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
-        capture_output=True, text=True, env=full_env, cwd=cwd, input=input_text,
+        capture_output=True,
+        text=True,
+        env=full_env,
+        cwd=cwd,
+        input=input_text,
     )
 
 
@@ -55,12 +60,17 @@ def _git_vault(tmp_path: Path) -> Path:
     """A vault that is its own git repo (toplevel == vault)."""
     vault = _make_vault(tmp_path)
     subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.name", "Tester"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.email", "t@e.st"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.name", "Tester"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
+        check=True,
+        capture_output=True,
+    )
     return vault
 
 
@@ -193,11 +203,11 @@ class TestFinalizeBodyOnlyCaptureFile:
 # lore finish / session-note on the GUID capture file (Slice 0.5, KU1)
 # ---------------------------------------------------------------------------
 
+
 class TestFinishOnGuidCaptureFile:
     def _candidate(self, vault: Path):
         return run_cli(
-            ["session", "candidate", "--session-id", _GUID,
-             "--kind", "lesson", "--phase", "Build"],
+            ["session", "candidate", "--session-id", _GUID, "--kind", "lesson", "--phase", "Build"],
             env={"LORE_VAULT": str(vault)},
             input_text="a lesson captured during the session\n",
         )
@@ -241,15 +251,11 @@ class TestFinishOnGuidCaptureFile:
         assert self._candidate(vault).returncode == 0
         sidecar = vault / "sessions" / f"{_GUID}.json"
 
-        first = run_cli(
-            ["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)}
-        )
+        first = run_cli(["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)})
         assert first.returncode == 0, first.stderr
         sidecar_after_first = sidecar.read_text()
 
-        second = run_cli(
-            ["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)}
-        )
+        second = run_cli(["finish", "--session-id", _GUID], env={"LORE_VAULT": str(vault)})
         assert second.returncode == 0, second.stderr
         # The sidecar status stays terminal and is not re-written.
         assert sidecar.read_text() == sidecar_after_first
@@ -275,6 +281,7 @@ class TestFinishEmptySession:
 # ---------------------------------------------------------------------------
 # lore finish: sets status: complete + ended:
 # ---------------------------------------------------------------------------
+
 
 class TestLoreFinishSetsStatus:
     def test_sets_status_complete(self, tmp_path):
@@ -330,7 +337,8 @@ class TestLoreFinishSetsStatus:
         )
         log = subprocess.run(
             ["git", "-C", str(vault), "log", "--oneline"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert log.returncode == 0
         assert log.stdout.strip(), "expected a commit in the vault after lore finish"
@@ -339,6 +347,7 @@ class TestLoreFinishSetsStatus:
 # ---------------------------------------------------------------------------
 # lore finish: no session note → exit 0 + notice
 # ---------------------------------------------------------------------------
+
 
 class TestLoreFinishNoSession:
     def test_exits_zero_with_notice_when_no_session(self, tmp_path):
@@ -371,6 +380,7 @@ class TestLoreFinishNoSession:
 # lore finish: non-git vault → status set, commit soft-fail
 # ---------------------------------------------------------------------------
 
+
 class TestLoreFinishNonGitVault:
     def test_status_set_even_when_not_git_toplevel(self, tmp_path):
         vault = _make_vault(tmp_path)  # NOT a git repo
@@ -391,6 +401,7 @@ class TestLoreFinishNonGitVault:
 # ---------------------------------------------------------------------------
 # Fix 1 regression: already-complete note + untracked stray file → exit 0, no commit
 # ---------------------------------------------------------------------------
+
 
 class TestFinishNoopWithStrayUntracked:
     """Regression guard for the git status --porcelain bug.
@@ -430,16 +441,17 @@ class TestFinishNoopWithStrayUntracked:
         vault = _git_vault(tmp_path)
         self._seed_complete_note(vault, worktree="my-worktree")
         # commit the complete note so the vault is clean
-        subprocess.run(["git", "-C", str(vault), "add", "-A"],
-                       check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(vault), "commit", "-m", "baseline"],
-                       check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(vault), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(vault), "commit", "-m", "baseline"], check=True, capture_output=True
+        )
         # add an unrelated untracked file (not staged, not committed)
         stray = vault / "sessions" / "scratch-untracked.md"
         stray.write_text("# Not yet tracked\n")
         commit_count_before = subprocess.run(
             ["git", "-C", str(vault), "rev-list", "--count", "HEAD"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
 
         fake_cwd = tmp_path / "my-worktree"
@@ -457,7 +469,8 @@ class TestFinishNoopWithStrayUntracked:
         # no new commit should have been made
         commit_count_after = subprocess.run(
             ["git", "-C", str(vault), "rev-list", "--count", "HEAD"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
         assert commit_count_before == commit_count_after, (
             f"cmd_finish must NOT commit when there is nothing staged "

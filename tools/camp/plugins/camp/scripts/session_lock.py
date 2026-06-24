@@ -27,6 +27,7 @@ Liveness (U2, validated): os.kill(pid, 0) → ProcessLookupError means dead;
 PermissionError means alive-but-not-ours (macOS DOES raise EPERM for cross-user
 PIDs) — treat as alive, conservative.
 """
+
 from __future__ import annotations
 
 import json

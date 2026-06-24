@@ -94,8 +94,7 @@ class TestGrepGuard:
             hits = [(f, ln, line) for f, ln, line in hits if not excl_rx.search(line)]
         if hits:
             msg_lines = [
-                f"Found {len(hits)} occurrence(s) of {description} — "
-                "must be zero after rename:"
+                f"Found {len(hits)} occurrence(s) of {description} — must be zero after rename:"
             ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
@@ -239,8 +238,7 @@ class TestGrepGuard:
         hits = _grep_files(r"skills/finished", files)
         if hits:
             msg_lines = [
-                f"Found {len(hits)} occurrence(s) of 'skills/finished' — "
-                "must be zero after rename:"
+                f"Found {len(hits)} occurrence(s) of 'skills/finished' — must be zero after rename:"
             ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
@@ -272,10 +270,7 @@ class TestGrepGuard:
         - lines that reference the 'code-reviewer' agent or 'code review' (not the council panel)
         - the experiments/ corpus (frozen)
         """
-        files = [
-            f for f in _collect_files()
-            if "experiments" not in f.parts and f.suffix == ".md"
-        ]
+        files = [f for f in _collect_files() if "experiments" not in f.parts and f.suffix == ".md"]
         hits = _grep_files(r"Circle Review", files)
         # No exclusions needed: 'Circle Review' with both words Title-Cased is
         # exclusively the old panel-review label.
@@ -334,9 +329,7 @@ class TestGrepGuard:
             "execute SKILL.md still has now-old 'Trailblazer returns' callouts — "
             "rename to 'Executor returns'"
         )
-        assert "Executor" in text, (
-            "execute SKILL.md must carry the new 'Executor' role label"
-        )
+        assert "Executor" in text, "execute SKILL.md must carry the new 'Executor' role label"
 
 
 # ---------------------------------------------------------------------------
@@ -472,12 +465,8 @@ class TestManifestValidation:
     def test_lore_sessions_references_finish_skill(self):
         """lore sessions capability must reference skills/finish (not skills/finished)."""
         m = load_manifest(_LORE_MANIFEST)
-        assert "finish" in m.skills, (
-            f"lore must ship the 'finish' skill; got {sorted(m.skills)}"
-        )
-        assert "finished" not in m.skills, (
-            "lore still ships 'finished' skill — renamed to 'finish'"
-        )
+        assert "finish" in m.skills, f"lore must ship the 'finish' skill; got {sorted(m.skills)}"
+        assert "finished" not in m.skills, "lore still ships 'finished' skill — renamed to 'finish'"
 
     def test_craft_execute_references_assumption_prover_and_executor(self):
         """craft execute capability must reference assumption-prover.md and executor.md."""
@@ -491,9 +480,7 @@ class TestManifestValidation:
         assert "trailblazer" not in m.subagents, (
             "craft still ships old 'trailblazer' subagent — renamed to 'executor'"
         )
-        assert "execute" in m.skills, (
-            f"craft must ship the 'execute' skill; got {sorted(m.skills)}"
-        )
+        assert "execute" in m.skills, f"craft must ship the 'execute' skill; got {sorted(m.skills)}"
         assert "subagent-driven-development" not in m.skills, (
             "craft still ships old 'subagent-driven-development' skill — renamed to 'execute'"
         )
@@ -510,9 +497,7 @@ class TestManifestValidation:
             assert not agent.startswith("council-"), (
                 f"craft still ships old council- agent: {agent}"
             )
-            assert not agent.startswith("circle-"), (
-                f"craft still ships old circle- agent: {agent}"
-            )
+            assert not agent.startswith("circle-"), f"craft still ships old circle- agent: {agent}"
 
 
 def _read_agent_text(agent_file: Path) -> str:
@@ -605,16 +590,14 @@ class TestResolveAllCapabilitiesOracle:
         """Every CopyOp.src for the full lore inventory must exist on disk."""
         missing = self._check_manifest(_LORE_MANIFEST, tmp_path)
         assert not missing, (
-            "R-6: lore compose_plan produced CopyOps with missing src:\n"
-            + "\n".join(missing)
+            "R-6: lore compose_plan produced CopyOps with missing src:\n" + "\n".join(missing)
         )
 
     def test_craft_all_capabilities_resolve_to_existing_src(self, tmp_path):
         """Every CopyOp.src for the full craft inventory must exist on disk."""
         missing = self._check_manifest(_CRAFT_MANIFEST, tmp_path)
         assert not missing, (
-            "R-6: craft compose_plan produced CopyOps with missing src:\n"
-            + "\n".join(missing)
+            "R-6: craft compose_plan produced CopyOps with missing src:\n" + "\n".join(missing)
         )
 
 
@@ -685,9 +668,7 @@ class TestSkillDirsExist:
         assert finish_dir.exists() and finish_dir.is_dir(), (
             f"skills/finish/ not found at {finish_dir} — rename from skills/finished/"
         )
-        assert (finish_dir / "SKILL.md").exists(), (
-            "skills/finish/SKILL.md missing after rename"
-        )
+        assert (finish_dir / "SKILL.md").exists(), "skills/finish/SKILL.md missing after rename"
 
     def test_lore_finish_frontmatter_name_matches_dir(self):
         """Slice 7 finish/finished fix: the finish skill dir is finish/ but its frontmatter
@@ -739,15 +720,18 @@ def _parse_frontmatter_name(agent_file: Path) -> str | None:
 class TestFrontmatterNameMatchesFilename:
     """Agent frontmatter name: field must match the new filename stem."""
 
-    @pytest.mark.parametrize("stem,path", [
-        ("librarian", _LORE_PLUGIN_ROOT / "agents" / "librarian.md"),
-        ("advocate", _CRAFT_PLUGIN_ROOT / "agents" / "advocate.md"),
-        ("builder", _CRAFT_PLUGIN_ROOT / "agents" / "builder.md"),
-        ("breaker", _CRAFT_PLUGIN_ROOT / "agents" / "breaker.md"),
-        ("attacker", _CRAFT_PLUGIN_ROOT / "agents" / "attacker.md"),
-        ("assumption-prover", _CRAFT_PLUGIN_ROOT / "agents" / "assumption-prover.md"),
-        ("executor", _CRAFT_PLUGIN_ROOT / "agents" / "executor.md"),
-    ])
+    @pytest.mark.parametrize(
+        "stem,path",
+        [
+            ("librarian", _LORE_PLUGIN_ROOT / "agents" / "librarian.md"),
+            ("advocate", _CRAFT_PLUGIN_ROOT / "agents" / "advocate.md"),
+            ("builder", _CRAFT_PLUGIN_ROOT / "agents" / "builder.md"),
+            ("breaker", _CRAFT_PLUGIN_ROOT / "agents" / "breaker.md"),
+            ("attacker", _CRAFT_PLUGIN_ROOT / "agents" / "attacker.md"),
+            ("assumption-prover", _CRAFT_PLUGIN_ROOT / "agents" / "assumption-prover.md"),
+            ("executor", _CRAFT_PLUGIN_ROOT / "agents" / "executor.md"),
+        ],
+    )
     def test_agent_frontmatter_name_matches_filename(self, stem: str, path: Path):
         """Agent frontmatter name: must match the new filename stem."""
         assert path.exists(), f"Agent file not found: {path}"
@@ -850,9 +834,7 @@ class TestConsultSkillAndSharedCouncil:
         )
         text = _COUNCIL_INCLUDE.read_text()
         for stem in _COUNCIL_STEMS:
-            assert stem in text, (
-                f"council.md must name the {stem!r} agent (single source of truth)"
-            )
+            assert stem in text, f"council.md must name the {stem!r} agent (single source of truth)"
             agent_file = _CRAFT_PLUGIN_ROOT / "agents" / f"{stem}.md"
             assert agent_file.exists(), (
                 f"council.md names {stem!r} but {agent_file} does not exist — "
@@ -904,9 +886,7 @@ class TestConsultSkillAndSharedCouncil:
     def test_craft_council_capability_includes_consult_skill(self):
         """craft must ship the consult skill."""
         m = load_manifest(_CRAFT_MANIFEST)
-        assert "consult" in m.skills, (
-            f"craft must ship the 'consult' skill; got {sorted(m.skills)}"
-        )
+        assert "consult" in m.skills, f"craft must ship the 'consult' skill; got {sorted(m.skills)}"
 
     def test_craft_council_compose_includes_consult_skill(self, tmp_path):
         """compose_plan of the consult skill must include its dir as a CopyOp."""
@@ -1140,9 +1120,7 @@ class TestSlice4SkillRenameForbids:
         """The four old skill directories must not exist under craft plugins."""
         for old in ("followup", "handoff", "planning", "requesting-code-review"):
             old_dir = _CRAFT_PLUGIN_ROOT / "skills" / old
-            assert not old_dir.exists(), (
-                f"Old skills/{old}/ still exists at {old_dir} — rename it."
-            )
+            assert not old_dir.exists(), f"Old skills/{old}/ still exists at {old_dir} — rename it."
 
 
 class TestSlice4RenamedSkillsExistAndRegistrable:
@@ -1153,21 +1131,27 @@ class TestSlice4RenamedSkillsExistAndRegistrable:
     surviving `plan`/`review` capability tokens.
     """
 
-    @pytest.mark.parametrize("stem,skill_md", [
-        ("polish", _POLISH_SKILL),
-        ("plan", _PLAN_SKILL),
-        ("review", _REVIEW_SKILL),
-    ])
+    @pytest.mark.parametrize(
+        "stem,skill_md",
+        [
+            ("polish", _POLISH_SKILL),
+            ("plan", _PLAN_SKILL),
+            ("review", _REVIEW_SKILL),
+        ],
+    )
     def test_renamed_skill_dir_exists_with_skill_md(self, stem: str, skill_md: Path):
         assert skill_md.exists(), (
             f"skills/{stem}/SKILL.md not found at {skill_md} — rename the old skill dir."
         )
 
-    @pytest.mark.parametrize("stem,skill_md", [
-        ("polish", _POLISH_SKILL),
-        ("plan", _PLAN_SKILL),
-        ("review", _REVIEW_SKILL),
-    ])
+    @pytest.mark.parametrize(
+        "stem,skill_md",
+        [
+            ("polish", _POLISH_SKILL),
+            ("plan", _PLAN_SKILL),
+            ("review", _REVIEW_SKILL),
+        ],
+    )
     def test_renamed_skill_is_registrable_with_matching_name(self, stem: str, skill_md: Path):
         assert skill_md.exists(), f"skills/{stem}/SKILL.md not found at {skill_md}"
         assert _has_registrable_frontmatter(skill_md), (
@@ -1201,9 +1185,7 @@ class TestSlice4ManifestRepointed:
         assert {"planner", "architect"} <= set(m.subagents), (
             f"craft must ship 'planner' + 'architect' subagents; got {sorted(m.subagents)}"
         )
-        assert "plan" in m.skills, (
-            f"craft must ship the 'plan' skill; got {sorted(m.skills)}"
-        )
+        assert "plan" in m.skills, f"craft must ship the 'plan' skill; got {sorted(m.skills)}"
         assert "planning" not in m.skills, (
             "craft still ships old 'planning' skill — renamed to 'plan'"
         )
@@ -1218,9 +1200,7 @@ class TestSlice4ManifestRepointed:
         assert "code-reviewer" in m.subagents, (
             f"craft must ship the 'code-reviewer' subagent; got {sorted(m.subagents)}"
         )
-        assert "review" in m.skills, (
-            f"craft must ship the 'review' skill; got {sorted(m.skills)}"
-        )
+        assert "review" in m.skills, f"craft must ship the 'review' skill; got {sorted(m.skills)}"
         assert "requesting-code-review" not in m.skills, (
             "craft still ships old 'requesting-code-review' skill — renamed to 'review'"
         )
@@ -1379,9 +1359,7 @@ class TestSlice6RadarSkillDataForbids:
         """The old skills/radar and skills/check-radar directories must not exist."""
         for old in ("radar", "check-radar"):
             old_dir = _LORE_SKILLS / old
-            assert not old_dir.exists(), (
-                f"Old skills/{old}/ still exists at {old_dir} — rename it."
-            )
+            assert not old_dir.exists(), f"Old skills/{old}/ still exists at {old_dir} — rename it."
 
 
 class TestSlice6RenamedSkillsExistAndRegistrable:
@@ -1393,10 +1371,13 @@ class TestSlice6RenamedSkillsExistAndRegistrable:
     updating the skill roster.
     """
 
-    @pytest.mark.parametrize("stem,skill_md", [
-        ("follow-up", _FOLLOW_UP_SKILL),
-        ("check-in", _CHECK_IN_SKILL),
-    ])
+    @pytest.mark.parametrize(
+        "stem,skill_md",
+        [
+            ("follow-up", _FOLLOW_UP_SKILL),
+            ("check-in", _CHECK_IN_SKILL),
+        ],
+    )
     def test_renamed_skill_dir_exists_with_skill_md(self, stem: str, skill_md: Path):
         # S6 Slice 2: these skills were deleted — they must no longer exist.
         assert not skill_md.exists(), (
@@ -1405,10 +1386,13 @@ class TestSlice6RenamedSkillsExistAndRegistrable:
             f"Remove it or update the roster."
         )
 
-    @pytest.mark.parametrize("stem,skill_md", [
-        ("follow-up", _FOLLOW_UP_SKILL),
-        ("check-in", _CHECK_IN_SKILL),
-    ])
+    @pytest.mark.parametrize(
+        "stem,skill_md",
+        [
+            ("follow-up", _FOLLOW_UP_SKILL),
+            ("check-in", _CHECK_IN_SKILL),
+        ],
+    )
     def test_renamed_skill_is_registrable_with_matching_name(self, stem: str, skill_md: Path):
         # S6 Slice 2: these skills were deleted — confirm they are absent.
         assert not skill_md.exists(), (
@@ -1463,9 +1447,7 @@ class TestSlice6ManifestAndTemplate:
     def test_lore_manifest_validates_and_composes_capture(self, tmp_path):
         """lore manifest validates and session skills compose correctly after S6 Slice 2."""
         m = load_manifest(_LORE_MANIFEST)
-        plan = compose_plan(
-            m, {}, {"checkpoint": None, "finish": None}, tmp_path / "session"
-        )
+        plan = compose_plan(m, {}, {"checkpoint": None, "finish": None}, tmp_path / "session")
         skill_srcs = {op.src.name for op in plan.ops if op.src.is_dir()}
         assert "checkpoint" in skill_srcs, (
             f"compose must include the checkpoint skill dir; got {skill_srcs}"
@@ -1500,7 +1482,8 @@ _LANDING_CLAIMS = _REPO_ROOT / "trailhead" / "landing_claims.toml"
 
 # Path-scoped file sets for the lore-only review/tend/ping/reflect forbids.
 _LORE_FILES = [
-    f for f in _collect_files()
+    f
+    for f in _collect_files()
     if (_REPO_ROOT / "tools" / "lore") in f.parents or f.parent == (_REPO_ROOT / "tools" / "lore")
 ]
 
@@ -1534,8 +1517,7 @@ class TestSlice7DeletionForbids:
         hits = _grep_files(r"reflect_sessions", files)
         if hits:
             msg_lines = [
-                f"Found {len(hits)} occurrence(s) of 'reflect_sessions' — "
-                "the script is deleted:"
+                f"Found {len(hits)} occurrence(s) of 'reflect_sessions' — the script is deleted:"
             ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
@@ -1600,8 +1582,7 @@ class TestSlice7DeletionForbids:
         hits = _grep_files(r"/lore:(review|tend)\b|^name: (review|tend)\b", _LORE_FILES)
         if hits:
             msg_lines = [
-                f"Found {len(hits)} occurrence(s) of the lore review/tend skill identity — "
-                "deleted:"
+                f"Found {len(hits)} occurrence(s) of the lore review/tend skill identity — deleted:"
             ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
@@ -1630,8 +1611,7 @@ class TestSlice7DeletionForbids:
         hits = _grep_files(r"skills/ping\b", _LORE_FILES)
         if hits:
             msg_lines = [
-                f"Found {len(hits)} occurrence(s) of lore 'skills/ping' — "
-                "the skill is deleted:"
+                f"Found {len(hits)} occurrence(s) of lore 'skills/ping' — the skill is deleted:"
             ]
             for f, ln, line in hits[:10]:
                 msg_lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
@@ -1717,12 +1697,8 @@ class TestSlice8ArtistCutover:
     """
 
     # S6 Slice 3 moved brainstorm from the lore plugin into craft.
-    _BRAINSTORM_SKILL = (
-        _CRAFT_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
-    )
-    _DESIGN_AUTHORING = (
-        _CRAFT_PLUGIN_ROOT / "docs" / "design-authoring.md"
-    )
+    _BRAINSTORM_SKILL = _CRAFT_PLUGIN_ROOT / "skills" / "brainstorm" / "SKILL.md"
+    _DESIGN_AUTHORING = _CRAFT_PLUGIN_ROOT / "docs" / "design-authoring.md"
 
     def test_brainstorm_names_artist_as_design_mockup_provider(self):
         """brainstorm/SKILL.md's design_mockup point must name `artist` as provider."""
@@ -1803,7 +1779,8 @@ class TestSlice9RadarFullForbid:
         fixture dir names — must read `follow-up`/`follow-ups` after Slice 9.
         """
         files = [
-            f for f in _scan_files_excluding_experiments()
+            f
+            for f in _scan_files_excluding_experiments()
             if f.name not in _RADAR_ALLOWLIST_FILENAMES
         ]
         hits = _grep_files(r"\bradar\b", files)
@@ -1879,7 +1856,8 @@ class TestSlice9DesignMockupWriterForbid:
         retirement prose in design-authoring.md — must drop the token.
         """
         files = [
-            f for f in _scan_files_excluding_experiments()
+            f
+            for f in _scan_files_excluding_experiments()
             if f.name not in _DESIGN_MOCKUP_WRITER_ALLOWLIST_FILENAMES
         ]
         hits = _grep_files(r"design-mockup-writer", files)

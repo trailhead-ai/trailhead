@@ -6,6 +6,7 @@ could misclassify real content as a skeleton and delete it on the live plugin.
 Fixture discipline: all worktree names, slugs, and note content are SYNTHETIC —
 no real brain content, no real subsystem names (public repo leak-gate rule).
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -55,12 +56,17 @@ def _make_vault(tmp_path: Path) -> Path:
 def _git_vault(tmp_path: Path) -> Path:
     vault = _make_vault(tmp_path)
     subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.name", "Tester"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.email", "t@e.st"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.name", "Tester"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
+        check=True,
+        capture_output=True,
+    )
     return vault
 
 
@@ -124,6 +130,7 @@ def _terminal_note(vault: Path, status: str, worktree: str = "synth-gamma") -> P
 # ---------------------------------------------------------------------------
 # is_skeleton_body — unit tests (pure function, no I/O)
 # ---------------------------------------------------------------------------
+
 
 class TestIsSkeletonBody:
     def _load_fn(self):
@@ -197,11 +204,10 @@ class TestIsSkeletonBody:
         assert self._load_fn()(note) is False
 
 
-
-
 # ---------------------------------------------------------------------------
 # sweep_orphan_skeletons — orphan sweep behavior
 # ---------------------------------------------------------------------------
+
 
 class TestSweepOrphanSkeletons:
     def _load_sweep(self):
@@ -262,6 +268,3 @@ class TestSweepOrphanSkeletons:
         vault.mkdir()
         sweep = self._load_sweep()
         sweep(vault, exclude=set())  # should not raise
-
-
-

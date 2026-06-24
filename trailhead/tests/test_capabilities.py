@@ -104,9 +104,7 @@ class TestLoreInventory:
         for name in ("checkpoint", "finish", "sync"):
             assert name in m.skills
             assert m.skills[name] == f"skills/{name}"
-        assert "brainstorm" not in m.skills, (
-            "brainstorm moved to the craft plugin (S6 Slice 3)"
-        )
+        assert "brainstorm" not in m.skills, "brainstorm moved to the craft plugin (S6 Slice 3)"
 
     def test_sync_is_now_selectable(self):
         # sync was always-on (base) under the capability model; it has a SKILL.md
@@ -147,8 +145,14 @@ class TestCraftInventory:
 
     def test_helper_subagents_discovered(self):
         m = load_manifest(_CRAFT_MANIFEST)
-        for name in ("doc-finder", "log-sifter", "researcher", "troubleshooter",
-                     "test-runner", "security-auditor"):
+        for name in (
+            "doc-finder",
+            "log-sifter",
+            "researcher",
+            "troubleshooter",
+            "test-runner",
+            "security-auditor",
+        ):
             assert name in m.subagents
 
     def test_lifecycle_skills_now_selectable(self):
@@ -248,12 +252,12 @@ class TestMalformedManifests:
             load_manifest(manifest_path)
 
     def test_missing_tool_section_raises(self, tmp_path):
-        manifest_path = _write_manifest(tmp_path, 'other = 1\n')
+        manifest_path = _write_manifest(tmp_path, "other = 1\n")
         with pytest.raises(ManifestError, match=r"\[tool\]"):
             load_manifest(manifest_path)
 
     def test_missing_tool_name_raises(self, tmp_path):
-        manifest_path = _write_manifest(tmp_path, '[tool]\nbase = []\n')
+        manifest_path = _write_manifest(tmp_path, "[tool]\nbase = []\n")
         with pytest.raises(ManifestError, match="name"):
             load_manifest(manifest_path)
 
@@ -278,10 +282,7 @@ class TestConfinement:
 
     def test_hooks_json_traversal_raises(self, tmp_path):
         _make_plugin_dir(tmp_path, "badtool")
-        content = (
-            '[tool]\nname = "badtool"\nhooks_json = "../../../etc/passwd"\n'
-            'validate = false\n'
-        )
+        content = '[tool]\nname = "badtool"\nhooks_json = "../../../etc/passwd"\nvalidate = false\n'
         with pytest.raises(ConfineError):
             load_manifest(_write_manifest(tmp_path, content))
 

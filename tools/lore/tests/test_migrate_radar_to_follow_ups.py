@@ -13,6 +13,7 @@ NEVER the live vault. Covers the council-raised concerns:
 - `--dry-run` touches NOTHING on disk
 - path-traversal refusal (no `../` escape of the vault root)
 """
+
 from __future__ import annotations
 
 import json
@@ -32,8 +33,10 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 # ── fixtures ────────────────────────────────────────────────────────────────
 
-def _radar_note(*, slug: str, status: str = "active", type_: str = "radar",
-                body_extra: str = "") -> str:
+
+def _radar_note(
+    *, slug: str, status: str = "active", type_: str = "radar", body_extra: str = ""
+) -> str:
     return (
         "---\n"
         f"type: {type_}\n"
@@ -63,9 +66,7 @@ def _make_vault(tmp_path: Path) -> Path:
     # bucketed note
     (bucket / "2026-01-05-watch-beta.md").write_text(_radar_note(slug="beta"))
     # the single off-vocab outlier
-    (bucket / "2026-01-09-watch-closed.md").write_text(
-        _radar_note(slug="closed", status="closed")
-    )
+    (bucket / "2026-01-09-watch-closed.md").write_text(_radar_note(slug="closed", status="closed"))
     # an auto-generated index (must be deleted, not moved)
     (radar / "_index.md").write_text("# radar\n\n[[radar/watch-alpha]]\n")
     return vault
@@ -74,11 +75,13 @@ def _make_vault(tmp_path: Path) -> Path:
 def _run_migrate(vault: Path, *extra: str):
     return subprocess.run(
         [sys.executable, str(MIGRATE_SCRIPT), "--vault", str(vault), *extra],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
 # ── real-mode migration ─────────────────────────────────────────────────────
+
 
 class TestRealMigration:
     def test_dir_moved_and_old_radar_gone(self, tmp_path):
@@ -170,6 +173,7 @@ class TestRealMigration:
 
 # ── idempotency ──────────────────────────────────────────────────────────────
 
+
 class TestIdempotency:
     def test_second_run_is_noop(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -215,6 +219,7 @@ class TestIdempotency:
 
 # ── dry-run ──────────────────────────────────────────────────────────────────
 
+
 class TestDryRun:
     def test_dry_run_touches_nothing(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -239,6 +244,7 @@ class TestDryRun:
 
 
 # ── path safety ──────────────────────────────────────────────────────────────
+
 
 class TestPathSafety:
     def test_refuses_nonexistent_vault(self, tmp_path):

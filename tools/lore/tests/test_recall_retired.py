@@ -11,6 +11,7 @@ The area-map path (`cmd_areas`, `build_area_map`, `render_area_pointer`,
 SessionStart pointer, not the recall command — and is covered by
 `test_recall_core.py` / `test_subsystem_recall.py`.
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,6 +29,7 @@ CLI_DIR = PLUGIN_ROOT / "cli"
 # ---------------------------------------------------------------------------
 # `lore recall …` is gone → non-zero exit + "did you mean 'lore search'?" hint
 # ---------------------------------------------------------------------------
+
 
 class TestRecallCommandRetired:
     def test_bare_recall_is_unknown_command_nonzero(self, tmp_path):
@@ -58,6 +60,7 @@ class TestRecallCommandRetired:
 # ---------------------------------------------------------------------------
 # Grep-guard: NO remaining executable `lore recall` reference in hooks/ + cli/
 # ---------------------------------------------------------------------------
+
 
 class TestNoRecallReferencesInExecutables:
     # Flagged forms the old call sites used — the hard guard must catch all of them.
@@ -95,6 +98,7 @@ class TestNoRecallReferencesInExecutables:
 # Call-site: area pointer references search not recall
 # ---------------------------------------------------------------------------
 
+
 class TestAreaPointerCallSite:
     def test_area_pointer_references_search_not_recall(self, tmp_path):
         """The area-pointer (serve `lore areas` / recall flows) must point at
@@ -118,6 +122,7 @@ class TestAreaPointerCallSite:
 # ---------------------------------------------------------------------------
 # The recall COMMAND path is gutted from recall.py (kept: area-map functions)
 # ---------------------------------------------------------------------------
+
 
 class TestRecallModuleGutted:
     def test_command_path_symbols_removed(self):

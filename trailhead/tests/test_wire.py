@@ -109,8 +109,9 @@ def _fail_first_copy(msg: str):
 
         return _f
 
-    with patch("shutil.copy2", side_effect=_wrap(original_copy2)), patch(
-        "shutil.copytree", side_effect=_wrap(original_copytree)
+    with (
+        patch("shutil.copy2", side_effect=_wrap(original_copy2)),
+        patch("shutil.copytree", side_effect=_wrap(original_copytree)),
     ):
         yield
 
@@ -418,9 +419,7 @@ class TestConsolidatedMarketplace:
         )
         composed_root = _composed_root(tmp_path)
         for path in composed_root.rglob("*"):
-            assert not path.is_symlink(), (
-                f"symlink found in composed tree (S-2 violation): {path}"
-            )
+            assert not path.is_symlink(), f"symlink found in composed tree (S-2 violation): {path}"
 
 
 # ---------------------------------------------------------------------------
@@ -443,9 +442,7 @@ class TestIdempotency:
         )
         plugin_dest = _live_dest(tmp_path, "lore")
         first_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
 
         wire(
@@ -456,13 +453,9 @@ class TestIdempotency:
             runner=_noop_runner,
         )
         second_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
-        assert first_files == second_files, (
-            "re-wiring same selection changed the file set"
-        )
+        assert first_files == second_files, "re-wiring same selection changed the file set"
 
     def test_rewire_removes_previously_present_capability(self, tmp_path):
         """Re-wiring a narrower selection removes the previously-wired entries."""
@@ -514,9 +507,7 @@ class TestAtomicPromote:
         assert plugin_dest.exists()
 
         before_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
 
         # Fail the first copy op — of EITHER primitive. Share one counter so
@@ -532,9 +523,7 @@ class TestAtomicPromote:
                 )
 
         after_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
         assert before_files == after_files, (
             "R-1 violated: mid-compose failure mutated the live dest\n"
@@ -560,9 +549,7 @@ class TestAtomicPromote:
                     runner=_noop_runner,
                 )
 
-        assert not plugin_dest.exists(), (
-            "R-1 violated: partial dest exists after failed first wire"
-        )
+        assert not plugin_dest.exists(), "R-1 violated: partial dest exists after failed first wire"
 
 
 # ---------------------------------------------------------------------------
@@ -596,9 +583,7 @@ class TestRegistrySequencing:
         assert len(marketplace_adds) == 1, (
             f"expected exactly ONE marketplace add across the wire, got {marketplace_adds}"
         )
-        assert len(installs) == 2, (
-            f"expected 2 install calls (lore+craft), got {installs}"
-        )
+        assert len(installs) == 2, f"expected 2 install calls (lore+craft), got {installs}"
 
     def test_install_references_tool_at_trailhead(self, tmp_path):
         """install call references <tool>@trailhead (NOT @trailhead-<tool>)."""
@@ -689,9 +674,7 @@ class TestMinimalLoreContent:
         lore_manifest = load_manifest(_LORE_MANIFEST)
         for name in skills:
             rel = lore_manifest.skills[name]
-            assert (lore_dest / rel).exists(), (
-                f"skill {name!r} missing from minimal lore dest"
-            )
+            assert (lore_dest / rel).exists(), f"skill {name!r} missing from minimal lore dest"
 
     def test_lore_minimal_lore_librarian_agent_present(self, tmp_path):
         """Minimal lore includes the librarian subagent → librarian.md in dest."""
@@ -784,9 +767,7 @@ class TestStagingCleanupOnBaseException:
         )
         staging_parent = _composed_root(tmp_path) / "plugins"
         leftover = list(staging_parent.glob("_lore_staging_*"))
-        assert leftover == [], (
-            f"staging dir not cleaned after successful wire: {leftover}"
-        )
+        assert leftover == [], f"staging dir not cleaned after successful wire: {leftover}"
 
 
 # ---------------------------------------------------------------------------
@@ -823,9 +804,7 @@ class TestWireErrorIsolation:
 
         err = exc_info.value
         assert err.tool == "craft", f"WireError.tool should be 'craft', got {err.tool!r}"
-        assert err.stage == "compose", (
-            f"WireError.stage should be 'compose', got {err.stage!r}"
-        )
+        assert err.stage == "compose", f"WireError.stage should be 'compose', got {err.stage!r}"
         assert isinstance(err.__cause__, RuntimeError)
 
     def test_already_wired_tool_stays_committed_after_later_failure(self, tmp_path):
@@ -886,9 +865,7 @@ class TestWireErrorIsolation:
         plugins_dir = _composed_root(tmp_path) / "plugins"
         if plugins_dir.exists():
             leftover = list(plugins_dir.glob("_craft_staging_*"))
-            assert leftover == [], (
-                f"orphaned craft staging dirs after WireError: {leftover}"
-            )
+            assert leftover == [], f"orphaned craft staging dirs after WireError: {leftover}"
 
     def test_failed_tool_absent_from_marketplace_but_earlier_tool_present(self, tmp_path):
         """On-disk-truth blast-radius (content-level): a tool whose compose raises is
@@ -1043,9 +1020,7 @@ class TestSplitMarkers:
             "rewire (uninstall) called on un-installed tool; "
             f"should have installed: {uninstall_calls}"
         )
-        assert len(install_calls) >= 1, (
-            f"install not called for un-installed tool: {calls}"
-        )
+        assert len(install_calls) >= 1, f"install not called for un-installed tool: {calls}"
 
     def test_second_wire_with_marker_calls_rewire(self, tmp_path):
         """Per-tool marker present → rewire_tool (uninstall + install) is called."""
@@ -1079,6 +1054,4 @@ class TestSplitMarkers:
         )
         # And it must NOT use plugin update (U-1(e)).
         update_calls = [c for c in calls if "update" in c]
-        assert update_calls == [], (
-            f"rewire must not use 'plugin update' (U-1(e)): {update_calls}"
-        )
+        assert update_calls == [], f"rewire must not use 'plugin update' (U-1(e)): {update_calls}"

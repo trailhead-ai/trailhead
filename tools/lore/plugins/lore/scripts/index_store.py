@@ -80,6 +80,7 @@ foreign_keys`` to OFF and does NOT persist it in the file, so ``open_index`` iss
 - I-6: ``delete_row`` removes the ``records`` row (CASCADE clears its facets) and the
   matching ``record_fts`` row; a missing key is a silent no-op (never raises).
 """
+
 from __future__ import annotations
 
 import json
@@ -90,6 +91,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Index path resolver
 # ---------------------------------------------------------------------------
+
 
 def _resolve_index_path(env: dict[str, str] | None = None) -> Path:
     """Return the canonical path for the SQLite index.
@@ -104,8 +106,10 @@ def _resolve_index_path(env: dict[str, str] | None = None) -> Path:
     """
     try:
         import _bootstrap
+
         _bootstrap.ensure_trailhead_importable()
         import trailhead.paths as _paths
+
         if env is not None:
             return _paths.state_dir("lore", env=env) / "index.sqlite"
         return _paths.state_dir("lore") / "index.sqlite"
@@ -181,6 +185,7 @@ _LIST_FACETS: tuple[tuple[str, str], ...] = (
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def open_index(env: dict[str, str] | None = None) -> sqlite3.Connection:
     """Open (creating on first use) the global lore index in WAL mode.
@@ -259,12 +264,22 @@ def _project_record(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            record_id, vault, kind, name, title, status,
-            sidecar.get("team"), sidecar.get("suite"),
-            sidecar.get("product"), sidecar.get("repo"),
-            sidecar.get("created-at"), sidecar.get("updated-at"),
+            record_id,
+            vault,
+            kind,
+            name,
+            title,
+            status,
+            sidecar.get("team"),
+            sidecar.get("suite"),
+            sidecar.get("product"),
+            sidecar.get("repo"),
+            sidecar.get("created-at"),
+            sidecar.get("updated-at"),
             sidecar.get("last-referenced-at"),
-            shared, src_mtime, src_size,
+            shared,
+            src_mtime,
+            src_size,
         ),
     )
     rowid = cur.lastrowid
@@ -338,8 +353,15 @@ def upsert_row(
     """
     body_bytes = body.encode("utf-8")
     _project_record(
-        conn, vault, kind, name, sidecar, body, shared,
-        src_mtime=0.0, src_size=len(body_bytes),
+        conn,
+        vault,
+        kind,
+        name,
+        sidecar,
+        body,
+        shared,
+        src_mtime=0.0,
+        src_size=len(body_bytes),
     )
 
 
@@ -406,7 +428,13 @@ def scan_vault(
                 sidecar = json.loads(json_path.read_text())
                 body = md_path.read_text()
                 upsert_row(
-                    conn, vault_root, kind, name, sidecar, body, shared=shared,
+                    conn,
+                    vault_root,
+                    kind,
+                    name,
+                    sidecar,
+                    body,
+                    shared=shared,
                 )
             except Exception:
                 continue
@@ -432,9 +460,7 @@ def remove_vault(vault_root: str, conn: sqlite3.Connection) -> int:
     Returns:
         The number of record rows removed. No matching rows → 0 (silent).
     """
-    keys = conn.execute(
-        "SELECT kind, name FROM records WHERE vault=?", (vault_root,)
-    ).fetchall()
+    keys = conn.execute("SELECT kind, name FROM records WHERE vault=?", (vault_root,)).fetchall()
     for kind, name in keys:
         delete_row(conn, vault_root, kind, name)
     return len(keys)
@@ -459,9 +485,7 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
     """Return the ``index_meta`` value for *key*, or ``None`` if unset (S4)."""
-    row = conn.execute(
-        "SELECT value FROM index_meta WHERE key=?", (key,)
-    ).fetchone()
+    row = conn.execute("SELECT value FROM index_meta WHERE key=?", (key,)).fetchone()
     return None if row is None else row[0]
 
 
@@ -550,8 +574,15 @@ def rebuild(
                     body = md_path.read_text()
                     stat = md_path.stat()
                     record_id = _project_record(
-                        conn, vault_str, kind, name, sidecar, body, shared,
-                        src_mtime=stat.st_mtime, src_size=stat.st_size,
+                        conn,
+                        vault_str,
+                        kind,
+                        name,
+                        sidecar,
+                        body,
+                        shared,
+                        src_mtime=stat.st_mtime,
+                        src_size=stat.st_size,
                     )
                 except Exception:
                     continue
@@ -564,9 +595,7 @@ def rebuild(
                         if not isinstance(names, list):
                             continue
                         for target_name in names:
-                            forward_related.append(
-                                (record_id, name, rel_kind, target_name)
-                            )
+                            forward_related.append((record_id, name, rel_kind, target_name))
                 count += 1
 
     # Pass 2 — reverse edges. For each forward ``related-<kind>`` edge whose target

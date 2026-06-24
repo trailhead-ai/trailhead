@@ -38,7 +38,10 @@ def run_cli(args, env=None, cwd=None):
         full_env.update(env)
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
-        capture_output=True, text=True, env=full_env, cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=full_env,
+        cwd=cwd,
     )
 
 
@@ -62,6 +65,7 @@ def _write_note(sessions_dir: Path, stem: str, worktree: str, session_id: str = 
 # ---------------------------------------------------------------------------
 # find_session_note_by_session_id
 # ---------------------------------------------------------------------------
+
 
 def test_by_session_id_matches_frontmatter(tmp_path):
     vault = tmp_path / "v"
@@ -175,6 +179,7 @@ def test_by_session_id_frontmatter_still_wins_over_body_only(tmp_path):
 # detect_worktree_name
 # ---------------------------------------------------------------------------
 
+
 def test_detect_prefers_claude_project_dir(monkeypatch, tmp_path):
     """CLAUDE_PROJECT_DIR basename wins — it is what named the note."""
     monkeypatch.setenv(
@@ -218,6 +223,7 @@ def test_detect_uses_git_toplevel_basename(monkeypatch, tmp_path):
 # resolve_session_note (combinator)
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_session_id_beats_newer_worktree_note(tmp_path):
     """The exact session-id match wins even when a NEWER note exists for the
     same worktree — this is the core bug being fixed."""
@@ -248,6 +254,7 @@ def test_resolve_falls_back_to_worktree_when_id_unmatched(tmp_path):
 # ---------------------------------------------------------------------------
 # `lore session-note` CLI
 # ---------------------------------------------------------------------------
+
 
 def test_cli_resolves_via_claude_code_session_id_env(tmp_path):
     vault = tmp_path / "v"
@@ -314,6 +321,7 @@ def test_cli_miss_exits_1_with_diagnostic(tmp_path):
 # ---------------------------------------------------------------------------
 # finish: --session-id and --worktree overrides
 # ---------------------------------------------------------------------------
+
 
 def _git_vault(tmp_path: Path) -> Path:
     """A vault that is its own git repo (so finish can commit)."""

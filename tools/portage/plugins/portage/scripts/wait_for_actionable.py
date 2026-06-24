@@ -13,6 +13,7 @@ Output JSON:
   {"actionable": {...}, "waiting": {...}}  -- or {"timeout": true, "elapsed_seconds": N}
 Exit 0 on actionable; exit 1 on timeout.
 """
+
 from __future__ import annotations
 
 import argparse

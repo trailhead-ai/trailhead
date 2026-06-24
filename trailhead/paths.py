@@ -105,9 +105,7 @@ def _home(env: dict[str, str], label: str) -> Path:
     return Path(home)
 
 
-def _per_app_override(
-    app: str, suffix: str, env: dict[str, str]
-) -> Path | None:
+def _per_app_override(app: str, suffix: str, env: dict[str, str]) -> Path | None:
     """Return the per-app override Path if set and valid, else None.
 
     suffix is one of "_CONFIG_DIR", "_STATE_DIR", "_CACHE_DIR".
@@ -165,9 +163,7 @@ def config_dir(
         return _macos_config(app, environ)
     if plat == "win32" or os.name == "nt":
         return _windows_config(app, environ)
-    raise PathResolutionError(
-        f"Unsupported platform {plat!r}. Cannot resolve config directory."
-    )
+    raise PathResolutionError(f"Unsupported platform {plat!r}. Cannot resolve config directory.")
 
 
 def state_dir(
@@ -209,9 +205,7 @@ def state_dir(
         return _macos_state(app, environ)
     if plat == "win32" or os.name == "nt":
         return _windows_state(app, environ)
-    raise PathResolutionError(
-        f"Unsupported platform {plat!r}. Cannot resolve state directory."
-    )
+    raise PathResolutionError(f"Unsupported platform {plat!r}. Cannot resolve state directory.")
 
 
 def cache_dir(
@@ -250,9 +244,7 @@ def cache_dir(
         return _macos_cache(app, environ)
     if plat == "win32" or os.name == "nt":
         return _windows_cache(app, environ)
-    raise PathResolutionError(
-        f"Unsupported platform {plat!r}. Cannot resolve cache directory."
-    )
+    raise PathResolutionError(f"Unsupported platform {plat!r}. Cannot resolve cache directory.")
 
 
 # ---------------------------------------------------------------------------
@@ -332,8 +324,7 @@ def _windows_config(app: str, env: dict[str, str]) -> Path:
     appdata = env.get("APPDATA")
     if not appdata:
         raise PathResolutionError(
-            "Cannot resolve config directory on Windows: "
-            "APPDATA environment variable is not set."
+            "Cannot resolve config directory on Windows: APPDATA environment variable is not set."
         )
     return Path(appdata) / app
 

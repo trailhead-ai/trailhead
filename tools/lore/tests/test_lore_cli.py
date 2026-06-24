@@ -22,7 +22,10 @@ def run_cli(args, env=None, input_text=None, cwd=None):
         full_env.update(env)
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
-        capture_output=True, text=True, env=full_env, input=input_text,
+        capture_output=True,
+        text=True,
+        env=full_env,
+        input=input_text,
         cwd=str(cwd) if cwd else None,
     )
 
@@ -47,6 +50,7 @@ def _run_init(tmp_path, extra_args=None, cwd=None):
 
 
 # ---- lore init: non-interactive idempotent installer (Slice 1, S5) ----------
+
 
 def test_init_exits_zero(tmp_path):
     """lore init with no args exits 0."""
@@ -81,6 +85,7 @@ def test_init_no_harvest_pending(tmp_path):
 
 # ---- lore patch is unregistered ---------------------------------------------
 
+
 def test_patch_subcommand_is_unregistered(tmp_path):
     """The orphaned `lore patch` subcommand was removed: invoking it is an
     argparse 'invalid choice' error (exit 2), never a successful patch. The
@@ -95,6 +100,7 @@ def test_patch_subcommand_is_unregistered(tmp_path):
 
 # ---- lore new is unregistered (Slice 4) -------------------------------------
 
+
 def test_new_subcommand_is_unregistered(tmp_path):
     """`lore new` (the template-renderer) was removed wholesale in Slice 4:
     invoking it is an argparse 'invalid choice' error (exit 2), never a
@@ -106,6 +112,7 @@ def test_new_subcommand_is_unregistered(tmp_path):
 
 # ---- lore set-status (removed — redirects via dispatch hint) ----------------
 
+
 def test_set_status_removed_and_hints_replacement(tmp_path):
     """`lore set-status` was removed in Slice 4 (lore-record-dedicated-field-flags).
     It must exit non-zero and stderr must carry the `_DISPATCH_HINTS` redirect
@@ -116,4 +123,3 @@ def test_set_status_removed_and_hints_replacement(tmp_path):
     assert r.returncode != 0
     assert "unknown command 'set-status'" in r.stderr
     assert "did you mean 'lore record update --status'?" in r.stderr
-

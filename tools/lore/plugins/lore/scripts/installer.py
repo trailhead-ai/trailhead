@@ -19,6 +19,7 @@ Provides three pure-ish functions used by ``cmd_init``:
 All filesystem operations use ``pathlib.Path``; no third-party deps (Axiom:
 pure stdlib only).
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -108,9 +109,7 @@ def git_init(path: Path) -> None:
         text=True,
     )
     if result.returncode != 0:
-        raise ValueError(
-            f"git init failed for vault at {path}: {result.stderr.strip()}"
-        )
+        raise ValueError(f"git init failed for vault at {path}: {result.stderr.strip()}")
 
 
 # ---------------------------------------------------------------------------

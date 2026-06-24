@@ -136,8 +136,7 @@ def explain_resolution(participating_scopes: dict, kind: str, config: list) -> R
         config_by_scope_name[(vault.scope, vault.name)] = vault
 
     normalized_participants: dict = {
-        scope: _vc.normalize_vault_name(name)
-        for scope, name in participating_scopes.items()
+        scope: _vc.normalize_vault_name(name) for scope, name in participating_scopes.items()
     }
 
     def _is_eligible(vault) -> bool:

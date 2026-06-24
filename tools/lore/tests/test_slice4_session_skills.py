@@ -10,6 +10,7 @@ The grep gate (zero forbidden tokens) and the extant-command check below are the
 mechanical acceptance criteria for the rewrite — a stale call would otherwise
 fail loudly only at use time (spec Observability stance).
 """
+
 from __future__ import annotations
 
 import re
@@ -38,15 +39,17 @@ FORBIDDEN = (
 
 # Every `lore <command>` invocation documented in the three skills must resolve
 # to one of these extant new-surface commands (sub-actions joined with a space).
-EXTANT_COMMANDS = frozenset({
-    "session candidate",
-    "session referenced",
-    "session-note",
-    "finish",
-    "search",
-    "sync",
-    "stats",
-})
+EXTANT_COMMANDS = frozenset(
+    {
+        "session candidate",
+        "session referenced",
+        "session-note",
+        "finish",
+        "search",
+        "sync",
+        "stats",
+    }
+)
 
 # Matches a documented CLI call: `lore <word>` optionally followed by a second
 # word (a sub-action like `session candidate`). Stops at the first flag/pipe.
@@ -128,8 +131,7 @@ def test_checkpoint_stays_active_not_terminal():
     )
     # It must not claim to finalize / stamp `ended:` — those belong to `finish`.
     assert "lore finish" not in _skill_text("checkpoint"), (
-        "checkpoint must NOT call `lore finish` — it is a mid-session sweep, "
-        "status stays `active`."
+        "checkpoint must NOT call `lore finish` — it is a mid-session sweep, status stays `active`."
     )
 
 

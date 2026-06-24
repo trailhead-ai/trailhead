@@ -17,6 +17,7 @@ Test contract (all with env={"HOME": str(tmp_path)} — never touch real ~/.clau
 - HarnessProfile.resolved_cwd returns the substituted cwd.
 - HarnessProfile.is_claude_launch true for claude, false for codex/other.
 """
+
 from __future__ import annotations
 
 import json
@@ -239,9 +240,7 @@ class TestUnexpectedStructure:
         original = claude_json.read_text()
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
-        pretrust_workspace(
-            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
-        )
+        pretrust_workspace(launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)})
         return claude_json, original
 
     def test_top_level_not_object_aborts_without_overwrite(self, tmp_path):
@@ -261,9 +260,7 @@ class TestUnexpectedStructure:
         key = str(launch_dir.resolve())
         claude_json.write_text(json.dumps({"projects": {key: "should-be-object"}}))
         original = claude_json.read_text()
-        pretrust_workspace(
-            launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)}
-        )
+        pretrust_workspace(launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)})
         assert claude_json.read_text() == original
 
     def test_unexpected_structure_does_not_raise_and_warns(self, tmp_path, capsys):
@@ -320,11 +317,7 @@ class TestUnreadableFile:
         err = capsys.readouterr().err
         assert err.startswith("camp:")
         # Should mention permission/read/unreadable — distinguishable from malformed
-        assert (
-            "permission" in err.lower()
-            or "unreadable" in err.lower()
-            or "read" in err.lower()
-        )
+        assert "permission" in err.lower() or "unreadable" in err.lower() or "read" in err.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -399,9 +392,7 @@ class TestConfinement:
         err = capsys.readouterr().err
         assert err.startswith("camp:")
 
-    def test_stderr_confinement_message_distinguishable_from_read_error(
-        self, tmp_path, capsys
-    ):
+    def test_stderr_confinement_message_distinguishable_from_read_error(self, tmp_path, capsys):
         """Stderr for out-of-confinement must be distinguishable from read errors."""
         from claude_trust import pretrust_workspace
 
@@ -513,8 +504,12 @@ class TestIsClaudeLaunch:
         from harness_launch import HarnessProfile
 
         p = HarnessProfile(
-            new=[], resume=[], cwd="{workspace}", doc_files=["CLAUDE.md"],
-            inject="stdout", pretrust=True,
+            new=[],
+            resume=[],
+            cwd="{workspace}",
+            doc_files=["CLAUDE.md"],
+            inject="stdout",
+            pretrust=True,
         )
         assert p.is_claude_launch() is False
 

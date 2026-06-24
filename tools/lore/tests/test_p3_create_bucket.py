@@ -13,6 +13,7 @@ behavior no longer exists to assert.
 
 All fixtures are SYNTHETIC (invented widget/alpha/gadget vocabulary).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,6 +32,7 @@ def _make_vault(tmp_path: Path) -> Path:
 # vault.bucket_dir helper
 # ---------------------------------------------------------------------------
 
+
 class TestBucketDir:
     def test_appends_year_month(self):
         vault_mod = load_script("vault")
@@ -46,6 +48,7 @@ class TestBucketDir:
 # ---------------------------------------------------------------------------
 # sessions.ensure_session_note creation
 # ---------------------------------------------------------------------------
+
 
 class TestEnsureSessionNoteCreation:
     def _ensure(self, sessions, vault, *, worktree="alpha", now_iso="2026-06-15T09:30:00Z"):
@@ -89,6 +92,7 @@ class TestEnsureSessionNoteCreation:
 # Month rollover (injected now_iso, not wall clock)
 # ---------------------------------------------------------------------------
 
+
 class TestMonthRollover:
     def _ensure(self, sessions, vault, *, worktree, now_iso):
         return sessions.ensure_session_note(
@@ -116,6 +120,7 @@ class TestMonthRollover:
 # ---------------------------------------------------------------------------
 # Bucket dir creation is race-safe
 # ---------------------------------------------------------------------------
+
 
 class TestBucketDirRaceSafe:
     def test_double_create_does_not_crash(self, tmp_path):

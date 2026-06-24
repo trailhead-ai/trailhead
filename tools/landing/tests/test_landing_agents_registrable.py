@@ -9,6 +9,7 @@ Unique basename (test_landing_agents_registrable.py, not test_agents_registrable
 so it does not collide with craft's/lore's/portage's same-named test under a shared
 pytest run.
 """
+
 from pathlib import Path
 
 import pytest

@@ -19,6 +19,7 @@ The content is two parts:
 ``RULESET_CONTENT`` is STATIC — no computed or per-session state — so two renders
 are byte-identical.  Whole-file equality is how ``lore status`` detects drift.
 """
+
 from __future__ import annotations
 
 _WRITE_PROHIBITION = """\

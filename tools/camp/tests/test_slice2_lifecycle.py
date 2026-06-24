@@ -41,6 +41,7 @@ Fixtures use synthetic git repos in tmp_path (real git init + commit so
 git worktree add actually works) plus fake-git assertions for the branch-base
 invocation shape. The resolver's env= injection is used for all state paths.
 """
+
 from __future__ import annotations
 
 import json
@@ -69,16 +70,22 @@ def _init_git_repo(path: Path) -> None:
     """Initialize a real git repo at path with an initial commit."""
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
+    )
     readme = path / "README.md"
     readme.write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _make_group_config(
@@ -177,7 +184,9 @@ class TestReconcileWorktreeCreates:
         # Verify branch name
         branch_a = subprocess.run(
             ["git", "-C", str(wt_a), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
         assert branch_a == f"worktree-{slug}"
 
@@ -299,9 +308,9 @@ class TestPartialCreationAtomicity:
         wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
         wt_a.mkdir(parents=True, exist_ok=True)
         subprocess.run(
-            ["git", "-C", str(g["repo_a"]), "worktree", "add",
-             str(wt_a), "-b", f"worktree-{slug}"],
-            check=True, capture_output=True,
+            ["git", "-C", str(g["repo_a"]), "worktree", "add", str(wt_a), "-b", f"worktree-{slug}"],
+            check=True,
+            capture_output=True,
         )
 
         # Verify no manifest yet
@@ -333,6 +342,7 @@ class TestPartialCreationAtomicity:
             return original_add(member, wt_path, branch, repo_root)
 
         from reconcile import _add_worktree_for_member as _orig
+
         original_add = _orig
 
         with patch("reconcile._add_worktree_for_member", side_effect=failing_add_for_member_b):
@@ -467,8 +477,12 @@ class TestBranchBasePolicy:
         member = {"name": "repo_a", "repo_root": str(tmp_path / "repo_a")}
         wt_path = tmp_path / "ws" / "feat" / "repo_a"
         _add_worktree_for_member(
-            member, wt_path, "worktree-feat", Path(member["repo_root"]),
-            base="origin/main", slug="feat",
+            member,
+            wt_path,
+            "worktree-feat",
+            Path(member["repo_root"]),
+            base="origin/main",
+            slug="feat",
         )
 
         adds = fake.worktree_add_calls()
@@ -490,8 +504,12 @@ class TestBranchBasePolicy:
         member = {"name": "repo_a", "repo_root": str(tmp_path / "repo_a")}
         wt_path = tmp_path / "ws" / "feat" / "repo_a"
         _add_worktree_for_member(
-            member, wt_path, "worktree-feat", Path(member["repo_root"]),
-            base="origin/trunk", slug="feat",
+            member,
+            wt_path,
+            "worktree-feat",
+            Path(member["repo_root"]),
+            base="origin/trunk",
+            slug="feat",
         )
 
         argv = fake.worktree_add_calls()[0]
@@ -540,7 +558,9 @@ def _admin_name(wt: Path) -> str:
     """
     git_dir = subprocess.run(
         ["git", "-C", str(wt), "rev-parse", "--git-dir"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     return Path(git_dir).name
 
@@ -591,8 +611,12 @@ class TestWorktreeAdminName:
         wt_path = tmp_path / "ws" / slug / "trailhead"
 
         _add_worktree_for_member(
-            member, wt_path, f"worktree-{slug}", repo,
-            base="origin/main", slug=slug,
+            member,
+            wt_path,
+            f"worktree-{slug}",
+            repo,
+            base="origin/main",
+            slug=slug,
         )
 
         assert wt_path.is_dir()
@@ -616,13 +640,19 @@ class TestWorktreeAdminName:
         branch = f"worktree-{slug}"
         subprocess.run(
             ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(stage), "HEAD"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         assert stage.is_dir()
 
         # Recovery must move (not re-add, which would fail "already registered").
         _add_worktree_for_member(
-            member, wt_path, branch, repo, base="origin/main", slug=slug,
+            member,
+            wt_path,
+            branch,
+            repo,
+            base="origin/main",
+            slug=slug,
         )
 
         assert wt_path.is_dir(), "recovery did not produce the final worktree"
@@ -646,7 +676,12 @@ class TestWorktreeAdminName:
         (stage / "leftover.txt").write_text("stale\n")
 
         _add_worktree_for_member(
-            member, wt_path, f"worktree-{slug}", repo, base="origin/main", slug=slug,
+            member,
+            wt_path,
+            f"worktree-{slug}",
+            repo,
+            base="origin/main",
+            slug=slug,
         )
 
         assert wt_path.is_dir(), "add should succeed despite the orphaned stage dir"
@@ -665,8 +700,12 @@ class TestWorktreeAdminName:
 
         with pytest.raises(ReconcileError):
             _add_worktree_for_member(
-                member, wt_path, "worktree-feat", repo,
-                base="origin/main", slug="../escape",
+                member,
+                wt_path,
+                "worktree-feat",
+                repo,
+                base="origin/main",
+                slug="../escape",
             )
 
 
@@ -708,13 +747,10 @@ class TestBreakRemovalConfinement:
 
         err_msg = str(exc_info.value).lower()
         assert any(
-            tok in err_msg
-            for tok in ("confinement", "outside", "not relative", "workspace")
+            tok in err_msg for tok in ("confinement", "outside", "not relative", "workspace")
         ), f"confinement error message unclear: {exc_info.value}"
 
-    def test_break_rejects_symlink_escaping_workspace_dir(
-        self, two_member_group, tmp_path
-    ):
+    def test_break_rejects_symlink_escaping_workspace_dir(self, two_member_group, tmp_path):
         """A worktree_path that is a symlink escaping the workspace dir → rejected.
 
         The target lexically sits inside the workspace dir but resolves outside
@@ -750,8 +786,7 @@ class TestBreakRemovalConfinement:
 
         err_msg = str(exc_info.value).lower()
         assert any(
-            tok in err_msg
-            for tok in ("confinement", "outside", "not relative", "workspace")
+            tok in err_msg for tok in ("confinement", "outside", "not relative", "workspace")
         ), f"symlink-escape error message unclear: {exc_info.value}"
 
         # The escape target must NOT have been removed.
@@ -800,9 +835,7 @@ class TestBreakRemovalConfinement:
 
 
 class TestBreakAtomicitySymmetry:
-    def test_mid_break_failure_manifest_not_left_listing_removed_member(
-        self, two_member_group
-    ):
+    def test_mid_break_failure_manifest_not_left_listing_removed_member(self, two_member_group):
         """A mid-break failure must not strand a manifest listing an already-removed member.
 
         reconcile_break returns ok_with_errors (no raise) on partial failure,
@@ -826,7 +859,8 @@ class TestBreakAtomicitySymmetry:
                 # First member (repo_a): remove for real
                 subprocess.run(
                     ["git", "-C", str(repo_root), "worktree", "remove", str(wt_path)],
-                    check=True, capture_output=True,
+                    check=True,
+                    capture_output=True,
                 )
                 return
             # Second member (repo_b): simulate failure
@@ -849,7 +883,8 @@ class TestBreakAtomicitySymmetry:
             data = read_central_manifest(manifest_path)
             # repo_a's worktree is gone — manifest must not list it
             removed_but_listed = [
-                m["name"] for m in data["members"]
+                m["name"]
+                for m in data["members"]
                 if m["name"] == "repo_a" and not Path(m["worktree_path"]).exists()
             ]
             assert not removed_but_listed, (
@@ -924,9 +959,8 @@ class TestMalformedManifest:
             read_central_manifest(manifest_path)
 
         # Must be a named error, not a raw json decode traceback
-        assert (
-            "manifest" in str(exc_info.value).lower()
-            or str(manifest_path) in str(exc_info.value)
+        assert "manifest" in str(exc_info.value).lower() or str(manifest_path) in str(
+            exc_info.value
         )
 
     def test_malformed_manifest_status_gives_legible_error(self, two_member_group):
@@ -945,6 +979,7 @@ class TestMalformedManifest:
 
         # Status via the group-aware path must give ManifestError, not raw JSONDecodeError
         from manifest import read_central_manifest
+
         with pytest.raises(ManifestError):
             read_central_manifest(manifest_path)
 
@@ -1009,7 +1044,6 @@ class TestSuccessSummary:
         assert result.get("member_count") == 2
         assert "manifest_path" in result
         assert "members" in result
-
 
 
 # ---------------------------------------------------------------------------
@@ -1125,8 +1159,7 @@ class TestCmdBreak:
             reconcile_break(g["group"], slug, env=g["env"], force=False)
 
         assert (
-            "dirty" in str(exc_info.value).lower()
-            or "uncommitted" in str(exc_info.value).lower()
+            "dirty" in str(exc_info.value).lower() or "uncommitted" in str(exc_info.value).lower()
         )
 
     def test_break_dirty_worktree_succeeds_with_force(self, two_member_group):
@@ -1181,10 +1214,16 @@ class TestManifestAPI:
             "slug": "feat-x",
             "branch": "worktree-feat-x",
             "members": [
-                {"name": "repo_a", "repo_root": "/tmp/a",
-                 "worktree_path": "/tmp/a/.claude/worktrees/feat-x"},
-                {"name": "repo_b", "repo_root": "/tmp/b",
-                 "worktree_path": "/tmp/b/.claude/worktrees/feat-x"},
+                {
+                    "name": "repo_a",
+                    "repo_root": "/tmp/a",
+                    "worktree_path": "/tmp/a/.claude/worktrees/feat-x",
+                },
+                {
+                    "name": "repo_b",
+                    "repo_root": "/tmp/b",
+                    "worktree_path": "/tmp/b/.claude/worktrees/feat-x",
+                },
             ],
         }
 

@@ -9,6 +9,7 @@ Both new agents read vault content that can include shared-layer notes, so each
 MUST carry the same `<external-memory>` injection-defense guard `librarian.md`
 carries. The guard is part of the fork, not a post-ship tuning item.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -28,9 +29,7 @@ _LIBRARIAN_PIN = FIXTURES_DIR / "librarian_pre_slice3.md"
 
 def _frontmatter(agent_md: Path) -> str:
     text = agent_md.read_text()
-    assert text.startswith("---\n"), (
-        f"{agent_md.name} must open with a `---` frontmatter block"
-    )
+    assert text.startswith("---\n"), f"{agent_md.name} must open with a `---` frontmatter block"
     end = text.find("\n---", 3)
     assert end > 0, f"{agent_md.name} frontmatter block is not closed"
     return text[3:end]
@@ -46,6 +45,7 @@ def _field(frontmatter: str, field: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Presence + frontmatter profile (KU2)
 # ---------------------------------------------------------------------------
+
 
 def test_investigator_agent_present_with_profile():
     """investigator exists with valid frontmatter; inherits craft researcher's
@@ -71,9 +71,7 @@ def test_researcher_agent_present_with_profile():
     agent = AGENTS_DIR / "researcher.md"
     assert agent.exists(), f"{agent} must exist (Slice 3)"
     fm = _frontmatter(agent)
-    assert _field(fm, "name") == "researcher", (
-        "researcher frontmatter name: must be 'researcher'"
-    )
+    assert _field(fm, "name") == "researcher", "researcher frontmatter name: must be 'researcher'"
     assert _field(fm, "model") == "haiku", (
         "researcher must inherit craft doc-finder's model: haiku (KU2)"
     )
@@ -96,6 +94,7 @@ def test_researcher_documents_tracking_backlog_polling():
 # ---------------------------------------------------------------------------
 # Injection-defense guard (council Important — Security)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("agent_name", ["investigator", "researcher"])
 def test_new_agent_carries_injection_defense_guard(agent_name: str):
@@ -120,14 +119,13 @@ def test_new_agent_carries_injection_defense_guard(agent_name: str):
 # librarian byte-pin (council Important — non-tautological baseline)
 # ---------------------------------------------------------------------------
 
+
 def test_librarian_unchanged_against_pinned_snapshot():
     """librarian.md must be byte-for-byte identical to the pinned pre-Slice-3
     fixture. Slice 3 establishes the roster but must NOT touch librarian — the
     comparison is against a captured snapshot, not the live file itself, so it
     cannot pass tautologically."""
-    assert _LIBRARIAN_PIN.exists(), (
-        f"pinned librarian fixture {_LIBRARIAN_PIN} must exist"
-    )
+    assert _LIBRARIAN_PIN.exists(), f"pinned librarian fixture {_LIBRARIAN_PIN} must exist"
     live = (AGENTS_DIR / "librarian.md").read_bytes()
     pinned = _LIBRARIAN_PIN.read_bytes()
     live_sha = hashlib.sha256(live).hexdigest()

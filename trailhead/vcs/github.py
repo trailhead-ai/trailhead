@@ -18,6 +18,7 @@ Safety invariants preserved: R-6 merge gate, shell=False, option-injection
 guards (pr_number digits-only, branch leading-dash / push ``--`` terminator),
 no hardcoded review-bot login (a passed param).
 """
+
 from __future__ import annotations
 
 import json
@@ -196,15 +197,12 @@ def _gh_or_raise(args: list[str], cwd: str, runner: rp.Runner) -> Any:
     if r.returncode != 0:
         stderr = (r.stderr or "").strip()
         raise DeployError(
-            f"gh {' '.join(args[:2])} failed (returncode {r.returncode}): "
-            f"{stderr or '<no stderr>'}"
+            f"gh {' '.join(args[:2])} failed (returncode {r.returncode}): {stderr or '<no stderr>'}"
         )
     try:
         return json.loads(r.stdout)
     except json.JSONDecodeError as e:
-        raise DeployError(
-            f"gh {' '.join(args[:2])} returned non-JSON / empty stdout: {e}"
-        ) from e
+        raise DeployError(f"gh {' '.join(args[:2])} returned non-JSON / empty stdout: {e}") from e
 
 
 def _get_owner_repo(cwd: str, runner: rp.Runner) -> str | None:
@@ -229,9 +227,13 @@ def _fetch_annotations(
         return []
     job_id = m.group(2)
     raw = _gh(
-        ["api", f"repos/{owner_repo}/check-runs/{job_id}/annotations",
-         "--paginate", "-q",
-         '[.[] | select(.annotation_level=="failure") | {path, start_line, message: .message}]'],
+        [
+            "api",
+            f"repos/{owner_repo}/check-runs/{job_id}/annotations",
+            "--paginate",
+            "-q",
+            '[.[] | select(.annotation_level=="failure") | {path, start_line, message: .message}]',
+        ],
         cwd=cwd,
         runner=runner,
     )
@@ -252,27 +254,27 @@ def _check_status(
     runner: rp.Runner,
 ) -> dict[str, Any]:
     pr = _gh(
-        ["pr", "view", pr_number, "--json",
-         "mergeable,mergeStateStatus,isDraft,reviews"],
+        ["pr", "view", pr_number, "--json", "mergeable,mergeStateStatus,isDraft,reviews"],
         cwd=repo_path,
         runner=runner,
     )
     if not pr:
-        raise RuntimeError(
-            f"check_pr_status: could not fetch PR #{pr_number} in {repo_path}"
-        )
+        raise RuntimeError(f"check_pr_status: could not fetch PR #{pr_number} in {repo_path}")
 
-    checks_raw = _gh(
-        ["pr", "checks", pr_number, "--json", "name,state,link"],
-        cwd=repo_path,
-        runner=runner,
-    ) or []
+    checks_raw = (
+        _gh(
+            ["pr", "checks", pr_number, "--json", "name,state,link"],
+            cwd=repo_path,
+            runner=runner,
+        )
+        or []
+    )
 
     failing = [
-        c for c in checks_raw
-        if c.get("state") not in (
-            "SUCCESS", "SKIPPED", "NEUTRAL", "PENDING", "IN_PROGRESS", "QUEUED"
-        )
+        c
+        for c in checks_raw
+        if c.get("state")
+        not in ("SUCCESS", "SKIPPED", "NEUTRAL", "PENDING", "IN_PROGRESS", "QUEUED")
     ]
 
     owner_repo = _get_owner_repo(repo_path, runner)
@@ -289,7 +291,8 @@ def _check_status(
     if review_bot_login:
         all_reviews = pr.get("reviews", [])
         bot_reviews = [
-            r for r in all_reviews
+            r
+            for r in all_reviews
             if r.get("author", {}).get("login") == review_bot_login
             and (not since or r.get("submittedAt", "") > since)
         ]
@@ -426,9 +429,7 @@ def _load_merge_order(toml_path: str | None) -> list[str] | None:
 
 def _validate_pr_number(pr_number: str) -> None:
     if not re.fullmatch(r"\d+", pr_number):
-        raise InvalidInputError(
-            f"merge_prs: pr_number must be all digits, got: {pr_number!r}"
-        )
+        raise InvalidInputError(f"merge_prs: pr_number must be all digits, got: {pr_number!r}")
 
 
 def _resolve_author_email(runner: rp.Runner) -> str:
@@ -444,8 +445,14 @@ def _resolve_author_email(runner: rp.Runner) -> str:
 
 def _get_pr_state(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | None:
     r = rp.run(
-        ["gh", "pr", "view", pr_number, "--json",
-         "mergeable,mergeStateStatus,isDraft,state,headRefName"],
+        [
+            "gh",
+            "pr",
+            "view",
+            pr_number,
+            "--json",
+            "mergeable,mergeStateStatus,isDraft,state,headRefName",
+        ],
         cwd=repo_path,
         runner=runner,
     )
@@ -727,10 +734,15 @@ class _GitHubCI(CISurface):
                 key = f"{repo}:{pr}"
                 try:
                     status = self._pr.status(
-                        repo, pr, since=since, review_bot_login=review_bot_login,
+                        repo,
+                        pr,
+                        since=since,
+                        review_bot_login=review_bot_login,
                     )
                     result = self._pr.evaluate(
-                        status, review_bot_login=review_bot_login, fail_count=0,
+                        status,
+                        review_bot_login=review_bot_login,
+                        fail_count=0,
                     )
                 except Exception as e:
                     result = {"action": "error", "reason": str(e)}
@@ -765,9 +777,7 @@ _WORKFLOW_RUN_FIELDS = (
 def _resolve_owner_repo(cwd: str, runner: rp.Runner) -> str:
     owner_repo = _get_owner_repo(cwd, runner)
     if not owner_repo:
-        raise DeployError(
-            f"could not resolve github owner/repo from origin remote in {cwd}"
-        )
+        raise DeployError(f"could not resolve github owner/repo from origin remote in {cwd}")
     return owner_repo
 
 
@@ -866,8 +876,10 @@ class _GitHubDeploy(DeploySurface):
         """
         owner_repo = _resolve_owner_repo(repo_path, self._runner)
         args = [
-            "api", f"repos/{owner_repo}/check-runs/{job_id}/annotations",
-            "--paginate", "-q",
+            "api",
+            f"repos/{owner_repo}/check-runs/{job_id}/annotations",
+            "--paginate",
+            "-q",
             '[.[] | select(.annotation_level=="failure") | {path, start_line, message: .message}]',
         ]
         r = rp.run(["gh"] + args, cwd=repo_path, runner=self._runner)

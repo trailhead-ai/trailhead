@@ -13,6 +13,7 @@ Slice 1 adds:
   - _discover_shared_vaults() — lazy guarded import of camp's resolver (B-1)
   - resolve_layers(cwd, groups_dir) — appends shared layers (A-4, C-3, C-4, D20)
 """
+
 import dataclasses
 import os
 import sys
@@ -74,13 +75,7 @@ def validate_layer_name(name: str) -> None:
     """
     if not name:
         raise LayerConfinementError("lore: layer name must not be empty")
-    if (
-        "/" in name
-        or "\\" in name
-        or ".." in name
-        or os.sep in name
-        or "\x00" in name
-    ):
+    if "/" in name or "\\" in name or ".." in name or os.sep in name or "\x00" in name:
         raise LayerConfinementError(
             f"lore: layer name {name!r} must not contain path separators, "
             "backslashes, '..', or null bytes (confinement)"
@@ -183,6 +178,7 @@ def _discover_shared_vaults(groups_dir: Path, cwd: Path) -> list[dict]:
     # personal-only — silently dropping every shared layer (B-1/D20).
     try:
         from _bootstrap import ensure_trailhead_importable
+
         ensure_trailhead_importable()
     except (ImportError, SystemExit):
         return []  # trailhead unavailable → personal-only (B-1/D20)
@@ -275,8 +271,10 @@ def resolve_layers(
     if groups_dir is None:
         try:
             from _bootstrap import ensure_trailhead_importable
+
             ensure_trailhead_importable()
             import trailhead.paths as _paths
+
             groups_dir = _paths.config_dir("camp") / "groups"
         except (ImportError, SystemExit):
             return layers  # trailhead unavailable → personal-only

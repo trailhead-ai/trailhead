@@ -12,6 +12,7 @@ Contract assertions (Slice 2 / A-3 / A-4 / A-5 / D-7 / S-3):
 
 Hermeticity: tmp_path-based ephemeral denylist; no real ~/.claude/ dependency.
 """
+
 from __future__ import annotations
 
 import re
@@ -65,6 +66,7 @@ def _write_ephemeral_denylist(p: Path) -> Path:
 # Fixture: artist.md text (skip all if absent — TDD RED phase)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def artist_text() -> str:
     if not ARTIST_MD.exists():
@@ -75,6 +77,7 @@ def artist_text() -> str:
 # ---------------------------------------------------------------------------
 # D-7 / S-3: leak gate — no zenith tokens in artist.md
 # ---------------------------------------------------------------------------
+
 
 def test_leak_gate_artist_md_is_clean(tmp_path: Path):
     """artist.md must have no Step-6 zenith tokens (D-7/S-3)."""
@@ -89,9 +92,7 @@ def test_leak_gate_artist_md_is_clean(tmp_path: Path):
     )
     # Filter to only artist.md hits
     hits = [line for line in result.stdout.splitlines() if "artist" in line]
-    assert not hits, (
-        "artist.md contains forbidden Step-6 zenith tokens:\n" + "\n".join(hits)
-    )
+    assert not hits, "artist.md contains forbidden Step-6 zenith tokens:\n" + "\n".join(hits)
 
 
 def test_leak_gate_slice1_surface_still_clean(tmp_path: Path):
@@ -110,8 +111,8 @@ def test_leak_gate_slice1_surface_still_clean(tmp_path: Path):
         text=True,
     )
     hits = [line for line in result.stdout.splitlines() if "combine_design" in line]
-    assert not hits, (
-        "combine_design.py contains forbidden Step-6 zenith tokens:\n" + "\n".join(hits)
+    assert not hits, "combine_design.py contains forbidden Step-6 zenith tokens:\n" + "\n".join(
+        hits
     )
 
 
@@ -120,6 +121,7 @@ def test_leak_gate_slice1_surface_still_clean(tmp_path: Path):
 # (these mirror test_agents_registrable.py patterns for the named agent)
 # ---------------------------------------------------------------------------
 
+
 def test_artist_frontmatter_name_is_artist(artist_text: str):
     """artist.md frontmatter must carry name: artist (the renamed slot from Step 5)."""
     assert artist_text.startswith("---\n"), "artist.md must open with a YAML frontmatter block"
@@ -127,7 +129,8 @@ def test_artist_frontmatter_name_is_artist(artist_text: str):
     assert end > 0, "artist.md frontmatter block must be closed"
     frontmatter = artist_text[3:end]
     name_lines = [
-        ln for ln in frontmatter.splitlines()
+        ln
+        for ln in frontmatter.splitlines()
         if ln.strip().startswith("name:") and ln.split(":", 1)[1].strip()
     ]
     assert name_lines, "artist.md frontmatter must carry a non-empty name:"
@@ -142,7 +145,8 @@ def test_artist_frontmatter_has_description(artist_text: str):
     end = artist_text.find("\n---", 3)
     frontmatter = artist_text[3:end]
     desc_lines = [
-        ln for ln in frontmatter.splitlines()
+        ln
+        for ln in frontmatter.splitlines()
         if ln.strip().startswith("description:") and ln.split(":", 1)[1].strip()
     ]
     assert desc_lines, "artist.md frontmatter must carry a non-empty description:"
@@ -151,6 +155,7 @@ def test_artist_frontmatter_has_description(artist_text: str):
 # ---------------------------------------------------------------------------
 # Inventory: artist is a discoverable subagent (capability groups were removed)
 # ---------------------------------------------------------------------------
+
 
 def test_artist_is_a_selectable_subagent():
     """artist.md is discovered as a selectable subagent by convention."""
@@ -180,6 +185,7 @@ def test_capabilities_toml_has_no_capability_groups():
 #   (b) "new, no counterpart" greenfield note path
 # so a greenfield user has a stated unblock path.
 # ---------------------------------------------------------------------------
+
 
 def test_blocked_message_names_file_line_escape(artist_text: str):
     """artist.md block rule must name the file:line citation escape hatch (A-3)."""
@@ -212,7 +218,7 @@ def test_blocked_message_names_both_escapes_in_block_rule(artist_text: str):
         idx = artist_text.find("BLOCKED:", search_start)
         if idx == -1:
             break
-        window = artist_text[idx: idx + 400]
+        window = artist_text[idx : idx + 400]
         if "no anchor" in window or "component-mapping row" in window:
             citation_blocked_idx = idx
             break
@@ -224,7 +230,7 @@ def test_blocked_message_names_both_escapes_in_block_rule(artist_text: str):
     )
 
     # The citation block itself must name both escapes
-    block_window = artist_text[citation_blocked_idx: citation_blocked_idx + 400]
+    block_window = artist_text[citation_blocked_idx : citation_blocked_idx + 400]
     assert "file:line" in block_window, (
         "The citation-block BLOCKED message must name 'file:line' as an escape hatch (A-3)"
     )
@@ -239,6 +245,7 @@ def test_blocked_message_names_both_escapes_in_block_rule(artist_text: str):
 # The artist must state that full guided aspirational-chrome setup is NOT
 # absorbed in Step 6 / this agent.
 # ---------------------------------------------------------------------------
+
 
 def test_greenfield_aspirational_chrome_out_of_scope_note(artist_text: str):
     """artist.md must state an explicit out-of-scope note for aspirational-chrome setup (A-4)."""
@@ -258,6 +265,7 @@ def test_greenfield_aspirational_chrome_out_of_scope_note(artist_text: str):
 # ---------------------------------------------------------------------------
 # A-5: both create AND update modes survive in artist.md
 # ---------------------------------------------------------------------------
+
 
 def test_artist_carries_create_mode(artist_text: str):
     """artist.md must describe a create mode (A-5)."""
@@ -283,9 +291,11 @@ def test_artist_carries_update_mode(artist_text: str):
 def test_both_modes_structurally_present(artist_text: str):
     """artist.md must contain both create and update mode sections (A-5)."""
     create_match = re.search(
-        r"#+\s+.*\bcreate\b.*mode|mode.*\bcreate\b", artist_text, re.IGNORECASE)
+        r"#+\s+.*\bcreate\b.*mode|mode.*\bcreate\b", artist_text, re.IGNORECASE
+    )
     update_match = re.search(
-        r"#+\s+.*\bupdate\b.*mode|mode.*\bupdate\b", artist_text, re.IGNORECASE)
+        r"#+\s+.*\bupdate\b.*mode|mode.*\bupdate\b", artist_text, re.IGNORECASE
+    )
     assert create_match is not None, (
         "artist.md must have a section heading for the create mode (A-5)"
     )
@@ -297,6 +307,7 @@ def test_both_modes_structurally_present(artist_text: str):
 # ---------------------------------------------------------------------------
 # Prose contract: generic (no hardcoded surfaces, no baked-in aesthetic)
 # ---------------------------------------------------------------------------
+
 
 def test_artist_resolves_roots_from_input_env(artist_text: str):
     (
@@ -390,6 +401,4 @@ def test_artist_report_under_12_lines(artist_text: str):
     """artist.md must describe a report structure of ~12 lines or fewer."""
     assert (
         "12" in artist_text or "twelve" in artist_text.lower() or "under" in artist_text.lower()
-    ), (
-        "artist.md must specify the report structure is under ~12 lines"
-    )
+    ), "artist.md must specify the report structure is under ~12 lines"

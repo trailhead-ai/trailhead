@@ -95,16 +95,13 @@ class TestRootMarketplaceShape:
         data = json.loads(_ROOT_MARKETPLACE.read_text())
         plugins = data.get("plugins", [])
         assert len(plugins) == 5, (
-            f"Expected 5 plugin entries, got {len(plugins)}: "
-            f"{[p.get('name') for p in plugins]}"
+            f"Expected 5 plugin entries, got {len(plugins)}: {[p.get('name') for p in plugins]}"
         )
 
     def test_root_marketplace_plugin_names(self):
         data = json.loads(_ROOT_MARKETPLACE.read_text())
         names = {p.get("name") for p in data.get("plugins", [])}
-        assert names == set(_TOOLS), (
-            f"Expected plugin names {set(_TOOLS)}, got {names}"
-        )
+        assert names == set(_TOOLS), f"Expected plugin names {set(_TOOLS)}, got {names}"
 
     def test_every_source_starts_with_tools(self):
         data = json.loads(_ROOT_MARKETPLACE.read_text())
@@ -160,6 +157,7 @@ class TestRepoWideGrepGuard:
     def _grep_files(self, pattern: str, files: list[Path]) -> list[tuple[Path, int, str]]:
         hits: list[tuple[Path, int, str]] = []
         import re
+
         rx = re.compile(pattern)
         for f in files:
             try:
@@ -189,9 +187,7 @@ class TestRepoWideGrepGuard:
         pattern = r"@trailhead-(?:lore|camp|craft|portage|landing)"
         hits = self._grep_files(pattern, files)
         if hits:
-            lines = [
-                f"Found {len(hits)} occurrence(s) of @trailhead-<tool> install refs:"
-            ]
+            lines = [f"Found {len(hits)} occurrence(s) of @trailhead-<tool> install refs:"]
             for f, ln, line in hits[:10]:
                 lines.append(f"  {f.relative_to(_REPO_ROOT)}:{ln}: {line}")
             pytest.fail("\n".join(lines))
@@ -202,10 +198,7 @@ class TestRepoWideGrepGuard:
         Note: test_renames_guard.py mentions 'craft-local' in historical rename
         comments — those are excluded via the trailhead/tests/ exclusion.
         """
-        files = [
-            f for f in _collect_grep_files()
-            if f.suffix in {".md", ".json"}
-        ]
+        files = [f for f in _collect_grep_files() if f.suffix in {".md", ".json"}]
         # Match <tool>-local as a marketplace name or @<tool>-local install ref
         pattern = r"(?:lore|camp|craft|portage|landing)-local"
         hits = self._grep_files(pattern, files)

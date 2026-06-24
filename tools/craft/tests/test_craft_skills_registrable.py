@@ -7,6 +7,7 @@ register (the same failure mode that bit lore's first capture skills).
 
 `skills/_shared/` is a reference doc, not a skill, and is exempt.
 """
+
 from pathlib import Path
 
 import pytest
@@ -76,9 +77,7 @@ def test_execute_dispatched_agents_resolve():
     `plugins/craft/agents/<name>.md`.
     """
     skill_md = SKILLS_DIR / "execute" / "SKILL.md"
-    assert skill_md.exists(), (
-        f"Expected execute/SKILL.md in {SKILLS_DIR}."
-    )
+    assert skill_md.exists(), f"Expected execute/SKILL.md in {SKILLS_DIR}."
     text = skill_md.read_text()
     for agent in _EXECUTE_DISPATCHED_AGENTS:
         assert agent in text, (

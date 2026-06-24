@@ -38,6 +38,7 @@ Identifying tokens (org name / bot name / infra vendor / developer handle /
 schema name) are NOT checked here — those are the leak gate's exclusive
 responsibility. Listing them here would trip the gate on this file itself.
 """
+
 from __future__ import annotations
 
 import re
@@ -73,11 +74,11 @@ STRUCTURAL_SEAMS: list[str] = [
 # ---------------------------------------------------------------------------
 
 MIDDLE_BAND_TOKENS: list[str] = [
-    "".join(["P", "e", "n", "n", "y"]),          # app character name
-    "".join(["M", "e", "t", "r", "o"]),           # transit system name
-    "".join(["d", "e", "v", "-", "e", "n", "v"]), # hyphenated env term
-    "".join(["m", "i", "x"]),                      # Elixir build tool
-    "".join(["n", "p", "m"]),                      # Node build tool
+    "".join(["P", "e", "n", "n", "y"]),  # app character name
+    "".join(["M", "e", "t", "r", "o"]),  # transit system name
+    "".join(["d", "e", "v", "-", "e", "n", "v"]),  # hyphenated env term
+    "".join(["m", "i", "x"]),  # Elixir build tool
+    "".join(["n", "p", "m"]),  # Node build tool
     # internal mobile repo slug
     "".join(["m", "o", "b", "i", "l", "e", "-", "o", "v", "e", "r", "v", "i", "e", "w"]),
 ]
@@ -239,8 +240,32 @@ _PLANNER_OBSERVABILITY_TOKENS: list[str] = [
     # soak evidence-pack script
     "".join(["e", "v", "i", "d", "e", "n", "c", "e", "_", "p", "a", "c", "k"]),
     # subsystem profile slug
-    "".join(["p", "l", "a", "t", "f", "o", "r", "m", "-", "h", "e", "a", "l", "t", "h",
-             "-", "c", "h", "e", "c", "k", "s"]),
+    "".join(
+        [
+            "p",
+            "l",
+            "a",
+            "t",
+            "f",
+            "o",
+            "r",
+            "m",
+            "-",
+            "h",
+            "e",
+            "a",
+            "l",
+            "t",
+            "h",
+            "-",
+            "c",
+            "h",
+            "e",
+            "c",
+            "k",
+            "s",
+        ]
+    ),
     "".join(["d", "a", "s", "h", "0"]),  # observability vendor
 ]
 
@@ -337,9 +362,7 @@ def test_council_agent_skip_notice_exactly_once(stem: str):
     adds token cost without adding information (Slice 3 dedup).
     """
     agent_md = AGENTS_DIR / f"{stem}.md"
-    assert agent_md.exists(), (
-        f"Expected council agent {stem}.md to exist in {AGENTS_DIR}."
-    )
+    assert agent_md.exists(), f"Expected council agent {stem}.md to exist in {AGENTS_DIR}."
     text = agent_md.read_text()
     count = text.count("synthesis pass was skipped")
     assert count == 1, (

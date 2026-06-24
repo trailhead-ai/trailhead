@@ -11,6 +11,7 @@ Test contract (Slice 6, camp ai portion):
   PID + timestamp; launcher NOT invoked.
 - stale lock (dead PID) → reclaimed, launch proceeds.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -50,14 +51,19 @@ def camp_cli():
 def _init_git_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "T"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@t.com"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "T"], check=True, capture_output=True
+    )
     (path / "README.md").write_text("# t\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
 
 
 @pytest.fixture()
@@ -66,8 +72,9 @@ def group_env(tmp_path):
     _init_git_repo(repo_a)
     group = {
         "group": {"name": "g"},
-        "members": [{"name": "repo_a", "repo_root": str(repo_a),
-                     "bootstrap": [], "base": "origin/main"}],
+        "members": [
+            {"name": "repo_a", "repo_root": str(repo_a), "bootstrap": [], "base": "origin/main"}
+        ],
         "branch_pattern": "worktree-{slug}",
     }
     # Isolate claude's session store so claude_session_exists is deterministic and
@@ -81,6 +88,7 @@ def group_env(tmp_path):
 
 def _workspace_dir(env, slug):
     from group_resolve import central_state_dir
+
     return central_state_dir("g", env=env) / "worktrees" / slug
 
 
@@ -98,6 +106,7 @@ def _seed_claude_session(env, slug, group_name="g"):
 def _stub_spawn(monkeypatch):
     """Never spawn a real detached provisioner in these tests."""
     import provision
+
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
 
@@ -108,9 +117,10 @@ class TestNewVsResume:
 
         calls = []
         monkeypatch.setattr(
-            harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
-                calls.append(is_resume)
+            harness_launch,
+            "launch",
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: calls.append(
+                is_resume
             ),
         )
 
@@ -132,9 +142,10 @@ class TestNewVsResume:
 
         calls = []
         monkeypatch.setattr(
-            harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
-                calls.append(is_resume)
+            harness_launch,
+            "launch",
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: calls.append(
+                is_resume
             ),
         )
         camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
@@ -153,9 +164,10 @@ class TestNewVsResume:
 
         calls = []
         monkeypatch.setattr(
-            harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
-                calls.append(is_resume)
+            harness_launch,
+            "launch",
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: calls.append(
+                is_resume
             ),
         )
         camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
@@ -179,16 +191,16 @@ class TestRefuseConcurrent:
         )
 
         launched = []
-        monkeypatch.setattr(harness_launch, "launch",
-                            lambda *a, **k: launched.append(True))
+        monkeypatch.setattr(harness_launch, "launch", lambda *a, **k: launched.append(True))
 
         with pytest.raises(SystemExit) as exc:
             camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         assert exc.value.code != 0
         assert launched == [], "launcher must NOT be invoked when refused"
 
-    def test_live_lock_refusal_names_workspace_pid_timestamp(self, camp_cli, group_env,
-                                                             monkeypatch, capsys):
+    def test_live_lock_refusal_names_workspace_pid_timestamp(
+        self, camp_cli, group_env, monkeypatch, capsys
+    ):
         import harness_launch
         import session_lock
 
@@ -218,21 +230,28 @@ class TestRefuseConcurrent:
         ws.mkdir(parents=True)
 
         # Dead PID from a reaped child.
-        child = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(0)"],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.exit(0)"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         dead = child.pid
         child.wait()
         if session_lock.is_pid_alive(dead):
             pytest.skip("PID recycled")
 
         session_lock.lock_path_for(ws).write_text(
-            json.dumps({"pid": dead, "started_at": datetime.now(timezone.utc).isoformat(),
-                        "workspace": str(ws)})
+            json.dumps(
+                {
+                    "pid": dead,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "workspace": str(ws),
+                }
+            )
         )
 
         launched = []
-        monkeypatch.setattr(harness_launch, "launch",
-                            lambda *a, **k: launched.append(True))
+        monkeypatch.setattr(harness_launch, "launch", lambda *a, **k: launched.append(True))
 
         camp_cli._cmd_ai_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         assert launched == [True], "stale lock should be reclaimed and launch proceed"
@@ -270,8 +289,9 @@ class TestBringUpInjectHook:
             f"Expected an inject --drain PostToolUse hook, got: {cmds}"
         )
 
-    def test_stdout_strategy_does_not_install_posttooluse_hook(self, camp_cli, group_env,
-                                                               monkeypatch):
+    def test_stdout_strategy_does_not_install_posttooluse_hook(
+        self, camp_cli, group_env, monkeypatch
+    ):
         import harness_launch
 
         monkeypatch.setattr(harness_launch, "launch", lambda *a, **k: None)

@@ -6,6 +6,7 @@ into the member's .claude/settings.json.
 
 Also surfaces the eager config-overlap validation (Slice 1) before writing.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

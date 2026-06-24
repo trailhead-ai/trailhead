@@ -42,6 +42,7 @@ Security (council/Security C2 — confinement):
   descendant of it (realpath comparison).  A crafted cwd = "/etc" in the group
   config is silently refused — same posture as compose.py's dual-end confinement.
 """
+
 from __future__ import annotations
 
 import json
@@ -174,9 +175,7 @@ def pretrust_workspace(
     # 0o600 by construction and we never widen it. This is deliberate: ~/.claude.json
     # holds OAuth secrets, so we always enforce owner-only perms rather than
     # preserving a (possibly looser) pre-existing mode (council/Security).
-    fd, tmp_path_str = tempfile.mkstemp(
-        dir=str(home), prefix=".claude-", suffix=".tmp"
-    )
+    fd, tmp_path_str = tempfile.mkstemp(dir=str(home), prefix=".claude-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(data, fh, indent=2)

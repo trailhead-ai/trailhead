@@ -47,8 +47,7 @@ class HarnessError(Exception):
 #: user believing the ruleset was written (Axiom 2 — widen the seam with a safe,
 #: honest default).  Pinned by ``test_harness.py``.
 UNSUPPORTED_RULESET_NOTICE = (
-    "trailhead: this harness has no user-level ruleset support; "
-    "nothing was installed."
+    "trailhead: this harness has no user-level ruleset support; nothing was installed."
 )
 
 

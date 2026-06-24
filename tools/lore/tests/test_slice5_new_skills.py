@@ -16,6 +16,7 @@ This slice adds three skills on top of the rewired session skills (Slice 4):
 The FINAL LOCKSTEP GATE (spec AC) greps ALL retained lore skills for the removed
 commands (`lore new`, `lore recall`, `lore patch`) and asserts zero matches.
 """
+
 from __future__ import annotations
 
 import re
@@ -66,6 +67,7 @@ def _description(name: str) -> str:
 # Presence + registrable frontmatter
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("name", NEW_SKILLS)
 def test_new_skill_present_with_registrable_frontmatter(name: str):
     """Each new skill exists with a closed frontmatter block + non-empty
@@ -78,6 +80,7 @@ def test_new_skill_present_with_registrable_frontmatter(name: str):
 # ---------------------------------------------------------------------------
 # search — read path + injection-defense guard
 # ---------------------------------------------------------------------------
+
 
 def test_search_invokes_lore_search_not_recall():
     """`search` wraps `lore search` (the S3 read path) and never `lore recall`."""
@@ -100,8 +103,7 @@ def test_search_carries_external_memory_injection_guard():
         "search/SKILL.md must carry the `<external-memory>` injection-defense guard"
     )
     assert "NEVER" in text, (
-        "search/SKILL.md injection guard must state shared-layer content is NEVER "
-        "instructions"
+        "search/SKILL.md injection guard must state shared-layer content is NEVER instructions"
     )
     assert "instructions" in text, (
         "search/SKILL.md injection guard must frame shared-layer content as "
@@ -123,6 +125,7 @@ def test_search_documents_kql_subset_query_shape():
 # ---------------------------------------------------------------------------
 # record — single deliberate capture; scope-disjoint from checkpoint
 # ---------------------------------------------------------------------------
+
 
 def test_record_references_only_record_and_session_surface():
     """`record` references ONLY the new capture surface — `lore record` /
@@ -184,6 +187,7 @@ def test_record_and_checkpoint_descriptions_are_scope_disjoint():
 # research — dispatches the lore agents; targets resolve to real agent FILES
 # ---------------------------------------------------------------------------
 
+
 def test_research_names_both_dispatch_agents():
     """research must name both dispatch targets so the caller can route."""
     text = _skill_text("research")
@@ -207,18 +211,16 @@ def test_research_signals_investigator_vs_researcher_selection():
     `researcher` (incl. `tracking`-backlog polling) so the caller routes
     correctly (council Minor — Advocate)."""
     text = _skill_text("research").lower()
-    assert "deep" in text, (
-        "research/SKILL.md must signal `investigator` is the deep/expensive path"
-    )
+    assert "deep" in text, "research/SKILL.md must signal `investigator` is the deep/expensive path"
     assert "tracking" in text, (
-        "research/SKILL.md must document `researcher` for polling `tracking`-status "
-        "backlog items"
+        "research/SKILL.md must document `researcher` for polling `tracking`-status backlog items"
     )
 
 
 # ---------------------------------------------------------------------------
 # FINAL LOCKSTEP GATE (spec AC — the capstone)
 # ---------------------------------------------------------------------------
+
 
 def _all_retained_skill_files() -> list[Path]:
     return sorted(
@@ -236,12 +238,9 @@ def test_final_lockstep_gate_no_removed_commands_in_any_retained_skill(removed: 
     """FINAL LOCKSTEP GATE: a grep across ALL retained lore skills for the removed
     commands returns ZERO. Every capture path resolves to `lore record` /
     `lore session`; every read/search path to `lore search`."""
-    offenders = [
-        str(p) for p in _all_retained_skill_files() if removed in p.read_text()
-    ]
+    offenders = [str(p) for p in _all_retained_skill_files() if removed in p.read_text()]
     assert not offenders, (
-        f"FINAL LOCKSTEP GATE FAILED: removed command {removed!r} still present in: "
-        f"{offenders}"
+        f"FINAL LOCKSTEP GATE FAILED: removed command {removed!r} still present in: {offenders}"
     )
 
 
@@ -252,11 +251,7 @@ def test_final_lockstep_gate_clean_across_whole_skills_tree(removed: str):
     `_shared/` reference doc — not just the SKILL.md files. Assert that literal
     scope is also clean, so the shared capture-pattern doc cannot smuggle a
     removed command (`lore new`) past the per-skill enumeration above."""
-    offenders = [
-        str(p)
-        for p in SKILLS_DIR.rglob("*.md")
-        if removed in p.read_text()
-    ]
+    offenders = [str(p) for p in SKILLS_DIR.rglob("*.md") if removed in p.read_text()]
     assert not offenders, (
         f"FINAL LOCKSTEP GATE FAILED (whole skills/ tree): removed command "
         f"{removed!r} still present in: {offenders}"

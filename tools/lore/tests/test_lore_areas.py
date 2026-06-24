@@ -8,6 +8,7 @@ Test contract (TDD — written BEFORE cmd_areas exists):
 
 The command must follow the never-fail D-1 contract that cmd_recall already uses.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -29,15 +30,25 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 # Module loader
 # ---------------------------------------------------------------------------
 
+
 def _load_cli():
     """Load cli/lore in-process (no .py extension — SourceFileLoader)."""
     from importlib.machinery import SourceFileLoader
+
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
     for cached in list(sys.modules):
-        if cached in ("recall", "vault", "frontmatter", "sessions", "layers",
-                      "status_validator", "regenerate_indices",
-                      "promote", "review"):
+        if cached in (
+            "recall",
+            "vault",
+            "frontmatter",
+            "sessions",
+            "layers",
+            "status_validator",
+            "regenerate_indices",
+            "promote",
+            "review",
+        ):
             sys.modules.pop(cached, None)
     loader = SourceFileLoader("lore_cli_areas_test", str(CLI_PATH))
     spec = importlib.util.spec_from_loader("lore_cli_areas_test", loader)
@@ -50,6 +61,7 @@ def _load_cli():
 # ---------------------------------------------------------------------------
 # Vault fixture helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
@@ -78,6 +90,7 @@ def _write_area(
 # Runner that invokes cmd_areas in-process
 # ---------------------------------------------------------------------------
 
+
 def _run_areas(vault_path: str | None) -> tuple[str, str, int]:
     """Invoke cmd_areas in-process; returns (stdout, stderr, returncode)."""
     cli = _load_cli()
@@ -104,6 +117,7 @@ def _run_areas(vault_path: str | None) -> tuple[str, str, int]:
 # ---------------------------------------------------------------------------
 # Tests: vault with 2 areas
 # ---------------------------------------------------------------------------
+
 
 class TestAreasWithContent:
     def test_stdout_contains_first_area_name(self, tmp_path):
@@ -184,6 +198,7 @@ class TestAreasWithContent:
 # Tests: empty vault (no area files)
 # ---------------------------------------------------------------------------
 
+
 class TestAreasEmpty:
     def test_exit_code_is_zero(self, tmp_path):
         vault = _make_vault(tmp_path)
@@ -221,6 +236,7 @@ class TestAreasEmpty:
 # ---------------------------------------------------------------------------
 # Tests: unresolvable vault (D-1 degradation contract)
 # ---------------------------------------------------------------------------
+
 
 class TestAreasUnresolvableVault:
     def test_exit_code_is_zero(self, tmp_path):
@@ -269,6 +285,7 @@ class TestAreasUnresolvableVault:
 # Tests: vault path exists but build_area_map raises
 # ---------------------------------------------------------------------------
 
+
 class TestAreasBuildAreaMapRaises:
     """Cover the second never-fail branch in cmd_areas.
 
@@ -293,7 +310,8 @@ class TestAreasBuildAreaMapRaises:
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch.object(
-                        cli.recall_mod, "build_area_map",
+                        cli.recall_mod,
+                        "build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         rc = cli.cmd_areas(args)
@@ -316,7 +334,8 @@ class TestAreasBuildAreaMapRaises:
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch.object(
-                        cli.recall_mod, "build_area_map",
+                        cli.recall_mod,
+                        "build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)
@@ -339,7 +358,8 @@ class TestAreasBuildAreaMapRaises:
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch.object(
-                        cli.recall_mod, "build_area_map",
+                        cli.recall_mod,
+                        "build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)

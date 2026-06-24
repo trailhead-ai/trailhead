@@ -8,6 +8,7 @@ to register as `portage:<name>`. It also pins `name:` == filename stem.
 Unique basename (test_portage_agents_registrable.py, not test_agents_registrable.py)
 so it does not collide with craft's/lore's same-named test under a shared pytest run.
 """
+
 from pathlib import Path
 
 import pytest

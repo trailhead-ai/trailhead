@@ -14,6 +14,7 @@ path stays covered after the harvest-expansion flow is removed:
 
 ALL fixtures SYNTHETIC — zero private tokens (public repo).
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -36,7 +37,11 @@ def run_cli(args, env=None, cwd=None, input_text=None):
         full_env.update(env)
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
-        capture_output=True, text=True, env=full_env, cwd=cwd, input=input_text,
+        capture_output=True,
+        text=True,
+        env=full_env,
+        cwd=cwd,
+        input=input_text,
     )
 
 
@@ -55,19 +60,25 @@ def _git_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     (vault / "sessions").mkdir(parents=True)
     subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.name", "Tester"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.email", "t@e.st"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.name", "Tester"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
+        check=True,
+        capture_output=True,
+    )
     return vault
 
 
 def _commit_baseline(vault: Path):
     subprocess.run(["git", "-C", str(vault), "add", "-A"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "commit", "-m", "baseline"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(vault), "commit", "-m", "baseline"], check=True, capture_output=True
+    )
 
 
 _GUID = "11111111-2222-4333-8444-555555555555"
@@ -76,8 +87,7 @@ _GUID = "11111111-2222-4333-8444-555555555555"
 def _candidate(vault: Path, guid: str = _GUID):
     """Write a body-only GUID capture file via the real capture path."""
     return run_cli(
-        ["session", "candidate", "--session-id", guid,
-         "--kind", "lesson", "--phase", "Build"],
+        ["session", "candidate", "--session-id", guid, "--kind", "lesson", "--phase", "Build"],
         env={"LORE_VAULT": str(vault)},
         input_text="a lesson captured during the session\n",
     )
@@ -86,14 +96,16 @@ def _candidate(vault: Path, guid: str = _GUID):
 def _committed_files_at_head(vault: Path) -> str:
     return subprocess.run(
         ["git", "-C", str(vault), "show", "--name-only", "--pretty=format:", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout
 
 
 def _commit_count(vault: Path) -> int:
     out = subprocess.run(
         ["git", "-C", str(vault), "rev-list", "--count", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     return int(out) if out else 0
 
@@ -101,6 +113,7 @@ def _commit_count(vault: Path) -> int:
 # ---------------------------------------------------------------------------
 # finalize + single commit of explicit paths only
 # ---------------------------------------------------------------------------
+
 
 class TestFinalizeSingleCommit:
     def test_finish_lands_exactly_one_commit(self, tmp_path):
@@ -144,6 +157,7 @@ class TestFinalizeSingleCommit:
 # explicit paths only — unrelated dirty file is NOT swept into the commit
 # ---------------------------------------------------------------------------
 
+
 class TestExplicitPathsOnly:
     def test_unrelated_dirty_file_not_swept_into_commit(self, tmp_path):
         vault = _git_vault(tmp_path)
@@ -163,7 +177,8 @@ class TestExplicitPathsOnly:
         assert "unrelated-scratch.md" not in _committed_files_at_head(vault)
         status = subprocess.run(
             ["git", "-C", str(vault), "status", "--porcelain"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         ).stdout
         assert "unrelated-scratch.md" in status, "stray file must remain untracked, not consumed"
 
@@ -212,8 +227,7 @@ class TestHarvestPendingRetired:
         vault = _git_vault(tmp_path)
         pending = vault / "harvest-pending.md"
         pending.write_text(
-            _PENDING_BODY
-            + "- gotcha: the flux capacitor resets on reconnect. Where it bit: "
+            _PENDING_BODY + "- gotcha: the flux capacitor resets on reconnect. Where it bit: "
             "flux.py:88.  <!-- h:ffffffffffff -->\n"
         )
         assert _candidate(vault).returncode == 0
@@ -229,6 +243,7 @@ class TestHarvestPendingRetired:
 # ---------------------------------------------------------------------------
 # the harvest module + starter protocol are gone — retirement is structural
 # ---------------------------------------------------------------------------
+
 
 class TestHarvestModuleRetired:
     def test_harvest_script_no_longer_exists(self):

@@ -21,6 +21,7 @@ Two invariants are locked:
    ``$TRAILHEAD_ROOT`` in the environment does NOT change the resolved
    ``trailhead`` package. The env var is irrelevant once Tier-1 wins.
 """
+
 from __future__ import annotations
 
 import importlib.util

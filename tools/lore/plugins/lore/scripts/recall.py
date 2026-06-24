@@ -29,6 +29,7 @@ Interpreter gotcha (Slice 2): ``@dataclass`` + ``importlib``-loaded module +
 ``from __future__ import annotations`` crashes the local interpreter's dataclass
 field resolution — this module OMITS that future import for that reason.
 """
+
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,7 @@ _KEYWORDS_MAX = 8
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AreaEntry:
     name: str
@@ -59,6 +61,7 @@ class AreaEntry:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _first_overview_sentence(text: str) -> str:
     """Extract the first non-empty, non-HTML-comment sentence after ## Overview."""
@@ -85,6 +88,7 @@ def _first_overview_sentence(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def build_area_map(vault: Path) -> list[AreaEntry]:
     """Build the compact area menu.
@@ -163,11 +167,7 @@ def render_area_menu(entries: list[AreaEntry]) -> str:
     for entry in entries:
         name_part = f"  {entry.name}"
         if entry.one_liner:
-            kw_part = (
-                f" ({', '.join(entry.keywords[:_KEYWORDS_MAX])})"
-                if entry.keywords
-                else ""
-            )
+            kw_part = f" ({', '.join(entry.keywords[:_KEYWORDS_MAX])})" if entry.keywords else ""
             lines.append(f"{name_part}  — {entry.one_liner}{kw_part}")
         else:
             if entry.keywords:

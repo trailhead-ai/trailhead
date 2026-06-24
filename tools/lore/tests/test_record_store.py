@@ -57,6 +57,7 @@ def _load(name: str):
     if name in sys.modules:
         del sys.modules[name]
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -106,6 +107,7 @@ def _sidecar(kind="spec", title="My Spec", status="draft", **extra):
 # ---------------------------------------------------------------------------
 # place_record naming + ID
 # ---------------------------------------------------------------------------
+
 
 def test_place_record_kebab_slug_and_id(rs, tmp_path):
     """place_record slugs the name and returns the vault-relative <kind>/<name> ID."""
@@ -164,6 +166,7 @@ def test_place_record_session_no_suffix_on_collision(rs, tmp_path):
 # resolve_committer_email — deterministic provenance source
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_committer_email_honors_lore_email(rs, monkeypatch):
     monkeypatch.setenv("LORE_EMAIL", "override@example.com")
     assert rs.resolve_committer_email() == "override@example.com"
@@ -194,9 +197,7 @@ def test_resolve_committer_email_ignores_repo_local_override(rs, monkeypatch, tm
     repo = tmp_path / "client-repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "dev@client.com"], cwd=repo, check=True
-    )
+    subprocess.run(["git", "config", "user.email", "dev@client.com"], cwd=repo, check=True)
     monkeypatch.chdir(repo)
 
     # Must read the GLOBAL identity, not the repo-local override.
@@ -206,6 +207,7 @@ def test_resolve_committer_email_ignores_repo_local_override(rs, monkeypatch, tm
 # ---------------------------------------------------------------------------
 # validate_and_write — round-trip + provenance
 # ---------------------------------------------------------------------------
+
 
 def test_validate_and_write_round_trip(rs, conn, tmp_path):
     """Body verbatim .md + compact sorted-key .json + matching index row."""
@@ -283,6 +285,7 @@ def test_validate_and_write_created_once_updated_restamped(rs, conn, tmp_path):
 
     # Force a distinguishable second timestamp.
     import time
+
     time.sleep(1.05)
     rs.validate_and_write(loc, _sidecar(), "body2", conn)
     conn.commit()
@@ -296,6 +299,7 @@ def test_validate_and_write_created_once_updated_restamped(rs, conn, tmp_path):
 # ---------------------------------------------------------------------------
 # Empty git email (KU4) → typed error, nothing written
 # ---------------------------------------------------------------------------
+
 
 def test_empty_email_raises_typed_error_nothing_written(rs, conn, tmp_path, monkeypatch):
     monkeypatch.setenv("LORE_EMAIL", "")
@@ -315,6 +319,7 @@ def test_empty_email_raises_typed_error_nothing_written(rs, conn, tmp_path, monk
 # ---------------------------------------------------------------------------
 # Validation failure → typed error carrying S1 messages, nothing written
 # ---------------------------------------------------------------------------
+
 
 def test_validation_failure_raises_typed_error_nothing_written(rs, conn, tmp_path):
     vault = tmp_path / "vault"
@@ -337,6 +342,7 @@ def test_validation_failure_raises_typed_error_nothing_written(rs, conn, tmp_pat
 # ---------------------------------------------------------------------------
 # Fence neutralization (AC-FENCE1)
 # ---------------------------------------------------------------------------
+
 
 def test_neutralize_fences_kills_tokens(rs):
     text = "before <external-memory> mid </external-memory> after"
@@ -370,6 +376,7 @@ def test_validate_and_write_neutralizes_fence_in_body(rs, conn, tmp_path):
 # Text-wins on index failure (AC-TX2)
 # ---------------------------------------------------------------------------
 
+
 def test_text_wins_when_index_raises(rs, conn, tmp_path, monkeypatch):
     """update_index raising leaves body+sidecar intact (text not rolled back)."""
     vault = tmp_path / "vault"
@@ -392,6 +399,7 @@ def test_text_wins_when_index_raises(rs, conn, tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Atomic write: no partial target on a crash between temp-write and rename
 # ---------------------------------------------------------------------------
+
 
 def test_write_temp_then_rename_no_partial_on_crash(rs, tmp_path, monkeypatch):
     """A crash before the rename leaves no partial target file."""
@@ -421,6 +429,7 @@ def test_write_temp_then_rename_writes_full_content(rs, tmp_path):
 # ---------------------------------------------------------------------------
 # move_record
 # ---------------------------------------------------------------------------
+
 
 def test_move_record_relocates_rekeys_and_removes_old(rs, conn, tmp_path):
     src_vault = tmp_path / "vault-a"
@@ -519,6 +528,7 @@ def test_move_record_interrupted_keeps_old_intact(rs, conn, tmp_path, monkeypatc
 # move_record — in-memory overrides (Slice 3: single durable write at dest)
 # ---------------------------------------------------------------------------
 
+
 def test_move_record_overrides_write_mutated_record_at_dest_only(rs, conn, tmp_path):
     """``new_sidecar``/``new_body`` write the mutated record AT the destination only.
 
@@ -545,7 +555,9 @@ def test_move_record_overrides_write_mutated_record_at_dest_only(rs, conn, tmp_p
     mutated["updated-at"] = "2026-06-21T00:00:01Z"
     mutated["updated-by"] = "tester@example.com"
     new_id = rs.move_record(
-        old_id, new_loc, conn,
+        old_id,
+        new_loc,
+        conn,
         old_vault_root=str(src_vault),
         new_sidecar=mutated,
         new_body="new body",
@@ -553,9 +565,7 @@ def test_move_record_overrides_write_mutated_record_at_dest_only(rs, conn, tmp_p
     conn.commit()
 
     # The destination holds the MUTATED record (the new value).
-    dst_sidecar = json.loads(
-        (dst_vault / "spec" / "my-spec.json").read_text(encoding="utf-8")
-    )
+    dst_sidecar = json.loads((dst_vault / "spec" / "my-spec.json").read_text(encoding="utf-8"))
     assert dst_sidecar["team"] == "beta"
     assert (dst_vault / "spec" / "my-spec.md").read_text() == "new body"
 
@@ -625,6 +635,7 @@ def test_realpath_is_descendant_guard(rs, tmp_path):
 # delete_record
 # ---------------------------------------------------------------------------
 
+
 def test_delete_record_removes_all_three(rs, conn, tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -650,6 +661,7 @@ def test_delete_record_missing_id_raises_not_found(rs, conn, tmp_path):
 # ---------------------------------------------------------------------------
 # Slice 1: labels/annotations round-trip (plan 2026-06-20)
 # ---------------------------------------------------------------------------
+
 
 def test_labels_round_trip_byte_stable_sorted_inner_keys(rs, conn, tmp_path):
     """labels map written compact with inner keys sorted; round-trips byte-stable."""

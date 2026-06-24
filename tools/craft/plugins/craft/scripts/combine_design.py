@@ -27,6 +27,7 @@ Usage:
     combine_design.py --designs-dir <path> --chrome-path <path> --slug <slug>
                       [--output <path>] [--spec-url <url>]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,6 +39,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Chrome parsing — extract declared variants + brand token rows
 # ---------------------------------------------------------------------------
+
 
 def _parse_chrome_variants(chrome_text: str) -> list[str]:
     """Extract variant names from a chrome catalog's ## Variants section.
@@ -84,6 +86,7 @@ def _parse_chrome_tokens(chrome_text: str) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 # Index.md parsing — extract screen file list
 # ---------------------------------------------------------------------------
+
 
 def _parse_index(index_text: str) -> list[dict[str, str]]:
     """Parse index.md for the screen file table.
@@ -133,6 +136,7 @@ def _parse_index(index_text: str) -> list[dict[str, str]]:
 # Path traversal guard (S-2)
 # ---------------------------------------------------------------------------
 
+
 def _validate_screen_path(resolved: Path, design_dir: Path, filename: str) -> None:
     """Assert resolved path is within design_dir. Raises SystemExit(1) on escape."""
     design_dir_resolved = design_dir.resolve()
@@ -150,6 +154,7 @@ def _validate_screen_path(resolved: Path, design_dir: Path, filename: str) -> No
 # ---------------------------------------------------------------------------
 # HTML generation helpers
 # ---------------------------------------------------------------------------
+
 
 def _slug_anchor(text: str) -> str:
     """Convert display text to a valid HTML anchor id."""
@@ -173,7 +178,7 @@ def _docbar_html(variants: list[str], title: str) -> str:
             lines.append(
                 f'    <label class="docbar-toggle" style="cursor:pointer;">'
                 f'<input type="checkbox" id="toggle-{anchor}" '
-                f'onchange="applyVariant(\'{anchor}\',this.checked)"> '
+                f"onchange=\"applyVariant('{anchor}',this.checked)\"> "
                 f"{_html_escape(label)}</label>\n"
             )
         lines.append("  </span>\n")
@@ -186,7 +191,7 @@ def _toc_html(screens: list[tuple[str, str, str]]) -> str:
     lines = [
         '<nav id="screens-toc" style="padding:16px 20px;border-bottom:1px solid #eee;">\n',
         '  <h2 style="margin:0 0 8px;font-size:1em;font-family:sans-serif;">Screens</h2>\n',
-        "  <ol style=\"font-family:sans-serif;margin:0;padding-left:20px;\">\n",
+        '  <ol style="font-family:sans-serif;margin:0;padding-left:20px;">\n',
     ]
     for num, name, anchor in screens:
         lines.append(
@@ -216,13 +221,13 @@ def _tokens_swatch_html(tokens: list[tuple[str, str]]) -> str:
                     f'vertical-align:middle;margin-right:6px;"></span>'
                 )
             lines.append(
-                f"    <tr><td style=\"padding:2px 12px 2px 0;\">{_html_escape(name)}</td>"
+                f'    <tr><td style="padding:2px 12px 2px 0;">{_html_escape(name)}</td>'
                 f"<td>{swatch}{_html_escape(value)}</td></tr>\n"
             )
         lines.append("  </table>\n")
     else:
         lines.append(
-            "  <p style=\"font-family:sans-serif;color:#666;\">"
+            '  <p style="font-family:sans-serif;color:#666;">'
             "No brand tokens found in chrome catalog.</p>\n"
         )
     lines.append("</section>\n")
@@ -281,10 +286,10 @@ def _shell_html(
     # <!-- mockup-only web-font: <link rel="stylesheet" href="https://fonts.googleapis.com/..."> -->
     return (
         "<!DOCTYPE html>\n"
-        "<html lang=\"en\">\n"
+        '<html lang="en">\n'
         "<head>\n"
-        f"  <meta charset=\"utf-8\">\n"
-        f"  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        f'  <meta charset="utf-8">\n'
+        f'  <meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"  <title>{_html_escape(slug)} — Design Reference</title>\n"
         "  <style>\n"
         "    * { box-sizing: border-box; }\n"
@@ -307,6 +312,7 @@ def _shell_html(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def assemble(
     designs_dir: Path,
@@ -417,6 +423,7 @@ def assemble(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(

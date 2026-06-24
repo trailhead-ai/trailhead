@@ -17,6 +17,7 @@ Re-grep result: no existing test in tools/lore/tests/ asserts unconditional
 presence of all four report sections. Survey confirmed before this test was
 written.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -43,7 +44,7 @@ def _report_section(text: str) -> str:
 
     section_lines = []
     in_fence = False
-    for line in lines[start + 1:]:
+    for line in lines[start + 1 :]:
         stripped = line.rstrip()
         if stripped.startswith("```"):
             in_fence = not in_fence

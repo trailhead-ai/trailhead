@@ -21,6 +21,7 @@ validate_no_overlap time: raises GroupResolutionError naming both groups + the r
 group names are validated with validate_group_name before use in any path
 construction (D-E confinement).
 """
+
 from __future__ import annotations
 
 import os
@@ -73,16 +74,8 @@ def validate_group_name(name: str) -> None:
     _validate_app because that is a private helper; the rule is identical.
     """
     if not name:
-        raise GroupConfinementError(
-            "camp: group name must not be empty"
-        )
-    if (
-        "/" in name
-        or "\\" in name
-        or ".." in name
-        or os.sep in name
-        or "\x00" in name
-    ):
+        raise GroupConfinementError("camp: group name must not be empty")
+    if "/" in name or "\\" in name or ".." in name or os.sep in name or "\x00" in name:
         raise GroupConfinementError(
             f"camp: group name {name!r} must not contain path separators, "
             "backslashes, '..', or null bytes (D-E confinement)"
@@ -145,9 +138,7 @@ def _repo_root_matches(candidate: Path, member: dict[str, Any]) -> bool:
     return resolved == declared
 
 
-def _find_groups_for_repo(
-    repo_path: Path, group_configs: list[dict[str, Any]]
-) -> list[str]:
+def _find_groups_for_repo(repo_path: Path, group_configs: list[dict[str, Any]]) -> list[str]:
     """Return group names where repo_path matches any member's repo_root."""
     matching: list[str] = []
     for cfg in group_configs:
@@ -268,14 +259,10 @@ def resolve_from_cwd(
             break
         current = parent
 
-    raise GroupResolutionError(
-        "camp: no group resolved from cwd, pass --group"
-    )
+    raise GroupResolutionError("camp: no group resolved from cwd, pass --group")
 
 
-def resolve_group_override(
-    group_name: str, group_configs: list[dict[str, Any]]
-) -> dict[str, Any]:
+def resolve_group_override(group_name: str, group_configs: list[dict[str, Any]]) -> dict[str, Any]:
     """Return the group config matching group_name (for --group override).
 
     Args:

@@ -10,13 +10,13 @@ fails loudly instead of silently dropping guidance.
 These are content anchors, not wording locks: each asserts a short distinctive
 phrase, not a paragraph, so legitimate rewording stays green.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 _BRAINSTORM = (
-    Path(__file__).parent.parent
-    / "plugins" / "craft" / "skills" / "brainstorm" / "SKILL.md"
+    Path(__file__).parent.parent / "plugins" / "craft" / "skills" / "brainstorm" / "SKILL.md"
 )
 
 

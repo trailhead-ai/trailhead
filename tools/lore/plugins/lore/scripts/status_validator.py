@@ -9,6 +9,7 @@ against these sets so a note can never carry an off-vocabulary status. (The
 The canonical sets are the single source of truth for the whole plugin —
 do not invent statuses; add them here and to the scaffolded glossary.
 """
+
 from __future__ import annotations
 
 # Canonical status sets per note type, keyed by the directory / plural name.
@@ -119,4 +120,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

@@ -10,6 +10,7 @@ Owns three responsibilities:
 
 No file I/O in this module — callers write the rendered string atomically (Slice 2).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -232,8 +233,7 @@ def validate_scaffold(
     candidate = {
         "group": {"name": group_name},
         "members": [
-            {"name": m["name"], "repo_root": m["repo_root"], "bootstrap": []}
-            for m in normalized
+            {"name": m["name"], "repo_root": m["repo_root"], "bootstrap": []} for m in normalized
         ],
         "branch_pattern": "worktree-{slug}",
         "shared_vaults": [],

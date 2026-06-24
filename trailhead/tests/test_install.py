@@ -32,14 +32,15 @@ def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr=""):
     """
     sdr = ShimDirResult(shim_dir=Path("/shim/bin"), shims={})
     lore_result = (lore_init_rc, lore_init_stderr)
-    with patch("trailhead.install.wire") as wire_mock, patch(
-        "trailhead.install.create_shims", return_value=sdr
-    ) as pathint_mock, patch(
-        "trailhead.install.detect_harnesses",
-        return_value=([ClaudeCodeHarness()] if detected else []),
-    ) as detect_mock, patch(
-        "trailhead.install.run_lore_init", return_value=lore_result
-    ) as lore_mock:
+    with (
+        patch("trailhead.install.wire") as wire_mock,
+        patch("trailhead.install.create_shims", return_value=sdr) as pathint_mock,
+        patch(
+            "trailhead.install.detect_harnesses",
+            return_value=([ClaudeCodeHarness()] if detected else []),
+        ) as detect_mock,
+        patch("trailhead.install.run_lore_init", return_value=lore_result) as lore_mock,
+    ):
         yield {
             "wire": wire_mock,
             "pathint": pathint_mock,
@@ -204,16 +205,12 @@ class TestLoreInitIntegration:
         m["lore_init"].assert_called_once()
 
     def test_lore_init_failure_propagates_nonzero(self, tmp_path):
-        with _patched(
-            detected=True, lore_init_rc=1, lore_init_stderr="lore: boom"
-        ):
+        with _patched(detected=True, lore_init_rc=1, lore_init_stderr="lore: boom"):
             rc = run_install(env=_env(tmp_path), quiet=True)
         assert rc == 1
 
     def test_lore_init_failure_surfaces_stderr(self, tmp_path, capsys):
-        with _patched(
-            detected=True, lore_init_rc=3, lore_init_stderr="lore: vault create failed"
-        ):
+        with _patched(detected=True, lore_init_rc=3, lore_init_stderr="lore: vault create failed"):
             run_install(env=_env(tmp_path), quiet=True)
         err = capsys.readouterr().err
         assert "lore: vault create failed" in err

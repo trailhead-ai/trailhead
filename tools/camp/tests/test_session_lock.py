@@ -16,6 +16,7 @@ Test contract (Slice 6, lock portion):
   (PID-recycling fallback).
 - release clears the lock.
 """
+
 from __future__ import annotations
 
 import json

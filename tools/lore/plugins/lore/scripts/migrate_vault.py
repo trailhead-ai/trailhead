@@ -496,7 +496,11 @@ def transcode(legacy: LegacyRecord) -> Transcoded:
     if related_flag is not None:
         flags.append(Flag.review(f"{legacy.path}: {related_flag}"))
     # Single-target wikilink keys (raised-in / source-plan / source-spec).
-    for legacy_key, rel_kind in (("raised-in", "session"), ("source-plan", "plan"), ("source-spec", "spec")):
+    for legacy_key, rel_kind in (
+        ("raised-in", "session"),
+        ("source-plan", "plan"),
+        ("source-spec", "spec"),
+    ):
         target = _extract_single_target(fm.get(legacy_key))
         if target:
             related.setdefault(rel_kind, []).append(target)

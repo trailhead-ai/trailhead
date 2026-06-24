@@ -79,9 +79,7 @@ def test_spec_template_literal_absent_from_common_path():
     fallback_idx = _fallback_offset(text)
     spec_idx = text.find(_SPEC_TEMPLATE_LITERAL)
 
-    assert spec_idx == -1 or (
-        fallback_idx != -1 and spec_idx > fallback_idx
-    ), (
+    assert spec_idx == -1 or (fallback_idx != -1 and spec_idx > fallback_idx), (
         f"planner.md contains {_SPEC_TEMPLATE_LITERAL!r} at char {spec_idx} "
         f"but the fallback marker '{FALLBACK_MARKER}' is at char {fallback_idx}. "
         "The spec template literal must only appear after the fallback marker "
@@ -100,9 +98,7 @@ def test_plan_template_literal_absent_from_common_path():
     fallback_idx = _fallback_offset(text)
     plan_idx = text.find(_PLAN_TEMPLATE_LITERAL)
 
-    assert plan_idx == -1 or (
-        fallback_idx != -1 and plan_idx > fallback_idx
-    ), (
+    assert plan_idx == -1 or (fallback_idx != -1 and plan_idx > fallback_idx), (
         f"planner.md contains {_PLAN_TEMPLATE_LITERAL!r} at char {plan_idx} "
         f"but the fallback marker '{FALLBACK_MARKER}' is at char {fallback_idx}. "
         "The plan template literal must only appear after the fallback marker "

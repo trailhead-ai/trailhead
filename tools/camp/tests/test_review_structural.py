@@ -20,6 +20,7 @@ C1 — the rmtree-confinement guard in reconcile_break (anchored on
   the resolved workspace dir (pre-check passes), but the workspace dir itself is a
   symlink escaping worktrees_root, so the dedicated rmtree guard fires.
 """
+
 from __future__ import annotations
 
 import importlib.machinery
@@ -87,8 +88,7 @@ class TestFix6InjectIsLight:
             cwd=str(tmp_path),
         )
         assert "SPINE_ABSENT" in result.stdout, (
-            f"inject drain must not import spine.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"inject drain must not import spine.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
     def test_cmd_inject_cli_does_not_reference_spine_import(self):
@@ -161,9 +161,7 @@ class TestFix7SlugFromCwdThreadsEnv:
         ws.mkdir(parents=True)
         monkeypatch.chdir(ws)
 
-        slug = camp_cli._slug_from_args_or_cwd(
-            [], group, verb="status", allow_none=True, env=env
-        )
+        slug = camp_cli._slug_from_args_or_cwd([], group, verb="status", allow_none=True, env=env)
         assert slug == "feat-x", (
             "slug-from-cwd must resolve against the env's state dir (env threaded "
             "into resolve_from_cwd), not os.environ"
@@ -187,9 +185,7 @@ class TestFix9VerbTaxonomy:
     def test_taxonomy_module_defines_tables(self):
         import verb_taxonomy
 
-        assert verb_taxonomy.DISABLED_VERBS == frozenset(
-            {"restock", "sweep", "code", "fire"}
-        )
+        assert verb_taxonomy.DISABLED_VERBS == frozenset({"restock", "sweep", "code", "fire"})
         assert verb_taxonomy.LEGACY_REDIRECTS == {
             "open": "ai",
             "break": "rm",
@@ -257,18 +253,27 @@ class TestFix9VerbTaxonomy:
 def _init_git_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "T"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@t.com"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "T"], check=True, capture_output=True
+    )
     (path / "README.md").write_text("# t\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", str(path)],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "fetch", "origin", "--quiet"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
+    )
 
 
 class TestC1RmtreeGuard:
@@ -297,6 +302,7 @@ class TestC1RmtreeGuard:
 
         # Provision normally (real workspace dir under worktrees_root).
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         bring_up_workspace(group, "feat-c1", env=env)
         cmd_setup_group(group, "feat-c1", env=env)

@@ -97,6 +97,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     result = run_doctor(as_json=args.json)
     if args.json:
         import json
+
         print(json.dumps(result.data))
     else:
         print(result.human_output)
@@ -115,9 +116,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="trailhead — install and manage the lore/camp/craft/portage/landing plugins.",
         add_help=True,
     )
-    parser.add_argument(
-        "--version", action="version", version=f"trailhead {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"trailhead {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -140,24 +139,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Install only these agent-plugins (repeatable). Default: all.",
     )
     install_p.add_argument(
-        "--no-camp", action="store_true", default=False,
+        "--no-camp",
+        action="store_true",
+        default=False,
         help="Skip installing/updating the camp CLI onto PATH.",
     )
     install_p.add_argument(
-        "--no-lore", action="store_true", default=False,
+        "--no-lore",
+        action="store_true",
+        default=False,
         help="Skip installing/updating the lore CLI onto PATH.",
     )
     install_p.add_argument(
-        "--config", metavar="PATH", default=None,
+        "--config",
+        metavar="PATH",
+        default=None,
         help="Config TOML (absolute, or relative to the repo config/ dir). "
-             "Default: config/default.toml.",
+        "Default: config/default.toml.",
     )
     install_p.add_argument(
-        "--quiet", action="store_true", default=False,
+        "--quiet",
+        action="store_true",
+        default=False,
         help="Suppress progress lines; summary is still printed.",
     )
     install_p.add_argument(
-        "--json", action="store_true", default=False,
+        "--json",
+        action="store_true",
+        default=False,
         help="Print a machine-readable JSON summary.",
     )
 
@@ -166,15 +175,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Remove the entire trailhead install (all plugins + CLIs). Keeps your data.",
     )
     uninstall_p.add_argument(
-        "--yes", "-y", action="store_true", default=False,
+        "--yes",
+        "-y",
+        action="store_true",
+        default=False,
         help="Skip the confirmation prompt.",
     )
     uninstall_p.add_argument(
-        "--quiet", action="store_true", default=False,
+        "--quiet",
+        action="store_true",
+        default=False,
         help="Suppress progress lines; summary is still printed.",
     )
     uninstall_p.add_argument(
-        "--json", action="store_true", default=False,
+        "--json",
+        action="store_true",
+        default=False,
         help="Print a machine-readable JSON summary.",
     )
 
@@ -182,7 +198,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "doctor", help="Report what trailhead has installed (read-only)."
     )
     doctor_p.add_argument(
-        "--json", action="store_true", default=False,
+        "--json",
+        action="store_true",
+        default=False,
         help="Print a machine-readable JSON report.",
     )
 
@@ -191,7 +209,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print shell env to put the camp/lore CLIs on PATH (brew-style).",
     )
     shellenv_p.add_argument(
-        "--shell", choices=["fish", "zsh", "bash"], default=None,
+        "--shell",
+        choices=["fish", "zsh", "bash"],
+        default=None,
         help="Target shell. Default: detect from $SHELL.",
     )
 

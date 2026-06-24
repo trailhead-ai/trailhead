@@ -231,9 +231,7 @@ def _compose_tool(
     staging_dir_path: Path | None = None
 
     try:
-        staging_dir_path = Path(
-            tempfile.mkdtemp(prefix=f"_{tool}_staging_", dir=staging_parent)
-        )
+        staging_dir_path = Path(tempfile.mkdtemp(prefix=f"_{tool}_staging_", dir=staging_parent))
 
         try:
             plan = compose_plan(manifest, subagents, skills, staging_dir_path)

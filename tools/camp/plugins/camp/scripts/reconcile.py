@@ -24,6 +24,7 @@ reconcile_break(group, slug):
 A slug-scoped file lock guards concurrent reconcile_worktree calls so two
 terminals racing camp <slug> don't both git-worktree-add the same path.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -156,7 +157,7 @@ def _registered_worktree_paths(repo_root: Path) -> set[Path]:
     paths: set[Path] = set()
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
-            registered = line[len("worktree "):].strip()
+            registered = line[len("worktree ") :].strip()
             try:
                 paths.add(Path(registered).resolve())
             except Exception:
@@ -169,9 +170,7 @@ def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
     return wt_path.resolve() in _registered_worktree_paths(repo_root)
 
 
-def _fetch_base(
-    repo_root: Path, base: str, *, timeout: float = FETCH_TIMEOUT_SECONDS
-) -> None:
+def _fetch_base(repo_root: Path, base: str, *, timeout: float = FETCH_TIMEOUT_SECONDS) -> None:
     """Fetch the member's base ref under a timeout (Slice 3 async provisioner).
 
     The base looks like "origin/main"; the remote is the part before the first
@@ -203,9 +202,7 @@ def _fetch_base(
         )
 
 
-def _move_worktree(
-    member: dict[str, Any], stage: Path, wt_path: Path, repo_root: Path
-) -> None:
+def _move_worktree(member: dict[str, Any], stage: Path, wt_path: Path, repo_root: Path) -> None:
     """git worktree move <stage> <wt_path>, preserving the git-internal admin name.
 
     On failure, raise ReconcileError but leave <stage> registered so the next
@@ -317,9 +314,7 @@ def _add_worktree_for_member(
         result = _git(repo_root, "worktree", "add", str(add_target), branch)
     else:
         start_point = base if _ref_resolves(repo_root, base) else "HEAD"
-        result = _git(
-            repo_root, "worktree", "add", "-b", branch, str(add_target), start_point
-        )
+        result = _git(repo_root, "worktree", "add", "-b", branch, str(add_target), start_point)
 
     if result.returncode != 0:
         raise ReconcileError(
@@ -455,18 +450,16 @@ def reconcile_worktree(
             member_results: list[dict[str, Any]] = []
             for member in members:
                 repo_root = Path(member["repo_root"])
-                wt_path = _worktree_path(
-                    group_name, slug, member["name"], env=env
-                )
+                wt_path = _worktree_path(group_name, slug, member["name"], env=env)
                 base = member.get("base") or DEFAULT_BASE
-                _add_worktree_for_member(
-                    member, wt_path, branch, repo_root, base=base, slug=slug
+                _add_worktree_for_member(member, wt_path, branch, repo_root, base=base, slug=slug)
+                member_results.append(
+                    {
+                        "name": member["name"],
+                        "repo_root": str(repo_root),
+                        "worktree_path": str(wt_path),
+                    }
                 )
-                member_results.append({
-                    "name": member["name"],
-                    "repo_root": str(repo_root),
-                    "worktree_path": str(wt_path),
-                })
 
             # -- Phase 2: Bootstrap members in parallel (shell=False, D-F)
             any_bootstrap_failure: Exception | None = None
@@ -598,9 +591,7 @@ def reconcile_break(
         member = member_for_entry.get(name, {"name": name})
 
         try:
-            _remove_worktree_for_member(
-                member, wt_path, repo_root, ws_dir, force=force
-            )
+            _remove_worktree_for_member(member, wt_path, repo_root, ws_dir, force=force)
             removed.append(name)
         except (ConfinementError, LegacyLayoutError):
             raise
@@ -621,6 +612,7 @@ def reconcile_break(
         # escape, old layout, etc.).
         if ws_dir.exists():
             from group_resolve import central_state_dir
+
             worktrees_root = (central_state_dir(group_name, env=env) / "worktrees").resolve()
             try:
                 ws_resolved.relative_to(worktrees_root)
@@ -635,10 +627,7 @@ def reconcile_break(
         # Some removals failed. Update the manifest to reflect reality:
         # remove entries for members that were successfully removed so the
         # manifest never lists a member whose worktree is gone.
-        remaining = [
-            e for e in member_entries
-            if e["name"] not in removed
-        ]
+        remaining = [e for e in member_entries if e["name"] not in removed]
         if remaining:
             updated = dict(manifest_data)
             updated["members"] = remaining

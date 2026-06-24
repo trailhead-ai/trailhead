@@ -28,6 +28,7 @@ check as SKILL.md files so a token cannot bypass the per-skill scan by living
 in a template. App-flavored tokens are constructed at runtime below (same
 P1-F trap avoidance as the test_cli_new.py band).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -119,6 +120,7 @@ def test_template_has_no_private_tokens(template_md: Path):
 # Additional private-token tokens constructed at runtime: app-specific names
 # that MUST NOT appear in the genericized skill as raw literals.
 # ---------------------------------------------------------------------------
+
 
 def test_intake_skill_is_not_present():
     """The intake skill was removed from the plugin.

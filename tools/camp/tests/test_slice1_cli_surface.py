@@ -12,6 +12,7 @@ Contract:
 - group-aware path (_dispatch_group_command): disabled verbs, ai, rm all stub
   correctly when a group resolves (exercised via CAMP_CONFIG_DIR + --group flag).
 """
+
 from __future__ import annotations
 
 import os
@@ -57,8 +58,7 @@ def test_camp_help_contains_all_active_verbs() -> None:
     output = result.stdout
     for verb in _EXPECTED_ACTIVE_VERBS:
         assert verb in output, (
-            f"Expected active verb {verb!r} in camp help output.\n"
-            f"Output:\n{output}"
+            f"Expected active verb {verb!r} in camp help output.\nOutput:\n{output}"
         )
 
 
@@ -68,8 +68,7 @@ def test_camp_help_does_not_contain_disabled_verbs() -> None:
     output = result.stdout
     for verb in _DISABLED_VERBS:
         assert verb not in output, (
-            f"Disabled verb {verb!r} must NOT appear in camp help output.\n"
-            f"Output:\n{output}"
+            f"Disabled verb {verb!r} must NOT appear in camp help output.\nOutput:\n{output}"
         )
 
 
@@ -82,8 +81,7 @@ def test_camp_help_does_not_contain_legacy_verbs() -> None:
         # The verb may appear as part of the "use camp <new>" pointer, but it
         # must NOT appear as a standalone command listing (e.g., "  camp init").
         assert f"  camp {verb}" not in output, (
-            f"Legacy verb {verb!r} must not appear as a command in help.\n"
-            f"Output:\n{output}"
+            f"Legacy verb {verb!r} must not appear as a command in help.\nOutput:\n{output}"
         )
 
 
@@ -157,6 +155,7 @@ def test_camp_ai_is_in_reserved() -> None:
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     from spine import RESERVED
+
     assert "ai" in RESERVED, f"'ai' must be in RESERVED, got: {RESERVED}"
 
 
@@ -166,6 +165,7 @@ def test_camp_rm_is_in_reserved() -> None:
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     from spine import RESERVED
+
     assert "rm" in RESERVED, f"'rm' must be in RESERVED, got: {RESERVED}"
 
 
@@ -175,6 +175,7 @@ def test_camp_group_is_in_reserved() -> None:
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     from spine import RESERVED
+
     assert "group" in RESERVED, f"'group' must be in RESERVED, got: {RESERVED}"
 
 
@@ -184,6 +185,7 @@ def test_camp_pwd_is_in_reserved() -> None:
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     from spine import RESERVED
+
     assert "pwd" in RESERVED, f"'pwd' must be in RESERVED, got: {RESERVED}"
 
 
@@ -193,6 +195,7 @@ def test_camp_enter_is_in_reserved() -> None:
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     from spine import RESERVED
+
     assert "enter" in RESERVED, f"'enter' must be in RESERVED, got: {RESERVED}"
 
 
@@ -202,6 +205,7 @@ def test_camp_setup_is_in_reserved() -> None:
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
     from spine import RESERVED
+
     assert "setup" in RESERVED, f"'setup' must be in RESERVED, got: {RESERVED}"
 
 
@@ -217,8 +221,7 @@ def test_bare_slug_exits_nonzero() -> None:
     # routing and spine errors) or the new bare-slug handler fires.
     # The contract says bare slug must exit non-zero with a pointer.
     assert result.returncode != 0, (
-        f"bare slug should exit non-zero.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"bare slug should exit non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
 
@@ -227,8 +230,7 @@ def test_bare_slug_names_camp_ai() -> None:
     result = _run(["my-feature-slug"])
     combined = result.stdout + result.stderr
     assert "camp ai" in combined, (
-        f"bare slug error must name 'camp ai'.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"bare slug error must name 'camp ai'.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
 
@@ -303,8 +305,7 @@ def test_camp_open_gives_legible_redirect() -> None:
     result = _run(["open", "my-slug"])
     combined = result.stdout + result.stderr
     assert "ai" in combined, (
-        f"camp open should redirect to 'camp ai'.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"camp open should redirect to 'camp ai'.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
 
@@ -387,9 +388,7 @@ def _run_group(args: list[str], *, group_env: dict[str, str]) -> subprocess.Comp
 
 
 @pytest.mark.parametrize("verb", ["code", "sweep", "restock", "fire"])
-def test_group_path_disabled_verb_exits_nonzero(
-    verb: str, stub_group_env: dict[str, str]
-) -> None:
+def test_group_path_disabled_verb_exits_nonzero(verb: str, stub_group_env: dict[str, str]) -> None:
     """_dispatch_group_command routes disabled verbs to cmd_disabled → non-zero exit."""
     result = _run_group([verb], group_env=stub_group_env)
     assert result.returncode != 0, (
@@ -415,12 +414,9 @@ def test_group_path_disabled_verb_prints_stabilizes_message(
 # CAMP_TEST_NO_EXEC suppresses the placeholder claude exec (the real launch is Slice 6).
 
 
-def test_group_path_ai_seeds_and_exits_zero(
-    stub_group_env: dict[str, str], tmp_path: Path
-) -> None:
+def test_group_path_ai_seeds_and_exits_zero(stub_group_env: dict[str, str], tmp_path: Path) -> None:
     """camp ai <slug> via group path seeds the workspace and exits 0 (no claude)."""
-    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"),
-           "CAMP_TEST_NO_EXEC": "1"}
+    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"), "CAMP_TEST_NO_EXEC": "1"}
     result = _run_group(["ai", "my-slug"], group_env=env)
     assert result.returncode == 0, (
         f"camp ai via group path should seed + exit 0 with CAMP_TEST_NO_EXEC.\n"
@@ -432,8 +428,7 @@ def test_group_path_ai_announces_background_provisioning(
     stub_group_env: dict[str, str], tmp_path: Path
 ) -> None:
     """camp ai reports that provisioning runs in the background."""
-    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"),
-           "CAMP_TEST_NO_EXEC": "1"}
+    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state"), "CAMP_TEST_NO_EXEC": "1"}
     result = _run_group(["ai", "my-slug"], group_env=env)
     combined = (result.stdout + result.stderr).lower()
     assert "background" in combined or "camp status" in combined, (

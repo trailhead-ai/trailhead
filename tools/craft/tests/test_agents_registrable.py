@@ -9,6 +9,7 @@ Live proof of the mechanism (KU1): the lore plugin's `librarian` agent
 appears in the running session's registry as the namespaced subagent_type
 `lore:librarian`. craft's agents register the same way as `craft:<name>`.
 """
+
 from pathlib import Path
 
 import pytest

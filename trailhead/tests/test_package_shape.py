@@ -92,9 +92,7 @@ def test_bin_trailhead_version_no_pip():
     assert result.returncode == 0, (
         f"bin/trailhead --version failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "0.1.0" in result.stdout, (
-        f"expected '0.1.0' in output, got: {result.stdout!r}"
-    )
+    assert "0.1.0" in result.stdout, f"expected '0.1.0' in output, got: {result.stdout!r}"
 
 
 def test_bin_camp_version_no_pip():
@@ -115,9 +113,7 @@ def test_bin_camp_version_no_pip():
     assert result.returncode == 0, (
         f"bin/camp --version failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "0.1.0" in result.stdout, (
-        f"expected '0.1.0' in output, got: {result.stdout!r}"
-    )
+    assert "0.1.0" in result.stdout, f"expected '0.1.0' in output, got: {result.stdout!r}"
 
 
 def test_lore_not_importable():

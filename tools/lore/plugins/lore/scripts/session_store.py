@@ -52,6 +52,7 @@ Pure stdlib (``fcntl``, ``re``, ``pathlib``). References: Slice 6, S2, AC20/AC21
 AC22/AC23, AC-FENCE1, KU3. ``fcntl`` is stdlib on darwin/linux; flock is unreliable
 over NFS (non-issue — the vault is local git). darwin ``LOCK_UN == 8``.
 """
+
 from __future__ import annotations
 
 import fcntl
@@ -98,13 +99,9 @@ def sanitize_session_id(session_id: str) -> str:
     if "\x00" in session_id:
         raise InvalidSessionIdError("session_id must not contain a NUL byte")
     if "/" in session_id or "\\" in session_id:
-        raise InvalidSessionIdError(
-            f"session_id must not contain a path separator: {session_id!r}"
-        )
+        raise InvalidSessionIdError(f"session_id must not contain a path separator: {session_id!r}")
     if ".." in session_id:
-        raise InvalidSessionIdError(
-            f"session_id must not contain a '..' component: {session_id!r}"
-        )
+        raise InvalidSessionIdError(f"session_id must not contain a '..' component: {session_id!r}")
     if not _GUID_RE.match(session_id):
         raise InvalidSessionIdError(
             f"session_id must be a canonical GUID (8-4-4-4-12 hex): {session_id!r}"
@@ -143,7 +140,7 @@ def create_or_append(session_id: str, entry: str, sessions_dir: Path) -> None:
         if not note_path.exists():
             note_path.write_text(_header(session_id))  # lazy-create INSIDE the lock
         with open(note_path, "a") as nf:
-            nf.write(entry + "\n")                      # append INSIDE the lock
+            nf.write(entry + "\n")  # append INSIDE the lock
     finally:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
         lock_fd.close()

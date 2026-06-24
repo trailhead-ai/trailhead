@@ -16,6 +16,7 @@ U2-proven field shapes (live-verified against cli/cli):
 Carried-from-Slice-1 (M-4): the deploy paths must surface a legible in-band error
 distinguishing "gh failed (returncode + stderr)" from "gh returned non-JSON/empty".
 """
+
 from __future__ import annotations
 
 import json
@@ -181,7 +182,8 @@ class TestWorkflowRuns:
             if resp is not None:
                 return resp
             return subprocess.CompletedProcess(
-                cmd, 0, json.dumps({"total_count": 0, "workflow_runs": []}), "")
+                cmd, 0, json.dumps({"total_count": 0, "workflow_runs": []}), ""
+            )
 
         provider = get_provider("github", runner=stub)
         assert provider.deploy.workflow_runs("some/path") == []
@@ -230,6 +232,7 @@ class TestStatus:
 
     def test_zero_deployments_returns_empty_list_no_raise(self) -> None:
         """U2: zero deployments is a VALID steady state — return [], never raise."""
+
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:
@@ -311,6 +314,7 @@ class TestLogs:
     def test_not_found_run_returns_empty_list(self) -> None:
         """A 404 from gh (nonzero + Not-Found stderr) on annotations is no-false-alarm:
         empty list."""
+
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:
@@ -322,6 +326,7 @@ class TestLogs:
 
     def test_non_404_nonzero_raises_deploy_error(self) -> None:
         """A non-404 nonzero (e.g. 403 rate-limit) raises DeployError — never returns []."""
+
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:
@@ -333,10 +338,7 @@ class TestLogs:
             provider.deploy.logs("some/path", job_id="999")
 
     def test_truncation_sentinel_appended_past_cap(self) -> None:
-        many = [
-            {"path": f"f{i}.py", "start_line": i, "message": f"err {i}"}
-            for i in range(15)
-        ]
+        many = [{"path": f"f{i}.py", "start_line": i, "message": f"err {i}"} for i in range(15)]
 
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
@@ -370,10 +372,7 @@ class TestLogs:
         assert "myorg/myrepo" in api_str
         # the jq filter is a list element, not a shell pipe — no unguarded | outside of jq select
         assert "-q" in api_calls[0]
-        assert not any(
-            "|" in tok and "select" not in tok
-            for tok in api_calls[0]
-        )
+        assert not any("|" in tok and "select" not in tok for tok in api_calls[0])
 
     def test_all_calls_list_form(self) -> None:
         def stub(cmd, **kw):
@@ -395,6 +394,7 @@ class TestLogs:
 class TestDeployErrorCause:
     def test_gh_nonzero_surfaces_returncode_and_stderr(self) -> None:
         """gh exiting nonzero on the runs query → DeployError naming returncode + stderr."""
+
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:
@@ -411,6 +411,7 @@ class TestDeployErrorCause:
     def test_non_json_surfaces_distinct_cause(self) -> None:
         """gh exiting zero but with non-JSON stdout → DeployError, distinct from the
         nonzero case."""
+
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:
@@ -425,6 +426,7 @@ class TestDeployErrorCause:
 
     def test_two_branches_are_distinguishable(self) -> None:
         """The nonzero-exit message and the non-JSON message must differ (M-4)."""
+
         def nonzero_stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
             if resp is not None:

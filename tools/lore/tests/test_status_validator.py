@@ -75,6 +75,7 @@ def test_permitted_statuses_lists_canonical():
 
 # ---- Slice 2: shelved + legacy session terminal statuses are retired --------
 
+
 def test_shelved_rejected_for_plans_specs_sessions():
     """`shelved` is no longer canonical for any note type — the shelve/pickup
     feature it backed was retired (Slice 2)."""
