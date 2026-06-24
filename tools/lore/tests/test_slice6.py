@@ -53,7 +53,10 @@ def run_cli(args, env=None, input_text=None):
         full_env.update(env)
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
-        capture_output=True, text=True, env=full_env, input=input_text,
+        capture_output=True,
+        text=True,
+        env=full_env,
+        input=input_text,
     )
 
 
@@ -64,7 +67,9 @@ def run_validator(args, env=None):
         full_env.update(env)
     return subprocess.run(
         [sys.executable, str(SCRIPTS_DIR / "status_validator.py"), *args],
-        capture_output=True, text=True, env=full_env,
+        capture_output=True,
+        text=True,
+        env=full_env,
     )
 
 
@@ -83,18 +88,22 @@ def home(tmp_path):
 def _git_init(path: Path, gpg_sign: bool = False) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@e.st"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@e.st"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
+    )
     if not gpg_sign:
-        subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(path), "config", "commit.gpgsign", "false"],
+            check=True,
+            capture_output=True,
+        )
 
 
 def _install_guard(vault: Path) -> subprocess.CompletedProcess:
-    return run_sh(INSTALLER_SH, args=[str(vault)],
-                  env={"LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)})
+    return run_sh(INSTALLER_SH, args=[str(vault)], env={"LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)})
 
 
 def _make_note(path: Path, note_type: str, status: str) -> None:
@@ -105,11 +114,13 @@ def _git_commit_all(vault: Path, msg: str = "init") -> subprocess.CompletedProce
     subprocess.run(["git", "-C", str(vault), "add", "-A"], capture_output=True)
     return subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", msg],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
 # ── status_validator.py CLI main() ────────────────────────────────────────────
+
 
 def test_validator_cli_exits_nonzero_for_bad_status(tmp_path):
     note = tmp_path / "bad.md"
@@ -158,6 +169,7 @@ def test_validator_cli_mixed_valid_and_invalid(tmp_path):
 
 
 # ── install-vault-hooks.sh ────────────────────────────────────────────────────
+
 
 def test_installer_creates_pre_commit_hook(tmp_path):
     vault = tmp_path / "vault"
@@ -221,6 +233,7 @@ def test_installer_requires_git_repo(tmp_path):
 
 # ── pre-commit-status-guard.sh (installed hook end-to-end) ───────────────────
 
+
 def _setup_guarded_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     _git_init(vault)
@@ -242,13 +255,15 @@ def test_guard_rejects_bad_status_at_commit(tmp_path):
     subprocess.run(["git", "-C", str(vault), "add", str(note)], check=True, capture_output=True)
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "should be rejected"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode != 0
     # The bad note must NOT have been committed
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert "should be rejected" not in log.stdout
 
@@ -260,7 +275,8 @@ def test_guard_passes_canonical_status(tmp_path):
     subprocess.run(["git", "-C", str(vault), "add", str(note)], check=True, capture_output=True)
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "good note"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stderr + r.stdout
 
@@ -272,7 +288,8 @@ def test_guard_noop_for_non_md_file(tmp_path):
     subprocess.run(["git", "-C", str(vault), "add", str(txt)], check=True, capture_output=True)
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "text only"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stderr + r.stdout
 
@@ -283,6 +300,7 @@ def test_guard_noop_for_non_md_file(tmp_path):
 # arbitrary user-specified location. Slice 1 (S5) replaced that with a
 # non-interactive installer: init now bootstraps $XDG_STATE_HOME/lore/vaults/default.
 # The tests below verify the new semantics.
+
 
 def test_init_creates_git_repo(tmp_path):
     """init bootstraps vaults/default as a git repo under XDG_STATE_HOME."""
@@ -336,6 +354,7 @@ def test_init_skips_git_init_if_already_a_repo(tmp_path):
 
 # ── lore sync ─────────────────────────────────────────────────────────────────
 
+
 def _make_sync_vault(tmp_path: Path) -> Path:
     """Create a git-initialized vault with initial commit and guard installed."""
     vault = tmp_path / "vault"
@@ -356,7 +375,8 @@ def test_sync_commits_dirty_vault(tmp_path):
     assert r.returncode == 0, r.stderr
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert len(log.stdout.strip().splitlines()) == 2  # init + sync commit
 
@@ -367,7 +387,8 @@ def test_sync_noop_on_clean_tree(tmp_path):
     assert r.returncode == 0, r.stderr
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert len(log.stdout.strip().splitlines()) == 1  # only init, no empty commit
 
@@ -382,7 +403,8 @@ def test_sync_respects_gpgsign_false(tmp_path):
     assert r.returncode == 0, r.stderr + r.stdout
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert len(log.stdout.strip().splitlines()) == 2
 
@@ -404,7 +426,8 @@ def test_sync_aborts_on_toplevel_mismatch(tmp_path):
     # Parent repo should be unmodified
     log = subprocess.run(
         ["git", "-C", str(parent), "log", "--oneline"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert len(log.stdout.strip().splitlines()) == 1
 
@@ -417,9 +440,7 @@ def test_sync_skips_push_without_origin(tmp_path):
     assert r.returncode == 0, r.stderr
     combined = r.stdout + r.stderr
     assert (
-        "origin" in combined.lower()
-        or "push" in combined.lower()
-        or "remote" in combined.lower()
+        "origin" in combined.lower() or "push" in combined.lower() or "remote" in combined.lower()
     )
 
 
@@ -430,19 +451,22 @@ def test_sync_accepts_custom_message(tmp_path):
     assert r.returncode == 0, r.stderr
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert "my custom commit" in log.stdout
 
 
 # ── C1: guard fails CLOSED when plugin has moved (LORE_GUARD_STRICT) ─────────
 
+
 def test_guard_strict_blocks_when_plugin_root_missing(tmp_path):
     """C1: With LORE_GUARD_STRICT=1 and a non-existent LORE_PLUGIN_ROOT,
     running the guard exits non-zero (fail closed), not silently 0."""
     r = subprocess.run(
         ["bash", str(GUARD_SH)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         env={
             **os.environ,
             "LORE_GUARD_STRICT": "1",
@@ -475,11 +499,13 @@ def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
     # We verify: if STRICT is set and root is gone → fail closed
     # For test, we inject STRICT manually since the installer may not set it yet
     # Once C1 fix is complete, the installer will bake it automatically
-    hook.write_text(broken_text.replace(
-        "export LORE_PLUGIN_ROOT=",
-        "export LORE_GUARD_STRICT=1\nexport LORE_PLUGIN_ROOT=",
-        1,
-    ))
+    hook.write_text(
+        broken_text.replace(
+            "export LORE_PLUGIN_ROOT=",
+            "export LORE_GUARD_STRICT=1\nexport LORE_PLUGIN_ROOT=",
+            1,
+        )
+    )
     hook.chmod(0o755)
 
     # Initial commit to establish HEAD
@@ -493,7 +519,8 @@ def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
     subprocess.run(["git", "-C", str(vault), "add", str(note)], capture_output=True)
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "should be blocked"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode != 0, (
         "guard must fail closed when STRICT=1 and plugin has moved; "
@@ -518,7 +545,8 @@ def test_guard_lenient_without_strict_when_plugin_missing(tmp_path):
     behavior for development / direct invocation use-cases."""
     r = subprocess.run(
         ["bash", str(GUARD_SH)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         env={
             **os.environ,
             "LORE_PLUGIN_ROOT": "/nonexistent/path",
@@ -529,6 +557,7 @@ def test_guard_lenient_without_strict_when_plugin_missing(tmp_path):
 
 
 # ── C2: non-ASCII filenames bypass the guard ──────────────────────────────────
+
 
 def test_guard_rejects_bad_status_non_ascii_filename(tmp_path):
     """C2: A note with a non-ASCII filename carrying a bad status must be rejected."""
@@ -541,11 +570,10 @@ def test_guard_rejects_bad_status_non_ascii_filename(tmp_path):
     )
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "non-ascii bad status"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    assert r.returncode != 0, (
-        "guard must reject a bad-status note with a non-ASCII filename"
-    )
+    assert r.returncode != 0, "guard must reject a bad-status note with a non-ASCII filename"
 
 
 def test_guard_passes_good_status_non_ascii_filename(tmp_path):
@@ -559,12 +587,14 @@ def test_guard_passes_good_status_non_ascii_filename(tmp_path):
     )
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "non-ascii good status"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, f"good non-ASCII note must pass: {r.stderr} {r.stdout}"
 
 
 # ── I1: validator silently skips unreadable files → must fail closed ──────────
+
 
 def test_validator_cli_exits_nonzero_for_nonexistent_file(tmp_path):
     """I1: Passing a non-existent path to the validator must produce non-zero exit."""
@@ -575,6 +605,7 @@ def test_validator_cli_exits_nonzero_for_nonexistent_file(tmp_path):
 
 
 # ── I2: guard reads working tree, not staged blob ─────────────────────────────
+
 
 def test_guard_validates_staged_blob_not_working_copy(tmp_path):
     """I2a: Stage a BAD-status note, then fix working copy without re-staging.
@@ -589,11 +620,10 @@ def test_guard_validates_staged_blob_not_working_copy(tmp_path):
     # Guard should read the staged blob (bad) and reject
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "should be rejected"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    assert r.returncode != 0, (
-        "guard must read staged blob; working-copy fix must not fool it"
-    )
+    assert r.returncode != 0, "guard must read staged blob; working-copy fix must not fool it"
 
 
 def test_guard_passes_good_staged_blob_even_if_working_copy_bad(tmp_path):
@@ -609,7 +639,8 @@ def test_guard_passes_good_staged_blob_even_if_working_copy_bad(tmp_path):
     # Guard reads staged blob (good) → commit allowed
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "staged blob is good"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, (
         f"guard must allow commit when staged blob is good, even if working copy is bad: "
@@ -618,6 +649,7 @@ def test_guard_passes_good_staged_blob_even_if_working_copy_bad(tmp_path):
 
 
 # ── I3: lore sync exit code after push failure ────────────────────────────────
+
 
 def _make_sync_vault_with_failing_remote(tmp_path: Path) -> tuple[Path, Path]:
     """Create a vault with an origin that will fail to push."""
@@ -630,9 +662,17 @@ def _make_sync_vault_with_failing_remote(tmp_path: Path) -> tuple[Path, Path]:
 
     # Add a remote that doesn't exist → push will fail
     subprocess.run(
-        ["git", "-C", str(vault), "remote", "add", "origin",
-         "git@github.com:nonexistent-test-org-xyz/nonexistent-repo.git"],
-        check=True, capture_output=True,
+        [
+            "git",
+            "-C",
+            str(vault),
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:nonexistent-test-org-xyz/nonexistent-repo.git",
+        ],
+        check=True,
+        capture_output=True,
     )
     return vault
 
@@ -660,7 +700,8 @@ def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
     # The commit must have been made
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert len(log.stdout.strip().splitlines()) == 2, (
         "commit must have been made before push was attempted"
@@ -668,6 +709,7 @@ def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
 
 
 # ── M2: pass "$@" to the guard in chained wrapper ────────────────────────────
+
 
 def test_installer_chained_wrapper_passes_args(tmp_path):
     """M2: When chaining over an existing hook, the wrapper passes $@ to the guard."""
@@ -682,7 +724,7 @@ def test_installer_chained_wrapper_passes_args(tmp_path):
     hook_text = hook_path.read_text()
     # The chained guard invocation must pass "$@"
     assert '"$@"' in hook_text, (
-        f"chained wrapper must pass \"$@\" to the guard; hook content:\n{hook_text}"
+        f'chained wrapper must pass "$@" to the guard; hook content:\n{hook_text}'
     )
 
 
@@ -691,6 +733,7 @@ def test_installer_chained_wrapper_passes_args(tmp_path):
 # The old M3 tested that a planned-tree preview text matched directories created
 # by the interactive scaffolding. Slice 1 (S5) removed the interactive scaffolding
 # entirely. The new invariant is simply: init exits 0 and the canonical vault exists.
+
 
 def test_init_planned_tree_shows_both_template_dirs(tmp_path):
     """M3 (updated for S5): init exits 0 and bootstraps the default vault."""

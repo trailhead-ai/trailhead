@@ -13,6 +13,7 @@ The WorktreeRemove wiring was dropped in Slice 2: camp owns teardown via
 `camp rm`, per the unified-workspace ADR. The `worktree-cleanup` handler is
 retained (still invocable) but no longer auto-wired into member settings.
 """
+
 from __future__ import annotations
 
 import json

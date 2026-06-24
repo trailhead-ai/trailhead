@@ -9,6 +9,7 @@ Test contract:
 - marketplace.json source resolves (./plugins/camp).
 - D-H guard: cli/camp --help succeeds; guard function tested in test_spine.py.
 """
+
 from __future__ import annotations
 
 import json
@@ -140,6 +141,7 @@ def test_bin_camp_wrapper_exits_0_on_help() -> None:
 
 def test_capabilities_toml_loads_and_validates() -> None:
     from trailhead.capabilities import load_manifest
+
     manifest = load_manifest(_CAPABILITIES_TOML)
     assert manifest.tool_name == "camp"
     assert manifest.validate is True
@@ -151,6 +153,7 @@ def test_capabilities_toml_no_skills() -> None:
     # harness opens, so worktree orchestration is operator-facing (README), not
     # a skill the agent invokes.
     from trailhead.capabilities import load_manifest
+
     manifest = load_manifest(_CAPABILITIES_TOML)
     assert manifest.base == []
     assert manifest.skills == {}
@@ -174,16 +177,22 @@ def _init_git_repo(path: Path) -> None:
     """Initialize a real git repo at path with an initial commit."""
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
+    )
     readme = path / "README.md"
     readme.write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _run_init(
@@ -261,9 +270,12 @@ def test_author_from_flags_writes_loadable_config(author_env):
     result = _run_init(
         [
             "mygroup",
-            "--member", f"alpha={repos['alpha']}",
-            "--member", f"beta={repos['beta']}",
-            "--member", f"gamma={repos['gamma']}",
+            "--member",
+            f"alpha={repos['alpha']}",
+            "--member",
+            f"beta={repos['beta']}",
+            "--member",
+            f"gamma={repos['gamma']}",
         ],
         config_dir=g["config_dir"],
         state_dir=g["state_dir"],
@@ -284,8 +296,10 @@ def test_force_redefine_does_not_self_collide(author_env):
     repos = g["repos"]
     base = [
         "mygroup",
-        "--member", f"alpha={repos['alpha']}",
-        "--member", f"beta={repos['beta']}",
+        "--member",
+        f"alpha={repos['alpha']}",
+        "--member",
+        f"beta={repos['beta']}",
     ]
     first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
     assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"

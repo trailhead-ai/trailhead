@@ -42,6 +42,7 @@ def load_script(name: str):
     if name in sys.modules:
         del sys.modules[name]
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -66,6 +67,7 @@ def index_store():
 # ---------------------------------------------------------------------------
 # Fixture index builder
 # ---------------------------------------------------------------------------
+
 
 def _sidecar(
     *,
@@ -123,21 +125,29 @@ def fixture_index(tmp_path, index_store):
     env["XDG_STATE_HOME"] = str(fake_state)
 
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(
-            kind="spec", title="Alpha Spec", status="active",
+            kind="spec",
+            title="Alpha Spec",
+            status="active",
             keywords=["search"],
             related={"area": ["penny"]},
         ),
         "unique body word zephyr",
     )
     _write_record(
-        vault, "plan", "beta",
+        vault,
+        "plan",
+        "beta",
         _sidecar(kind="plan", title="Beta Plan", status="draft"),
         "beta only body content here",
     )
     _write_record(
-        vault, "area", "penny",
+        vault,
+        "area",
+        "penny",
         _sidecar(kind="area", title="Penny Area", status="active"),
         "penny area body",
     )
@@ -164,18 +174,24 @@ def ranking_index(tmp_path, index_store):
     env["XDG_STATE_HOME"] = str(fake_state)
 
     _write_record(
-        vault, "spec", "title-hit",
+        vault,
+        "spec",
+        "title-hit",
         _sidecar(kind="spec", title="zephyr report", status="active"),
         "filler text without the magic word",
     )
     _write_record(
-        vault, "spec", "body-hit",
+        vault,
+        "spec",
+        "body-hit",
         _sidecar(kind="spec", title="Body Only", status="active"),
         "a zephyr lives in the body content",
     )
     # A non-matching record to confirm NULL-score rows sort last.
     _write_record(
-        vault, "spec", "no-hit",
+        vault,
+        "spec",
+        "no-hit",
         _sidecar(kind="spec", title="Nothing", status="active"),
         "irrelevant content entirely",
     )
@@ -197,6 +213,7 @@ def _ids(rows, conn):
 # ---------------------------------------------------------------------------
 # LOCKED compile-table rows
 # ---------------------------------------------------------------------------
+
 
 class TestLockedCompileTable:
     """Each LOCKED compile-table row → expected SQL fragment + params."""
@@ -288,8 +305,7 @@ class TestLockedCompileTable:
         cq = compiler.compile(kql.parse("foo"))
         assert cq.has_fts
         assert (
-            "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
-            in cq.where
+            "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)" in cq.where
         )
         assert "foo" in cq.params
 
@@ -297,8 +313,7 @@ class TestLockedCompileTable:
         cq = compiler.compile(kql.parse('"penny worker"'))
         assert cq.has_fts
         assert (
-            "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
-            in cq.where
+            "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)" in cq.where
         )
         assert '"penny worker"' in cq.params
 
@@ -330,6 +345,7 @@ class TestLockedCompileTable:
 # ---------------------------------------------------------------------------
 # CRITICAL #1 — boolean composition across the FTS/SQL boundary
 # ---------------------------------------------------------------------------
+
 
 class TestBooleanComposition:
     """Full-text composes uniformly with scalar/facet predicates in SQL."""
@@ -392,6 +408,7 @@ class TestBooleanComposition:
 # MATCH encoding (single-term predicate strings — locked encoding preserved)
 # ---------------------------------------------------------------------------
 
+
 class TestMatchEncoding:
     """Each full-text node carries its own single-term MATCH string param."""
 
@@ -427,8 +444,8 @@ class TestMatchEncoding:
 # Ranking selection
 # ---------------------------------------------------------------------------
 
-class TestRankingSelection:
 
+class TestRankingSelection:
     def test_fulltext_query_uses_bm25_order(self, kql, compiler):
         cq = compiler.compile(kql.parse("foo"))
         assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.order_by
@@ -481,8 +498,8 @@ class TestRankingSelection:
 # Vault scope
 # ---------------------------------------------------------------------------
 
-class TestVaultScope:
 
+class TestVaultScope:
     def test_vault_none_adds_no_predicate(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"), vault=None)
         assert "vault" not in cq.where
@@ -501,8 +518,8 @@ class TestVaultScope:
 # Limit (bound param)
 # ---------------------------------------------------------------------------
 
-class TestLimit:
 
+class TestLimit:
     def test_default_limit_is_20(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"))
         assert cq.limit == 20
@@ -532,6 +549,7 @@ class TestLimit:
 # ---------------------------------------------------------------------------
 # Positional param alignment (executed)
 # ---------------------------------------------------------------------------
+
 
 class TestParamAlignment:
     """full_query() placeholders and params stay positionally aligned (executed)."""
@@ -571,8 +589,8 @@ class TestParamAlignment:
 # SQL injection safety (council-flagged, REQUIRED)
 # ---------------------------------------------------------------------------
 
-class TestInjectionSafety:
 
+class TestInjectionSafety:
     def test_scalar_value_is_bound_not_interpolated(self, kql, compiler):
         kql_mod = load_script("kql")
         inject_ast = kql_mod.FieldEq(field="kind", value="penny' OR '1'='1")
@@ -600,8 +618,8 @@ class TestInjectionSafety:
 # SECURITY — Compare.op guard (no assert, generic message)
 # ---------------------------------------------------------------------------
 
-class TestCompareOpGuard:
 
+class TestCompareOpGuard:
     def test_invalid_op_raises_value_error(self, compiler):
         kql_mod = load_script("kql")
         bad = kql_mod.Compare(field="created-at", op="; DROP TABLE records;--", value="x")
@@ -619,8 +637,8 @@ class TestCompareOpGuard:
 # SECURITY — unknown column raises (no node.field fallthrough)
 # ---------------------------------------------------------------------------
 
-class TestUnknownColumnGuard:
 
+class TestUnknownColumnGuard:
     def test_unknown_field_eq_column_raises(self, compiler):
         kql_mod = load_script("kql")
         node = kql_mod.FieldEq(field="evil_col", value="x")
@@ -639,6 +657,7 @@ class TestUnknownColumnGuard:
 # ---------------------------------------------------------------------------
 # SECURITY — FTS5 strict-allowlist sanitizer (executed)
 # ---------------------------------------------------------------------------
+
 
 class TestFtsSanitizer:
     """Strict allowlist: tokens not matching ^[-A-Za-z0-9._]+$ become quoted literals."""
@@ -715,8 +734,8 @@ class TestFtsSanitizer:
 # SECURITY — empty-after-strip token raises a clean compile error
 # ---------------------------------------------------------------------------
 
-class TestEmptyAfterStrip:
 
+class TestEmptyAfterStrip:
     @pytest.mark.parametrize("term", ['"', "\\", '""'])
     def test_empty_after_strip_raises(self, compiler, term):
         kql_mod = load_script("kql")
@@ -737,8 +756,8 @@ class TestEmptyAfterStrip:
 # Full SELECT query shape (Slice 4 compatibility)
 # ---------------------------------------------------------------------------
 
-class TestFullQueryShape:
 
+class TestFullQueryShape:
     def test_full_query_selects_from_records(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"))
         sql = cq.full_query()
@@ -794,8 +813,16 @@ class TestFullQueryShape:
 # Slice 4 — label selectors (LabelEq / LabelExists)
 # ---------------------------------------------------------------------------
 
-def _label_sidecar(*, kind="spec", title="L", status="active", labels=None,
-                   annotations=None, updated_at="2026-06-17T10:00:00Z"):
+
+def _label_sidecar(
+    *,
+    kind="spec",
+    title="L",
+    status="active",
+    labels=None,
+    annotations=None,
+    updated_at="2026-06-17T10:00:00Z",
+):
     s = _sidecar(kind=kind, title=title, status=status, updated_at=updated_at)
     if labels is not None:
         s["labels"] = labels
@@ -808,11 +835,11 @@ def _label_sidecar(*, kind="spec", title="L", status="active", labels=None,
 def label_index(tmp_path, index_store):
     """Index with label-bearing records.
 
-      - spec/has-s5      labels={"worktree":"s5"}
-      - spec/has-s6      labels={"worktree":"s6"}
-      - spec/namespaced  labels={"claude-code/model":"opus"}
-      - spec/two-labels  labels={"worktree":"s5","phase":"build"}
-      - spec/no-labels   annotations={"note":"x"} only (no labels)
+    - spec/has-s5      labels={"worktree":"s5"}
+    - spec/has-s6      labels={"worktree":"s6"}
+    - spec/namespaced  labels={"claude-code/model":"opus"}
+    - spec/two-labels  labels={"worktree":"s5","phase":"build"}
+    - spec/no-labels   annotations={"note":"x"} only (no labels)
     """
     vault = tmp_path / "vault"
     fake_state = tmp_path / "xdg-state"
@@ -820,23 +847,41 @@ def label_index(tmp_path, index_store):
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
 
-    _write_record(vault, "spec", "has-s5",
-                  _label_sidecar(title="Has S5", labels={"worktree": "s5"}),
-                  "body s5")
-    _write_record(vault, "spec", "has-s6",
-                  _label_sidecar(title="Has S6", labels={"worktree": "s6"}),
-                  "body s6")
-    _write_record(vault, "spec", "namespaced",
-                  _label_sidecar(title="Namespaced",
-                                 labels={"claude-code/model": "opus"}),
-                  "body ns")
-    _write_record(vault, "spec", "two-labels",
-                  _label_sidecar(title="Two",
-                                 labels={"worktree": "s5", "phase": "build"}),
-                  "body two")
-    _write_record(vault, "spec", "no-labels",
-                  _label_sidecar(title="None", annotations={"note": "x"}),
-                  "body none")
+    _write_record(
+        vault,
+        "spec",
+        "has-s5",
+        _label_sidecar(title="Has S5", labels={"worktree": "s5"}),
+        "body s5",
+    )
+    _write_record(
+        vault,
+        "spec",
+        "has-s6",
+        _label_sidecar(title="Has S6", labels={"worktree": "s6"}),
+        "body s6",
+    )
+    _write_record(
+        vault,
+        "spec",
+        "namespaced",
+        _label_sidecar(title="Namespaced", labels={"claude-code/model": "opus"}),
+        "body ns",
+    )
+    _write_record(
+        vault,
+        "spec",
+        "two-labels",
+        _label_sidecar(title="Two", labels={"worktree": "s5", "phase": "build"}),
+        "body two",
+    )
+    _write_record(
+        vault,
+        "spec",
+        "no-labels",
+        _label_sidecar(title="None", annotations={"note": "x"}),
+        "body none",
+    )
 
     conn = index_store.open_index(env=env)
     index_store.rebuild([str(vault)], conn)
@@ -972,8 +1017,8 @@ class TestLabelInjectionSafety:
 # CompiledQuery structure
 # ---------------------------------------------------------------------------
 
-class TestCompiledQueryStructure:
 
+class TestCompiledQueryStructure:
     def test_compiled_query_has_expected_attrs(self, kql, compiler):
         cq = compiler.compile(kql.parse("kind:spec"))
         for attr in ("where", "params", "order_by", "limit", "has_fts", "rank_match"):

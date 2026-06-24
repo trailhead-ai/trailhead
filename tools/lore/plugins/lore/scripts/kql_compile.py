@@ -202,6 +202,7 @@ def _sanitize_phrase_text(raw: str) -> str:
 # CompiledQuery
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CompiledQuery:
     """Output of ``compile(ast)``.
@@ -246,9 +247,7 @@ class CompiledQuery:
 # Internal compiler state
 # ---------------------------------------------------------------------------
 
-_FTS_PREDICATE = (
-    "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
-)
+_FTS_PREDICATE = "records.rowid IN (SELECT rowid FROM record_fts WHERE record_fts MATCH ?)"
 
 
 class _Compiler:
@@ -314,18 +313,12 @@ class _Compiler:
         # both are VALUES, never SQL column names, so a label key/value containing
         # SQL metachars is structurally inert (mirrors FacetMembership). Do NOT
         # string-interpolate either — this is a hard security requirement.
-        sql = (
-            "EXISTS (SELECT 1 FROM record_labels "
-            "WHERE id = records.id AND key = ? AND value = ?)"
-        )
+        sql = "EXISTS (SELECT 1 FROM record_labels WHERE id = records.id AND key = ? AND value = ?)"
         return sql, [node.key, node.value]
 
     def _compile_label_exists(self, node) -> tuple:
         # ``key`` is a BIND param (existence-only — no value predicate).
-        sql = (
-            "EXISTS (SELECT 1 FROM record_labels "
-            "WHERE id = records.id AND key = ?)"
-        )
+        sql = "EXISTS (SELECT 1 FROM record_labels WHERE id = records.id AND key = ?)"
         return sql, [node.key]
 
     def _compile_fulltext(self, node) -> tuple:
@@ -389,6 +382,7 @@ def _combine_sql(left_sql: str, right_sql: str, op: str) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def compile(ast, *, vault=None, limit=20) -> CompiledQuery:
     """Compile a KQL AST to a parameterized SQL fragment set.

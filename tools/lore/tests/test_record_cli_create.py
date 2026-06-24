@@ -41,6 +41,7 @@ always agree.  This file exercises:
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern).  Never
 writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
 """
+
 from __future__ import annotations
 
 import json
@@ -56,6 +57,7 @@ SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_config(config_home: Path, vaults: list[dict]) -> Path:
     """Write a config.json under config_home/lore/ and return its path."""
@@ -75,6 +77,7 @@ def _run_with_config(args, *, vault, state, config_home, stdin_text=None):
         env_extra={"XDG_CONFIG_HOME": str(config_home)},
     )
 
+
 def _find_sidecar(vault: Path, record_id: str) -> dict:
     """Read and JSON-parse the sidecar for a RECORD_ID (``<kind>/<name>``)."""
     kind, name = record_id.split("/", 1)
@@ -92,10 +95,14 @@ def _find_body(vault: Path, record_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 _BASE_ARGS = [
-    "record", "create",
-    "--kind", "spec",
-    "--title", "My Record",
-    "--keyword", "foo",
+    "record",
+    "create",
+    "--kind",
+    "spec",
+    "--title",
+    "My Record",
+    "--keyword",
+    "foo",
 ]
 
 
@@ -103,12 +110,14 @@ _BASE_ARGS = [
 # AC1: body from stdin → stored verbatim; sidecar + index consistent
 # ---------------------------------------------------------------------------
 
+
 def test_create_with_piped_body_returns_id_on_stdout(tmp_path):
     """create with piped body → RECORD_ID printed on stdout (AC4)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         stdin_text="# Hello\nThis is the body.\n",
     )
     assert r.returncode == 0, r.stderr
@@ -122,7 +131,8 @@ def test_create_with_piped_body_body_and_sidecar_consistent(tmp_path):
     body_text = "# Hello\nThis is the body.\n"
     r = _run(
         _BASE_ARGS,
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         stdin_text=body_text,
     )
     assert r.returncode == 0, r.stderr
@@ -147,7 +157,8 @@ def test_create_with_piped_body_index_row_present(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         stdin_text="body text\n",
     )
     assert r.returncode == 0, r.stderr
@@ -177,12 +188,14 @@ def test_create_with_piped_body_index_row_present(tmp_path):
 # AC1: no stdin → empty body, sidecar has only auto-set / required metadata
 # ---------------------------------------------------------------------------
 
+
 def test_create_no_stdin_empty_body(tmp_path):
     """With no stdin the stored body is empty (AC1)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         # no stdin_text → subprocess stdin is None (closed)
     )
     assert r.returncode == 0, r.stderr
@@ -195,7 +208,8 @@ def test_create_no_stdin_sidecar_has_auto_fields_only(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
@@ -214,12 +228,14 @@ def test_create_no_stdin_sidecar_has_auto_fields_only(tmp_path):
 # AC2: missing --kind → non-zero, nothing created
 # ---------------------------------------------------------------------------
 
+
 def test_create_missing_kind_exits_nonzero(tmp_path):
     """Missing --kind → non-zero exit; nothing written (AC2)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--title", "Test", "--keyword", "foo"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     # Error message must name the missing requirement.
@@ -232,13 +248,15 @@ def test_create_missing_kind_exits_nonzero(tmp_path):
 # AC-TX3: leading ``---`` in body is preserved verbatim, NOT parsed
 # ---------------------------------------------------------------------------
 
+
 def test_create_leading_triple_dash_body_stored_verbatim(tmp_path):
     """A body starting with '---' is stored as-is; sidecar is NOT affected (AC-TX3)."""
     vault, state = _make_vault(tmp_path)
     body_text = "---\nsome: yaml-like-content\n---\n\nActual body here.\n"
     r = _run(
         _BASE_ARGS,
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         stdin_text=body_text,
     )
     assert r.returncode == 0, r.stderr
@@ -255,12 +273,14 @@ def test_create_leading_triple_dash_body_stored_verbatim(tmp_path):
 # Slice 1: --status (scalar) sets the field; off-vocab → non-zero, vocab named
 # ---------------------------------------------------------------------------
 
+
 def test_status_flag_sets_field(tmp_path):
     """--status sets the sidecar status to an in-vocab value."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--status", "ready"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -271,9 +291,20 @@ def test_status_off_vocab_nonzero_names_vocab(tmp_path):
     """An off-vocab --status → non-zero; stderr names the permitted vocab (A3)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        ["record", "create", "--kind", "decision", "--title", "T",
-         "--keyword", "foo", "--status", "nonsense"],
-        vault=vault, state_dir=state,
+        [
+            "record",
+            "create",
+            "--kind",
+            "decision",
+            "--title",
+            "T",
+            "--keyword",
+            "foo",
+            "--status",
+            "nonsense",
+        ],
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     err = r.stderr.lower()
@@ -286,13 +317,25 @@ def test_status_off_vocab_nonzero_names_vocab(tmp_path):
 # Slice 1: repeatable list flags append; --unset-<field> VALUE removes one
 # ---------------------------------------------------------------------------
 
+
 def test_keyword_flag_appends(tmp_path):
     """--keyword a --keyword b → keywords == ['a', 'b'] (append order preserved)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        ["record", "create", "--kind", "spec", "--title", "My Record",
-         "--keyword", "a", "--keyword", "b"],
-        vault=vault, state_dir=state,
+        [
+            "record",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "My Record",
+            "--keyword",
+            "a",
+            "--keyword",
+            "b",
+        ],
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -303,9 +346,22 @@ def test_unset_keyword_removes_single_item(tmp_path):
     """--unset-keyword a removes only 'a' from the keywords list."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        ["record", "create", "--kind", "spec", "--title", "My Record",
-         "--keyword", "a", "--keyword", "b", "--unset-keyword", "a"],
-        vault=vault, state_dir=state,
+        [
+            "record",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "My Record",
+            "--keyword",
+            "a",
+            "--keyword",
+            "b",
+            "--unset-keyword",
+            "a",
+        ],
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -316,12 +372,17 @@ def test_related_url_flag_appends_and_unsets(tmp_path):
     """--related-url appends to related-urls; --unset-related-url removes one."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + [
-            "--related-url", "https://a.example",
-            "--related-url", "https://b.example",
-            "--unset-related-url", "https://a.example",
+        _BASE_ARGS
+        + [
+            "--related-url",
+            "https://a.example",
+            "--related-url",
+            "https://b.example",
+            "--unset-related-url",
+            "https://a.example",
         ],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -333,7 +394,8 @@ def test_related_file_flag_maps_to_related_files_or_folders(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related-file", "src/foo.py", "--related-file", "src/bar.py"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -345,7 +407,8 @@ def test_related_phase_flag_appends(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related-phase", "frame", "--related-phase", "build"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -356,12 +419,14 @@ def test_related_phase_flag_appends(tmp_path):
 # Slice 1: --related <kind>=<name> map flag
 # ---------------------------------------------------------------------------
 
+
 def test_related_map_flag_appends_under_kind(tmp_path):
     """--related plan=foo --related plan=bar → related == {'plan': ['foo','bar']}."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related", "plan=foo", "--related", "plan=bar"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -373,7 +438,8 @@ def test_related_map_invalid_kind_nonzero_names_kind(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related", "bogus=x"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert "bogus" in r.stderr
@@ -385,7 +451,8 @@ def test_related_map_empty_name_rejected_by_guard(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related", "plan="],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert list(vault.glob("**/*.md")) == []
@@ -396,7 +463,8 @@ def test_related_map_empty_kind_rejected_by_guard(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--related", "=foo"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert list(vault.glob("**/*.md")) == []
@@ -406,12 +474,14 @@ def test_related_map_empty_kind_rejected_by_guard(tmp_path):
 # Slice 1: keywords optional — create with no --keyword succeeds
 # ---------------------------------------------------------------------------
 
+
 def test_create_no_keyword_succeeds(tmp_path):
     """create with NO --keyword now validates and succeeds (keywords optional)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--kind", "spec", "--title", "My Record"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
@@ -422,12 +492,14 @@ def test_create_no_keyword_succeeds(tmp_path):
 # Slice 1: --set/--unset are gone; provenance remains unwritable
 # ---------------------------------------------------------------------------
 
+
 def test_set_flag_is_unrecognized(tmp_path):
     """--set is removed: argparse rejects it as an unrecognized argument."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--set", "title=x"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert list(vault.glob("**/*.md")) == []
@@ -438,7 +510,8 @@ def test_unset_flag_is_unrecognized(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--unset", "keywords"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert list(vault.glob("**/*.md")) == []
@@ -450,7 +523,8 @@ def test_no_flag_for_provenance_fields(tmp_path):
     for prov_flag in ("--created-at", "--created-by", "--updated-at", "--updated-by"):
         r = _run(
             _BASE_ARGS + [prov_flag, "x"],
-            vault=vault, state_dir=state,
+            vault=vault,
+            state_dir=state,
         )
         assert r.returncode != 0, f"{prov_flag} should be unrecognized"
 
@@ -459,12 +533,14 @@ def test_no_flag_for_provenance_fields(tmp_path):
 # AC-DISP1: unknown subcommand → non-zero with "did you mean" hint
 # ---------------------------------------------------------------------------
 
+
 def test_unknown_subcommand_hints_did_you_mean(tmp_path):
     """An unrecognized command → non-zero + 'did you mean' hint (AC-DISP1)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["frob"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     out = r.stdout + r.stderr
@@ -483,7 +559,8 @@ def test_search_is_a_registered_command(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["search"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     out = (r.stdout + r.stderr).lower()
@@ -504,7 +581,8 @@ def test_valid_command_bad_arg_does_not_emit_unknown_command_hint(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--title", "No Kind Here"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     out = (r.stdout + r.stderr).lower()
@@ -515,15 +593,20 @@ def test_valid_command_bad_arg_does_not_emit_unknown_command_hint(tmp_path):
 # Slice 2: --label / --annotation / --unset-label / --unset-annotation
 # ---------------------------------------------------------------------------
 
+
 def test_create_label_two_entries_both_stored(tmp_path):
     """create --label worktree=s5 --label claude-code/model=x → both entries in labels."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + [
-            "--label", "worktree=s5",
-            "--label", "claude-code/model=x",
+        _BASE_ARGS
+        + [
+            "--label",
+            "worktree=s5",
+            "--label",
+            "claude-code/model=x",
         ],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
@@ -536,7 +619,8 @@ def test_create_label_validates_compact_serialization(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--label", "worktree=s5"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
@@ -544,6 +628,7 @@ def test_create_label_validates_compact_serialization(tmp_path):
     raw = (vault / kind / f"{name}.json").read_text(encoding="utf-8")
     # Compact: no newlines inside the JSON, and round-trips cleanly.
     import json as _json
+
     assert "\n" not in raw
     parsed = _json.loads(raw)
     assert parsed["labels"] == {"worktree": "s5"}
@@ -554,7 +639,8 @@ def test_create_annotation_stored(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--annotation", "note=hello"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
@@ -567,7 +653,8 @@ def test_create_label_bad_key_nonzero_names_key(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--label", "BadKey=x"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert "BadKey" in r.stderr
@@ -579,7 +666,8 @@ def test_create_label_value_with_equals_splits_on_first(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--annotation", "note=a=b"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
@@ -591,6 +679,7 @@ def test_create_label_value_with_equals_splits_on_first(tmp_path):
 # Slice 2 (dedicated-field-flags plan): scope flags write the namesake sidecar
 # field AND drive vault routing — one input, both effects (AC-ROUTE1 positive).
 # ---------------------------------------------------------------------------
+
 
 def test_scope_team_with_config_writes_field_and_routes(tmp_path):
     """--team alpha with a config routing team:alpha → its vault: sidecar has
@@ -608,19 +697,24 @@ def test_scope_team_with_config_writes_field_and_routes(tmp_path):
     scoped_vault = tmp_path / "team_alpha_vault"
     scoped_vault.mkdir(parents=True)
 
-    _write_config(config_home, [
-        {"name": "default", "scope": "default", "path": str(vault)},
-        {
-            "name": "alpha",
-            "scope": "team",
-            "records": ["decision"],
-            "path": str(scoped_vault),
-        },
-    ])
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault)},
+            {
+                "name": "alpha",
+                "scope": "team",
+                "records": ["decision"],
+                "path": str(scoped_vault),
+            },
+        ],
+    )
 
     r = _run_with_config(
         ["record", "create", "--kind", "decision", "--title", "T", "--team", "alpha"],
-        vault=vault, state=state, config_home=config_home,
+        vault=vault,
+        state=state,
+        config_home=config_home,
         stdin_text="body\n",
     )
     assert r.returncode == 0, r.stderr
@@ -645,7 +739,8 @@ def test_scope_team_no_config_writes_field_in_active_vault(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--kind", "decision", "--title", "T", "--team", "alpha"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         stdin_text="body\n",
     )
     assert r.returncode == 0, r.stderr
@@ -666,10 +761,19 @@ def test_scope_multiple_flags_write_all_fields(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         [
-            "record", "create", "--kind", "decision", "--title", "T",
-            "--team", "alpha", "--repo", "r1",
+            "record",
+            "create",
+            "--kind",
+            "decision",
+            "--title",
+            "T",
+            "--team",
+            "alpha",
+            "--repo",
+            "r1",
         ],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
 
@@ -685,7 +789,8 @@ def test_scope_field_raw_value_not_scope_string(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--kind", "decision", "--title", "T", "--team", "my-team"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
 
@@ -701,7 +806,8 @@ def test_scope_cannot_decouple_set_team_rejected(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS + ["--set", "team=other"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert list(vault.glob("**/*.md")) == []
@@ -718,7 +824,8 @@ def test_scope_no_other_team_field_flag(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--kind", "decision", "--title", "T"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
 

@@ -39,6 +39,7 @@ def load_index_store(xdg_state_home: Path | None = None):
     if name in sys.modules:
         del sys.modules[name]
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
     if xdg_state_home is not None:
@@ -53,6 +54,7 @@ def load_index_store(xdg_state_home: Path | None = None):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def state_dir(tmp_path):
@@ -93,6 +95,7 @@ def _make_sidecar(kind="spec", name="my-spec", title="My Spec", status="draft"):
 # ---------------------------------------------------------------------------
 # open_index: creates DB at the resolved state path + WAL mode
 # ---------------------------------------------------------------------------
+
 
 def test_open_index_creates_db_at_xdg_state_path(tmp_path):
     """open_index(env=...) creates the file at state_dir("lore")/index.sqlite."""
@@ -169,6 +172,7 @@ def test_open_index_wal_persists_across_reopen(tmp_path):
 # upsert_row: idempotent keyed upsert
 # ---------------------------------------------------------------------------
 
+
 def test_upsert_row_inserts_new_row(tmp_path):
     """upsert_row inserts a row keyed by (vault, kind, name)."""
     mod = load_index_store()
@@ -210,7 +214,7 @@ def test_upsert_row_idempotent_same_key_leaves_one_row(tmp_path):
             "SELECT record_fts.body FROM records "
             "JOIN record_fts ON record_fts.rowid = records.rowid "
             "WHERE records.vault=? AND records.kind=? AND records.name=?",
-            ("/vault", "spec", "my-spec")
+            ("/vault", "spec", "my-spec"),
         ).fetchone()[0]
     finally:
         conn.close()
@@ -236,7 +240,7 @@ def test_upsert_row_updates_scalar_in_place(tmp_path):
         conn.commit()
         status = conn.execute(
             "SELECT status FROM records WHERE vault=? AND kind=? AND name=?",
-            ("/vault", "spec", "my-spec")
+            ("/vault", "spec", "my-spec"),
         ).fetchone()[0]
     finally:
         conn.close()
@@ -247,6 +251,7 @@ def test_upsert_row_updates_scalar_in_place(tmp_path):
 # ---------------------------------------------------------------------------
 # delete_row: keyed delete + no-op on missing
 # ---------------------------------------------------------------------------
+
 
 def test_delete_row_removes_keyed_row(tmp_path):
     """delete_row removes the row for (vault, kind, name)."""
@@ -317,6 +322,7 @@ def test_delete_row_missing_key_is_noop_no_raise(tmp_path):
 # rebuild: fixture-vault scan + idempotency + drop-deleted rows
 # ---------------------------------------------------------------------------
 
+
 def _write_fixture_vault(vault_root: Path, records: list[tuple[str, str, dict, str]]):
     """Write (kind, name, sidecar, body) pairs into a vault fixture.
 
@@ -366,17 +372,18 @@ def test_rebuild_keys_rows_correctly(tmp_path):
     env["XDG_STATE_HOME"] = str(fake_state)
 
     vault_root = tmp_path / "vault"
-    _write_fixture_vault(vault_root, [
-        ("spec", "my-spec", _make_sidecar(kind="spec", title="My Spec"), "body"),
-    ])
+    _write_fixture_vault(
+        vault_root,
+        [
+            ("spec", "my-spec", _make_sidecar(kind="spec", title="My Spec"), "body"),
+        ],
+    )
 
     conn = mod.open_index(env=env)
     try:
         mod.rebuild([str(vault_root)], conn)
         conn.commit()
-        row = conn.execute(
-            "SELECT vault, kind, name FROM records"
-        ).fetchone()
+        row = conn.execute("SELECT vault, kind, name FROM records").fetchone()
     finally:
         conn.close()
 
@@ -466,20 +473,24 @@ def test_rebuild_spans_two_vaults_keys_by_vault(tmp_path):
     vault_a = tmp_path / "vault-a"
     vault_b = tmp_path / "vault-b"
 
-    _write_fixture_vault(vault_a, [
-        ("spec", "spec-in-a", _make_sidecar(kind="spec", title="Spec In A"), "body"),
-    ])
-    _write_fixture_vault(vault_b, [
-        ("spec", "spec-in-b", _make_sidecar(kind="spec", title="Spec In B"), "body"),
-    ])
+    _write_fixture_vault(
+        vault_a,
+        [
+            ("spec", "spec-in-a", _make_sidecar(kind="spec", title="Spec In A"), "body"),
+        ],
+    )
+    _write_fixture_vault(
+        vault_b,
+        [
+            ("spec", "spec-in-b", _make_sidecar(kind="spec", title="Spec In B"), "body"),
+        ],
+    )
 
     conn = mod.open_index(env=env)
     try:
         count = mod.rebuild([str(vault_a), str(vault_b)], conn)
         conn.commit()
-        rows = conn.execute(
-            "SELECT vault, name FROM records ORDER BY name"
-        ).fetchall()
+        rows = conn.execute("SELECT vault, name FROM records ORDER BY name").fetchall()
     finally:
         conn.close()
 
@@ -495,6 +506,7 @@ def test_rebuild_spans_two_vaults_keys_by_vault(tmp_path):
 # ---------------------------------------------------------------------------
 # rebuild: only pairs (both .json + .md) are indexed
 # ---------------------------------------------------------------------------
+
 
 def test_rebuild_skips_orphan_json_without_md(tmp_path):
     """rebuild ignores a .json with no matching .md — incomplete record."""
@@ -524,6 +536,7 @@ def test_rebuild_skips_orphan_json_without_md(tmp_path):
 # ---------------------------------------------------------------------------
 # lore reindex: CLI exits 0 and prints a row count
 # ---------------------------------------------------------------------------
+
 
 def _run_lore(args: list[str], env: dict) -> subprocess.CompletedProcess:
     """Run the lore CLI as a subprocess.
@@ -607,6 +620,7 @@ def test_lore_reindex_count_reflects_vault_records(tmp_path):
 # scan_vault / remove_vault — per-vault incremental helpers (Slice 4, S4)
 # ---------------------------------------------------------------------------
 
+
 def test_scan_vault_inserts_rows_for_existing_pairs(tmp_path):
     """scan_vault upserts one row per <kind>/<name>.json+.md pair; returns count."""
     mod = load_index_store()
@@ -615,10 +629,13 @@ def test_scan_vault_inserts_rows_for_existing_pairs(tmp_path):
     (tmp_path / "xdg-state").mkdir()
 
     vault_root = tmp_path / "vault"
-    _write_fixture_vault(vault_root, [
-        ("spec", "spec-a", _make_sidecar(kind="spec", name="spec-a", title="Spec A"), "body a"),
-        ("plan", "plan-x", _make_sidecar(kind="plan", name="plan-x", title="Plan X"), "body x"),
-    ])
+    _write_fixture_vault(
+        vault_root,
+        [
+            ("spec", "spec-a", _make_sidecar(kind="spec", name="spec-a", title="Spec A"), "body a"),
+            ("plan", "plan-x", _make_sidecar(kind="plan", name="plan-x", title="Plan X"), "body x"),
+        ],
+    )
 
     conn = mod.open_index(env=env)
     try:
@@ -646,9 +663,12 @@ def test_scan_vault_honors_shared_flag(tmp_path):
     (tmp_path / "xdg-state").mkdir()
 
     vault_root = tmp_path / "vault"
-    _write_fixture_vault(vault_root, [
-        ("spec", "spec-a", _make_sidecar(kind="spec", name="spec-a", title="Spec A"), "body a"),
-    ])
+    _write_fixture_vault(
+        vault_root,
+        [
+            ("spec", "spec-a", _make_sidecar(kind="spec", name="spec-a", title="Spec A"), "body a"),
+        ],
+    )
 
     conn = mod.open_index(env=env)
     try:
@@ -669,9 +689,12 @@ def test_scan_vault_skips_malformed_sidecar(tmp_path):
     (tmp_path / "xdg-state").mkdir()
 
     vault_root = tmp_path / "vault"
-    _write_fixture_vault(vault_root, [
-        ("spec", "good", _make_sidecar(kind="spec", name="good", title="Good"), "ok"),
-    ])
+    _write_fixture_vault(
+        vault_root,
+        [
+            ("spec", "good", _make_sidecar(kind="spec", name="good", title="Good"), "ok"),
+        ],
+    )
     bad_dir = vault_root / "spec"
     (bad_dir / "bad.json").write_text("{not valid json")
     (bad_dir / "bad.md").write_text("body")
@@ -713,13 +736,19 @@ def test_remove_vault_removes_only_that_vaults_rows(tmp_path):
 
     vault_a = tmp_path / "vault-a"
     vault_b = tmp_path / "vault-b"
-    _write_fixture_vault(vault_a, [
-        ("spec", "a1", _make_sidecar(kind="spec", name="a1", title="A1"), "b"),
-        ("plan", "a2", _make_sidecar(kind="plan", name="a2", title="A2"), "b"),
-    ])
-    _write_fixture_vault(vault_b, [
-        ("spec", "b1", _make_sidecar(kind="spec", name="b1", title="B1"), "b"),
-    ])
+    _write_fixture_vault(
+        vault_a,
+        [
+            ("spec", "a1", _make_sidecar(kind="spec", name="a1", title="A1"), "b"),
+            ("plan", "a2", _make_sidecar(kind="plan", name="a2", title="A2"), "b"),
+        ],
+    )
+    _write_fixture_vault(
+        vault_b,
+        [
+            ("spec", "b1", _make_sidecar(kind="spec", name="b1", title="B1"), "b"),
+        ],
+    )
 
     conn = mod.open_index(env=env)
     try:
@@ -728,9 +757,7 @@ def test_remove_vault_removes_only_that_vaults_rows(tmp_path):
         conn.commit()
         removed = mod.remove_vault(str(vault_a), conn)
         conn.commit()
-        remaining = conn.execute(
-            "SELECT vault FROM records"
-        ).fetchall()
+        remaining = conn.execute("SELECT vault FROM records").fetchall()
     finally:
         conn.close()
 
@@ -747,10 +774,13 @@ def test_remove_vault_cleans_fts_rows(tmp_path):
     (tmp_path / "xdg-state").mkdir()
 
     vault_root = tmp_path / "vault"
-    _write_fixture_vault(vault_root, [
-        ("spec", "s1", _make_sidecar(kind="spec", name="s1", title="S1"), "body one"),
-        ("spec", "s2", _make_sidecar(kind="spec", name="s2", title="S2"), "body two"),
-    ])
+    _write_fixture_vault(
+        vault_root,
+        [
+            ("spec", "s1", _make_sidecar(kind="spec", name="s1", title="S1"), "body one"),
+            ("spec", "s2", _make_sidecar(kind="spec", name="s2", title="S2"), "body two"),
+        ],
+    )
 
     conn = mod.open_index(env=env)
     try:

@@ -12,6 +12,7 @@ This test pins the new contract for portage:
 Hermeticity: pure path-existence checks; no network. (Plugin-local test — uses
 stdlib tomllib, not trailhead.capabilities.)
 """
+
 from __future__ import annotations
 
 import tomllib
@@ -29,17 +30,16 @@ def _load_caps() -> dict:
 
 def _on_disk_skills() -> set[str]:
     skills = PLUGIN_ROOT / "skills"
-    return {
-        d.name for d in skills.iterdir()
-        if d.is_dir() and (d / "SKILL.md").is_file()
-    } if skills.is_dir() else set()
+    return (
+        {d.name for d in skills.iterdir() if d.is_dir() and (d / "SKILL.md").is_file()}
+        if skills.is_dir()
+        else set()
+    )
 
 
 def _on_disk_agents() -> set[str]:
     agents = PLUGIN_ROOT / "agents"
-    return {
-        p.stem for p in agents.glob("*.md") if p.is_file()
-    } if agents.is_dir() else set()
+    return {p.stem for p in agents.glob("*.md") if p.is_file()} if agents.is_dir() else set()
 
 
 def test_capabilities_toml_exists():

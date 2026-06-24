@@ -60,9 +60,7 @@ class TestSubagentApply:
     def test_no_symlinks_in_tree(self, tmp_path):
         m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
-        plan = compose_plan(
-            m, {"planner": None, "doc-finder": None}, {"plan": None}, dest
-        )
+        plan = compose_plan(m, {"planner": None, "doc-finder": None}, {"plan": None}, dest)
         apply_plan(plan, mode="copy")
         for path in dest.rglob("*"):
             assert not path.is_symlink()

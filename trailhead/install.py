@@ -72,6 +72,7 @@ def run_lore_init(
     stderr, never be swallowed).
     """
     if runner is None:
+
         def runner(args, **kw):
             import subprocess
 

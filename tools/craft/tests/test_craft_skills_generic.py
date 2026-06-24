@@ -29,6 +29,7 @@ literals would trip the gate on this file itself.
 
 `skills/_shared/` is a reference doc, not a skill, and is exempt.
 """
+
 from __future__ import annotations
 
 import re
@@ -59,8 +60,34 @@ APP_SEAM_TOKENS: list[str] = [
     # analytics/flag vendor
     "".join(["p", "o", "s", "t", "h", "o", "g"]),
     # flag-provider skill slug
-    "".join(["i", "n", "s", "t", "r", "u", "m", "e", "n", "t", "-", "f", "e", "a", "t", "u",
-             "r", "e", "-", "f", "l", "a", "g", "s"]),
+    "".join(
+        [
+            "i",
+            "n",
+            "s",
+            "t",
+            "r",
+            "u",
+            "m",
+            "e",
+            "n",
+            "t",
+            "-",
+            "f",
+            "e",
+            "a",
+            "t",
+            "u",
+            "r",
+            "e",
+            "-",
+            "f",
+            "l",
+            "a",
+            "g",
+            "s",
+        ]
+    ),
     # observability vendor
     "".join(["d", "a", "s", "h", "0"]),
     # soak evidence allowlist script
@@ -265,9 +292,9 @@ def test_skill_generalize_replacement_landed(stem: str):
 
 _INLINED_VALUES: dict[str, list[str]] = {
     "execute": [
-        "30",   # Small/Medium line boundary (≤30 lines)
+        "30",  # Small/Medium line boundary (≤30 lines)
         "200",  # Medium/Large line boundary (30-200 lines)
-        "5+",   # Large file-count threshold (5+ files)
+        "5+",  # Large file-count threshold (5+ files)
     ],
 }
 

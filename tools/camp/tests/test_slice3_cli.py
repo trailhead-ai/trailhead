@@ -12,6 +12,7 @@ Test contract:
   0=ready / 2=pending / 3=failed; --json shape stable.
 - The detached `camp setup --background` it spawns matches the foreground code path.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,20 +36,31 @@ if str(_SCRIPTS_DIR) not in sys.path:
 def _init_git_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
+    )
     (path / "README.md").write_text("# test\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
     # Self-origin so the configured base `origin/main` resolves locally (a real
     # member always has a fetchable/resolvable base).
-    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", str(path)],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "fetch", "origin", "--quiet"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
+    )
 
 
 @pytest.fixture()
@@ -70,15 +82,29 @@ def cli_env(tmp_path: Path):
 
     # Author the group via the real CLI.
     r = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "group", "mygroup",
-         "--member", f"repo_a={repo_a}", "--member", f"repo_b={repo_b}"],
-        capture_output=True, text=True, env=env,
+        [
+            sys.executable,
+            str(_CLI_CAMP),
+            "group",
+            "mygroup",
+            "--member",
+            f"repo_a={repo_a}",
+            "--member",
+            f"repo_b={repo_b}",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert r.returncode == 0, f"group authoring failed: {r.stderr}"
 
     return {
-        "env": env, "config_dir": config_dir, "state_dir": state_dir,
-        "repo_a": repo_a, "repo_b": repo_b, "tmp_path": tmp_path,
+        "env": env,
+        "config_dir": config_dir,
+        "state_dir": state_dir,
+        "repo_a": repo_a,
+        "repo_b": repo_b,
+        "tmp_path": tmp_path,
     }
 
 
@@ -88,7 +114,9 @@ def _camp(cli_env, *args, extra_env=None):
         env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(_CLI_CAMP), *args],
-        capture_output=True, text=True, env=env,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -105,8 +133,9 @@ class TestCampAi:
     def test_ai_seeds_and_background_provisions_to_ready(self, cli_env):
         """camp ai seeds pending, spawns the detached provisioner, which drives
         every member to ready. The workspace dir + setup.log exist."""
-        r = _camp(cli_env, "ai", "feat-x", "--group", "mygroup",
-                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
+        r = _camp(
+            cli_env, "ai", "feat-x", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
+        )
         assert r.returncode == 0, f"camp ai failed: {r.stderr}"
 
         ws = cli_env["state_dir"] / "mygroup" / "worktrees" / "feat-x"
@@ -125,8 +154,7 @@ class TestCampAi:
         assert (ws / "setup.log").stat().st_mode & 0o777 == 0o600
 
     def test_ai_requires_slug(self, cli_env):
-        r = _camp(cli_env, "ai", "--group", "mygroup",
-                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
+        r = _camp(cli_env, "ai", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"})
         assert r.returncode != 0
         assert "slug" in r.stderr.lower()
 
@@ -137,8 +165,9 @@ class TestCampSetup:
         # Seed only (no background provisioner) via a hidden seam: camp ai with
         # CAMP_TEST_NO_EXEC still spawns the bg provisioner, so instead drive setup
         # directly on a fresh slug by seeding through camp ai then setup --retry.
-        r = _camp(cli_env, "ai", "feat-s", "--group", "mygroup",
-                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
+        r = _camp(
+            cli_env, "ai", "feat-s", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
+        )
         assert r.returncode == 0, r.stderr
 
         # Foreground setup is idempotent with the bg provisioner — both land ready.
@@ -202,8 +231,14 @@ class TestSetupRetryFlagRemoved:
         failure is definitively due to --retry being an unknown flag, not a
         missing-slug error.
         """
-        r = _camp(cli_env, "ai", "feat-retry-test", "--group", "mygroup",
-                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
+        r = _camp(
+            cli_env,
+            "ai",
+            "feat-retry-test",
+            "--group",
+            "mygroup",
+            extra_env={"CAMP_TEST_NO_EXEC": "1"},
+        )
         assert r.returncode == 0, r.stderr
 
         r2 = _camp(cli_env, "setup", "feat-retry-test", "--retry", "--group", "mygroup")
@@ -214,8 +249,9 @@ class TestSetupRetryFlagRemoved:
 
     def test_setup_without_retry_still_works(self, cli_env):
         """camp setup (no --retry) still retries pending+failed members idempotently."""
-        r = _camp(cli_env, "ai", "feat-nrt", "--group", "mygroup",
-                  extra_env={"CAMP_TEST_NO_EXEC": "1"})
+        r = _camp(
+            cli_env, "ai", "feat-nrt", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
+        )
         assert r.returncode == 0, r.stderr
 
         r2 = _camp(cli_env, "setup", "feat-nrt", "--group", "mygroup")

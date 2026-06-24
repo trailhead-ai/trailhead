@@ -19,6 +19,7 @@ def _run(args: list[str]):
         sys.argv = ["trailhead"] + args
         sys.stdout, sys.stderr = stdout_buf, stderr_buf
         from trailhead.cli import main
+
         try:
             exit_code = main()
         except SystemExit as e:

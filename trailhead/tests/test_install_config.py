@@ -165,8 +165,7 @@ class TestPluginExpansion:
     def test_map_form_missing_keys_means_all(self, tmp_path):
         path = _write(
             tmp_path,
-            '[[harness]]\nname="claude_code"\n'
-            '  [[harness.plugins]]\n  name="lore"\n',
+            '[[harness]]\nname="claude_code"\n  [[harness.plugins]]\n  name="lore"\n',
         )
         cfg = resolve_config(config_path=path, detected_harnesses=[])
         lore = cfg.harnesses[0].plugins[0]

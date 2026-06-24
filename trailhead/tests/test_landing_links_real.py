@@ -148,8 +148,7 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
     elif kind == "doc-link":
         resolved = (_REPO_ROOT / ref).resolve()
         assert resolved.exists(), (
-            f"landing_claims.toml claims doc-link {ref!r}; "
-            f"path does not exist on disk: {resolved}"
+            f"landing_claims.toml claims doc-link {ref!r}; path does not exist on disk: {resolved}"
         )
 
 
@@ -400,11 +399,7 @@ class TestBuildRealAnchorSet:
         (plugin_root / "agents").mkdir(parents=True)
         (plugin_root / "agents" / "solo.md").write_text("# solo agent\n")
         manifest_path = tmp_path / "tools" / "testtool" / "capabilities.toml"
-        manifest_path.write_text(
-            "[tool]\n"
-            'name = "testtool"\n'
-            "validate = true\n"
-        )
+        manifest_path.write_text('[tool]\nname = "testtool"\nvalidate = true\n')
         anchors = build_real_anchor_set(root=tmp_path)
         assert anchors["testtool"]["agents"] == {"agents/solo.md"}
 
@@ -419,9 +414,7 @@ class TestForwardCheckOverRealClaims:
 
     def test_all_claims_resolve(self):
         """Every [[claim]] in landing_claims.toml must resolve against its oracle."""
-        assert _CLAIMS_FILE.exists(), (
-            f"landing_claims.toml not found at {_CLAIMS_FILE}"
-        )
+        assert _CLAIMS_FILE.exists(), f"landing_claims.toml not found at {_CLAIMS_FILE}"
         with open(_CLAIMS_FILE, "rb") as f:
             data = tomllib.load(f)
         claims = data.get("claim", [])
@@ -464,9 +457,7 @@ _TRACKED_TOOLS = frozenset({"trailhead", "lore", "craft", "camp", "portage", "la
 # Fenced sh/bash block pattern (U-3: bounded to fenced blocks only).
 _FENCED_BLOCK_RE = re.compile(r"```(?:sh|bash)\n(.*?)```", re.DOTALL)
 # Command line pattern within a fenced block.
-_CMD_LINE_RE = re.compile(
-    r"^\s*(" + "|".join(sorted(_TRACKED_TOOLS)) + r")\s+(\S+)", re.MULTILINE
-)
+_CMD_LINE_RE = re.compile(r"^\s*(" + "|".join(sorted(_TRACKED_TOOLS)) + r")\s+(\S+)", re.MULTILINE)
 # Markdown relative link pattern: [label](./path) or [label](../path).
 # Excludes absolute http(s):// and anchor-only #frag links. The path capture stops
 # at whitespace so a markdown title attribute — [label](./p "title") — does not leak
@@ -498,9 +489,7 @@ def extract_relative_links(readme_text: str) -> set[str]:
     return {m.group(2) for m in _REL_LINK_RE.finditer(readme_text)}
 
 
-def _is_command_registered(
-    tool: str, subcommand: str, claims: list[dict]
-) -> bool:
+def _is_command_registered(tool: str, subcommand: str, claims: list[dict]) -> bool:
     """Return True if (tool, subcommand) is registered in the claims manifest.
 
     Matching rule (Slice 2 contract):
@@ -554,9 +543,7 @@ def check_inverse(
     # --- commands ---
     commands = extract_fenced_commands(readme_text)
     unregistered_cmds = sorted(
-        f"{tool} {sub}"
-        for tool, sub in commands
-        if not _is_command_registered(tool, sub, claims)
+        f"{tool} {sub}" for tool, sub in commands if not _is_command_registered(tool, sub, claims)
     )
     assert not unregistered_cmds, (
         f"README {readme_path} shows command(s) not registered in landing_claims.toml:\n"
@@ -627,10 +614,7 @@ class TestExtractFencedCommands:
 
     def test_multiple_commands_extracted(self):
         """Multiple commands across multiple fenced blocks are all extracted."""
-        text = (
-            "```sh\ntrailhead doctor\n```\n"
-            "```bash\nlore recall --areas auth\n```\n"
-        )
+        text = "```sh\ntrailhead doctor\n```\n```bash\nlore recall --areas auth\n```\n"
         result = extract_fenced_commands(text)
         assert ("trailhead", "doctor") in result
         assert ("lore", "recall") in result
@@ -714,10 +698,7 @@ class TestCheckInverseFixtures:
         docs_dir.mkdir()
         (docs_dir / "paths.md").write_text("# paths")
         readme = tmp_path / "README.md"
-        readme.write_text(
-            "```sh\ntrailhead doctor\n```\n"
-            "See [guide](./docs/paths.md).\n"
-        )
+        readme.write_text("```sh\ntrailhead doctor\n```\nSee [guide](./docs/paths.md).\n")
         # must not raise
         check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
 
@@ -754,9 +735,7 @@ class TestCheckInverseFixtures:
             }
         ]
         readme = tmp_path / "README.md"
-        readme.write_text(
-            "# Don't do this:\n```sh\ntrailhead frobnicate\n```\n"
-        )
+        readme.write_text("# Don't do this:\n```sh\ntrailhead frobnicate\n```\n")
         # must not raise
         check_inverse(readme, allowlist_claims, tmp_path)
 
@@ -799,9 +778,7 @@ class TestCheckInverseFixtures:
     def test_sorted_extraction_determinism(self, tmp_path):
         """Extraction result sorted before assertion is stable (R-5)."""
         readme = tmp_path / "README.md"
-        readme.write_text(
-            "```sh\ntrailhead doctor\ntrailhead install\n```\n"
-        )
+        readme.write_text("```sh\ntrailhead doctor\ntrailhead install\n```\n")
         claims = [
             {"kind": "command", "tool": "trailhead", "ref": "doctor", "source": "root"},
             {"kind": "command", "tool": "trailhead", "ref": "install", "source": "root"},
@@ -869,9 +846,8 @@ class TestRealReadmeInverseScan:
             except AssertionError as e:
                 failures.append(str(e))
 
-        assert not failures, (
-            f"{len(failures)} README(s) failed the inverse check:\n"
-            + "\n".join(f"  - {f}" for f in failures)
+        assert not failures, f"{len(failures)} README(s) failed the inverse check:\n" + "\n".join(
+            f"  - {f}" for f in failures
         )
 
 
@@ -1103,9 +1079,7 @@ _LANDING_FILES: list[Path] = [
 ]
 
 # Path to the leak_gate.py script.
-_LEAK_GATE = (
-    _REPO_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "leak_gate.py"
-)
+_LEAK_GATE = _REPO_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "leak_gate.py"
 
 # Denylist token classes seeded into the ephemeral denylist (S-1).
 #
@@ -1141,8 +1115,7 @@ _DENYLIST_ENTRIES: list[str] = [
 ]
 
 _DENYLIST_COMMENT = (
-    "# Slice-5 ephemeral landing-surface denylist — "
-    "business-context strings, not secrets\n"
+    "# Slice-5 ephemeral landing-surface denylist — business-context strings, not secrets\n"
 )
 
 

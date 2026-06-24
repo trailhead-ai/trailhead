@@ -16,6 +16,7 @@ Test contract (TDD — all must RED before implementation, GREEN after):
 Pattern: fake-git + tmp_path + CAMP_STATE_DIR/CAMP_CONFIG_DIR (no real
 ~/.claude touched; no real claude exec needed for rm).
 """
+
 from __future__ import annotations
 
 import json
@@ -39,20 +40,31 @@ if str(_SCRIPTS_DIR) not in sys.path:
 def _init_git_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
+    )
     (path / "README.md").write_text("# test\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
     # Self-origin so the configured base `origin/main` resolves locally (a real
     # member always has a fetchable/resolvable base).
-    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", str(path)],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "fetch", "origin", "--quiet"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
+    )
 
 
 def _wait_provisioned(manifest_path: Path, members: list[str], timeout: float = 20.0) -> None:
@@ -99,16 +111,28 @@ def rm_env(tmp_path: Path):
 
     # Author group via real CLI
     r = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "group", "rmgroup",
-         "--member", f"repo_a={repo_a}", "--member", f"repo_b={repo_b}"],
-        capture_output=True, text=True, env=env,
+        [
+            sys.executable,
+            str(_CLI_CAMP),
+            "group",
+            "rmgroup",
+            "--member",
+            f"repo_a={repo_a}",
+            "--member",
+            f"repo_b={repo_b}",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert r.returncode == 0, f"group authoring failed: {r.stderr}"
 
     # Provision a workspace via camp ai (no harness exec needed)
     r2 = subprocess.run(
         [sys.executable, str(_CLI_CAMP), "ai", "ws-slug", "--group", "rmgroup"],
-        capture_output=True, text=True, env={**env, "CAMP_TEST_NO_EXEC": "1"},
+        capture_output=True,
+        text=True,
+        env={**env, "CAMP_TEST_NO_EXEC": "1"},
     )
     assert r2.returncode == 0, f"camp ai failed: {r2.stderr}"
 
@@ -136,7 +160,9 @@ def _camp(rm_env, *args, extra_env=None):
         env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(_CLI_CAMP), *args],
-        capture_output=True, text=True, env=env,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -149,8 +175,7 @@ class TestCampRmSuccess:
         """camp rm <slug> on a clean workspace exits 0."""
         r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup")
         assert r.returncode == 0, (
-            f"camp rm should exit 0 on a clean workspace.\n"
-            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+            f"camp rm should exit 0 on a clean workspace.\nstdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
     def test_rm_removes_manifest(self, rm_env):
@@ -161,16 +186,14 @@ class TestCampRmSuccess:
         _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup")
 
         assert not manifest.exists(), (
-            f"manifest should be removed after camp rm.\n"
-            f"manifest path: {manifest}"
+            f"manifest should be removed after camp rm.\nmanifest path: {manifest}"
         )
 
     def test_rm_name_flag_resolves_slug(self, rm_env):
         """camp rm --name <slug> uses the --name flag to resolve the slug."""
         r = _camp(rm_env, "rm", "--name", "ws-slug", "--group", "rmgroup")
         assert r.returncode == 0, (
-            f"camp rm --name <slug> should exit 0.\n"
-            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+            f"camp rm --name <slug> should exit 0.\nstdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
     def test_rm_announces_removed_slug(self, rm_env):
@@ -178,8 +201,7 @@ class TestCampRmSuccess:
         r = _camp(rm_env, "rm", "ws-slug", "--group", "rmgroup")
         combined = r.stdout + r.stderr
         assert "ws-slug" in combined, (
-            f"camp rm output should mention the slug.\n"
-            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+            f"camp rm output should mention the slug.\nstdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
 

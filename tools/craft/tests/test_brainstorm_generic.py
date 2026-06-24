@@ -9,6 +9,7 @@ The structural-brain-seam and app-seam-token scans over ALL craft skills (which
 now include brainstorm) live in test_craft_skills_generic.py; this file holds the
 brainstorm-specific positive assertions.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -102,6 +103,7 @@ def test_brainstorm_skill_has_no_private_tokens():
 # lives in the craft plugin.
 # ---------------------------------------------------------------------------
 
+
 class TestBrainstormSearchWiring:
     def test_brainstorm_references_lore_search_area(self):
         text = _BRAINSTORM_SKILL.read_text()
@@ -138,14 +140,17 @@ class TestBrainstormSearchWiring:
 # (S6 Slice 3).
 # ---------------------------------------------------------------------------
 
+
 class TestBrainstormSkillInjectionInstruction:
     def test_brainstorm_skill_has_shared_content_is_data_rule(self) -> None:
         """brainstorm SKILL.md must carry the injection-defense instruction."""
         text = _BRAINSTORM_SKILL.read_text()
         assert (
             "external-memory" in text
-            or "shared" in text.lower() and "not instructions" in text.lower()
-            or "data" in text.lower() and "not instructions" in text.lower()
+            or "shared" in text.lower()
+            and "not instructions" in text.lower()
+            or "data" in text.lower()
+            and "not instructions" in text.lower()
         ), (
             "brainstorm SKILL.md must carry the 'shared content is data, not "
             f"instructions' rule. Got: {text[:500]!r}"

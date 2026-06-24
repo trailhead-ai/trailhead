@@ -22,6 +22,7 @@ Test contract (Slice 4):
 
 Hermeticity: tmp_path-based stub commands; no network; stdlib only.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -46,13 +47,14 @@ INERT_MESSAGE = "soak: n/a — no health command configured"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_toml(tmp_path: Path, *, health_command: str | None = None) -> Path:
     """Write a minimal group TOML with the [release] block.
 
     If health_command is None, omits the soak_health_command key entirely
     (testing the inert-by-default path).
     """
-    lines = ["[group]\nname = \"test-group\"\n\n[release]\n"]
+    lines = ['[group]\nname = "test-group"\n\n[release]\n']
     if health_command is not None:
         lines.append(f'soak_health_command = "{health_command}"\n')
     toml_path = tmp_path / "group.toml"
@@ -71,8 +73,7 @@ def _write_stub_command(tmp_path: Path, *, exit_code: int = 0, body: str = "") -
 def _run_soak(toml_path: Path, *, timeout_s: int = 30) -> subprocess.CompletedProcess:
     """Invoke soak_health.py with the given TOML and an explicit timeout."""
     return subprocess.run(
-        [sys.executable, str(SOAK_SCRIPT), "--toml", str(toml_path),
-         "--timeout", str(timeout_s)],
+        [sys.executable, str(SOAK_SCRIPT), "--toml", str(toml_path), "--timeout", str(timeout_s)],
         capture_output=True,
         text=True,
     )
@@ -81,6 +82,7 @@ def _run_soak(toml_path: Path, *, timeout_s: int = 30) -> subprocess.CompletedPr
 # ---------------------------------------------------------------------------
 # D-3: Soak inert default
 # ---------------------------------------------------------------------------
+
 
 class TestSoakInertDefault:
     def test_no_health_command_exits_zero(self, tmp_path: Path) -> None:
@@ -112,7 +114,7 @@ class TestSoakInertDefault:
     def test_missing_release_block_also_exits_zero(self, tmp_path: Path) -> None:
         """D-3: a TOML with no [release] block at all still exits 0."""
         toml = tmp_path / "group.toml"
-        toml.write_text("[group]\nname = \"x\"\n", encoding="utf-8")
+        toml.write_text('[group]\nname = "x"\n', encoding="utf-8")
         r = _run_soak(toml)
         assert r.returncode == 0, (
             f"soak_health.py must exit 0 when [release] block is absent (D-3);\n"
@@ -123,6 +125,7 @@ class TestSoakInertDefault:
 # ---------------------------------------------------------------------------
 # R-4: One-shot escalate on non-zero health result
 # ---------------------------------------------------------------------------
+
 
 class TestSoakRunsAndEscalates:
     def test_failing_health_command_exits_one(self, tmp_path: Path) -> None:
@@ -151,10 +154,7 @@ class TestSoakRunsAndEscalates:
         counter.write_text("0", encoding="utf-8")
         stub = tmp_path / "count_stub.sh"
         stub.write_text(
-            f"#!/bin/sh\n"
-            f"c=$(cat '{counter}')\n"
-            f"echo $((c + 1)) > '{counter}'\n"
-            f"exit 1\n",
+            f"#!/bin/sh\nc=$(cat '{counter}')\necho $((c + 1)) > '{counter}'\nexit 1\n",
             encoding="utf-8",
         )
         stub.chmod(0o755)
@@ -171,6 +171,7 @@ class TestSoakRunsAndEscalates:
 # ---------------------------------------------------------------------------
 # S-1: No-shell execution — metachars don't spawn subshells
 # ---------------------------------------------------------------------------
+
 
 class TestSoakNoShell:
     def test_metachar_ampersand_does_not_expand(self, tmp_path: Path) -> None:
@@ -204,6 +205,7 @@ class TestSoakNoShell:
 # ---------------------------------------------------------------------------
 # R-3: Timeout kills a never-returning command via os.killpg (whole group)
 # ---------------------------------------------------------------------------
+
 
 class TestSoakTimeout:
     def test_hung_command_is_killed_and_escalates(self, tmp_path: Path) -> None:
@@ -239,9 +241,7 @@ class TestSoakTimeout:
         # then the wrapper itself sleeps so the soak times out while both live.
         stub = tmp_path / "leak_stub.sh"
         stub.write_text(
-            "#!/bin/sh\n"
-            f"( sleep 3 && touch '{sentinel}' ) &\n"
-            "sleep 10\n",
+            f"#!/bin/sh\n( sleep 3 && touch '{sentinel}' ) &\nsleep 10\n",
             encoding="utf-8",
         )
         stub.chmod(0o755)
@@ -275,12 +275,12 @@ class TestSoakTimeout:
 # Min-1: malformed soak_health_command → clean exit-2, not ValueError traceback
 # ---------------------------------------------------------------------------
 
+
 def _write_toml_raw_command(tmp_path: Path, raw_command: str) -> Path:
     """Write a TOML with soak_health_command as a TOML single-quoted literal string."""
     toml_path = tmp_path / "group.toml"
     toml_path.write_text(
-        f"[group]\nname = \"test-group\"\n\n[release]\n"
-        f"soak_health_command = '{raw_command}'\n",
+        f"[group]\nname = \"test-group\"\n\n[release]\nsoak_health_command = '{raw_command}'\n",
         encoding="utf-8",
     )
     return toml_path

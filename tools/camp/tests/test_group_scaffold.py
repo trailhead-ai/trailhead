@@ -12,6 +12,7 @@ Test contract (Slice 1):
   name ("..", "/").
 - A clean 3-member input validates without error.
 """
+
 from __future__ import annotations
 
 import sys
@@ -307,9 +308,6 @@ def test_validate_scaffold_clean_3_member_input_passes(tmp_path: Path) -> None:
         (d / ".git").mkdir()
         repos.append(d)
 
-    members = [
-        {"name": f"repo{i}", "repo_root": str(repos[i])}
-        for i in range(3)
-    ]
+    members = [{"name": f"repo{i}", "repo_root": str(repos[i])} for i in range(3)]
     # Should not raise
     validate_scaffold("testgroup", members, other_configs=[], allow_missing=False)

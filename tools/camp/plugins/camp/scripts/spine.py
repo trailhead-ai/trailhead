@@ -16,6 +16,7 @@ De-zenithed from zenith/bin/camp (quarry provenance — Slice 0):
 
 Source: zenith/bin/camp (quarry provenance — Slice 0).
 """
+
 from __future__ import annotations
 
 import json
@@ -44,14 +45,36 @@ _SIBLING_MARKER = ".workspace-sibling"
 _VALID_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 _NORMALIZE_RE = re.compile(r"[^a-z0-9-]+")
 
-RESERVED = frozenset({
-    "ls", "status", "break", "rebase", "path", "open", "fire",
-    "foreach", "code", "sweep", "sync", "restock", "doctor", "help",
-    "version", "which",
-    "init", "session-bootstrap", "worktree-cleanup",
-    # Slice 1: new verb surface
-    "group", "ai", "rm", "pwd", "enter", "setup",
-})
+RESERVED = frozenset(
+    {
+        "ls",
+        "status",
+        "break",
+        "rebase",
+        "path",
+        "open",
+        "fire",
+        "foreach",
+        "code",
+        "sweep",
+        "sync",
+        "restock",
+        "doctor",
+        "help",
+        "version",
+        "which",
+        "init",
+        "session-bootstrap",
+        "worktree-cleanup",
+        # Slice 1: new verb surface
+        "group",
+        "ai",
+        "rm",
+        "pwd",
+        "enter",
+        "setup",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # D-H guard: single import guard, hook-subprocess-proof
@@ -82,6 +105,7 @@ def _check_trailhead_paths_importable(
         return False
     try:
         import trailhead.paths  # noqa: F401
+
         return True
     except ImportError:
         print(
@@ -184,9 +208,7 @@ def _resolve_slug(raw: str, *, context: str = "argument") -> str:
 
     normalized, changed = _normalize_slug(raw)
     if not normalized:
-        _die(
-            f"camp: slug from {context}: {raw!r} has no usable characters after normalization"
-        )
+        _die(f"camp: slug from {context}: {raw!r} has no usable characters after normalization")
     if changed:
         print(f"camp: using normalized slug {normalized!r} (from {raw!r})", file=sys.stderr)
     _validate_slug(normalized)
@@ -208,7 +230,7 @@ def _consume_flag_value(args: list[str], flag: str) -> str | None:
             del args[i : i + 2]
             return value
         if args[i].startswith(prefix):
-            value = args[i][len(prefix):]
+            value = args[i][len(prefix) :]
             del args[i]
             return value
         i += 1
@@ -570,9 +592,7 @@ def _classify_orphan_worktree(wt_path: Path) -> str:
     return "DIRTY" if is_dirty else "SAFE"
 
 
-def _collect_orphan_worktrees(
-    workspace_root: Path, active: set[str]
-) -> dict[str, dict[str, str]]:
+def _collect_orphan_worktrees(workspace_root: Path, active: set[str]) -> dict[str, dict[str, str]]:
     """Return {"<repo>/<name>": {repo,name,path,class}} for orphan worktrees.
 
     Quarried from zenith/bin/camp. The _SIBLING_REPOS constant is removed;
@@ -678,10 +698,7 @@ def _print_sweep_human(report: dict[str, Any], *, prune: bool, force: bool) -> N
     print(f"\nOrphan dev-env instances: {len(instances)}")
 
     if not prune:
-        print(
-            "\nDry-run. Pass --prune to remove SAFE orphans "
-            "(and --force to also remove DIRTY)."
-        )
+        print("\nDry-run. Pass --prune to remove SAFE orphans (and --force to also remove DIRTY).")
 
 
 def cmd_sweep(args: list[str], dry_run: bool = False) -> None:
@@ -838,7 +855,9 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
         else:
             subprocess.run(
                 ["git", "-C", str(repo_root), "fetch", "origin", "--quiet"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
         is_dirty = _git_is_dirty(repo_root)
@@ -870,16 +889,22 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
         if force:
             subprocess.run(
                 ["git", "-C", str(repo_root), "checkout", "main", "--quiet"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             update = subprocess.run(
                 ["git", "-C", str(repo_root), "reset", "--hard", "origin/main", "--quiet"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         else:
             update = subprocess.run(
                 ["git", "-C", str(repo_root), "merge", "--ff-only", "origin/main"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
         if update.returncode != 0:
@@ -1206,7 +1231,7 @@ def _git_worktree_list(repo_root: Path) -> list[Path]:
     for line in result.stdout.splitlines():
         if not line.startswith("worktree "):
             continue
-        wt_path_str = line[len("worktree "):].strip()
+        wt_path_str = line[len("worktree ") :].strip()
         if not wt_path_str:
             continue
         wt_path = Path(wt_path_str)
@@ -1249,7 +1274,7 @@ def cmd_status(args: list[str], dry_run: bool = False) -> None:
             continue
         elif filtered_args[i].startswith("--days="):
             try:
-                stale_days = int(filtered_args[i][len("--days="):])
+                stale_days = int(filtered_args[i][len("--days=") :])
             except ValueError:
                 _die(f"camp status: --days= requires an integer argument, got {filtered_args[i]!r}")
             del filtered_args[i]
@@ -1415,12 +1440,14 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
     asdf_ok = _doctor_asdf_present()
     if not asdf_ok:
         any_failed = True
-    checks.append({
-        "check": "asdf",
-        "description": "asdf installed and resolvable",
-        "pass": asdf_ok,
-        "details": "asdf found" if asdf_ok else "asdf not found on PATH",
-    })
+    checks.append(
+        {
+            "check": "asdf",
+            "description": "asdf installed and resolvable",
+            "pass": asdf_ok,
+            "details": "asdf found" if asdf_ok else "asdf not found on PATH",
+        }
+    )
 
     # --- check (b): manifest ↔ registry consistency ---
     registry = _read_registry(canonical_root)
@@ -1429,17 +1456,17 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
     consistency_ok = not stale_ids
     if not consistency_ok:
         any_failed = True
-    checks.append({
-        "check": "consistency",
-        "description": "manifest ↔ git-worktree ↔ registry consistency",
-        "pass": consistency_ok,
-        "details": (
-            f"stale registry instances: {stale_ids}"
-            if stale_ids
-            else "no drift detected"
-        ),
-        "stale_registry_instances": stale_ids,
-    })
+    checks.append(
+        {
+            "check": "consistency",
+            "description": "manifest ↔ git-worktree ↔ registry consistency",
+            "pass": consistency_ok,
+            "details": (
+                f"stale registry instances: {stale_ids}" if stale_ids else "no drift detected"
+            ),
+            "stale_registry_instances": stale_ids,
+        }
+    )
 
     if as_json:
         report = {"pass": not any_failed, "checks": checks}

@@ -120,7 +120,7 @@ def test_read_legacy_block_map_related(tmp_path):
         "type: lesson\n"
         "related:\n"
         "  decision: [[decisions/2026-05/foo]]\n"
-        "  dead-end: \"[[dead-ends/2026-05/bar]]\"\n"
+        '  dead-end: "[[dead-ends/2026-05/bar]]"\n'
         "project:"
     )
     p = write_legacy(tmp_path, "lessons/x.md", fm)
@@ -154,7 +154,7 @@ def test_read_legacy_records_original_path(tmp_path):
 def test_wikilink_variant1_pipe_alias(tmp_path):
     """Variant 1: `raised-in: [[target|alias]]` → stripped of alias."""
     mod = _mod()
-    fm = "type: decision\nstatus: active\nraised-in: \"[[sessions/2026-06/foo|Foo Session]]\""
+    fm = 'type: decision\nstatus: active\nraised-in: "[[sessions/2026-06/foo|Foo Session]]"'
     p = write_legacy(tmp_path, "decisions/d.md", fm)
     t = mod.transcode(mod.read_legacy(p))
     assert t.sidecar["related"]["session"] == ["sessions/2026-06/foo"]
@@ -164,7 +164,7 @@ def test_wikilink_variant1_pipe_alias(tmp_path):
 def test_wikilink_variant2_flow_map(tmp_path):
     """Variant 2: `related: {decision: "[[decisions/...]]"}` → related-decision list."""
     mod = _mod()
-    fm = "type: lesson\nstatus: active\nrelated: {decision: \"[[decisions/2026-05/foo]]\"}"
+    fm = 'type: lesson\nstatus: active\nrelated: {decision: "[[decisions/2026-05/foo]]"}'
     p = write_legacy(tmp_path, "lessons/x.md", fm)
     t = mod.transcode(mod.read_legacy(p))
     assert t.sidecar["related"]["decision"] == ["decisions/2026-05/foo"]
@@ -174,7 +174,7 @@ def test_wikilink_variant2_flow_map(tmp_path):
 def test_wikilink_variant3_flow_sequence(tmp_path):
     """Variant 3: areas as flow-seq of wikilink strings → stripped targets."""
     mod = _mod()
-    fm = "type: session\nstatus: complete\nsession_id: abc\nareas: [\"[[areas/workflow-worktrees]]\"]"
+    fm = 'type: session\nstatus: complete\nsession_id: abc\nareas: ["[[areas/workflow-worktrees]]"]'
     p = write_legacy(tmp_path, "sessions/2026-05/s.md", fm)
     t = mod.transcode(mod.read_legacy(p))
     # areas wikilinks are converted; no [[ survives anywhere in the sidecar.
@@ -198,7 +198,7 @@ def test_wikilink_variant5_block_map(tmp_path):
         "type: lesson\nstatus: active\n"
         "related:\n"
         "  decision: [[decisions/2026-05/foo]]\n"
-        "  dead-end: \"[[dead-ends/2026-05/bar]]\"\n"
+        '  dead-end: "[[dead-ends/2026-05/bar]]"\n'
     )
     p = write_legacy(tmp_path, "lessons/x.md", fm)
     t = mod.transcode(mod.read_legacy(p))
@@ -235,7 +235,7 @@ def test_wikilink_related_key_removed_from_sidecar(tmp_path):
 def test_status_compound_strips_prose_to_breadcrumb(tmp_path):
     """`active | superseded — prose` → base status + prose in a migration note."""
     mod = _mod()
-    fm = "type: decision\nstatus: \"active | superseded — replaced by the new ADR\""
+    fm = 'type: decision\nstatus: "active | superseded — replaced by the new ADR"'
     p = write_legacy(tmp_path, "decisions/d.md", fm)
     t = mod.transcode(mod.read_legacy(p))
     assert t.sidecar["status"] == "active"
@@ -249,7 +249,14 @@ def test_status_shelved_plan_stays_shelved_or_dropped(tmp_path):
     p = write_legacy(tmp_path, "plans/2026-05/p.md", "type: plan\nstatus: shelved")
     t = mod.transcode(mod.read_legacy(p))
     # plan kind has no "shelved"; it must map to a valid plan status, not "active".
-    assert t.sidecar["status"] in {"draft", "ready", "in-progress", "complete", "superseded", "dropped"}
+    assert t.sidecar["status"] in {
+        "draft",
+        "ready",
+        "in-progress",
+        "complete",
+        "superseded",
+        "dropped",
+    }
 
 
 def test_status_shelved_session_becomes_closed(tmp_path):
@@ -394,7 +401,9 @@ def test_unknown_keys_land_in_annotations_no_flag(tmp_path):
 
 def test_unknown_key_not_in_top_level_sidecar(tmp_path):
     mod = _mod()
-    p = write_legacy(tmp_path, "deferred/2026-05/d.md", "type: deferred\nstatus: dropped\neffort: S")
+    p = write_legacy(
+        tmp_path, "deferred/2026-05/d.md", "type: deferred\nstatus: dropped\neffort: S"
+    )
     t = mod.transcode(mod.read_legacy(p))
     assert "effort" not in t.sidecar
 
@@ -420,11 +429,7 @@ def test_known_key_bad_shape_flags_review(tmp_path):
 
 def test_severity_and_closure_reason_rehomed(tmp_path):
     mod = _mod()
-    fm = (
-        "type: lesson\nstatus: active\n"
-        "severity: medium\n"
-        "closure-reason: dropped during wind-down"
-    )
+    fm = "type: lesson\nstatus: active\nseverity: medium\nclosure-reason: dropped during wind-down"
     p = write_legacy(tmp_path, "lessons/2026-05/l.md", fm)
     t = mod.transcode(mod.read_legacy(p))
     assert t.sidecar["annotations"]["legacy/severity"] == "medium"
@@ -440,14 +445,18 @@ def test_severity_and_closure_reason_rehomed(tmp_path):
 
 def test_provenance_created_at_from_legacy_date(tmp_path):
     mod = _mod()
-    p = write_legacy(tmp_path, "lessons/2026-05/l.md", "type: lesson\nstatus: active\ndate: 2026-06-04")
+    p = write_legacy(
+        tmp_path, "lessons/2026-05/l.md", "type: lesson\nstatus: active\ndate: 2026-06-04"
+    )
     t = mod.transcode(mod.read_legacy(p))
     assert t.sidecar["created-at"].startswith("2026-06-04")
 
 
 def test_provenance_group_dropped_and_version_stamped(tmp_path):
     mod = _mod()
-    p = write_legacy(tmp_path, "lessons/2026-05/l.md", "type: lesson\nstatus: active\ngroup: zenith")
+    p = write_legacy(
+        tmp_path, "lessons/2026-05/l.md", "type: lesson\nstatus: active\ngroup: zenith"
+    )
     t = mod.transcode(mod.read_legacy(p))
     assert "group" not in t.sidecar
     assert "legacy/group" not in t.sidecar.get("annotations", {})

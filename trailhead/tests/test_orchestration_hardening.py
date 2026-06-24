@@ -30,6 +30,7 @@ def _run_cli(args: list[str]):
         sys.argv = ["trailhead"] + args
         sys.stdout, sys.stderr = out, err
         from trailhead.cli import main
+
         try:
             code = main()
         except SystemExit as e:
@@ -79,14 +80,19 @@ def _patched_install(*, detected=True, pathint_exc=None):
         "trailhead.install.create_shims",
         **({"side_effect": pathint_exc} if pathint_exc else {"return_value": sdr}),
     )
-    with patch("trailhead.install.wire"), pathint, patch(
-        "trailhead.install.detect_harnesses",
-        return_value=([ClaudeCodeHarness()] if detected else []),
-    ), patch(
-        # Hermetic (Axiom 6): never invoke the real `lore init` against the
-        # user's vault/state. Default stub reports success.
-        "trailhead.install.run_lore_init",
-        return_value=(0, ""),
+    with (
+        patch("trailhead.install.wire"),
+        pathint,
+        patch(
+            "trailhead.install.detect_harnesses",
+            return_value=([ClaudeCodeHarness()] if detected else []),
+        ),
+        patch(
+            # Hermetic (Axiom 6): never invoke the real `lore init` against the
+            # user's vault/state. Default stub reports success.
+            "trailhead.install.run_lore_init",
+            return_value=(0, ""),
+        ),
     ):
         yield
 

@@ -11,6 +11,7 @@ Exit-code contract:
   1 → leak found (prints relpath:lineno:token per hit)
   2 → error / fail-closed (denylist missing, unreadable, or pattern-empty)
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -52,6 +53,7 @@ def denylist(tmp_path: Path) -> Path:
 
 
 # ---- clean / leak basics ----------------------------------------------------
+
 
 def test_clean_tree_exits_0(tmp_path: Path, denylist: Path):
     tree = tmp_path / "tree"
@@ -116,6 +118,7 @@ def test_binary_and_pycache_skipped(tmp_path: Path, denylist: Path):
 
 # ---- multiple trees ---------------------------------------------------------
 
+
 def test_multiple_trees_all_scanned(tmp_path: Path, denylist: Path):
     a = tmp_path / "a"
     a.mkdir()
@@ -147,6 +150,7 @@ def test_multiple_trees_one_missing_fails_closed(tmp_path: Path, denylist: Path)
 
 
 # ---- fail-closed ------------------------------------------------------------
+
 
 def test_missing_denylist_exits_2(tmp_path: Path):
     tree = tmp_path / "tree"
@@ -184,8 +188,7 @@ REAL_DENYLIST = Path.home() / ".claude" / "leak-gate.denylist"
     # The monorepo's own shippable surfaces (REPO_ROOT is tools/craft) — not the
     # pre-monorepo standalone ~/code/{craft,lore} checkouts, which may still
     # carry tokens (e.g. the old 'zenith' group name) the monorepo has dropped.
-    [REPO_ROOT / "plugins" / "craft",
-     REPO_ROOT.parent / "lore" / "plugins" / "lore"],
+    [REPO_ROOT / "plugins" / "craft", REPO_ROOT.parent / "lore" / "plugins" / "lore"],
     ids=["craft", "lore"],
 )
 def test_real_shippable_surface_is_clean(surface: Path):

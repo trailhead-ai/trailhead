@@ -25,6 +25,7 @@ adversarial cases (CRLF, trailing-newline, adjacent hunks) with byte-for-byte
 CLI tests run the lore CLI as a subprocess via CLI_PATH (conftest pattern). Never
 writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -43,6 +44,7 @@ SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 # ---------------------------------------------------------------------------
 # Artifact-inspection helpers (the CLI harness lives in conftest)
 # ---------------------------------------------------------------------------
+
 
 def _find_sidecar(vault: Path, record_id: str) -> dict:
     kind, name = record_id.split("/", 1)
@@ -84,10 +86,14 @@ def _index_rows(state: Path, vault: Path, kind: str, name: str) -> list:
 
 
 _CREATE_ARGS = [
-    "record", "create",
-    "--kind", "spec",
-    "--title", "My Record",
-    "--keyword", "foo",
+    "record",
+    "create",
+    "--kind",
+    "spec",
+    "--title",
+    "My Record",
+    "--keyword",
+    "foo",
 ]
 
 
@@ -114,6 +120,7 @@ def _make_diff(old: str, new: str) -> str:
 # CLI: full-body replace (AC9)
 # ===========================================================================
 
+
 def test_update_full_body_replaces_body(tmp_path):
     """Piped stdin replaces the full body by default (AC9)."""
     vault, state = _make_vault(tmp_path)
@@ -122,7 +129,9 @@ def test_update_full_body_replaces_body(tmp_path):
     new_body = "completely new body\nwith two lines\n"
     r = _run(
         ["record", "update", record_id],
-        vault=vault, state_dir=state, stdin_text=new_body,
+        vault=vault,
+        state_dir=state,
+        stdin_text=new_body,
     )
     assert r.returncode == 0, r.stderr
     assert _find_body(vault, record_id) == new_body
@@ -137,7 +146,9 @@ def test_update_full_body_updates_index(tmp_path):
     new_body = "fresh body text\n"
     r = _run(
         ["record", "update", record_id],
-        vault=vault, state_dir=state, stdin_text=new_body,
+        vault=vault,
+        state_dir=state,
+        stdin_text=new_body,
     )
     assert r.returncode == 0, r.stderr
     rows = _index_rows(state, vault, kind, name)
@@ -155,7 +166,9 @@ def test_update_full_body_restamps_updated_keeps_created(tmp_path):
     # and assert created-* is preserved byte-for-byte while updated-* is re-stamped.
     r = _run(
         ["record", "update", record_id],
-        vault=vault, state_dir=state, stdin_text="new body\n",
+        vault=vault,
+        state_dir=state,
+        stdin_text="new body\n",
         env_extra={"LORE_EMAIL": "second@example.com"},
     )
     assert r.returncode == 0, r.stderr
@@ -170,6 +183,7 @@ def test_update_full_body_restamps_updated_keeps_created(tmp_path):
 # CLI: metadata-only (no stdin) — AC10 / AC11 + stderr notice
 # ===========================================================================
 
+
 def test_update_metadata_only_leaves_body_byte_identical(tmp_path):
     """No stdin → body unchanged; only sidecar params applied (AC10)."""
     vault, state = _make_vault(tmp_path)
@@ -178,7 +192,8 @@ def test_update_metadata_only_leaves_body_byte_identical(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--keyword", "bar"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         # no stdin_text → metadata-only path
     )
     assert r.returncode == 0, r.stderr
@@ -194,7 +209,8 @@ def test_update_metadata_only_prints_no_stdin_notice_to_stderr(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--keyword", "bar"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     assert "no stdin" in r.stderr.lower()
@@ -211,7 +227,8 @@ def test_update_metadata_only_advances_updated_keeps_created(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--keyword", "bar"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         env_extra={"LORE_EMAIL": "later@example.com"},
     )
     assert r.returncode == 0, r.stderr
@@ -225,6 +242,7 @@ def test_update_metadata_only_advances_updated_keeps_created(tmp_path):
 # Slice 1 (dedicated-field-flags): dedicated per-field setters on update
 # ===========================================================================
 
+
 def test_update_title_overwrites(tmp_path):
     """--title on update is an optional setter that overwrites the title field."""
     vault, state = _make_vault(tmp_path)
@@ -232,7 +250,8 @@ def test_update_title_overwrites(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--title", "New Title"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, record_id)
@@ -246,7 +265,8 @@ def test_update_status_sets_field(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--status", "ready"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, record_id)
@@ -260,14 +280,16 @@ def test_update_keyword_appends_and_unsets(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--keyword", "bar"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     assert _find_sidecar(vault, record_id)["keywords"] == ["foo", "bar"]
 
     r2 = _run(
         ["record", "update", record_id, "--unset-keyword", "foo"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r2.returncode == 0, r2.stderr
     assert _find_sidecar(vault, record_id)["keywords"] == ["bar"]
@@ -280,7 +302,8 @@ def test_update_set_flag_is_unrecognized(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--set", "title=x"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
 
@@ -288,6 +311,7 @@ def test_update_set_flag_is_unrecognized(tmp_path):
 # ===========================================================================
 # CLI: --diff clean apply (AC9 / AC-DIFF1)
 # ===========================================================================
+
 
 def test_update_diff_clean_apply_updates_body_and_index(tmp_path):
     """A clean ``--diff`` applies the hunks to the body and refreshes the index."""
@@ -301,7 +325,9 @@ def test_update_diff_clean_apply_updates_body_and_index(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--diff"],
-        vault=vault, state_dir=state, stdin_text=diff,
+        vault=vault,
+        state_dir=state,
+        stdin_text=diff,
     )
     assert r.returncode == 0, r.stderr
     assert _find_body(vault, record_id) == modified
@@ -313,6 +339,7 @@ def test_update_diff_clean_apply_updates_body_and_index(tmp_path):
 # ===========================================================================
 # CLI: --diff stale hunk → atomic reject (AC-DIFF1)
 # ===========================================================================
+
 
 def test_update_diff_stale_hunk_rejects_atomically(tmp_path):
     """A stale ``--diff`` → non-zero; body byte-for-byte unchanged; no index churn."""
@@ -329,7 +356,9 @@ def test_update_diff_stale_hunk_rejects_atomically(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--diff"],
-        vault=vault, state_dir=state, stdin_text=stale_diff,
+        vault=vault,
+        state_dir=state,
+        stdin_text=stale_diff,
     )
     assert r.returncode != 0
     # Body byte-for-byte unchanged.
@@ -353,7 +382,9 @@ def test_update_diff_stale_hunk_parseable_rejected_line(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--diff"],
-        vault=vault, state_dir=state, stdin_text=stale_diff,
+        vault=vault,
+        state_dir=state,
+        stdin_text=stale_diff,
     )
     assert r.returncode != 0
     # Parseable contract: ``rejected hunk @@ ... @@: <reason>``.
@@ -365,22 +396,21 @@ def test_update_diff_stale_hunk_parseable_rejected_line(tmp_path):
 # CLI: --diff is not a fence-neutralization bypass (council/Security)
 # ===========================================================================
 
+
 def test_update_diff_inserting_fence_is_neutralized(tmp_path):
     """A ``--diff`` hunk inserting ``<external-memory>`` lands neutralized on disk."""
     vault, state = _make_vault(tmp_path)
     original = "safe line one\nsafe line two\n"
     record_id = _create(vault, state, body=original)
 
-    modified = (
-        "safe line one\n"
-        "<external-memory foo>injected</external-memory>\n"
-        "safe line two\n"
-    )
+    modified = "safe line one\n<external-memory foo>injected</external-memory>\nsafe line two\n"
     diff = _make_diff(original, modified)
 
     r = _run(
         ["record", "update", record_id, "--diff"],
-        vault=vault, state_dir=state, stdin_text=diff,
+        vault=vault,
+        state_dir=state,
+        stdin_text=diff,
     )
     assert r.returncode == 0, r.stderr
     stored = _find_body(vault, record_id)
@@ -395,12 +425,15 @@ def test_update_diff_inserting_fence_is_neutralized(tmp_path):
 # CLI: invalid RECORD_ID (AC8)
 # ===========================================================================
 
+
 def test_update_invalid_record_id_nonzero(tmp_path):
     """A nonexistent RECORD_ID → non-zero exit (AC8)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "update", "spec/does-not-exist"],
-        vault=vault, state_dir=state, stdin_text="body\n",
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
     )
     assert r.returncode != 0
     assert "not found" in r.stderr.lower() or "does-not-exist" in r.stderr
@@ -417,6 +450,7 @@ def test_update_invalid_record_id_nonzero(tmp_path):
 # prints a structured ``moved: <old id> → <new id>`` line to stdout (no silent
 # move); a no-op scope update prints only the normal RECORD_ID line.
 
+
 def _write_config(config_home: Path, vaults: list[dict]) -> Path:
     """Write a lore ``config.json`` under XDG_CONFIG_HOME/lore for routed-vault tests."""
     lore_cfg = config_home / "lore"
@@ -429,7 +463,10 @@ def _write_config(config_home: Path, vaults: list[dict]) -> Path:
 def _run_cfg(args, *, vault, state, config_home, stdin_text=None):
     """Run the CLI with an explicit XDG_CONFIG_HOME so config-driven routing fires."""
     return _run(
-        args, vault=vault, state_dir=state, stdin_text=stdin_text,
+        args,
+        vault=vault,
+        state_dir=state,
+        stdin_text=stdin_text,
         env_extra={"XDG_CONFIG_HOME": str(config_home)},
     )
 
@@ -440,11 +477,14 @@ def _two_team_config(tmp_path):
     vault_b = tmp_path / "vault_b"
     vault_b.mkdir(parents=True)
     config_home = tmp_path / "config"
-    _write_config(config_home, [
-        {"name": "default", "scope": "default", "path": str(vault_a)},
-        {"name": "alpha", "scope": "team", "records": ["decision"], "path": str(vault_a)},
-        {"name": "beta", "scope": "team", "records": ["decision"], "path": str(vault_b)},
-    ])
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault_a)},
+            {"name": "alpha", "scope": "team", "records": ["decision"], "path": str(vault_a)},
+            {"name": "beta", "scope": "team", "records": ["decision"], "path": str(vault_b)},
+        ],
+    )
     return vault_a, vault_b, state, config_home
 
 
@@ -467,7 +507,10 @@ def test_update_scope_change_auto_moves_to_routed_vault(tmp_path):
 
     r = _run_cfg(
         ["record", "update", rid, "--team", "beta"],
-        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
     )
     assert r.returncode == 0, r.stderr
 
@@ -496,7 +539,10 @@ def test_update_no_scope_change_stays_in_place_no_moved_line(tmp_path):
 
     r = _run_cfg(
         ["record", "update", rid, "--status", "superseded"],
-        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
     )
     assert r.returncode == 0, r.stderr
 
@@ -524,7 +570,10 @@ def test_update_same_scope_is_noop_with_symlinked_vault_root(tmp_path):
 
     r = _run_cfg(
         ["record", "update", rid, "--team", "alpha"],
-        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
     )
     assert r.returncode == 0, r.stderr
 
@@ -542,7 +591,10 @@ def test_update_zero_prior_scope_resolves_fresh_and_moves(tmp_path):
 
     r = _run_cfg(
         ["record", "update", rid, "--team", "beta"],
-        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
     )
     assert r.returncode == 0, r.stderr
 
@@ -558,13 +610,23 @@ def test_update_scope_change_is_idempotent(tmp_path):
     rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
     kind, name = rid.split("/", 1)
 
-    r1 = _run_cfg(["record", "update", rid, "--team", "beta"],
-                  vault=vault_a, state=state, config_home=config_home, stdin_text="")
+    r1 = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
     assert r1.returncode == 0, r1.stderr
     assert "moved:" in r1.stdout
 
-    r2 = _run_cfg(["record", "update", rid, "--team", "beta"],
-                  vault=vault_a, state=state, config_home=config_home, stdin_text="")
+    r2 = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
     assert r2.returncode == 0, r2.stderr
     assert "moved:" not in r2.stdout  # already in B — no double-move
     assert (vault_b / kind / f"{name}.json").exists()
@@ -580,7 +642,10 @@ def test_update_scope_change_single_durable_write_at_destination(tmp_path):
 
     r = _run_cfg(
         ["record", "update", rid, "--team", "beta"],
-        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
     )
     assert r.returncode == 0, r.stderr
 
@@ -596,7 +661,10 @@ def test_update_scope_change_field_equals_vault_invariant(tmp_path):
 
     r = _run_cfg(
         ["record", "update", rid, "--team", "beta"],
-        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
     )
     assert r.returncode == 0, r.stderr
     # beta routes to vault_b, and the persisted field is beta.
@@ -615,18 +683,22 @@ def test_update_scope_change_restamps_updated_preserves_created(tmp_path):
     created_before = _find_sidecar(vault_a, rid)["created-at"]
 
     import time
+
     time.sleep(1.1)
 
     r = _run_cfg(
         ["record", "update", rid, "--team", "beta"],
-        vault=vault_a, state=state, config_home=config_home, stdin_text="",
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
     )
     assert r.returncode == 0, r.stderr
 
     moved = _find_sidecar(vault_b, rid)
-    assert moved["created-at"] == created_before          # created-* preserved
-    assert moved["updated-at"] != created_before          # updated-* re-stamped
-    assert moved["updated-by"]                              # present, non-empty
+    assert moved["created-at"] == created_before  # created-* preserved
+    assert moved["updated-at"] != created_before  # updated-* re-stamped
+    assert moved["updated-by"]  # present, non-empty
 
 
 def test_update_move_to_flag_is_removed(tmp_path):
@@ -638,7 +710,8 @@ def test_update_move_to_flag_is_removed(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--move-to", str(other)],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert "move-to" in r.stderr or "unrecognized" in r.stderr.lower()
@@ -647,6 +720,7 @@ def test_update_move_to_flag_is_removed(tmp_path):
 # ===========================================================================
 # Unit tests for apply_unified_diff — KU2 adversarial cases (replace prover test)
 # ===========================================================================
+
 
 @pytest.fixture
 def rs():
@@ -687,9 +761,7 @@ class TestApplierCRLF:
     def test_crlf_body_crlf_diff_applies_preserving_endings(self, rs):
         body_crlf = "line one\r\nline two\r\nline three\r\n"
         modified_crlf = "line one\r\nline TWO\r\nline three\r\n"
-        result, rejected = rs.apply_unified_diff(
-            body_crlf, _make_diff(body_crlf, modified_crlf)
-        )
+        result, rejected = rs.apply_unified_diff(body_crlf, _make_diff(body_crlf, modified_crlf))
         assert result == modified_crlf
         assert rejected == []
         assert result.count("\r\n") == 3
@@ -744,6 +816,7 @@ class TestApplierAdjacentHunks:
 # Slice 2: --label / --annotation / --unset-label / --unset-annotation
 # ===========================================================================
 
+
 def test_update_label_overwrites_existing(tmp_path):
     """update --label worktree=s6 upserts (overwrites) an existing label value."""
     vault, state = _make_vault(tmp_path)
@@ -752,13 +825,15 @@ def test_update_label_overwrites_existing(tmp_path):
     # First set a label via create then update to overwrite.
     r = _run(
         ["record", "update", record_id, "--label", "worktree=s5"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
 
     r2 = _run(
         ["record", "update", record_id, "--label", "worktree=s6"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r2.returncode == 0, r2.stderr
     sidecar = _find_sidecar(vault, record_id)
@@ -772,16 +847,16 @@ def test_update_unset_label_removes_key(tmp_path):
 
     # Set two labels first.
     r = _run(
-        ["record", "update", record_id,
-         "--label", "worktree=s5",
-         "--label", "env=prod"],
-        vault=vault, state_dir=state,
+        ["record", "update", record_id, "--label", "worktree=s5", "--label", "env=prod"],
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
 
     r2 = _run(
         ["record", "update", record_id, "--unset-label", "worktree"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r2.returncode == 0, r2.stderr
     sidecar = _find_sidecar(vault, record_id)
@@ -796,13 +871,15 @@ def test_update_unset_last_label_drops_field(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--label", "worktree=s5"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
 
     r2 = _run(
         ["record", "update", record_id, "--unset-label", "worktree"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r2.returncode == 0, r2.stderr
 
@@ -820,7 +897,8 @@ def test_update_unset_label_absent_key_silent_noop(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--unset-label", "nonexistent"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0
     sidecar = _find_sidecar(vault, record_id)
@@ -834,7 +912,8 @@ def test_update_annotation_upsert_and_unset(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--annotation", "note=hello"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, record_id)
@@ -842,7 +921,8 @@ def test_update_annotation_upsert_and_unset(tmp_path):
 
     r2 = _run(
         ["record", "update", record_id, "--unset-annotation", "note"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r2.returncode == 0, r2.stderr
     kind, name = record_id.split("/", 1)
@@ -858,7 +938,8 @@ def test_update_label_bad_key_nonzero(tmp_path):
 
     r = _run(
         ["record", "update", record_id, "--label", "BadKey=x"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert "BadKey" in r.stderr

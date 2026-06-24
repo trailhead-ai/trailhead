@@ -11,6 +11,7 @@ Output JSON:
   {action, reason, details}
 Exit 0 on success; exit 1 if the path is not a directory or gh fetch fails.
 """
+
 from __future__ import annotations
 
 import argparse

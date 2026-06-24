@@ -36,6 +36,7 @@ from conftest import CLI_PATH, load_script  # noqa: E402
 # Harness
 # ---------------------------------------------------------------------------
 
+
 def _run(args, *, state, config, vault=None, stdin_text=None, extra=None):
     """Run the lore CLI with isolated XDG state/config dirs."""
     env = dict(os.environ)
@@ -48,7 +49,10 @@ def _run(args, *, state, config, vault=None, stdin_text=None, extra=None):
         env.update(extra)
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
-        capture_output=True, text=True, env=env, input=stdin_text,
+        capture_output=True,
+        text=True,
+        env=env,
+        input=stdin_text,
     )
 
 
@@ -77,9 +81,15 @@ def _seed_default_config(config, state):
     """Write a minimal config.json with the single default vault."""
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(json.dumps({"vaults": [
-        {"name": "default", "scope": "default"},
-    ]}))
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default"},
+                ]
+            }
+        )
+    )
 
 
 def _write_record(vault_dir, kind, name, sidecar, body):
@@ -91,8 +101,12 @@ def _write_record(vault_dir, kind, name, sidecar, body):
 
 def _sidecar(kind, name, title):
     return {
-        "version": "v1", "kind": kind, "title": title, "status": "active",
-        "created-at": "2026-06-17T10:00:00Z", "updated-at": "2026-06-17T10:00:00Z",
+        "version": "v1",
+        "kind": kind,
+        "title": title,
+        "status": "active",
+        "created-at": "2026-06-17T10:00:00Z",
+        "updated-at": "2026-06-17T10:00:00Z",
     }
 
 
@@ -115,6 +129,7 @@ def _index_rows_for(state, vault_root):
 # ---------------------------------------------------------------------------
 # init seeding (Slice 1, S5 — non-interactive installer)
 # ---------------------------------------------------------------------------
+
 
 def test_init_seeds_config_with_single_default_vault(tmp_path):
     """init seeds config.json with exactly one default-scope vault."""
@@ -142,18 +157,33 @@ def test_init_creates_default_vault_under_state_dir(tmp_path):
 # vault add — config entry + index scan
 # ---------------------------------------------------------------------------
 
+
 def test_add_writes_config_entry(tmp_path):
     state, config = _dirs(tmp_path)
     _seed_default_config(config, state)
 
-    res = _run(["vault", "add", "team-vault", "--scope", "team"],
-               state=state, config=config)
+    res = _run(["vault", "add", "team-vault", "--scope", "team"], state=state, config=config)
     assert res.returncode == 0, res.stderr
 
     cfg = _read_config(config)
     names = {v["name"]: v for v in cfg["vaults"]}
     assert "team-vault" in names
     assert names["team-vault"]["scope"] == "team"
+
+
+def test_add_creates_vault_directory_when_absent(tmp_path):
+    """vault add creates the vault directory and git-inits it when it doesn't exist."""
+    state, config = _dirs(tmp_path)
+    _seed_default_config(config, state)
+
+    vault_dir = _vaults_root(state) / "product-vault"
+    assert not vault_dir.exists()
+
+    res = _run(["vault", "add", "product-vault", "--scope", "product"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+
+    assert vault_dir.is_dir(), "vault directory was not created"
+    assert (vault_dir / ".git").is_dir(), "vault was not git-initialized"
 
 
 def test_add_scans_populated_dir_into_index(tmp_path):
@@ -164,8 +194,7 @@ def test_add_scans_populated_dir_into_index(tmp_path):
     _write_record(vault_dir, "spec", "spec-a", _sidecar("spec", "spec-a", "Spec A"), "body a")
     _write_record(vault_dir, "plan", "plan-x", _sidecar("plan", "plan-x", "Plan X"), "body x")
 
-    res = _run(["vault", "add", "team-vault", "--scope", "team"],
-               state=state, config=config)
+    res = _run(["vault", "add", "team-vault", "--scope", "team"], state=state, config=config)
     assert res.returncode == 0, res.stderr
 
     rows = _index_rows_for(state, vault_dir)
@@ -181,8 +210,9 @@ def test_add_shared_vault_flags_rows_shared(tmp_path):
     vault_dir = _vaults_root(state) / "shared-team"
     _write_record(vault_dir, "spec", "s1", _sidecar("spec", "s1", "S1"), "b")
 
-    res = _run(["vault", "add", "shared-team", "--scope", "team", "--shared"],
-               state=state, config=config)
+    res = _run(
+        ["vault", "add", "shared-team", "--scope", "team", "--shared"], state=state, config=config
+    )
     assert res.returncode == 0, res.stderr
 
     rows = _index_rows_for(state, vault_dir)
@@ -194,8 +224,9 @@ def test_add_repo_name_with_slash_normalized(tmp_path):
     state, config = _dirs(tmp_path)
     _seed_default_config(config, state)
 
-    res = _run(["vault", "add", "trailhead-ai/trailhead", "--scope", "repo"],
-               state=state, config=config)
+    res = _run(
+        ["vault", "add", "trailhead-ai/trailhead", "--scope", "repo"], state=state, config=config
+    )
     assert res.returncode == 0, res.stderr
     names = {v["name"] for v in _read_config(config)["vaults"]}
     assert "trailhead-ai_trailhead" in names
@@ -231,8 +262,11 @@ def test_add_duplicate_after_normalization_is_error(tmp_path):
 def test_add_default_scope_with_record_is_error(tmp_path):
     state, config = _dirs(tmp_path)
     _seed_default_config(config, state)
-    res = _run(["vault", "add", "another-default", "--scope", "default",
-                "--record", "blob"], state=state, config=config)
+    res = _run(
+        ["vault", "add", "another-default", "--scope", "default", "--record", "blob"],
+        state=state,
+        config=config,
+    )
     assert res.returncode != 0
     assert res.stderr.strip() != ""
 
@@ -240,8 +274,11 @@ def test_add_default_scope_with_record_is_error(tmp_path):
 def test_add_unknown_record_kind_is_error(tmp_path):
     state, config = _dirs(tmp_path)
     _seed_default_config(config, state)
-    res = _run(["vault", "add", "kindy", "--scope", "team",
-                "--record", "notakind"], state=state, config=config)
+    res = _run(
+        ["vault", "add", "kindy", "--scope", "team", "--record", "notakind"],
+        state=state,
+        config=config,
+    )
     assert res.returncode != 0
     assert "notakind" in res.stderr
 
@@ -256,8 +293,7 @@ def test_add_deep_validation_failure_leaves_config_unchanged(tmp_path):
 
     # ".." passes the inline scope/duplicate/record guards but fails
     # validate_layer_name inside load_config (deep validation).
-    res = _run(["vault", "add", "..", "--scope", "team"],
-               state=state, config=config)
+    res = _run(["vault", "add", "..", "--scope", "team"], state=state, config=config)
     assert res.returncode != 0, res.stdout
     # config.json must be byte-for-byte unchanged — never persisted then rejected.
     assert _config_path(config).read_bytes() == before
@@ -266,6 +302,7 @@ def test_add_deep_validation_failure_leaves_config_unchanged(tmp_path):
 # ---------------------------------------------------------------------------
 # vault delete — config entry + index rows; on-disk kept by default
 # ---------------------------------------------------------------------------
+
 
 def test_delete_removes_config_entry_and_index_rows_keeps_dir(tmp_path):
     state, config = _dirs(tmp_path)
@@ -296,8 +333,7 @@ def test_delete_remove_from_disk_without_yes_aborts(tmp_path):
     _write_record(vault_dir, "spec", "spec-a", _sidecar("spec", "spec-a", "Spec A"), "body a")
     _run(["vault", "add", "team-vault", "--scope", "team"], state=state, config=config)
 
-    res = _run(["vault", "delete", "team-vault", "--remove-from-disk"],
-               state=state, config=config)
+    res = _run(["vault", "delete", "team-vault", "--remove-from-disk"], state=state, config=config)
     assert res.returncode != 0
     # Dir must survive — no destruction without --yes.
     assert vault_dir.is_dir()
@@ -314,8 +350,9 @@ def test_delete_remove_from_disk_with_yes_removes_dir(tmp_path):
     _run(["vault", "add", "team-vault", "--scope", "team"], state=state, config=config)
     assert vault_dir.is_dir()
 
-    res = _run(["vault", "delete", "team-vault", "--remove-from-disk", "--yes"],
-               state=state, config=config)
+    res = _run(
+        ["vault", "delete", "team-vault", "--remove-from-disk", "--yes"], state=state, config=config
+    )
     assert res.returncode == 0, res.stderr
     assert not vault_dir.exists()
     names = {v["name"] for v in _read_config(config)["vaults"]}
@@ -330,13 +367,20 @@ def test_delete_remove_from_disk_refuses_path_outside_root(tmp_path):
     _write_record(outside, "spec", "x", _sidecar("spec", "x", "X"), "b")
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(json.dumps({"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "exfil", "scope": "team", "path": str(outside)},
-    ]}))
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default"},
+                    {"name": "exfil", "scope": "team", "path": str(outside)},
+                ]
+            }
+        )
+    )
 
-    res = _run(["vault", "delete", "exfil", "--remove-from-disk", "--yes"],
-               state=state, config=config)
+    res = _run(
+        ["vault", "delete", "exfil", "--remove-from-disk", "--yes"], state=state, config=config
+    )
     assert res.returncode != 0
     # The outside dir must NOT be deleted.
     assert outside.is_dir()
@@ -356,13 +400,20 @@ def test_delete_remove_from_disk_refuses_symlinked_path(tmp_path):
 
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(json.dumps({"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "linky", "scope": "team", "path": str(link)},
-    ]}))
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default"},
+                    {"name": "linky", "scope": "team", "path": str(link)},
+                ]
+            }
+        )
+    )
 
-    res = _run(["vault", "delete", "linky", "--remove-from-disk", "--yes"],
-               state=state, config=config)
+    res = _run(
+        ["vault", "delete", "linky", "--remove-from-disk", "--yes"], state=state, config=config
+    )
     assert res.returncode != 0
     assert real.is_dir()
     assert (real / "keep.txt").is_file()
@@ -383,13 +434,20 @@ def test_delete_remove_from_disk_refuses_symlink_targeting_inside_root(tmp_path)
 
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(json.dumps({"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "linky", "scope": "team", "path": str(link)},
-    ]}))
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default"},
+                    {"name": "linky", "scope": "team", "path": str(link)},
+                ]
+            }
+        )
+    )
 
-    res = _run(["vault", "delete", "linky", "--remove-from-disk", "--yes"],
-               state=state, config=config)
+    res = _run(
+        ["vault", "delete", "linky", "--remove-from-disk", "--yes"], state=state, config=config
+    )
     assert res.returncode != 0
     assert real.is_dir()
     assert (real / "keep.txt").is_file()
@@ -413,12 +471,12 @@ def test_delete_remove_from_disk_succeeds_with_symlinked_ancestor(tmp_path):
     _write_record(vault_dir, "spec", "spec-a", _sidecar("spec", "spec-a", "Spec A"), "body a")
 
     _seed_default_config(config, state)
-    add = _run(["vault", "add", "team-vault", "--scope", "team"],
-               state=state, config=config)
+    add = _run(["vault", "add", "team-vault", "--scope", "team"], state=state, config=config)
     assert add.returncode == 0, add.stderr
 
-    res = _run(["vault", "delete", "team-vault", "--remove-from-disk", "--yes"],
-               state=state, config=config)
+    res = _run(
+        ["vault", "delete", "team-vault", "--remove-from-disk", "--yes"], state=state, config=config
+    )
     assert res.returncode == 0, res.stderr
     # The vault dir (a real dir, just reached through a symlinked ancestor)
     # must actually be deleted.
@@ -428,6 +486,7 @@ def test_delete_remove_from_disk_succeeds_with_symlinked_ancestor(tmp_path):
 # ---------------------------------------------------------------------------
 # delete → re-add round-trip (index row counts at the index_store boundary)
 # ---------------------------------------------------------------------------
+
 
 def test_delete_then_readd_roundtrips_index_rows(tmp_path):
     state, config = _dirs(tmp_path)
@@ -471,6 +530,7 @@ def test_readd_is_idempotent_no_duplicate_rows(tmp_path):
 # ---------------------------------------------------------------------------
 # vault ls
 # ---------------------------------------------------------------------------
+
 
 def test_ls_lists_configured_vaults(tmp_path):
     state, config = _dirs(tmp_path)

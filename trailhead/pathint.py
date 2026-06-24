@@ -33,10 +33,21 @@ from trailhead.paths import ensure_dir, state_dir
 # S-6 denylist
 # ---------------------------------------------------------------------------
 
-_SHIM_DENYLIST = frozenset({
-    "python", "python3", "git", "ssh", "curl",
-    "install", "update", "sh", "bash", "fish", "zsh",
-})
+_SHIM_DENYLIST = frozenset(
+    {
+        "python",
+        "python3",
+        "git",
+        "ssh",
+        "curl",
+        "install",
+        "update",
+        "sh",
+        "bash",
+        "fish",
+        "zsh",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +125,7 @@ def create_shims(
             shim_path.chmod(0o700)
             shims[name] = shim_path
     except OSError as exc:
-        raise PathIntegrationError(
-            f"could not create shim dir at {shim_dir}: {exc}"
-        ) from exc
+        raise PathIntegrationError(f"could not create shim dir at {shim_dir}: {exc}") from exc
 
     return ShimDirResult(shim_dir=shim_dir, shims=shims)
 

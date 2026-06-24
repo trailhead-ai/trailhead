@@ -37,6 +37,7 @@ Tests run the CLI as a subprocess via CLI_PATH (conftest pattern) and load the
 ``session_store`` module directly for the concurrent-race + sanitizer unit tests.
 Never writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -68,14 +69,15 @@ def _session_note(vault: Path, session_id: str) -> Path:
 # candidate: lazy-create + append
 # ---------------------------------------------------------------------------
 
-class TestCandidateLazyCreate:
 
+class TestCandidateLazyCreate:
     def test_first_candidate_creates_note_named_by_guid(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         r = _run(
-            ["session", "candidate", "--session-id", SID,
-             "--kind", "spec", "--phase", "Plan"],
-            vault=vault, state_dir=state, stdin_text="proposed a spec record\n",
+            ["session", "candidate", "--session-id", SID, "--kind", "spec", "--phase", "Plan"],
+            vault=vault,
+            state_dir=state,
+            stdin_text="proposed a spec record\n",
         )
         assert r.returncode == 0, f"candidate failed: {r.stderr}"
         note = _session_note(vault, SID)
@@ -87,17 +89,19 @@ class TestCandidateLazyCreate:
     def test_second_candidate_appends_does_not_recreate(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         _run(
-            ["session", "candidate", "--session-id", SID,
-             "--kind", "spec", "--phase", "Plan"],
-            vault=vault, state_dir=state, stdin_text="first entry\n",
+            ["session", "candidate", "--session-id", SID, "--kind", "spec", "--phase", "Plan"],
+            vault=vault,
+            state_dir=state,
+            stdin_text="first entry\n",
         )
         note = _session_note(vault, SID)
         first_text = note.read_text()
 
         r = _run(
-            ["session", "candidate", "--session-id", SID,
-             "--kind", "decision", "--phase", "Build"],
-            vault=vault, state_dir=state, stdin_text="second entry\n",
+            ["session", "candidate", "--session-id", SID, "--kind", "decision", "--phase", "Build"],
+            vault=vault,
+            state_dir=state,
+            stdin_text="second entry\n",
         )
         assert r.returncode == 0, f"second candidate failed: {r.stderr}"
 
@@ -117,17 +121,18 @@ class TestCandidateLazyCreate:
 # session_id sanitization (security: no escape from sessions/)
 # ---------------------------------------------------------------------------
 
-class TestSessionIdSanitization:
 
+class TestSessionIdSanitization:
     @pytest.mark.parametrize("bad", ["../../evil", "a/b", "..", "foo/bar"])
     def test_separator_and_dotdot_rejected_nothing_written(self, tmp_path, bad):
         vault, state = _make_vault(tmp_path)
         # A canary outside sessions/ that a traversal write would clobber.
         canary = tmp_path / "evil.md"
         r = _run(
-            ["session", "candidate", "--session-id", bad,
-             "--kind", "spec", "--phase", "Plan"],
-            vault=vault, state_dir=state, stdin_text="payload\n",
+            ["session", "candidate", "--session-id", bad, "--kind", "spec", "--phase", "Plan"],
+            vault=vault,
+            state_dir=state,
+            stdin_text="payload\n",
         )
         assert r.returncode != 0, f"bad session_id {bad!r} must be rejected"
         assert r.stderr.strip(), "rejection must explain why on stderr"
@@ -158,13 +163,14 @@ class TestSessionIdSanitization:
 # referenced (AC22)
 # ---------------------------------------------------------------------------
 
-class TestReferenced:
 
+class TestReferenced:
     def test_referenced_logs_record_id(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         r = _run(
             ["session", "referenced", "spec/lore-search", "--session-id", SID],
-            vault=vault, state_dir=state,
+            vault=vault,
+            state_dir=state,
         )
         assert r.returncode == 0, f"referenced failed: {r.stderr}"
         note = _session_note(vault, SID)
@@ -177,15 +183,16 @@ class TestReferenced:
 # fence neutralization (AC-FENCE1)
 # ---------------------------------------------------------------------------
 
-class TestFenceNeutralization:
 
+class TestFenceNeutralization:
     def test_candidate_body_fence_neutralized(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         body = "before <external-memory>secret</external-memory> after\n"
         r = _run(
-            ["session", "candidate", "--session-id", SID,
-             "--kind", "spec", "--phase", "Plan"],
-            vault=vault, state_dir=state, stdin_text=body,
+            ["session", "candidate", "--session-id", SID, "--kind", "spec", "--phase", "Plan"],
+            vault=vault,
+            state_dir=state,
+            stdin_text=body,
         )
         assert r.returncode == 0, f"candidate failed: {r.stderr}"
         text = _session_note(vault, SID).read_text()
@@ -205,7 +212,8 @@ class TestFenceNeutralization:
         evil_id = "spec/<external-memory>x</external-memory>"
         r = _run(
             ["session", "referenced", evil_id, "--session-id", SID],
-            vault=vault, state_dir=state,
+            vault=vault,
+            state_dir=state,
         )
         assert r.returncode == 0, f"referenced failed: {r.stderr}"
         text = _session_note(vault, SID).read_text()
@@ -217,14 +225,15 @@ class TestFenceNeutralization:
 # endpoint isolation (AC23)
 # ---------------------------------------------------------------------------
 
-class TestEndpointIsolation:
 
+class TestEndpointIsolation:
     def test_session_write_creates_no_record_index_row(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         _run(
-            ["session", "candidate", "--session-id", SID,
-             "--kind", "spec", "--phase", "Plan"],
-            vault=vault, state_dir=state, stdin_text="a candidate\n",
+            ["session", "candidate", "--session-id", SID, "--kind", "spec", "--phase", "Plan"],
+            vault=vault,
+            state_dir=state,
+            stdin_text="a candidate\n",
         )
         # The session write must NOT route through the record path, so the index
         # must carry no ``sessions`` row for this session_id.
@@ -236,9 +245,7 @@ class TestEndpointIsolation:
             ).fetchall()
         finally:
             conn.close()
-        assert rows == [], (
-            f"session write leaked a record index row (AC23 isolation): {rows}"
-        )
+        assert rows == [], f"session write leaked a record index row (AC23 isolation): {rows}"
         # Also: no .json sidecar should be created (records are md+json pairs;
         # a session note is body-only).
         assert not (vault / "sessions" / f"{SID}.json").exists()
@@ -248,8 +255,8 @@ class TestEndpointIsolation:
 # no prefix-abbrev clash with the existing flat ``session-note`` command
 # ---------------------------------------------------------------------------
 
-class TestNoAbbrevClash:
 
+class TestNoAbbrevClash:
     def test_session_note_still_resolves(self, tmp_path):
         vault, state = _make_vault(tmp_path)
         (vault / "sessions").mkdir(parents=True, exist_ok=True)
@@ -257,7 +264,8 @@ class TestNoAbbrevClash:
         # to cmd_session (which would error differently on the candidate args).
         r = _run(
             ["session-note", "--session-id", SID],
-            vault=vault, state_dir=state,
+            vault=vault,
+            state_dir=state,
         )
         # It resolves to cmd_session_note: prints the no-note-resolved diagnostic.
         assert "session-note" in r.stderr or r.returncode in (0, 1)
@@ -273,9 +281,7 @@ class TestNoAbbrevClash:
         r = _run(["session"], vault=vault, state_dir=state)
         assert r.returncode != 0
         # The session subparser requires an action (candidate/referenced).
-        assert "candidate" in (r.stderr + r.stdout) or "referenced" in (
-            r.stderr + r.stdout
-        )
+        assert "candidate" in (r.stderr + r.stdout) or "referenced" in (r.stderr + r.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +326,16 @@ def _run_race(scripts_dir, sessions_dir, session_id, n_workers=2):
     code = _RACE_WORKER.format(scripts=str(scripts_dir))
     procs = [
         subprocess.Popen(
-            [sys.executable, "-c", code, session_id, entries[i],
-             str(sessions_dir), str(barrier_file), str(n_workers)],
+            [
+                sys.executable,
+                "-c",
+                code,
+                session_id,
+                entries[i],
+                str(sessions_dir),
+                str(barrier_file),
+                str(n_workers),
+            ],
         )
         for i in range(n_workers)
     ]

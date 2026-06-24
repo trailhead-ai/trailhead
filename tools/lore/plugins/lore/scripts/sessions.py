@@ -19,6 +19,7 @@ build_action_index, and the capture-commands tuple) were removed in Slice 2, S5
 (F5: lore is fully pull — orientation lives in agent-rules + S6 skill descriptions;
 no SessionStart hook).
 """
+
 from __future__ import annotations
 
 import json
@@ -120,7 +121,7 @@ def is_skeleton_body(note: Path) -> bool:
     end = text.find("\n---", 3)
     if end < 0:
         return False
-    body = text[end + 4:]  # skip past closing "\n---"
+    body = text[end + 4 :]  # skip past closing "\n---"
 
     for raw in body.splitlines():
         line = raw.strip()
@@ -259,8 +260,7 @@ def ensure_session_note(
         "status: active\n"
         "---\n\n"
         f"# Session: {worktree_name}\n\n"
-        f"Started {now_human} on branch `{branch}` in project `{project}`.\n\n"
-        + _session_body()
+        f"Started {now_human} on branch `{branch}` in project `{project}`.\n\n" + _session_body()
     )
     try:
         new_path.write_text(content)
@@ -286,8 +286,7 @@ def write_note_atomic(note: Path, text: str) -> bool:
         os.replace(tmp_path, note)
         return True
     except Exception as e:  # noqa: BLE001
-        print(f"sessions: write_note_atomic {note.name}: {type(e).__name__}: {e}",
-              file=sys.stderr)
+        print(f"sessions: write_note_atomic {note.name}: {type(e).__name__}: {e}", file=sys.stderr)
         if tmp_path is not None:
             try:
                 os.unlink(tmp_path)
@@ -416,5 +415,3 @@ def finalize_note(note: Path, ended_iso: str) -> bool:
 
     new_text = "---" + "\n".join(new_fm_lines) + body
     return write_note_atomic(note, new_text)
-
-

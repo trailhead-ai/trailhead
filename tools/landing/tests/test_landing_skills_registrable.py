@@ -7,6 +7,7 @@ pins `name:` == the skill dir name.
 
 Unique basename so it does not collide with craft's/lore's/portage's same-named test.
 """
+
 from pathlib import Path
 
 import pytest

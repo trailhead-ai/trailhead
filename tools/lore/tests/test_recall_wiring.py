@@ -23,7 +23,10 @@ AGENTS_DIR = PLUGIN_ROOT / "agents"
 
 CRAFT_AGENTS_DIR = (
     Path(__file__).parent.parent.parent  # tools/
-    / "craft" / "plugins" / "craft" / "agents"
+    / "craft"
+    / "plugins"
+    / "craft"
+    / "agents"
 )
 
 _LORE_LIBRARIAN = AGENTS_DIR / "librarian.md"
@@ -33,6 +36,7 @@ _CRAFT_PLANNER = CRAFT_AGENTS_DIR / "planner.md"
 # ---------------------------------------------------------------------------
 # librarian agent — area-scoped retrieval primitive is lore search --json
 # ---------------------------------------------------------------------------
+
 
 class TestLoreLibrarianSearchPrimitive:
     def test_lore_librarian_references_lore_search(self):
@@ -60,11 +64,10 @@ class TestLoreLibrarianSearchPrimitive:
 # craft planner agent — recall reference rewired to lore search
 # ---------------------------------------------------------------------------
 
+
 class TestCraftPlannerSearchReference:
     def test_craft_planner_references_lore_search(self):
-        assert _CRAFT_PLANNER.exists(), (
-            f"craft planner.md not found at {_CRAFT_PLANNER}."
-        )
+        assert _CRAFT_PLANNER.exists(), f"craft planner.md not found at {_CRAFT_PLANNER}."
         text = _CRAFT_PLANNER.read_text()
         assert "lore search" in text, (
             "craft/agents/planner.md must reference `lore search 'area:<name>'` in "

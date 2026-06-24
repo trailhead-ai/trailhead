@@ -16,6 +16,7 @@ Test contract (all must RED before implementation, GREEN after):
 10. relative root in the TOML resolves relative to TOML file location, not cwd (A-4).
 11. two groups claiming the cwd → [personal] + stderr overlap warning (C-4 recall degrade).
 """
+
 from __future__ import annotations
 
 import os
@@ -32,9 +33,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 # The camp plugin root must be on sys.path for the lazy import to succeed.
-_CAMP_PLUGIN_ROOT = str(
-    Path(__file__).resolve().parents[4] / "camp" / "plugins"
-)
+_CAMP_PLUGIN_ROOT = str(Path(__file__).resolve().parents[4] / "camp" / "plugins")
 if _CAMP_PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _CAMP_PLUGIN_ROOT)
 
@@ -83,9 +82,7 @@ def _layers():
 
 
 class TestSharedLayerDiscovery:
-    def test_one_shared_vault_returns_personal_and_shared(
-        self, tmp_path: Path
-    ) -> None:
+    def test_one_shared_vault_returns_personal_and_shared(self, tmp_path: Path) -> None:
         """A group config with one existing [[shared_vaults]] → [personal, shared]."""
         m = _layers()
 
@@ -117,9 +114,7 @@ class TestSharedLayerDiscovery:
         assert layers[1].trusted is False
         assert layers[1].root.resolve() == shared_root.resolve()
 
-    def test_two_shared_vaults_both_appended_in_order(
-        self, tmp_path: Path
-    ) -> None:
+    def test_two_shared_vaults_both_appended_in_order(self, tmp_path: Path) -> None:
         """Multiple [[shared_vaults]] entries appear in declared order."""
         m = _layers()
 
@@ -174,9 +169,7 @@ class TestGracefulFallback:
         assert len(layers) == 1
         assert layers[0].kind == "personal"
 
-    def test_group_with_no_shared_vaults_returns_personal_only(
-        self, tmp_path: Path
-    ) -> None:
+    def test_group_with_no_shared_vaults_returns_personal_only(self, tmp_path: Path) -> None:
         """Group config with no [[shared_vaults]] → [personal]."""
         m = _layers()
 
@@ -200,9 +193,7 @@ class TestGracefulFallback:
         assert len(layers) == 1
         assert layers[0].kind == "personal"
 
-    def test_cwd_in_no_group_returns_personal_only(
-        self, tmp_path: Path
-    ) -> None:
+    def test_cwd_in_no_group_returns_personal_only(self, tmp_path: Path) -> None:
         """cwd not in any group → [personal] (graceful single-personal fallback)."""
         m = _layers()
 
@@ -238,9 +229,7 @@ class TestGracefulFallback:
 
 
 class TestCampAbsent:
-    def test_camp_import_error_returns_personal_only(
-        self, tmp_path: Path
-    ) -> None:
+    def test_camp_import_error_returns_personal_only(self, tmp_path: Path) -> None:
         """camp ImportError → [personal], no raise (B-1/D20)."""
         m = _layers()
 
@@ -250,9 +239,15 @@ class TestCampAbsent:
         groups_dir.mkdir()
 
         # Simulate camp being absent by blocking the import
-        with mock.patch.dict(sys.modules, {"camp": None, "camp.scripts": None,
-                                            "camp.scripts.group_config": None,
-                                            "camp.scripts.group_resolve": None}):
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "camp": None,
+                "camp.scripts": None,
+                "camp.scripts.group_config": None,
+                "camp.scripts.group_resolve": None,
+            },
+        ):
             with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
                 layers = m.resolve_layers(cwd=tmp_path, groups_dir=groups_dir)
 
@@ -266,9 +261,7 @@ class TestCampAbsent:
 
 
 class TestMalformedConfig:
-    def test_malformed_group_config_returns_personal_only(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_malformed_group_config_returns_personal_only(self, tmp_path: Path, capsys) -> None:
         """Malformed group config (missing group.name) → [personal], no raise (C-3)."""
         m = _layers()
 
@@ -282,7 +275,7 @@ class TestMalformedConfig:
         # Write a structurally valid TOML but missing required group.name
         bad_config = groups_dir / "bad.toml"
         bad_config.write_text(
-            "[group]\n# name is missing\n\n[[members]]\nname = \"r\"\nrepo_root = \"/tmp/r\"\n"
+            '[group]\n# name is missing\n\n[[members]]\nname = "r"\nrepo_root = "/tmp/r"\n'
         )
 
         with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
@@ -301,9 +294,7 @@ class TestMalformedConfig:
 
 
 class TestMissingSharedRoot:
-    def test_missing_shared_root_omitted_with_stderr(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_missing_shared_root_omitted_with_stderr(self, tmp_path: Path, capsys) -> None:
         """A [[shared_vaults]] root that doesn't exist → omitted + named stderr."""
         m = _layers()
 
@@ -333,9 +324,7 @@ class TestMissingSharedRoot:
         assert "missing-vault" in captured.err
         assert str(nonexistent) in captured.err or "not found" in captured.err
 
-    def test_good_vault_survives_bad_vault_skipped(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_good_vault_survives_bad_vault_skipped(self, tmp_path: Path, capsys) -> None:
         """One missing vault is skipped; remaining valid vaults still resolve."""
         m = _layers()
 
@@ -376,9 +365,7 @@ class TestMissingSharedRoot:
 
 
 class TestConfinementViolations:
-    def test_bad_shared_name_dropped_with_stderr(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_bad_shared_name_dropped_with_stderr(self, tmp_path: Path, capsys) -> None:
         """A [[shared_vaults]] name of '../evil' → that layer dropped + named stderr (A-4)."""
         m = _layers()
 
@@ -406,9 +393,7 @@ class TestConfinementViolations:
         captured = capsys.readouterr()
         assert captured.err  # named error
 
-    def test_bad_name_dropped_but_good_name_survives(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_bad_name_dropped_but_good_name_survives(self, tmp_path: Path, capsys) -> None:
         """Bad name dropped; good-name vault in same config survives (A-4)."""
         m = _layers()
 
@@ -448,9 +433,7 @@ class TestConfinementViolations:
 
 
 class TestPromoteToSelfCollision:
-    def test_shared_root_same_as_personal_root_dropped(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_shared_root_same_as_personal_root_dropped(self, tmp_path: Path, capsys) -> None:
         """Shared root == personal root → dropped + stderr collision warning (A-4)."""
         m = _layers()
 
@@ -484,9 +467,7 @@ class TestPromoteToSelfCollision:
 
 
 class TestRelativeRootResolution:
-    def test_relative_root_resolves_from_toml_location(
-        self, tmp_path: Path
-    ) -> None:
+    def test_relative_root_resolves_from_toml_location(self, tmp_path: Path) -> None:
         """A relative root in [[shared_vaults]] resolves relative to the TOML file, not cwd."""
         m = _layers()
 
@@ -535,9 +516,7 @@ class TestRelativeRootResolution:
 
 
 class TestOverlapDegradation:
-    def test_two_groups_claim_cwd_degrades_to_personal(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_two_groups_claim_cwd_degrades_to_personal(self, tmp_path: Path, capsys) -> None:
         """Two groups claiming cwd → [personal] + stderr warning (C-4 recall degrade)."""
         m = _layers()
 

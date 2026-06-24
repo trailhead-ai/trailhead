@@ -57,9 +57,7 @@ def get_harness(name: str) -> Harness:
     cname = canonical_name(name)
     cls = _HARNESSES.get(cname)
     if cls is None:
-        raise HarnessError(
-            f"unknown harness {name!r}; known harnesses: {known_harness_names()}"
-        )
+        raise HarnessError(f"unknown harness {name!r}; known harnesses: {known_harness_names()}")
     return cls()
 
 

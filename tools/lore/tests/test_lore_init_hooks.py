@@ -15,6 +15,7 @@ Covers every bullet of the Slice 2 test contract:
 All tests inject XDG_STATE_HOME / XDG_CONFIG_HOME via env and use tmp_path so
 they NEVER touch real config, state, or vault data (Axiom 6).
 """
+
 from __future__ import annotations
 
 import json
@@ -39,6 +40,7 @@ from conftest import load_script  # noqa: E402
 # ---------------------------------------------------------------------------
 # Harness
 # ---------------------------------------------------------------------------
+
 
 def _run(args, *, state, config, home, cwd=None, extra=None):
     """Run lore CLI with isolated XDG dirs and an isolated HOME (Axiom 6)."""
@@ -71,6 +73,7 @@ def _dirs(tmp_path):
 # 1. hooks.json: session-context.py and finalize-session-note.py not wired
 # ---------------------------------------------------------------------------
 
+
 class TestHooksJson:
     def test_hooks_json_does_not_wire_session_context(self):
         """hooks.json must not reference session-context.py (F5: no SessionStart hook)."""
@@ -88,9 +91,7 @@ class TestHooksJson:
         """SessionStart key must be absent from hooks.json (F5)."""
         data = json.loads(HOOKS_JSON.read_text())
         hooks = data.get("hooks", {})
-        assert "SessionStart" not in hooks, (
-            "hooks.json still has a SessionStart entry"
-        )
+        assert "SessionStart" not in hooks, "hooks.json still has a SessionStart entry"
 
     def test_hooks_json_does_not_wire_finalize_session_note(self):
         """hooks.json must not reference finalize-session-note.py."""
@@ -108,9 +109,7 @@ class TestHooksJson:
         """WorktreeRemove key must be absent from hooks.json (finalization is explicit)."""
         data = json.loads(HOOKS_JSON.read_text())
         hooks = data.get("hooks", {})
-        assert "WorktreeRemove" not in hooks, (
-            "hooks.json still has a WorktreeRemove entry"
-        )
+        assert "WorktreeRemove" not in hooks, "hooks.json still has a WorktreeRemove entry"
 
     def test_hooks_json_has_no_post_tool_use(self):
         """PostToolUse harvest entry must be absent from hooks.json.
@@ -130,6 +129,7 @@ class TestHooksJson:
 # 2. Deleted hook script files are absent
 # ---------------------------------------------------------------------------
 
+
 class TestDeletedHookScripts:
     def test_session_context_script_deleted(self):
         """hooks/session-context.py must not exist (F5: lore is fully pull)."""
@@ -147,6 +147,7 @@ class TestDeletedHookScripts:
 # ---------------------------------------------------------------------------
 # 3. settings_writer module — idempotent upsert
 # ---------------------------------------------------------------------------
+
 
 class TestSettingsWriter:
     def _sw(self):
@@ -194,9 +195,7 @@ class TestSettingsWriter:
         # Pre-populate with a hook we want to remove
         data = {
             "hooks": {
-                "SessionStart": [
-                    {"hooks": [{"type": "command", "command": "lore-context.py"}]}
-                ]
+                "SessionStart": [{"hooks": [{"type": "command", "command": "lore-context.py"}]}]
             }
         }
         settings_path.write_text(json.dumps(data))
@@ -216,12 +215,12 @@ class TestSettingsWriter:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "hooks": {
-                "SessionStart": [
-                    {"hooks": [{"type": "command", "command": "lore-context.py"}]}
-                ],
+                "SessionStart": [{"hooks": [{"type": "command", "command": "lore-context.py"}]}],
                 "PreToolUse": [
-                    {"matcher": "Edit|Write",
-                     "hooks": [{"type": "command", "command": "unrelated-guard.py"}]}
+                    {
+                        "matcher": "Edit|Write",
+                        "hooks": [{"type": "command", "command": "unrelated-guard.py"}],
+                    }
                 ],
             }
         }
@@ -230,18 +229,16 @@ class TestSettingsWriter:
         result = json.loads(settings_path.read_text())
         pre = result.get("hooks", {}).get("PreToolUse", [])
         cmds = [h.get("command") for e in pre for h in e.get("hooks", [])]
-        assert "unrelated-guard.py" in cmds, (
-            "remove_hook removed an unrelated PreToolUse hook"
-        )
+        assert "unrelated-guard.py" in cmds, "remove_hook removed an unrelated PreToolUse hook"
 
     def test_remove_hook_is_noop_when_absent(self, tmp_path):
         """remove_hook on a settings file that lacks the target hook is idempotent."""
         sw = self._sw()
         settings_path = tmp_path / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"hooks": {"PostToolUse": [
-            {"hooks": [{"type": "command", "command": "harvest.py"}]}
-        ]}}
+        data = {
+            "hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": "harvest.py"}]}]}
+        }
         settings_path.write_text(json.dumps(data))
         original = settings_path.read_text()
         sw.remove_hook(settings_path, "SessionStart", "lore-context.py")
@@ -288,6 +285,7 @@ class TestSettingsWriter:
 # ---------------------------------------------------------------------------
 # 4. lore init installs zero lore hooks in settings.json
 # ---------------------------------------------------------------------------
+
 
 class TestInitInstallsNoHooks:
     def test_init_writes_no_session_start_hook(self, tmp_path):
@@ -336,8 +334,10 @@ class TestInitInstallsNoHooks:
         pre_existing = {
             "hooks": {
                 "PreToolUse": [
-                    {"matcher": "Edit|Write",
-                     "hooks": [{"type": "command", "command": "unrelated-guard.py"}]}
+                    {
+                        "matcher": "Edit|Write",
+                        "hooks": [{"type": "command", "command": "unrelated-guard.py"}],
+                    }
                 ]
             }
         }

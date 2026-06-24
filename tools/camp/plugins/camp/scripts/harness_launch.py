@@ -26,6 +26,7 @@ memory: harness-cli-not-isolated-by-trailhead-env). The CAMP_TEST_NO_EXEC escape
 hatch short-circuits the real os.execvp for the subprocess-level CLI tests that
 cannot monkeypatch in-process.
 """
+
 from __future__ import annotations
 
 import os
@@ -93,9 +94,7 @@ class HarnessProfile:
     inject: str  # "stdout" | "claude-hook"
     pretrust: bool  # opt-in to the claude trust pre-seed (see should_pretrust)
 
-    def resolved_cwd(
-        self, *, slug: str, workspace: Path | str, session_id: str = ""
-    ) -> Path:
+    def resolved_cwd(self, *, slug: str, workspace: Path | str, session_id: str = "") -> Path:
         """Single source of the substituted launch cwd.
 
         Accepts workspace as Path or str; returns the resolved Path after
@@ -106,9 +105,7 @@ class HarnessProfile:
         launch() passes the real id so a custom cwd that does reference it works.
         """
         return Path(
-            _substitute(
-                self.cwd, slug=slug, workspace=str(workspace), session_id=session_id
-            )
+            _substitute(self.cwd, slug=slug, workspace=str(workspace), session_id=session_id)
         )
 
     def is_claude_launch(self) -> bool:
@@ -139,9 +136,7 @@ class HarnessProfile:
         inject-only gate would wrongly skip pretrust for a plain `["claude", …]`
         launch.
         """
-        return self.pretrust and (
-            self.is_claude_launch() or self.inject == "claude-hook"
-        )
+        return self.pretrust and (self.is_claude_launch() or self.inject == "claude-hook")
 
     def has_resumable_session(
         self, session_id: str, *, env: dict[str, str] | None = None
@@ -198,9 +193,7 @@ def resolve_harness_profile(group: dict[str, Any]) -> HarnessProfile:
         new=list(harness.get("new") or _CLAUDE_DEFAULT["new"]),
         resume=list(harness.get("resume") or _CLAUDE_DEFAULT["resume"]),
         cwd=harness.get("cwd") or _CLAUDE_DEFAULT["cwd"],
-        doc_files=list(harness["doc_files"])
-        if "doc_files" in harness
-        else ["CLAUDE.md"],
+        doc_files=list(harness["doc_files"]) if "doc_files" in harness else ["CLAUDE.md"],
         inject=inject,
         pretrust=harness.get("pretrust", True),
     )

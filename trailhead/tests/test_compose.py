@@ -75,9 +75,7 @@ def _make_agent(plugin_root: Path, name: str) -> Path:
 
 def _basic_manifest(tmp_path: Path, tool: str, *, base: list[str] | None = None) -> Path:
     base_line = f"base = {base!r}\n" if base else ""
-    return _write_manifest(
-        tmp_path, f'[tool]\nname = "{tool}"\nvalidate = false\n{base_line}'
-    )
+    return _write_manifest(tmp_path, f'[tool]\nname = "{tool}"\nvalidate = false\n{base_line}')
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ wording is pinned as a fixture (`fixtures/injection_defense_canonical.txt`,
 captured from librarian.md — the canonical source). The drift-prevention intent
 is preserved: brainstorm's block must still match the canonical wording exactly.
 """
+
 from __future__ import annotations
 
 import re
@@ -47,7 +48,7 @@ _PROVIDER_SEAMS = [
 # The injection-defense anchor: a distinctive substring that appears in the
 # canonical block and is load-bearing enough that if the block is deleted,
 # this test fails.
-_INJECTION_ANCHOR = "external-memory layer=\"shared\" source=\"…\">"
+_INJECTION_ANCHOR = 'external-memory layer="shared" source="…">'
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +106,7 @@ class TestKeyPrinciplesAbsent:
 # (c) Injection-defense byte-identical in both files
 # ---------------------------------------------------------------------------
 
+
 def _extract_injection_block(text: str) -> str:
     """Extract the injection-defense block from either file.
 
@@ -153,8 +155,8 @@ def _extract_injection_block(text: str) -> str:
     # Normalize the first line: if it starts with a list marker ("- " or "* ")
     # followed by the heading, strip the marker so a brainstorm sub-bullet and a
     # librarian paragraph-indent produce the same canonical string.
-    if block_lines and re.match(r'^[-*]\s+', block_lines[0]):
-        block_lines[0] = re.sub(r'^[-*]\s+', '', block_lines[0])
+    if block_lines and re.match(r"^[-*]\s+", block_lines[0]):
+        block_lines[0] = re.sub(r"^[-*]\s+", "", block_lines[0])
 
     return " ".join(part for part in block_lines if part)
 
@@ -177,9 +179,7 @@ class TestInjectionDefenseByteIdentical:
         authoritative source of the shared injection-defense wording. Pinning it
         as a fixture keeps the drift-prevention check intact now that brainstorm
         lives in the craft plugin and can no longer reach librarian.md by path."""
-        brainstorm_block = _extract_injection_block(
-            _BRAINSTORM_SKILL.read_text()
-        )
+        brainstorm_block = _extract_injection_block(_BRAINSTORM_SKILL.read_text())
         canonical_block = _INJECTION_CANONICAL.read_text().strip()
         assert brainstorm_block == canonical_block, (
             "Injection-defense block in brainstorm/SKILL.md drifted from the "

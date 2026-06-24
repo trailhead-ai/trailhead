@@ -26,6 +26,7 @@ Canonical status vocab for follow-up notes: ``active | resolved | dropped``
 status (e.g. a legacy "snoozed") is skipped and placed in
 ``skipped_legacy``; the helper never crashes on an unexpected value.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -13,6 +13,7 @@ Slice 1 (lore-agent-interface): the PostToolUse harvest-candidates hook was
 deleted; lore installs zero push hooks. harvest-candidates.py is gone and
 hooks.json carries no PostToolUse entry.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -74,12 +75,17 @@ def _git_vault(tmp_path: Path) -> Path:
     """A vault that is its own git repo (toplevel == vault)."""
     vault = _make_vault(tmp_path)
     subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.name", "Tester"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.email", "t@e.st"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.name", "Tester"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
+        check=True,
+        capture_output=True,
+    )
     return vault
 
 
@@ -91,13 +97,18 @@ NOW_HUMAN = "2026-06-02 12:00 UTC"
 # sessions.ensure_session_note
 # ---------------------------------------------------------------------------
 
+
 class TestEnsureSessionNote:
     def test_creates_note_with_session_type(self, tmp_path):
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note, created = s.ensure_session_note(
-            vault=vault, worktree_name="my-feature", branch="feat/x",
-            project="my-project", now_iso=NOW_ISO, now_human=NOW_HUMAN,
+            vault=vault,
+            worktree_name="my-feature",
+            branch="feat/x",
+            project="my-project",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
             session_id="sid-1",
         )
         assert created is True
@@ -111,8 +122,13 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note, _ = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         fm = load_script("frontmatter").parse_frontmatter(note)
         sv = load_script("status_validator")
@@ -122,20 +138,35 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note, _ = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         text = note.read_text()
-        for heading in ("## What we did", "## Decided", "## Deferred",
-                        "## Learned", "## Open questions"):
+        for heading in (
+            "## What we did",
+            "## Decided",
+            "## Deferred",
+            "## Learned",
+            "## Open questions",
+        ):
             assert heading in text, f"missing {heading}"
 
     def test_filename_format_date_time_worktree(self, tmp_path):
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note, _ = s.ensure_session_note(
-            vault=vault, worktree_name="cool-wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="cool-wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         assert note.name == "2026-06-02-1200-cool-wt.md"
 
@@ -144,8 +175,13 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note, _ = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         assert "areas: []" in note.read_text()
 
@@ -153,13 +189,22 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note1, c1 = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         # Second call with a later timestamp but within the resume window:
         note2, c2 = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso="2026-06-02T12:05:00Z", now_human="2026-06-02 12:05 UTC",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso="2026-06-02T12:05:00Z",
+            now_human="2026-06-02 12:05 UTC",
             session_id="sid",
         )
         assert c1 is True
@@ -173,15 +218,24 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note1, _ = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid-old",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid-old",
         )
         # Backdate note1 well outside the resume window.
         old = time.time() - (s.RESUME_WINDOW_SECONDS + 60)
         os.utime(note1, (old, old))
         note2, c2 = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso="2026-06-02T13:00:00Z", now_human="2026-06-02 13:00 UTC",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso="2026-06-02T13:00:00Z",
+            now_human="2026-06-02 13:00 UTC",
             session_id="sid-new",
         )
         assert c2 is True
@@ -194,14 +248,23 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note1, c1 = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         old = time.time() - (s.RESUME_WINDOW_SECONDS + 3600)
         os.utime(note1, (old, old))
         note2, c2 = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso="2026-06-02T16:00:00Z", now_human="2026-06-02 16:00 UTC",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso="2026-06-02T16:00:00Z",
+            now_human="2026-06-02 16:00 UTC",
             session_id="sid",
         )
         assert c1 is True
@@ -214,15 +277,24 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note1, _ = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         s.finalize_note(note1, ended_iso="2026-06-02T12:30:00Z")
         old = time.time() - (s.RESUME_WINDOW_SECONDS + 60)
         os.utime(note1, (old, old))
         note2, c2 = s.ensure_session_note(
-            vault=vault, worktree_name="wt", branch="b", project="p",
-            now_iso="2026-06-02T16:00:00Z", now_human="2026-06-02 16:00 UTC",
+            vault=vault,
+            worktree_name="wt",
+            branch="b",
+            project="p",
+            now_iso="2026-06-02T16:00:00Z",
+            now_human="2026-06-02 16:00 UTC",
             session_id="sid",
         )
         assert c2 is True
@@ -232,23 +304,31 @@ class TestEnsureSessionNote:
         vault = _make_vault(tmp_path)
         s = load_sessions()
         s.ensure_session_note(
-            vault=vault, worktree_name="alpha", branch="b", project="p",
-            now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
+            vault=vault,
+            worktree_name="alpha",
+            branch="b",
+            project="p",
+            now_iso=NOW_ISO,
+            now_human=NOW_HUMAN,
+            session_id="sid",
         )
         note2, c2 = s.ensure_session_note(
-            vault=vault, worktree_name="beta", branch="b", project="p",
-            now_iso="2026-06-02T12:02:00Z", now_human="2026-06-02 12:02 UTC",
+            vault=vault,
+            worktree_name="beta",
+            branch="b",
+            project="p",
+            now_iso="2026-06-02T12:02:00Z",
+            now_human="2026-06-02 12:02 UTC",
             session_id="sid",
         )
         assert c2 is True
         assert note2.name.endswith("-beta.md")
 
 
-
-
 # ---------------------------------------------------------------------------
 # permission-log.py
 # ---------------------------------------------------------------------------
+
 
 class TestPermissionLog:
     def test_permission_log_hook_not_present(self):
@@ -269,6 +349,7 @@ class TestPermissionLog:
 # hooks.json registration (Slice 1, lore-agent-interface: zero push hooks)
 # ---------------------------------------------------------------------------
 
+
 class TestHooksJson:
     def test_no_post_tool_use_harvest_entry(self):
         """hooks.json must carry no PostToolUse entry — harvest hook is retired.
@@ -286,9 +367,7 @@ class TestHooksJson:
         """hooks.json registers zero push hooks (lore is fully pull)."""
         data = json.loads((HOOKS_DIR / "hooks.json").read_text())
         hooks = data.get("hooks", {})
-        assert hooks == {}, (
-            f"hooks.json must have empty hooks dict, got keys: {list(hooks.keys())}"
-        )
+        assert hooks == {}, f"hooks.json must have empty hooks dict, got keys: {list(hooks.keys())}"
 
     def test_smoke_files_deleted(self):
         assert not (HOOKS_DIR / "session_smoke.py").exists()
@@ -307,12 +386,11 @@ class TestHooksJson:
 # 'foo' match '…-super-foo.md'.
 # ---------------------------------------------------------------------------
 
+
 def _seed_note(sessions_dir: Path, stamp: str, worktree: str) -> Path:
     """Write a minimal session note with correct filename and worktree frontmatter."""
     p = sessions_dir / f"{stamp}-{worktree}.md"
-    p.write_text(
-        f"---\ntype: session\nworktree: {worktree}\nstatus: active\n---\n\n# Session\n"
-    )
+    p.write_text(f"---\ntype: session\nworktree: {worktree}\nstatus: active\n---\n\n# Session\n")
     return p
 
 

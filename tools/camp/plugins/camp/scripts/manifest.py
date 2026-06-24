@@ -29,6 +29,7 @@ Schema (v1):
         ]
     }
 """
+
 from __future__ import annotations
 
 import fcntl
@@ -92,16 +93,12 @@ def read_central_manifest(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text()
     except OSError as e:
-        raise ManifestError(
-            f"camp: cannot read manifest at {path}: {e}"
-        ) from e
+        raise ManifestError(f"camp: cannot read manifest at {path}: {e}") from e
 
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
-        raise ManifestError(
-            f"camp: malformed manifest at {path}: {e}"
-        ) from e
+        raise ManifestError(f"camp: malformed manifest at {path}: {e}") from e
 
     if not isinstance(data, dict):
         raise ManifestError(
@@ -190,6 +187,7 @@ def workspace_dir(group: str, slug: str, *, env: dict[str, str] | None = None) -
         Absolute path to the workspace dir (directory may not exist yet).
     """
     from group_resolve import central_state_dir
+
     return central_state_dir(group, env=env) / "worktrees" / slug
 
 

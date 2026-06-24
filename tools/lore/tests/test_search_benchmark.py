@@ -14,6 +14,7 @@ Several runs are timed and the p95 is taken. The assertion carries a documented
 slack margin so a hard fail signals a real regression, not host noise — but the
 actual measured p95 is always printed so the number is visible in the test output.
 """
+
 from __future__ import annotations
 
 import sys
@@ -53,8 +54,8 @@ TARGET_P95_MS = 100.0
 CEILING_1X_MS = TARGET_P95_MS  # 100ms — the pinned SLO is asserted at the real vault size
 CEILING_5X_MS = 1000.0  # catastrophic-regression tripwire (NOT the SLO); wide for CI noise
 
-CORPUS_1X = 2149      # ~current vault size
-CORPUS_5X = 10000     # synthesized ~5×
+CORPUS_1X = 2149  # ~current vault size
+CORPUS_5X = 10000  # synthesized ~5×
 
 # A representative mixed query: a facet predicate + a distinctive full-text term
 # (exercises the kind predicate, the FTS MATCH inline-IN, and the bm25 ORDER BY
@@ -180,9 +181,7 @@ def test_search_latency_p95_under_target(tmp_path, capsys, corpus_size, label, c
             f"(target<{TARGET_P95_MS:.0f}ms, ceiling<{ceiling_ms:.0f}ms) → {verdict}"
         )
 
-    assert indexed >= corpus_size, (
-        f"corpus under-built: indexed {indexed} of {corpus_size}"
-    )
+    assert indexed >= corpus_size, f"corpus under-built: indexed {indexed} of {corpus_size}"
     assert p95 < ceiling_ms, (
         f"search p95 {p95:.2f}ms exceeded the {ceiling_ms:.0f}ms ceiling at the "
         f"{label} corpus ({indexed} records). The pinned target is "

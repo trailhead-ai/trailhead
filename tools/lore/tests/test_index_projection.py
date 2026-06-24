@@ -45,6 +45,7 @@ def load_index_store():
     if name in sys.modules:
         del sys.modules[name]
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -54,6 +55,7 @@ def load_index_store():
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def env(tmp_path):
@@ -121,6 +123,7 @@ def _write_record(vault_root: Path, kind: str, name: str, sidecar: dict, body: s
 # FK enforcement (MANDATORY per Slice 0 verdict)
 # ---------------------------------------------------------------------------
 
+
 def test_open_index_enables_foreign_keys(env):
     """Every connection issues PRAGMA foreign_keys = ON (else CASCADE/FK no-op)."""
     mod = load_index_store()
@@ -150,6 +153,7 @@ def test_facet_fk_is_enforced(env):
 # Realized schema: tables + columns
 # ---------------------------------------------------------------------------
 
+
 def test_open_index_provisions_realized_tables(env):
     """open_index provisions records, record_facet, idx_facet, record_fts, labels."""
     mod = load_index_store()
@@ -166,8 +170,12 @@ def test_open_index_provisions_realized_tables(env):
     finally:
         conn.close()
     assert {
-        "records", "record_facet", "idx_facet", "record_fts",
-        "record_labels", "idx_labels",
+        "records",
+        "record_facet",
+        "idx_facet",
+        "record_fts",
+        "record_labels",
+        "idx_labels",
     } <= objs
 
 
@@ -180,10 +188,22 @@ def test_records_has_locked_columns(env):
     finally:
         conn.close()
     expected = {
-        "id", "vault", "kind", "name", "title", "status",
-        "team", "suite", "product", "repo",
-        "created_at", "updated_at", "last_referenced_at",
-        "shared", "src_mtime", "src_size",
+        "id",
+        "vault",
+        "kind",
+        "name",
+        "title",
+        "status",
+        "team",
+        "suite",
+        "product",
+        "repo",
+        "created_at",
+        "updated_at",
+        "last_referenced_at",
+        "shared",
+        "src_mtime",
+        "src_size",
     }
     assert expected <= cols, f"missing columns: {expected - cols}"
 
@@ -193,7 +213,9 @@ def test_reindex_populates_records_columns(env, tmp_path):
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(kind="spec", title="Alpha Spec", status="active", team="trailhead"),
         "alpha body",
     )
@@ -202,8 +224,7 @@ def test_reindex_populates_records_columns(env, tmp_path):
         mod.rebuild([str(vault)], conn)
         conn.commit()
         row = conn.execute(
-            "SELECT id, vault, kind, name, title, status, team, shared "
-            "FROM records"
+            "SELECT id, vault, kind, name, title, status, team, shared FROM records"
         ).fetchone()
     finally:
         conn.close()
@@ -222,7 +243,9 @@ def test_reindex_one_facet_row_per_list_value(env, tmp_path):
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(
             kind="spec",
             title="Alpha",
@@ -238,13 +261,16 @@ def test_reindex_one_facet_row_per_list_value(env, tmp_path):
     try:
         mod.rebuild([str(vault)], conn)
         conn.commit()
+
         def vals(facet):
             return sorted(
-                r[0] for r in conn.execute(
+                r[0]
+                for r in conn.execute(
                     "SELECT value FROM record_facet WHERE id=? AND facet=?",
                     (rid, facet),
                 ).fetchall()
             )
+
         keywords = vals("keywords")
         phases = vals("related-phases")
         files = vals("related-files-or-folders")
@@ -279,12 +305,15 @@ def test_reindex_populates_fts_rows(env, tmp_path):
 # Body-only full-text (proves body read from .md)
 # ---------------------------------------------------------------------------
 
+
 def test_body_only_term_is_full_text_matched(env, tmp_path):
     """A term ONLY in the markdown body (not title/keywords) is FTS-matched."""
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(title="Generic Title", keywords=["unrelated"]),
         "The xyzzy quux appears only in the body text.",
     )
@@ -306,12 +335,15 @@ def test_body_only_term_is_full_text_matched(env, tmp_path):
 # Tokenizer behavior
 # ---------------------------------------------------------------------------
 
+
 def test_unicode61_hyphen_split_case_insensitive(env, tmp_path):
     """A keyword 'phi-scrubber' is matched by a bare 'phi' / 'PHI' FTS query."""
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "tool",
+        vault,
+        "spec",
+        "tool",
         _sidecar(title="Tool", keywords=["phi-scrubber"]),
         "description",
     )
@@ -352,13 +384,16 @@ def test_diacritics_folded(env, tmp_path):
 # Reverse-edge symmetry (incl. cross-vault)
 # ---------------------------------------------------------------------------
 
+
 def test_reverse_edge_symmetry_same_vault(env, tmp_path):
     """area:penny finds the linker AND the linked-back record (symmetric)."""
     mod = load_index_store()
     vault = tmp_path / "vault"
     # alpha declares related-area -> penny (forward).
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(kind="spec", title="Alpha", related={"area": ["penny"]}),
         "body",
     )
@@ -366,7 +401,9 @@ def test_reverse_edge_symmetry_same_vault(env, tmp_path):
     _write_record(vault, "area", "penny", _sidecar(kind="area", title="Penny"), "body")
     # penny declares related-area -> marco (forward); reverse makes marco a member of area:penny.
     _write_record(
-        vault, "area", "penny2",
+        vault,
+        "area",
+        "penny2",
         _sidecar(kind="area", title="Penny2", related={"area": ["marco"]}),
         "body",
     )
@@ -378,7 +415,8 @@ def test_reverse_edge_symmetry_same_vault(env, tmp_path):
         conn.commit()
         # area:penny membership predicate (forward edge): alpha is a member.
         members = {
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 "SELECT records.name FROM records WHERE EXISTS ("
                 "SELECT 1 FROM record_facet f WHERE f.id = records.id "
                 "AND f.facet='related-area' AND f.value=?)",
@@ -388,7 +426,8 @@ def test_reverse_edge_symmetry_same_vault(env, tmp_path):
         # Reverse: querying area:penny2 must find marco (penny2 -> marco forward,
         # so marco carries a reverse edge to penny2).
         marco_members = {
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 "SELECT records.name FROM records WHERE EXISTS ("
                 "SELECT 1 FROM record_facet f WHERE f.id = records.id "
                 "AND f.facet='related-area' AND f.value=?)",
@@ -410,7 +449,9 @@ def test_reverse_edge_cross_vault_target_ingested_second(env, tmp_path):
     vault_b = tmp_path / "vault-b"
     # Vault A: penny declares related-spec -> marco (marco lives in vault B).
     _write_record(
-        vault_a, "area", "penny",
+        vault_a,
+        "area",
+        "penny",
         _sidecar(kind="area", title="Penny", related={"spec": ["marco"]}),
         "body",
     )
@@ -425,7 +466,8 @@ def test_reverse_edge_cross_vault_target_ingested_second(env, tmp_path):
         # Reverse edge: marco carries a related-spec edge back to penny, so
         # spec:penny finds marco.
         rev = {
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 "SELECT records.name FROM records WHERE EXISTS ("
                 "SELECT 1 FROM record_facet f WHERE f.id = records.id "
                 "AND f.facet='related-spec' AND f.value=?)",
@@ -443,17 +485,22 @@ def test_reverse_edge_cross_vault_target_ingested_second(env, tmp_path):
 # BM25 sort direction
 # ---------------------------------------------------------------------------
 
+
 def test_bm25_title_hit_sorts_before_body_only_hit(env, tmp_path):
     """Under ORDER BY bm25(record_fts, 3.0, 2.0, 1.0), a title-hit precedes a body-hit."""
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "titlehit",
+        vault,
+        "spec",
+        "titlehit",
         _sidecar(title="quantum computing overview", keywords=["misc"]),
         "nothing relevant here",
     )
     _write_record(
-        vault, "spec", "bodyhit",
+        vault,
+        "spec",
+        "bodyhit",
         _sidecar(title="unrelated heading", keywords=["misc"]),
         "quantum mechanics is discussed in the body",
     )
@@ -462,7 +509,8 @@ def test_bm25_title_hit_sorts_before_body_only_hit(env, tmp_path):
         mod.rebuild([str(vault)], conn)
         conn.commit()
         ordered = [
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 "SELECT records.name FROM record_fts "
                 "JOIN records ON records.rowid = record_fts.rowid "
                 "WHERE record_fts MATCH 'quantum' "
@@ -480,6 +528,7 @@ def test_bm25_title_hit_sorts_before_body_only_hit(env, tmp_path):
 # Trust integrity (shared 0/1 column)
 # ---------------------------------------------------------------------------
 
+
 def test_non_owned_vault_is_shared(env, tmp_path):
     """A record from a non-owned (second) vault gets shared=1; owned gets shared=0."""
     mod = load_index_store()
@@ -491,10 +540,7 @@ def test_non_owned_vault_is_shared(env, tmp_path):
     try:
         mod.rebuild([str(vault_a), str(vault_b)], conn)
         conn.commit()
-        shared = {
-            r[0]: r[1]
-            for r in conn.execute("SELECT name, shared FROM records").fetchall()
-        }
+        shared = {r[0]: r[1] for r in conn.execute("SELECT name, shared FROM records").fetchall()}
     finally:
         conn.close()
     assert shared["in-a"] == 0
@@ -511,9 +557,19 @@ def test_check_constraint_rejects_value_outside_zero_one(env):
                 "INSERT INTO records (id, vault, kind, name, title, status, "
                 "created_at, updated_at, shared, src_mtime, src_size) VALUES "
                 "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                ("v/spec/x", "v", "spec", "x", "X", "active",
-                 "2026-06-17T10:00:00Z", "2026-06-17T10:00:00Z",
-                 2, 0.0, 0),
+                (
+                    "v/spec/x",
+                    "v",
+                    "spec",
+                    "x",
+                    "X",
+                    "active",
+                    "2026-06-17T10:00:00Z",
+                    "2026-06-17T10:00:00Z",
+                    2,
+                    0.0,
+                    0,
+                ),
             )
     finally:
         conn.close()
@@ -523,12 +579,15 @@ def test_check_constraint_rejects_value_outside_zero_one(env):
 # reindex idempotency + CASCADE / drop on delete
 # ---------------------------------------------------------------------------
 
+
 def test_reindex_idempotent(env, tmp_path):
     """Running reindex twice leaves the same record + facet counts."""
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(title="Alpha", keywords=["a", "b"]),
         "body",
     )
@@ -560,7 +619,9 @@ def test_reindex_skips_malformed_sidecar_without_aborting(env, tmp_path):
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "good",
+        vault,
+        "spec",
+        "good",
         _sidecar(title="Good", keywords=["g"]),
         "body",
     )
@@ -586,12 +647,16 @@ def test_reindex_drops_deleted_records_and_facets(env, tmp_path):
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "keep",
+        vault,
+        "spec",
+        "keep",
         _sidecar(title="Keep", keywords=["k"]),
         "body",
     )
     _write_record(
-        vault, "spec", "gone",
+        vault,
+        "spec",
+        "gone",
         _sidecar(title="Gone", keywords=["g1", "g2"]),
         "body",
     )
@@ -625,6 +690,7 @@ def test_reindex_drops_deleted_records_and_facets(env, tmp_path):
 # ---------------------------------------------------------------------------
 # update_index write path: forward facets + FTS in the same call
 # ---------------------------------------------------------------------------
+
 
 def test_upsert_row_populates_forward_facets_and_fts(env, tmp_path):
     """The write-path upsert populates the record's forward facets + FTS in one call."""
@@ -670,18 +736,27 @@ def test_upsert_row_re_upsert_replaces_facets_and_fts(env, tmp_path):
     conn = mod.open_index(env=env)
     try:
         mod.upsert_row(
-            conn, str(vault), "spec", "x",
-            _sidecar(title="X", keywords=["old"]), "old body",
+            conn,
+            str(vault),
+            "spec",
+            "x",
+            _sidecar(title="X", keywords=["old"]),
+            "old body",
         )
         conn.commit()
         mod.upsert_row(
-            conn, str(vault), "spec", "x",
-            _sidecar(title="X", keywords=["new"]), "new body",
+            conn,
+            str(vault),
+            "spec",
+            "x",
+            _sidecar(title="X", keywords=["new"]),
+            "new body",
         )
         conn.commit()
         rid = f"{vault}/spec/x"
         kw = sorted(
-            r[0] for r in conn.execute(
+            r[0]
+            for r in conn.execute(
                 "SELECT value FROM record_facet WHERE id=? AND facet='keywords'", (rid,)
             ).fetchall()
         )
@@ -700,12 +775,15 @@ def test_upsert_row_re_upsert_replaces_facets_and_fts(env, tmp_path):
 # Labels projection (Slice 3) — labels indexed, annotations NOT
 # ---------------------------------------------------------------------------
 
+
 def test_labels_project_one_row_per_key_value(env, tmp_path):
     """A record with labels={"worktree": "s5"} yields a record_labels (id, key, value) row."""
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(title="Alpha", labels={"worktree": "s5"}),
         "body",
     )
@@ -727,7 +805,9 @@ def test_annotations_are_not_projected(env, tmp_path):
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(title="Alpha", annotations={"note": "free form text"}),
         "body",
     )
@@ -746,7 +826,9 @@ def test_labels_projection_idempotent(env, tmp_path):
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(title="Alpha", labels={"worktree": "s5", "claude-code/model": "x"}),
         "body",
     )
@@ -774,7 +856,9 @@ def test_delete_projection_cascades_label_rows(env, tmp_path):
     mod = load_index_store()
     vault = tmp_path / "vault"
     _write_record(
-        vault, "spec", "alpha",
+        vault,
+        "spec",
+        "alpha",
         _sidecar(title="Alpha", labels={"worktree": "s5"}),
         "body",
     )
@@ -783,15 +867,11 @@ def test_delete_projection_cascades_label_rows(env, tmp_path):
     try:
         mod.rebuild([str(vault)], conn)
         conn.commit()
-        before = conn.execute(
-            "SELECT COUNT(*) FROM record_labels WHERE id=?", (rid,)
-        ).fetchone()[0]
+        before = conn.execute("SELECT COUNT(*) FROM record_labels WHERE id=?", (rid,)).fetchone()[0]
         assert before == 1
         mod._delete_projection(conn, rid)
         conn.commit()
-        after = conn.execute(
-            "SELECT COUNT(*) FROM record_labels WHERE id=?", (rid,)
-        ).fetchone()[0]
+        after = conn.execute("SELECT COUNT(*) FROM record_labels WHERE id=?", (rid,)).fetchone()[0]
     finally:
         conn.close()
     assert after == 0, "FK ON DELETE CASCADE must remove the linked record_labels rows"

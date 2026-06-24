@@ -45,13 +45,6 @@ import vault_resolve as vault_resolve_mod  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
-# The generic directory taxonomy every vault gets.
-TAXONOMY = [
-    "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
-    "follow-ups", "collaboration", "specs", "plans", "designs", "inbox",
-    "briefings", "reviews", "gotchas", "audits", "tools", "templates",
-]
-
 
 def _resolve_groups_dir() -> "Path | None":
     """Return the camp groups directory, or None if unavailable.
@@ -1045,17 +1038,36 @@ def _cmd_vault_add(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
+    # Resolve the vault now (before writing config) so we can scaffold its
+    # directory.  Failing here before the config write means a failed scaffold
+    # never leaves a dangling config entry pointing at a non-existent path.
+    vault = next((v for v in vaults if v.name == normalized), None)
+    if vault is None:
+        print(f"lore: vault {normalized!r} not found after validation", file=sys.stderr)
+        return 1
+
+    # Create the vault directory when it does not yet exist.  Existing
+    # directories (already-populated repos registered via --path, or a prior
+    # partial add) are left untouched.
+    if not vault.path.exists():
+        try:
+            vault.path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(f"lore: failed to create vault directory {vault.path}: {exc}", file=sys.stderr)
+            return 1
+        # Reuse the shared scaffolding helper so the vault-is-a-git-repo contract
+        # has one implementation (also used by `lore init`'s bootstrap_vault).
+        try:
+            installer_mod.git_init(vault.path)
+        except ValueError as exc:
+            print(f"lore: {exc}", file=sys.stderr)
+            return 1
+
     config_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         vault_config_mod.write_config_atomic(config_path, config)
     except Exception as exc:
         print(f"lore: failed to write config: {exc}", file=sys.stderr)
-        return 1
-
-    # Resolve the vault we just added + scan its on-disk records into the index.
-    vault = next((v for v in vaults if v.name == normalized), None)
-    if vault is None:
-        print(f"lore: vault {normalized!r} not found after write", file=sys.stderr)
         return 1
 
     shared_flag = vault_config_mod.shared_flag(vault)

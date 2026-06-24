@@ -75,13 +75,11 @@ def _durable_tail_template(text: str) -> str:
     The template's own sub-headings are '## ' lines *inside* a fenced code block, so we cannot
     bound on the next '## ' heading — we extract the code fence itself. Returns "" if not found.
     """
-    start = re.search(
-        r"^#{3,} .*(durable tail|commit body).*$", text, re.MULTILINE | re.IGNORECASE
-    )
+    start = re.search(r"^#{3,} .*(durable tail|commit body).*$", text, re.MULTILINE | re.IGNORECASE)
     if start is None:
         return ""
     # The template is the first ``` … ``` fenced block after the heading.
-    fence = re.search(r"```[^\n]*\n(.*?)\n```", text[start.end():], re.DOTALL)
+    fence = re.search(r"```[^\n]*\n(.*?)\n```", text[start.end() :], re.DOTALL)
     return fence.group(1) if fence else ""
 
 
@@ -96,12 +94,10 @@ def _head_template(text: str) -> str:
     fence makes a field's removal from the template go RED (PR #4 review hardening). Returns ""
     if not found.
     """
-    start = re.search(
-        r"^#{3,} .*controller-facing head.*$", text, re.MULTILINE | re.IGNORECASE
-    )
+    start = re.search(r"^#{3,} .*controller-facing head.*$", text, re.MULTILINE | re.IGNORECASE)
     if start is None:
         return ""
-    fence = re.search(r"```[^\n]*\n(.*?)\n```", text[start.end():], re.DOTALL)
+    fence = re.search(r"```[^\n]*\n(.*?)\n```", text[start.end() :], re.DOTALL)
     return fence.group(1) if fence else ""
 
 
@@ -175,15 +171,10 @@ class TestExecutorTailDirective:
         )
 
     def test_tail_directive_states_not_returned_or_not_echoed(self):
-        (
-            "The durable-tail section must state it is 'not returned' "
-            "or 'not echoed' to the controller."
-        )
+        "The durable-tail section must state it is 'not returned' or 'not echoed' to the controller."
         text = _executor_text()
         _head, tail = _split_at_tail_marker(text)
-        assert tail, (
-            "executor.md must have a durable-tail section"
-        )
+        assert tail, "executor.md must have a durable-tail section"
         lower = tail.lower()
         assert "not returned" in lower or "not echoed" in lower, (
             "executor.md durable-tail directive must state the tail is 'not returned' or "
@@ -432,10 +423,7 @@ class TestCodeReviewerNegativeAbsence:
         )
 
     def test_skill_lacks_acknowledge_strengths_instruction(self):
-        (
-            "'Acknowledge strengths' instruction must be ABSENT from "
-            "skills/review/code-reviewer.md."
-        )
+        "'Acknowledge strengths' instruction must be ABSENT from skills/review/code-reviewer.md."
         text = _skill_reviewer_text()
         assert "Acknowledge strengths" not in text, (
             "skills/review/code-reviewer.md still contains 'Acknowledge strengths' — "
@@ -484,9 +472,7 @@ class TestCodeReviewerSecurityEscalationInvariant:
             "This is review thoroughness (spec Non-Goal: don't change review thoroughness)."
         )
         lower = text.lower()
-        has_trigger = (
-            "auth" in lower or "crypto" in lower or "secrets" in lower
-        )
+        has_trigger = "auth" in lower or "crypto" in lower or "secrets" in lower
         assert has_trigger, (
             "agents/code-reviewer.md security-auditor escalation must name the trigger condition "
             "(auth/crypto/secrets) — just the token 'security-auditor' alone is insufficient."
@@ -531,9 +517,7 @@ class TestCodeReviewerSeverityLabelsInvariant:
     def test_agent_contains_minor_label(self):
         """agents/code-reviewer.md must retain the 'Minor' severity label."""
         text = _agent_reviewer_text()
-        assert "Minor" in text, (
-            "agents/code-reviewer.md must retain the 'Minor' severity label."
-        )
+        assert "Minor" in text, "agents/code-reviewer.md must retain the 'Minor' severity label."
 
     def test_skill_contains_critical_label(self):
         """skills/review/code-reviewer.md must retain the 'Critical' severity label."""

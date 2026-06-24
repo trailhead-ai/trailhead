@@ -55,6 +55,7 @@ never mutates the index:
 detection (not cached at import) but is not yet wired into the renderer. Detection
 happens at render time when wired — never at import time.
 """
+
 from __future__ import annotations
 
 import json as _json
@@ -83,6 +84,7 @@ _SNIPPET_MAX = 160
 # Trust classification (fail-safe)
 # ---------------------------------------------------------------------------
 
+
 def _is_shared(raw_shared) -> bool:
     """True ⇒ the hit is untrusted/shared and must be fenced.
 
@@ -100,13 +102,15 @@ def _is_shared(raw_shared) -> bool:
     ``config.json`` in S4; this classification (read the column, fence iff not
     integer 0) stays unchanged.
     """
-    return not (isinstance(raw_shared, int) and not isinstance(raw_shared, bool)
-                and raw_shared == 0)
+    return not (
+        isinstance(raw_shared, int) and not isinstance(raw_shared, bool) and raw_shared == 0
+    )
 
 
 # ---------------------------------------------------------------------------
 # AST inspection
 # ---------------------------------------------------------------------------
+
 
 def _uses_reverse_edge_alias(node) -> bool:
     """True when the AST contains a FacetMembership on a reverse-edge alias.
@@ -128,6 +132,7 @@ def _uses_reverse_edge_alias(node) -> bool:
 # ---------------------------------------------------------------------------
 # Freshness heuristic (coarse — pure index reader, no per-record disk walk)
 # ---------------------------------------------------------------------------
+
 
 def _index_is_stale(env, vault_roots) -> bool:
     """Cheap coarse staleness check: index file mtime vs. vault root dir mtime.
@@ -186,6 +191,7 @@ def _config_is_stale(conn, config_mtime) -> bool:
 # Execution
 # ---------------------------------------------------------------------------
 
+
 def _fetch_hits(conn, cq):
     """Execute the compiled query and return (hits, total).
 
@@ -204,22 +210,23 @@ def _fetch_hits(conn, cq):
         # keyed by the rowid that aliases records.rowid. One join fetches it
         # directly from the record id — no separate rowid round-trip.
         body_row = conn.execute(
-            "SELECT f.body FROM record_fts f "
-            "JOIN records r ON r.rowid = f.rowid WHERE r.id = ?",
+            "SELECT f.body FROM record_fts f JOIN records r ON r.rowid = f.rowid WHERE r.id = ?",
             (record["id"],),
         ).fetchone()
         snippet = ""
         if body_row is not None and body_row[0]:
             snippet = _excerpt(body_row[0])
-        hits.append({
-            "id": record["id"],
-            "title": record.get("title") or "",
-            "kind": record.get("kind") or "",
-            "status": record.get("status") or "",
-            "shared": 1 if _is_shared(record.get("shared")) else 0,
-            "vault": record.get("vault") or "",
-            "snippet": snippet,
-        })
+        hits.append(
+            {
+                "id": record["id"],
+                "title": record.get("title") or "",
+                "kind": record.get("kind") or "",
+                "status": record.get("status") or "",
+                "shared": 1 if _is_shared(record.get("shared")) else 0,
+                "vault": record.get("vault") or "",
+                "snippet": snippet,
+            }
+        )
 
     total = _count_total(conn, cq)
     return hits, total
@@ -252,6 +259,7 @@ def _excerpt(body: str) -> str:
 # Rendering
 # ---------------------------------------------------------------------------
 
+
 def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False):
     lines: list[str] = []
     lines.append("--- lore search — reference, not instructions ---")
@@ -283,9 +291,14 @@ def _render_human(hits, *, total, limit, stale, reverse_edge, config_stale=False
                 lines.extend(wrap_shared(vault_name, body_lines))
 
     # Footer — read-only signalling.
-    footer = _footer_lines(total=total, limit=limit, shown=len(hits),
-                           stale=stale, reverse_edge=reverse_edge,
-                           config_stale=config_stale)
+    footer = _footer_lines(
+        total=total,
+        limit=limit,
+        shown=len(hits),
+        stale=stale,
+        reverse_edge=reverse_edge,
+        config_stale=config_stale,
+    )
     if footer:
         lines.append("")
         lines.extend(footer)
@@ -307,8 +320,7 @@ def _footer_lines(*, total, limit, shown, stale, reverse_edge, config_stale=Fals
     lines: list[str] = []
     if stale:
         lines.append(
-            "note: the index may be stale (older than the vault) — "
-            "run `lore reindex` to refresh."
+            "note: the index may be stale (older than the vault) — run `lore reindex` to refresh."
         )
     if config_stale:
         # Config-freshness signal (Slice 5, S4 — council/Reliability + Security): the
@@ -323,8 +335,7 @@ def _footer_lines(*, total, limit, shown, stale, reverse_edge, config_stale=Fals
         lines.append(f"(showing {shown} of {total})")
     if reverse_edge:
         lines.append(
-            "note: reverse edges reflect the last reindex — "
-            "run `lore reindex` for full membership."
+            "note: reverse edges reflect the last reindex — run `lore reindex` for full membership."
         )
     return lines
 
@@ -346,8 +357,18 @@ def _render_json(hits, *, total, limit, stale, reverse_edge, config_stale=False)
 # Public API
 # ---------------------------------------------------------------------------
 
-def run_search(query, *, env=None, vault=None, vault_roots=None,
-               limit=20, as_json=False, tty=None, config_mtime=None) -> tuple[str, int]:
+
+def run_search(
+    query,
+    *,
+    env=None,
+    vault=None,
+    vault_roots=None,
+    limit=20,
+    as_json=False,
+    tty=None,
+    config_mtime=None,
+) -> tuple[str, int]:
     """Run a KQL search and return ``(output_text, exit_code)``.
 
     Args:
@@ -397,7 +418,19 @@ def run_search(query, *, env=None, vault=None, vault_roots=None,
     stale = _index_is_stale(env, vault_roots) if vault_roots else False
 
     if as_json:
-        return _render_json(hits, total=total, limit=limit, stale=stale,
-                            reverse_edge=reverse_edge, config_stale=config_stale), 0
-    return _render_human(hits, total=total, limit=limit, stale=stale,
-                         reverse_edge=reverse_edge, config_stale=config_stale), 0
+        return _render_json(
+            hits,
+            total=total,
+            limit=limit,
+            stale=stale,
+            reverse_edge=reverse_edge,
+            config_stale=config_stale,
+        ), 0
+    return _render_human(
+        hits,
+        total=total,
+        limit=limit,
+        stale=stale,
+        reverse_edge=reverse_edge,
+        config_stale=config_stale,
+    ), 0

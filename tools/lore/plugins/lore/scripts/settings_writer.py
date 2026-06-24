@@ -26,6 +26,7 @@ set_env_var(settings_path, name, value)
     hook its ``LORE_VAULT_GUARD_ROOT``. Idempotent (no write when unchanged);
     preserves unrelated env keys.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,17 +54,13 @@ def _load(settings_path: Path) -> dict:
     try:
         return json.loads(settings_path.read_text())
     except (json.JSONDecodeError, OSError) as exc:
-        raise ValueError(
-            f"could not read existing settings at {settings_path}: {exc}"
-        ) from exc
+        raise ValueError(f"could not read existing settings at {settings_path}: {exc}") from exc
 
 
 def _save(settings_path: Path, data: dict) -> None:
     """Atomically write *data* to *settings_path* as indented JSON."""
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        dir=str(settings_path.parent), prefix=".settings-", suffix=".tmp"
-    )
+    fd, tmp = tempfile.mkstemp(dir=str(settings_path.parent), prefix=".settings-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
@@ -148,7 +145,8 @@ def remove_hook(settings_path: Path, event: str, command: str) -> None:
     hook_list = hooks.get(event, [])
 
     new_list = [
-        entry for entry in hook_list
+        entry
+        for entry in hook_list
         if not any(h.get("command") == command for h in entry.get("hooks", []))
     ]
 

@@ -13,6 +13,7 @@ Test contract:
 - camp inject --drain with an empty queue → no output, exit 0.
 - multiple enqueues before a drain → all docs present in the drained output.
 """
+
 from __future__ import annotations
 
 import io
@@ -305,8 +306,7 @@ class TestInjectCli:
         """camp inject --drain from a workspace with an empty queue → no output, exit 0."""
         ws = tmp_path / "ws"
         ws.mkdir()
-        result = _run_cli(["inject", "--drain", "--workspace", str(ws)],
-                          env={}, cwd=ws)
+        result = _run_cli(["inject", "--drain", "--workspace", str(ws)], env={}, cwd=ws)
         assert result.returncode == 0
         assert result.stdout == ""
 
@@ -318,8 +318,7 @@ class TestInjectCli:
         ws.mkdir()
         enqueue_doc(ws, "QUEUED-DOC-marker")
 
-        result = _run_cli(["inject", "--drain", "--workspace", str(ws)],
-                          env={}, cwd=ws)
+        result = _run_cli(["inject", "--drain", "--workspace", str(ws)], env={}, cwd=ws)
         assert result.returncode == 0
         parsed = json.loads(result.stdout)
         assert parsed["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
@@ -374,8 +373,7 @@ class TestDrainResilience:
         # A sub-directory in the queue dir; is_file() → False, filtered out.
         (qdir / "poison_dir.md").mkdir()
 
-        result = _run_cli(["inject", "--drain", "--workspace", str(ws)],
-                          env={}, cwd=ws)
+        result = _run_cli(["inject", "--drain", "--workspace", str(ws)], env={}, cwd=ws)
         assert result.returncode == 0, (
             f"camp inject --drain should exit 0 even with only dirs in queue. "
             f"rc={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}"

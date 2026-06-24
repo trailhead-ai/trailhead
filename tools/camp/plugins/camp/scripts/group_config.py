@@ -29,6 +29,7 @@ authors is explicitly out of scope (see D-F in the Step-2 plan).
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.
 """
+
 from __future__ import annotations
 
 import sys
@@ -64,9 +65,7 @@ KNOWN_HOOK_KINDS = frozenset({"dep-install"})
 # Loader
 # ---------------------------------------------------------------------------
 
-_FIRST_RUN_HINT = (
-    "copy groups.example/trailhead.toml as a starting point"
-)
+_FIRST_RUN_HINT = "copy groups.example/trailhead.toml as a starting point"
 
 
 def load_group(path: Path) -> dict[str, Any]:
@@ -86,8 +85,7 @@ def load_group(path: Path) -> dict[str, Any]:
     """
     if not path.is_file():
         raise GroupConfigNotFound(
-            f"No group config found at {path!s}; expected a TOML file.\n"
-            f"  {_FIRST_RUN_HINT}"
+            f"No group config found at {path!s}; expected a TOML file.\n  {_FIRST_RUN_HINT}"
         )
 
     try:
@@ -98,9 +96,7 @@ def load_group(path: Path) -> dict[str, Any]:
     # --- [group] section ---
     group_section = raw.get("group")
     if not isinstance(group_section, dict):
-        raise GroupConfigError(
-            f"{path}: missing required [group] section"
-        )
+        raise GroupConfigError(f"{path}: missing required [group] section")
 
     group_name = group_section.get("name")
     if not isinstance(group_name, str) or not group_name.strip():
@@ -111,16 +107,12 @@ def load_group(path: Path) -> dict[str, Any]:
     # --- [[members]] section ---
     members_raw = raw.get("members")
     if not isinstance(members_raw, list) or len(members_raw) == 0:
-        raise GroupConfigError(
-            f"{path}: field 'members' must be a non-empty list of member tables"
-        )
+        raise GroupConfigError(f"{path}: field 'members' must be a non-empty list of member tables")
 
     members: list[dict[str, Any]] = []
     for i, m in enumerate(members_raw):
         if not isinstance(m, dict):
-            raise GroupConfigError(
-                f"{path}: members[{i}] must be a table"
-            )
+            raise GroupConfigError(f"{path}: members[{i}] must be a table")
 
         member_name = m.get("name")
         if not isinstance(member_name, str) or not member_name.strip():
@@ -215,9 +207,7 @@ def load_group(path: Path) -> dict[str, Any]:
     branch_section = raw.get("branch") or {}
     branch_pattern = branch_section.get("pattern", "worktree-{slug}")
     if not isinstance(branch_pattern, str):
-        raise GroupConfigError(
-            f"{path}: field 'branch.pattern' must be a string"
-        )
+        raise GroupConfigError(f"{path}: field 'branch.pattern' must be a string")
 
     # --- [harness] section (optional) — launch seam config (Slice 6) ---
     harness = _parse_harness(raw.get("harness"), path)
@@ -235,16 +225,12 @@ def load_group(path: Path) -> dict[str, Any]:
     if shared_vaults_raw is None:
         shared_vaults_raw = []
     if not isinstance(shared_vaults_raw, list):
-        raise GroupConfigError(
-            f"{path}: field 'shared_vaults' must be a list of tables"
-        )
+        raise GroupConfigError(f"{path}: field 'shared_vaults' must be a list of tables")
 
     shared_vaults: list[dict[str, Any]] = []
     for i, sv in enumerate(shared_vaults_raw):
         if not isinstance(sv, dict):
-            raise GroupConfigError(
-                f"{path}: shared_vaults[{i}] must be a table"
-            )
+            raise GroupConfigError(f"{path}: shared_vaults[{i}] must be a table")
 
         sv_name = sv.get("name")
         if not isinstance(sv_name, str) or not sv_name.strip():
@@ -315,9 +301,7 @@ def _validate_string_list_field(
     but the flag exists so Slice 9 can reuse the helper without kwargs surgery.
     """
     if not isinstance(value, list) or (not allow_empty_list and len(value) == 0):
-        raise GroupConfigError(
-            f"{path}: {where} must be a non-empty list of strings"
-        )
+        raise GroupConfigError(f"{path}: {where} must be a non-empty list of strings")
     for i, token in enumerate(value):
         if not isinstance(token, str):
             raise GroupConfigError(
@@ -356,21 +340,15 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
     result: dict[str, Any] = {}
 
     if "new" in raw:
-        result["new"] = _validate_argv_template(
-            raw["new"], path=path, where="harness.new"
-        )
+        result["new"] = _validate_argv_template(raw["new"], path=path, where="harness.new")
 
     if "resume" in raw:
-        result["resume"] = _validate_argv_template(
-            raw["resume"], path=path, where="harness.resume"
-        )
+        result["resume"] = _validate_argv_template(raw["resume"], path=path, where="harness.resume")
 
     if "cwd" in raw:
         cwd = raw["cwd"]
         if not isinstance(cwd, str) or not cwd.strip():
-            raise GroupConfigError(
-                f"{path}: harness.cwd must be a non-empty string"
-            )
+            raise GroupConfigError(f"{path}: harness.cwd must be a non-empty string")
         _reject_unknown_placeholders(cwd, path=path, where="harness.cwd")
         result["cwd"] = cwd
 
@@ -379,7 +357,7 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
         if not isinstance(doc_files_raw, list) or len(doc_files_raw) == 0:
             raise GroupConfigError(
                 f"{path}: harness.doc_files must be a non-empty list of strings "
-                "(workspace doc filenames, e.g. [\"CLAUDE.md\"] or [\"AGENTS.md\"])"
+                '(workspace doc filenames, e.g. ["CLAUDE.md"] or ["AGENTS.md"])'
             )
         result["doc_files"] = _validate_string_list_field(
             doc_files_raw, path=path, where="harness.doc_files", allow_empty_list=False

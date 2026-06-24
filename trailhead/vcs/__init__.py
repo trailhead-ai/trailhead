@@ -8,6 +8,7 @@ Adding a second backend (e.g. GitLab via ``glab``/REST) is a two-step change:
 implement a ``Provider`` subclass, then add one ``name -> class`` entry to
 ``_PROVIDERS`` below — the single source of truth for provider selection.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

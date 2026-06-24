@@ -53,7 +53,7 @@ def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
         if not hdir.is_dir():
             continue
         installed = sorted(
-            f.name[len(_INSTALLED_MARKER_PREFIX):]
+            f.name[len(_INSTALLED_MARKER_PREFIX) :]
             for f in hdir.iterdir()
             if f.is_file() and f.name.startswith(_INSTALLED_MARKER_PREFIX)
         )
@@ -127,8 +127,9 @@ def _build_human(data: dict) -> str:
     lines.append("  CLIs on PATH:")
     for name, resolved in data["clis"].items():
         lines.append(f"    {name}: {resolved or 'not on PATH'}")
-    lines.append(f"  shim dir: {data['shim_dir']} "
-                 f"({'present' if data['shim_dir_present'] else 'absent'})")
+    lines.append(
+        f"  shim dir: {data['shim_dir']} ({'present' if data['shim_dir_present'] else 'absent'})"
+    )
     lines.append(f"  python3: {data['python3_version']}")
 
     return "\n".join(lines)

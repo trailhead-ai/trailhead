@@ -23,6 +23,7 @@ Contract assertions:
 
 Hermeticity: tmp_path for ephemeral denylist; no network; no real ~/.claude/.
 """
+
 from __future__ import annotations
 
 import re
@@ -78,17 +79,17 @@ def _write_ephemeral_denylist(p: Path) -> Path:
 # Fixture: design-authoring.md text
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def doc_text() -> str:
-    assert DESIGN_AUTHORING_MD.exists(), (
-        f"design-authoring.md not found at {DESIGN_AUTHORING_MD}"
-    )
+    assert DESIGN_AUTHORING_MD.exists(), f"design-authoring.md not found at {DESIGN_AUTHORING_MD}"
     return DESIGN_AUTHORING_MD.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
 # 1. Provider-seam present (D-9)
 # ---------------------------------------------------------------------------
+
 
 def test_design_mockup_provider_seam_present(doc_text: str):
     """design-authoring.md must document a 'design_mockup' provider seam (D-9)."""
@@ -102,7 +103,7 @@ def test_provider_seam_names_artist_agent(doc_text: str):
     # Find the design_mockup section and check artist appears near it
     idx = doc_text.find("design_mockup")
     assert idx != -1, "design_mockup not found"
-    window = doc_text[max(0, idx - 200): idx + 600]
+    window = doc_text[max(0, idx - 200) : idx + 600]
     assert "artist" in window, (
         "The design_mockup provider seam must name 'artist' as the agent to dispatch (D-9)"
     )
@@ -113,7 +114,7 @@ def test_provider_seam_references_brief_shape(doc_text: str):
     idx = doc_text.find("design_mockup")
     assert idx != -1, "design_mockup not found"
     # The seam should reference brief inputs in its vicinity
-    window = doc_text[max(0, idx - 100): idx + 800]
+    window = doc_text[max(0, idx - 100) : idx + 800]
     # Must reference either "brief" inputs or the artist's input fields
     has_brief_ref = "brief" in window.lower() or "input" in window.lower()
     assert has_brief_ref, (
@@ -125,13 +126,14 @@ def test_provider_seam_is_marked_live(doc_text: str):
     """The design_mockup seam must be marked LIVE (Slice 8 cutover — brainstorm
     now dispatches the artist; the seam is no longer RESERVED / not-yet-wired)."""
     import re as _re
+
     doc_lower = doc_text.lower()
 
     # Find the section heading that introduces the provider seam
     section_match = _re.search(r"##[^\n]*design_mockup[^\n]*\n", doc_lower)
     if section_match:
         start = section_match.start()
-        window = doc_lower[start: start + 1200]
+        window = doc_lower[start : start + 1200]
     else:
         window = doc_lower
 
@@ -149,6 +151,7 @@ def test_provider_seam_is_marked_live(doc_text: str):
 # The seam is now LIVE: design-authoring.md states that lore's brainstorm
 # dispatches the artist as the default design_mockup provider.
 # ---------------------------------------------------------------------------
+
 
 def test_seam_is_marked_live(doc_text: str):
     """design-authoring.md must state the design_mockup seam is LIVE / wired (Slice 8)."""
@@ -178,6 +181,7 @@ def test_seam_states_brainstorm_dispatches_artist(doc_text: str):
 # with an ephemeral tmp_path denylist → exit 0.
 # ---------------------------------------------------------------------------
 
+
 def test_full_ws2_surface_leak_gate_agents(tmp_path: Path):
     """Full WS-2 agents surface (artist.md) must pass the Step-6 leak gate (D-7/S-3)."""
     if not ARTIST_MD.exists():
@@ -190,8 +194,8 @@ def test_full_ws2_surface_leak_gate_agents(tmp_path: Path):
         text=True,
     )
     artist_hits = [ln for ln in result.stdout.splitlines() if "artist" in ln]
-    assert not artist_hits, (
-        "artist.md failed the full-surface WS-2 leak gate:\n" + "\n".join(artist_hits)
+    assert not artist_hits, "artist.md failed the full-surface WS-2 leak gate:\n" + "\n".join(
+        artist_hits
     )
 
 
@@ -221,9 +225,7 @@ def test_full_ws2_surface_leak_gate_docs(tmp_path: Path):
         capture_output=True,
         text=True,
     )
-    doc_hits = [
-        ln for ln in result.stdout.splitlines() if "design-authoring" in ln
-    ]
+    doc_hits = [ln for ln in result.stdout.splitlines() if "design-authoring" in ln]
     assert not doc_hits, (
         "design-authoring.md failed the full-surface WS-2 leak gate:\n" + "\n".join(doc_hits)
     )
@@ -233,6 +235,7 @@ def test_full_ws2_surface_leak_gate_docs(tmp_path: Path):
 # 4. Design-phase declaration
 # design-authoring.md must state that `design` is the loop's design phase.
 # ---------------------------------------------------------------------------
+
 
 def test_design_phase_declaration_present(doc_text: str):
     """design-authoring.md must declare that 'design' is the loop's design phase (Slice 3)."""
@@ -272,6 +275,7 @@ def test_design_phase_names_combine_produces_reference(doc_text: str):
 # 5. A-6 completeness: "how to invoke the artist directly" + combine CLI
 # ---------------------------------------------------------------------------
 
+
 def test_a6_invoke_artist_directly_section_present(doc_text: str):
     """design-authoring.md must have a 'how to invoke the artist directly' section (A-6)."""
     doc_lower = doc_text.lower()
@@ -284,15 +288,9 @@ def test_a6_invoke_artist_directly_section_present(doc_text: str):
 def test_a6_combine_cli_args_named(doc_text: str):
     """design-authoring.md must name the combine_design.py CLI args (A-6)."""
     # The key named args from A-7 must appear in the doc
-    assert "--designs-dir" in doc_text, (
-        "design-authoring.md must document --designs-dir arg (A-6)"
-    )
-    assert "--chrome-path" in doc_text, (
-        "design-authoring.md must document --chrome-path arg (A-6)"
-    )
-    assert "--slug" in doc_text, (
-        "design-authoring.md must document --slug arg (A-6)"
-    )
+    assert "--designs-dir" in doc_text, "design-authoring.md must document --designs-dir arg (A-6)"
+    assert "--chrome-path" in doc_text, "design-authoring.md must document --chrome-path arg (A-6)"
+    assert "--slug" in doc_text, "design-authoring.md must document --slug arg (A-6)"
 
 
 def test_a6_example_invocation_present(doc_text: str):

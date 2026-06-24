@@ -8,6 +8,7 @@ The SessionStart hook integration tests were removed in Slice 2, S5 (F5: no
 SessionStart hook; lore is fully pull — orientation lives in agent-rules +
 S6 skill descriptions).
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -24,8 +25,14 @@ def load_script(name: str):
     """Load a module from plugins/lore/scripts/ by stem, freshly each call."""
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in (name, "vault", "frontmatter", "status_validator",
-                   "regenerate_indices", "sessions"):
+    for cached in (
+        name,
+        "vault",
+        "frontmatter",
+        "status_validator",
+        "regenerate_indices",
+        "sessions",
+    ):
         sys.modules.pop(cached, None)
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
@@ -69,6 +76,7 @@ def _write_area(vault: Path, name: str, keywords: list[str]) -> Path:
 # D23 API shape: old subsystem functions are absent
 # ---------------------------------------------------------------------------
 
+
 class TestD23ApiShape:
     """Guard against accidentally resurrecting the old subsystem API."""
 
@@ -98,8 +106,7 @@ class TestD23ApiShape:
         """The recall COMMAND path was retired in Slice 5 (S3) — `lore search` is
         the query interface. Its symbols must not reappear."""
         recall = load_script("recall")
-        for name in ("recall_areas", "render_recall_banner",
-                     "RecallItem", "RecallResult"):
+        for name in ("recall_areas", "render_recall_banner", "RecallItem", "RecallResult"):
             assert not hasattr(recall, name), (
                 f"recall.{name} is part of the retired recall command path "
                 "(Slice 5); use `lore search` instead."
@@ -111,5 +118,3 @@ class TestD23ApiShape:
         assert hasattr(recall, "build_area_map")
         assert hasattr(recall, "render_area_menu")
         assert hasattr(recall, "render_area_pointer")
-
-

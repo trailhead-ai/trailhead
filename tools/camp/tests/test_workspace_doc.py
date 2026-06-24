@@ -32,6 +32,7 @@ Test contract (all must RED before implementation, GREEN after):
    b. The workspace dir .claude/settings.json is the authoritative SessionStart source
       for a workspace session (covered by test 3).
 """
+
 from __future__ import annotations
 
 import json
@@ -132,32 +133,28 @@ class TestWorkspaceDocCommandTable:
         """CLAUDE.md contains the exact string 'camp enter <member>'."""
         content = self._get_claude_md(tmp_path)
         assert "camp enter <member>" in content, (
-            f"Expected 'camp enter <member>' in CLAUDE.md, not found.\n"
-            f"Content:\n{content}"
+            f"Expected 'camp enter <member>' in CLAUDE.md, not found.\nContent:\n{content}"
         )
 
     def test_claude_md_contains_camp_status_exact(self, tmp_path: Path):
         """CLAUDE.md contains the exact string 'camp status'."""
         content = self._get_claude_md(tmp_path)
         assert "camp status" in content, (
-            f"Expected 'camp status' in CLAUDE.md, not found.\n"
-            f"Content:\n{content}"
+            f"Expected 'camp status' in CLAUDE.md, not found.\nContent:\n{content}"
         )
 
     def test_claude_md_contains_camp_setup_exact(self, tmp_path: Path):
         """CLAUDE.md contains the exact string 'camp setup' (no --retry flag)."""
         content = self._get_claude_md(tmp_path)
         assert "camp setup" in content, (
-            f"Expected 'camp setup' in CLAUDE.md, not found.\n"
-            f"Content:\n{content}"
+            f"Expected 'camp setup' in CLAUDE.md, not found.\nContent:\n{content}"
         )
 
     def test_claude_md_does_not_contain_camp_setup_retry(self, tmp_path: Path):
         """CLAUDE.md must NOT contain 'camp setup --retry' — the flag was removed."""
         content = self._get_claude_md(tmp_path)
         assert "camp setup --retry" not in content, (
-            f"Found 'camp setup --retry' in CLAUDE.md — this flag was removed.\n"
-            f"Content:\n{content}"
+            f"Found 'camp setup --retry' in CLAUDE.md — this flag was removed.\nContent:\n{content}"
         )
 
     def test_configured_agents_md_contains_camp_enter_exact(self, tmp_path: Path):
@@ -174,8 +171,7 @@ class TestWorkspaceDocCommandTable:
         write_workspace_doc(ws_dir, group, "feat-x")
         content = (ws_dir / "AGENTS.md").read_text()
         assert "camp enter <member>" in content, (
-            f"Expected 'camp enter <member>' in AGENTS.md, not found.\n"
-            f"Content:\n{content}"
+            f"Expected 'camp enter <member>' in AGENTS.md, not found.\nContent:\n{content}"
         )
 
 
@@ -250,8 +246,7 @@ class TestWorkspaceDocGuidance:
         # Accept several phrasings: "inert until", "inactive until", "not active until"
         inert_signals = ["inert until", "inactive until", "not active until", "INERT UNTIL"]
         assert any(sig in content for sig in inert_signals), (
-            f"Expected 'inert until' or equivalent in CLAUDE.md.\n"
-            f"Content:\n{content}"
+            f"Expected 'inert until' or equivalent in CLAUDE.md.\nContent:\n{content}"
         )
 
     def test_setup_may_be_in_flight(self, tmp_path: Path):
@@ -259,11 +254,14 @@ class TestWorkspaceDocGuidance:
         content = self._write_and_read(tmp_path)
         # Accept several phrasings indicating provisioning in flight
         flight_signals = [
-            "in flight", "in-flight", "background", "provisioning", "pending",
+            "in flight",
+            "in-flight",
+            "background",
+            "provisioning",
+            "pending",
         ]
         assert any(sig in content for sig in flight_signals), (
-            f"Expected provisioning-in-flight guidance in CLAUDE.md.\n"
-            f"Content:\n{content}"
+            f"Expected provisioning-in-flight guidance in CLAUDE.md.\nContent:\n{content}"
         )
 
 
@@ -292,9 +290,7 @@ class TestWorkspaceDocIdempotent:
         write_workspace_doc(ws_dir, group, "feat-x")
         second = (ws_dir / "CLAUDE.md").read_text()
 
-        assert first == second, (
-            "CLAUDE.md content changed on second write (not idempotent)"
-        )
+        assert first == second, "CLAUDE.md content changed on second write (not idempotent)"
 
     def test_configured_agents_md_no_duplication_on_second_write(self, tmp_path: Path):
         """Writing twice with doc_files=[AGENTS.md] produces identical AGENTS.md."""
@@ -313,9 +309,7 @@ class TestWorkspaceDocIdempotent:
         write_workspace_doc(ws_dir, group, "feat-x")
         second = (ws_dir / "AGENTS.md").read_text()
 
-        assert first == second, (
-            "AGENTS.md content changed on second write (not idempotent)"
-        )
+        assert first == second, "AGENTS.md content changed on second write (not idempotent)"
 
     def test_stable_content_for_same_inputs(self, tmp_path: Path):
         """Same group + slug always produces the same content."""
@@ -371,11 +365,7 @@ class TestWorkspaceHooks:
         data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
         hooks = data.get("hooks", {})
         ss_hooks = hooks.get("SessionStart", [])
-        commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
         # The command uses the ${CAMP_BIN:-<bin>} form; check for setup --status suffix
         assert any("setup --status" in cmd for cmd in commands), (
             f"Expected 'setup --status' hook in SessionStart, got: {commands}"
@@ -393,11 +383,7 @@ class TestWorkspaceHooks:
         data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
         hooks = data.get("hooks", {})
         ss_hooks = hooks.get("SessionStart", [])
-        commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
         expected = f"${{CAMP_BIN:-{camp_bin}}} setup --status"
         assert expected in commands, (
             f"Expected exact command {expected!r} in SessionStart, got: {commands}"
@@ -417,15 +403,9 @@ class TestWorkspaceHooks:
         data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
         hooks = data.get("hooks", {})
         ss_hooks = hooks.get("SessionStart", [])
-        commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
         expected = f"${{CAMP_BIN:-{camp_bin}}} setup --status"
-        assert commands.count(expected) == 1, (
-            f"Duplicate hook entries after re-run: {commands}"
-        )
+        assert commands.count(expected) == 1, f"Duplicate hook entries after re-run: {commands}"
 
     def test_workspace_hooks_preserves_existing_keys(self, tmp_path: Path):
         """Existing unrelated keys in workspace settings.json are preserved."""
@@ -491,9 +471,7 @@ class TestWorkspaceInjectHook:
         data = json.loads((ws_dir / ".claude" / "settings.json").read_text())
         commands = self._commands(data, "PostToolUse")
         expected = f"${{CAMP_BIN:-{camp_bin}}} inject --drain"
-        assert expected in commands, (
-            f"Expected {expected!r} in PostToolUse, got: {commands}"
-        )
+        assert expected in commands, f"Expected {expected!r} in PostToolUse, got: {commands}"
 
     def test_inject_hook_matcher_is_bash(self, tmp_path: Path):
         """The PostToolUse inject hook uses the Bash matcher."""
@@ -583,10 +561,12 @@ class TestBringUpWorkspaceIntegration:
         )
 
         import unittest.mock as mock
+
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc", env=env)
 
         from group_resolve import central_state_dir
+
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc"
         assert (ws_dir / "CLAUDE.md").is_file(), "CLAUDE.md missing after bring_up_workspace"
 
@@ -601,10 +581,12 @@ class TestBringUpWorkspaceIntegration:
         )
 
         import unittest.mock as mock
+
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc2", env=env)
 
         from group_resolve import central_state_dir
+
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc2"
         assert not (ws_dir / "AGENT.md").exists(), (
             "AGENT.md should NOT be written by default (no doc_files configured)"
@@ -621,10 +603,12 @@ class TestBringUpWorkspaceIntegration:
         )
 
         import unittest.mock as mock
+
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc3", env=env)
 
         from group_resolve import central_state_dir
+
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc3"
         settings_path = ws_dir / ".claude" / "settings.json"
         assert settings_path.is_file(), "workspace .claude/settings.json missing"
@@ -632,11 +616,7 @@ class TestBringUpWorkspaceIntegration:
         data = json.loads(settings_path.read_text())
         hooks = data.get("hooks", {})
         ss_hooks = hooks.get("SessionStart", [])
-        commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
         assert any("setup --status" in cmd for cmd in commands), (
             f"SessionStart hook not found. Settings: {data}"
         )
@@ -655,10 +635,12 @@ class TestBringUpWorkspaceIntegration:
         )
 
         import unittest.mock as mock
+
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc4", env=env)
 
         from group_resolve import central_state_dir
+
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc4"
         content = (ws_dir / "CLAUDE.md").read_text()
         assert "alpha" in content and "beta" in content
@@ -674,10 +656,12 @@ class TestBringUpWorkspaceIntegration:
         )
 
         import unittest.mock as mock
+
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-idem", env=env)
 
         from group_resolve import central_state_dir
+
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-idem"
         first_claude = (ws_dir / "CLAUDE.md").read_text()
 

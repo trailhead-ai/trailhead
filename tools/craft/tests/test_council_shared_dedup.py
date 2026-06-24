@@ -20,6 +20,7 @@ silently regress them:
 The merged shared file must also be net-leaner than the sum of the two original
 council blocks, so a future edit can't re-bloat it back to pure relocation.
 """
+
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
@@ -83,6 +84,7 @@ DISPOSITION_NAMES = ["resolved", "bounced-back-to-spec", "accepted-as-risk", "di
 
 # --- positive: shared scaffolding now lives in _shared/council.md ---
 
+
 def test_bars_byte_for_byte_in_shared():
     text = SHARED.read_text()
     for bars in ALL_BARS:
@@ -142,6 +144,7 @@ def test_lens_substitution_documented_in_shared():
 
 # --- negative: the shared scaffolding is no longer duplicated in the skills ---
 
+
 def test_bars_not_duplicated_in_plan_body():
     text = PLAN.read_text()
     for bars in ALL_BARS:
@@ -176,6 +179,7 @@ def test_synthesis_rules_not_reinlined():
 
 # --- each skill keeps only its delta ---
 
+
 def test_plan_retains_disposition_gate_and_persistence():
     text = PLAN.read_text()
     assert "## Council Review" in text, "plan must keep the persistence schema heading"
@@ -196,9 +200,7 @@ def test_consult_keeps_role_label_note_and_context_pointers():
     assert "may strip your role label" in text, (
         "consult must keep its synthesizer-may-strip-role-label note"
     )
-    assert "<context-pointers>" in text, (
-        "consult must supply its <context-pointers> substitution"
-    )
+    assert "<context-pointers>" in text, "consult must supply its <context-pointers> substitution"
 
 
 def test_consult_has_no_persistence_schema():
@@ -218,6 +220,7 @@ def test_single_persistence_worked_example():
 
 
 # --- both skills still reference the shared file (read-on-reference) ---
+
 
 def test_skills_reference_shared_council():
     for skill in (PLAN, CONSULT):

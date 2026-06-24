@@ -8,6 +8,7 @@ records opened/stacked PRs alongside the camp manifest.
 
 All git/gh calls go through an injected stub runner — zero network.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,10 +26,9 @@ from trailhead.vcs.github import ManifestReadError, SidecarError
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_manifest(tmp_path: Path, members: list[dict]) -> Path:
-    path = (
-        tmp_path / "camp-state" / "test-group" / "worktrees" / "my-feat" / "manifest.json"
-    )
+    path = tmp_path / "camp-state" / "test-group" / "worktrees" / "my-feat" / "manifest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "schema_version": 1,
@@ -69,12 +69,21 @@ class TestReposDetect:
             wt = tmp_path / "worktrees" / name
             wt.mkdir(parents=True)
             (wt / ".git").mkdir()
-        return _make_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path / "alpha"),
-             "worktree_path": str(tmp_path / "worktrees" / "alpha")},
-            {"name": "beta", "repo_root": str(tmp_path / "beta"),
-             "worktree_path": str(tmp_path / "worktrees" / "beta")},
-        ])
+        return _make_manifest(
+            tmp_path,
+            [
+                {
+                    "name": "alpha",
+                    "repo_root": str(tmp_path / "alpha"),
+                    "worktree_path": str(tmp_path / "worktrees" / "alpha"),
+                },
+                {
+                    "name": "beta",
+                    "repo_root": str(tmp_path / "beta"),
+                    "worktree_path": str(tmp_path / "worktrees" / "beta"),
+                },
+            ],
+        )
 
     def test_both_members_reported(self, manifest_path: Path) -> None:
         provider = get_provider("github", runner=_active_member_stub())
@@ -100,9 +109,12 @@ class TestReposDetect:
         wt = tmp_path / "worktrees" / "alpha"
         wt.mkdir(parents=True)
         (wt / ".git").mkdir()
-        manifest = _make_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path / "alpha"), "worktree_path": str(wt)},
-        ])
+        manifest = _make_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path / "alpha"), "worktree_path": str(wt)},
+            ],
+        )
         import subprocess
 
         def stub(cmd, **kwargs):
@@ -117,11 +129,17 @@ class TestReposDetect:
         wt = tmp_path / "worktrees" / "alpha"
         wt.mkdir(parents=True)
         (wt / ".git").mkdir()
-        manifest = _make_manifest(tmp_path, [
-            {"name": "alpha", "repo_root": str(tmp_path / "alpha"), "worktree_path": str(wt)},
-            {"name": "beta", "repo_root": str(tmp_path / "beta"),
-             "worktree_path": str(tmp_path / "DOES_NOT_EXIST" / "beta")},
-        ])
+        manifest = _make_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path / "alpha"), "worktree_path": str(wt)},
+                {
+                    "name": "beta",
+                    "repo_root": str(tmp_path / "beta"),
+                    "worktree_path": str(tmp_path / "DOES_NOT_EXIST" / "beta"),
+                },
+            ],
+        )
         provider = get_provider("github", runner=_active_member_stub())
         result = provider.repos.detect(str(manifest))
         assert len(result) == 1
@@ -131,9 +149,12 @@ class TestReposDetect:
         wt = tmp_path / "worktrees" / "zenith"
         wt.mkdir(parents=True)
         (wt / ".git").mkdir()
-        manifest = _make_manifest(tmp_path, [
-            {"name": "zenith", "repo_root": str(tmp_path / "zenith"), "worktree_path": str(wt)},
-        ])
+        manifest = _make_manifest(
+            tmp_path,
+            [
+                {"name": "zenith", "repo_root": str(tmp_path / "zenith"), "worktree_path": str(wt)},
+            ],
+        )
         provider = get_provider("github", runner=_active_member_stub(branch="feature-branch"))
         result = provider.repos.detect(str(manifest))
         assert [r["repo"] for r in result] == ["zenith"]
@@ -172,6 +193,7 @@ class TestReposDetect:
     def test_detect_routes_through_injected_runner(self, manifest_path: Path) -> None:
         """Every git call is captured by the stub — none uses a shell string."""
         import subprocess
+
         calls: list[list[str]] = []
 
         def stub(cmd, **kwargs):

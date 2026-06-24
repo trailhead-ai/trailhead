@@ -66,6 +66,7 @@ distributed over the OR. This is the simplest form for the compiler to pattern-m
 
 The module raises ``KqlParseError`` and never prints or calls ``sys.exit``.
 """
+
 import difflib
 from dataclasses import dataclass
 
@@ -74,18 +75,35 @@ from dataclasses import dataclass
 # Known fields
 # ---------------------------------------------------------------------------
 
-_FACET_ALIASES = frozenset({
-    "area", "phase", "keyword",
-    "related-area", "related-phases", "keywords",
-})
+_FACET_ALIASES = frozenset(
+    {
+        "area",
+        "phase",
+        "keyword",
+        "related-area",
+        "related-phases",
+        "keywords",
+    }
+)
 
-_SCALAR_FIELDS = frozenset({
-    "kind", "status", "repo", "team", "product", "suite",
-})
+_SCALAR_FIELDS = frozenset(
+    {
+        "kind",
+        "status",
+        "repo",
+        "team",
+        "product",
+        "suite",
+    }
+)
 
-_COMPARE_FIELDS = frozenset({
-    "created-at", "updated-at", "last-referenced-at",
-})
+_COMPARE_FIELDS = frozenset(
+    {
+        "created-at",
+        "updated-at",
+        "last-referenced-at",
+    }
+)
 
 VALID_FIELDS = tuple(sorted(_FACET_ALIASES | _SCALAR_FIELDS | _COMPARE_FIELDS))
 
@@ -96,9 +114,11 @@ _ALL_FIELDS = _FACET_ALIASES | _SCALAR_FIELDS | _COMPARE_FIELDS
 # AST node types (frozen dataclasses — no from __future__ import annotations)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class FieldEq:
     """Scalar field equality: ``kind:spec``."""
+
     field: str
     value: str
 
@@ -106,6 +126,7 @@ class FieldEq:
 @dataclass(frozen=True)
 class FacetMembership:
     """List-valued facet membership: ``area:penny``, ``phase:build``."""
+
     facet: str
     value: str
 
@@ -117,6 +138,7 @@ class LabelEq:
     ``key`` is the REAL stored label key (dot-for-slash already decoded — see
     ``_parse_field_rhs``). Only ``labels`` have a selector; ``annotations`` do not.
     """
+
     key: str
     value: str
 
@@ -127,24 +149,28 @@ class LabelExists:
 
     ``key`` is the REAL stored label key (dot-for-slash already decoded).
     """
+
     key: str
 
 
 @dataclass(frozen=True)
 class FullText:
     """Bare full-text term: ``trailhead``."""
+
     term: str
 
 
 @dataclass(frozen=True)
 class Phrase:
     """Quoted adjacent phrase: ``"penny worker"``."""
+
     text: str
 
 
 @dataclass(frozen=True)
 class Compare:
     """Range comparison: ``created-at >= "2026-01-01"``."""
+
     field: str
     op: str
     value: str
@@ -153,6 +179,7 @@ class Compare:
 @dataclass(frozen=True)
 class And:
     """Boolean AND (explicit ``and`` or implicit adjacency)."""
+
     left: object
     right: object
 
@@ -160,6 +187,7 @@ class And:
 @dataclass(frozen=True)
 class Or:
     """Boolean OR."""
+
     left: object
     right: object
 
@@ -167,18 +195,21 @@ class Or:
 @dataclass(frozen=True)
 class Not:
     """Boolean NOT — also used for the ``-exclusion`` prefix form."""
+
     operand: object
 
 
 @dataclass(frozen=True)
 class Group:
     """Explicit parenthesized grouping."""
+
     inner: object
 
 
 # ---------------------------------------------------------------------------
 # Error type
 # ---------------------------------------------------------------------------
+
 
 class KqlParseError(Exception):
     """Raised for any parse error (malformed input, unsupported feature, unknown field).
@@ -192,6 +223,7 @@ class KqlParseError(Exception):
 # Deterministic "did you mean" suggestion
 # ---------------------------------------------------------------------------
 
+
 def _suggest_field(name):
     """Return a deterministic 'did you mean X?' error string for an unknown field name.
 
@@ -204,10 +236,7 @@ def _suggest_field(name):
     matches = difflib.get_close_matches(name, VALID_FIELDS, n=1, cutoff=0.6)
     suggestion = f"did you mean '{matches[0]}'? " if matches else ""
     all_fields = ", ".join(VALID_FIELDS)
-    return (
-        f"unknown field '{name}': {suggestion}"
-        f"valid fields: {all_fields}"
-    )
+    return f"unknown field '{name}': {suggestion}valid fields: {all_fields}"
 
 
 # ---------------------------------------------------------------------------
@@ -215,16 +244,16 @@ def _suggest_field(name):
 # ---------------------------------------------------------------------------
 
 # Token kinds
-_TK_WORD = "WORD"       # bare word (identifier or value)
-_TK_QUOTED = "QUOTED"   # "..."
-_TK_COLON = "COLON"     # :
-_TK_LPAREN = "LPAREN"   # (
-_TK_RPAREN = "RPAREN"   # )
-_TK_GTE = "GTE"         # >=
-_TK_LTE = "LTE"         # <=
-_TK_GT = "GT"           # >
-_TK_LT = "LT"           # <
-_TK_MINUS = "MINUS"     # -  (exclusion prefix)
+_TK_WORD = "WORD"  # bare word (identifier or value)
+_TK_QUOTED = "QUOTED"  # "..."
+_TK_COLON = "COLON"  # :
+_TK_LPAREN = "LPAREN"  # (
+_TK_RPAREN = "RPAREN"  # )
+_TK_GTE = "GTE"  # >=
+_TK_LTE = "LTE"  # <=
+_TK_GT = "GT"  # >
+_TK_LT = "LT"  # <
+_TK_MINUS = "MINUS"  # -  (exclusion prefix)
 _TK_EOF = "EOF"
 
 
@@ -259,14 +288,14 @@ def _tokenize(text):
                 j += 1
             if j >= n:
                 raise KqlParseError("unbalanced quote: missing closing '\"'")
-            tokens.append((_TK_QUOTED, text[i + 1:j]))
+            tokens.append((_TK_QUOTED, text[i + 1 : j]))
             i = j + 1
             continue
 
         # bare '/' — rejected. Either an unsupported regex literal (/re/) or an
         # unquoted value containing a slash; both are errors, but the common case
         # is a value (e.g. a repo path) that needs quoting, so say so.
-        if c == '/':
+        if c == "/":
             raise KqlParseError(
                 "unexpected '/': regex (/re/) is not supported, and a value "
                 "containing '/' must be quoted "
@@ -274,73 +303,73 @@ def _tokenize(text):
             )
 
         # operators >=, <=, >, <
-        if c == '>' and i + 1 < n and text[i + 1] == '=':
+        if c == ">" and i + 1 < n and text[i + 1] == "=":
             tokens.append((_TK_GTE, ">="))
             i += 2
             continue
-        if c == '<' and i + 1 < n and text[i + 1] == '=':
+        if c == "<" and i + 1 < n and text[i + 1] == "=":
             tokens.append((_TK_LTE, "<="))
             i += 2
             continue
-        if c == '>':
+        if c == ">":
             tokens.append((_TK_GT, ">"))
             i += 1
             continue
-        if c == '<':
+        if c == "<":
             tokens.append((_TK_LT, "<"))
             i += 1
             continue
 
         # colon
-        if c == ':':
+        if c == ":":
             tokens.append((_TK_COLON, ":"))
             i += 1
             continue
 
         # parens
-        if c == '(':
+        if c == "(":
             tokens.append((_TK_LPAREN, "("))
             i += 1
             continue
-        if c == ')':
+        if c == ")":
             tokens.append((_TK_RPAREN, ")"))
             i += 1
             continue
 
         # minus — leading exclusion prefix (emitted as its own token)
-        if c == '-':
+        if c == "-":
             tokens.append((_TK_MINUS, "-"))
             i += 1
             continue
 
         # bare word (letters, digits, underscore, dot; hyphen is mid-word only)
-        if c.isalnum() or c in '_.' or c in '*~^':
+        if c.isalnum() or c in "_." or c in "*~^":
             j = i
             while j < n and (
                 text[j].isalnum()
-                or text[j] in '_.'
-                or text[j] in '*~^'
+                or text[j] in "_."
+                or text[j] in "*~^"
                 # hyphen as mid-word char only (not at the start position)
-                or (text[j] == '-' and j > i)
+                or (text[j] == "-" and j > i)
             ):
                 j += 1
 
             word = text[i:j]
 
             # Trim trailing hyphens (e.g. "created-" where a MINUS follows)
-            while word.endswith('-'):
+            while word.endswith("-"):
                 word = word[:-1]
                 j -= 1
 
-            if '*' in word:
+            if "*" in word:
                 raise KqlParseError(
                     f"wildcard queries ('{word}') are not supported in this KQL subset"
                 )
-            if '~' in word:
+            if "~" in word:
                 raise KqlParseError(
                     f"fuzzy queries ('{word}') are not supported in this KQL subset"
                 )
-            if '^' in word:
+            if "^" in word:
                 raise KqlParseError(
                     f"boost queries ('{word}') are not supported in this KQL subset"
                 )
@@ -349,7 +378,7 @@ def _tokenize(text):
             i = j
             continue
 
-        if c == '=':
+        if c == "=":
             # The old/wrong label form ``label:worktree=s5`` lands here ('=' is not
             # a word char). Point users at the correct dot-form selector.
             raise KqlParseError(
@@ -367,6 +396,7 @@ def _tokenize(text):
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
+
 
 class _Parser:
     """Recursive-descent parser over the token list produced by ``_tokenize``."""
@@ -418,11 +448,7 @@ class _Parser:
                 self._consume()  # eat explicit 'and'
                 right = self._parse_not()
                 left = And(left, right)
-            elif (
-                not self._at(_TK_EOF)
-                and not self._at(_TK_RPAREN)
-                and not self._at_word("or")
-            ):
+            elif not self._at(_TK_EOF) and not self._at(_TK_RPAREN) and not self._at_word("or"):
                 # Implicit AND: next token starts a new primary
                 right = self._parse_not()
                 left = And(left, right)
@@ -465,11 +491,7 @@ class _Parser:
 
             # Lookahead: peek at the token AFTER this word
             next_pos = self._pos + 1
-            next_tok = (
-                self._tokens[next_pos]
-                if next_pos < len(self._tokens)
-                else (_TK_EOF, "")
-            )
+            next_tok = self._tokens[next_pos] if next_pos < len(self._tokens) else (_TK_EOF, "")
 
             if next_tok[0] == _TK_COLON:
                 self._consume()  # eat field word
@@ -484,9 +506,7 @@ class _Parser:
             # bare word — reject reserved Boolean operators used alone
             self._consume()
             if word_lower in ("and", "or", "not"):
-                raise KqlParseError(
-                    f"unexpected operator '{word}' without operands"
-                )
+                raise KqlParseError(f"unexpected operator '{word}' without operands")
             return FullText(word)
 
         raise KqlParseError(f"unexpected token '{self._peek()[1]}' in query")
@@ -512,7 +532,7 @@ class _Parser:
         ``annotations`` deliberately have no selector.
         """
         if field.startswith("label."):
-            key = field[len("label."):].replace(".", "/")
+            key = field[len("label.") :].replace(".", "/")
             value = self._parse_value()
             return LabelEq(key=key, value=value)
 
@@ -521,11 +541,9 @@ class _Parser:
                 _, rhs = self._peek()
                 if rhs.startswith("label."):
                     self._consume()  # eat the label.<key> word
-                    key = rhs[len("label."):].replace(".", "/")
+                    key = rhs[len("label.") :].replace(".", "/")
                     return LabelExists(key=key)
-            raise KqlParseError(
-                "has: expects has:label.<key> (e.g. has:label.worktree)"
-            )
+            raise KqlParseError("has: expects has:label.<key> (e.g. has:label.worktree)")
 
         if field not in _ALL_FIELDS:
             raise KqlParseError(_suggest_field(field))
@@ -584,6 +602,7 @@ class _Parser:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def parse(query):
     """Parse a KQL-subset query string and return the AST root node.

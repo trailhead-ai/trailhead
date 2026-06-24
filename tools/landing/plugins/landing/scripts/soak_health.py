@@ -28,6 +28,7 @@ Exit codes:
     1  regression — health command exited nonzero or timed out
     2  error — TOML unreadable / malformed soak_health_command / unexpected exception
 """
+
 from __future__ import annotations
 
 import argparse
@@ -59,7 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=_DEFAULT_TIMEOUT,
         metavar="SECONDS",
         help=f"Timeout in seconds for the health command (default: {_DEFAULT_TIMEOUT}). "
-             "A hung command is killed after this duration and treated as a regression.",
+        "A hung command is killed after this duration and treated as a regression.",
     )
     return p
 

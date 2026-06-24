@@ -19,6 +19,7 @@ Properties:
   - **Path-safe**: refuses to operate on any note whose resolved source or
     destination escapes the vault root (no ``../`` traversal / symlink escape).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -75,8 +76,8 @@ def _rewrite_frontmatter(text: str) -> tuple[str, bool, tuple[str, str] | None]:
     if close_idx is None:
         return text, False, None
 
-    head = "".join(lines[:close_idx])   # opening '---\n' .. last fm line (exclusive of fence)
-    rest = "".join(lines[close_idx:])   # the closing '---' fence onward (body untouched)
+    head = "".join(lines[:close_idx])  # opening '---\n' .. last fm line (exclusive of fence)
+    rest = "".join(lines[close_idx:])  # the closing '---' fence onward (body untouched)
 
     type_rewritten = False
     status_fix: tuple[str, str] | None = None
@@ -88,7 +89,7 @@ def _rewrite_frontmatter(text: str) -> tuple[str, bool, tuple[str, str] | None]:
             type_rewritten = True
             continue
         if stripped.startswith("status: "):
-            value = stripped[len("status: "):].strip()
+            value = stripped[len("status: ") :].strip()
             if value in _STATUS_FIXES:
                 new_value = _STATUS_FIXES[value]
                 out_lines.append(line.replace(f"status: {value}", f"status: {new_value}", 1))

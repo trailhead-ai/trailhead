@@ -11,6 +11,7 @@ malformed config, slug=None) because it fires at EVERY SessionStart in EVERY rep
 — including ones that never ran camp init. All no-op cases exit 0 with empty
 stderr so they don't pollute session start for the common case of a non-camp repo.
 """
+
 from __future__ import annotations
 
 import sys
@@ -49,9 +50,7 @@ def _load_groups_silently() -> list | None:
         return None
 
 
-def _resolve_group_slug_silently(
-    cwd: Path, group_configs: list
-) -> tuple[dict | None, str | None]:
+def _resolve_group_slug_silently(cwd: Path, group_configs: list) -> tuple[dict | None, str | None]:
     """Resolve (group, slug) from cwd; return (None, None) for all silent-no-op cases.
 
     Silent no-op cases:
@@ -105,6 +104,7 @@ def cmd_session_bootstrap() -> None:
     # Reconcile (idempotent create-or-complete).
     try:
         from reconcile import reconcile_worktree
+
         reconcile_worktree(group, slug)
     except Exception as e:
         # Genuine failure in a valid member worktree — warn once, don't crash.

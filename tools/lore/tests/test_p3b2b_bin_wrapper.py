@@ -10,6 +10,7 @@ Covers:
 - invoking bin/lore from an arbitrary cwd (e.g. /tmp) still resolves cli/lore
   (location-independence — not just relative to plugin dir)
 """
+
 from __future__ import annotations
 
 import os
@@ -31,7 +32,10 @@ def run_bin(args, env=None, cwd=None):
         full_env.update(env)
     return subprocess.run(
         [str(BIN_PATH), *args],
-        capture_output=True, text=True, env=full_env, cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=full_env,
+        cwd=cwd,
     )
 
 
@@ -42,11 +46,15 @@ def run_cli_direct(args, env=None, cwd=None):
         full_env.update(env)
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
-        capture_output=True, text=True, env=full_env, cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=full_env,
+        cwd=cwd,
     )
 
 
 # ---- existence + permissions ------------------------------------------------
+
 
 def test_bin_lore_exists():
     assert BIN_PATH.exists(), f"bin/lore not found at {BIN_PATH}"
@@ -57,6 +65,7 @@ def test_bin_lore_is_executable():
 
 
 # ---- delegation correctness: --help -----------------------------------------
+
 
 def test_bin_help_exit_code_matches_cli():
     bin_result = run_bin(["--help"])
@@ -72,6 +81,7 @@ def test_bin_help_stdout_matches_cli():
 
 # ---- non-zero exit code forwarding ------------------------------------------
 
+
 def test_bin_invalid_subcommand_forwards_nonzero():
     result = run_bin(["__invalid_subcommand_that_does_not_exist__"])
     assert result.returncode != 0
@@ -85,6 +95,7 @@ def test_bin_invalid_subcommand_exit_code_matches_cli():
 
 # ---- location-independence: different cwd -----------------------------------
 
+
 def test_bin_help_from_tmp_cwd():
     """bin/lore resolves cli/lore even when invoked from /tmp."""
     bin_result = run_bin(["--help"], cwd="/tmp")
@@ -93,6 +104,7 @@ def test_bin_help_from_tmp_cwd():
 
 
 # ---- no machine-specific paths baked in -------------------------------------
+
 
 def test_bin_wrapper_no_hardcoded_absolute_paths():
     """The wrapper must not contain any hardcoded absolute paths."""

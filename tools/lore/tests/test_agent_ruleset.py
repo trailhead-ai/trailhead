@@ -5,6 +5,7 @@ write-prohibition rules (minus the stale per-project multi-rules-file "Drift
 caveat") plus a short disposition primer. The content is STATIC — no
 computed/per-session state — so two renders must be byte-identical.
 """
+
 from __future__ import annotations
 
 import sys

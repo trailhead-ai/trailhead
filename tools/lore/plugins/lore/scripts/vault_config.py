@@ -88,9 +88,7 @@ import record_model
 # ---------------------------------------------------------------------------
 
 #: The closed set of valid scope values.
-VALID_SCOPES: frozenset[str] = frozenset(
-    {"repo", "product", "suite", "team", "default"}
-)
+VALID_SCOPES: frozenset[str] = frozenset({"repo", "product", "suite", "team", "default"})
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +214,10 @@ def _resolve_vaults_root(env: dict | None = None) -> Path:
     """
     try:
         import _bootstrap
+
         _bootstrap.ensure_trailhead_importable()
         import trailhead.paths as _paths
+
         if env is not None:
             return _paths.state_dir("lore", env=env) / "vaults"
         return _paths.state_dir("lore") / "vaults"
@@ -325,8 +325,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
             layers.validate_layer_name(name)
         except layers.LayerConfinementError as exc:
             raise VaultConfigError(
-                f"lore: vault name {raw_name!r} (normalized: {name!r}) "
-                f"is invalid: {exc}"
+                f"lore: vault name {raw_name!r} (normalized: {name!r}) is invalid: {exc}"
             ) from exc
 
         # --- 3. Globally unique names after normalization ---
@@ -387,19 +386,20 @@ def validate_config(data: dict, env: dict | None = None) -> list:
         else:
             resolved_path = vaults_root / name
 
-        vaults.append(Vault(
-            name=name,
-            scope=scope,
-            path=resolved_path,
-            records=list(records),
-            shared=shared,
-        ))
+        vaults.append(
+            Vault(
+                name=name,
+                scope=scope,
+                path=resolved_path,
+                records=list(records),
+                shared=shared,
+            )
+        )
 
     # --- 2. Exactly one default-scope vault ---
     if default_count == 0:
         raise VaultConfigError(
-            "lore: config.json must contain exactly one vault with "
-            "scope 'default'; found zero"
+            "lore: config.json must contain exactly one vault with scope 'default'; found zero"
         )
     if default_count > 1:
         raise VaultConfigError(
@@ -446,7 +446,8 @@ def remove_vault_entry(config: dict, name: str) -> None:
     """
     normalized_target = normalize_vault_name(name)
     config["vaults"] = [
-        v for v in config.get("vaults", [])
+        v
+        for v in config.get("vaults", [])
         if normalize_vault_name(v.get("name", "")) != normalized_target
     ]
 
@@ -490,9 +491,7 @@ def write_config_atomic(path, config: dict) -> None:
         with tmp_path.open("r", encoding="utf-8") as fh:
             verified = json.load(fh)
         if "vaults" not in verified:
-            raise ValueError(
-                "write_config_atomic: re-read verified file missing 'vaults' key"
-            )
+            raise ValueError("write_config_atomic: re-read verified file missing 'vaults' key")
         os.replace(tmp_path, path)
     except Exception:
         try:

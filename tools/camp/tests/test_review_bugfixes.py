@@ -18,6 +18,7 @@ BUG 4 — a fast `git fetch` failure was swallowed (`check=False`) and the membe
 Patterns: fake-git + tmp_path + CAMP_STATE_DIR (no real ~/.claude, no real
 claude exec).
 """
+
 from __future__ import annotations
 
 import importlib.machinery
@@ -40,20 +41,29 @@ if str(_SCRIPTS_DIR) not in sys.path:
 def _init_git_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "T"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@t.com"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "T"], check=True, capture_output=True
+    )
     (path / "README.md").write_text("# t\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
     # Self-origin so the configured base `origin/main` resolves locally (a real
     # member always has a fetchable/resolvable base).
-    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", str(path)],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "fetch", "origin", "--quiet"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
+    )
 
 
 def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
@@ -68,6 +78,7 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 
 def _workspace_dir(group_name, slug, env):
     from group_resolve import central_state_dir
+
     return central_state_dir(group_name, env=env) / "worktrees" / slug
 
 
@@ -106,6 +117,7 @@ def two_member_group(tmp_path: Path):
 def _stub_spawn(monkeypatch):
     """Never spawn a real detached provisioner in these tests."""
     import provision
+
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
 
@@ -119,6 +131,7 @@ class TestBug1SetupStatus:
         """Seed + provision a workspace so members are ready."""
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
+
         bring_up_workspace(g["group"], slug, env=g["env"])
         cmd_setup_group(g["group"], slug, env=g["env"])
 
@@ -132,9 +145,7 @@ class TestBug1SetupStatus:
         monkeypatch.chdir(ws)
         code = 0
         try:
-            camp_cli._cmd_setup_group_cli(
-                ["--status"], g["group"], g["env"], dry_run=False
-            )
+            camp_cli._cmd_setup_group_cli(["--status"], g["group"], g["env"], dry_run=False)
         except SystemExit as e:
             code = e.code or 0
         captured = capsys.readouterr()
@@ -158,6 +169,7 @@ class TestBug1SetupStatus:
     ):
         from provision import seed_pending_workspace
         from manifest import flip_member_state_unlocked, reconcile_lock
+
         g = two_member_group
         seed_pending_workspace(g["group"], "feat-pf", env=g["env"])
         mpath = _workspace_dir("bugfixgroup", "feat-pf", g["env"]) / "manifest.json"
@@ -204,12 +216,14 @@ class TestBug2RmRemovesWorkspaceDir:
     def _provision(self, g, slug):
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
+
         bring_up_workspace(g["group"], slug, env=g["env"])
         cmd_setup_group(g["group"], slug, env=g["env"])
 
     def test_rm_removes_workspace_dir(self, two_member_group):
         from reconcile import reconcile_break
         from manifest import workspace_dir
+
         g = two_member_group
         self._provision(g, "feat-rm")
         ws = workspace_dir("bugfixgroup", "feat-rm", env=g["env"])
@@ -229,9 +243,10 @@ class TestBug2RmRemovesWorkspaceDir:
 
         calls = []
         monkeypatch.setattr(
-            harness_launch, "launch",
-            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: (
-                calls.append(is_resume)
+            harness_launch,
+            "launch",
+            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: calls.append(
+                is_resume
             ),
         )
         camp_cli._cmd_ai_group_cli(["feat-cycle"], g["group"], g["env"], dry_run=False)
@@ -240,6 +255,7 @@ class TestBug2RmRemovesWorkspaceDir:
     def test_dirty_block_without_force_leaves_dir_intact(self, two_member_group):
         from reconcile import reconcile_break, ReconcileError
         from manifest import workspace_dir
+
         g = two_member_group
         self._provision(g, "feat-dirty")
         ws = workspace_dir("bugfixgroup", "feat-dirty", env=g["env"])
@@ -256,6 +272,7 @@ class TestBug2RmRemovesWorkspaceDir:
         from reconcile import reconcile_break, ConfinementError
         import reconcile
         from manifest import workspace_dir
+
         g = two_member_group
         self._provision(g, "feat-conf")
         workspace_dir("bugfixgroup", "feat-conf", env=g["env"])
@@ -328,6 +345,7 @@ def _fetch_fails(monkeypatch):
             returncode = 1
             stdout = ""
             stderr = "fatal: couldn't find remote ref refs/heads/main"
+
         if isinstance(argv, (list, tuple)) and "fetch" in argv:
             return _R()
         return _sp.run(argv, **kwargs)
@@ -352,7 +370,8 @@ class TestBug4FetchFailureFailsMember:
         # when the fetch fails on an unresolved remote base.
         added: list[str] = []
         monkeypatch.setattr(
-            reconcile, "_add_worktree_for_member",
+            reconcile,
+            "_add_worktree_for_member",
             lambda member, *a, **k: added.append(member["name"]),
         )
 
@@ -364,11 +383,13 @@ class TestBug4FetchFailureFailsMember:
         mpath = _workspace_dir("bugfixgroup", "feat-ff", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
         by_name = {m["name"]: m for m in data["members"]}
-        assert by_name["repo_a"]["provision_state"] == "failed", \
+        assert by_name["repo_a"]["provision_state"] == "failed", (
             "member must be flipped to failed, not ready, on unresolved-base fetch failure"
+        )
         reason = by_name["repo_a"].get("reason", "").lower()
-        assert "remote ref" in reason or "fetch" in reason, \
+        assert "remote ref" in reason or "fetch" in reason, (
             f"failed reason must carry the fetch error, got: {reason!r}"
+        )
 
     def test_fetch_failure_resolved_base_proceeds(self, two_member_group, monkeypatch):
         """Fetch fails but the base ref DOES resolve locally (cached) → proceed
@@ -382,7 +403,8 @@ class TestBug4FetchFailureFailsMember:
         _fetch_fails(monkeypatch)
         added = []
         monkeypatch.setattr(
-            reconcile, "_add_worktree_for_member",
+            reconcile,
+            "_add_worktree_for_member",
             lambda member, *a, **k: added.append(member["name"]),
         )
 
@@ -409,13 +431,15 @@ class TestBug4FetchFailureFailsMember:
                     returncode = 0
                     stdout = "deadbeef" if args and args[0] == "rev-parse" else ""
                     stderr = ""
+
                 return _R()
 
         fake = _OkGit()
         monkeypatch.setattr(reconcile, "_git", fake)
         captured = {}
         monkeypatch.setattr(
-            reconcile, "_add_worktree_for_member",
+            reconcile,
+            "_add_worktree_for_member",
             lambda member, wt, branch, repo, *, base, slug: captured.setdefault("base", base),
         )
 

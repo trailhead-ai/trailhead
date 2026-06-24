@@ -27,6 +27,7 @@ Exit codes:
        tree path does not exist. NEVER exits 0 when it could not actually
        certify the tree as clean.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,8 +41,19 @@ DEFAULT_DENYLIST = Path.home() / ".claude" / "leak-gate.denylist"
 # Text file types to scan. Extensionless files are scanned if they decode as
 # UTF-8 (covers shell/cli scripts with no suffix).
 _TEXT_EXTENSIONS = {
-    ".md", ".py", ".sh", ".json", ".txt", ".toml", ".cfg", ".ini", ".yaml",
-    ".yml", ".bash", ".zsh", ".fish",
+    ".md",
+    ".py",
+    ".sh",
+    ".json",
+    ".txt",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".yaml",
+    ".yml",
+    ".bash",
+    ".zsh",
+    ".fish",
 }
 
 

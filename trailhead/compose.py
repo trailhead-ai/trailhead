@@ -103,9 +103,7 @@ class OverrideError(Exception):
         self.name = name
         self.kind = kind
         self.path = path
-        super().__init__(
-            f"override for {kind} {name!r} does not exist: {path}"
-        )
+        super().__init__(f"override for {kind} {name!r} does not exist: {path}")
 
 
 @dataclass
@@ -133,9 +131,7 @@ class DestConfinementError(Exception):
     def __init__(self, dest_root: Path, path: Path):
         self.dest_root = dest_root
         self.path = path
-        super().__init__(
-            f"dest path {path!r} escapes the target plugin dir {dest_root!r}"
-        )
+        super().__init__(f"dest path {path!r} escapes the target plugin dir {dest_root!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -296,9 +292,7 @@ def compose_plan(
             if resolved.is_dir():
                 _add_override(override_path, f"skills/{name}", name, "skill")
             else:
-                _add_override(
-                    override_path, f"skills/{name}/SKILL.md", name, "skill"
-                )
+                _add_override(override_path, f"skills/{name}/SKILL.md", name, "skill")
         else:
             rel = manifest.skills.get(name)
             if rel is None:

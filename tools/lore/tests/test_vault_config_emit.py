@@ -154,7 +154,7 @@ def test_special_chars_in_path_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
     cfg = vc()
     # Use an absolute path that contains special chars in some component
-    tricky_path = str(tmp_path / 'vaults' / 'my-"vault')
+    tricky_path = str(tmp_path / "vaults" / 'my-"vault')
     config_path = _write_config(tmp_path, _minimal_config())
     config = _read_config(config_path)
     cfg.add_vault_entry(config, {"name": "special", "scope": "team", "path": tricky_path})
@@ -172,10 +172,12 @@ def test_special_chars_in_path_roundtrip(tmp_path, monkeypatch):
 def test_remove_vault_entry_removes_named_entry(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    config = _minimal_config(extra_vaults=[
-        {"name": "team-a", "scope": "team"},
-        {"name": "team-b", "scope": "team"},
-    ])
+    config = _minimal_config(
+        extra_vaults=[
+            {"name": "team-a", "scope": "team"},
+            {"name": "team-b", "scope": "team"},
+        ]
+    )
     cfg.remove_vault_entry(config, "team-a")
     names = [v["name"] for v in config["vaults"]]
     assert "team-a" not in names
@@ -184,10 +186,12 @@ def test_remove_vault_entry_removes_named_entry(tmp_path, monkeypatch):
 def test_remove_vault_entry_leaves_siblings_intact(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    config = _minimal_config(extra_vaults=[
-        {"name": "team-a", "scope": "team"},
-        {"name": "team-b", "scope": "team"},
-    ])
+    config = _minimal_config(
+        extra_vaults=[
+            {"name": "team-a", "scope": "team"},
+            {"name": "team-b", "scope": "team"},
+        ]
+    )
     cfg.remove_vault_entry(config, "team-a")
     names = [v["name"] for v in config["vaults"]]
     assert "team-b" in names
@@ -200,9 +204,11 @@ def test_remove_vault_entry_normalizes_name(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
     # Store a name with / in the raw config (pre-normalization)
-    config = _minimal_config(extra_vaults=[
-        {"name": "org/repo", "scope": "repo"},
-    ])
+    config = _minimal_config(
+        extra_vaults=[
+            {"name": "org/repo", "scope": "repo"},
+        ]
+    )
     # Remove using either form — both should match "org_repo" normalized
     cfg.remove_vault_entry(config, "org/repo")
     names = [v["name"] for v in config["vaults"]]
@@ -213,9 +219,11 @@ def test_remove_vault_entry_by_normalized_form(tmp_path, monkeypatch):
     """remove_vault_entry accepts the already-normalized form too."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    config = _minimal_config(extra_vaults=[
-        {"name": "org_repo", "scope": "repo"},
-    ])
+    config = _minimal_config(
+        extra_vaults=[
+            {"name": "org_repo", "scope": "repo"},
+        ]
+    )
     cfg.remove_vault_entry(config, "org_repo")
     names = [v["name"] for v in config["vaults"]]
     assert "org_repo" not in names
@@ -288,12 +296,16 @@ def test_atomic_write_failure_leaves_config_unchanged(tmp_path, monkeypatch):
         raise ValueError("simulated verify failure")
 
     # Patch the json module attribute on the loaded vault_config module object
-    fake_json = type("FakeJson", (), {
-        "dump": staticmethod(stdlib_json.dump),
-        "load": staticmethod(fail_on_load),
-        "loads": staticmethod(stdlib_json.loads),
-        "JSONDecodeError": stdlib_json.JSONDecodeError,
-    })()
+    fake_json = type(
+        "FakeJson",
+        (),
+        {
+            "dump": staticmethod(stdlib_json.dump),
+            "load": staticmethod(fail_on_load),
+            "loads": staticmethod(stdlib_json.loads),
+            "JSONDecodeError": stdlib_json.JSONDecodeError,
+        },
+    )()
     monkeypatch.setattr(cfg, "json", fake_json)
 
     # write_config_atomic must exist and raise on verify failure
@@ -316,12 +328,16 @@ def test_atomic_write_failure_cleans_up_temp_file(tmp_path, monkeypatch):
     def fail_on_load(fp):
         raise ValueError("simulated verify failure")
 
-    fake_json = type("FakeJson", (), {
-        "dump": staticmethod(stdlib_json.dump),
-        "load": staticmethod(fail_on_load),
-        "loads": staticmethod(stdlib_json.loads),
-        "JSONDecodeError": stdlib_json.JSONDecodeError,
-    })()
+    fake_json = type(
+        "FakeJson",
+        (),
+        {
+            "dump": staticmethod(stdlib_json.dump),
+            "load": staticmethod(fail_on_load),
+            "loads": staticmethod(stdlib_json.loads),
+            "JSONDecodeError": stdlib_json.JSONDecodeError,
+        },
+    )()
     monkeypatch.setattr(cfg, "json", fake_json)
 
     with pytest.raises(Exception, match="simulated verify failure"):

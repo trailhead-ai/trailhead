@@ -7,6 +7,7 @@ Every session/plan/spec/design enumeration must recurse exactly one level into
 
 TDD: tests written before implementation. All fixtures are SYNTHETIC.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -24,8 +25,15 @@ def load_script(name: str):
     """Load a module from plugins/lore/scripts/ freshly (no cache)."""
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in (name, "vault", "frontmatter", "status_validator", "sessions",
-                   "config", "recall"):
+    for cached in (
+        name,
+        "vault",
+        "frontmatter",
+        "status_validator",
+        "sessions",
+        "config",
+        "recall",
+    ):
         sys.modules.pop(cached, None)
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
@@ -75,6 +83,7 @@ def vault(tmp_path: Path) -> Path:
 # vault.find_session_note
 # ---------------------------------------------------------------------------
 
+
 class TestFindSessionNote:
     def test_finds_flat(self, vault):
         flat = _session_note(vault, "2026-06-01-1000-alpha-worktree.md")
@@ -104,6 +113,7 @@ class TestFindSessionNote:
 # sessions.all_session_notes_for_worktree
 # ---------------------------------------------------------------------------
 
+
 class TestAllSessionNotes:
     def test_finds_flat_and_bucketed(self, vault):
         flat = _session_note(vault, "2026-07-01-0800-alpha-worktree.md")
@@ -129,6 +139,7 @@ class TestAllSessionNotes:
 # sessions.session_note_path
 # ---------------------------------------------------------------------------
 
+
 class TestSessionNotePath:
     def test_finds_bucketed(self, vault):
         bucketed = _session_note(vault, "2026-06/2026-06-01-1000-alpha-worktree.md")
@@ -146,10 +157,12 @@ class TestSessionNotePath:
 # sessions.sweep_orphan_skeletons
 # ---------------------------------------------------------------------------
 
+
 class TestSweepOrphanSkeletons:
     def test_sweeps_bucketed_skeleton(self, vault):
         import os
         import time
+
         skeleton = _session_note(
             vault, "2026-06/2026-06-01-1000-beta-worktree.md", worktree="beta-worktree"
         )
@@ -164,6 +177,7 @@ class TestSweepOrphanSkeletons:
     def test_excludes_passed_bucketed_note(self, vault):
         import os
         import time
+
         keep = _session_note(vault, "2026-06/2026-06-01-1000-alpha-worktree.md")
         old = time.time() - 60 * 60
         os.utime(keep, (old, old))
@@ -177,16 +191,21 @@ class TestSweepOrphanSkeletons:
 # recall._recent_sessions (recursive) vs out-of-scope folders (flat)
 # ---------------------------------------------------------------------------
 
+
 def _load_recall():
     """Load recall module with sys.modules registration so @dataclass resolves."""
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in ("recall", "vault", "frontmatter", "status_validator",
-                   "regenerate_indices", "sessions"):
+    for cached in (
+        "recall",
+        "vault",
+        "frontmatter",
+        "status_validator",
+        "regenerate_indices",
+        "sessions",
+    ):
         sys.modules.pop(cached, None)
-    spec = importlib.util.spec_from_file_location(
-        "recall", SCRIPTS_DIR / "recall.py"
-    )
+    spec = importlib.util.spec_from_file_location("recall", SCRIPTS_DIR / "recall.py")
     mod = importlib.util.module_from_spec(spec)
     sys.modules["recall"] = mod
     spec.loader.exec_module(mod)
@@ -228,6 +247,7 @@ class TestAreaMapStaysFlat:
 # ---------------------------------------------------------------------------
 # Iterator scoping: underscore skip + one-level depth
 # ---------------------------------------------------------------------------
+
 
 class TestIteratorScoping:
     def test_skips_underscore_file(self, vault):
