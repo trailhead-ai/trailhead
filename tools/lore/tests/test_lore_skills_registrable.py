@@ -55,17 +55,35 @@ def test_all_capture_and_ritual_skills_present():
 
     S6 Slice 3 MOVED 'brainstorm' to the craft plugin. S6 Slice 5 ADDED the
     three new skills 'search' (read path / replaces recall), 'record' (single
-    deliberate capture), and 'research' (dispatch investigator/researcher), so
-    the retained lore skills are: checkpoint, finish, sync, search, record,
-    research (+ _shared, exempt).
+    deliberate capture), and 'research' (dispatch investigator/researcher).
+
+    This slice (plan Slice 4) RENAMED 'finish' → 'flush' and DELETED 'checkpoint'.
+    The retained lore skills are: flush, sync, search, record, research
+    (+ _shared, exempt).
     """
     names = {p.parent.name for p in _skill_files()}
     expected = {
-        "checkpoint", "finish", "sync",
+        "flush", "sync",
         "search", "record", "research",
     }
     missing = expected - names
     assert not missing, f"expected skills missing from the plugin: {sorted(missing)}"
+
+
+def test_finish_renamed_to_flush_checkpoint_deleted():
+    """Plan Slice 4: 'finish' was renamed to 'flush'; 'checkpoint' was deleted.
+
+    Guard that neither the old 'finish' nor the deleted 'checkpoint' exist.
+    """
+    names = {p.parent.name for p in _skill_files()}
+    assert "finish" not in names, (
+        "finish skill must not exist — Slice 4 renamed it to 'flush'"
+    )
+    assert "checkpoint" not in names, (
+        "checkpoint skill must not exist — Slice 4 deleted it "
+        "(candidate capture is continuous via `lore session candidate`; "
+        "flush evaluates)"
+    )
 
 
 def test_brainstorm_moved_to_craft_absent_from_lore():

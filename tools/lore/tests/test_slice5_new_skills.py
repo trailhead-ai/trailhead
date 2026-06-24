@@ -137,46 +137,41 @@ def test_record_references_only_record_and_session_surface():
         )
 
 
-def test_record_and_checkpoint_descriptions_are_scope_disjoint():
-    """The `record` and `checkpoint` trigger descriptions must carve
-    non-overlapping scopes (council Critical — Advocate):
+def test_record_and_flush_descriptions_are_scope_disjoint():
+    """The `record` and `flush` trigger descriptions must carve non-overlapping scopes.
 
-      - record    = "log ONE specific item NOW" (a single deliberate capture)
-      - checkpoint = "sweep the session and catch what I missed" (a review)
+    Plan Slice 4 deleted `checkpoint` and renamed `finish` → `flush`. The
+    scope-disjointness concern now applies to `record` vs `flush`:
 
-    The test fails if either description reads as a generic catch-all "capture"
-    the other also claims — concretely: `record` must signal "one"/"now" and must
-    NOT call itself a sweep/review; `checkpoint` must signal the sweep/review and
-    must NOT call itself a single/one-item capture.
+      - record = "log ONE specific item NOW" (a single deliberate capture)
+      - flush  = "evaluate outstanding candidates → records, then flip clean"
+                 (a batch judgment step, not a single-item NOW capture)
+
+    `record` must signal "one"/"now" and must NOT claim the evaluation-batch scope
+    `flush` owns; `flush` must not claim the single-deliberate-capture scope
+    `record` owns.
     """
     record_desc = _description("record").lower()
-    checkpoint_desc = _description("checkpoint").lower()
+    flush_desc = _description("flush").lower()
 
     # record names its distinct moment: a single item, now.
     assert any(tok in record_desc for tok in ("one", "single", "now")), (
         "record description must name its distinct moment — log ONE item NOW — "
         "not a generic 'capture'"
     )
-    # record must NOT claim the sweep/review scope checkpoint owns.
-    for sweep_tok in ("sweep", "catch what", "review the session", "review the whole"):
-        assert sweep_tok not in record_desc, (
-            f"record description must not claim checkpoint's sweep scope "
-            f"({sweep_tok!r}) — record is a single deliberate capture"
+    # record must NOT affirmatively claim the batch-evaluation scope flush owns.
+    # (Pointing to /lore:flush as a redirect is fine — claiming the evaluation
+    #  work itself is not.)
+    for batch_tok in ("evaluate", "outstanding", "candidates"):
+        assert batch_tok not in record_desc, (
+            f"record description must not claim flush's batch-evaluation scope "
+            f"({batch_tok!r}) — record is a single deliberate capture"
         )
 
-    # checkpoint names the sweep/review moment.
-    assert any(tok in checkpoint_desc for tok in ("sweep", "catch what", "review")), (
-        "checkpoint description must name its distinct moment — sweep the session "
-        "/ catch what I missed"
-    )
-    # checkpoint must NOT positively claim record's single-deliberate-capture
-    # scope. (It may *disclaim* it — e.g. "NOT a single deliberate capture" — which
-    # reinforces the disjointness; only an affirmative claim is a violation.)
-    assert "single deliberate capture" not in re.sub(
-        r"\bnot a single deliberate capture\b", "", checkpoint_desc
-    ), (
-        "checkpoint description must not affirmatively claim record's single-"
-        "deliberate-capture scope — it is a session sweep"
+    # flush must describe candidate evaluation (its core judgment step).
+    assert any(tok in flush_desc for tok in ("candidate", "evaluate", "outstanding")), (
+        "flush description must describe evaluating candidates (its core judgment step), "
+        "not just the mechanical clean-flip"
     )
 
 
@@ -265,10 +260,14 @@ def test_final_lockstep_gate_clean_across_whole_skills_tree(removed: str):
 
 def test_final_lockstep_gate_enumerates_expected_retained_set():
     """The lockstep gate must run over the full retained skill set — guard that
-    the enumeration actually covers the six retained lore skills (so the gate
-    above is not vacuously passing over a shrunken set)."""
+    the enumeration actually covers the five retained lore skills (so the gate
+    above is not vacuously passing over a shrunken set).
+
+    Plan Slice 4 renamed 'finish' → 'flush' and deleted 'checkpoint'.
+    Retained set: flush, sync, search, record, research.
+    """
     names = {p.parent.name for p in _all_retained_skill_files()}
-    expected = {"checkpoint", "finish", "sync", "search", "record", "research"}
+    expected = {"flush", "sync", "search", "record", "research"}
     assert expected <= names, (
         f"retained lore skill set is missing {sorted(expected - names)} — the "
         "lockstep gate would not cover them"
