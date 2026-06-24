@@ -8,14 +8,22 @@ against these sets so a note can never carry an off-vocabulary status. (The
 
 The canonical sets are the single source of truth for the whole plugin —
 do not invent statuses; add them here and to the scaffolded glossary.
+
+Session vocab (Slice 0): ``session`` is keyed by its singular name and carries
+``{dirty, clean}``. ``dirty`` = candidates pending; ``clean`` = no outstanding
+candidates. The old ``active``/``complete`` values are retired; the ``session→sessions``
+alias is dropped because ``session`` is now a direct CANONICAL key.
 """
 from __future__ import annotations
 
-# Canonical status sets per note type, keyed by the directory / plural name.
+# Canonical status sets per note type. Plans/specs/follow-ups/lessons/dead-ends
+# use the plural directory name as key; deferred and session use the singular
+# kind name. Note: ``session`` moved to a singular direct key (Slice 0) so
+# the ``session→sessions`` alias that used to live in ``_TYPE_ALIASES`` is gone.
 CANONICAL: dict[str, frozenset[str]] = {
     "plans": frozenset({"draft", "ready", "in-progress", "complete", "superseded", "dropped"}),
     "specs": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped"}),
-    "sessions": frozenset({"active", "complete"}),
+    "session": frozenset({"dirty", "clean"}),
     "deferred": frozenset({"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}),
     "follow-ups": frozenset({"active", "resolved", "dropped"}),
     "lessons": frozenset({"active", "superseded"}),
@@ -24,11 +32,11 @@ CANONICAL: dict[str, frozenset[str]] = {
 
 # Note `type:` frontmatter is usually singular ("deferred", "session",
 # "dead-end"); directory names are the keys above. Map the singular form to
-# the canonical key so callers can pass either.
+# the canonical key so callers can pass either. ``session`` resolves directly
+# as a CANONICAL key and needs no alias here.
 _TYPE_ALIASES: dict[str, str] = {
     "plan": "plans",
     "spec": "specs",
-    "session": "sessions",
     "deferred": "deferred",
     "follow-up": "follow-ups",
     "lesson": "lessons",

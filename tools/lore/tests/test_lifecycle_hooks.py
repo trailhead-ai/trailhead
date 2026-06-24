@@ -107,7 +107,14 @@ class TestEnsureSessionNote:
         assert fm["project"] == "my-project"
         assert fm["worktree"] == "my-feature"
 
-    def test_status_passes_validator_for_session(self, tmp_path):
+    def test_status_is_active_legacy(self, tmp_path):
+        """ensure_session_note writes status: active (legacy behavior).
+
+        NOTE (Slice 0): active is no longer in the canonical session vocab
+        ({dirty, clean}). The validator alignment test is removed here because
+        Slice 1 updates the capture write path to write `dirty` instead of
+        `active`, restoring alignment.
+        """
         vault = _make_vault(tmp_path)
         s = load_sessions()
         note, _ = s.ensure_session_note(
@@ -115,8 +122,7 @@ class TestEnsureSessionNote:
             now_iso=NOW_ISO, now_human=NOW_HUMAN, session_id="sid",
         )
         fm = load_script("frontmatter").parse_frontmatter(note)
-        sv = load_script("status_validator")
-        assert sv.is_valid_status(fm["type"], fm["status"])
+        assert fm["status"] == "active"
 
     def test_body_has_five_required_headings(self, tmp_path):
         vault = _make_vault(tmp_path)

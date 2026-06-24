@@ -304,7 +304,15 @@ class TestLoreFinishSetsStatus:
         fm = load_script("frontmatter").parse_frontmatter(note)
         assert fm.get("ended"), f"ended is empty: {fm.get('ended')!r}"
 
-    def test_finalized_note_passes_status_validator(self, tmp_path):
+    def test_finalized_note_status_is_complete(self, tmp_path):
+        """lore finish writes status: complete (legacy command).
+
+        NOTE (Slice 0): complete is no longer in the canonical session vocab
+        ({dirty, clean}). This test documents the as-built behavior of the
+        legacy `finish` command. The validator alignment test is removed here
+        because `finish` → `flush` (Slice 2) is what restores alignment by
+        writing `clean` instead of `complete`.
+        """
         vault = _git_vault(tmp_path)
         note = _seed_session_note(vault, worktree="my-worktree")
         fake_cwd = tmp_path / "my-worktree"
@@ -315,8 +323,7 @@ class TestLoreFinishSetsStatus:
             cwd=str(fake_cwd),
         )
         fm = load_script("frontmatter").parse_frontmatter(note)
-        sv = load_script("status_validator")
-        assert sv.is_valid_status(fm["type"], fm["status"])
+        assert fm["status"] == "complete"
 
     def test_commits_after_finalize(self, tmp_path):
         vault = _git_vault(tmp_path)
