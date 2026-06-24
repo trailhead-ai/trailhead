@@ -252,12 +252,14 @@ def test_status_shelved_plan_stays_shelved_or_dropped(tmp_path):
     assert t.sidecar["status"] in {"draft", "ready", "in-progress", "complete", "superseded", "dropped"}
 
 
-def test_status_shelved_session_becomes_closed(tmp_path):
+def test_status_shelved_session_becomes_clean(tmp_path):
+    """`shelved` resolves to the legacy `complete`, which the Slice 6 session remap
+    translates to `clean` (the second path covered by `_SESSION_STATUS_REMAP`)."""
     mod = _mod()
     fm = "type: session\nstatus: shelved\nsession_id: abc"
     p = write_legacy(tmp_path, "sessions/2026-05/s.md", fm)
     t = mod.transcode(mod.read_legacy(p))
-    assert t.sidecar["status"] in {"active", "complete"}
+    assert t.sidecar["status"] == "clean"
 
 
 def test_status_empty_string_maps_to_active(tmp_path):
@@ -508,11 +510,14 @@ def test_session_name_is_session_id(tmp_path):
     assert t.name == "295a0017-7f96-4505-ba49-a3fc3026debb"
 
 
-def test_session_missing_session_id_flags_review(tmp_path):
+def test_session_missing_session_id_repaired_to_title_slug(tmp_path):
+    """Slice 6 (KU5): a session with no session_id is repaired to its sanitized title
+    slug rather than flagged for review, so no session lands unnamed."""
     mod = _mod()
     p = write_legacy(tmp_path, "sessions/2026-05/s.md", "type: session\nstatus: complete")
     t = mod.transcode(mod.read_legacy(p))
-    assert any(f.kind == "review" for f in t.flags)
+    assert t.name == "s"
+    assert not any(f.kind == "review" and "session_id" in f.detail for f in t.flags)
 
 
 # ===========================================================================
