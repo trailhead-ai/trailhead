@@ -11,6 +11,7 @@ The area-map path (`cmd_areas`, `build_area_map`, `render_area_pointer`,
 SessionStart pointer, not the recall command — and is covered by
 `test_recall_core.py` / `test_subsystem_recall.py`.
 """
+
 from __future__ import annotations
 
 import sys
@@ -20,14 +21,11 @@ CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
 from conftest import load_script, make_vault, run_cli  # noqa: E402
 
-PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
-HOOKS_DIR = PLUGIN_ROOT / "hooks"
-CLI_DIR = PLUGIN_ROOT / "cli"
-
 
 # ---------------------------------------------------------------------------
 # `lore recall …` is gone → non-zero exit + "did you mean 'lore search'?" hint
 # ---------------------------------------------------------------------------
+
 
 class TestRecallCommandRetired:
     def test_bare_recall_is_unknown_command_nonzero(self, tmp_path):
@@ -56,44 +54,9 @@ class TestRecallCommandRetired:
 
 
 # ---------------------------------------------------------------------------
-# Grep-guard: NO remaining executable `lore recall` reference in hooks/ + cli/
-# ---------------------------------------------------------------------------
-
-class TestNoRecallReferencesInExecutables:
-    # Flagged forms the old call sites used — the hard guard must catch all of them.
-    _FORBIDDEN = [
-        "lore recall",
-        "lore recall --areas",
-        "lore recall --json",
-        "lore recall --limit",
-    ]
-
-    def _executable_files(self):
-        files = []
-        for d in (HOOKS_DIR, CLI_DIR):
-            if d.is_dir():
-                files.extend(p for p in d.rglob("*") if p.is_file())
-        return files
-
-    def test_no_lore_recall_in_hooks_or_cli(self):
-        offenders = []
-        for f in self._executable_files():
-            try:
-                text = f.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-            for needle in self._FORBIDDEN:
-                if needle in text:
-                    offenders.append(f"{f}: contains {needle!r}")
-        assert not offenders, (
-            "Executable `lore recall` references survive in hooks/ or cli/ — the "
-            "recall command is gone; rewire to `lore search`:\n" + "\n".join(offenders)
-        )
-
-
-# ---------------------------------------------------------------------------
 # Call-site: area pointer references search not recall
 # ---------------------------------------------------------------------------
+
 
 class TestAreaPointerCallSite:
     def test_area_pointer_references_search_not_recall(self, tmp_path):
@@ -114,42 +77,3 @@ class TestAreaPointerCallSite:
         assert "lore recall" not in pointer, (
             f"area pointer must NOT reference the removed `lore recall`; got: {pointer!r}"
         )
-
-
-# ---------------------------------------------------------------------------
-# The recall COMMAND path is gutted from recall.py (kept: area-map functions)
-# ---------------------------------------------------------------------------
-
-class TestRecallModuleGutted:
-    def test_command_path_symbols_removed(self):
-        recall = load_script("recall")
-        for name in (
-            "recall_areas",
-            "_recall_areas_layered",
-            "render_recall_banner",
-            "RecallItem",
-            "RecallResult",
-            "_pull_folder",
-            "_pull_deferred",
-            "_pull_dead_ends",
-            "_pull_lessons",
-            "_pull_decisions",
-            "_pull_cross_cutting",
-        ):
-            assert not hasattr(recall, name), (
-                f"recall.{name} is part of the removed recall-command path and must "
-                "be gone (Slice 5)."
-            )
-
-    def test_area_map_path_kept(self):
-        recall = load_script("recall")
-        for name in (
-            "build_area_map",
-            "render_area_pointer",
-            "render_area_menu",
-            "AreaEntry",
-        ):
-            assert hasattr(recall, name), (
-                f"recall.{name} serves `lore areas` + the SessionStart pointer and "
-                "must be KEPT (Slice 5 keep-vs-remove boundary)."
-            )

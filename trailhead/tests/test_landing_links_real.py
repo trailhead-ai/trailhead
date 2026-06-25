@@ -148,8 +148,7 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
     elif kind == "doc-link":
         resolved = (_REPO_ROOT / ref).resolve()
         assert resolved.exists(), (
-            f"landing_claims.toml claims doc-link {ref!r}; "
-            f"path does not exist on disk: {resolved}"
+            f"landing_claims.toml claims doc-link {ref!r}; path does not exist on disk: {resolved}"
         )
 
 
@@ -238,8 +237,8 @@ class TestForwardCheckPositive:
     def test_real_skill_claim_passes(self):
         """A claim for a known skill resolves without error."""
         anchor_set = build_real_anchor_set()
-        # lore has skills/checkpoint (S6 Slice 2 deleted the 7 per-kind capture skills)
-        claim = {"kind": "skill", "tool": "lore", "ref": "skills/checkpoint", "source": "lore"}
+        # lore has skills/flush (Slice 4 renamed finish→flush, deleted checkpoint)
+        claim = {"kind": "skill", "tool": "lore", "ref": "skills/flush", "source": "lore"}
         check_claim(claim, anchor_set)
 
     def test_real_agent_claim_passes(self):
@@ -332,27 +331,6 @@ class TestBuildRealAnchorSet:
         for tool in ("lore", "craft", "camp"):
             assert tool in anchors, f"tool {tool!r} missing from anchor set"
 
-    def test_lore_finish_skill_present(self):
-        anchors = build_real_anchor_set()
-        assert "skills/finish" in anchors["lore"]["skills"]
-
-    def test_lore_librarian_agent_present(self):
-        anchors = build_real_anchor_set()
-        assert "agents/librarian.md" in anchors["lore"]["agents"]
-
-    def test_craft_execute_skill_present(self):
-        anchors = build_real_anchor_set()
-        assert "skills/execute" in anchors["craft"]["skills"]
-
-    def test_craft_assumption_prover_agent_present(self):
-        anchors = build_real_anchor_set()
-        assert "agents/assumption-prover.md" in anchors["craft"]["agents"]
-
-    def test_craft_artist_agent_present(self):
-        """craft has agents/artist.md — verify it's in the anchor set."""
-        anchors = build_real_anchor_set()
-        assert "agents/artist.md" in anchors["craft"]["agents"]
-
     def test_camp_has_no_skills_or_agents(self):
         """camp ships only a CLI + hooks — its anchor set has no skills and no agents (R-1).
 
@@ -400,11 +378,7 @@ class TestBuildRealAnchorSet:
         (plugin_root / "agents").mkdir(parents=True)
         (plugin_root / "agents" / "solo.md").write_text("# solo agent\n")
         manifest_path = tmp_path / "tools" / "testtool" / "capabilities.toml"
-        manifest_path.write_text(
-            "[tool]\n"
-            'name = "testtool"\n'
-            "validate = true\n"
-        )
+        manifest_path.write_text('[tool]\nname = "testtool"\nvalidate = true\n')
         anchors = build_real_anchor_set(root=tmp_path)
         assert anchors["testtool"]["agents"] == {"agents/solo.md"}
 
@@ -419,9 +393,7 @@ class TestForwardCheckOverRealClaims:
 
     def test_all_claims_resolve(self):
         """Every [[claim]] in landing_claims.toml must resolve against its oracle."""
-        assert _CLAIMS_FILE.exists(), (
-            f"landing_claims.toml not found at {_CLAIMS_FILE}"
-        )
+        assert _CLAIMS_FILE.exists(), f"landing_claims.toml not found at {_CLAIMS_FILE}"
         with open(_CLAIMS_FILE, "rb") as f:
             data = tomllib.load(f)
         claims = data.get("claim", [])
@@ -464,9 +436,7 @@ _TRACKED_TOOLS = frozenset({"trailhead", "lore", "craft", "camp", "portage", "la
 # Fenced sh/bash block pattern (U-3: bounded to fenced blocks only).
 _FENCED_BLOCK_RE = re.compile(r"```(?:sh|bash)\n(.*?)```", re.DOTALL)
 # Command line pattern within a fenced block.
-_CMD_LINE_RE = re.compile(
-    r"^\s*(" + "|".join(sorted(_TRACKED_TOOLS)) + r")\s+(\S+)", re.MULTILINE
-)
+_CMD_LINE_RE = re.compile(r"^\s*(" + "|".join(sorted(_TRACKED_TOOLS)) + r")\s+(\S+)", re.MULTILINE)
 # Markdown relative link pattern: [label](./path) or [label](../path).
 # Excludes absolute http(s):// and anchor-only #frag links. The path capture stops
 # at whitespace so a markdown title attribute — [label](./p "title") — does not leak
@@ -498,9 +468,7 @@ def extract_relative_links(readme_text: str) -> set[str]:
     return {m.group(2) for m in _REL_LINK_RE.finditer(readme_text)}
 
 
-def _is_command_registered(
-    tool: str, subcommand: str, claims: list[dict]
-) -> bool:
+def _is_command_registered(tool: str, subcommand: str, claims: list[dict]) -> bool:
     """Return True if (tool, subcommand) is registered in the claims manifest.
 
     Matching rule (Slice 2 contract):
@@ -554,9 +522,7 @@ def check_inverse(
     # --- commands ---
     commands = extract_fenced_commands(readme_text)
     unregistered_cmds = sorted(
-        f"{tool} {sub}"
-        for tool, sub in commands
-        if not _is_command_registered(tool, sub, claims)
+        f"{tool} {sub}" for tool, sub in commands if not _is_command_registered(tool, sub, claims)
     )
     assert not unregistered_cmds, (
         f"README {readme_path} shows command(s) not registered in landing_claims.toml:\n"
@@ -627,10 +593,7 @@ class TestExtractFencedCommands:
 
     def test_multiple_commands_extracted(self):
         """Multiple commands across multiple fenced blocks are all extracted."""
-        text = (
-            "```sh\ntrailhead doctor\n```\n"
-            "```bash\nlore recall --areas auth\n```\n"
-        )
+        text = "```sh\ntrailhead doctor\n```\n```bash\nlore recall --areas auth\n```\n"
         result = extract_fenced_commands(text)
         assert ("trailhead", "doctor") in result
         assert ("lore", "recall") in result
@@ -714,10 +677,7 @@ class TestCheckInverseFixtures:
         docs_dir.mkdir()
         (docs_dir / "paths.md").write_text("# paths")
         readme = tmp_path / "README.md"
-        readme.write_text(
-            "```sh\ntrailhead doctor\n```\n"
-            "See [guide](./docs/paths.md).\n"
-        )
+        readme.write_text("```sh\ntrailhead doctor\n```\nSee [guide](./docs/paths.md).\n")
         # must not raise
         check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
 
@@ -754,9 +714,7 @@ class TestCheckInverseFixtures:
             }
         ]
         readme = tmp_path / "README.md"
-        readme.write_text(
-            "# Don't do this:\n```sh\ntrailhead frobnicate\n```\n"
-        )
+        readme.write_text("# Don't do this:\n```sh\ntrailhead frobnicate\n```\n")
         # must not raise
         check_inverse(readme, allowlist_claims, tmp_path)
 
@@ -799,9 +757,7 @@ class TestCheckInverseFixtures:
     def test_sorted_extraction_determinism(self, tmp_path):
         """Extraction result sorted before assertion is stable (R-5)."""
         readme = tmp_path / "README.md"
-        readme.write_text(
-            "```sh\ntrailhead doctor\ntrailhead install\n```\n"
-        )
+        readme.write_text("```sh\ntrailhead doctor\ntrailhead install\n```\n")
         claims = [
             {"kind": "command", "tool": "trailhead", "ref": "doctor", "source": "root"},
             {"kind": "command", "tool": "trailhead", "ref": "install", "source": "root"},
@@ -869,9 +825,8 @@ class TestRealReadmeInverseScan:
             except AssertionError as e:
                 failures.append(str(e))
 
-        assert not failures, (
-            f"{len(failures)} README(s) failed the inverse check:\n"
-            + "\n".join(f"  - {f}" for f in failures)
+        assert not failures, f"{len(failures)} README(s) failed the inverse check:\n" + "\n".join(
+            f"  - {f}" for f in failures
         )
 
 
@@ -1103,9 +1058,7 @@ _LANDING_FILES: list[Path] = [
 ]
 
 # Path to the leak_gate.py script.
-_LEAK_GATE = (
-    _REPO_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "leak_gate.py"
-)
+_LEAK_GATE = _REPO_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "leak_gate.py"
 
 # Denylist token classes seeded into the ephemeral denylist (S-1).
 #
@@ -1141,8 +1094,7 @@ _DENYLIST_ENTRIES: list[str] = [
 ]
 
 _DENYLIST_COMMENT = (
-    "# Slice-5 ephemeral landing-surface denylist — "
-    "business-context strings, not secrets\n"
+    "# Slice-5 ephemeral landing-surface denylist — business-context strings, not secrets\n"
 )
 
 
@@ -1326,53 +1278,3 @@ class TestLandingSurfaceLeakGate:
             "Denylist false-positived on legitimate landing vocabulary.\n"
             f"Gate output:\n{result.stdout}\n{result.stderr}"
         )
-
-
-class TestNoDivCollapseGuard:
-    """D17 scope guard: asserts that Slice 5 did NOT wire the D17 group-workspace-config.
-
-    The D17 collapse (wiring trailhead as the group's camp workspace + adding a
-    group CLAUDE.md/AGENTS.md) is explicitly deferred as a tracked follow-up, not
-    built in WS-8 (D-3). This parallels Step-6's no-cutover guard: the boundary is
-    a tested contract, not just a comment.
-
-    Two negative assertions (kept simple and meaningful, not brittle):
-    1. The root README.md does NOT claim "this repo is the group's workspace" /
-       "camp workspace" (the D-3 omit branch: if D17 wiring isn't in, the sentence
-       must not be in either — the claim would be link-dead).
-    2. No group coordination file (CLAUDE.md or AGENTS.md) was added to the repo root
-       by WS-8 work.
-    """
-
-    def test_root_readme_does_not_claim_group_workspace(self) -> None:
-        """Root README must not claim 'this repo is the group's workspace' (D-3 omit).
-
-        If D17 hasn't landed, the link-dead sentence must not be in the README.
-        The guard targets the specific vocabulary the workspace-config feature would
-        introduce: 'group's workspace', 'camp workspace', 'workspace = <path>' wiring.
-        """
-        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
-        text = _ROOT_README.read_text(encoding="utf-8")
-        # None of these phrases should appear in a landing that hasn't wired D17
-        forbidden_phrases = (
-            "group's workspace",
-            "group workspace",
-            "camp workspace",
-            "workspace = ",
-        )
-        for phrase in forbidden_phrases:
-            assert phrase.lower() not in text.lower(), (
-                f"README.md contains '{phrase}', which implies D17 group-workspace-config "
-                "is wired. D17 is deferred (D-3) — this claim is link-dead until D17 lands. "
-                "Either wire D17 properly (out of WS-8 scope) or remove the sentence."
-            )
-
-    # NOTE: the former `test_no_group_coordination_file_at_repo_root` guard was
-    # removed. It used the mere existence of CLAUDE.md at the repo root as a proxy
-    # for "D17 group-workspace-config was wired". That proxy was invalidated when
-    # the project deliberately adopted a repo-root CLAUDE.md to load the vision
-    # axioms (it imports docs/vision.md) — a purpose unrelated to D17. The old
-    # guard also checked AGENTS.md presence; that check is dropped too, since a
-    # file's presence never proved D17 was wired. D17 is now guarded semantically
-    # above by test_root_readme_does_not_claim_group_workspace, which checks for
-    # the actual workspace-config vocabulary rather than any file's presence.

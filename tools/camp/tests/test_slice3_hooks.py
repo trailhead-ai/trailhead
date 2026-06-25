@@ -43,6 +43,7 @@ Fixtures use synthetic git repos + tmp .claude/settings.json (tmp_path).
 The resolver's env= injection is used for all state paths.
 Do NOT run camp init against the real ~/code/trailhead repo.
 """
+
 from __future__ import annotations
 
 import json
@@ -71,16 +72,22 @@ def _init_git_repo(path: Path) -> None:
     """Initialize a real git repo at path with an initial commit."""
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
+    )
     readme = path / "README.md"
     readme.write_text("# test\n")
-    subprocess.run(["git", "-C", str(path), "add", "README.md"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _make_group_config(
@@ -168,11 +175,7 @@ class TestHooksWriter:
         assert len(ss_hooks) >= 1
 
         # Find a hook entry with session-bootstrap
-        commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
         assert any("session-bootstrap" in cmd for cmd in commands)
 
     def test_does_not_write_worktree_remove_hook(self, two_member_group):
@@ -229,11 +232,7 @@ class TestHooksWriter:
 
         hooks = data.get("hooks", {})
         ss_hooks = hooks.get("SessionStart", [])
-        commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
         expected_cmd = f"${{CAMP_BIN:-{camp_bin}}} session-bootstrap"
         assert expected_cmd in commands, (
             f"Expected command {expected_cmd!r} not found in {commands}"
@@ -257,11 +256,7 @@ class TestHooksWriter:
         hooks = data.get("hooks", {})
         ss_hooks = hooks.get("SessionStart", [])
 
-        ss_commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        ss_commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
 
         expected_ss = f"${{CAMP_BIN:-{camp_bin}}} session-bootstrap"
 
@@ -287,9 +282,7 @@ class TestHooksWriter:
             "model": "claude-opus-4",
             "permissions": {"allow": ["Bash(git *)"]},
             "hooks": {
-                "PreToolUse": [
-                    {"hooks": [{"type": "command", "command": "/some/other/hook.sh"}]}
-                ]
+                "PreToolUse": [{"hooks": [{"type": "command", "command": "/some/other/hook.sh"}]}]
             },
         }
         settings_path.write_text(json.dumps(existing))
@@ -334,11 +327,7 @@ class TestHooksWriter:
 
         # The command string must contain the verbatim camp_bin_spaced
         ss_hooks = data.get("hooks", {}).get("SessionStart", [])
-        commands = [
-            h.get("command", "")
-            for entry in ss_hooks
-            for h in entry.get("hooks", [])
-        ]
+        commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
         assert any(camp_bin_spaced in cmd for cmd in commands), (
             f"Expected camp_bin path in commands: {commands}"
         )
@@ -382,11 +371,7 @@ class TestInitCmd:
             data = json.loads(settings_path.read_text())
 
             ss_hooks = data.get("hooks", {}).get("SessionStart", [])
-            commands = [
-                h.get("command", "")
-                for entry in ss_hooks
-                for h in entry.get("hooks", [])
-            ]
+            commands = [h.get("command", "") for entry in ss_hooks for h in entry.get("hooks", [])]
             expected_cmd = f"${{CAMP_BIN:-{camp_bin}}} session-bootstrap"
             assert commands.count(expected_cmd) == 1, (
                 f"Duplicate session-bootstrap entries in {repo_key}: {commands}"
@@ -691,7 +676,8 @@ bootstrap = []
 
         # Central manifest should be gone
         mpath = manifest_path_for(
-            "cleanup_group", "feat-y",
+            "cleanup_group",
+            "feat-y",
             env={"CAMP_STATE_DIR": str(tmp_path / "camp-state")},
         )
         assert not mpath.exists(), f"Manifest should have been removed: {mpath}"
@@ -842,9 +828,7 @@ class TestSessionBootstrapGenuineFailure:
     and exits 0 — no traceback.
     """
 
-    def test_genuine_reconcile_failure_warns_once_names_slug_exits_0(
-        self, tmp_path: Path
-    ):
+    def test_genuine_reconcile_failure_warns_once_names_slug_exits_0(self, tmp_path: Path):
         """A genuine reconcile failure in a valid member worktree emits exactly one
         stderr line naming the slug, exits 0, and contains no traceback.
         """
@@ -883,20 +867,16 @@ bootstrap = ["false"]
         )
 
         assert result.returncode == 0, (
-            f"Expected exit 0 (non-blocking), got {result.returncode}. "
-            f"stderr={result.stderr!r}"
+            f"Expected exit 0 (non-blocking), got {result.returncode}. stderr={result.stderr!r}"
         )
 
         stderr_lines = [ln for ln in result.stderr.splitlines() if ln.strip()]
         assert len(stderr_lines) == 1, (
-            f"Expected exactly one stderr warning line, got {len(stderr_lines)}: "
-            f"{result.stderr!r}"
+            f"Expected exactly one stderr warning line, got {len(stderr_lines)}: {result.stderr!r}"
         )
 
         warning = stderr_lines[0]
-        assert "feat-warn" in warning, (
-            f"Warning must name the slug 'feat-warn', got: {warning!r}"
-        )
+        assert "feat-warn" in warning, f"Warning must name the slug 'feat-warn', got: {warning!r}"
         assert "Traceback" not in result.stderr, (
             f"Traceback must not appear in stderr: {result.stderr!r}"
         )
@@ -915,9 +895,7 @@ bootstrap = ["false"]
             },
         )
         assert result.returncode == 0
-        assert result.stderr == "", (
-            f"Cold-start case must be silent, got: {result.stderr!r}"
-        )
+        assert result.stderr == "", f"Cold-start case must be silent, got: {result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -942,9 +920,7 @@ class TestHelpMenuInit:
         )
         combined = result.stdout + result.stderr
         # Slice 1: 'init' renamed to 'group'.
-        assert "group" in combined, (
-            f"'group' not found in --help output:\n{combined}"
-        )
+        assert "group" in combined, f"'group' not found in --help output:\n{combined}"
 
     def test_help_init_has_description(self):
         """camp --help output describes what group (formerly init) does."""
@@ -973,12 +949,8 @@ class TestHelpMenuInit:
         combined = result.stdout + result.stderr
         # argparse dumps start with 'usage: camp' and contain 'optional arguments:'
         # or 'options:'; curated help has 'camp —'
-        assert "optional arguments:" not in combined, (
-            "argparse dump detected in --help output"
-        )
-        assert "positional arguments:" not in combined, (
-            "argparse dump detected in --help output"
-        )
+        assert "optional arguments:" not in combined, "argparse dump detected in --help output"
+        assert "positional arguments:" not in combined, "argparse dump detected in --help output"
 
     def test_help_does_not_list_session_bootstrap_or_worktree_cleanup(self):
         """session-bootstrap and worktree-cleanup are NOT in the help menu

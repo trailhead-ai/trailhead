@@ -60,11 +60,11 @@ _FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 # All session skills for lore (the names a "minimal lore" picks).
 # S6 Slice 2 deleted the 7 obsolete per-kind capture skills (area, check-in,
 # dead-end, decision, defer, follow-up, seed) — replaced by the lore record/session CLI.
-# S6 Slice 3 MOVED 'brainstorm' to the craft plugin — retained lore skills:
-# checkpoint, finish, sync.
+# S6 Slice 3 MOVED 'brainstorm' to the craft plugin.
+# Slice 4 RENAMED 'finish' → 'flush' and DELETED 'checkpoint' — retained lore
+# skills: flush, sync, search, record, research.
 _LORE_CAPTURE_SESSION_SKILLS = {
-    "checkpoint": None,
-    "finish": None,
+    "flush": None,
     "sync": None,
 }
 
@@ -109,8 +109,9 @@ def _fail_first_copy(msg: str):
 
         return _f
 
-    with patch("shutil.copy2", side_effect=_wrap(original_copy2)), patch(
-        "shutil.copytree", side_effect=_wrap(original_copytree)
+    with (
+        patch("shutil.copy2", side_effect=_wrap(original_copy2)),
+        patch("shutil.copytree", side_effect=_wrap(original_copytree)),
     ):
         yield
 
@@ -152,7 +153,7 @@ class TestMinimalPresetGating:
         """wire with minimal preset creates lore dest."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -166,7 +167,7 @@ class TestMinimalPresetGating:
         """wire with minimal preset creates NO camp dest (B-5)."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -182,7 +183,7 @@ class TestMinimalPresetGating:
         """wire with minimal preset creates NO craft dest (B-5)."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -198,7 +199,7 @@ class TestMinimalPresetGating:
         """plugins[] = the successfully-wired set; only lore here."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -335,7 +336,7 @@ class TestConsolidatedMarketplace:
         """Composed lore dest has a valid .claude-plugin/plugin.json."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -352,7 +353,7 @@ class TestConsolidatedMarketplace:
         """ONE marketplace.json at composed/claude_code/.claude-plugin/, name == 'trailhead'."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -370,7 +371,7 @@ class TestConsolidatedMarketplace:
         """After wiring {lore, camp}: plugins[] lists BOTH; trees exist for both."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None}), "camp": ({}, {})}
+        selection = {"lore": ({}, {"flush": None}), "camp": ({}, {})}
         wire(
             selection,
             harness=_harness(),
@@ -389,7 +390,7 @@ class TestConsolidatedMarketplace:
         """The old per-tool composed/<tool>/ marketplace dirs must NOT be created."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None}), "camp": ({}, {})}
+        selection = {"lore": ({}, {"flush": None}), "camp": ({}, {})}
         wire(
             selection,
             harness=_harness(),
@@ -406,7 +407,7 @@ class TestConsolidatedMarketplace:
         from trailhead.wire import wire
 
         selection = {
-            "lore": ({"librarian": None}, {"checkpoint": None}),
+            "lore": ({"librarian": None}, {"flush": None}),
             "craft": ({"planner": None}, {"plan": None}),
         }
         wire(
@@ -418,9 +419,7 @@ class TestConsolidatedMarketplace:
         )
         composed_root = _composed_root(tmp_path)
         for path in composed_root.rglob("*"):
-            assert not path.is_symlink(), (
-                f"symlink found in composed tree (S-2 violation): {path}"
-            )
+            assert not path.is_symlink(), f"symlink found in composed tree (S-2 violation): {path}"
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +432,7 @@ class TestIdempotency:
         """Calling wire twice with the same selection produces the same tree."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({"librarian": None}, {"checkpoint": None})}
+        selection = {"lore": ({"librarian": None}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -443,9 +442,7 @@ class TestIdempotency:
         )
         plugin_dest = _live_dest(tmp_path, "lore")
         first_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
 
         wire(
@@ -456,19 +453,15 @@ class TestIdempotency:
             runner=_noop_runner,
         )
         second_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
-        assert first_files == second_files, (
-            "re-wiring same selection changed the file set"
-        )
+        assert first_files == second_files, "re-wiring same selection changed the file set"
 
     def test_rewire_removes_previously_present_capability(self, tmp_path):
         """Re-wiring a narrower selection removes the previously-wired entries."""
         from trailhead.wire import wire
 
-        selection_full = {"lore": ({"librarian": None}, {"checkpoint": None})}
+        selection_full = {"lore": ({"librarian": None}, {"flush": None})}
         wire(
             selection_full,
             harness=_harness(),
@@ -479,7 +472,7 @@ class TestIdempotency:
         plugin_dest = _live_dest(tmp_path, "lore")
         assert (plugin_dest / "agents" / "librarian.md").exists()
 
-        selection_narrow = {"lore": ({}, {"checkpoint": None})}
+        selection_narrow = {"lore": ({}, {"flush": None})}
         wire(
             selection_narrow,
             harness=_harness(),
@@ -502,7 +495,7 @@ class TestAtomicPromote:
         """R-1: if compose fails mid-way, the prior wired dest is untouched."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         wire(
             selection,
             harness=_harness(),
@@ -514,9 +507,7 @@ class TestAtomicPromote:
         assert plugin_dest.exists()
 
         before_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
 
         # Fail the first copy op — of EITHER primitive. Share one counter so
@@ -532,9 +523,7 @@ class TestAtomicPromote:
                 )
 
         after_files = {
-            str(p.relative_to(plugin_dest))
-            for p in plugin_dest.rglob("*")
-            if p.is_file()
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
         assert before_files == after_files, (
             "R-1 violated: mid-compose failure mutated the live dest\n"
@@ -546,7 +535,7 @@ class TestAtomicPromote:
         """R-1: if the very first wire fails, no partial dest is left."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         plugin_dest = _live_dest(tmp_path, "lore")
         assert not plugin_dest.exists()
 
@@ -560,9 +549,7 @@ class TestAtomicPromote:
                     runner=_noop_runner,
                 )
 
-        assert not plugin_dest.exists(), (
-            "R-1 violated: partial dest exists after failed first wire"
-        )
+        assert not plugin_dest.exists(), "R-1 violated: partial dest exists after failed first wire"
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +563,7 @@ class TestRegistrySequencing:
         from trailhead.wire import wire
 
         selection = {
-            "lore": ({}, {"checkpoint": None}),
+            "lore": ({}, {"flush": None}),
             "craft": ({"planner": None}, {"plan": None}),
         }
         calls = []
@@ -596,15 +583,13 @@ class TestRegistrySequencing:
         assert len(marketplace_adds) == 1, (
             f"expected exactly ONE marketplace add across the wire, got {marketplace_adds}"
         )
-        assert len(installs) == 2, (
-            f"expected 2 install calls (lore+craft), got {installs}"
-        )
+        assert len(installs) == 2, f"expected 2 install calls (lore+craft), got {installs}"
 
     def test_install_references_tool_at_trailhead(self, tmp_path):
         """install call references <tool>@trailhead (NOT @trailhead-<tool>)."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         calls = []
 
         def stub_runner(args, **kwargs):
@@ -629,7 +614,7 @@ class TestRegistrySequencing:
         """wire with a stub runner must not touch subprocess.run."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         with patch("subprocess.run") as mock_run:
             wire(
                 selection,
@@ -644,7 +629,7 @@ class TestRegistrySequencing:
         """marketplace add call includes the shared per-harness composed_root path."""
         from trailhead.wire import wire
 
-        selection = {"lore": ({}, {"checkpoint": None})}
+        selection = {"lore": ({}, {"flush": None})}
         calls = []
 
         def stub_runner(args, **kwargs):
@@ -689,9 +674,7 @@ class TestMinimalLoreContent:
         lore_manifest = load_manifest(_LORE_MANIFEST)
         for name in skills:
             rel = lore_manifest.skills[name]
-            assert (lore_dest / rel).exists(), (
-                f"skill {name!r} missing from minimal lore dest"
-            )
+            assert (lore_dest / rel).exists(), f"skill {name!r} missing from minimal lore dest"
 
     def test_lore_minimal_lore_librarian_agent_present(self, tmp_path):
         """Minimal lore includes the librarian subagent → librarian.md in dest."""
@@ -732,7 +715,7 @@ class TestStagingCleanupOnBaseException:
         with patch.object(wire_mod, "compose_plan", side_effect=raising_compose_plan):
             with pytest.raises((KeyboardInterrupt, Exception)):
                 wire(
-                    {"lore": ({}, {"checkpoint": None})},
+                    {"lore": ({}, {"flush": None})},
                     harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
@@ -758,7 +741,7 @@ class TestStagingCleanupOnBaseException:
         with patch.object(wire_mod, "compose_plan", side_effect=raising_compose_plan):
             with pytest.raises((SystemExit, Exception)):
                 wire(
-                    {"lore": ({}, {"checkpoint": None})},
+                    {"lore": ({}, {"flush": None})},
                     harness=_harness(),
                     manifest_paths=_manifest_paths(),
                     env=_env(tmp_path),
@@ -776,7 +759,7 @@ class TestStagingCleanupOnBaseException:
         from trailhead.wire import wire
 
         wire(
-            {"lore": ({}, {"checkpoint": None})},
+            {"lore": ({}, {"flush": None})},
             harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
@@ -784,9 +767,7 @@ class TestStagingCleanupOnBaseException:
         )
         staging_parent = _composed_root(tmp_path) / "plugins"
         leftover = list(staging_parent.glob("_lore_staging_*"))
-        assert leftover == [], (
-            f"staging dir not cleaned after successful wire: {leftover}"
-        )
+        assert leftover == [], f"staging dir not cleaned after successful wire: {leftover}"
 
 
 # ---------------------------------------------------------------------------
@@ -812,7 +793,7 @@ class TestWireErrorIsolation:
             with pytest.raises(WireError) as exc_info:
                 wire(
                     {
-                        "lore": ({}, {"checkpoint": None}),
+                        "lore": ({}, {"flush": None}),
                         "craft": ({"planner": None}, {"plan": None}),
                     },
                     harness=_harness(),
@@ -823,9 +804,7 @@ class TestWireErrorIsolation:
 
         err = exc_info.value
         assert err.tool == "craft", f"WireError.tool should be 'craft', got {err.tool!r}"
-        assert err.stage == "compose", (
-            f"WireError.stage should be 'compose', got {err.stage!r}"
-        )
+        assert err.stage == "compose", f"WireError.stage should be 'compose', got {err.stage!r}"
         assert isinstance(err.__cause__, RuntimeError)
 
     def test_already_wired_tool_stays_committed_after_later_failure(self, tmp_path):
@@ -841,7 +820,7 @@ class TestWireErrorIsolation:
             return original_compose_plan(manifest, subagents, skills, dest)
 
         selection = {
-            "lore": ({}, {"checkpoint": None}),
+            "lore": ({}, {"flush": None}),
             "craft": ({"planner": None}, {"plan": None}),
         }
         with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
@@ -874,7 +853,7 @@ class TestWireErrorIsolation:
             with pytest.raises(WireError):
                 wire(
                     {
-                        "lore": ({}, {"checkpoint": None}),
+                        "lore": ({}, {"flush": None}),
                         "craft": ({"planner": None}, {"plan": None}),
                     },
                     harness=_harness(),
@@ -886,9 +865,7 @@ class TestWireErrorIsolation:
         plugins_dir = _composed_root(tmp_path) / "plugins"
         if plugins_dir.exists():
             leftover = list(plugins_dir.glob("_craft_staging_*"))
-            assert leftover == [], (
-                f"orphaned craft staging dirs after WireError: {leftover}"
-            )
+            assert leftover == [], f"orphaned craft staging dirs after WireError: {leftover}"
 
     def test_failed_tool_absent_from_marketplace_but_earlier_tool_present(self, tmp_path):
         """On-disk-truth blast-radius (content-level): a tool whose compose raises is
@@ -910,7 +887,7 @@ class TestWireErrorIsolation:
 
         # lore is processed before craft (ordered dict).
         selection = {
-            "lore": ({}, {"checkpoint": None}),
+            "lore": ({}, {"flush": None}),
             "craft": ({"planner": None}, {"plan": None}),
         }
         with patch.object(wire_mod, "compose_plan", side_effect=craft_failing_plan):
@@ -947,7 +924,7 @@ class TestWireErrorIsolation:
 
         with pytest.raises(WireError) as exc_info:
             wire(
-                {"lore": ({}, {"checkpoint": None})},
+                {"lore": ({}, {"flush": None})},
                 harness=_harness(),
                 manifest_paths=_manifest_paths(),
                 env=_env(tmp_path),
@@ -972,7 +949,7 @@ class TestSplitMarkers:
         from trailhead.wire import wire
 
         wire(
-            {"lore": ({}, {"checkpoint": None})},
+            {"lore": ({}, {"flush": None})},
             harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
@@ -996,7 +973,7 @@ class TestSplitMarkers:
 
         with pytest.raises(WireError):
             wire(
-                {"lore": ({}, {"checkpoint": None})},
+                {"lore": ({}, {"flush": None})},
                 harness=_harness(),
                 manifest_paths=_manifest_paths(),
                 env=_env(tmp_path),
@@ -1018,7 +995,7 @@ class TestSplitMarkers:
             calls.append(list(args))
 
         wire(
-            {"lore": ({}, {"checkpoint": None})},
+            {"lore": ({}, {"flush": None})},
             harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
@@ -1030,7 +1007,7 @@ class TestSplitMarkers:
         calls.clear()
 
         wire(
-            {"lore": ({}, {"checkpoint": None})},
+            {"lore": ({}, {"flush": None})},
             harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
@@ -1043,9 +1020,7 @@ class TestSplitMarkers:
             "rewire (uninstall) called on un-installed tool; "
             f"should have installed: {uninstall_calls}"
         )
-        assert len(install_calls) >= 1, (
-            f"install not called for un-installed tool: {calls}"
-        )
+        assert len(install_calls) >= 1, f"install not called for un-installed tool: {calls}"
 
     def test_second_wire_with_marker_calls_rewire(self, tmp_path):
         """Per-tool marker present → rewire_tool (uninstall + install) is called."""
@@ -1057,7 +1032,7 @@ class TestSplitMarkers:
             calls.append(list(args))
 
         wire(
-            {"lore": ({}, {"checkpoint": None})},
+            {"lore": ({}, {"flush": None})},
             harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
@@ -1066,7 +1041,7 @@ class TestSplitMarkers:
         calls.clear()
 
         wire(
-            {"lore": ({}, {"checkpoint": None})},
+            {"lore": ({}, {"flush": None})},
             harness=_harness(),
             manifest_paths=_manifest_paths(),
             env=_env(tmp_path),
@@ -1079,6 +1054,4 @@ class TestSplitMarkers:
         )
         # And it must NOT use plugin update (U-1(e)).
         update_calls = [c for c in calls if "update" in c]
-        assert update_calls == [], (
-            f"rewire must not use 'plugin update' (U-1(e)): {update_calls}"
-        )
+        assert update_calls == [], f"rewire must not use 'plugin update' (U-1(e)): {update_calls}"

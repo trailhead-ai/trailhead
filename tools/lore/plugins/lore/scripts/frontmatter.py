@@ -8,6 +8,7 @@ shapes this vault uses.
 CLI exposes: a frontmatter status flip and a section-targeted append. Both
 leave everything they don't touch byte-identical.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,7 +34,7 @@ def _strip_slug_prefix(value: str) -> str:
     """Remove a known path prefix from a wikilink target (slug-reduce)."""
     for prefix in _SLUG_PREFIXES:
         if value.startswith(prefix):
-            return value[len(prefix):]
+            return value[len(prefix) :]
     return value
 
 
@@ -86,9 +87,7 @@ def _parse_fm_text(text: str) -> dict:
             # Possible block list: collect following "  - item" or "- item" lines
             block_items: list[str] = []
             j = i + 1
-            while j < len(lines) and (
-                lines[j].startswith("  - ") or lines[j].startswith("- ")
-            ):
+            while j < len(lines) and (lines[j].startswith("  - ") or lines[j].startswith("- ")):
                 entry = lines[j]
                 if entry.startswith("  - "):
                     raw = entry[4:]

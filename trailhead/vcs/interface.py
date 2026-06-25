@@ -15,6 +15,7 @@ The interface is GitHub-agnostic by construction: a second backend (GitLab via
 ``glab``/REST) maps onto the same method set. See ``trailhead/docs/vcs-provider.md``
 for the per-method GitLab mapping and the documented extension point.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

@@ -78,8 +78,7 @@ class ConfineError(Exception):
         self.context = context
         self.entry = entry
         super().__init__(
-            f"path {entry!r} escapes the plugin root for tool {tool!r} "
-            f"(context: {context!r})"
+            f"path {entry!r} escapes the plugin root for tool {tool!r} (context: {context!r})"
         )
 
 
@@ -223,15 +222,11 @@ def load_manifest(manifest_path: Path) -> Manifest:
     # ------------------------------------------------------------------
     tool_data = data.get("tool")
     if tool_data is None:
-        raise ManifestError(
-            f"manifest {manifest_path} is missing the required [tool] section"
-        )
+        raise ManifestError(f"manifest {manifest_path} is missing the required [tool] section")
 
     tool_name = tool_data.get("name")
     if not tool_name:
-        raise ManifestError(
-            f"manifest {manifest_path}: [tool] is missing required field 'name'"
-        )
+        raise ManifestError(f"manifest {manifest_path}: [tool] is missing required field 'name'")
 
     base: list[str] = list(tool_data.get("base", []))
     hooks_json: str | None = tool_data.get("hooks_json")
@@ -256,9 +251,7 @@ def load_manifest(manifest_path: Path) -> Manifest:
             _validate_path(candidate, entry, tool_name, "base", must_be_dir=True)
         if hooks_json is not None:
             candidate = _confine(plugin_root, hooks_json, tool_name, "hooks_json")
-            _validate_path(
-                candidate, hooks_json, tool_name, "hooks_json", must_be_file=True
-            )
+            _validate_path(candidate, hooks_json, tool_name, "hooks_json", must_be_file=True)
 
     # ------------------------------------------------------------------
     # Convention-based selectable inventory

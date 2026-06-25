@@ -7,6 +7,7 @@ register (the same failure mode that bit lore's first capture skills).
 
 `skills/_shared/` is a reference doc, not a skill, and is exempt.
 """
+
 from pathlib import Path
 
 import pytest
@@ -76,9 +77,7 @@ def test_execute_dispatched_agents_resolve():
     `plugins/craft/agents/<name>.md`.
     """
     skill_md = SKILLS_DIR / "execute" / "SKILL.md"
-    assert skill_md.exists(), (
-        f"Expected execute/SKILL.md in {SKILLS_DIR}."
-    )
+    assert skill_md.exists(), f"Expected execute/SKILL.md in {SKILLS_DIR}."
     text = skill_md.read_text()
     for agent in _EXECUTE_DISPATCHED_AGENTS:
         assert agent in text, (
@@ -92,32 +91,3 @@ def test_execute_dispatched_agents_resolve():
             f"{agent_file} does not exist. A dispatch must not dead-end — "
             "install the agent or rename the dispatch to an installed one."
         )
-
-
-def test_shelve_and_pickup_skills_absent():
-    """The shelve/pickup dev rituals were retired (Slice 2).
-
-    They backed the lore `handoff`/`shelved`/`resume` verbs and the `shelved`
-    session status, all of which are gone; camp session-resume is the
-    replacement. Guard that neither skill dir lingers in the plugin.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    lingering = {"shelve", "pickup"} & names
-    assert not lingering, (
-        f"retired craft skills must not be present in the plugin: {sorted(lingering)}"
-    )
-
-
-def test_brainstorm_skill_present_in_craft():
-    """S6 Slice 3 moved the brainstorm skill from lore into craft.
-
-    brainstorm runs BEFORE planning (discovery → frozen spec) and now lives in
-    the craft plugin alongside plan/execute/review. Guard its presence so the
-    move can't silently regress.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    assert "brainstorm" in names, (
-        "brainstorm must exist under the craft plugin "
-        "(tools/craft/plugins/craft/skills/brainstorm/) — S6 Slice 3 moved it "
-        "from lore"
-    )

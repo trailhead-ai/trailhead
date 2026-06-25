@@ -10,6 +10,7 @@ Contract:
     a deploy surface that is NOT implemented in Slice 1 (NotImplemented).
   - vcs-provider.md exists and names every repos/pr/ci interface method.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,6 +56,7 @@ class TestGetProvider:
 
         def stub(cmd, **kwargs):
             import subprocess
+
             calls.append(list(cmd))
             return subprocess.CompletedProcess(cmd, 0, "[]", "")
 
@@ -105,9 +107,7 @@ class TestProviderShape:
 # ---------------------------------------------------------------------------
 
 
-_DOC_PATH = (
-    Path(__file__).resolve().parent.parent / "docs" / "vcs-provider.md"
-)
+_DOC_PATH = Path(__file__).resolve().parent.parent / "docs" / "vcs-provider.md"
 
 # The repos/pr/ci/deploy surface — every method here must appear in the doc.
 _INTERFACE_METHODS = [
@@ -132,9 +132,7 @@ class TestVcsProviderDoc:
     def test_doc_names_every_interface_method(self) -> None:
         text = _DOC_PATH.read_text(encoding="utf-8")
         missing = [m for m in _INTERFACE_METHODS if m not in text]
-        assert not missing, (
-            f"vcs-provider.md does not map these interface methods: {missing}"
-        )
+        assert not missing, f"vcs-provider.md does not map these interface methods: {missing}"
 
     def test_doc_documents_gitlab_mapping(self) -> None:
         """The doc proves the seam isn't GitHub-only by naming GitLab equivalents."""

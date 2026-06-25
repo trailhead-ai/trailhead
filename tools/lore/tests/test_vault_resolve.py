@@ -44,6 +44,7 @@ def _make_vault(name, scope, records=None, shared=False):
     """Build a lightweight Vault-like namedtuple via vault_config for these tests."""
     vc = load_script("vault_config")
     from pathlib import Path
+
     return vc.Vault(
         name=name,
         scope=scope,
@@ -164,8 +165,8 @@ def test_highest_precedence_wins_when_multiple_eligible():
     mod = vr()
     config = [
         _make_vault("default", "default"),
-        _make_vault("my-repo", "repo"),          # no allowlist → all kinds eligible
-        _make_vault("my-team", "team"),           # no allowlist → all kinds eligible
+        _make_vault("my-repo", "repo"),  # no allowlist → all kinds eligible
+        _make_vault("my-team", "team"),  # no allowlist → all kinds eligible
     ]
     result = mod.resolve_vault({"repo": "my-repo", "team": "my-team"}, "spec", config)
     assert result.name == "my-repo"
@@ -177,7 +178,7 @@ def test_team_wins_over_default_when_only_team_supplied():
     mod = vr()
     config = [
         _make_vault("default", "default"),
-        _make_vault("my-team", "team"),           # no allowlist → all kinds eligible
+        _make_vault("my-team", "team"),  # no allowlist → all kinds eligible
     ]
     result = mod.resolve_vault({"team": "my-team"}, "session", config)
     assert result.name == "my-team"
@@ -293,8 +294,17 @@ def test_default_vault_eligible_for_any_kind():
     """Default vault (empty records) accepts every kind."""
     mod = vr()
     config = [_make_vault("default", "default")]
-    for kind in ("blob", "spec", "plan", "session", "decision", "area",
-                 "backlog", "collaboration", "lesson"):
+    for kind in (
+        "blob",
+        "spec",
+        "plan",
+        "session",
+        "decision",
+        "area",
+        "backlog",
+        "collaboration",
+        "lesson",
+    ):
         result = mod.resolve_vault({}, kind, config)
         assert result.scope == "default", f"kind={kind!r} should resolve to default"
 

@@ -64,6 +64,7 @@ unreliable over NFS (non-issue — the vault is local git). darwin ``LOCK_UN == 
 References: Slice 1, KU1, KU2, council/Security Critical 3, council/Reliability
 Critical 2.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -121,13 +122,9 @@ def sanitize_session_id(session_id: str) -> str:
     if "\x00" in session_id:
         raise InvalidSessionIdError("session_id must not contain a NUL byte")
     if "/" in session_id or "\\" in session_id:
-        raise InvalidSessionIdError(
-            f"session_id must not contain a path separator: {session_id!r}"
-        )
+        raise InvalidSessionIdError(f"session_id must not contain a path separator: {session_id!r}")
     if ".." in session_id:
-        raise InvalidSessionIdError(
-            f"session_id must not contain a '..' component: {session_id!r}"
-        )
+        raise InvalidSessionIdError(f"session_id must not contain a '..' component: {session_id!r}")
     if not _GUID_RE.match(session_id):
         raise InvalidSessionIdError(
             f"session_id must be a canonical GUID (8-4-4-4-12 hex): {session_id!r}"

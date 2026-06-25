@@ -7,6 +7,7 @@ Test contract:
 - unknown slug → legible stderr error, non-zero, NOTHING on stdout.
 - outside a member dir without --group → the standard "pass --group" error.
 """
+
 from __future__ import annotations
 
 import os
@@ -142,9 +143,7 @@ class TestCampPwdCLI:
         assert len(lines) == 1, (
             f"Expected exactly one stdout line, got {len(lines)}:\n{result.stdout!r}"
         )
-        assert lines[0] == str(ws_dir), (
-            f"Expected path {ws_dir!s}, got {lines[0]!r}"
-        )
+        assert lines[0] == str(ws_dir), f"Expected path {ws_dir!s}, got {lines[0]!r}"
 
     def test_camp_pwd_stdout_has_no_trailing_whitespace(self, tmp_path: Path) -> None:
         """The single stdout line from camp pwd has no trailing whitespace."""
@@ -207,9 +206,7 @@ class TestCampPwdCLI:
 
         assert result.returncode == 0
         path_str = result.stdout.strip()
-        assert Path(path_str).is_absolute(), (
-            f"Expected absolute path, got: {path_str!r}"
-        )
+        assert Path(path_str).is_absolute(), f"Expected absolute path, got: {path_str!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -280,9 +277,7 @@ class TestCampPwdErrors:
             or "not found" in result.stderr.lower()
             or "does not exist" in result.stderr.lower()
             or "no workspace" in result.stderr.lower()
-        ), (
-            f"Expected legible error naming the slug in stderr: {result.stderr!r}"
-        )
+        ), f"Expected legible error naming the slug in stderr: {result.stderr!r}"
 
     def test_outside_member_dir_without_group_exits_nonzero(self, tmp_path: Path) -> None:
         """camp pwd without --group from outside a member dir exits non-zero."""

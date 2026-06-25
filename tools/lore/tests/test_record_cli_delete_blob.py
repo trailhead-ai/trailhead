@@ -10,6 +10,7 @@ Covers every bullet in the Slice 5 test contract
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern).
 Never writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
 """
+
 from __future__ import annotations
 
 import sys
@@ -27,12 +28,13 @@ SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _create_record(vault, state, *, kind="spec", title="Test Record", body="body text\n") -> str:
     """Create a record via the CLI and return its RECORD_ID."""
     r = _run(
-        ["record", "create", "--kind", kind, "--title", title,
-         "--keyword", "test"],
-        vault=vault, state_dir=state,
+        ["record", "create", "--kind", kind, "--title", title, "--keyword", "test"],
+        vault=vault,
+        state_dir=state,
         stdin_text=body,
     )
     assert r.returncode == 0, f"create failed: {r.stderr}"
@@ -42,6 +44,7 @@ def _create_record(vault, state, *, kind="spec", title="Test Record", body="body
 def _open_index(state_dir):
     """Load index_store and open the index for test assertions."""
     import importlib.util
+
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
     spec = importlib.util.spec_from_file_location(
@@ -55,6 +58,7 @@ def _open_index(state_dir):
 # ---------------------------------------------------------------------------
 # delete: removes all three artifacts
 # ---------------------------------------------------------------------------
+
 
 def test_delete_removes_body(tmp_path):
     """delete removes the .md body file (AC13)."""
@@ -107,7 +111,8 @@ def test_delete_nonexistent_id_exits_nonzero(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "delete", "spec/does-not-exist"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
     assert "not found" in r.stderr.lower() or "error" in r.stderr.lower()
@@ -118,7 +123,8 @@ def test_delete_invalid_id_format_exits_nonzero(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "delete", "no-slash-here"],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
     )
     assert r.returncode != 0
 
@@ -128,6 +134,7 @@ def test_delete_invalid_id_format_exits_nonzero(tmp_path):
 # delete + update. A crafted ID with '..' / absolute segments must NOT delete
 # or overwrite .md/.json files outside the active vault.
 # ---------------------------------------------------------------------------
+
 
 def _make_outside_victim(tmp_path: Path) -> Path:
     """Create a sibling 'other-vault' with a victim spec record outside the vault."""
@@ -141,10 +148,10 @@ def _make_outside_victim(tmp_path: Path) -> Path:
 @pytest.mark.parametrize(
     "evil_id",
     [
-        "../other-vault/spec/victim",          # climb out of the vault root
+        "../other-vault/spec/victim",  # climb out of the vault root
         "spec/../../other-vault/spec/victim",  # climb out via the name half
-        "/etc/passwd",                          # absolute (no slash-split escape)
-        "spec/../../../etc/hosts",              # deep traversal
+        "/etc/passwd",  # absolute (no slash-split escape)
+        "spec/../../../etc/hosts",  # deep traversal
     ],
 )
 def test_delete_rejects_record_id_escaping_vault(tmp_path, evil_id):
@@ -175,10 +182,10 @@ def test_update_rejects_record_id_escaping_vault(tmp_path, evil_id):
 
     r = _run(
         ["record", "update", evil_id],
-        vault=vault, state_dir=state,
+        vault=vault,
+        state_dir=state,
         stdin_text="HIJACKED BODY\n",
     )
     assert r.returncode != 0, f"escape ID {evil_id!r} was not rejected: {r.stdout!r}"
     # The outside victim body must be byte-for-byte unchanged.
     assert (victim / "victim.md").read_text(encoding="utf-8") == before
-

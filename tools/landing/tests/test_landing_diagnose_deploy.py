@@ -13,6 +13,7 @@ assert:
 
 Unique basename — no collision with craft's per-script tests.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -61,9 +62,7 @@ def _patch_provider(mod, monkeypatch, provider):
 class TestDiagnoseDeployFailingRun:
     def test_failing_run_surfaces_annotation(self, tmp_path, monkeypatch, capsys):
         """A failing run's annotation is surfaced as the doctor signal."""
-        annotations = [
-            {"path": "deploy.sh", "start_line": 12, "message": "deploy failed: exit 1"}
-        ]
+        annotations = [{"path": "deploy.sh", "start_line": 12, "message": "deploy failed: exit 1"}]
         provider = _FakeProvider(_FakeDeploy(logs_result=annotations))
         mod = _load("diagnose_deploy")
         _patch_provider(mod, monkeypatch, provider)

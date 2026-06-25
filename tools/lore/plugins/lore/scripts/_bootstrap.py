@@ -24,6 +24,7 @@ ordering closes that: when the script runs from inside a checkout, the env var
 is never consulted; it is reached only when there is no co-located checkout to
 trust.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,6 +37,7 @@ def ensure_trailhead_importable() -> None:
     # Tier 1: already importable.
     try:
         import trailhead.paths  # noqa: F401
+
         return
     except ImportError:
         pass

@@ -79,13 +79,16 @@ class TestCreateShims:
 
 
 class TestDetectShell:
-    @pytest.mark.parametrize("shell,expected", [
-        ("/usr/bin/fish", "fish"),
-        ("/bin/zsh", "zsh"),
-        ("/bin/bash", "bash"),
-        ("/usr/local/bin/weird", "bash"),
-        ("", "bash"),
-    ])
+    @pytest.mark.parametrize(
+        "shell,expected",
+        [
+            ("/usr/bin/fish", "fish"),
+            ("/bin/zsh", "zsh"),
+            ("/bin/bash", "bash"),
+            ("/usr/local/bin/weird", "bash"),
+            ("", "bash"),
+        ],
+    )
     def test_detects_from_shell_env(self, shell, expected):
         assert detect_shell({"SHELL": shell}) == expected
 

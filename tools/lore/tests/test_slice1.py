@@ -17,6 +17,7 @@ PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
 # Manifest validity — plugin.json, marketplace.json, hooks/hooks.json
 # ---------------------------------------------------------------------------
 
+
 def test_plugin_json_parses_and_has_required_keys():
     """plugin.json is valid JSON and has name, version, description."""
     path = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"

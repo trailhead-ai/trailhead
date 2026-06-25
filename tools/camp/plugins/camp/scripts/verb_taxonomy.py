@@ -15,6 +15,7 @@ Tables:
                       cli/camp; reaching them via spine.main means no group
                       resolved, so spine emits a "configure / pass --group" error.
 """
+
 from __future__ import annotations
 
 # Verbs disabled while the worktree flow stabilizes.

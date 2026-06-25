@@ -18,6 +18,7 @@ Pure, no I/O.
 - The ``source=`` attribute is XML-attribute-escaped so a vault name like
   ``"><script`` cannot break the tag structure.
 """
+
 from __future__ import annotations
 
 # The fenced data-channel framing for shared-layer content.

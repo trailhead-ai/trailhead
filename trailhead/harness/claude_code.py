@@ -89,9 +89,7 @@ class ClaudeCodeHarness(Harness):
     # redirect the Claude dir (``TRAILHEAD_CLAUDE_DIR``) and never touch the real
     # ``~/.claude`` (Axiom 6).
 
-    def user_ruleset_path(
-        self, name: str, *, env: dict[str, str] | None = None
-    ) -> Path:
+    def user_ruleset_path(self, name: str, *, env: dict[str, str] | None = None) -> Path:
         _env = env if env is not None else dict(os.environ)
         return _claude_dir(_env) / _RULES_SUBDIR / f"{name}.md"
 
@@ -109,9 +107,7 @@ class ClaudeCodeHarness(Harness):
         if target.is_file() and target.read_text() == content:
             return
         target.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(
-            dir=str(target.parent), prefix=f".{name}-", suffix=".tmp"
-        )
+        fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{name}-", suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(content)

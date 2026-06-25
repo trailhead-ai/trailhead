@@ -367,9 +367,7 @@ def validate(sidecar: dict, kind: str | None = None) -> ValidationResult:
         normalized["version"] = VERSION
         version = VERSION
     elif version != VERSION:
-        errors.append(
-            f"unsupported version {version!r}: only {VERSION!r} is supported"
-        )
+        errors.append(f"unsupported version {version!r}: only {VERSION!r} is supported")
         return ValidationResult(normalized, errors)
 
     schema = field_spec(version)
@@ -397,9 +395,7 @@ def validate(sidecar: dict, kind: str | None = None) -> ValidationResult:
     if status is None:
         normalized["status"] = initial_status(kind)
     elif status not in vocab:
-        errors.append(
-            f"invalid status {status!r} for kind {kind!r}: allowed {list(vocab)}"
-        )
+        errors.append(f"invalid status {status!r} for kind {kind!r}: allowed {list(vocab)}")
 
     # --- per-key type checks (only for keys present and in the schema). ------
     for key, value in sidecar.items():

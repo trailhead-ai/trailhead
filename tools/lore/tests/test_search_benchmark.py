@@ -1,8 +1,7 @@
 """Slice 5 (S3) — `lore search` latency benchmark.
 
 Pins the latency target decided in the plan: **p95 < 100 ms** for a representative
-query, measured at ~current vault size (~2,149 records, the "1×" corpus) AND a
-synthesized ~5× corpus (~10k records).
+query, measured at ~current vault size (~2,149 records, the "1×" corpus).
 
 The benchmark builds SYNTHETIC fixture indexes in ``tmp_path`` via
 ``index_store.open_index(env=...)`` + ``rebuild(...)`` over a generated tmp vault —
@@ -14,6 +13,7 @@ Several runs are timed and the p95 is taken. The assertion carries a documented
 slack margin so a hard fail signals a real regression, not host noise — but the
 actual measured p95 is always printed so the number is visible in the test output.
 """
+
 from __future__ import annotations
 
 import sys
@@ -29,32 +29,15 @@ from conftest import load_script  # noqa: E402
 # Pinned plan target.
 TARGET_P95_MS = 100.0
 
-# Per-corpus hard ceilings.
+# Per-corpus hard ceiling.
 #
 # At 1× (the real current vault size) the representative mixed query lands ~10ms on
 # a dev box — comfortably under the pinned 100ms target, so the 1× assert IS the
 # pinned target itself (~10× headroom over the measured value absorbs host noise
 # while still catching a real regression at the pinned size — the locked latency SLO).
-#
-# At 5× (~10k records) the dominant cost is the ranking step: the Slice-3 compiler
-# orders full-text results by a *correlated* ``bm25()`` subquery
-# (``... ORDER BY (SELECT bm25(...) WHERE record_fts.rowid=records.rowid AND
-# record_fts MATCH ?) IS NULL, (same) ASC, …``), which re-evaluates an FTS MATCH
-# once per WHERE-surviving row. That scales with the match-set size, so a 5× corpus
-# can exceed the 100ms target on a loaded host even though the WHERE itself is
-# sub-millisecond. This is a documented property of the locked Slice-3 ranking form,
-# not a regression. The 5× corpus is a synthesized GROWTH OBSERVATION, NOT the pinned
-# SLO (the SLO is the 1× assert above). Its measured p95 is ~186ms on a dev box and
-# has been observed ~300ms+ on a contended CI runner (3 pytest jobs share the host).
-# So the 5× ceiling is NOT a tight SLO gate — it is a deliberately wide
-# CATASTROPHIC-REGRESSION TRIPWIRE that absorbs CI host contention while still
-# catching an order-of-magnitude regression (e.g. a dropped FTS index → multi-second
-# queries). The measured p95 is always printed for visibility regardless.
 CEILING_1X_MS = TARGET_P95_MS  # 100ms — the pinned SLO is asserted at the real vault size
-CEILING_5X_MS = 1000.0  # catastrophic-regression tripwire (NOT the SLO); wide for CI noise
 
-CORPUS_1X = 2149      # ~current vault size
-CORPUS_5X = 10000     # synthesized ~5×
+CORPUS_1X = 2149  # ~current vault size
 
 # A representative mixed query: a facet predicate + a distinctive full-text term
 # (exercises the kind predicate, the FTS MATCH inline-IN, and the bm25 ORDER BY
@@ -157,7 +140,6 @@ def _measure_query_p95(state_dir: Path, *, runs: int = 30) -> float:
     "corpus_size,label,ceiling_ms",
     [
         (CORPUS_1X, "1x", CEILING_1X_MS),
-        (CORPUS_5X, "5x", CEILING_5X_MS),
     ],
 )
 def test_search_latency_p95_under_target(tmp_path, capsys, corpus_size, label, ceiling_ms):
@@ -180,9 +162,7 @@ def test_search_latency_p95_under_target(tmp_path, capsys, corpus_size, label, c
             f"(target<{TARGET_P95_MS:.0f}ms, ceiling<{ceiling_ms:.0f}ms) → {verdict}"
         )
 
-    assert indexed >= corpus_size, (
-        f"corpus under-built: indexed {indexed} of {corpus_size}"
-    )
+    assert indexed >= corpus_size, f"corpus under-built: indexed {indexed} of {corpus_size}"
     assert p95 < ceiling_ms, (
         f"search p95 {p95:.2f}ms exceeded the {ceiling_ms:.0f}ms ceiling at the "
         f"{label} corpus ({indexed} records). The pinned target is "

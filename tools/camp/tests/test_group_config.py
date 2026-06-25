@@ -8,6 +8,7 @@ Test contract (Slice 1):
 - [dev_env] block present → warn-and-continue (prints deferred note, does not crash).
 - No group config file → legible first-run scaffold/point message.
 """
+
 from __future__ import annotations
 
 import sys
@@ -529,8 +530,7 @@ def _write_and_load(tmp_path: Path, toml_body: str):
     f = tmp_path / "testgroup.toml"
     f.write_text(
         "[group]\nname = 'testgroup'\n\n"
-        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n\n"
-        + toml_body
+        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n\n" + toml_body
     )
     return load_group(f)
 
@@ -591,9 +591,7 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
     ws = tmp_path / "ws"
     ws.mkdir()
     sid = session_id_for("trailhead", "feat-x")
-    argv, cwd = profile.launch(
-        slug="feat-x", workspace=str(ws), is_resume=False, session_id=sid
-    )
+    argv, cwd = profile.launch(slug="feat-x", workspace=str(ws), is_resume=False, session_id=sid)
     assert argv == ["claude", "--session-id", sid]
     assert cwd == ws
 

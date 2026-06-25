@@ -16,6 +16,7 @@ Exit codes:
   1  at least one failed or skipped
   2  configuration / manifest / merge_order error (nothing merged)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,8 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     for pair_str in args.pairs:
         parts = pair_str.split(":", 2)
         if len(parts) < 2:
-            print(f"merge_prs: bad pair format '{pair_str}' (expected path:pr_number[:name])",
-                  file=sys.stderr)
+            print(
+                f"merge_prs: bad pair format '{pair_str}' (expected path:pr_number[:name])",
+                file=sys.stderr,
+            )
             return 2
         repo_path = parts[0]
         pr_number = parts[1]

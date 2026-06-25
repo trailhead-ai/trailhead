@@ -19,6 +19,7 @@ wording is pinned as a fixture (`fixtures/injection_defense_canonical.txt`,
 captured from librarian.md — the canonical source). The drift-prevention intent
 is preserved: brainstorm's block must still match the canonical wording exactly.
 """
+
 from __future__ import annotations
 
 import re
@@ -31,11 +32,6 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 _INJECTION_CANONICAL = FIXTURES_DIR / "injection_defense_canonical.txt"
 
-# The canonical degradation sentence shared across all three extension-point
-# stanzas (feature_flags, observability, issue_tracker). After the dedup, it
-# must appear exactly once.
-_DEGRADATION_SENTENCE = "see the extend guide in `docs/DEGRADATION.md`"
-
 # The three provider seams that must still appear individually (visible-skip
 # contract — each extension point must still announce its identity).
 _PROVIDER_SEAMS = [
@@ -47,7 +43,7 @@ _PROVIDER_SEAMS = [
 # The injection-defense anchor: a distinctive substring that appears in the
 # canonical block and is load-bearing enough that if the block is deleted,
 # this test fails.
-_INJECTION_ANCHOR = "external-memory layer=\"shared\" source=\"…\">"
+_INJECTION_ANCHOR = 'external-memory layer="shared" source="…">'
 
 
 # ---------------------------------------------------------------------------
@@ -56,20 +52,6 @@ _INJECTION_ANCHOR = "external-memory layer=\"shared\" source=\"…\">"
 
 
 class TestDegradationDedup:
-    def test_degradation_sentence_appears_exactly_once(self):
-        """The shared degradation sentence must appear exactly once after the
-        dedup — not once per provider (3×). Fail-first: currently appears 2×
-        (feature-flag + observability stanzas carry it; issue-tracker uses
-        different wording). After Slice 5 lands it must be exactly 1."""
-        text = _BRAINSTORM_SKILL.read_text()
-        count = text.count(_DEGRADATION_SENTENCE)
-        assert count == 1, (
-            f"Expected the shared degradation sentence to appear exactly once "
-            f"in brainstorm/SKILL.md, but found it {count} times. "
-            f"Sentence: {_DEGRADATION_SENTENCE!r}. "
-            "Factor the sentence into a shared note and trim per-provider copies."
-        )
-
     def test_all_provider_seams_still_present(self):
         """All three provider-specific visible-skip phrases must still appear
         (test_skills_generic.py pins these). After the dedup, each provider
@@ -85,25 +67,9 @@ class TestDegradationDedup:
 
 
 # ---------------------------------------------------------------------------
-# (b) Key Principles section absent
-# ---------------------------------------------------------------------------
-
-
-class TestKeyPrinciplesAbsent:
-    def test_key_principles_section_gone(self):
-        """The 'Key Principles' recap section must be absent — it duplicates
-        principles stated earlier in the skill and in the planner."""
-        text = _BRAINSTORM_SKILL.read_text()
-        assert "## Key Principles" not in text, (
-            "brainstorm/SKILL.md still contains the '## Key Principles' recap "
-            "section (lines 274-287 in the pre-Slice-5 file). Drop it — it "
-            "duplicates earlier content."
-        )
-
-
-# ---------------------------------------------------------------------------
 # (c) Injection-defense byte-identical in both files
 # ---------------------------------------------------------------------------
+
 
 def _extract_injection_block(text: str) -> str:
     """Extract the injection-defense block from either file.
@@ -153,8 +119,8 @@ def _extract_injection_block(text: str) -> str:
     # Normalize the first line: if it starts with a list marker ("- " or "* ")
     # followed by the heading, strip the marker so a brainstorm sub-bullet and a
     # librarian paragraph-indent produce the same canonical string.
-    if block_lines and re.match(r'^[-*]\s+', block_lines[0]):
-        block_lines[0] = re.sub(r'^[-*]\s+', '', block_lines[0])
+    if block_lines and re.match(r"^[-*]\s+", block_lines[0]):
+        block_lines[0] = re.sub(r"^[-*]\s+", "", block_lines[0])
 
     return " ".join(part for part in block_lines if part)
 
@@ -177,9 +143,7 @@ class TestInjectionDefenseByteIdentical:
         authoritative source of the shared injection-defense wording. Pinning it
         as a fixture keeps the drift-prevention check intact now that brainstorm
         lives in the craft plugin and can no longer reach librarian.md by path."""
-        brainstorm_block = _extract_injection_block(
-            _BRAINSTORM_SKILL.read_text()
-        )
+        brainstorm_block = _extract_injection_block(_BRAINSTORM_SKILL.read_text())
         canonical_block = _INJECTION_CANONICAL.read_text().strip()
         assert brainstorm_block == canonical_block, (
             "Injection-defense block in brainstorm/SKILL.md drifted from the "

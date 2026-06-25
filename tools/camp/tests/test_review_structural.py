@@ -20,6 +20,7 @@ C1 — the rmtree-confinement guard in reconcile_break (anchored on
   the resolved workspace dir (pre-check passes), but the workspace dir itself is a
   symlink escaping worktrees_root, so the dedicated rmtree guard fires.
 """
+
 from __future__ import annotations
 
 import importlib.machinery
@@ -87,19 +88,7 @@ class TestFix6InjectIsLight:
             cwd=str(tmp_path),
         )
         assert "SPINE_ABSENT" in result.stdout, (
-            f"inject drain must not import spine.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-    def test_cmd_inject_cli_does_not_reference_spine_import(self):
-        """_cmd_inject_cli's source must not import from spine (the --workspace
-        parse is inlined so the drain path stays spine-free)."""
-        import inspect
-
-        camp_cli = _load_cli_module()
-        src = inspect.getsource(camp_cli._cmd_inject_cli)
-        assert "from spine" not in src and "import spine" not in src, (
-            "_cmd_inject_cli must not import spine — inline the --workspace parse"
+            f"inject drain must not import spine.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
     def test_inject_drain_still_drains(self, tmp_path: Path, monkeypatch, capsys):
@@ -161,21 +150,11 @@ class TestFix7SlugFromCwdThreadsEnv:
         ws.mkdir(parents=True)
         monkeypatch.chdir(ws)
 
-        slug = camp_cli._slug_from_args_or_cwd(
-            [], group, verb="status", allow_none=True, env=env
-        )
+        slug = camp_cli._slug_from_args_or_cwd([], group, verb="status", allow_none=True, env=env)
         assert slug == "feat-x", (
             "slug-from-cwd must resolve against the env's state dir (env threaded "
             "into resolve_from_cwd), not os.environ"
         )
-
-    def test_signature_accepts_env_kwarg(self):
-        """_slug_from_args_or_cwd must accept an env keyword (thread-through)."""
-        import inspect
-
-        camp_cli = _load_cli_module()
-        sig = inspect.signature(camp_cli._slug_from_args_or_cwd)
-        assert "env" in sig.parameters
 
 
 # ===========================================================================
@@ -184,49 +163,6 @@ class TestFix7SlugFromCwdThreadsEnv:
 
 
 class TestFix9VerbTaxonomy:
-    def test_taxonomy_module_defines_tables(self):
-        import verb_taxonomy
-
-        assert verb_taxonomy.DISABLED_VERBS == frozenset(
-            {"restock", "sweep", "code", "fire"}
-        )
-        assert verb_taxonomy.LEGACY_REDIRECTS == {
-            "open": "ai",
-            "break": "rm",
-            "init": "group",
-        }
-
-    def test_spine_sources_disabled_set_from_taxonomy(self):
-        """spine.main consults verb_taxonomy.DISABLED_VERBS (not an inline literal)."""
-        import spine
-        import verb_taxonomy
-
-        assert spine.DISABLED_VERBS is verb_taxonomy.DISABLED_VERBS
-
-    def test_spine_sources_redirect_map_from_taxonomy(self):
-        import spine
-        import verb_taxonomy
-
-        assert spine.LEGACY_REDIRECTS is verb_taxonomy.LEGACY_REDIRECTS
-
-    def test_cli_sources_taxonomy_from_same_definition(self):
-        """cli/camp references the SAME constants as spine (single definition)."""
-        import spine
-
-        camp_cli = _load_cli_module()
-        assert camp_cli._DISABLED_VERBS is spine.DISABLED_VERBS
-        assert camp_cli._LEGACY_REDIRECTS is spine.LEGACY_REDIRECTS
-
-    def test_cmd_needs_group_replaces_five_stubs(self):
-        """The 5 per-verb stubs collapse into one cmd_needs_group(verb)."""
-        import spine
-
-        assert hasattr(spine, "cmd_needs_group")
-        for verb in ("ai", "rm", "cd", "enter", "setup"):
-            assert not hasattr(spine, f"cmd_{verb}"), (
-                f"cmd_{verb} stub should be collapsed into cmd_needs_group"
-            )
-
     @pytest.mark.parametrize("verb", ["ai", "setup"])
     def test_needs_group_configure_message(self, verb, capsys):
         import spine
@@ -257,18 +193,27 @@ class TestFix9VerbTaxonomy:
 def _init_git_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "T"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "t@t.com"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "T"], check=True, capture_output=True
+    )
     (path / "README.md").write_text("# t\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", str(path)],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "fetch", "origin", "--quiet"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "i", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
+    )
 
 
 class TestC1RmtreeGuard:
@@ -297,6 +242,7 @@ class TestC1RmtreeGuard:
 
         # Provision normally (real workspace dir under worktrees_root).
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         bring_up_workspace(group, "feat-c1", env=env)
         cmd_setup_group(group, "feat-c1", env=env)

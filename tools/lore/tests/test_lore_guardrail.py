@@ -24,6 +24,7 @@ ignored). The vault root(s) are passed via the ``LORE_VAULT_GUARD_ROOT`` env var
 All tests inject XDG_STATE_HOME / XDG_CONFIG_HOME / HOME via env and use tmp_path
 so they NEVER touch real config, state, vault, or ``~/.claude`` data (Axiom 6).
 """
+
 from __future__ import annotations
 
 import json
@@ -49,14 +50,17 @@ from conftest import load_script  # noqa: E402
 # Guard-hook harness
 # ---------------------------------------------------------------------------
 
+
 def _make_payload(file_path: str, tool_name: str = "Write") -> str:
     """Return a minimal PreToolUse JSON payload string for a write to file_path."""
-    return json.dumps({
-        "session_id": "test-session",
-        "hook_event_name": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": {"file_path": file_path, "file_text": "# x"},
-    })
+    return json.dumps(
+        {
+            "session_id": "test-session",
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": {"file_path": file_path, "file_text": "# x"},
+        }
+    )
 
 
 # The runtime guard reads the vault root list from LORE_VAULT_GUARD_ROOT split on
@@ -81,6 +85,7 @@ def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None):
 # ---------------------------------------------------------------------------
 # init harness (mirrors test_lore_init / test_lore_init_hooks)
 # ---------------------------------------------------------------------------
+
 
 def _run_init(args, *, state, config, home, cwd=None, extra=None):
     """Run `lore init` with isolated XDG dirs + an isolated HOME (Axiom 6)."""
@@ -112,6 +117,7 @@ def _dirs(tmp_path):
 # ===========================================================================
 # 1. The guard hook script: deny under vault, allow outside (exit-2 contract)
 # ===========================================================================
+
 
 class TestGuardHookDenyAllow:
     def test_guard_hook_script_exists(self):
@@ -161,11 +167,13 @@ class TestGuardHookDenyAllow:
         """A payload with no file_path (e.g. Bash) defers — exit 0, no crash."""
         vault = tmp_path / "vaults" / "default"
         vault.mkdir(parents=True)
-        payload = json.dumps({
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": "echo hi"},
-        })
+        payload = json.dumps(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": "echo hi"},
+            }
+        )
         result = _run_guard("", [vault.parent], payload=payload)
         assert result.returncode == 0
 
@@ -188,6 +196,7 @@ class TestGuardHookDenyAllow:
 # ===========================================================================
 # 2. Mandatory symlink case — execution-time real-target resolution
 # ===========================================================================
+
 
 class TestGuardHookSymlinkResolution:
     def test_write_to_real_target_of_symlinked_vault_is_denied(self, tmp_path):
@@ -230,8 +239,7 @@ class TestGuardHookSymlinkResolution:
 
         r_old = _run_guard(real_v1 / "note.md", roots)
         assert r_old.returncode == 0, (
-            "after retarget, the OLD real target must be allowed "
-            "(symlink no longer points there)"
+            "after retarget, the OLD real target must be allowed (symlink no longer points there)"
         )
         r_new = _run_guard(real_v2 / "note.md", roots)
         assert r_new.returncode == 2, (
@@ -256,6 +264,7 @@ class TestGuardHookSymlinkResolution:
 # ===========================================================================
 # 2b. Security-audit fixes (Slice 3 hardening, S5)
 # ===========================================================================
+
 
 class TestGuardToolCoverage:
     """Fix 1: MultiEdit/NotebookEdit must not bypass the matcher.
@@ -289,11 +298,13 @@ class TestGuardToolCoverage:
         vault = tmp_path / "vaults" / "default"
         vault.mkdir(parents=True)
         target = vault / "records" / "note.ipynb"
-        payload = json.dumps({
-            "hook_event_name": "PreToolUse",
-            "tool_name": "NotebookEdit",
-            "tool_input": {"notebook_path": str(target), "new_source": "x = 1"},
-        })
+        payload = json.dumps(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "NotebookEdit",
+                "tool_input": {"notebook_path": str(target), "new_source": "x = 1"},
+            }
+        )
         result = _run_guard("", [vault.parent], tool_name="NotebookEdit", payload=payload)
         assert result.returncode == 2, (
             "NotebookEdit (notebook_path) under the vault must be denied; "
@@ -305,11 +316,13 @@ class TestGuardToolCoverage:
         vault.mkdir(parents=True)
         outside = tmp_path / "project" / "analysis.ipynb"
         outside.parent.mkdir(parents=True)
-        payload = json.dumps({
-            "hook_event_name": "PreToolUse",
-            "tool_name": "NotebookEdit",
-            "tool_input": {"notebook_path": str(outside), "new_source": "x = 1"},
-        })
+        payload = json.dumps(
+            {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "NotebookEdit",
+                "tool_input": {"notebook_path": str(outside), "new_source": "x = 1"},
+            }
+        )
         result = _run_guard("", [vault.parent], tool_name="NotebookEdit", payload=payload)
         assert result.returncode == 0
 
@@ -417,6 +430,7 @@ class TestGuardDocstringScope:
 # 3. settings_writer: permissions.deny upsert (defense-in-depth)
 # ===========================================================================
 
+
 class TestSettingsWriterPermissionDeny:
     def _sw(self):
         return load_script("settings_writer")
@@ -441,9 +455,9 @@ class TestSettingsWriterPermissionDeny:
         sw = self._sw()
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
-        settings.write_text(json.dumps({
-            "permissions": {"deny": ["Bash(rm:*)"], "allow": ["Read(*)"]}
-        }))
+        settings.write_text(
+            json.dumps({"permissions": {"deny": ["Bash(rm:*)"], "allow": ["Read(*)"]}})
+        )
         sw.upsert_permission_deny(settings, "Write(//abs/vaults/**)")
         data = json.loads(settings.read_text())
         assert "Bash(rm:*)" in data["permissions"]["deny"]
@@ -482,6 +496,7 @@ class TestSettingsWriterPermissionDeny:
 # 4. cmd_init wiring: installs the guardrail into the resolved settings.json
 # ===========================================================================
 
+
 class TestInitInstallsGuardrail:
     """The guardrail install is user-global: ``lore init`` writes the PreToolUse
     vault-guard into ``~/.claude/settings.json`` (HOME isolated via Axiom 6).
@@ -512,12 +527,14 @@ class TestInitInstallsGuardrail:
             f"no PreToolUse vault-guard entry installed; PreToolUse cmds={cmds!r}"
         )
         # The matcher must cover Edit and Write.
-        matchers = [e.get("matcher") for e in data["hooks"]["PreToolUse"]
-                    if any("vault-guard" in h.get("command", "")
-                           for h in e.get("hooks", []))]
-        assert matchers and all(
-            "Edit" in m and "Write" in m for m in matchers
-        ), f"guard matcher must be Edit|Write, got {matchers!r}"
+        matchers = [
+            e.get("matcher")
+            for e in data["hooks"]["PreToolUse"]
+            if any("vault-guard" in h.get("command", "") for h in e.get("hooks", []))
+        ]
+        assert matchers and all("Edit" in m and "Write" in m for m in matchers), (
+            f"guard matcher must be Edit|Write, got {matchers!r}"
+        )
 
     def test_init_sets_guard_root_env(self, tmp_path):
         """The settings must give the hook the vault root via LORE_VAULT_GUARD_ROOT,
@@ -530,8 +547,7 @@ class TestInitInstallsGuardrail:
         guard_root = data.get("env", {}).get("LORE_VAULT_GUARD_ROOT", "")
         vaults = state / "lore" / "vaults"
         assert str(vaults) in guard_root, (
-            f"LORE_VAULT_GUARD_ROOT must include the vaults dir {vaults}; "
-            f"got {guard_root!r}"
+            f"LORE_VAULT_GUARD_ROOT must include the vaults dir {vaults}; got {guard_root!r}"
         )
 
     def test_init_guard_root_uses_newline_delimiter(self, tmp_path):
@@ -560,9 +576,11 @@ class TestInitInstallsGuardrail:
         assert res.returncode == 0, res.stderr
 
         _, data = self._read_user_settings(home)
-        matchers = [e.get("matcher", "") for e in data["hooks"]["PreToolUse"]
-                    if any("vault-guard" in h.get("command", "")
-                           for h in e.get("hooks", []))]
+        matchers = [
+            e.get("matcher", "")
+            for e in data["hooks"]["PreToolUse"]
+            if any("vault-guard" in h.get("command", "") for h in e.get("hooks", []))
+        ]
         assert matchers, "no guard matcher found"
         for m in matchers:
             assert "MultiEdit" in m, f"matcher must cover MultiEdit, got {m!r}"
@@ -604,9 +622,7 @@ class TestInitInstallsGuardrail:
         _, data = self._read_user_settings(home)
         cmds = self._pretooluse_commands(data)
         guard_cmds = [c for c in cmds if "vault-guard" in c]
-        assert len(guard_cmds) == 1, (
-            f"re-run duplicated the guard entry: {guard_cmds!r}"
-        )
+        assert len(guard_cmds) == 1, f"re-run duplicated the guard entry: {guard_cmds!r}"
         deny = data.get("permissions", {}).get("deny", [])
         vault_denies = [r for r in deny if "vaults" in r]
         # Two rules expected (Write + Edit, fix 5); re-run must not duplicate either.
@@ -618,16 +634,22 @@ class TestInitInstallsGuardrail:
         state, config, home = _dirs(tmp_path)
         settings = home / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True, exist_ok=True)
-        settings.write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [
-                    {"matcher": "Bash",
-                     "hooks": [{"type": "command", "command": "other-guard.py"}]}
-                ]
-            },
-            "permissions": {"deny": ["Bash(curl:*)"]},
-            "env": {"FOO": "bar"},
-        }))
+        settings.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Bash",
+                                "hooks": [{"type": "command", "command": "other-guard.py"}],
+                            }
+                        ]
+                    },
+                    "permissions": {"deny": ["Bash(curl:*)"]},
+                    "env": {"FOO": "bar"},
+                }
+            )
+        )
 
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr

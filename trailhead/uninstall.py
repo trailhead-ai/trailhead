@@ -186,7 +186,7 @@ def _discover(composed_base: Path) -> dict[str, list[str]]:
         if not hdir.is_dir():
             continue
         tools = sorted(
-            f.name[len(_INSTALLED_MARKER_PREFIX):]
+            f.name[len(_INSTALLED_MARKER_PREFIX) :]
             for f in hdir.iterdir()
             if f.is_file() and f.name.startswith(_INSTALLED_MARKER_PREFIX)
         )

@@ -11,6 +11,7 @@ Test contract:
 - group_config parses + validates the activation-hook block: string-list
   enforcement, PLUS strip-and-reject empty/whitespace-only argv tokens.
 """
+
 from __future__ import annotations
 
 import json
@@ -434,6 +435,7 @@ def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
     with patch("subprocess.run") as mock_run:
         import io
         import contextlib
+
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             enter_member(group, slug, member_name, env=env)
@@ -741,9 +743,9 @@ def test_cli_enter_unknown_hook_kind_exits_nonzero_with_legible_message(
     groups_dir = tmp_path / "groups"
     groups_dir.mkdir(parents=True)
     (groups_dir / "badgroup.toml").write_text(
-        "[group]\nname = \"badgroup\"\n\n"
-        "[[members]]\nname = \"myrepo\"\nrepo_root = \"/tmp/fake-myrepo\"\n\n"
-        "[[members.hooks]]\nkind = \"not-a-valid-kind\"\ncmd = [\"echo\", \"hi\"]\n"
+        '[group]\nname = "badgroup"\n\n'
+        '[[members]]\nname = "myrepo"\nrepo_root = "/tmp/fake-myrepo"\n\n'
+        '[[members.hooks]]\nkind = "not-a-valid-kind"\ncmd = ["echo", "hi"]\n'
     )
 
     env = {
@@ -762,13 +764,9 @@ def test_cli_enter_unknown_hook_kind_exits_nonzero_with_legible_message(
     )
     combined = result.stdout + result.stderr
     assert "not-a-valid-kind" in combined, (
-        "Error output must name the unknown hook kind.\n"
-        f"combined: {combined}"
+        f"Error output must name the unknown hook kind.\ncombined: {combined}"
     )
-    assert "myrepo" in combined, (
-        "Error output must name the member.\n"
-        f"combined: {combined}"
-    )
+    assert "myrepo" in combined, f"Error output must name the member.\ncombined: {combined}"
 
 
 # ---------------------------------------------------------------------------
@@ -808,6 +806,7 @@ def test_failing_hook_does_not_mark_activated(tmp_path: Path) -> None:
 
     # Simulate a hook that exits non-zero via a CalledProcessError.
     import subprocess as _subprocess
+
     fake_error = _subprocess.CalledProcessError(1, ["false"])
     with patch("subprocess.run", side_effect=fake_error):
         with pytest.raises(_subprocess.CalledProcessError):
@@ -860,9 +859,9 @@ def test_failing_hook_surfaces_legibly_via_cli(tmp_path: Path) -> None:
     groups_dir = tmp_path / "groups"
     groups_dir.mkdir(parents=True)
     (groups_dir / f"{group_name}.toml").write_text(
-        f"[group]\nname = \"{group_name}\"\n\n"
-        f"[[members]]\nname = \"{member_name}\"\nrepo_root = \"/tmp/fake-repo\"\n\n"
-        f"[[members.hooks]]\nkind = \"dep-install\"\ncmd = [\"false\"]\n"
+        f'[group]\nname = "{group_name}"\n\n'
+        f'[[members]]\nname = "{member_name}"\nrepo_root = "/tmp/fake-repo"\n\n'
+        f'[[members.hooks]]\nkind = "dep-install"\ncmd = ["false"]\n'
     )
 
     env = {
@@ -975,9 +974,7 @@ def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -
     assert "next turn" in captured.out.lower() or "hook" in captured.out.lower()
 
 
-def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(
-    tmp_path: Path, capsys
-) -> None:
+def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Path, capsys) -> None:
     """BUG 5: claude-hook strategy but NO drain hook installed → fall back to
     printing the full doc to stdout; no false 'will load via hook' claim."""
     from activation import enter_member

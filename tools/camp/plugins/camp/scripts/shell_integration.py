@@ -11,6 +11,7 @@ cmd_pwd(group, slug, *, env=None) -> Path
 Shell usage: cd "$(camp pwd <slug>)" — users can wrap this in their own
 alias or shell function as they like.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

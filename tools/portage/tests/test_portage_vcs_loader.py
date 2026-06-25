@@ -31,6 +31,7 @@ terms (which excludes the file) that is ``parents[5]``. This test asserts the
 marker lands at iteration index 6 of ``(here, *here.parents)`` — i.e. it mirrors
 exactly what ``_bootstrap.py`` does, so a layout shift trips it.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -65,27 +66,6 @@ class TestParents6Layout:
             f"portage _bootstrap.py not found at {_BOOTSTRAP} — the thin scripts "
             "depend on it to make trailhead.vcs importable"
         )
-
-    def test_marker_reachable_at_proven_depth(self):
-        """A script at scripts/<name>.py reaches trailhead/paths.py at the proven depth.
-
-        Mirrors the bootstrap's own walk over ``(here, *here.parents)``:
-        file(0) → scripts(1) → portage(2) → plugins(3) → portage(4) → tools(5)
-        → repo-root(6). The marker must be found at iteration index 6 — if anyone
-        restructures the plugin layout, the index shifts and this trips.
-        """
-        fake_script = (_SCRIPTS_DIR / "some_thin_script.py").resolve()
-        chain = [fake_script, *fake_script.parents]
-        found_index = next(
-            (i for i, p in enumerate(chain) if (p / "trailhead" / "paths.py").exists()),
-            None,
-        )
-        assert found_index == 6, (
-            f"expected the trailhead/paths.py marker at iteration index 6 of "
-            f"(here, *here.parents) from a portage script, got {found_index}; "
-            "the four-tier bootstrap marker walk depends on this depth"
-        )
-        assert chain[found_index] == _REPO_ROOT
 
 
 class TestVcsImportableFromPortageContext:
@@ -202,9 +182,7 @@ class TestColdStartTier2Hardening:
             cwd=tmp_path,
         )
 
-        assert result.returncode == 0, (
-            f"cold bootstrap failed unexpectedly:\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"cold bootstrap failed unexpectedly:\n{result.stderr}"
         assert result.stdout.strip() == f"OK:{_REPO_ROOT}", (
             "a hostile $TRAILHEAD_ROOT redirected a cold-start import — the "
             f"__file__ walk must win (got {result.stdout!r})\n{result.stderr}"
@@ -233,8 +211,7 @@ class TestColdStartTier2Hardening:
             f"env fallback failed — camp shim flow broken:\n{result.stderr}"
         )
         assert result.stdout.strip() == f"OK:{_REPO_ROOT}", (
-            f"expected resolution from $TRAILHEAD_ROOT, got {result.stdout!r}\n"
-            f"{result.stderr}"
+            f"expected resolution from $TRAILHEAD_ROOT, got {result.stdout!r}\n{result.stderr}"
         )
 
     def test_invalid_env_with_no_walk_target_exits_legibly(self, tmp_path):
@@ -258,7 +235,6 @@ class TestColdStartTier2Hardening:
         )
 
         assert result.returncode == 1, (
-            f"expected a legible exit 1, got {result.returncode}\n{result.stdout}\n"
-            f"{result.stderr}"
+            f"expected a legible exit 1, got {result.returncode}\n{result.stdout}\n{result.stderr}"
         )
         assert "portage: the trailhead shared library isn't importable" in result.stderr

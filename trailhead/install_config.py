@@ -165,13 +165,9 @@ def _expand_selection(
             name = item.get("name")
             override = item.get("file_path")
             if not name:
-                raise ConfigResolveError(
-                    f"{plugin}: a {kind} entry is missing 'name'"
-                )
+                raise ConfigResolveError(f"{plugin}: a {kind} entry is missing 'name'")
         else:
-            raise ConfigResolveError(
-                f"{plugin}: invalid {kind} entry {item!r}"
-            )
+            raise ConfigResolveError(f"{plugin}: invalid {kind} entry {item!r}")
         if name not in inventory:
             if kind == "subagent":
                 raise UnknownSubagentError(name, plugin)

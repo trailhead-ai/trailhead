@@ -21,6 +21,7 @@ Seam-unit coverage (``install_user_ruleset`` / ``user_ruleset_status`` /
 All tests isolate via a tmp ``HOME`` + ``TRAILHEAD_CLAUDE_DIR`` so they NEVER touch
 the real ``~/.claude`` (Axiom 6).
 """
+
 from __future__ import annotations
 
 import os
@@ -41,6 +42,7 @@ from conftest import load_script  # noqa: E402
 # ---------------------------------------------------------------------------
 # Harness
 # ---------------------------------------------------------------------------
+
 
 def _run(args, *, state, config, home, cwd=None, extra=None):
     """Run lore CLI with isolated XDG dirs, a fake HOME, and an isolated Claude dir.
@@ -91,6 +93,7 @@ def _ruleset_content():
 # 1. lore init writes the user-level ruleset byte-exact
 # ---------------------------------------------------------------------------
 
+
 class TestInitWritesRuleset:
     def test_init_writes_ruleset_file(self, tmp_path):
         state, config, home = _dirs(tmp_path)
@@ -129,6 +132,7 @@ class TestInitWritesRuleset:
 # 2. lore init also installs the PreToolUse guardrail (must SURVIVE the rewire)
 # ---------------------------------------------------------------------------
 
+
 class TestInitInstallsGuardrail:
     def test_init_writes_pretooluse_guard(self, tmp_path):
         import json
@@ -153,6 +157,7 @@ class TestInitInstallsGuardrail:
 # ---------------------------------------------------------------------------
 # 3. No CLAUDE.md block, no markers, no project files
 # ---------------------------------------------------------------------------
+
 
 class TestNoBlockInjection:
     def test_init_writes_no_claude_md(self, tmp_path):
@@ -192,6 +197,7 @@ class TestNoBlockInjection:
 # 4. Idempotency: re-run leaves the ruleset byte-for-byte unchanged
 # ---------------------------------------------------------------------------
 
+
 class TestIdempotency:
     def test_rerun_leaves_ruleset_byte_for_byte_unchanged(self, tmp_path):
         state, config, home = _dirs(tmp_path)
@@ -205,6 +211,7 @@ class TestIdempotency:
 # ---------------------------------------------------------------------------
 # 5. --local is gone (unknown flag → SystemExit(2), writes nothing)
 # ---------------------------------------------------------------------------
+
 
 class TestLocalFlagRemoved:
     def test_local_flag_is_unknown_flag_error(self, tmp_path):
@@ -226,6 +233,7 @@ class TestLocalFlagRemoved:
 # ---------------------------------------------------------------------------
 # 6. lore status: current → stale → missing
 # ---------------------------------------------------------------------------
+
 
 class TestStatus:
     def test_status_reports_current_after_clean_install(self, tmp_path):

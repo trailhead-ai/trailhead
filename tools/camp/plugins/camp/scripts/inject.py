@@ -18,6 +18,7 @@ then CLEARS the queue. An EMPTY queue emits NOTHING (exit 0) so it adds no
 per-tool-call noise. The drain is resilient — it must never crash a tool call, so
 any internal error → exit 0 with no output.
 """
+
 from __future__ import annotations
 
 import json

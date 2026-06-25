@@ -24,6 +24,7 @@ def kql():
 # Grammar matrix — expected AST shapes
 # ---------------------------------------------------------------------------
 
+
 def test_kind_field_eq(kql):
     ast = kql.parse("kind:spec")
     assert isinstance(ast, kql.FieldEq)
@@ -199,6 +200,7 @@ def test_keyword_facet_membership(kql):
 # Quoting rules
 # ---------------------------------------------------------------------------
 
+
 def test_repo_slash_requires_quotes(kql):
     # repo:"trailhead-ai/trailhead" — slash forces quoting; parses correctly
     ast = kql.parse('repo:"trailhead-ai/trailhead"')
@@ -233,7 +235,7 @@ def test_unquoted_value_space_is_boundary(kql):
 
 def test_hyphenated_field_not_quoted(kql):
     # related-area is a recognized field token without quotes
-    ast = kql.parse('related-area:penny')
+    ast = kql.parse("related-area:penny")
     assert isinstance(ast, kql.FacetMembership)
     assert ast.facet == "related-area"
 
@@ -241,6 +243,7 @@ def test_hyphenated_field_not_quoted(kql):
 # ---------------------------------------------------------------------------
 # Error cases — each must raise KqlParseError
 # ---------------------------------------------------------------------------
+
 
 def test_error_unbalanced_quote(kql):
     with pytest.raises(kql.KqlParseError):
@@ -291,6 +294,7 @@ def test_error_unknown_field(kql):
 # Deterministic suggestion — asserted by repeated calls
 # ---------------------------------------------------------------------------
 
+
 def test_deterministic_suggestion_repeated(kql):
     """Unknown field 'aera' must yield identical output on every call."""
     messages = []
@@ -340,6 +344,7 @@ def test_valid_field_zero_matches_no_error(kql):
 # AST node immutability (frozen dataclasses)
 # ---------------------------------------------------------------------------
 
+
 def test_nodes_are_immutable(kql):
     ast = kql.parse("kind:spec")
     with pytest.raises((AttributeError, TypeError)):
@@ -355,6 +360,7 @@ def test_ast_equality(kql):
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_extra_close_paren_is_error(kql):
     with pytest.raises(kql.KqlParseError):
@@ -386,6 +392,7 @@ def test_product_field(kql):
 # LabelEq/LabelExists node. Namespaced keys encode `/` as `.` (dot-for-slash)
 # since a bare `/` is rejected by the lexer.
 # ---------------------------------------------------------------------------
+
 
 def test_label_eq_simple_key(kql):
     ast = kql.parse("label.worktree:s5")
@@ -454,6 +461,7 @@ def test_label_eq_negation(kql):
 
 # -- disallowed chars still rejected on the label path ----------------------
 
+
 def test_label_value_wildcard_rejected(kql):
     with pytest.raises(kql.KqlParseError, match=r"wildcard|not supported"):
         kql.parse("label.worktree:s5*")
@@ -477,6 +485,7 @@ def test_label_key_wildcard_rejected(kql):
 
 # -- wrong form → actionable error pointing at the dot-form ------------------
 
+
 def test_old_equals_form_rejected_with_guidance(kql):
     # label:worktree=s5 — the '=' is not a word char; the message must guide the
     # user toward the correct label.<key>:<value> form.
@@ -486,6 +495,7 @@ def test_old_equals_form_rejected_with_guidance(kql):
 
 
 # -- annotations get NO selector --------------------------------------------
+
 
 def test_annotation_field_is_unknown(kql):
     with pytest.raises(kql.KqlParseError, match=r"unknown field"):

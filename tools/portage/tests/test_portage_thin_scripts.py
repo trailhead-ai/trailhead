@@ -19,6 +19,7 @@ Scripts under test (CLI contract ported verbatim from craft):
 
 Unique basename — no collision with craft's per-script tests.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -55,8 +56,12 @@ class _FakeRepos:
 class _FakePR:
     def __init__(self):
         self.calls = []
-        self.status_result = {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                              "isDraft": False, "failingChecks": []}
+        self.status_result = {
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "isDraft": False,
+            "failingChecks": [],
+        }
         self.evaluate_result = {"action": "done", "reason": "clean", "details": {}}
         self.merge_result = {"merged": ["a:1"], "failed": {}, "skipped": {}}
         self.sidecar = {"schema_version": 1, "prs": [], "external_tracker": None}
@@ -263,23 +268,35 @@ class TestSidecar:
         _patch_provider(mod, monkeypatch, provider)
         sidecar = tmp_path / "prs.json"
 
-        rc = mod.main([
-            "write", "--sidecar", str(sidecar),
-            "--pr", "api:1:https://github.com/o/api/pull/1:feat",
-        ])
+        rc = mod.main(
+            [
+                "write",
+                "--sidecar",
+                str(sidecar),
+                "--pr",
+                "api:1:https://github.com/o/api/pull/1:feat",
+            ]
+        )
         assert rc == 0
         open_calls = [c for c in provider.pr.calls if c[0] == "open"]
         assert open_calls, "write subcommand must delegate to provider.pr.open"
         _, _, prs = open_calls[0]
-        assert prs == [{"repo": "api", "pr_number": "1",
-                        "url": "https://github.com/o/api/pull/1", "branch": "feat"}]
+        assert prs == [
+            {
+                "repo": "api",
+                "pr_number": "1",
+                "url": "https://github.com/o/api/pull/1",
+                "branch": "feat",
+            }
+        ]
 
     def test_read_delegates_to_pr_read_sidecar(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        provider.pr.sidecar = {"schema_version": 1,
-                               "prs": [{"repo": "api", "pr_number": "1",
-                                        "url": "u", "branch": "b"}],
-                               "external_tracker": None}
+        provider.pr.sidecar = {
+            "schema_version": 1,
+            "prs": [{"repo": "api", "pr_number": "1", "url": "u", "branch": "b"}],
+            "external_tracker": None,
+        }
         mod = _load("release_prs_sidecar")
         _patch_provider(mod, monkeypatch, provider)
         sidecar = tmp_path / "prs.json"

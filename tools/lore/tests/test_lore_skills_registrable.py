@@ -7,6 +7,7 @@ this test locks the invariant so that can't regress.
 
 `skills/_shared/` is a reference doc, not a skill, and is exempt.
 """
+
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,8 @@ def test_skill_has_registrable_frontmatter(skill_md: Path):
     assert end > 0, f"{skill_md.parent.name}/SKILL.md frontmatter block is not closed"
     frontmatter = text[3:end]
     desc_lines = [
-        ln for ln in frontmatter.splitlines()
+        ln
+        for ln in frontmatter.splitlines()
         if ln.strip().startswith("description:") and ln.split(":", 1)[1].strip()
     ]
     assert desc_lines, (

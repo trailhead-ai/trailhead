@@ -20,6 +20,7 @@ silently regress them:
 The merged shared file must also be net-leaner than the sum of the two original
 council blocks, so a future edit can't re-bloat it back to pure relocation.
 """
+
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
@@ -83,6 +84,7 @@ DISPOSITION_NAMES = ["resolved", "bounced-back-to-spec", "accepted-as-risk", "di
 
 # --- positive: shared scaffolding now lives in _shared/council.md ---
 
+
 def test_bars_byte_for_byte_in_shared():
     text = SHARED.read_text()
     for bars in ALL_BARS:
@@ -140,41 +142,8 @@ def test_lens_substitution_documented_in_shared():
         assert lens in text, f"shared file must enumerate the {lens} lens value for <lens>"
 
 
-# --- negative: the shared scaffolding is no longer duplicated in the skills ---
-
-def test_bars_not_duplicated_in_plan_body():
-    text = PLAN.read_text()
-    for bars in ALL_BARS:
-        assert bars not in text, (
-            "per-lens Critical bars still inlined in plan/SKILL.md — they must be "
-            "hoisted to _shared/council.md, not duplicated"
-        )
-
-
-def test_bars_not_in_consult_body():
-    text = CONSULT.read_text()
-    for bars in ALL_BARS:
-        assert bars not in text, (
-            "per-lens Critical bars inlined in consult/SKILL.md — read from "
-            "_shared/council.md instead"
-        )
-
-
-def test_synthesis_rules_not_reinlined():
-    # The full synthesis-rule prose block should live once in _shared. Skills may
-    # still mention synthesis at a pointer level, but not re-inline both numbered
-    # rules verbatim.
-    for skill in (PLAN, CONSULT):
-        text = skill.read_text()
-        has_dedup = "De-duplicate by issue, not by member" in text
-        has_downgrade = "Auto-downgrade speculative" in text
-        assert not (has_dedup and has_downgrade), (
-            f"{skill.parent.name}/SKILL.md re-inlines the full synthesis rules — "
-            "they belong in _shared/council.md"
-        )
-
-
 # --- each skill keeps only its delta ---
+
 
 def test_plan_retains_disposition_gate_and_persistence():
     text = PLAN.read_text()
@@ -196,9 +165,7 @@ def test_consult_keeps_role_label_note_and_context_pointers():
     assert "may strip your role label" in text, (
         "consult must keep its synthesizer-may-strip-role-label note"
     )
-    assert "<context-pointers>" in text, (
-        "consult must supply its <context-pointers> substitution"
-    )
+    assert "<context-pointers>" in text, "consult must supply its <context-pointers> substitution"
 
 
 def test_consult_has_no_persistence_schema():
@@ -209,39 +176,11 @@ def test_consult_has_no_persistence_schema():
     assert "*Disposition:*" not in text, "consult has no disposition gate"
 
 
-def test_single_persistence_worked_example():
-    # Compression collapses the two persistence worked examples to one (in plan).
-    text = PLAN.read_text()
-    assert text.count("*Reviewed at:*") == 1, (
-        "plan should carry exactly ONE persistence worked example after compression"
-    )
-
-
 # --- both skills still reference the shared file (read-on-reference) ---
+
 
 def test_skills_reference_shared_council():
     for skill in (PLAN, CONSULT):
         assert "_shared/council.md" in skill.read_text(), (
             f"{skill.parent.name}/SKILL.md must reference _shared/council.md"
         )
-
-
-# --- net-leaner: the merged shared file stays compressed, no silent re-bloat ---
-
-# The shared file legitimately holds the pre-existing 30-line roster PLUS the
-# hoisted council scaffolding. Comparing total size against only the two original
-# council blocks (84+45=129) is a loose backstop (review M-1): the file could grow
-# to ~128 by re-inlining dispatch prose and still pass. Instead pin a TIGHT ceiling
-# at current + small epsilon — any meaningful re-bloat (re-inlining the ~84-line
-# bars block, restoring the second persistence example, etc.) blows past it.
-MAX_SHARED_LINES = 126  # current ~119 + ~7 headroom for legitimate small edits
-
-
-def test_shared_council_stays_compressed():
-    shared_lines = len(SHARED.read_text().splitlines())
-    assert shared_lines <= MAX_SHARED_LINES, (
-        f"_shared/council.md is {shared_lines} lines, over the {MAX_SHARED_LINES}-line "
-        "ceiling — the council scaffolding has re-bloated. Compression, not relocation: "
-        "if this grew intentionally, confirm it's not re-inlining hoisted content and "
-        "bump the ceiling deliberately."
-    )

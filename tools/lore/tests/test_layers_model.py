@@ -14,6 +14,7 @@ Test contract (all must RED before implementation, GREEN after):
 6. assert_within_root(<escape>) raises LayerConfinementError; benign path passes;
    a symlinked-escape is caught because .resolve() runs first (A-4).
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -105,6 +106,7 @@ class TestResolveLayers:
         assert layer.trusted is True
         # root must equal resolve_vault() output
         from vault import resolve_vault
+
         with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault_dir)}, clear=False):
             expected_root = resolve_vault()
         assert str(layer.root) == expected_root

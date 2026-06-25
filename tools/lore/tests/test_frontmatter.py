@@ -5,6 +5,7 @@ from conftest import load_script
 
 # ---- parse_frontmatter (ported from _vault_context.py) ---------------------
 
+
 def test_parse_frontmatter_scalars(tmp_path):
     fm = load_script("frontmatter")
     p = tmp_path / "note.md"
@@ -44,6 +45,7 @@ def test_parse_frontmatter_missing_file(tmp_path):
 
 # ---- set_status -------------------------------------------------------------
 
+
 def test_set_status_replaces_existing(tmp_path):
     fm = load_script("frontmatter")
     p = tmp_path / "note.md"
@@ -77,15 +79,9 @@ def test_set_status_only_touches_status_line(tmp_path):
 
 # ---- patch_section ----------------------------------------------------------
 
+
 def _doc():
-    return (
-        "---\ntype: session\n---\n\n"
-        "# Title\n\n"
-        "## Alpha\n"
-        "alpha line\n\n"
-        "## Beta\n"
-        "beta line\n"
-    )
+    return "---\ntype: session\n---\n\n# Title\n\n## Alpha\nalpha line\n\n## Beta\nbeta line\n"
 
 
 def test_patch_section_appends_under_heading(tmp_path):
@@ -107,7 +103,7 @@ def test_patch_section_leaves_sibling_byte_identical(tmp_path):
     fm.patch_section(p, "Alpha", "- new alpha entry")
     text = p.read_text()
     # The Beta section (heading through end) must be byte-identical to before.
-    beta_block = text[text.index("## Beta"):]
+    beta_block = text[text.index("## Beta") :]
     assert beta_block == "## Beta\nbeta line\n"
 
 

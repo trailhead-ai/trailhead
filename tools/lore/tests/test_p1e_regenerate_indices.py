@@ -10,6 +10,7 @@ Test contract (all must fail before the implementation, pass after):
 - A note missing grouping fields → still indexed (fallback), no crash.
 - Pre-commit hook STAGES the regenerated indices so they land in the commit.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -38,6 +39,7 @@ def load_regen():
 # Fixture vault builders
 # ---------------------------------------------------------------------------
 
+
 def _make_vault(tmp_path: Path, *dirs: str) -> Path:
     vault = tmp_path / "vault"
     for d in dirs:
@@ -45,9 +47,15 @@ def _make_vault(tmp_path: Path, *dirs: str) -> Path:
     return vault
 
 
-def _write_deferred(vault: Path, slug: str, *, value: str = "high",
-                    effort: str = "S", status: str = "open",
-                    revisit: str = "2099-06-01") -> Path:
+def _write_deferred(
+    vault: Path,
+    slug: str,
+    *,
+    value: str = "high",
+    effort: str = "S",
+    status: str = "open",
+    revisit: str = "2099-06-01",
+) -> Path:
     p = vault / "deferred" / f"{slug}.md"
     p.write_text(
         f"---\n"
@@ -62,8 +70,9 @@ def _write_deferred(vault: Path, slug: str, *, value: str = "high",
     return p
 
 
-def _write_follow_up(vault: Path, slug: str, *, revisit: str = "2099-06-01",
-                 status: str = "open") -> Path:
+def _write_follow_up(
+    vault: Path, slug: str, *, revisit: str = "2099-06-01", status: str = "open"
+) -> Path:
     p = vault / "follow-ups" / f"{slug}.md"
     p.write_text(
         f"---\n"
@@ -77,8 +86,14 @@ def _write_follow_up(vault: Path, slug: str, *, revisit: str = "2099-06-01",
     return p
 
 
-def _write_lesson(vault: Path, slug: str, *, date: str = "2099-01-01",
-                  severity: str = "medium", subsystems: str = "synth-sub") -> Path:
+def _write_lesson(
+    vault: Path,
+    slug: str,
+    *,
+    date: str = "2099-01-01",
+    severity: str = "medium",
+    subsystems: str = "synth-sub",
+) -> Path:
     p = vault / "lessons" / f"{slug}.md"
     p.write_text(
         f"---\n"
@@ -93,8 +108,9 @@ def _write_lesson(vault: Path, slug: str, *, date: str = "2099-01-01",
     return p
 
 
-def _write_plan(vault: Path, slug: str, *, status: str = "in-progress",
-                updated: str = "2099-01-01") -> Path:
+def _write_plan(
+    vault: Path, slug: str, *, status: str = "in-progress", updated: str = "2099-01-01"
+) -> Path:
     p = vault / "plans" / f"{slug}.md"
     p.write_text(
         f"---\n"
@@ -108,8 +124,9 @@ def _write_plan(vault: Path, slug: str, *, status: str = "in-progress",
     return p
 
 
-def _write_spec(vault: Path, slug: str, *, status: str = "draft",
-                updated: str = "2099-01-01") -> Path:
+def _write_spec(
+    vault: Path, slug: str, *, status: str = "draft", updated: str = "2099-01-01"
+) -> Path:
     p = vault / "specs" / f"{slug}.md"
     p.write_text(
         f"---\n"
@@ -123,8 +140,9 @@ def _write_spec(vault: Path, slug: str, *, status: str = "draft",
     return p
 
 
-def _write_design(vault: Path, slug: str, *, status: str = "draft",
-                  updated: str = "2099-01-01") -> Path:
+def _write_design(
+    vault: Path, slug: str, *, status: str = "draft", updated: str = "2099-01-01"
+) -> Path:
     p = vault / "designs" / f"{slug}.md"
     p.write_text(
         f"---\n"
@@ -141,18 +159,24 @@ def _write_design(vault: Path, slug: str, *, status: str = "draft",
 def _git_vault(tmp_path: Path, *dirs: str) -> Path:
     vault = _make_vault(tmp_path, *dirs)
     subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.name", "Tester"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.email", "t@e.st"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "user.name", "Tester"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
+        check=True,
+        capture_output=True,
+    )
     return vault
 
 
 def _run_main(vault: Path) -> int:
     """Run regenerate_indices.main() with LORE_VAULT pointing at vault."""
     import os
+
     env_backup = os.environ.get("LORE_VAULT")
     os.environ["LORE_VAULT"] = str(vault)
     try:
@@ -168,6 +192,7 @@ def _run_main(vault: Path) -> int:
 # ---------------------------------------------------------------------------
 # Basic generation: each folder produces a _index.md
 # ---------------------------------------------------------------------------
+
 
 class TestBasicGeneration:
     def test_deferred_index_created(self, tmp_path):
@@ -224,6 +249,7 @@ class TestBasicGeneration:
 
     def test_vault_not_found_returns_nonzero(self, tmp_path):
         import os
+
         nonexistent = tmp_path / "no-such-vault"
         os.environ["LORE_VAULT"] = str(nonexistent)
         try:
@@ -237,6 +263,7 @@ class TestBasicGeneration:
 # ---------------------------------------------------------------------------
 # Content: deferred ordering (value/effort)
 # ---------------------------------------------------------------------------
+
 
 class TestDeferredOrdering:
     def test_high_value_before_low_value(self, tmp_path):
@@ -277,6 +304,7 @@ class TestDeferredOrdering:
 # Content: plans/specs/designs — status grouping
 # ---------------------------------------------------------------------------
 
+
 class TestStatusGrouping:
     def test_in_progress_bucket_present(self, tmp_path):
         vault = _make_vault(tmp_path, "plans")
@@ -310,6 +338,7 @@ class TestStatusGrouping:
 # ---------------------------------------------------------------------------
 # Idempotency: second run is byte-identical
 # ---------------------------------------------------------------------------
+
 
 class TestIdempotency:
     def test_deferred_idempotent(self, tmp_path):
@@ -354,6 +383,7 @@ class TestIdempotency:
 # Graceful degradation: missing grouping fields → fallback, no crash
 # ---------------------------------------------------------------------------
 
+
 class TestGracefulDegradation:
     def test_deferred_missing_value_and_effort_still_indexed(self, tmp_path):
         vault = _make_vault(tmp_path, "deferred")
@@ -373,12 +403,7 @@ class TestGracefulDegradation:
     def test_plan_missing_status_lands_in_uncategorized(self, tmp_path):
         vault = _make_vault(tmp_path, "plans")
         p = vault / "plans" / "synth-no-status.md"
-        p.write_text(
-            "---\n"
-            "type: plan\n"
-            "---\n\n"
-            "# synth-no-status\n\nPlan with no status.\n"
-        )
+        p.write_text("---\ntype: plan\n---\n\n# synth-no-status\n\nPlan with no status.\n")
         rc = _run_main(vault)
         assert rc == 0
         content = (vault / "plans" / "_index.md").read_text()
@@ -445,6 +470,7 @@ class TestGracefulDegradation:
 # Pre-commit hook staging: regenerated indices are staged for the commit
 # ---------------------------------------------------------------------------
 
+
 def _install_regen_hook(vault: Path, plugin_root: Path) -> None:
     """Run install-vault-hooks.sh with LORE_PLUGIN_ROOT set."""
     result = subprocess.run(
@@ -454,7 +480,8 @@ def _install_regen_hook(vault: Path, plugin_root: Path) -> None:
             "LORE_PLUGIN_ROOT": str(plugin_root),
             "HOME": str(vault.parent),
         },
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, f"install-vault-hooks.sh failed: {result.stderr}"
 
@@ -463,32 +490,35 @@ def _initial_commit(vault: Path, msg: str = "init") -> None:
     """Create an initial commit so the repo has a HEAD."""
     readme = vault / "README.md"
     readme.write_text("# vault\n")
-    subprocess.run(["git", "-C", str(vault), "add", "README.md"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "commit", "-m", msg],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(vault), "add", "README.md"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(vault), "commit", "-m", msg], check=True, capture_output=True)
 
 
 def _commit_file(vault: Path, path: Path, msg: str = "add note") -> subprocess.CompletedProcess:
     """Stage a file and commit; returns the completed process (may fail — caller checks)."""
-    subprocess.run(["git", "-C", str(vault), "add", "--", str(path)],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(vault), "add", "--", str(path)], check=True, capture_output=True
+    )
     return subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", msg],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
 def _git_status_clean(vault: Path) -> bool:
-    r = subprocess.run(["git", "-C", str(vault), "status", "--porcelain"],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", str(vault), "status", "--porcelain"], capture_output=True, text=True
+    )
     return r.returncode == 0 and not r.stdout.strip()
 
 
 def _get_tree_files(vault: Path) -> set[str]:
     r = subprocess.run(
         ["git", "-C", str(vault), "ls-tree", "-r", "--name-only", "HEAD"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return set(r.stdout.strip().splitlines())
 
@@ -528,9 +558,9 @@ class TestBucketedScan:
         _run_main(vault)
         content = (vault / "plans" / "_index.md").read_text()
         assert "[[2026-06/synth-widget-plan]]" not in content, "broken parent-only link emitted"
-        assert (
-            "[[plans/2026-06/synth-widget-plan]]" in content
-        ), "resolvable vault-relative link missing"
+        assert "[[plans/2026-06/synth-widget-plan]]" in content, (
+            "resolvable vault-relative link missing"
+        )
 
     def test_specs_index_across_two_buckets(self, tmp_path):
         vault = _make_vault(tmp_path, "specs/2026-05", "specs/2026-06")
@@ -691,9 +721,7 @@ class TestPreCommitHookStagesIndices:
         result = _commit_file(vault, plan2, "second commit")
         assert result.returncode == 0, f"second commit failed: {result.stderr}"
 
-        assert _git_status_clean(vault), (
-            "vault should be clean after second commit"
-        )
+        assert _git_status_clean(vault), "vault should be clean after second commit"
 
     def test_hook_idempotent_on_reinvocation(self, tmp_path):
         """install-vault-hooks.sh is idempotent: second install does not corrupt the hook."""

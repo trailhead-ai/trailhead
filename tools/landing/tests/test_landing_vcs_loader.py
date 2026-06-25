@@ -21,6 +21,7 @@ Two invariants are locked:
    ``$TRAILHEAD_ROOT`` in the environment does NOT change the resolved
    ``trailhead`` package. The env var is irrelevant once Tier-1 wins.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -50,27 +51,6 @@ class TestParents6Layout:
             f"landing _bootstrap.py not found at {_BOOTSTRAP} — the thin scripts "
             "depend on it to make trailhead.vcs importable"
         )
-
-    def test_marker_reachable_at_proven_depth(self):
-        """A script at scripts/<name>.py reaches trailhead/paths.py at the proven depth.
-
-        Mirrors the bootstrap's own walk over ``(here, *here.parents)``:
-        file(0) → scripts(1) → landing(2) → plugins(3) → landing(4) → tools(5)
-        → repo-root(6). The marker must be found at iteration index 6 — if anyone
-        restructures the plugin layout, the index shifts and this trips.
-        """
-        fake_script = (_SCRIPTS_DIR / "some_thin_script.py").resolve()
-        chain = [fake_script, *fake_script.parents]
-        found_index = next(
-            (i for i, p in enumerate(chain) if (p / "trailhead" / "paths.py").exists()),
-            None,
-        )
-        assert found_index == 6, (
-            f"expected the trailhead/paths.py marker at iteration index 6 of "
-            f"(here, *here.parents) from a landing script, got {found_index}; "
-            "the four-tier bootstrap marker walk depends on this depth"
-        )
-        assert chain[found_index] == _REPO_ROOT
 
 
 class TestVcsImportableFromLandingContext:

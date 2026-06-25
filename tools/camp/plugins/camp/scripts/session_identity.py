@@ -12,6 +12,7 @@ nothing about claude. The claude-specific part — that `--session-id` seeds a n
 session id and `--resume` resumes one — lives in the launch profile
 (harness_launch.py), which consumes the id this module produces.
 """
+
 from __future__ import annotations
 
 import uuid

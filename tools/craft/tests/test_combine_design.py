@@ -11,6 +11,7 @@ Design contract (D-4/D-5/D-6/S-2/R-8/A-7):
 Hermeticity: whole test runs under tmp_path, no network, no real ~/.claude/, no real vault.
 Import pattern: sys.path.insert(SCRIPTS_DIR) per test_handoff_capture.py:28-31 (U-1).
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -28,6 +29,7 @@ import combine_design as cd  # noqa: E402
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write(p: Path, name: str, body: str) -> Path:
     f = p / name
@@ -90,6 +92,7 @@ def _minimal_index(rows: list[dict]) -> str:
 # U-1: confirm import cleanly via sys.path.insert pattern (hermeticity)
 # ---------------------------------------------------------------------------
 
+
 def test_import_via_scripts_dir_harness():
     """combine_design imports cleanly via the established craft harness (U-1)."""
     assert hasattr(cd, "assemble")
@@ -99,6 +102,7 @@ def test_import_via_scripts_dir_harness():
 # ---------------------------------------------------------------------------
 # A-7: CLI interface tested (named args + --help)
 # ---------------------------------------------------------------------------
+
 
 def test_cli_help_names_required_args():
     """--help output must name --designs-dir, --chrome-path, and --slug."""
@@ -130,6 +134,7 @@ def test_cli_spec_link_arg_present():
 # D-4: verbatim assembly — exact reviewed markup survives (no re-render)
 # ---------------------------------------------------------------------------
 
+
 def test_verbatim_body_survives_in_output(tmp_path: Path):
     """Both screens' VERBATIM bodies must appear unchanged in the reference file (D-4)."""
     designs = tmp_path / "designs"
@@ -145,10 +150,14 @@ def test_verbatim_body_survives_in_output(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "dashboard", "file": "web-dashboard.html"},
-        {"surface": "web", "screen": "settings", "file": "web-settings.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "dashboard", "file": "web-dashboard.html"},
+                {"surface": "web", "screen": "settings", "file": "web-settings.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "my-design-reference.html"
     cd.assemble(
@@ -169,6 +178,7 @@ def test_verbatim_body_survives_in_output(tmp_path: Path):
 # D-4: numbered sections + in-page TOC
 # ---------------------------------------------------------------------------
 
+
 def test_numbered_sections_and_toc(tmp_path: Path):
     """Output must contain a numbered section per screen and a TOC anchoring each."""
     designs = tmp_path / "designs"
@@ -180,10 +190,14 @@ def test_numbered_sections_and_toc(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-        {"surface": "web", "screen": "about", "file": "web-about.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+                {"surface": "web", "screen": "about", "file": "web-about.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "test-design-reference.html"
     cd.assemble(
@@ -208,6 +222,7 @@ def test_numbered_sections_and_toc(tmp_path: Path):
 # D-6: docbar toggles driven by chrome variants (or none)
 # ---------------------------------------------------------------------------
 
+
 def test_docbar_no_toggles_when_chrome_declares_none(tmp_path: Path):
     """Chrome with no Variants section → no docbar toggles in output (D-6)."""
     designs = tmp_path / "designs"
@@ -218,9 +233,13 @@ def test_docbar_no_toggles_when_chrome_declares_none(tmp_path: Path):
     chrome.write_text(_make_chrome([]))  # no variants
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "test-design-reference.html"
     cd.assemble(
@@ -247,9 +266,13 @@ def test_docbar_toggles_present_for_declared_variants(tmp_path: Path):
     chrome.write_text(_make_chrome(["theme: light/dark", "density: compact/full"]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "test-design-reference.html"
     cd.assemble(
@@ -271,13 +294,15 @@ def test_docbar_toggles_present_for_declared_variants(tmp_path: Path):
 # D-5: multi-surface filename prefix grouping
 # ---------------------------------------------------------------------------
 
+
 def test_multi_surface_sections_labeled_by_prefix(tmp_path: Path):
     """admin-*.html + mobile-*.html → sections labeled by surface prefix (D-5)."""
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "admin-home.html", _make_screen_html("Admin Home", "<p>admin home</p>"))
     _write(
-        designs, "admin-settings.html",
+        designs,
+        "admin-settings.html",
         _make_screen_html("Admin Settings", "<p>admin settings</p>"),
     )
     _write(designs, "mobile-home.html", _make_screen_html("Mobile Home", "<p>mobile home</p>"))
@@ -286,11 +311,15 @@ def test_multi_surface_sections_labeled_by_prefix(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "admin", "screen": "home", "file": "admin-home.html"},
-        {"surface": "admin", "screen": "settings", "file": "admin-settings.html"},
-        {"surface": "mobile", "screen": "home", "file": "mobile-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "admin", "screen": "home", "file": "admin-home.html"},
+                {"surface": "admin", "screen": "settings", "file": "admin-settings.html"},
+                {"surface": "mobile", "screen": "home", "file": "mobile-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "multi-surface-reference.html"
     cd.assemble(
@@ -314,6 +343,7 @@ def test_multi_surface_sections_labeled_by_prefix(tmp_path: Path):
 # D-4 + self-contained: spec link + no decision log duplication
 # ---------------------------------------------------------------------------
 
+
 def test_spec_link_present_in_output(tmp_path: Path):
     """Output must contain a link back to the spec URL when provided."""
     designs = tmp_path / "designs"
@@ -324,9 +354,13 @@ def test_spec_link_present_in_output(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     spec_url = "https://example.com/specs/my-feature"
     out_path = tmp_path / "test-design-reference.html"
@@ -343,10 +377,7 @@ def test_spec_link_present_in_output(tmp_path: Path):
 
 
 def test_no_external_stylesheet_link_except_flagged_webfont(tmp_path: Path):
-    (
-        "Output must be self-contained — no external stylesheet links "
-        "(except mockup-only web-font flagged as comment)."
-    )
+    "Output must be self-contained — no external stylesheet links (except mockup-only web-font flagged as comment)."
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "web-home.html", _make_screen_html("Home", "<p>home</p>"))
@@ -355,9 +386,13 @@ def test_no_external_stylesheet_link_except_flagged_webfont(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "test-design-reference.html"
     cd.assemble(
@@ -371,9 +406,9 @@ def test_no_external_stylesheet_link_except_flagged_webfont(tmp_path: Path):
     content = out_path.read_text(encoding="utf-8")
     # No live <link rel="stylesheet" href="http..."> tags (external CDN sheet)
     import re
+
     live_stylesheet_links = re.findall(
-        r'<link[^>]+rel=["\']stylesheet["\'][^>]+href=["\']https?://',
-        content, re.IGNORECASE
+        r'<link[^>]+rel=["\']stylesheet["\'][^>]+href=["\']https?://', content, re.IGNORECASE
     )
     # If any web-font link exists, it must be inside a comment (mockup-only flag)
     for link in live_stylesheet_links:
@@ -393,6 +428,7 @@ def test_no_external_stylesheet_link_except_flagged_webfont(tmp_path: Path):
 # S-2: path-traversal guard
 # ---------------------------------------------------------------------------
 
+
 def test_path_traversal_rejected_nonzero_exit_no_output(tmp_path: Path):
     """A crafted ../../outside.html filename → nonzero exit, no output file written (S-2)."""
     designs = tmp_path / "designs"
@@ -410,9 +446,13 @@ def test_path_traversal_rejected_nonzero_exit_no_output(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "escape", "file": "escape.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "escape", "file": "escape.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "test-design-reference.html"
     with pytest.raises(SystemExit) as exc_info:
@@ -443,19 +483,28 @@ def test_path_traversal_via_cli_nonzero_no_output(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "evil", "file": "evil.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "evil", "file": "evil.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "evil-design-reference.html"
     script = SCRIPTS_DIR / "combine_design.py"
     result = subprocess.run(
         [
-            sys.executable, str(script),
-            "--designs-dir", str(designs),
-            "--chrome-path", str(chrome),
-            "--slug", "evil-design",
-            "--output", str(out_path),
+            sys.executable,
+            str(script),
+            "--designs-dir",
+            str(designs),
+            "--chrome-path",
+            str(chrome),
+            "--slug",
+            "evil-design",
+            "--output",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -468,6 +517,7 @@ def test_path_traversal_via_cli_nonzero_no_output(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # R-8: determinism — index.md row order is authoritative
 # ---------------------------------------------------------------------------
+
 
 def test_index_order_is_authoritative_over_filename_alpha(tmp_path: Path):
     """index.md row order must be preserved even when it is non-alphabetical (R-8 / D-5).
@@ -489,11 +539,15 @@ def test_index_order_is_authoritative_over_filename_alpha(tmp_path: Path):
 
     # index lists screens in narrative order: zzz → mmm → aaa (NOT alphabetical)
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "zzz", "file": "web-zzz.html"},
-        {"surface": "web", "screen": "mmm", "file": "web-mmm.html"},
-        {"surface": "web", "screen": "aaa", "file": "web-aaa.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "zzz", "file": "web-zzz.html"},
+                {"surface": "web", "screen": "mmm", "file": "web-mmm.html"},
+                {"surface": "web", "screen": "aaa", "file": "web-aaa.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "index-order-reference.html"
     cd.assemble(
@@ -520,6 +574,7 @@ def test_index_order_is_authoritative_over_filename_alpha(tmp_path: Path):
 # R-8: no partial output on error
 # ---------------------------------------------------------------------------
 
+
 def test_no_partial_output_on_missing_screen_file(tmp_path: Path):
     """Missing per-screen file → nonzero exit, no output written (R-8)."""
     designs = tmp_path / "designs"
@@ -531,10 +586,14 @@ def test_no_partial_output_on_missing_screen_file(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-        {"surface": "web", "screen": "missing", "file": "web-missing.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+                {"surface": "web", "screen": "missing", "file": "web-missing.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "test-design-reference.html"
     with pytest.raises(SystemExit) as exc_info:
@@ -559,19 +618,28 @@ def test_malformed_missing_screen_named_error(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "ghost", "file": "web-ghost.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "ghost", "file": "web-ghost.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "test-design-reference.html"
     script = SCRIPTS_DIR / "combine_design.py"
     result = subprocess.run(
         [
-            sys.executable, str(script),
-            "--designs-dir", str(designs),
-            "--chrome-path", str(chrome),
-            "--slug", "test-design",
-            "--output", str(out_path),
+            sys.executable,
+            str(script),
+            "--designs-dir",
+            str(designs),
+            "--chrome-path",
+            str(chrome),
+            "--slug",
+            "test-design",
+            "--output",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -590,6 +658,7 @@ def test_malformed_missing_screen_named_error(tmp_path: Path):
 # CLI end-to-end: basic invocation produces output
 # ---------------------------------------------------------------------------
 
+
 def test_cli_basic_invocation(tmp_path: Path):
     """CLI invocation with valid inputs produces the expected output file."""
     designs = tmp_path / "designs"
@@ -601,19 +670,28 @@ def test_cli_basic_invocation(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "cli-design-reference.html"
     script = SCRIPTS_DIR / "combine_design.py"
     result = subprocess.run(
         [
-            sys.executable, str(script),
-            "--designs-dir", str(designs),
-            "--chrome-path", str(chrome),
-            "--slug", "cli-design",
-            "--output", str(out_path),
+            sys.executable,
+            str(script),
+            "--designs-dir",
+            str(designs),
+            "--chrome-path",
+            str(chrome),
+            "--slug",
+            "cli-design",
+            "--output",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -636,21 +714,31 @@ def test_cli_with_spec_url(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     spec_url = "https://example.com/my-spec"
     out_path = tmp_path / "spec-design-reference.html"
     script = SCRIPTS_DIR / "combine_design.py"
     result = subprocess.run(
         [
-            sys.executable, str(script),
-            "--designs-dir", str(designs),
-            "--chrome-path", str(chrome),
-            "--slug", "spec-design",
-            "--output", str(out_path),
-            "--spec-url", spec_url,
+            sys.executable,
+            str(script),
+            "--designs-dir",
+            str(designs),
+            "--chrome-path",
+            str(chrome),
+            "--slug",
+            "spec-design",
+            "--output",
+            str(out_path),
+            "--spec-url",
+            spec_url,
         ],
         capture_output=True,
         text=True,
@@ -665,6 +753,7 @@ def test_cli_with_spec_url(tmp_path: Path):
 # Design tokens swatch section
 # ---------------------------------------------------------------------------
 
+
 def test_design_tokens_swatch_section_present(tmp_path: Path):
     """Output contains a '00 Design tokens' swatch section."""
     designs = tmp_path / "designs"
@@ -675,9 +764,13 @@ def test_design_tokens_swatch_section_present(tmp_path: Path):
     chrome.write_text(_make_chrome([]))
 
     index = designs / "index.md"
-    index.write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    index.write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "tokens-design-reference.html"
     cd.assemble(
@@ -695,6 +788,7 @@ def test_design_tokens_swatch_section_present(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # M-1: _html_escape must also escape single quotes (defense-in-depth)
 # ---------------------------------------------------------------------------
+
 
 def test_html_escape_escapes_single_quotes():
     """_html_escape must replace ' with &#39; so the helper is safe in single-quoted attrs."""
@@ -745,6 +839,7 @@ def _write_ephemeral_denylist(p: Path) -> Path:
 # I-1: env-var root-resolution fallbacks (DESIGNS_ROOT / CHROME_ROOT)
 # ---------------------------------------------------------------------------
 
+
 def test_env_fallback_designs_root_when_flag_absent(tmp_path: Path, monkeypatch):
     """When --designs-dir is absent but DESIGNS_ROOT is set, combine_design.py uses the env var."""
     designs = tmp_path / "designs"
@@ -754,9 +849,13 @@ def test_env_fallback_designs_root_when_flag_absent(tmp_path: Path, monkeypatch)
     chrome = tmp_path / "chrome.md"
     chrome.write_text(_make_chrome([]))
 
-    (designs / "index.md").write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    (designs / "index.md").write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "env-root-reference.html"
     script = SCRIPTS_DIR / "combine_design.py"
@@ -764,15 +863,20 @@ def test_env_fallback_designs_root_when_flag_absent(tmp_path: Path, monkeypatch)
     env = {"DESIGNS_ROOT": str(designs), "CHROME_ROOT": str(chrome.parent)}
     # Inherit PATH so python and locale work; inject our vars
     import os
+
     full_env = {**os.environ, **env}
 
     result = subprocess.run(
         [
-            sys.executable, str(script),
+            sys.executable,
+            str(script),
             # --designs-dir intentionally absent; DESIGNS_ROOT env provides it
-            "--chrome-path", str(chrome),
-            "--slug", "env-root",
-            "--output", str(out_path),
+            "--chrome-path",
+            str(chrome),
+            "--slug",
+            "env-root",
+            "--output",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -788,10 +892,7 @@ def test_env_fallback_designs_root_when_flag_absent(tmp_path: Path, monkeypatch)
 
 
 def test_env_fallback_chrome_root_when_flag_absent(tmp_path: Path, monkeypatch):
-    (
-        "When --chrome-path is absent but CHROME_ROOT is set, combine_design.py "
-        "uses CHROME_ROOT as the chrome path."
-    )
+    "When --chrome-path is absent but CHROME_ROOT is set, combine_design.py uses CHROME_ROOT as the chrome path."
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "web-home.html", _make_screen_html("Home", "<p>chrome-root sentinel</p>"))
@@ -799,24 +900,33 @@ def test_env_fallback_chrome_root_when_flag_absent(tmp_path: Path, monkeypatch):
     chrome = tmp_path / "chrome.md"
     chrome.write_text(_make_chrome([]))
 
-    (designs / "index.md").write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    (designs / "index.md").write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     out_path = tmp_path / "chrome-root-reference.html"
     script = SCRIPTS_DIR / "combine_design.py"
 
     import os
+
     # CHROME_ROOT points to the chrome file path (the fallback for --chrome-path)
     full_env = {**os.environ, "CHROME_ROOT": str(chrome)}
 
     result = subprocess.run(
         [
-            sys.executable, str(script),
-            "--designs-dir", str(designs),
+            sys.executable,
+            str(script),
+            "--designs-dir",
+            str(designs),
             # --chrome-path intentionally absent; CHROME_ROOT env provides it
-            "--slug", "chrome-root",
-            "--output", str(out_path),
+            "--slug",
+            "chrome-root",
+            "--output",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -837,16 +947,24 @@ def test_cli_flag_wins_over_env_designs_root(tmp_path: Path):
     flag_designs = tmp_path / "flag_designs"
     flag_designs.mkdir()
     _write(flag_designs, "web-home.html", _make_screen_html("Home", "<p>FLAG sentinel</p>"))
-    (flag_designs / "index.md").write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    (flag_designs / "index.md").write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     env_designs = tmp_path / "env_designs"
     env_designs.mkdir()
     _write(env_designs, "web-home.html", _make_screen_html("Home", "<p>ENV sentinel</p>"))
-    (env_designs / "index.md").write_text(_minimal_index([
-        {"surface": "web", "screen": "home", "file": "web-home.html"},
-    ]))
+    (env_designs / "index.md").write_text(
+        _minimal_index(
+            [
+                {"surface": "web", "screen": "home", "file": "web-home.html"},
+            ]
+        )
+    )
 
     chrome = tmp_path / "chrome.md"
     chrome.write_text(_make_chrome([]))
@@ -855,15 +973,21 @@ def test_cli_flag_wins_over_env_designs_root(tmp_path: Path):
     script = SCRIPTS_DIR / "combine_design.py"
 
     import os
+
     full_env = {**os.environ, "DESIGNS_ROOT": str(env_designs)}
 
     result = subprocess.run(
         [
-            sys.executable, str(script),
-            "--designs-dir", str(flag_designs),  # flag points here
-            "--chrome-path", str(chrome),
-            "--slug", "flag-wins",
-            "--output", str(out_path),
+            sys.executable,
+            str(script),
+            "--designs-dir",
+            str(flag_designs),  # flag points here
+            "--chrome-path",
+            str(chrome),
+            "--slug",
+            "flag-wins",
+            "--output",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -877,10 +1001,7 @@ def test_cli_flag_wins_over_env_designs_root(tmp_path: Path):
 
 
 def test_cli_neither_flag_nor_env_exits_nonzero(tmp_path: Path):
-    (
-        "When neither --designs-dir nor DESIGNS_ROOT is provided, "
-        "combine_design.py exits nonzero with a named error."
-    )
+    "When neither --designs-dir nor DESIGNS_ROOT is provided, combine_design.py exits nonzero with a named error."
     chrome = tmp_path / "chrome.md"
     chrome.write_text(_make_chrome([]))
 
@@ -888,16 +1009,21 @@ def test_cli_neither_flag_nor_env_exits_nonzero(tmp_path: Path):
     script = SCRIPTS_DIR / "combine_design.py"
 
     import os
+
     # Strip DESIGNS_ROOT from env if set
     env = {k: v for k, v in os.environ.items() if k != "DESIGNS_ROOT"}
 
     result = subprocess.run(
         [
-            sys.executable, str(script),
+            sys.executable,
+            str(script),
             # --designs-dir absent, DESIGNS_ROOT absent
-            "--chrome-path", str(chrome),
-            "--slug", "no-root",
-            "--output", str(out_path),
+            "--chrome-path",
+            str(chrome),
+            "--slug",
+            "no-root",
+            "--output",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -930,6 +1056,4 @@ def test_leak_gate_combine_design_script_is_clean(tmp_path: Path):
     )
     # Filter hits to only combine_design.py
     hits = [line for line in result.stdout.splitlines() if "combine_design" in line]
-    assert not hits, (
-        "combine_design.py contains forbidden tokens:\n" + "\n".join(hits)
-    )
+    assert not hits, "combine_design.py contains forbidden tokens:\n" + "\n".join(hits)

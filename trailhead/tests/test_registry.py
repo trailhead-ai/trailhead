@@ -44,9 +44,7 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["lore"], composed_root=composed_root)
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert data["name"] == "trailhead"
 
     def test_marketplace_owner_name_is_trailhead(self, tmp_path):
@@ -55,9 +53,7 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["lore"], composed_root=composed_root)
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert data["owner"] == {"name": "trailhead"}
 
     def test_multi_tool_plugins_list(self, tmp_path):
@@ -67,9 +63,7 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert len(data["plugins"]) == 2
 
     def test_plugins_contain_correct_names(self, tmp_path):
@@ -78,9 +72,7 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         plugin_names = [p["name"] for p in data["plugins"]]
         assert "lore" in plugin_names
         assert "camp" in plugin_names
@@ -92,14 +84,11 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         for plugin in data["plugins"]:
             tool = plugin["name"]
             assert plugin["source"] == f"./plugins/{tool}", (
-                f"plugin '{tool}' source should be './plugins/{tool}', "
-                f"got '{plugin['source']}'"
+                f"plugin '{tool}' source should be './plugins/{tool}', got '{plugin['source']}'"
             )
 
     def test_plugins_list_is_deterministic(self, tmp_path):
@@ -109,19 +98,13 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["camp", "lore"], composed_root=composed_root)
-        data_a = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data_a = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
 
         # Reverse order — should produce same JSON
         generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
-        data_b = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data_b = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
 
-        assert [p["name"] for p in data_a["plugins"]] == [
-            p["name"] for p in data_b["plugins"]
-        ]
+        assert [p["name"] for p in data_a["plugins"]] == [p["name"] for p in data_b["plugins"]]
 
     def test_single_tool_is_valid(self, tmp_path):
         """Single-tool case must produce a valid marketplace.json with one plugin."""
@@ -130,9 +113,7 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["craft"], composed_root=composed_root)
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert data["name"] == "trailhead"
         assert len(data["plugins"]) == 1
         assert data["plugins"][0]["name"] == "craft"
@@ -143,12 +124,8 @@ class TestGenerateMarketplaceJson:
 
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
-        generate_marketplace_json(
-            tools=["lore", "camp", "craft"], composed_root=composed_root
-        )
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        generate_marketplace_json(tools=["lore", "camp", "craft"], composed_root=composed_root)
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert len(data["plugins"]) == 3
         names = {p["name"] for p in data["plugins"]}
         assert names == {"lore", "camp", "craft"}
@@ -188,9 +165,7 @@ class TestGenerateMarketplaceJson:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         generate_marketplace_json(tools=["lore", "camp"], composed_root=composed_root)
-        data = json.loads(
-            (composed_root / ".claude-plugin" / "marketplace.json").read_text()
-        )
+        data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         for plugin in data["plugins"]:
             assert "description" in plugin
             assert isinstance(plugin["description"], str)
@@ -205,14 +180,14 @@ class TestInputGuard:
     @pytest.mark.parametrize(
         "invalid_tool",
         [
-            "Lore",          # uppercase
-            "1lore",         # starts with digit
-            "lore tool",     # space
-            "lore/../etc",   # path traversal
-            "",              # empty
+            "Lore",  # uppercase
+            "1lore",  # starts with digit
+            "lore tool",  # space
+            "lore/../etc",  # path traversal
+            "",  # empty
             "lore@trailhead",  # special char
-            "CAMP",          # all-caps
-            "-lore",         # starts with hyphen
+            "CAMP",  # all-caps
+            "-lore",  # starts with hyphen
         ],
     )
     def test_generate_rejects_invalid_tool_names(self, tmp_path, invalid_tool):
@@ -221,9 +196,7 @@ class TestInputGuard:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
         with pytest.raises((ValueError, TypeError)):
-            generate_marketplace_json(
-                tools=[invalid_tool], composed_root=composed_root
-            )
+            generate_marketplace_json(tools=[invalid_tool], composed_root=composed_root)
 
     @pytest.mark.parametrize(
         "invalid_tool",
@@ -302,13 +275,8 @@ class TestRegisterMarketplace:
 
         register_marketplace(composed_root=composed_root, runner=stub_runner)
 
-        add_calls = [
-            args for args in calls_seen
-            if "marketplace" in args and "add" in args
-        ]
-        assert len(add_calls) == 1, (
-            f"expected one 'marketplace add' call; got {calls_seen}"
-        )
+        add_calls = [args for args in calls_seen if "marketplace" in args and "add" in args]
+        assert len(add_calls) == 1, f"expected one 'marketplace add' call; got {calls_seen}"
         assert str(composed_root) in add_calls[0]
 
     def test_register_marketplace_scope_user(self, tmp_path):
@@ -336,9 +304,7 @@ class TestRegisterMarketplace:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
 
-        register_marketplace(
-            composed_root=composed_root, runner=lambda args, **kw: None
-        )
+        register_marketplace(composed_root=composed_root, runner=lambda args, **kw: None)
 
         assert (composed_root / ".trailhead-registered").exists(), (
             "global marker .trailhead-registered not written after register_marketplace"
@@ -355,9 +321,7 @@ class TestRegisterMarketplace:
             raise RuntimeError("marketplace add failed")
 
         with pytest.raises(RuntimeError):
-            register_marketplace(
-                composed_root=composed_root, runner=failing_runner
-            )
+            register_marketplace(composed_root=composed_root, runner=failing_runner)
 
         assert not (composed_root / ".trailhead-registered").exists()
 
@@ -411,9 +375,7 @@ class TestInstallTool:
         install_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
         install_calls = [args for args in calls_seen if "install" in args]
-        assert len(install_calls) == 1, (
-            f"expected one 'install' call; got {calls_seen}"
-        )
+        assert len(install_calls) == 1, f"expected one 'install' call; got {calls_seen}"
 
     def test_install_tool_ref_is_trailhead_not_per_tool(self, tmp_path):
         """Install ref must be '<tool>@trailhead', NOT '<tool>@trailhead-<tool>'."""
@@ -460,9 +422,7 @@ class TestInstallTool:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
 
-        install_tool(
-            tool="lore", composed_root=composed_root, runner=lambda args, **kw: None
-        )
+        install_tool(tool="lore", composed_root=composed_root, runner=lambda args, **kw: None)
 
         assert (composed_root / ".trailhead-installed-lore").exists(), (
             "per-tool marker .trailhead-installed-lore not written after install_tool"
@@ -479,9 +439,7 @@ class TestInstallTool:
             raise RuntimeError("install failed")
 
         with pytest.raises(RuntimeError):
-            install_tool(
-                tool="lore", composed_root=composed_root, runner=failing_runner
-            )
+            install_tool(tool="lore", composed_root=composed_root, runner=failing_runner)
 
         assert not (composed_root / ".trailhead-installed-lore").exists()
 
@@ -492,12 +450,8 @@ class TestInstallTool:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
 
-        install_tool(
-            tool="lore", composed_root=composed_root, runner=lambda args, **kw: None
-        )
-        install_tool(
-            tool="camp", composed_root=composed_root, runner=lambda args, **kw: None
-        )
+        install_tool(tool="lore", composed_root=composed_root, runner=lambda args, **kw: None)
+        install_tool(tool="camp", composed_root=composed_root, runner=lambda args, **kw: None)
 
         assert (composed_root / ".trailhead-installed-lore").exists()
         assert (composed_root / ".trailhead-installed-camp").exists()
@@ -595,9 +549,7 @@ class TestRewireTool:
 
         for call_args in calls_seen:
             if "uninstall" in call_args or "install" in call_args:
-                assert "lore@trailhead" in call_args, (
-                    f"expected 'lore@trailhead' in {call_args}"
-                )
+                assert "lore@trailhead" in call_args, f"expected 'lore@trailhead' in {call_args}"
                 assert "lore@trailhead-lore" not in call_args
 
     def test_rewire_tool_tolerates_uninstall_failure(self, tmp_path):
@@ -617,9 +569,7 @@ class TestRewireTool:
         # Must not propagate the uninstall error
         rewire_tool(tool="lore", composed_root=composed_root, runner=stub_runner)
 
-        assert len(install_calls) == 1, (
-            "install must still run even when uninstall fails"
-        )
+        assert len(install_calls) == 1, "install must still run even when uninstall fails"
 
     def test_rewire_tool_clears_per_tool_marker_before_pair(self, tmp_path):
         """Per-tool marker must be cleared BEFORE the uninstall+install pair starts."""
@@ -650,9 +600,7 @@ class TestRewireTool:
         composed_root = tmp_path / "composed"
         composed_root.mkdir(parents=True)
 
-        rewire_tool(
-            tool="lore", composed_root=composed_root, runner=lambda args, **kw: None
-        )
+        rewire_tool(tool="lore", composed_root=composed_root, runner=lambda args, **kw: None)
 
         assert (composed_root / ".trailhead-installed-lore").exists(), (
             "per-tool marker not re-written after rewire_tool install succeeds"
@@ -672,13 +620,9 @@ class TestRewireTool:
                 raise RuntimeError("install failed")
 
         with pytest.raises(RuntimeError):
-            rewire_tool(
-                tool="lore", composed_root=composed_root, runner=failing_on_install
-            )
+            rewire_tool(tool="lore", composed_root=composed_root, runner=failing_on_install)
 
-        assert not marker.exists(), (
-            "per-tool marker must be absent after install raises"
-        )
+        assert not marker.exists(), "per-tool marker must be absent after install raises"
 
     def test_rewire_tool_scope_user_on_both_calls(self, tmp_path):
         """Both uninstall and install must pass --scope user."""
@@ -773,7 +717,8 @@ class TestUnregisterTool:
         composed_root.mkdir(parents=True)
         calls_seen = []
         unregister_tool(
-            tool="lore", composed_root=composed_root,
+            tool="lore",
+            composed_root=composed_root,
             runner=lambda args, **kw: calls_seen.append(list(args)),
         )
 
@@ -791,7 +736,8 @@ class TestUnregisterTool:
         composed_root.mkdir(parents=True)
         calls_seen = []
         unregister_tool(
-            tool="lore", composed_root=composed_root,
+            tool="lore",
+            composed_root=composed_root,
             runner=lambda args, **kw: calls_seen.append(list(args)),
         )
 
@@ -808,7 +754,8 @@ class TestUnregisterTool:
         composed_root.mkdir(parents=True)
         calls_seen = []
         unregister_tool(
-            tool="lore", composed_root=composed_root,
+            tool="lore",
+            composed_root=composed_root,
             runner=lambda args, **kw: calls_seen.append(list(args)),
         )
 

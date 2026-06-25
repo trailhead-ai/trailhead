@@ -18,6 +18,7 @@ The doc embeds:
   - guidance that members are INERT until `camp enter <member>`
   - guidance that setup may be in flight (background provisioner)
 """
+
 from __future__ import annotations
 
 from pathlib import Path

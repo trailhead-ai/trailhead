@@ -32,12 +32,16 @@ def load_recall():
     """Load recall module freshly each call to avoid state pollution."""
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in ("recall", "vault", "frontmatter", "status_validator",
-                   "regenerate_indices", "sessions"):
+    for cached in (
+        "recall",
+        "vault",
+        "frontmatter",
+        "status_validator",
+        "regenerate_indices",
+        "sessions",
+    ):
         sys.modules.pop(cached, None)
-    spec = importlib.util.spec_from_file_location(
-        "recall", SCRIPTS_DIR / "recall.py"
-    )
+    spec = importlib.util.spec_from_file_location("recall", SCRIPTS_DIR / "recall.py")
     mod = importlib.util.module_from_spec(spec)
     # Register in sys.modules before exec so @dataclass can resolve cls.__module__
     sys.modules["recall"] = mod
@@ -48,6 +52,7 @@ def load_recall():
 # ---------------------------------------------------------------------------
 # Fixture vault helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
@@ -67,8 +72,7 @@ def _write_area(
     summary_line = f"summary: {summary}\n" if summary else ""
     overview_block = f"\n## Overview\n\n{overview}\n" if overview else ""
     p.write_text(
-        f"---\ntype: area\nname: {name}\nkeywords: {kw_str}\n{summary_line}---\n"
-        f"{overview_block}"
+        f"---\ntype: area\nname: {name}\nkeywords: {kw_str}\n{summary_line}---\n{overview_block}"
     )
     return p
 
@@ -76,6 +80,7 @@ def _write_area(
 # ---------------------------------------------------------------------------
 # build_area_map
 # ---------------------------------------------------------------------------
+
 
 class TestBuildAreaMap:
     def test_reads_name_keywords_one_liner(self, tmp_path):
@@ -145,8 +150,9 @@ class TestBuildAreaMap:
 
     def test_summary_field_preferred_over_overview(self, tmp_path):
         vault = _make_vault(tmp_path)
-        _write_area(vault, "prefer-summary", ["x"],
-                    summary="Summary wins.", overview="Overview text.")
+        _write_area(
+            vault, "prefer-summary", ["x"], summary="Summary wins.", overview="Overview text."
+        )
         recall = load_recall()
         entries = recall.build_area_map(vault)
         assert entries[0].one_liner == "Summary wins."

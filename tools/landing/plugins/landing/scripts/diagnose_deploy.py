@@ -20,6 +20,7 @@ Exit codes:
     0  the deploy log was readable (failed=true if failure annotations present)
     1  the deploy log could not be read (DeployError) — surface the cause
 """
+
 from __future__ import annotations
 
 import argparse

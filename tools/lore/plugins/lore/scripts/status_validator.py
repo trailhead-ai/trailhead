@@ -14,6 +14,7 @@ Session vocab (Slice 0): ``session`` is keyed by its singular name and carries
 candidates. The old ``active``/``complete`` values are retired; the ``session→sessions``
 alias is dropped because ``session`` is now a direct CANONICAL key.
 """
+
 from __future__ import annotations
 
 # Canonical status sets per note type, keyed by the **singular** kind name
@@ -125,4 +126,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

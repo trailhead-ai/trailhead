@@ -19,6 +19,7 @@ tmp_path so they NEVER touch real config, state, or vault (Axiom 6). The git
 identity is isolated via ``GIT_CONFIG_GLOBAL`` so the test never reads the
 developer's real ``~/.gitconfig``.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,6 +35,7 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 # ---------------------------------------------------------------------------
 # Harness
 # ---------------------------------------------------------------------------
+
 
 def _dirs(tmp_path):
     state = tmp_path / "state"
@@ -91,6 +93,7 @@ def _rules_path(home):
 # 1. Unset git identity: init still succeeds, advisory goes to stderr
 # ---------------------------------------------------------------------------
 
+
 def test_init_unset_identity_still_exits_zero(tmp_path):
     state, config, home = _dirs(tmp_path)
     res = _run(["init"], state=state, config=config, home=home, identity=None)
@@ -116,7 +119,10 @@ def test_init_unset_identity_advisory_not_on_stdout(tmp_path):
 def test_init_with_identity_emits_no_advisory(tmp_path):
     state, config, home = _dirs(tmp_path)
     res = _run(
-        ["init"], state=state, config=config, home=home,
+        ["init"],
+        state=state,
+        config=config,
+        home=home,
         identity="dev@example.com",
     )
     assert res.returncode == 0, res.stderr
@@ -129,10 +135,10 @@ def test_init_with_identity_emits_no_advisory(tmp_path):
 # 2. The installed user-level ruleset carries the write-prohibition rules
 # ---------------------------------------------------------------------------
 
+
 def test_installed_ruleset_carries_write_prohibition(tmp_path):
     state, config, home = _dirs(tmp_path)
-    _run(["init"], state=state, config=config, home=home,
-         identity="dev@example.com")
+    _run(["init"], state=state, config=config, home=home, identity="dev@example.com")
     rules = _rules_path(home).read_text()
     # The write-prohibition (Bash/shell gap) must be present in the ruleset.
     assert "Lore vault — mandatory write rules" in rules
@@ -143,25 +149,20 @@ def test_installed_ruleset_carries_write_prohibition(tmp_path):
 # 3. End-to-end byte-for-byte idempotency (every init-flow writer)
 # ---------------------------------------------------------------------------
 
+
 def test_second_init_leaves_settings_byte_for_byte_unchanged(tmp_path):
     state, config, home = _dirs(tmp_path)
-    _run(["init"], state=state, config=config, home=home,
-         identity="dev@example.com")
+    _run(["init"], state=state, config=config, home=home, identity="dev@example.com")
     first = _settings_path(home).read_bytes()
-    _run(["init"], state=state, config=config, home=home,
-         identity="dev@example.com")
+    _run(["init"], state=state, config=config, home=home, identity="dev@example.com")
     second = _settings_path(home).read_bytes()
     assert second == first, "settings.json must be byte-for-byte stable on re-run"
 
 
 def test_second_init_leaves_ruleset_byte_for_byte_unchanged(tmp_path):
     state, config, home = _dirs(tmp_path)
-    _run(["init"], state=state, config=config, home=home,
-         identity="dev@example.com")
+    _run(["init"], state=state, config=config, home=home, identity="dev@example.com")
     first = _rules_path(home).read_bytes()
-    _run(["init"], state=state, config=config, home=home,
-         identity="dev@example.com")
+    _run(["init"], state=state, config=config, home=home, identity="dev@example.com")
     second = _rules_path(home).read_bytes()
-    assert second == first, (
-        "the user-level ruleset must be byte-for-byte stable on re-run"
-    )
+    assert second == first, "the user-level ruleset must be byte-for-byte stable on re-run"

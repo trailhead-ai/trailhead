@@ -23,6 +23,7 @@ seams. Both trees are scanned.
 appearing in this file are STRUCTURAL extension-point identifiers, not private
 app tokens — they carry no denylist match and are safe as literals here.
 """
+
 from __future__ import annotations
 
 import re
@@ -103,11 +104,15 @@ def test_real_extension_points_discovered():
     seams — is now discovered in the craft tree, only when a craft checkout is
     present."""
     if CRAFT_PLUGIN is not None:
-        for expected in ("design_mockup", "feature_flags", "observability",
-                         "issue_tracker", "build_test_commands"):
+        for expected in (
+            "design_mockup",
+            "feature_flags",
+            "observability",
+            "issue_tracker",
+            "build_test_commands",
+        ):
             assert expected in REAL_POINTS, (
-                f"discovery did not find {expected!r} in the craft tree; "
-                f"found: {REAL_POINTS}"
+                f"discovery did not find {expected!r} in the craft tree; found: {REAL_POINTS}"
             )
 
 

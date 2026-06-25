@@ -14,6 +14,7 @@ Test contract (harness portion):
 - unknown {placeholder} or empty token → legible GroupConfigError.
 - launch() resolves then os.execvp's the resolved argv + chdir to cwd (stubbed).
 """
+
 from __future__ import annotations
 
 import sys
@@ -127,10 +128,7 @@ class TestHarnessConfigValidation:
         from group_config import load_group
 
         f = tmp_path / "g.toml"
-        f.write_text(
-            "[group]\nname='g'\n"
-            "[[members]]\nname='r'\nrepo_root='/tmp/r'\n" + body
-        )
+        f.write_text("[group]\nname='g'\n[[members]]\nname='r'\nrepo_root='/tmp/r'\n" + body)
         return load_group(f)
 
     def test_valid_harness_block_parses(self, tmp_path):
@@ -153,7 +151,7 @@ class TestHarnessConfigValidation:
         from group_config import GroupConfigError
 
         with pytest.raises(GroupConfigError):
-            self._load(tmp_path, "[harness]\nnew = \"claude\"\nresume = [\"claude\"]\n")
+            self._load(tmp_path, '[harness]\nnew = "claude"\nresume = ["claude"]\n')
 
     def test_harness_empty_token_rejected(self, tmp_path):
         from group_config import GroupConfigError
@@ -161,7 +159,7 @@ class TestHarnessConfigValidation:
         with pytest.raises(GroupConfigError) as exc:
             self._load(
                 tmp_path,
-                "[harness]\nnew = [\"claude\", \"  \"]\nresume = [\"claude\"]\n",
+                '[harness]\nnew = ["claude", "  "]\nresume = ["claude"]\n',
             )
         assert "empty" in str(exc.value).lower() or "whitespace" in str(exc.value).lower()
 
@@ -169,7 +167,7 @@ class TestHarnessConfigValidation:
         from group_config import GroupConfigError
 
         with pytest.raises(GroupConfigError):
-            self._load(tmp_path, "[harness]\nnew = [\"claude\", 3]\nresume = [\"claude\"]\n")
+            self._load(tmp_path, '[harness]\nnew = ["claude", 3]\nresume = ["claude"]\n')
 
     def test_harness_unknown_placeholder_rejected(self, tmp_path):
         from group_config import GroupConfigError
@@ -177,7 +175,7 @@ class TestHarnessConfigValidation:
         with pytest.raises(GroupConfigError) as exc:
             self._load(
                 tmp_path,
-                "[harness]\nnew = [\"claude\", \"{bogus}\"]\nresume = [\"claude\"]\n",
+                '[harness]\nnew = ["claude", "{bogus}"]\nresume = ["claude"]\n',
             )
         assert "bogus" in str(exc.value)
 
@@ -187,27 +185,27 @@ class TestHarnessConfigValidation:
         with pytest.raises(GroupConfigError) as exc:
             self._load(
                 tmp_path,
-                "[harness]\nnew = [\"claude\"]\nresume = [\"claude\"]\ncwd = \"{nope}\"\n",
+                '[harness]\nnew = ["claude"]\nresume = ["claude"]\ncwd = "{nope}"\n',
             )
         assert "nope" in str(exc.value)
 
     def test_harness_inject_stdout_parses(self, tmp_path):
-        cfg = self._load(tmp_path, "[harness]\ninject = \"stdout\"\n")
+        cfg = self._load(tmp_path, '[harness]\ninject = "stdout"\n')
         assert cfg["harness"]["inject"] == "stdout"
 
     def test_harness_inject_claude_hook_parses(self, tmp_path):
-        cfg = self._load(tmp_path, "[harness]\ninject = \"claude-hook\"\n")
+        cfg = self._load(tmp_path, '[harness]\ninject = "claude-hook"\n')
         assert cfg["harness"]["inject"] == "claude-hook"
 
     def test_harness_inject_absent_not_in_parsed(self, tmp_path):
-        cfg = self._load(tmp_path, "[harness]\ndoc_files = [\"AGENTS.md\"]\n")
+        cfg = self._load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
         assert "inject" not in cfg["harness"]
 
     def test_harness_inject_unknown_value_rejected(self, tmp_path):
         from group_config import GroupConfigError
 
         with pytest.raises(GroupConfigError) as exc:
-            self._load(tmp_path, "[harness]\ninject = \"telepathy\"\n")
+            self._load(tmp_path, '[harness]\ninject = "telepathy"\n')
         assert "telepathy" in str(exc.value)
 
     def test_harness_inject_non_string_rejected(self, tmp_path):
@@ -225,14 +223,14 @@ class TestHarnessConfigValidation:
         assert cfg["harness"]["pretrust"] is False
 
     def test_harness_pretrust_absent_not_in_parsed(self, tmp_path):
-        cfg = self._load(tmp_path, "[harness]\ndoc_files = [\"AGENTS.md\"]\n")
+        cfg = self._load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
         assert "pretrust" not in cfg["harness"]
 
     def test_harness_pretrust_non_bool_rejected(self, tmp_path):
         from group_config import GroupConfigError
 
         with pytest.raises(GroupConfigError) as exc:
-            self._load(tmp_path, "[harness]\npretrust = \"yes\"\n")
+            self._load(tmp_path, '[harness]\npretrust = "yes"\n')
         assert "pretrust" in str(exc.value)
 
 
@@ -250,14 +248,15 @@ class TestLaunch:
 
         execd = {}
         chdir_to = {}
-        monkeypatch.setattr(harness_launch.os, "execvp",
-                            lambda file, args: execd.setdefault("call", (file, args)))
-        monkeypatch.setattr(harness_launch.os, "chdir",
-                            lambda d: chdir_to.setdefault("dir", d))
+        monkeypatch.setattr(
+            harness_launch.os, "execvp", lambda file, args: execd.setdefault("call", (file, args))
+        )
+        monkeypatch.setattr(harness_launch.os, "chdir", lambda d: chdir_to.setdefault("dir", d))
 
         harness_launch.launch(_group(), "feat-x", ws, is_resume=True)
 
         from session_identity import session_id_for
+
         sid = session_id_for("g", "feat-x")
         assert execd["call"] == ("claude", ["claude", "--resume", sid])
         assert chdir_to["dir"] == str(ws)
@@ -396,9 +395,7 @@ class TestResolveHarnessProfile:
     def test_configured_fields_honored(self):
         from harness_launch import resolve_harness_profile
 
-        p = resolve_harness_profile(
-            _group({"new": ["myh"], "inject": "claude-hook"})
-        )
+        p = resolve_harness_profile(_group({"new": ["myh"], "inject": "claude-hook"}))
         assert p.new == ["myh"]
         assert p.inject == "claude-hook"
         assert p.resume == ["claude", "--resume", "{session_id}"]

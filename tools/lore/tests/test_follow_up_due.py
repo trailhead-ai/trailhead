@@ -18,6 +18,7 @@ Cadence rules (daily / weekly):
 These tests use SYNTHETIC follow-up fixtures (public repo — invented vocabulary,
 never real brain content or real repo slugs).
 """
+
 from __future__ import annotations
 
 import sys
@@ -35,6 +36,7 @@ from follow_up_due import follow_up_notes_due  # noqa: E402
 # ---------------------------------------------------------------------------
 # Fixture helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_follow_up(path: Path, **fields) -> None:
     """Write a minimal synthetic follow-up note with the given frontmatter fields."""
@@ -57,6 +59,7 @@ def _follow_up_dir(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Fixtures — synthetic vault with follow-up notes
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def synthetic_vault(tmp_path: Path) -> Path:
@@ -151,6 +154,7 @@ def synthetic_vault(tmp_path: Path) -> Path:
 # Selection-predicate tests (the 6-case fixture)
 # ---------------------------------------------------------------------------
 
+
 def test_active_stale_is_selected(synthetic_vault: Path):
     """(a) active + stale last-checked → in due list."""
     result = follow_up_notes_due(synthetic_vault, today=date(2026, 6, 1))
@@ -206,6 +210,7 @@ def test_exact_due_set(synthetic_vault: Path):
 # Cadence tests (weekly boundary)
 # ---------------------------------------------------------------------------
 
+
 def test_weekly_stale_7_days_ago_is_due(tmp_path: Path):
     """Weekly item checked exactly 7 days ago is stale (older than 7 days: strictly > 7)."""
     follow_ups = _follow_up_dir(tmp_path)
@@ -259,6 +264,7 @@ def test_empty_follow_up_dir_returns_empty_result(tmp_path: Path):
 # Status-preservation tests
 # ---------------------------------------------------------------------------
 
+
 def test_status_preserved_after_patch(tmp_path: Path):
     """After stamping last-checked/last-state, the note's status is unchanged."""
     import frontmatter as fm
@@ -285,6 +291,7 @@ def test_status_preserved_after_patch(tmp_path: Path):
 
     # Validate: status must still be in the canonical set
     from status_validator import is_valid_status
+
     meta = fm.parse_frontmatter(note)
     assert meta["status"] == "active"
     assert is_valid_status("follow-ups", meta["status"])
@@ -293,6 +300,7 @@ def test_status_preserved_after_patch(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # No-snoozed-explosion test
 # ---------------------------------------------------------------------------
+
 
 def test_snoozed_legacy_status_does_not_crash(tmp_path: Path):
     """A note with legacy status 'snoozed' (off lore vocab) does not crash and is not polled."""
@@ -323,6 +331,7 @@ def test_snoozed_legacy_status_does_not_crash(tmp_path: Path):
 # Slice 6: follow-ups is a date-bucketed living folder — selection recurses into
 # YYYY-MM/ buckets while still finding flat notes.
 # ---------------------------------------------------------------------------
+
 
 def test_bucketed_radar_note_is_selected(tmp_path: Path):
     follow_ups = _follow_up_dir(tmp_path)

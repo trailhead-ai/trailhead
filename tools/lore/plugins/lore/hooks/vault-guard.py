@@ -51,6 +51,7 @@ guard's job is to protect the vault, not to become a single point of failure tha
 bricks the editor; the vault subtree is the narrow, well-defined target and a
 parse failure means we cannot identify the target anyway.
 """
+
 from __future__ import annotations
 
 import json

@@ -69,10 +69,12 @@ def test_parse_minimal_config_returns_one_vault(tmp_path, monkeypatch):
 def test_parse_multi_vault_config(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    data = _minimal_config(extra_vaults=[
-        {"name": "trailhead-ai_trailhead", "scope": "repo", "records": ["spec", "plan"]},
-        {"name": "product-engineering", "scope": "team", "records": ["blob"]},
-    ])
+    data = _minimal_config(
+        extra_vaults=[
+            {"name": "trailhead-ai_trailhead", "scope": "repo", "records": ["spec", "plan"]},
+            {"name": "product-engineering", "scope": "team", "records": ["blob"]},
+        ]
+    )
     config_path = _write_config(tmp_path, data)
     vaults = cfg.load_config(config_path)
     assert len(vaults) == 3
@@ -109,9 +111,11 @@ def test_vault_has_expected_fields(tmp_path, monkeypatch):
     state = tmp_path / "state"
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
     cfg = vc()
-    data = _minimal_config(extra_vaults=[
-        {"name": "my-team", "scope": "team", "records": ["spec"], "shared": True},
-    ])
+    data = _minimal_config(
+        extra_vaults=[
+            {"name": "my-team", "scope": "team", "records": ["spec"], "shared": True},
+        ]
+    )
     config_path = _write_config(tmp_path, data)
     vaults = cfg.load_config(config_path)
     team_vault = next(v for v in vaults if v.name == "my-team")
@@ -156,10 +160,12 @@ def test_repo_vault_with_slash_stored_as_normalized(tmp_path, monkeypatch):
     # The config already stores the normalized name (normalization happens at
     # add time, Slice 4). When stored as trailhead-ai/trailhead in config, the
     # load_config should normalize it on load.
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "trailhead-ai/trailhead", "scope": "repo"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "trailhead-ai/trailhead", "scope": "repo"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     vaults = cfg.load_config(config_path)
     repo_vault = next(v for v in vaults if v.scope == "repo")
@@ -170,10 +176,12 @@ def test_repo_vault_default_path_is_single_segment_under_vaults(tmp_path, monkey
     state = tmp_path / "state"
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
     cfg = vc()
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "trailhead-ai/trailhead", "scope": "repo"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "trailhead-ai/trailhead", "scope": "repo"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     vaults = cfg.load_config(config_path)
     repo_vault = next(v for v in vaults if v.scope == "repo")
@@ -182,6 +190,7 @@ def test_repo_vault_default_path_is_single_segment_under_vaults(tmp_path, monkey
     assert path_str.endswith("trailhead-ai_trailhead")
     # Parent should be the vaults dir, not a nested org dir
     from pathlib import Path
+
     assert Path(path_str).parent.name == "vaults"
 
 
@@ -202,10 +211,12 @@ def test_zero_default_vaults_raises(tmp_path, monkeypatch):
 def test_two_default_vaults_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "default2", "scope": "default"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "default2", "scope": "default"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     with pytest.raises(cfg.VaultConfigError):
         cfg.load_config(config_path)
@@ -232,11 +243,13 @@ def test_default_vault_with_shared_true_raises(tmp_path, monkeypatch):
 def test_duplicate_name_across_scopes_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "my-vault", "scope": "team"},
-        {"name": "my-vault", "scope": "product"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "my-vault", "scope": "team"},
+            {"name": "my-vault", "scope": "product"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     with pytest.raises(cfg.VaultConfigError):
         cfg.load_config(config_path)
@@ -247,11 +260,13 @@ def test_duplicate_name_after_normalization_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
     # "org/repo" and "org_repo" normalize to the same "org_repo"
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "org/repo", "scope": "repo"},
-        {"name": "org_repo", "scope": "product"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "org/repo", "scope": "repo"},
+            {"name": "org_repo", "scope": "product"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     with pytest.raises(cfg.VaultConfigError):
         cfg.load_config(config_path)
@@ -260,10 +275,12 @@ def test_duplicate_name_after_normalization_raises(tmp_path, monkeypatch):
 def test_bad_scope_value_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "my-vault", "scope": "workspace"},  # invalid scope
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "my-vault", "scope": "workspace"},  # invalid scope
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     with pytest.raises(cfg.VaultConfigError):
         cfg.load_config(config_path)
@@ -272,10 +289,12 @@ def test_bad_scope_value_raises(tmp_path, monkeypatch):
 def test_records_entry_not_in_kinds_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "my-vault", "scope": "team", "records": ["nosuchkind"]},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "my-vault", "scope": "team", "records": ["nosuchkind"]},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     with pytest.raises(cfg.VaultConfigError):
         cfg.load_config(config_path)
@@ -284,10 +303,12 @@ def test_records_entry_not_in_kinds_raises(tmp_path, monkeypatch):
 def test_empty_name_after_normalization_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "", "scope": "team"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "", "scope": "team"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     with pytest.raises(cfg.VaultConfigError):
         cfg.load_config(config_path)
@@ -296,10 +317,12 @@ def test_empty_name_after_normalization_raises(tmp_path, monkeypatch):
 def test_dotdot_name_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "..", "scope": "team"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "..", "scope": "team"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     with pytest.raises(cfg.VaultConfigError):
         cfg.load_config(config_path)
@@ -324,9 +347,14 @@ def test_error_message_names_violation(tmp_path, monkeypatch):
 def test_is_shared_no_key_returns_false(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    config_path = _write_config(tmp_path, _minimal_config(extra_vaults=[
-        {"name": "my-team", "scope": "team"},
-    ]))
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "my-team", "scope": "team"},
+            ]
+        ),
+    )
     vaults = cfg.load_config(config_path)
     team_vault = next(v for v in vaults if v.name == "my-team")
     assert cfg.is_shared(team_vault) is False
@@ -335,9 +363,14 @@ def test_is_shared_no_key_returns_false(tmp_path, monkeypatch):
 def test_is_shared_explicit_true_returns_true(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    config_path = _write_config(tmp_path, _minimal_config(extra_vaults=[
-        {"name": "shared-team", "scope": "team", "shared": True},
-    ]))
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "shared-team", "scope": "team", "shared": True},
+            ]
+        ),
+    )
     vaults = cfg.load_config(config_path)
     team_vault = next(v for v in vaults if v.name == "shared-team")
     assert cfg.is_shared(team_vault) is True
@@ -347,10 +380,15 @@ def test_is_shared_multiple_non_default_can_all_be_false(tmp_path, monkeypatch):
     """No singleton 'personal' vault — multiple vaults can be unshared."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    config_path = _write_config(tmp_path, _minimal_config(extra_vaults=[
-        {"name": "team-a", "scope": "team"},
-        {"name": "my-repo", "scope": "repo"},
-    ]))
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "team-a", "scope": "team"},
+                {"name": "my-repo", "scope": "repo"},
+            ]
+        ),
+    )
     vaults = cfg.load_config(config_path)
     non_default = [v for v in vaults if v.scope != "default"]
     assert len(non_default) == 2
@@ -374,9 +412,14 @@ def test_is_shared_default_vault_always_false(tmp_path, monkeypatch):
 def test_is_configured_vault_true_for_present_name(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
-    config_path = _write_config(tmp_path, _minimal_config(extra_vaults=[
-        {"name": "my-team", "scope": "team"},
-    ]))
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "my-team", "scope": "team"},
+            ]
+        ),
+    )
     vaults = cfg.load_config(config_path)
     assert cfg.is_configured_vault("my-team", vaults) is True
 
@@ -394,10 +437,12 @@ def test_is_configured_vault_matches_after_normalization(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
     # Config stores normalized name trailhead-ai_trailhead (normalized on load)
-    data = {"vaults": [
-        {"name": "default", "scope": "default"},
-        {"name": "trailhead-ai/trailhead", "scope": "repo"},
-    ]}
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "trailhead-ai/trailhead", "scope": "repo"},
+        ]
+    }
     config_path = _write_config(tmp_path, data)
     vaults = cfg.load_config(config_path)
     # Both the normalized and un-normalized form should match

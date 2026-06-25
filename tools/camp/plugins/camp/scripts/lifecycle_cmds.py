@@ -13,6 +13,7 @@ cmd_ls_group(group, env):
 cmd_sync_group(group, env):
     Sync canonical member repos to latest (fetch + ff-only).
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -130,6 +131,7 @@ def cmd_status_group(
         # Scoped: one worktree
         group_name = group["group"]["name"]
         from manifest import manifest_path_for
+
         mpath = manifest_path_for(group_name, slug, env=env)
         try:
             data = read_central_manifest(mpath)
@@ -155,14 +157,16 @@ def cmd_status_group(
             st = _git_repo_status(wt_path)
             member_statuses.append({"name": m["name"], **st})
 
-        worktrees.append({
-            "slug": slug_name,
-            "branch": data.get("branch", ""),
-            "manifest_path": str(mpath),
-            "members": member_statuses,
-            "dev_env_instance": None,
-            "fire_state": None,
-        })
+        worktrees.append(
+            {
+                "slug": slug_name,
+                "branch": data.get("branch", ""),
+                "manifest_path": str(mpath),
+                "members": member_statuses,
+                "dev_env_instance": None,
+                "fire_state": None,
+            }
+        )
 
     return {"worktrees": worktrees}
 
@@ -182,12 +186,14 @@ def cmd_ls_group(
     for slug_name, mpath in pairs:
         try:
             data = read_central_manifest(mpath)
-            entries.append({
-                "slug": slug_name,
-                "branch": data.get("branch", ""),
-                "manifest_path": str(mpath),
-                "group": data.get("group", ""),
-            })
+            entries.append(
+                {
+                    "slug": slug_name,
+                    "branch": data.get("branch", ""),
+                    "manifest_path": str(mpath),
+                    "group": data.get("group", ""),
+                }
+            )
         except ManifestError:
             pass
     return entries
@@ -324,7 +330,9 @@ def cmd_sync_group(
         # Fetch
         subprocess.run(
             ["git", "-C", str(repo_root), "fetch", "origin", "--quiet"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
         is_dirty = _git_is_dirty(repo_root)
@@ -341,16 +349,22 @@ def cmd_sync_group(
         if force:
             subprocess.run(
                 ["git", "-C", str(repo_root), "checkout", "main", "--quiet"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             r = subprocess.run(
                 ["git", "-C", str(repo_root), "reset", "--hard", "origin/main"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         else:
             r = subprocess.run(
                 ["git", "-C", str(repo_root), "merge", "--ff-only", "origin/main"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
         if r.returncode != 0:

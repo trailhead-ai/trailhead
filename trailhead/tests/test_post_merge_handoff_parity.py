@@ -23,6 +23,7 @@ Strategy:
 
 Hermetic: reads only the two markdown files under their respective plugin trees.
 """
+
 from __future__ import annotations
 
 import re
@@ -42,6 +43,7 @@ SOAKER_MD = REPO_ROOT / "tools" / "landing" / "plugins" / "landing" / "agents" /
 # ---------------------------------------------------------------------------
 # Parsers
 # ---------------------------------------------------------------------------
+
 
 def _parse_handoff_marker_fields(monitor_text: str) -> set[str]:
     """Extract top-level fields from the post_merge_handoff JSON example in monitor.md.
@@ -65,11 +67,11 @@ def _parse_handoff_marker_fields(monitor_text: str) -> set[str]:
         if idx < 0:
             continue
         # Advance past the marker and any whitespace/:/{
-        rest = stripped[idx + len(marker):]
+        rest = stripped[idx + len(marker) :]
         colon_pos = rest.find("{")
         if colon_pos < 0:
             continue
-        inner = rest[colon_pos + 1:]  # content after the opening {
+        inner = rest[colon_pos + 1 :]  # content after the opening {
 
         # Extract keys at depth 0 of the inner object
         # (depth increments on { or [, decrements on } or ])
@@ -90,9 +92,9 @@ def _parse_handoff_marker_fields(monitor_text: str) -> set[str]:
                 # Possible key at top level
                 end = inner.find('"', i + 1)
                 if end > i:
-                    key = inner[i + 1:end]
+                    key = inner[i + 1 : end]
                     # Check it's followed by a colon (is actually a key, not a value)
-                    after = inner[end + 1:].lstrip()
+                    after = inner[end + 1 :].lstrip()
                     if after.startswith(":"):
                         keys.add(key)
                     i = end + 1
@@ -133,6 +135,7 @@ def _parse_required_inputs(soaker_text: str) -> set[str]:
 # The parity test
 # ---------------------------------------------------------------------------
 
+
 class TestPostMergeHandoffParity:
     """post_merge_handoff marker (portage monitor) must cover all required inputs of
     landing soaker."""
@@ -147,9 +150,7 @@ class TestPostMergeHandoffParity:
         assert SOAKER_MD.exists(), f"soaker.md not found at {SOAKER_MD}"
         return SOAKER_MD.read_text(encoding="utf-8")
 
-    def test_handoff_marker_has_group_toml_path(
-        self, monitor_text: str
-    ) -> None:
+    def test_handoff_marker_has_group_toml_path(self, monitor_text: str) -> None:
         """Parity guard: the post_merge_handoff marker must include group_toml_path.
 
         group_toml_path is the field whose omission caused the original bug:
@@ -180,12 +181,8 @@ class TestPostMergeHandoffParity:
         marker_fields = _parse_handoff_marker_fields(monitor_text)
         required_inputs = _parse_required_inputs(soaker_text)
 
-        assert marker_fields, (
-            "Could not parse post_merge_handoff fields from monitor.md"
-        )
-        assert required_inputs, (
-            "Could not parse required inputs from soaker.md Inputs section"
-        )
+        assert marker_fields, "Could not parse post_merge_handoff fields from monitor.md"
+        assert required_inputs, "Could not parse required inputs from soaker.md Inputs section"
 
         # merge_pairs is optional in soaker.md ("for context only") — it may be
         # threaded separately as formatted context rather than a raw marker field
@@ -208,6 +205,4 @@ class TestPostMergeHandoffParity:
 
     def test_inputs_section_exists_in_soaker(self, soaker_text: str) -> None:
         """The '## Inputs' section must exist in soaker.md."""
-        assert "## Inputs" in soaker_text, (
-            "soaker.md must have an '## Inputs' section"
-        )
+        assert "## Inputs" in soaker_text, "soaker.md must have an '## Inputs' section"

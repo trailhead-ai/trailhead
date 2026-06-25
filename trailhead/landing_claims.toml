@@ -45,7 +45,7 @@ source = "root"
 [[claim]]
 kind = "skill"
 tool = "lore"
-ref = "skills/finish"
+ref = "skills/flush"
 source = "lore"
 
 # ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ source = "portage"
 [[claim]]
 kind = "skill"
 tool = "lore"
-ref = "skills/checkpoint"
+ref = "skills/search"
 source = "lore"
 
 # ---------------------------------------------------------------------------

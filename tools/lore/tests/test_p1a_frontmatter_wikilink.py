@@ -16,6 +16,7 @@ Test contract (all must fail before the fix, pass after):
 recall command path was retired; membership is now an index-projection property
 covered by test_index_projection.py.)
 """
+
 from __future__ import annotations
 
 from conftest import load_script
@@ -24,6 +25,7 @@ from conftest import load_script
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _fm(text: str) -> dict:
     """Parse frontmatter from a raw YAML string (between the ---s)."""
@@ -35,6 +37,7 @@ def _fm(text: str) -> dict:
 # ---------------------------------------------------------------------------
 # Block-style list parsing
 # ---------------------------------------------------------------------------
+
 
 class TestBlockStyleListParsing:
     def test_block_style_single_bare_slug(self):
@@ -61,6 +64,7 @@ class TestBlockStyleListParsing:
 # ---------------------------------------------------------------------------
 # Wikilink unwrapping for overlap keys (slug-reduced)
 # ---------------------------------------------------------------------------
+
 
 class TestWikilinkUnwrapSlugReduced:
     def test_block_wikilink_areas_prefix_stripped(self):
@@ -117,6 +121,7 @@ class TestWikilinkUnwrapSlugReduced:
 # Non-overlap wikilink fields: full path retained, NOT slug-reduced, NOT a list
 # ---------------------------------------------------------------------------
 
+
 class TestNonOverlapWikilinkFields:
     def test_related_spec_keeps_full_path(self):
         """related-spec: '[[specs/synth-spec-slug]]' → 'specs/synth-spec-slug'
@@ -150,6 +155,7 @@ class TestNonOverlapWikilinkFields:
 # ---------------------------------------------------------------------------
 # Regression guard: existing forms still parse unchanged
 # ---------------------------------------------------------------------------
+
 
 class TestRegressionGuard:
     def test_inline_bare_slug_list_unchanged(self):

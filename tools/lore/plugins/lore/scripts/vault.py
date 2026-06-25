@@ -5,6 +5,7 @@ through these two pure functions. Vault location comes from $LORE_VAULT
 (default ~/lore); the acting user from $LORE_USER, then git config, then
 a generic fallback. Neither function raises.
 """
+
 from __future__ import annotations
 
 import os
@@ -91,7 +92,9 @@ def resolve_user() -> str:
     try:
         result = subprocess.run(
             ["git", "config", "user.name"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             name = _sanitize(result.stdout or "")
@@ -130,7 +133,9 @@ def resolve_committer_email() -> str:
     try:
         result = subprocess.run(
             ["git", "config", "--global", "user.email"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             email = _sanitize(result.stdout or "")
@@ -154,7 +159,9 @@ def resolve_project(cwd: Path | None = None) -> str:
     try:
         result = subprocess.run(
             ["git", "-C", str(target), "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         url = (result.stdout or "").strip()
         if url and result.returncode == 0:
@@ -260,7 +267,9 @@ def detect_worktree_name(cwd: Path | None = None) -> str:
     try:
         result = subprocess.run(
             ["git", "-C", target_str, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         top = (result.stdout or "").strip()
         if top and result.returncode == 0:

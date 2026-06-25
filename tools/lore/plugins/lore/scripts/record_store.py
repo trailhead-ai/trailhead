@@ -52,6 +52,7 @@ Pure stdlib (``json``, ``sqlite3`` via ``index_store``, ``os``/``pathlib``,
 ``subprocess`` for git identity, ``datetime``). References: Slice 2, AC-TX1/TX2,
 AC-LIB1/2/3, AC-FENCE1, AC12/AC13, KU4/KU5.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -146,8 +147,7 @@ class DiffRejectError(RecordStoreError):
         self.original_body = original_body
         self.rejected = rejected
         super().__init__(
-            f"{len(rejected)} hunk(s) rejected: "
-            + "; ".join(f"{h}: {r}" for h, r in rejected)
+            f"{len(rejected)} hunk(s) rejected: " + "; ".join(f"{h}: {r}" for h, r in rejected)
         )
 
 
@@ -183,11 +183,11 @@ _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 class _Hunk(NamedTuple):
     """A single parsed unified-diff hunk (header + body lines with endings kept)."""
 
-    header: str          # raw ``@@ -L,N +L,M @@`` line (for error reporting)
-    old_start: int       # 1-based line number in the original body
+    header: str  # raw ``@@ -L,N +L,M @@`` line (for error reporting)
+    old_start: int  # 1-based line number in the original body
     old_count: int
     new_count: int
-    lines: list[str]     # hunk lines WITH leading marker AND original line ending
+    lines: list[str]  # hunk lines WITH leading marker AND original line ending
 
 
 def _validate_hunk_counts(hunk: _Hunk) -> None:
@@ -285,12 +285,14 @@ def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
         start_0 = hunk.old_start - 1
         end_0 = start_0 + len(ctx_lines)
         if end_0 > len(body_lines):
-            rejected.append((
-                hunk.header,
-                f"context overruns body (body has {len(body_lines)} lines, "
-                f"hunk starts at line {hunk.old_start} and expects "
-                f"{len(ctx_lines)} context/deletion lines)",
-            ))
+            rejected.append(
+                (
+                    hunk.header,
+                    f"context overruns body (body has {len(body_lines)} lines, "
+                    f"hunk starts at line {hunk.old_start} and expects "
+                    f"{len(ctx_lines)} context/deletion lines)",
+                )
+            )
             continue
 
         mismatch_line: Optional[int] = None
@@ -299,10 +301,12 @@ def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
                 mismatch_line = hunk.old_start + i
                 break
         if mismatch_line is not None:
-            rejected.append((
-                hunk.header,
-                f"context mismatch at body line {mismatch_line}",
-            ))
+            rejected.append(
+                (
+                    hunk.header,
+                    f"context mismatch at body line {mismatch_line}",
+                )
+            )
 
     if rejected:
         raise DiffRejectError(original_body=original_body, rejected=rejected)
@@ -323,7 +327,7 @@ def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
             elif marker == "+":
                 new_slice.append(content)
         start_0 = hunk.old_start - 1 + offset
-        result_lines[start_0:start_0 + len(old_slice)] = new_slice
+        result_lines[start_0 : start_0 + len(old_slice)] = new_slice
         offset += len(new_slice) - len(old_slice)
 
     return "".join(result_lines), []
@@ -363,9 +367,7 @@ def neutralize_fences(text: str) -> str:
     enough for the contract: the output contains no fence token.
     """
     return _FENCE_RE.sub(
-        lambda m: m.group(0).replace(
-            m.group(1) + m.group(2), m.group(1) + _JOINER + m.group(2), 1
-        ),
+        lambda m: m.group(0).replace(m.group(1) + m.group(2), m.group(1) + _JOINER + m.group(2), 1),
         text,
     )
 
@@ -413,9 +415,7 @@ def _read_existing_provenance(sidecar_path: Path) -> dict[str, Any]:
     if not isinstance(existing, dict):
         return {}
     return {
-        k: existing[k]
-        for k in ("created-at", "created-by")
-        if isinstance(existing.get(k), str)
+        k: existing[k] for k in ("created-at", "created-by") if isinstance(existing.get(k), str)
     }
 
 
@@ -501,9 +501,7 @@ def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, 
     root_real = os.path.realpath(root)
     for p in (body_path, sidecar_path):
         if not _realpath_is_descendant(p, root_real):
-            raise InvalidRecordIdError(
-                f"RECORD_ID resolves outside the vault root: {record_id!r}"
-            )
+            raise InvalidRecordIdError(f"RECORD_ID resolves outside the vault root: {record_id!r}")
     return kind, name, body_path, sidecar_path
 
 
@@ -602,9 +600,7 @@ def update_index(
     blanket "CLI writes are always own" assumption.
     """
     kind, name = record_id.split("/", 1)
-    index_store.upsert_row(
-        conn, vault_root, kind, name, sidecar, body, shared=shared
-    )
+    index_store.upsert_row(conn, vault_root, kind, name, sidecar, body, shared=shared)
 
 
 # ---------------------------------------------------------------------------
@@ -645,8 +641,7 @@ def validate_stamp_neutralize(
     email = resolve_committer_email()
     if not email:
         raise ProvenanceError(
-            "set git config user.email; *-by provenance is required and "
-            "cannot be defaulted"
+            "set git config user.email; *-by provenance is required and cannot be defaulted"
         )
 
     # 3 — stamp provenance. created-* set once; updated-* re-stamped each write.
@@ -704,7 +699,11 @@ def validate_and_write(
     # ``shared`` is the resolved vault's trust flag (S4): default 0 (own/trusted)
     # preserves vanilla; the config-driven create path passes 1 for a shared vault.
     update_index(
-        conn, location.record_id, stamped, safe_body, location.vault_root,
+        conn,
+        location.record_id,
+        stamped,
+        safe_body,
+        location.vault_root,
         shared=shared,
     )
 
@@ -759,9 +758,7 @@ def move_record(
     Returns the new ``RecordId``.
     """
     old_root = old_vault_root if old_vault_root is not None else vault_mod.resolve_vault()
-    old_kind, old_name, old_body_path, old_sidecar_path = _confine_record_id(
-        old_id, old_root
-    )
+    old_kind, old_name, old_body_path, old_sidecar_path = _confine_record_id(old_id, old_root)
 
     # Dest-confinement (Slice 3): the destination paths must be descendants of the
     # declared dest vault root (mirrors the source-side _confine_record_id guard).
@@ -769,8 +766,7 @@ def move_record(
     for p in (new_location.body_path, new_location.sidecar_path):
         if not _realpath_is_descendant(p, dest_root_real):
             raise InvalidRecordIdError(
-                f"destination resolves outside the dest vault root: "
-                f"{new_location.record_id!r}"
+                f"destination resolves outside the dest vault root: {new_location.record_id!r}"
             )
 
     if not old_body_path.exists() and not old_sidecar_path.exists():
@@ -787,9 +783,7 @@ def move_record(
         sidecar_text = json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
     else:
         sidecar_text = (
-            old_sidecar_path.read_text(encoding="utf-8")
-            if old_sidecar_path.exists()
-            else "{}"
+            old_sidecar_path.read_text(encoding="utf-8") if old_sidecar_path.exists() else "{}"
         )
         sidecar = json.loads(sidecar_text)
 

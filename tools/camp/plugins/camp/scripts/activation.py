@@ -10,6 +10,7 @@ camp enter <member>:
 
 Hooks run shell=False (list-mode, D-F bootstrap-trust posture).
 """
+
 from __future__ import annotations
 
 import subprocess

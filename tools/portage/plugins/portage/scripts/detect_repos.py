@@ -11,6 +11,7 @@ and JSON output shape.
 Output: a JSON array of {repo, path, branch, ahead, dirty} for active members.
 Exit 0 on success; exit 2 on a missing/malformed manifest.
 """
+
 from __future__ import annotations
 
 import argparse

@@ -18,6 +18,7 @@ Protocol:
 SHELL_FALSE is a module-level sentinel documenting the invariant. Tests assert
 it is True; a future change to shell=True would trip the assertion.
 """
+
 from __future__ import annotations
 
 import subprocess

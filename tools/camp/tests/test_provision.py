@@ -26,6 +26,7 @@ Test contract (all must RED before implementation, GREEN after):
 Fixtures use real synthetic git repos in tmp_path + CAMP_STATE_DIR env injection;
 no real claude exec, no ~/.claude.
 """
+
 from __future__ import annotations
 
 import json
@@ -56,21 +57,32 @@ _VENV_PYTHON = sys.executable
 def _init_git_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main", str(path)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@test.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@test.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True, capture_output=True
+    )
     (path / "README.md").write_text("# test\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        capture_output=True,
+    )
     # Self-origin so the configured base `origin/main` resolves locally — a real
     # member always has a fetchable/resolvable base; without it the base-fetch
     # correctly fails the member (BUG 4 fix: no silent HEAD fallback).
-    subprocess.run(["git", "-C", str(path), "remote", "add", "origin", str(path)],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(path), "fetch", "origin", "--quiet"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "fetch", "origin", "--quiet"], check=True, capture_output=True
+    )
 
 
 def _make_group_config(name, members, *, branch_pattern="worktree-{slug}"):
@@ -85,11 +97,13 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 
 def _member_wt(group_name, slug, member, env):
     from group_resolve import central_state_dir
+
     return central_state_dir(group_name, env=env) / "worktrees" / slug / member
 
 
 def _workspace_dir(group_name, slug, env):
     from group_resolve import central_state_dir
+
     return central_state_dir(group_name, env=env) / "worktrees" / slug
 
 
@@ -128,18 +142,22 @@ class TestU1RealSurvival:
         # No-op provisioner script (stands in for `camp setup --background`):
         # sleeps so the parent definitely exec's first, then writes the sentinel.
         provisioner = scratch / "noop_provisioner.py"
-        provisioner.write_text(textwrap.dedent(f"""\
+        provisioner.write_text(
+            textwrap.dedent(f"""\
             import time, os
             time.sleep(0.8)
             with open({str(sentinel)!r}, "w") as f:
                 f.write(f"done pid={{os.getpid()}}\\n")
             print("provisioner completed", flush=True)
-            """), encoding="utf-8")
+            """),
+            encoding="utf-8",
+        )
 
         # Parent: import the REAL spawn helper, spawn the detached child via it,
         # then immediately os.execvp over itself.
         parent = scratch / "parent.py"
-        parent.write_text(textwrap.dedent(f"""\
+        parent.write_text(
+            textwrap.dedent(f"""\
             import sys, os
             sys.path.insert(0, {str(_SCRIPTS_DIR)!r})
             from provision import spawn_detached_provisioner
@@ -149,7 +167,9 @@ class TestU1RealSurvival:
                 _argv=[sys.executable, {str(provisioner)!r}],
             )
             os.execvp(sys.executable, [sys.executable, "-c", "pass"])
-            """), encoding="utf-8")
+            """),
+            encoding="utf-8",
+        )
 
         result = subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=15)
         assert result.returncode == 0, (
@@ -174,16 +194,20 @@ class TestU1RealSurvival:
         logfile = scratch / "setup.log"
 
         provisioner = scratch / "noop_provisioner.py"
-        provisioner.write_text(textwrap.dedent(f"""\
+        provisioner.write_text(
+            textwrap.dedent(f"""\
             import time, os
             time.sleep(0.5)
             with open({str(sentinel)!r}, "w") as f:
                 f.write("done\\n")
             print("provisioner completed", flush=True)
-            """), encoding="utf-8")
+            """),
+            encoding="utf-8",
+        )
 
         parent = scratch / "parent.py"
-        parent.write_text(textwrap.dedent(f"""\
+        parent.write_text(
+            textwrap.dedent(f"""\
             import sys, os
             sys.path.insert(0, {str(_SCRIPTS_DIR)!r})
             from provision import spawn_detached_provisioner
@@ -192,7 +216,9 @@ class TestU1RealSurvival:
                 _argv=[sys.executable, {str(provisioner)!r}],
             )
             os.execvp(sys.executable, [sys.executable, "-c", "pass"])
-            """), encoding="utf-8")
+            """),
+            encoding="utf-8",
+        )
 
         subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=15)
 
@@ -305,6 +331,7 @@ class TestAiSeedAndSpawn:
         bring_up_workspace(g["group"], "feat-x", env=g["env"])
 
         from manifest import read_central_manifest
+
         mpath = _workspace_dir("testgroup", "feat-x", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
         states = {m["name"]: m["provision_state"] for m in data["members"]}
@@ -312,6 +339,7 @@ class TestAiSeedAndSpawn:
 
     def test_ai_creates_workspace_dir_synchronously(self, two_member_group, monkeypatch):
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
 
@@ -326,7 +354,8 @@ class TestAiSeedAndSpawn:
         g = two_member_group
         calls = []
         monkeypatch.setattr(
-            provision, "spawn_detached_provisioner",
+            provision,
+            "spawn_detached_provisioner",
             lambda **kw: calls.append(kw),
         )
 
@@ -412,6 +441,7 @@ class TestPretrustWiring:
         assert _read_trust(Path(env["HOME"])) == {}
         # Bring-up otherwise unchanged: manifest seeded.
         from manifest import read_central_manifest
+
         mpath = _workspace_dir("testgroup", "feat-off", env) / "manifest.json"
         assert read_central_manifest(mpath)["members"]
 
@@ -438,7 +468,8 @@ class TestPretrustWiring:
         env = self._env(g)
         spawned = []
         monkeypatch.setattr(
-            provision, "spawn_detached_provisioner",
+            provision,
+            "spawn_detached_provisioner",
             lambda **kw: spawned.append(kw),
         )
 
@@ -451,6 +482,7 @@ class TestPretrustWiring:
 
         # Best-effort invariant: manifest still seeded AND provisioner still spawned.
         from manifest import read_central_manifest
+
         mpath = _workspace_dir("testgroup", "feat-boom", env) / "manifest.json"
         assert read_central_manifest(mpath)["members"]
         assert len(spawned) == 1
@@ -483,6 +515,7 @@ class TestForegroundSetup:
     def test_setup_flips_pending_to_ready(self, two_member_group, monkeypatch):
         """A successful setup flips all pending members to ready."""
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
@@ -493,6 +526,7 @@ class TestForegroundSetup:
         cmd_setup_group(g["group"], "feat-s", env=g["env"])
 
         from manifest import read_central_manifest
+
         mpath = _workspace_dir("testgroup", "feat-s", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
         states = {m["name"]: m["provision_state"] for m in data["members"]}
@@ -505,6 +539,7 @@ class TestForegroundSetup:
     def test_failing_member_marked_failed_others_ready(self, tmp_path, monkeypatch):
         """A member whose reconcile fails → failed + reason; others still ready."""
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
@@ -516,10 +551,18 @@ class TestForegroundSetup:
         group = _make_group_config(
             "failg",
             [
-                {"name": "repo_a", "repo_root": str(repo_a), "bootstrap": [],
-                 "base": "origin/main"},
-                {"name": "repo_b", "repo_root": str(tmp_path / "nonexistent"),
-                 "bootstrap": [], "base": "origin/main"},
+                {
+                    "name": "repo_a",
+                    "repo_root": str(repo_a),
+                    "bootstrap": [],
+                    "base": "origin/main",
+                },
+                {
+                    "name": "repo_b",
+                    "repo_root": str(tmp_path / "nonexistent"),
+                    "bootstrap": [],
+                    "base": "origin/main",
+                },
             ],
         )
 
@@ -528,6 +571,7 @@ class TestForegroundSetup:
 
         from manifest import read_central_manifest
         from group_resolve import central_state_dir
+
         mpath = central_state_dir("failg", env=env) / "worktrees" / "feat-f" / "manifest.json"
         data = read_central_manifest(mpath)
         by_name = {m["name"]: m for m in data["members"]}
@@ -559,6 +603,7 @@ class TestForegroundSetup:
         cmd_setup_group(g["group"], "feat-to", env=g["env"])
 
         from manifest import read_central_manifest
+
         mpath = _workspace_dir("testgroup", "feat-to", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
         by_name = {m["name"]: m for m in data["members"]}
@@ -569,6 +614,7 @@ class TestForegroundSetup:
     def test_retry_reruns_only_non_ready(self, two_member_group, monkeypatch):
         """camp setup re-runs pending/failed members, leaves ready untouched."""
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
@@ -597,6 +643,7 @@ class TestForegroundSetup:
     def test_setup_is_idempotent(self, two_member_group, monkeypatch):
         """Running setup twice does not crash or duplicate members."""
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
@@ -607,6 +654,7 @@ class TestForegroundSetup:
         cmd_setup_group(g["group"], "feat-i", env=g["env"])
 
         from manifest import read_central_manifest
+
         mpath = _workspace_dir("testgroup", "feat-i", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
         assert len(data["members"]) == 2
@@ -622,6 +670,7 @@ class TestConcurrency:
         """A foreground setup started while a provisioner holds the lock
         serializes — no torn manifest, no double-add."""
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
@@ -647,6 +696,7 @@ class TestConcurrency:
         assert not errors, f"concurrent setup raised: {errors}"
 
         from manifest import read_central_manifest
+
         mpath = _workspace_dir("testgroup", "feat-c", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
         # Manifest is intact (readable, two members, both ready) — not torn.
@@ -658,6 +708,7 @@ class TestConcurrency:
         """camp status reads the rename-replaced manifest atomically: a read
         concurrent with many writes is always valid JSON (never a partial)."""
         import provision
+
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
         from manifest import (
@@ -707,19 +758,19 @@ class TestConcurrency:
 class TestStatusExitCodes:
     def _seed_states(self, group, slug, env, states: dict[str, str]):
         import provision
+
         # Seed pending then flip to target states directly.
         from manifest import flip_member_state_unlocked, reconcile_lock
+
         provision.seed_pending_workspace(group, slug, env=env)
-        mpath = (
-            provision.workspace_dir(group["group"]["name"], slug, env=env)
-            / "manifest.json"
-        )
+        mpath = provision.workspace_dir(group["group"]["name"], slug, env=env) / "manifest.json"
         for name, state in states.items():
             with reconcile_lock(mpath.parent):
                 flip_member_state_unlocked(mpath, name, state)
 
     def test_all_ready_exit_0(self, two_member_group):
         from lifecycle_cmds import provision_status_code
+
         g = two_member_group
         self._seed_states(g["group"], "s1", g["env"], {"repo_a": "ready", "repo_b": "ready"})
         code, _ = provision_status_code(g["group"], "s1", env=g["env"])
@@ -727,6 +778,7 @@ class TestStatusExitCodes:
 
     def test_some_pending_exit_2(self, two_member_group):
         from lifecycle_cmds import provision_status_code
+
         g = two_member_group
         self._seed_states(g["group"], "s2", g["env"], {"repo_a": "ready", "repo_b": "pending"})
         code, _ = provision_status_code(g["group"], "s2", env=g["env"])
@@ -734,6 +786,7 @@ class TestStatusExitCodes:
 
     def test_some_failed_exit_3(self, two_member_group):
         from lifecycle_cmds import provision_status_code
+
         g = two_member_group
         self._seed_states(g["group"], "s3", g["env"], {"repo_a": "ready", "repo_b": "failed"})
         code, _ = provision_status_code(g["group"], "s3", env=g["env"])
@@ -742,14 +795,15 @@ class TestStatusExitCodes:
     def test_failed_takes_precedence_over_pending(self, two_member_group):
         """When both pending and failed exist, failed (3) wins."""
         from lifecycle_cmds import provision_status_code
+
         g = two_member_group
-        self._seed_states(g["group"], "s4", g["env"],
-                          {"repo_a": "pending", "repo_b": "failed"})
+        self._seed_states(g["group"], "s4", g["env"], {"repo_a": "pending", "repo_b": "failed"})
         code, _ = provision_status_code(g["group"], "s4", env=g["env"])
         assert code == 3
 
     def test_json_shape_stable(self, two_member_group):
         from lifecycle_cmds import provision_status_code
+
         g = two_member_group
         self._seed_states(g["group"], "s5", g["env"], {"repo_a": "ready", "repo_b": "pending"})
         code, report = provision_status_code(g["group"], "s5", env=g["env"])

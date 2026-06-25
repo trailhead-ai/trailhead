@@ -28,6 +28,7 @@ check as SKILL.md files so a token cannot bypass the per-skill scan by living
 in a template. App-flavored tokens are constructed at runtime below (same
 P1-F trap avoidance as the test_cli_new.py band).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -110,27 +111,3 @@ def test_template_has_no_private_tokens(template_md: Path):
 # and private-token scans above still cover whatever lore skills remain.
 # ---------------------------------------------------------------------------
 
-
-# ---------------------------------------------------------------------------
-# intake — positive assertions (council 3-lens requirement)
-# The issue-tracker half is stripped; the visible-skip for issue_tracker MUST
-# be announced explicitly so a silent omission fails this test.
-#
-# Additional private-token tokens constructed at runtime: app-specific names
-# that MUST NOT appear in the genericized skill as raw literals.
-# ---------------------------------------------------------------------------
-
-def test_intake_skill_is_not_present():
-    """The intake skill was removed from the plugin.
-
-    The intake SKILL.md was removed as part of the subsystems→areas rename
-    cleanup (it was coupled to Asana-specific issue tracker integration that
-    is a private seam). This test asserts the removal is intentional so any
-    re-addition of an intake skill is a deliberate change that also must pass
-    the private-token generic checks.
-    """
-    intake_skill = SKILLS_DIR / "intake" / "SKILL.md"
-    assert not intake_skill.exists(), (
-        "intake/SKILL.md must not be present — it was removed. "
-        "Re-adding it requires genericizing all private tokens first."
-    )
