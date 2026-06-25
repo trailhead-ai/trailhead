@@ -124,7 +124,7 @@ def _git_commit_all(vault: Path, msg: str = "init") -> subprocess.CompletedProce
 
 def test_validator_cli_exits_nonzero_for_bad_status(tmp_path):
     note = tmp_path / "bad.md"
-    _make_note(note, "deferred", "bogus-status")
+    _make_note(note, "session", "bogus-status")
     r = run_validator([str(note)])
     assert r.returncode != 0
     assert "bad.md" in r.stderr or "bad.md" in r.stdout
@@ -132,7 +132,7 @@ def test_validator_cli_exits_nonzero_for_bad_status(tmp_path):
 
 def test_validator_cli_names_bad_status_in_output(tmp_path):
     note = tmp_path / "bad.md"
-    _make_note(note, "deferred", "bogus-status")
+    _make_note(note, "session", "bogus-status")
     r = run_validator([str(note)])
     assert "bogus-status" in r.stderr or "bogus-status" in r.stdout
 
@@ -140,7 +140,7 @@ def test_validator_cli_names_bad_status_in_output(tmp_path):
 def test_validator_cli_exits_zero_for_valid_files(tmp_path):
     good1 = tmp_path / "good1.md"
     good2 = tmp_path / "good2.md"
-    _make_note(good1, "deferred", "open")
+    _make_note(good1, "lesson", "active")
     _make_note(good2, "session", "dirty")  # Slice 0: active → dirty
     r = run_validator([str(good1), str(good2)])
     assert r.returncode == 0
@@ -162,7 +162,10 @@ def test_validator_cli_mixed_valid_and_invalid(tmp_path):
     good = tmp_path / "good.md"
     bad = tmp_path / "bad.md"
     _make_note(good, "session", "clean")  # Slice 0: active → clean
-    _make_note(bad, "follow-up", "nonexistent-status")
+    # 'session' is tracked, so a non-canonical status is rejected. (follow-up /
+    # deferred / dead-end are now retired → unconstrained, so they can't serve
+    # as the invalid case.)
+    _make_note(bad, "session", "nonexistent-status")
     r = run_validator([str(good), str(bad)])
     assert r.returncode != 0
     assert "bad.md" in r.stderr or "bad.md" in r.stdout
@@ -237,7 +240,6 @@ def test_installer_requires_git_repo(tmp_path):
 def _setup_guarded_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     _git_init(vault)
-    (vault / "deferred").mkdir()
     (vault / "sessions").mkdir()
     # install guard
     r = _install_guard(vault)
@@ -250,8 +252,8 @@ def _setup_guarded_vault(tmp_path: Path) -> Path:
 
 def test_guard_rejects_bad_status_at_commit(tmp_path):
     vault = _setup_guarded_vault(tmp_path)
-    note = vault / "deferred" / "bad.md"
-    _make_note(note, "deferred", "totally-wrong")
+    note = vault / "sessions" / "bad.md"
+    _make_note(note, "session", "totally-wrong")
     subprocess.run(["git", "-C", str(vault), "add", str(note)], check=True, capture_output=True)
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "should be rejected"],
@@ -270,8 +272,8 @@ def test_guard_rejects_bad_status_at_commit(tmp_path):
 
 def test_guard_passes_canonical_status(tmp_path):
     vault = _setup_guarded_vault(tmp_path)
-    note = vault / "deferred" / "good.md"
-    _make_note(note, "deferred", "open")
+    note = vault / "sessions" / "good.md"
+    _make_note(note, "session", "dirty")
     subprocess.run(["git", "-C", str(vault), "add", str(note)], check=True, capture_output=True)
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "good note"],
@@ -360,7 +362,6 @@ def _make_sync_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
     _git_init(vault)
     (vault / "sessions").mkdir()
-    (vault / "deferred").mkdir()
     (vault / "README.md").write_text("vault\n")
     _git_commit_all(vault, "init")
     return vault
@@ -396,8 +397,8 @@ def test_sync_noop_on_clean_tree(tmp_path):
 def test_sync_respects_gpgsign_false(tmp_path):
     """With commit.gpgsign=false in the repo config, sync commits succeed unsigned."""
     vault = _make_sync_vault(tmp_path)
-    (vault / "deferred" / "note.md").write_text(
-        "---\ntype: deferred\nstatus: open\n---\n\n# Deferred\n"
+    (vault / "sessions" / "note.md").write_text(
+        "---\ntype: session\nstatus: active\n---\n\n# Session\n"
     )
     r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
     assert r.returncode == 0, r.stderr + r.stdout
@@ -483,7 +484,7 @@ def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
     ANY commit (even clean notes) is blocked (non-zero)."""
     vault = tmp_path / "vault"
     _git_init(vault)
-    (vault / "deferred").mkdir()
+    (vault / "sessions").mkdir()
     r = _install_guard(vault)
     assert r.returncode == 0, r.stderr
 
@@ -514,8 +515,8 @@ def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
     subprocess.run(["git", "-C", str(vault), "commit", "-m", "init"], capture_output=True)
 
     # Now try to commit a good note — must be BLOCKED because validator is gone
-    note = vault / "deferred" / "fine.md"
-    _make_note(note, "deferred", "open")
+    note = vault / "sessions" / "fine.md"
+    _make_note(note, "session", "dirty")
     subprocess.run(["git", "-C", str(vault), "add", str(note)], capture_output=True)
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "should be blocked"],
@@ -562,8 +563,8 @@ def test_guard_lenient_without_strict_when_plugin_missing(tmp_path):
 def test_guard_rejects_bad_status_non_ascii_filename(tmp_path):
     """C2: A note with a non-ASCII filename carrying a bad status must be rejected."""
     vault = _setup_guarded_vault(tmp_path)
-    non_ascii_note = vault / "deferred" / "café-redesign.md"
-    _make_note(non_ascii_note, "deferred", "bad-nonascii-status")
+    non_ascii_note = vault / "sessions" / "café-redesign.md"
+    _make_note(non_ascii_note, "session", "bad-nonascii-status")
     subprocess.run(
         ["git", "-C", str(vault), "add", str(non_ascii_note)],
         capture_output=True,
@@ -579,8 +580,8 @@ def test_guard_rejects_bad_status_non_ascii_filename(tmp_path):
 def test_guard_passes_good_status_non_ascii_filename(tmp_path):
     """C2: A note with a non-ASCII filename carrying a valid status must pass."""
     vault = _setup_guarded_vault(tmp_path)
-    non_ascii_note = vault / "deferred" / "café-redesign.md"
-    _make_note(non_ascii_note, "deferred", "open")
+    non_ascii_note = vault / "sessions" / "café-redesign.md"
+    _make_note(non_ascii_note, "session", "dirty")
     subprocess.run(
         ["git", "-C", str(vault), "add", str(non_ascii_note)],
         capture_output=True,
@@ -611,12 +612,12 @@ def test_guard_validates_staged_blob_not_working_copy(tmp_path):
     """I2a: Stage a BAD-status note, then fix working copy without re-staging.
     Guard must reject (staged blob is bad) even though working copy is good."""
     vault = _setup_guarded_vault(tmp_path)
-    note = vault / "deferred" / "tricky.md"
+    note = vault / "sessions" / "tricky.md"
     # Stage a bad-status note
-    _make_note(note, "deferred", "totally-bad-status")
+    _make_note(note, "session", "totally-bad-status")
     subprocess.run(["git", "-C", str(vault), "add", str(note)], capture_output=True)
     # Fix working copy WITHOUT re-staging
-    _make_note(note, "deferred", "open")
+    _make_note(note, "session", "dirty")
     # Guard should read the staged blob (bad) and reject
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "should be rejected"],
@@ -630,12 +631,12 @@ def test_guard_passes_good_staged_blob_even_if_working_copy_bad(tmp_path):
     """I2b: Stage a GOOD-status note, then corrupt working copy without re-staging.
     Guard must allow the commit (staged blob is good)."""
     vault = _setup_guarded_vault(tmp_path)
-    note = vault / "deferred" / "sneaky.md"
+    note = vault / "sessions" / "sneaky.md"
     # Stage a good-status note
-    _make_note(note, "deferred", "open")
+    _make_note(note, "session", "dirty")
     subprocess.run(["git", "-C", str(vault), "add", str(note)], capture_output=True)
     # Corrupt working copy WITHOUT re-staging
-    _make_note(note, "deferred", "totally-bad-status")
+    _make_note(note, "session", "totally-bad-status")
     # Guard reads staged blob (good) → commit allowed
     r = subprocess.run(
         ["git", "-C", str(vault), "commit", "-m", "staged blob is good"],
@@ -656,7 +657,6 @@ def _make_sync_vault_with_failing_remote(tmp_path: Path) -> tuple[Path, Path]:
     vault = tmp_path / "vault"
     _git_init(vault)
     (vault / "sessions").mkdir()
-    (vault / "deferred").mkdir()
     (vault / "README.md").write_text("vault\n")
     _git_commit_all(vault, "init")
 

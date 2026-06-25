@@ -19,27 +19,26 @@ from __future__ import annotations
 
 # Canonical status sets per note type, keyed by the **singular** kind name
 # (Slice 7: vault directories and kinds standardize on singular). ``session``
-# was already singularized in Slice 0; the remaining keys
-# (plan/spec/follow-up/lesson/dead-end) were singularized here. ``deferred`` is
-# already singular-shaped; it has no live S1 kind (deferred → backlog via
-# migrate_vault) and is the lone legacy survivor, retained until a cross-user
-# scan confirms no ``deferred`` notes remain (tracked: backlog
-# ``retire-legacy-plural-taxonomy-survivors-...``).
+# was already singularized in Slice 0 and carries ``{dirty, clean}``.
+#
+# The legacy plural-taxonomy kinds ("deferred", "follow-up", "dead-end") were
+# retired once their living folders were gone from every vault and the one-shot
+# migrations that produced them (migrate_vault / migrate_radar_to_follow_ups)
+# were removed. Those kinds now consolidate into `backlog`/`lesson` records,
+# which carry their status in the JSON sidecar (validated by record_model), not
+# inline frontmatter — so this guard no longer needs to know them.
 CANONICAL: dict[str, frozenset[str]] = {
     "plan": frozenset({"draft", "ready", "in-progress", "complete", "superseded", "dropped"}),
     "spec": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped"}),
     "session": frozenset({"dirty", "clean"}),
-    "deferred": frozenset({"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}),
-    "follow-up": frozenset({"active", "resolved", "dropped"}),
     "lesson": frozenset({"active", "superseded"}),
-    "dead-end": frozenset({"active", "archived"}),
 }
 
-# Note `type:` frontmatter is singular ("deferred", "session", "dead-end"), and
-# the CANONICAL keys are now singular too, so the singular form resolves
-# directly as a CANONICAL key. The old singular→plural ``_TYPE_ALIASES`` map is
-# gone (Slice 7); only a true alias (a name that differs from its key) belongs
-# here, of which there are currently none.
+# Note `type:` frontmatter is singular ("session", "plan", "lesson"), and the
+# CANONICAL keys are now singular too, so the singular form resolves directly as
+# a CANONICAL key. The old singular→plural ``_TYPE_ALIASES`` map is gone
+# (Slice 7); only a true alias (a name that differs from its key) belongs here,
+# of which there are currently none.
 _TYPE_ALIASES: dict[str, str] = {}
 
 
