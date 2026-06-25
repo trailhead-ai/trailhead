@@ -6,7 +6,7 @@ path was retired in Slice 5 (S3); ``lore search`` is now the query interface, so
 the recall-command tests that used to live here were removed.
 
   build_area_map:
-    - reads name + keywords + one-liner from areas/*.md
+    - reads name + keywords + one-liner from area/*.md
     - keyword-less area still appears (agent can match on one-liner)
     - malformed / binary / non-UTF-8 area file silently skipped (no raise)
     - deterministic alpha order by name
@@ -51,7 +51,7 @@ def load_recall():
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
-    (vault / "areas").mkdir(parents=True)
+    (vault / "area").mkdir(parents=True)
     return vault
 
 
@@ -62,7 +62,7 @@ def _write_area(
     summary: str | None = None,
     overview: str | None = None,
 ) -> Path:
-    p = vault / "areas" / f"{name}.md"
+    p = vault / "area" / f"{name}.md"
     kw_str = "[" + ", ".join(keywords) + "]"
     summary_line = f"summary: {summary}\n" if summary else ""
     overview_block = f"\n## Overview\n\n{overview}\n" if overview else ""
@@ -111,7 +111,7 @@ class TestBuildAreaMap:
     def test_malformed_file_silently_skipped(self, tmp_path):
         vault = _make_vault(tmp_path)
         _write_area(vault, "good", ["ok"], summary="Good area.")
-        bad = vault / "areas" / "bad-file.md"
+        bad = vault / "area" / "bad-file.md"
         bad.write_bytes(b"\xff\xfe not utf8 \x00\x01")
         recall = load_recall()
         entries = recall.build_area_map(vault)
@@ -121,7 +121,7 @@ class TestBuildAreaMap:
 
     def test_malformed_file_does_not_raise(self, tmp_path):
         vault = _make_vault(tmp_path)
-        bad = vault / "areas" / "bad.md"
+        bad = vault / "area" / "bad.md"
         bad.write_bytes(b"\xff\xfe garbage \x00\x01\x02")
         recall = load_recall()
         entries = recall.build_area_map(vault)
@@ -160,7 +160,7 @@ class TestBuildAreaMap:
 
     def test_html_comment_overview_skipped(self, tmp_path):
         vault = _make_vault(tmp_path)
-        p = vault / "areas" / "html-comment.md"
+        p = vault / "area" / "html-comment.md"
         p.write_text(
             "---\ntype: area\nname: html-comment\nkeywords: [x]\n---\n\n"
             "## Overview\n<!-- Just a placeholder -->\n\nBody text.\n"
@@ -172,7 +172,7 @@ class TestBuildAreaMap:
 
     def test_area_no_summary_no_usable_overview_appears_empty_one_liner(self, tmp_path):
         vault = _make_vault(tmp_path)
-        p = vault / "areas" / "empty-area.md"
+        p = vault / "area" / "empty-area.md"
         p.write_text(
             "---\ntype: area\nname: empty-area\nkeywords: [x]\n---\n\n"
             "## Overview\n<!-- Placeholder -->\n"

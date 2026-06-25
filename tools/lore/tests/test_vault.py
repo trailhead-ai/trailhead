@@ -87,38 +87,40 @@ def test_resolve_user_git_failure_falls_back_to_you():
 
 
 # ---------------------------------------------------------------------------
-# find_session_note: worktree-scoped filtering (I1)
+# find_session_note: worktree-scoped singular record lookup (Slice 7)
+#
+# Since Slice 1, a session is a first-class record under session/ (singular).
+# find_session_note reads session/<worktree_name>.md confirmed by the body
+# header "# session: <worktree_name>". The old plural sessions/ reader is
+# retired; tests now use the singular session/ layout.
 # ---------------------------------------------------------------------------
 
-def _make_session_note(sessions_dir: Path, stem: str, worktree: str) -> Path:
-    """Write a minimal session note with worktree frontmatter."""
-    p = sessions_dir / f"{stem}-{worktree}.md"
-    p.write_text(
-        f"---\ntype: session\nworktree: {worktree}\nstatus: active\n---\n\n# Session: {worktree}\n"
-    )
+def _make_session_record(session_dir: Path, worktree: str) -> Path:
+    """Write a minimal singular session record (session/<worktree>.md)."""
+    p = session_dir / f"{worktree}.md"
+    p.write_text(f"# session: {worktree}\n\nsome content\n")
     return p
 
 
-def test_find_session_note_no_worktree_returns_newest_overall(tmp_path):
-    """Without worktree_name, returns the newest note across all worktrees."""
+def test_find_session_note_returns_singular_record(tmp_path):
+    """find_session_note returns the singular session/<worktree>.md record."""
     vault = tmp_path / "vault"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _make_session_note(sd, "2026-06-01-1000", "alpha")
-    beta = _make_session_note(sd, "2026-06-02-1000", "beta")
+    alpha = _make_session_record(sd, "alpha")
 
     v = load_script("vault")
-    result = v.find_session_note(vault)
-    assert result == beta
+    result = v.find_session_note(vault, worktree_name="alpha")
+    assert result == alpha
 
 
-def test_find_session_note_scoped_to_alpha_ignores_newer_beta(tmp_path):
-    """When worktree_name='alpha' and beta's note is newer, return alpha's note."""
+def test_find_session_note_scoped_to_alpha_ignores_beta(tmp_path):
+    """When worktree_name='alpha', beta's record is not returned."""
     vault = tmp_path / "vault"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    alpha = _make_session_note(sd, "2026-06-01-1000", "alpha")
-    _make_session_note(sd, "2026-06-02-1000", "beta")  # newer but different worktree
+    alpha = _make_session_record(sd, "alpha")
+    _make_session_record(sd, "beta")
 
     v = load_script("vault")
     result = v.find_session_note(vault, worktree_name="alpha")
@@ -126,19 +128,19 @@ def test_find_session_note_scoped_to_alpha_ignores_newer_beta(tmp_path):
 
 
 def test_find_session_note_scoped_no_note_returns_none(tmp_path):
-    """When worktree_name has no note, return None (no-session fallback)."""
+    """When worktree_name has no record, return None."""
     vault = tmp_path / "vault"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _make_session_note(sd, "2026-06-02-1000", "beta")
+    _make_session_record(sd, "beta")
 
     v = load_script("vault")
     result = v.find_session_note(vault, worktree_name="alpha")
     assert result is None
 
 
-def test_find_session_note_no_sessions_dir_returns_none(tmp_path):
-    """Missing sessions/ dir returns None regardless of worktree_name."""
+def test_find_session_note_no_session_dir_returns_none(tmp_path):
+    """Missing session/ dir returns None regardless of worktree_name."""
     vault = tmp_path / "vault"
     vault.mkdir()
 
@@ -148,12 +150,12 @@ def test_find_session_note_no_sessions_dir_returns_none(tmp_path):
 
 
 def test_find_session_note_no_collision_with_super_prefix(tmp_path):
-    """worktree_name='foo' must NOT match '…-super-foo.md' (M1 consistency)."""
+    """worktree_name='foo' must NOT match 'super-foo.md' (stem match only)."""
     vault = tmp_path / "vault"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _make_session_note(sd, "2026-06-02-1000", "super-foo")
-    foo = _make_session_note(sd, "2026-06-01-1000", "foo")
+    _make_session_record(sd, "super-foo")
+    foo = _make_session_record(sd, "foo")
 
     v = load_script("vault")
     result = v.find_session_note(vault, worktree_name="foo")

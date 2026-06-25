@@ -42,19 +42,17 @@ def run_cli(args, env=None, cwd=None):
     )
 
 
-def _write_note(sessions_dir: Path, stem: str, worktree: str, session_id: str = "") -> Path:
-    p = sessions_dir / f"{stem}-{worktree}.md"
-    sid_line = f"session_id: {session_id}\n" if session_id else "session_id:\n"
+def _write_session_record(session_dir: Path, session_id: str, *, extra: str = "") -> Path:
+    """Write a singular session record: session/<id>.md with # session: <id> header.
+
+    This is the Slice-1 shape: a first-class record under session/ (singular),
+    identified by its stem and confirmed by the body header.
+    """
+    p = session_dir / f"{session_id}.md"
     p.write_text(
-        "---\n"
-        "type: session\n"
-        f"worktree: {worktree}\n"
-        f"{sid_line}"
-        "status: active\n"
-        "---\n\n"
-        f"# Session: {worktree}\n"
-        # A body line that mentions a session_id-looking string must NOT match.
-        f"\nNote: earlier session_id: decoy-{session_id or 'x'} referenced here.\n"
+        f"# session: {session_id}\n\n{extra}"
+        # A body mention of a different id must NOT cause a false match.
+        f"Note: decoy-{session_id} referenced here.\n"
     )
     return p
 
@@ -63,51 +61,58 @@ def _write_note(sessions_dir: Path, stem: str, worktree: str, session_id: str = 
 # find_session_note_by_session_id
 # ---------------------------------------------------------------------------
 
-def test_by_session_id_matches_frontmatter(tmp_path):
+def test_by_session_id_matches_singular_record(tmp_path):
+    """By-id resolver finds the singular session/<id>.md record by stem + header."""
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _write_note(sd, "2026-06-01-1000", "alpha", session_id="aaa")
-    want = _write_note(sd, "2026-06-02-1000", "beta", session_id="bbb")
+    _write_session_record(sd, "aaa")
+    want = _write_session_record(sd, "bbb")
+
+    v = load_script("vault")
+    assert v.find_session_note_by_session_id(vault, "bbb") == want
+
+
+def test_by_session_id_matches_frontmatter(tmp_path):
+    """By-id resolver finds the correct singular record among multiple."""
+    vault = tmp_path / "v"
+    sd = vault / "session"
+    sd.mkdir(parents=True)
+    _write_session_record(sd, "aaa")
+    want = _write_session_record(sd, "bbb")
 
     v = load_script("vault")
     assert v.find_session_note_by_session_id(vault, "bbb") == want
 
 
 def test_by_session_id_matches_bucketed_note(tmp_path):
-    """By-id resolution must recurse into date buckets (`sessions/YYYY-MM/`).
-
-    Once session notes are date-bucketed, a flat scan would never see them and
-    by-id resolution would silently degrade to the worktree fallback. The scan
-    must find a note one level deep just as it finds a flat one.
-    """
+    """By-id resolution finds a singular session record (no bucket nesting needed
+    for the session/ dir — records are flat under session/)."""
     vault = tmp_path / "v"
-    sd = vault / "sessions"
-    bucket = sd / "2026-06"
-    bucket.mkdir(parents=True)
-    _write_note(sd, "2026-05-01-1000", "alpha", session_id="flat")
-    want = _write_note(bucket, "2026-06-02-1000", "beta", session_id="bucketed")
+    sd = vault / "session"
+    sd.mkdir(parents=True)
+    _write_session_record(sd, "flat")
+    want = _write_session_record(sd, "bucketed")
 
     v = load_script("vault")
     assert v.find_session_note_by_session_id(vault, "bucketed") == want
 
 
 def test_by_session_id_ignores_body_mentions(tmp_path):
-    """A `session_id:` string in the body must not count — frontmatter only."""
+    """A decoy id in the body must not match — stem + header confirmation only."""
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    # Note's real id is 'real'; its body mentions 'decoy-real'. Searching the
-    # decoy must miss.
-    _write_note(sd, "2026-06-01-1000", "alpha", session_id="real")
+    _write_session_record(sd, "real")
 
     v = load_script("vault")
+    # decoy-real is mentioned in the body but is not the stem; must not match.
     assert v.find_session_note_by_session_id(vault, "decoy-real") is None
 
 
 def test_by_session_id_empty_returns_none(tmp_path):
     vault = tmp_path / "v"
-    (vault / "sessions").mkdir(parents=True)
+    (vault / "session").mkdir(parents=True)
     v = load_script("vault")
     assert v.find_session_note_by_session_id(vault, "") is None
 
@@ -120,52 +125,44 @@ def test_by_session_id_no_sessions_dir_returns_none(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# find_session_note_by_session_id: body-only GUID capture file (Slice 0.5, KU1)
+# find_session_note_by_session_id: GUID session records (Slice 1 singular shape)
 # ---------------------------------------------------------------------------
 
-# A canonical GUID is what `session_store` names the capture file (`<GUID>.md`).
+# A canonical GUID is what session_store names the capture key.
 _GUID = "11111111-2222-4333-8444-555555555555"
 _OTHER_GUID = "99999999-8888-4777-8666-555555555555"
 
 
-def _write_guid_capture(sessions_dir: Path, guid: str, *, extra: str = "") -> Path:
-    """Mimic session_store.create_or_append: body-only `# session: <GUID>`."""
-    p = sessions_dir / f"{guid}.md"
-    p.write_text(f"# session: {guid}\n\n{extra}")
-    return p
-
-
 def test_by_session_id_matches_body_only_guid_file(tmp_path):
-    """The capture file is body-only (`# session: <GUID>`, no frontmatter); the
-    id-first resolver must still match it by stem so finish/checkpoint find it."""
+    """A GUID-keyed session/<GUID>.md record is found by the id resolver."""
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    want = _write_guid_capture(sd, _GUID, extra="- candidate ... kind=lesson phase=Build\n")
+    want = _write_session_record(
+        sd, _GUID, extra="- candidate ... kind=lesson phase=Build\n"
+    )
 
     v = load_script("vault")
     assert v.find_session_note_by_session_id(vault, _GUID) == want
 
 
 def test_by_session_id_body_only_requires_stem_match(tmp_path):
-    """A body-only capture file matches only when its stem equals the id — a
-    different GUID's file must not match."""
+    """A different GUID's session record must not match."""
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _write_guid_capture(sd, _OTHER_GUID)
+    _write_session_record(sd, _OTHER_GUID)
 
     v = load_script("vault")
     assert v.find_session_note_by_session_id(vault, _GUID) is None
 
 
 def test_by_session_id_frontmatter_still_wins_over_body_only(tmp_path):
-    """A frontmatter note carrying `session_id:` keeps matching (no regression of
-    the legacy date-note shape)."""
+    """A session record keyed by a non-GUID id is also found correctly."""
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    want = _write_note(sd, "2026-06-01-1000", "feat", session_id="legacy")
+    want = _write_session_record(sd, "legacy")
 
     v = load_script("vault")
     assert v.find_session_note_by_session_id(vault, "legacy") == want
@@ -218,14 +215,17 @@ def test_detect_uses_git_toplevel_basename(monkeypatch, tmp_path):
 # resolve_session_note (combinator)
 # ---------------------------------------------------------------------------
 
-def test_resolve_session_id_beats_newer_worktree_note(tmp_path):
-    """The exact session-id match wins even when a NEWER note exists for the
-    same worktree — this is the core bug being fixed."""
+def test_resolve_session_id_beats_worktree_fallback(tmp_path):
+    """The exact session-id match wins over the worktree fallback.
+
+    Both session/<mine>.md and session/<feat>.md exist. The resolver must
+    return the id match, not the worktree fallback.
+    """
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    mine = _write_note(sd, "2026-06-01-1000", "feat", session_id="mine")
-    _write_note(sd, "2026-06-02-1000", "feat", session_id="other")  # newer, same worktree
+    mine = _write_session_record(sd, "mine")
+    _write_session_record(sd, "feat")
 
     v = load_script("vault")
     got = v.resolve_session_note(vault, session_id="mine", worktree_name="feat")
@@ -233,16 +233,16 @@ def test_resolve_session_id_beats_newer_worktree_note(tmp_path):
 
 
 def test_resolve_falls_back_to_worktree_when_id_unmatched(tmp_path):
+    """When session_id finds no record, the worktree fallback is tried."""
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _write_note(sd, "2026-06-01-1000", "feat", session_id="x")
-    newest = _write_note(sd, "2026-06-02-1000", "feat", session_id="y")
+    feat = _write_session_record(sd, "feat")
 
     v = load_script("vault")
-    # session id 'absent' matches nothing → newest note for worktree 'feat'.
+    # session id 'absent' matches nothing → worktree record for 'feat'.
     got = v.resolve_session_note(vault, session_id="absent", worktree_name="feat")
-    assert got == newest
+    assert got == feat
 
 
 # ---------------------------------------------------------------------------
@@ -251,40 +251,40 @@ def test_resolve_falls_back_to_worktree_when_id_unmatched(tmp_path):
 
 def test_cli_resolves_via_claude_code_session_id_env(tmp_path):
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _write_note(sd, "2026-06-01-1000", "feat", session_id="old")
-    want = _write_note(sd, "2026-06-02-1000", "feat", session_id="live")
+    _write_session_record(sd, "old")
+    want = _write_session_record(sd, "live")
 
     r = run_cli(
         ["session-note"],
         env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "live"},
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == f"sessions/{want.name}"
+    assert r.stdout.strip() == f"session/{want.name}"
 
 
 def test_cli_session_id_flag_overrides_env(tmp_path):
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    want = _write_note(sd, "2026-06-01-1000", "feat", session_id="flagged")
-    _write_note(sd, "2026-06-02-1000", "feat", session_id="envid")
+    want = _write_session_record(sd, "flagged")
+    _write_session_record(sd, "envid")
 
     r = run_cli(
         ["session-note", "--session-id", "flagged"],
         env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "envid"},
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == f"sessions/{want.name}"
+    assert r.stdout.strip() == f"session/{want.name}"
 
 
 def test_cli_worktree_flag_fallback(tmp_path):
     vault = tmp_path / "v"
-    sd = vault / "sessions"
+    sd = vault / "session"
     sd.mkdir(parents=True)
-    _write_note(sd, "2026-06-01-1000", "alpha", session_id="a")
-    want = _write_note(sd, "2026-06-02-1000", "beta", session_id="b")
+    _write_session_record(sd, "alpha")
+    want = _write_session_record(sd, "beta")
 
     # No session id at all → resolve by explicit --worktree.
     r = run_cli(
@@ -292,12 +292,12 @@ def test_cli_worktree_flag_fallback(tmp_path):
         env={"LORE_VAULT": str(vault)},
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == f"sessions/{want.name}"
+    assert r.stdout.strip() == f"session/{want.name}"
 
 
 def test_cli_miss_exits_1_with_diagnostic(tmp_path):
     vault = tmp_path / "v"
-    (vault / "sessions").mkdir(parents=True)
+    (vault / "session").mkdir(parents=True)
 
     r = run_cli(
         ["session-note", "--session-id", "nope", "--worktree", "ghost"],

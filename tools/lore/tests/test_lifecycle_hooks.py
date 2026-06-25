@@ -15,73 +15,13 @@ hooks.json carries no PostToolUse entry.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import os
-import subprocess
-import sys
-import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
 HOOKS_DIR = PLUGIN_ROOT / "hooks"
 SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
-
-
-def load_hook(name: str):
-    """Load a hook module from hooks/ by stem, freshly each call."""
-    for d in (str(HOOKS_DIR), str(SCRIPTS_DIR)):
-        if d not in sys.path:
-            sys.path.insert(0, d)
-    for cached in (name, "sessions", "vault", "frontmatter", "status_validator"):
-        sys.modules.pop(cached, None)
-    spec = importlib.util.spec_from_file_location(name, HOOKS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def load_sessions():
-    for d in (str(SCRIPTS_DIR),):
-        if d not in sys.path:
-            sys.path.insert(0, d)
-    for cached in ("sessions", "vault", "frontmatter", "status_validator"):
-        sys.modules.pop(cached, None)
-    spec = importlib.util.spec_from_file_location("sessions", SCRIPTS_DIR / "sessions.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def load_script(name: str):
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    sys.modules.pop(name, None)
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _make_vault(tmp_path: Path) -> Path:
-    vault = tmp_path / "vault"
-    (vault / "sessions").mkdir(parents=True)
-    return vault
-
-
-def _git_vault(tmp_path: Path) -> Path:
-    """A vault that is its own git repo (toplevel == vault)."""
-    vault = _make_vault(tmp_path)
-    subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.email", "t@e.st"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "user.name", "Tester"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "config", "commit.gpgsign", "false"],
-                   check=True, capture_output=True)
-    return vault
-
 
 
 # ---------------------------------------------------------------------------
@@ -148,63 +88,11 @@ class TestHooksJson:
 
 
 # ---------------------------------------------------------------------------
-# M1: sessions.py nested-name collision
-# session_note_path / all_session_notes_for_worktree must not let worktree
-# 'foo' match '…-super-foo.md'.
+# Slice 7: the legacy plural-``sessions/`` finders (sessions.py
+# session_note_path / all_session_notes_for_worktree / sweep_orphan_skeletons)
+# were retired with the module — no production caller remained after Slice 1/2
+# moved capture to the singular ``session/`` record. The nested-name-collision
+# guard those finders carried is now structural: the singular resolver does an
+# exact-stem lookup (``session/<key>.md``), so worktree ``foo`` can never match
+# ``super-foo`` by construction (covered in test_session_note_resolution.py).
 # ---------------------------------------------------------------------------
-
-def _seed_note(sessions_dir: Path, stamp: str, worktree: str) -> Path:
-    """Write a minimal session note with correct filename and worktree frontmatter."""
-    p = sessions_dir / f"{stamp}-{worktree}.md"
-    p.write_text(
-        f"---\ntype: session\nworktree: {worktree}\nstatus: active\n---\n\n# Session\n"
-    )
-    return p
-
-
-class TestSessionNoteNestedNameCollision:
-    def test_session_note_path_no_false_match_on_super_prefix(self, tmp_path):
-        """session_note_path('foo') must not return a 'super-foo' note."""
-        vault = _make_vault(tmp_path)
-        sessions_dir = vault / "sessions"
-        _seed_note(sessions_dir, "2026-06-02-1000", "super-foo")
-        foo = _seed_note(sessions_dir, "2026-06-01-1000", "foo")
-
-        s = load_sessions()
-        result = s.session_note_path(vault, "foo")
-        assert result == foo
-
-    def test_session_note_path_returns_none_when_only_prefix_note_exists(self, tmp_path):
-        """If only 'super-foo' exists, looking for 'foo' returns None."""
-        vault = _make_vault(tmp_path)
-        sessions_dir = vault / "sessions"
-        _seed_note(sessions_dir, "2026-06-02-1000", "super-foo")
-
-        s = load_sessions()
-        result = s.session_note_path(vault, "foo")
-        assert result is None
-
-    def test_all_notes_for_worktree_no_false_match_on_super_prefix(self, tmp_path):
-        """all_session_notes_for_worktree('foo') excludes 'super-foo' notes."""
-        vault = _make_vault(tmp_path)
-        sessions_dir = vault / "sessions"
-        _seed_note(sessions_dir, "2026-06-02-1000", "super-foo")
-        foo = _seed_note(sessions_dir, "2026-06-01-1000", "foo")
-
-        s = load_sessions()
-        results = s.all_session_notes_for_worktree(vault, "foo")
-        assert results == [foo]
-
-    def test_all_notes_for_worktree_empty_when_only_prefix_note_exists(self, tmp_path):
-        """all_session_notes_for_worktree('foo') returns [] if only super-foo exists."""
-        vault = _make_vault(tmp_path)
-        sessions_dir = vault / "sessions"
-        _seed_note(sessions_dir, "2026-06-02-1000", "super-foo")
-
-        s = load_sessions()
-        results = s.all_session_notes_for_worktree(vault, "foo")
-        assert results == []
-
-
-# ---------------------------------------------------------------------------
-# M2: commit_vault must not sweep unrelated dirty vault files

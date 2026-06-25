@@ -98,11 +98,12 @@ class TestNoRecallReferencesInExecutables:
 class TestAreaPointerCallSite:
     def test_area_pointer_references_search_not_recall(self, tmp_path):
         """The area-pointer (serve `lore areas` / recall flows) must point at
-        `lore search`, not the removed `lore recall`."""
+        `lore search`, not the removed `lore recall`.
+        Slice 7: area profiles live under area/ (singular), not areas/."""
         recall = load_script("recall")
         vault = tmp_path / "vault"
-        (vault / "areas").mkdir(parents=True)
-        (vault / "areas" / "penny.md").write_text(
+        (vault / "area").mkdir(parents=True)
+        (vault / "area" / "penny.md").write_text(
             "---\nname: penny\nsummary: the penny worker\n---\n## Overview\nPenny.\n"
         )
         pointer = recall.render_area_pointer(vault)

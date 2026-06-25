@@ -53,7 +53,7 @@ def _load_cli():
 
 def _make_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "vault"
-    (vault / "areas").mkdir(parents=True)
+    (vault / "area").mkdir(parents=True)
     (vault / "sessions").mkdir(parents=True)
     return vault
 
@@ -64,7 +64,7 @@ def _write_area(
     keywords: list[str],
     summary: str | None = None,
 ) -> Path:
-    p = vault / "areas" / f"{name}.md"
+    p = vault / "area" / f"{name}.md"
     kw_str = "[" + ", ".join(keywords) + "]"
     summary_line = f"summary: {summary}\n" if summary else ""
     p.write_text(
@@ -210,7 +210,7 @@ class TestAreasEmpty:
     def test_absent_areas_dir_also_safe(self, tmp_path):
         """build_area_map tolerates absent areas/ — no crash, no areas message."""
         vault = _make_vault(tmp_path)
-        (vault / "areas").rmdir()
+        (vault / "area").rmdir()
 
         stdout, _, rc = _run_areas(str(vault))
 

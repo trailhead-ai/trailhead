@@ -17,21 +17,23 @@ def test_canonical_vocab_matches_source():
     Slice 0 updated the session vocab to {dirty, clean} and moved it to the
     singular key 'session'. Slice 2 retired `shelved` and the legacy
     `finalized`/`handoff` session terminal statuses — none are canonical.
+    Slice 7 singularized the remaining CANONICAL keys (plan/spec/follow-up/
+    lesson/dead-end); `deferred` is already singular-shaped and retained.
     """
     sv = load_script("status_validator")
-    assert sv.CANONICAL["plans"] == frozenset(
+    assert sv.CANONICAL["plan"] == frozenset(
         {"draft", "ready", "in-progress", "complete", "superseded", "dropped"}
     )
-    assert sv.CANONICAL["specs"] == frozenset(
+    assert sv.CANONICAL["spec"] == frozenset(
         {"draft", "ready", "planned", "complete", "superseded", "dropped"}
     )
     assert sv.CANONICAL["session"] == frozenset({"dirty", "clean"})
     assert sv.CANONICAL["deferred"] == frozenset(
         {"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}
     )
-    assert sv.CANONICAL["follow-ups"] == frozenset({"active", "resolved", "dropped"})
-    assert sv.CANONICAL["lessons"] == frozenset({"active", "superseded"})
-    assert sv.CANONICAL["dead-ends"] == frozenset({"active", "archived"})
+    assert sv.CANONICAL["follow-up"] == frozenset({"active", "resolved", "dropped"})
+    assert sv.CANONICAL["lesson"] == frozenset({"active", "superseded"})
+    assert sv.CANONICAL["dead-end"] == frozenset({"active", "archived"})
 
 
 def test_is_valid_status_accepts_canonical():
@@ -50,16 +52,22 @@ def test_is_valid_status_rejects_noncanonical():
     assert sv.is_valid_status("lesson", "complete") is False
 
 
-def test_is_valid_status_singular_and_plural_type():
-    """type frontmatter is singular (deferred, session); dirs are plural-ish.
+def test_is_valid_status_keys_are_singular_only():
+    """Slice 7: CANONICAL keys are singular; the plural directory form no longer
+    resolves (vault dirs standardized on singular, so the singular→plural alias
+    map was dropped).
 
-    is_valid_status accepts both the note `type:` form and the directory name.
+    The singular `type:` form is the only accepted key. An unrecognized type
+    (the old plural directory name) is treated as untracked → unconstrained →
+    always valid (the validator never constrains types outside its vocab).
     """
     sv = load_script("status_validator")
-    # singular type form
+    # singular type form resolves to the real vocab
     assert sv.is_valid_status("dead-end", "active") is True
-    # directory form
-    assert sv.is_valid_status("dead-ends", "active") is True
+    assert sv.is_valid_status("dead-end", "bogus") is False
+    # plural directory form is no longer a tracked key → untracked → unconstrained
+    assert sv.permitted_statuses("dead-ends") is None
+    assert sv.is_valid_status("dead-ends", "anything") is True
 
 
 def test_is_valid_status_unknown_type_is_valid():
@@ -77,15 +85,14 @@ def test_permitted_statuses_lists_canonical():
 
 # ---- Slice 2: shelved + legacy session terminal statuses are retired --------
 
-def test_shelved_rejected_for_plans_specs_sessions():
+def test_shelved_rejected_for_plan_spec_session():
     """`shelved` is no longer canonical for any note type — the shelve/pickup
-    feature it backed was retired (Slice 2). The `sessions` plural key is gone
-    (Slice 0); only the singular `session` key is checked here."""
+    feature it backed was retired (Slice 2). Slice 7 keys are singular; the
+    plural directory forms are untracked (unconstrained) so only the singular
+    `type:` forms are asserted as rejecting `shelved`."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("plan", "shelved") is False
-    assert sv.is_valid_status("plans", "shelved") is False
     assert sv.is_valid_status("spec", "shelved") is False
-    assert sv.is_valid_status("specs", "shelved") is False
     assert sv.is_valid_status("session", "shelved") is False
 
 

@@ -43,13 +43,6 @@ import vault_resolve as vault_resolve_mod  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
-# The generic directory taxonomy every vault gets.
-TAXONOMY = [
-    "sessions", "deferred", "areas", "decisions", "dead-ends", "lessons",
-    "follow-ups", "collaboration", "specs", "plans", "designs", "inbox",
-    "briefings", "reviews", "gotchas", "audits", "tools", "templates",
-]
-
 
 def _resolve_groups_dir() -> "Path | None":
     """Return the camp groups directory, or None if unavailable.
@@ -874,7 +867,7 @@ def cmd_session_note(args: argparse.Namespace) -> int:
         "lore session-note: no session note resolved.\n"
         f"  session_id: {session_id or '<unset>'}\n"
         f"  worktree:   {worktree_name or '<unknown>'}\n"
-        f"  searched:   {vault / 'sessions'}",
+        f"  searched:   {vault / 'session'}",
         file=sys.stderr,
     )
     return 1
