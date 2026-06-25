@@ -540,7 +540,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 # ---- flush ------------------------------------------------------------------
 
-def _flush_commit(vault: Path, key: str) -> int:
+def _flush_commit(vault: Path, key: str, *, push: bool = True) -> int:
     """Stage the flushed session record's EXPLICIT path(s) + commit in ONE commit.
 
     Never `git add -A` — only `session/<key>.json` (the flipped sidecar) and its
@@ -548,6 +548,14 @@ def _flush_commit(vault: Path, key: str) -> int:
     (Slice 2 test contract). The staged-index gate (`git diff --cached --quiet`)
     makes an already-clean flush a no-op rather than a failed empty commit.
     Returns exit code.
+
+    The per-session *commit* is the deliberate atomicity unit and always runs here.
+    The *push* is NOT per-session: a batch flush passes ``push=False`` and pushes
+    ONCE after the whole batch commits (:func:`_flush_push`), turning N network
+    round-trips into one. The current-session path keeps the inline push
+    (``push=True`` default) — there is nothing to batch. A skipped mid-batch push
+    is harmless: the commits are durable locally and a re-run (or `lore sync`)
+    pushes them, so atomicity is unchanged.
     """
     if not vault.exists() or not _vault_is_git_toplevel(vault):
         print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
@@ -580,6 +588,21 @@ def _flush_commit(vault: Path, key: str) -> int:
         return 1
     print(f"Committed: {message}")
 
+    if push:
+        return _flush_push(vault)
+    return 0
+
+
+def _flush_push(vault: Path) -> int:
+    """Push committed flush(es) to origin once, if an origin remote exists.
+
+    Split out of :func:`_flush_commit` so a batch flush probes the remote and
+    pushes ONCE after every per-session commit lands, rather than N times inside
+    the per-session loop (efficiency follow-up). A missing origin, or a push that
+    fails (offline), is a soft outcome (exit 0): every flush is already committed
+    locally and `lore sync` — or the next successful flush — re-pushes when online.
+    Returns exit code (always 0; a push failure does not fail the flush).
+    """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
         print("No origin remote — skipping push.")
@@ -747,9 +770,13 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
     Discovers keys via :func:`_discover_dirty_session_keys` (the facade), then for
     each key runs the SAME per-session primitive the current-session path uses
     (`flush_session` + `_flush_commit`) so every session is record-flip + commit as
-    its own unit. A mid-batch failure stops the batch, prints the per-session summary
-    so far, NAMES the failed session, states already-flushed sessions are `clean` and
-    that a re-run safely retries (idempotent by design), and exits non-zero. An empty
+    its own unit. The git *push*, however, is hoisted OUT of the loop: each commit
+    runs with `push=False` and the batch pushes ONCE at the end (`_flush_push`),
+    replacing N network round-trips with one. A mid-batch failure stops the batch
+    (and never reaches the final push), prints the per-session summary so far, NAMES
+    the failed session, states already-flushed sessions are `clean` and that a re-run
+    safely retries (idempotent by design — the committed-but-unpushed sessions are
+    pushed by the next successful run or `lore sync`), and exits non-zero. An empty
     match set is a clean no-op (exit 0). A roll-up of the flushed count closes a
     successful batch.
     """
@@ -780,7 +807,9 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
             if verdict != session_store_mod.FLUSH_FLUSHED:
                 continue
             flipped = True
-            rc = _flush_commit(vault, key)
+            # Commit per-session (the atomicity unit) but DON'T push here — the
+            # push is hoisted to one round-trip after the batch (see below).
+            rc = _flush_commit(vault, key, push=False)
             if rc != 0:
                 raise RuntimeError(f"commit failed (rc={rc})")
         except Exception as exc:
@@ -821,6 +850,12 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
         print(f"Flushed: session/{key} (dirty -> clean)")
 
     print(f"Flushed {len(flushed)} session(s) [{scope_label}].")
+    # One push for the whole batch (efficiency follow-up): every session was
+    # committed locally above; push them together rather than once per session.
+    # Only probe/push when something actually committed — an all-raced-clean batch
+    # (every verdict != FLUSH_FLUSHED) leaves nothing to push.
+    if flushed:
+        _flush_push(vault)
     return 0
 
 

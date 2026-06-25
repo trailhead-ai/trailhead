@@ -307,11 +307,11 @@ class TestMidBatchFaultInjection:
         calls = {"n": 0}
         real_commit = cli._flush_commit
 
-        def flaky_commit(vault_path, key):
+        def flaky_commit(vault_path, key, *, push=True):
             calls["n"] += 1
             if calls["n"] >= 2:
                 raise RuntimeError("injected mid-batch commit failure")
-            return real_commit(vault_path, key)
+            return real_commit(vault_path, key, push=push)
 
         old_environ = dict(os.environ)
         os.environ.update(env)
@@ -363,6 +363,108 @@ class TestMidBatchFaultInjection:
         assert "re-run" in low or "rerun" in low or "retr" in low, (
             f"must state a re-run safely retries: {combined!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# batch efficiency — one push per batch, not one per session
+# ---------------------------------------------------------------------------
+
+class TestBatchPushesOnce:
+    """A batch flush pushes ONCE for the whole batch, not once per session.
+
+    Each per-session commit is still its own atomicity unit; only the network
+    push is hoisted out of the loop (`_flush_commit(push=False)` + a single
+    trailing `_flush_push`). Drives the CLI in-process so `_git` can be patched
+    to (a) report a fake origin remote — the test vault has none — so the push
+    path is actually reached, and (b) count pushes while letting add/diff/commit
+    run for real, proving N commits but exactly one push.
+    """
+
+    def _run_counting_pushes(self, vault, state):
+        import contextlib
+        import importlib.util
+        import io
+        import os
+        from importlib.machinery import SourceFileLoader
+
+        env = {
+            "LORE_VAULT": str(vault),
+            "XDG_STATE_HOME": str(state),
+            "XDG_CONFIG_HOME": str(Path(state) / "_xdg_config"),
+            "LORE_EMAIL": "tester@example.com",
+            **_NO_AMBIENT_SID,
+        }
+        if str(SCRIPTS_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS_DIR))
+        loader = SourceFileLoader("lore_cli_pushtest", str(CLI_PATH))
+        spec = importlib.util.spec_from_loader("lore_cli_pushtest", loader)
+        cli = importlib.util.module_from_spec(spec)
+        loader.exec_module(cli)
+
+        real_git = cli._git
+        pushes = {"n": 0}
+
+        def counting_git(vault_path, *args):
+            # Pretend an origin exists so `_flush_push` reaches the push step…
+            if args[:2] == ("remote", "get-url"):
+                return (0, "git@example.invalid:fake/vault.git", "")
+            # …and count (without actually contacting a network) every push.
+            if args[:1] == ("push",):
+                pushes["n"] += 1
+                return (0, "", "")
+            return real_git(vault_path, *args)
+
+        old_environ = dict(os.environ)
+        os.environ.update(env)
+        cli._git = counting_git
+        buf_out, buf_err = io.StringIO(), io.StringIO()
+        code = None
+        try:
+            args = cli.build_parser().parse_args(["flush", "all"])
+            with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+                code = args.func(args)
+        finally:
+            cli._git = real_git
+            os.environ.clear()
+            os.environ.update(old_environ)
+        return code, pushes["n"], buf_out.getvalue(), buf_err.getvalue()
+
+    def test_batch_of_n_sessions_pushes_exactly_once(self, tmp_path):
+        vault, state = _make_vault(tmp_path)
+        _git_init(vault)
+        sids = [SID_A, SID_B, SID_C]
+        for sid in sids:
+            assert _candidate(vault, state, sid).returncode == 0
+        _commit_baseline(vault)
+        before = _commit_count(vault)
+
+        code, pushes, out, err = self._run_counting_pushes(vault, state)
+        assert code == 0, err
+
+        # Every session was flushed + committed as its own unit …
+        for sid in sids:
+            assert _sidecar(vault, sid)["status"] == "clean"
+        assert _commit_count(vault) == before + len(sids), (
+            "each session must still be its own commit (per-session atomicity)"
+        )
+        # … but the whole batch pushed exactly once, not once per session.
+        assert pushes == 1, f"a batch of {len(sids)} must push once, got {pushes}"
+
+    def test_all_raced_clean_batch_does_not_push(self, tmp_path):
+        """If discovery's matches all raced to clean before flush, push nothing.
+
+        Flushing the dirty sessions first leaves them clean; a second `flush all`
+        re-discovers nothing dirty (empty keys) → no commit, no push.
+        """
+        vault, state = _make_vault(tmp_path)
+        _git_init(vault)
+        assert _candidate(vault, state, SID_A).returncode == 0
+        _commit_baseline(vault)
+        assert _flush_current(vault, state, SID_A).returncode == 0
+
+        code, pushes, out, err = self._run_counting_pushes(vault, state)
+        assert code == 0, err
+        assert pushes == 0, f"nothing dirty to flush → no push, got {pushes}"
 
 
 # ---------------------------------------------------------------------------
