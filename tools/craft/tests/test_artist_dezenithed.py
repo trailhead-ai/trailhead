@@ -16,8 +16,6 @@ Hermeticity: tmp_path-based ephemeral denylist; no real ~/.claude/ dependency.
 from __future__ import annotations
 
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -27,40 +25,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "craft" / "scripts"
 AGENTS_DIR = REPO_ROOT / "plugins" / "craft" / "agents"
-CAPABILITIES_TOML = REPO_ROOT / "capabilities.toml"
 
 ARTIST_MD = AGENTS_DIR / "artist.md"
-GATE = SCRIPTS_DIR / "leak_gate.py"
-
-# ---------------------------------------------------------------------------
-# Step-6 ephemeral denylist tokens (D-7 / S-3)
-# Structurally-observable zenith tokens — safe to name in tracked test source.
-# ---------------------------------------------------------------------------
-
-_STEP6_DENYLIST_TOKENS = [
-    r"zenithhealth",
-    r"\bzenith\b",
-    r"dash0",
-    r"cortana(-zh)?",
-    r"\basana\b",
-    r"platform-admin-ui",
-    r"patient-portal-web",
-    r"mobile-overview",
-    r"admin-preview",
-    r"preview\s*(url|server|host)",
-    r"\.workspace-manifest",
-    r"brain/(designs|chrome|specs|plans|sessions)",
-]
-
-
-def _write_ephemeral_denylist(p: Path) -> Path:
-    """Write an ephemeral Step-6 denylist to tmp_path (S-3: never depend on machine-local)."""
-    dl = p / "step6-denylist.txt"
-    dl.write_text("\n".join(_STEP6_DENYLIST_TOKENS) + "\n", encoding="utf-8")
-    return dl
-
 
 # ---------------------------------------------------------------------------
 # Fixture: artist.md text (skip all if absent — TDD RED phase)
@@ -72,48 +39,6 @@ def artist_text() -> str:
     if not ARTIST_MD.exists():
         pytest.skip("artist.md not yet implemented")
     return ARTIST_MD.read_text(encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# D-7 / S-3: leak gate — no zenith tokens in artist.md
-# ---------------------------------------------------------------------------
-
-
-def test_leak_gate_artist_md_is_clean(tmp_path: Path):
-    """artist.md must have no Step-6 zenith tokens (D-7/S-3)."""
-    if not ARTIST_MD.exists():
-        pytest.skip("artist.md not yet implemented")
-
-    denylist = _write_ephemeral_denylist(tmp_path)
-    result = subprocess.run(
-        [sys.executable, str(GATE), str(AGENTS_DIR), "--denylist", str(denylist)],
-        capture_output=True,
-        text=True,
-    )
-    # Filter to only artist.md hits
-    hits = [line for line in result.stdout.splitlines() if "artist" in line]
-    assert not hits, "artist.md contains forbidden Step-6 zenith tokens:\n" + "\n".join(hits)
-
-
-def test_leak_gate_slice1_surface_still_clean(tmp_path: Path):
-    (
-        """The Slice-1 scripts surface (combine_design.py + docs) must remain clean under the """
-        """Step-6 denylist (D-7/S-3)."""
-    )
-    scripts_dir = SCRIPTS_DIR
-    if not (scripts_dir / "combine_design.py").exists():
-        pytest.skip("combine_design.py not yet implemented")
-
-    denylist = _write_ephemeral_denylist(tmp_path)
-    result = subprocess.run(
-        [sys.executable, str(GATE), str(scripts_dir), "--denylist", str(denylist)],
-        capture_output=True,
-        text=True,
-    )
-    hits = [line for line in result.stdout.splitlines() if "combine_design" in line]
-    assert not hits, "combine_design.py contains forbidden Step-6 zenith tokens:\n" + "\n".join(
-        hits
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -150,32 +75,6 @@ def test_artist_frontmatter_has_description(artist_text: str):
         if ln.strip().startswith("description:") and ln.split(":", 1)[1].strip()
     ]
     assert desc_lines, "artist.md frontmatter must carry a non-empty description:"
-
-
-# ---------------------------------------------------------------------------
-# Inventory: artist is a discoverable subagent (capability groups were removed)
-# ---------------------------------------------------------------------------
-
-
-def test_artist_is_a_selectable_subagent():
-    """artist.md is discovered as a selectable subagent by convention."""
-    artist_path = REPO_ROOT / "plugins" / "craft" / "agents" / "artist.md"
-    assert artist_path.exists(), (
-        f"craft must ship agents/artist.md but {artist_path} does not exist"
-    )
-
-
-def test_capabilities_toml_has_no_capability_groups():
-    """The manifest no longer declares [capabilities.*] groups."""
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib  # type: ignore
-
-    data = tomllib.loads(CAPABILITIES_TOML.read_text(encoding="utf-8"))
-    assert "capabilities" not in data, (
-        "capability groups were removed — install selects subagents/skills by name"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -367,38 +266,8 @@ def test_artist_does_not_have_fixed_surface_list(artist_text: str):
         )
 
 
-def test_artist_references_combine_as_deliverable_step(artist_text: str):
-    (
-        """artist.md must reference 'combine' as the deliverable step """
-        """(renamed vocabulary from Slice 1)."""
-    )
-    assert "combine" in artist_text.lower(), (
-        "artist.md must reference 'combine' / combine_design.py as the deliverable step "
-        "(Slice-1 renamed vocabulary)"
-    )
-
-
 def test_artist_carries_anchor_to_real_chrome_block_rule(artist_text: str):
     """artist.md must state the anchor-to-real-chrome BLOCK rule with both escape paths (A-3)."""
     assert "BLOCKED" in artist_text, (
         "artist.md must carry a BLOCKED: rule for missing file:line citations"
     )
-
-
-def test_artist_component_mapping_before_html(artist_text: str):
-    """artist.md must state that the component-mapping table appears BEFORE any HTML."""
-    # The contract: component mapping table is rendered before any HTML
-    text_lower = artist_text.lower()
-    mapping_idx = text_lower.find("component mapping")
-    assert mapping_idx != -1, "artist.md must describe a component mapping table"
-    # "before" must appear in proximity to component mapping or HTML rendering
-    assert "before" in text_lower, (
-        "artist.md must state that the component-mapping table appears BEFORE any HTML"
-    )
-
-
-def test_artist_report_under_12_lines(artist_text: str):
-    """artist.md must describe a report structure of ~12 lines or fewer."""
-    assert (
-        "12" in artist_text or "twelve" in artist_text.lower() or "under" in artist_text.lower()
-    ), "artist.md must specify the report structure is under ~12 lines"

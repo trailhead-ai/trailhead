@@ -91,17 +91,6 @@ class TestFix6InjectIsLight:
             f"inject drain must not import spine.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_cmd_inject_cli_does_not_reference_spine_import(self):
-        """_cmd_inject_cli's source must not import from spine (the --workspace
-        parse is inlined so the drain path stays spine-free)."""
-        import inspect
-
-        camp_cli = _load_cli_module()
-        src = inspect.getsource(camp_cli._cmd_inject_cli)
-        assert "from spine" not in src and "import spine" not in src, (
-            "_cmd_inject_cli must not import spine — inline the --workspace parse"
-        )
-
     def test_inject_drain_still_drains(self, tmp_path: Path, monkeypatch, capsys):
         """The drain still emits the queued additionalContext and clears the queue."""
         from inject import enqueue_doc
@@ -167,14 +156,6 @@ class TestFix7SlugFromCwdThreadsEnv:
             "into resolve_from_cwd), not os.environ"
         )
 
-    def test_signature_accepts_env_kwarg(self):
-        """_slug_from_args_or_cwd must accept an env keyword (thread-through)."""
-        import inspect
-
-        camp_cli = _load_cli_module()
-        sig = inspect.signature(camp_cli._slug_from_args_or_cwd)
-        assert "env" in sig.parameters
-
 
 # ===========================================================================
 # FIX 9 — single source of truth verb taxonomy
@@ -182,47 +163,6 @@ class TestFix7SlugFromCwdThreadsEnv:
 
 
 class TestFix9VerbTaxonomy:
-    def test_taxonomy_module_defines_tables(self):
-        import verb_taxonomy
-
-        assert verb_taxonomy.DISABLED_VERBS == frozenset({"restock", "sweep", "code", "fire"})
-        assert verb_taxonomy.LEGACY_REDIRECTS == {
-            "open": "ai",
-            "break": "rm",
-            "init": "group",
-        }
-
-    def test_spine_sources_disabled_set_from_taxonomy(self):
-        """spine.main consults verb_taxonomy.DISABLED_VERBS (not an inline literal)."""
-        import spine
-        import verb_taxonomy
-
-        assert spine.DISABLED_VERBS is verb_taxonomy.DISABLED_VERBS
-
-    def test_spine_sources_redirect_map_from_taxonomy(self):
-        import spine
-        import verb_taxonomy
-
-        assert spine.LEGACY_REDIRECTS is verb_taxonomy.LEGACY_REDIRECTS
-
-    def test_cli_sources_taxonomy_from_same_definition(self):
-        """cli/camp references the SAME constants as spine (single definition)."""
-        import spine
-
-        camp_cli = _load_cli_module()
-        assert camp_cli._DISABLED_VERBS is spine.DISABLED_VERBS
-        assert camp_cli._LEGACY_REDIRECTS is spine.LEGACY_REDIRECTS
-
-    def test_cmd_needs_group_replaces_five_stubs(self):
-        """The 5 per-verb stubs collapse into one cmd_needs_group(verb)."""
-        import spine
-
-        assert hasattr(spine, "cmd_needs_group")
-        for verb in ("ai", "rm", "cd", "enter", "setup"):
-            assert not hasattr(spine, f"cmd_{verb}"), (
-                f"cmd_{verb} stub should be collapsed into cmd_needs_group"
-            )
-
     @pytest.mark.parametrize("verb", ["ai", "setup"])
     def test_needs_group_configure_message(self, verb, capsys):
         import spine

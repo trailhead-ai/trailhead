@@ -87,6 +87,30 @@ def test_manifest_validates_against_disk(tool: str):
 
 
 @pytest.mark.parametrize("tool", _TOOLS)
+def test_every_declared_capability_resolves_to_existing_src(tool: str, tmp_path: Path):
+    """R-6 oracle: compose_plan for a tool's FULL inventory must produce only
+    CopyOps whose src exists on disk — no manifest entry or discovered selectable
+    may dangle.
+
+    The inverse of ``test_every_on_disk_skill_and_agent_is_wired`` (which proves
+    nothing on disk is orphaned): this proves nothing *declared* points at a
+    missing src. Preserved from the retired ``test_renames_guard.py`` and
+    generalized from lore+craft to every tool.
+    """
+    m = load_manifest(_manifest_path(tool))
+    plan = compose_plan(
+        m,
+        {n: None for n in m.subagents},
+        {n: None for n in m.skills},
+        tmp_path / "all",
+    )
+    missing = [str(op.src) for op in plan.ops if not op.src.exists()]
+    assert not missing, (
+        f"{tool}: compose_plan produced CopyOps with missing src:\n" + "\n".join(missing)
+    )
+
+
+@pytest.mark.parametrize("tool", _TOOLS)
 def test_hooks_scripts_referenced_by_hooks_json_get_wired(tool: str, tmp_path: Path):
     """Every script a hooks.json shells out to must land in the composed install.
 

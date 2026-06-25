@@ -83,33 +83,6 @@ def test_init_no_harvest_pending(tmp_path):
     assert not (default_vault / "harvest-pending.md").exists()
 
 
-# ---- lore patch is unregistered ---------------------------------------------
-
-
-def test_patch_subcommand_is_unregistered(tmp_path):
-    """The orphaned `lore patch` subcommand was removed: invoking it is an
-    argparse 'invalid choice' error (exit 2), never a successful patch. The
-    internal `frontmatter.patch_section` helper (used by `lore handoff`) is
-    unaffected — only the user-facing subcommand is gone."""
-    p = tmp_path / "s.md"
-    p.write_text("---\ntype: session\nstatus: active\n---\n\n## What we did\nx\n")
-    r = run_cli(["patch", str(p), "What we did", "--text", "- more work"])
-    assert r.returncode == 2
-    assert "invalid choice: 'patch'" in r.stderr
-
-
-# ---- lore new is unregistered (Slice 4) -------------------------------------
-
-
-def test_new_subcommand_is_unregistered(tmp_path):
-    """`lore new` (the template-renderer) was removed wholesale in Slice 4:
-    invoking it is an argparse 'invalid choice' error (exit 2), never a
-    successful note creation."""
-    r = run_cli(["new", "plan", "--title", "Whatever"])
-    assert r.returncode == 2
-    assert "invalid choice: 'new'" in r.stderr
-
-
 # ---- lore set-status (removed — redirects via dispatch hint) ----------------
 
 

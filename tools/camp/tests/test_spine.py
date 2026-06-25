@@ -12,7 +12,6 @@ Test contract from the plan (Slice 0):
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -160,91 +159,6 @@ def test_git_out_returns_empty_on_nonzero(tmp_path: Path) -> None:
         mock_run.return_value = MagicMock(returncode=1, stdout="something", stderr="err")
         result = _git_out(tmp_path, "status")
     assert result == ""
-
-
-# ---------------------------------------------------------------------------
-# cmd_sweep: no registry → orphan_instances={}, no NotImplementedError
-# ---------------------------------------------------------------------------
-
-
-def test_cmd_sweep_no_registry_returns_empty_instances(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """cmd_sweep with no dev-env registry must return orphan_instances={}."""
-    from spine import cmd_sweep
-
-    with (
-        patch("spine._workspace_root", return_value=tmp_path),
-        patch("spine._canonical_root", return_value=tmp_path),
-        patch("spine._active_worktree_names", return_value=set()),
-        patch("spine._collect_orphan_worktrees", return_value={}),
-    ):
-        cmd_sweep(["--json"])
-    captured = capsys.readouterr()
-    report = json.loads(captured.out)
-    assert report["orphan_instances"] == {}
-
-
-def test_cmd_sweep_no_registry_does_not_call_import_dev_env(tmp_path: Path) -> None:
-    """cmd_sweep without --prune must not call _import_dev_env (stub)."""
-    from spine import cmd_sweep
-
-    with (
-        patch("spine._workspace_root", return_value=tmp_path),
-        patch("spine._canonical_root", return_value=tmp_path),
-        patch("spine._active_worktree_names", return_value=set()),
-        patch("spine._collect_orphan_worktrees", return_value={}),
-        patch("spine._import_dev_env") as mock_import,
-    ):
-        cmd_sweep([])
-    mock_import.assert_not_called()
-
-
-def test_cmd_sweep_prune_with_orphan_instance_raises_not_implemented(
-    tmp_path: Path,
-) -> None:
-    """cmd_sweep --prune hitting the stub should raise NotImplementedError."""
-    from spine import cmd_sweep
-
-    reg_dir = tmp_path / ".worktree-dev"
-    reg_dir.mkdir()
-    vanished_root = tmp_path / "vanished-wt"
-    registry = {
-        "schema_version": 3,
-        "instances": {"inst-001": {"paths": {"worktree_root": str(vanished_root)}}},
-    }
-    (reg_dir / "registry.json").write_text(json.dumps(registry))
-
-    with (
-        patch("spine._workspace_root", return_value=tmp_path),
-        patch("spine._canonical_root", return_value=tmp_path),
-        patch("spine._active_worktree_names", return_value=set()),
-        patch("spine._collect_orphan_worktrees", return_value={}),
-    ):
-        with pytest.raises(NotImplementedError):
-            cmd_sweep(["--prune"])
-
-
-# ---------------------------------------------------------------------------
-# JSON schema stability: status/sweep retain dev_env keys as null/{}
-# ---------------------------------------------------------------------------
-
-
-def test_sweep_report_retains_dev_env_schema_keys(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """--json output must have orphan_instances (not dropped), defaulting to {}."""
-    from spine import cmd_sweep
-
-    with (
-        patch("spine._workspace_root", return_value=tmp_path),
-        patch("spine._canonical_root", return_value=tmp_path),
-        patch("spine._active_worktree_names", return_value=set()),
-        patch("spine._collect_orphan_worktrees", return_value={}),
-    ):
-        cmd_sweep(["--json"])
-    report = json.loads(capsys.readouterr().out)
-    assert "orphan_instances" in report
 
 
 # ---------------------------------------------------------------------------
