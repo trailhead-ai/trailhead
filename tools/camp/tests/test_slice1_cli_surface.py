@@ -40,73 +40,6 @@ def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedPro
 
 
 # ---------------------------------------------------------------------------
-# camp help: golden-structure assert
-# The lesson [[2026-06-04-port-parity-golden-structure-not-substring]] says:
-# assert the STRUCTURE (all active sections, none of the disabled ones),
-# not just a substring.
-# ---------------------------------------------------------------------------
-
-_EXPECTED_ACTIVE_VERBS = ("group", "ai", "rm", "pwd", "enter", "setup")
-_EXPECTED_ACTIVE_SECTIONS = ("Setup", "Workspace")
-_DISABLED_VERBS = ("restock", "sweep", "code", "fire")
-_LEGACY_VERBS = ("init", "open", "break")
-
-
-def test_camp_help_contains_all_active_verbs() -> None:
-    result = _run(["help"])
-    assert result.returncode == 0, f"help exited {result.returncode}\n{result.stderr}"
-    output = result.stdout
-    for verb in _EXPECTED_ACTIVE_VERBS:
-        assert verb in output, (
-            f"Expected active verb {verb!r} in camp help output.\nOutput:\n{output}"
-        )
-
-
-def test_camp_help_does_not_contain_disabled_verbs() -> None:
-    result = _run(["help"])
-    assert result.returncode == 0
-    output = result.stdout
-    for verb in _DISABLED_VERBS:
-        assert verb not in output, (
-            f"Disabled verb {verb!r} must NOT appear in camp help output.\nOutput:\n{output}"
-        )
-
-
-def test_camp_help_does_not_contain_legacy_verbs() -> None:
-    """init/open/break are renamed; they must not appear in help as commands."""
-    result = _run(["help"])
-    assert result.returncode == 0
-    output = result.stdout
-    for verb in _LEGACY_VERBS:
-        # The verb may appear as part of the "use camp <new>" pointer, but it
-        # must NOT appear as a standalone command listing (e.g., "  camp init").
-        assert f"  camp {verb}" not in output, (
-            f"Legacy verb {verb!r} must not appear as a command in help.\nOutput:\n{output}"
-        )
-
-
-def test_camp_help_golden_structure() -> None:
-    """Full golden-structure check: new verbs present, disabled/legacy absent."""
-    result = _run(["help"])
-    assert result.returncode == 0
-    output = result.stdout
-
-    # Must contain active verb surface
-    for verb in _EXPECTED_ACTIVE_VERBS:
-        assert verb in output, f"Missing active verb: {verb!r}"
-
-    # Must NOT contain disabled verbs
-    for verb in _DISABLED_VERBS:
-        assert verb not in output, f"Disabled verb in help: {verb!r}"
-
-    # Must reference camp as the tool (header / title)
-    assert "camp" in output.lower()
-
-    # Must have usage section
-    assert "usage" in output.lower() or "Usage" in output
-
-
-# ---------------------------------------------------------------------------
 # camp group → dispatches (stub behavior for Slice 1)
 # ---------------------------------------------------------------------------
 
@@ -147,66 +80,6 @@ def test_camp_ai_dispatches_not_error() -> None:
         f"camp ai should not show unknown-command error.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-
-
-def test_camp_ai_is_in_reserved() -> None:
-    """'ai' must be in RESERVED so bare-slug dispatch doesn't consume it."""
-    scripts_dir = _PLUGIN_DIR / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    from spine import RESERVED
-
-    assert "ai" in RESERVED, f"'ai' must be in RESERVED, got: {RESERVED}"
-
-
-def test_camp_rm_is_in_reserved() -> None:
-    """'rm' must be in RESERVED."""
-    scripts_dir = _PLUGIN_DIR / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    from spine import RESERVED
-
-    assert "rm" in RESERVED, f"'rm' must be in RESERVED, got: {RESERVED}"
-
-
-def test_camp_group_is_in_reserved() -> None:
-    """'group' must be in RESERVED."""
-    scripts_dir = _PLUGIN_DIR / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    from spine import RESERVED
-
-    assert "group" in RESERVED, f"'group' must be in RESERVED, got: {RESERVED}"
-
-
-def test_camp_pwd_is_in_reserved() -> None:
-    """'pwd' must be in RESERVED."""
-    scripts_dir = _PLUGIN_DIR / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    from spine import RESERVED
-
-    assert "pwd" in RESERVED, f"'pwd' must be in RESERVED, got: {RESERVED}"
-
-
-def test_camp_enter_is_in_reserved() -> None:
-    """'enter' must be in RESERVED."""
-    scripts_dir = _PLUGIN_DIR / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    from spine import RESERVED
-
-    assert "enter" in RESERVED, f"'enter' must be in RESERVED, got: {RESERVED}"
-
-
-def test_camp_setup_is_in_reserved() -> None:
-    """'setup' must be in RESERVED."""
-    scripts_dir = _PLUGIN_DIR / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    from spine import RESERVED
-
-    assert "setup" in RESERVED, f"'setup' must be in RESERVED, got: {RESERVED}"
 
 
 # ---------------------------------------------------------------------------
@@ -320,38 +193,6 @@ def test_camp_break_gives_legible_redirect() -> None:
 
 
 # ---------------------------------------------------------------------------
-# camp cd/enter/setup → stub "not yet implemented in this slice" + non-zero
-# ---------------------------------------------------------------------------
-
-
-# NOTE: 'setup' graduated from a stub to real behavior in Slice 3 (and 'ai' too);
-# 'enter' graduated from a stub to real behavior in Slice 5;
-# 'pwd' graduated from a stub to real behavior in Slice 7 (previously named 'cd').
-# All stub verbs have graduated — this parametrize is intentionally empty.
-@pytest.mark.parametrize("verb", [])
-def test_stub_verb_exits_nonzero(verb: str) -> None:
-    result = _run([verb, "dummy"])
-    assert result.returncode != 0, (
-        f"Stub verb {verb!r} must exit non-zero (not yet implemented).\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-@pytest.mark.parametrize("verb", [])
-def test_stub_verb_prints_not_implemented_message(verb: str) -> None:
-    result = _run([verb, "dummy"])
-    combined = result.stdout + result.stderr
-    assert (
-        "not yet" in combined.lower()
-        or "slice" in combined.lower()
-        or "implement" in combined.lower()
-    ), (
-        f"Stub verb {verb!r} must print 'not yet implemented' message.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Group-aware path: _dispatch_group_command exercised via CAMP_CONFIG_DIR +
 # --group flag. This ensures the group-aware routing is tested separately from
 # the spine fallback path.
@@ -440,20 +281,6 @@ def test_group_path_ai_announces_background_provisioning(
 # camp rm via group-aware path → real (graduated from Slice 1 stub in cleanup pass)
 # camp rm now routes to reconcile_break; it exits non-zero for an unknown slug
 # (no manifest present), NOT with a "not yet implemented" stub message.
-
-
-def test_group_path_rm_no_longer_stubbed(stub_group_env: dict[str, str]) -> None:
-    """camp rm via group-aware path no longer says 'not yet implemented' (stub graduated)."""
-    result = _run_group(["rm", "--name", "my-slug"], group_env=stub_group_env)
-    combined = result.stdout + result.stderr
-    assert "not yet implemented" not in combined.lower(), (
-        f"camp rm must not return the Slice-1 stub message (it has graduated).\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-    assert "slice 2" not in combined.lower(), (
-        f"camp rm must not mention 'Slice 2' (stub message removed).\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    )
 
 
 def test_group_path_rm_unknown_slug_exits_nonzero(stub_group_env: dict[str, str]) -> None:

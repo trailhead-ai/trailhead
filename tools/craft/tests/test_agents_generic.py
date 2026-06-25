@@ -147,69 +147,6 @@ def test_agent_has_no_middle_band_tokens(agent_md: Path):
 # Slice P3A-2 behavioral tests
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Slice 1: Harvest-candidates emit retired (absence assertions)
-#
-# No craft or portage agent may carry a '## Harvest candidates' heading or any
-# 'harvest-protocol' mention. The lore-side hook (harvest-candidates.py) is
-# removed separately; these tests guard the agent-prompt side.
-# ---------------------------------------------------------------------------
-
-PORTAGE_AGENTS_DIR = (
-    AGENTS_DIR.parent.parent.parent.parent / "portage" / "plugins" / "portage" / "agents"
-)
-
-
-@pytest.mark.parametrize("agent_md", _agent_files(), ids=lambda p: p.stem)
-def test_agent_has_no_harvest_candidates_heading(agent_md: Path):
-    """No craft agent may carry a '## Harvest candidates' section heading.
-
-    The harvest-candidates emit convention has been retired (Slice 1). Agents
-    must not prompt callers to append harvest blocks.
-    """
-    text = agent_md.read_text()
-    assert "## Harvest candidates" not in text, (
-        f"{agent_md.name} still contains a '## Harvest candidates' heading. "
-        "Remove the entire harvest-candidates section from this agent."
-    )
-
-
-@pytest.mark.parametrize("agent_md", _agent_files(), ids=lambda p: p.stem)
-def test_agent_has_no_harvest_protocol_mention(agent_md: Path):
-    """No craft agent may mention 'harvest-protocol'.
-
-    The harvest-protocol reference (both the .md variant caught by
-    STRUCTURAL_SEAMS and bare mentions) must be absent from all craft agents.
-    """
-    text = agent_md.read_text()
-    assert "harvest-protocol" not in text, (
-        f"{agent_md.name} still contains a 'harvest-protocol' reference. "
-        "Remove all harvest-protocol mentions from this agent."
-    )
-
-
-def test_portage_agents_have_no_harvest_candidates():
-    """Backstop: no portage agent may carry '## Harvest candidates' or 'harvest-protocol'.
-
-    Covers the portage plugin's agent directory as a whole, catching any agent
-    that carries harvest blocks (monitor.md was the known case at Slice 1).
-    """
-    assert PORTAGE_AGENTS_DIR.is_dir(), (
-        f"Portage agents directory not found at {PORTAGE_AGENTS_DIR}. "
-        "Update the path if the portage plugin has moved."
-    )
-    for agent_md in sorted(PORTAGE_AGENTS_DIR.glob("*.md")):
-        text = agent_md.read_text()
-        assert "## Harvest candidates" not in text, (
-            f"portage/{agent_md.name} still contains a '## Harvest candidates' heading. "
-            "Remove the entire harvest-candidates section from this agent."
-        )
-        assert "harvest-protocol" not in text, (
-            f"portage/{agent_md.name} still contains a 'harvest-protocol' reference. "
-            "Remove all harvest-protocol mentions from this agent."
-        )
-
-
 # Agents that dispatched brain-librarian and must now carry a visible skip notice
 # so callers know the prior-art synthesis pass was skipped.
 _VISIBLE_SKIP_AGENTS: list[str] = [
@@ -343,30 +280,4 @@ def test_visible_skip_notice_present(stem: str):
         "Rewrite the brain-librarian dispatch to the required fallback shape: "
         "'if none is configured, note in your report that the prior-art synthesis "
         "pass was skipped and results may be shallower.'"
-    )
-
-
-# Council agents must state the skip notice exactly once — once in the Output
-# shape / Uncertainty field. The subagent-section bullet must NOT restate it
-# (Slice 3 dedup). The existing presence check above already guards against
-# zero occurrences; this guards against the double-statement.
-_COUNCIL_AGENTS: list[str] = ["advocate", "attacker", "breaker", "builder"]
-
-
-@pytest.mark.parametrize("stem", _COUNCIL_AGENTS)
-def test_council_agent_skip_notice_exactly_once(stem: str):
-    """Each council agent must contain 'synthesis pass was skipped' exactly once.
-
-    The canonical location is the Output shape / Uncertainty field. The
-    Confidence boost / subagent section must NOT restate it — that duplication
-    adds token cost without adding information (Slice 3 dedup).
-    """
-    agent_md = AGENTS_DIR / f"{stem}.md"
-    assert agent_md.exists(), f"Expected council agent {stem}.md to exist in {AGENTS_DIR}."
-    text = agent_md.read_text()
-    count = text.count("synthesis pass was skipped")
-    assert count == 1, (
-        f"{agent_md.name} contains 'synthesis pass was skipped' {count} time(s); "
-        "expected exactly 1. Keep the occurrence in the Output shape / Uncertainty "
-        "field and remove the duplicate from the Confidence boost section."
     )

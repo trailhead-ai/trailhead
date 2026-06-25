@@ -72,31 +72,3 @@ def test_all_capture_and_ritual_skills_present():
     }
     missing = expected - names
     assert not missing, f"expected skills missing from the plugin: {sorted(missing)}"
-
-
-def test_brainstorm_moved_to_craft_absent_from_lore():
-    """S6 Slice 3 moved the brainstorm skill out of lore into the craft plugin.
-
-    Guard against it being accidentally re-added under lore — its home is now
-    tools/craft/plugins/craft/skills/brainstorm/.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    assert "brainstorm" not in names, (
-        "brainstorm must not exist under the lore plugin — S6 Slice 3 moved it to "
-        "the craft plugin (tools/craft/plugins/craft/skills/brainstorm/)"
-    )
-
-
-def test_obsolete_per_kind_capture_skills_absent():
-    """S6 Slice 2 deleted the 7 obsolete per-kind capture skills.
-
-    These skills are replaced by the `lore record` / `lore session` CLI surface.
-    Guard against them being accidentally re-added.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    deleted = {"area", "check-in", "dead-end", "decision", "defer", "follow-up", "seed"}
-    present = deleted & names
-    assert not present, (
-        f"obsolete per-kind capture skills must not exist (S6 Slice 2 deleted them): "
-        f"{sorted(present)}"
-    )

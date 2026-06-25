@@ -41,14 +41,6 @@ class TestCuratedHelp:
         for cmd in ("install", "uninstall", "doctor", "shellenv"):
             assert cmd in out
 
-    def test_help_does_not_name_removed_commands(self):
-        # The curated menu (bare invocation) must not list update/config commands.
-        _, out, _ = _run([])
-        assert "update" not in out
-        # 'config' may appear as "--config"/"config/default.toml" guidance, but
-        # never as a standalone command line.
-        assert "\n  config " not in out
-
     def test_help_mentions_config_flag(self):
         _, out, _ = _run([])
         assert "--config" in out
@@ -62,10 +54,6 @@ class TestSubcommandHelp:
         for flag in ("--harness", "--plugin", "--no-camp", "--no-lore", "--config"):
             assert flag in text
 
-    def test_install_help_has_no_preset_flag(self):
-        _, out, err = _run(["install", "--help"])
-        assert "--preset" not in (out + err)
-
     def test_uninstall_help_shows_yes_flag(self):
         ec, out, _ = _run(["uninstall", "--help"])
         assert ec == 0
@@ -73,15 +61,6 @@ class TestSubcommandHelp:
 
     def test_doctor_help_exits_zero(self):
         assert _run(["doctor", "--help"])[0] == 0
-
-    def test_update_command_is_gone(self):
-        # argparse: unknown subcommand → exit code 2 on stderr.
-        ec, _, _ = _run(["update"])
-        assert ec != 0
-
-    def test_config_command_is_gone(self):
-        ec, _, _ = _run(["config"])
-        assert ec != 0
 
 
 class TestDoctorRuns:

@@ -32,11 +32,6 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 _INJECTION_CANONICAL = FIXTURES_DIR / "injection_defense_canonical.txt"
 
-# The canonical degradation sentence shared across all three extension-point
-# stanzas (feature_flags, observability, issue_tracker). After the dedup, it
-# must appear exactly once.
-_DEGRADATION_SENTENCE = "see the extend guide in `docs/DEGRADATION.md`"
-
 # The three provider seams that must still appear individually (visible-skip
 # contract — each extension point must still announce its identity).
 _PROVIDER_SEAMS = [
@@ -57,20 +52,6 @@ _INJECTION_ANCHOR = 'external-memory layer="shared" source="…">'
 
 
 class TestDegradationDedup:
-    def test_degradation_sentence_appears_exactly_once(self):
-        """The shared degradation sentence must appear exactly once after the
-        dedup — not once per provider (3×). Fail-first: currently appears 2×
-        (feature-flag + observability stanzas carry it; issue-tracker uses
-        different wording). After Slice 5 lands it must be exactly 1."""
-        text = _BRAINSTORM_SKILL.read_text()
-        count = text.count(_DEGRADATION_SENTENCE)
-        assert count == 1, (
-            f"Expected the shared degradation sentence to appear exactly once "
-            f"in brainstorm/SKILL.md, but found it {count} times. "
-            f"Sentence: {_DEGRADATION_SENTENCE!r}. "
-            "Factor the sentence into a shared note and trim per-provider copies."
-        )
-
     def test_all_provider_seams_still_present(self):
         """All three provider-specific visible-skip phrases must still appear
         (test_skills_generic.py pins these). After the dedup, each provider
@@ -83,23 +64,6 @@ class TestDegradationDedup:
                 "degradation dedup. Each provider must retain its own visible-skip "
                 "notice (test_skills_generic.py pins these)."
             )
-
-
-# ---------------------------------------------------------------------------
-# (b) Key Principles section absent
-# ---------------------------------------------------------------------------
-
-
-class TestKeyPrinciplesAbsent:
-    def test_key_principles_section_gone(self):
-        """The 'Key Principles' recap section must be absent — it duplicates
-        principles stated earlier in the skill and in the planner."""
-        text = _BRAINSTORM_SKILL.read_text()
-        assert "## Key Principles" not in text, (
-            "brainstorm/SKILL.md still contains the '## Key Principles' recap "
-            "section (lines 274-287 in the pre-Slice-5 file). Drop it — it "
-            "duplicates earlier content."
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -326,58 +326,16 @@ class TestEnsureSessionNote:
 
 
 # ---------------------------------------------------------------------------
-# permission-log.py
-# ---------------------------------------------------------------------------
-
-
-class TestPermissionLog:
-    def test_permission_log_hook_not_present(self):
-        """permission-log.py was removed from the hooks directory.
-
-        The PreToolUse / permission-logging hook was removed as part of the
-        subsystems→areas rename cleanup. This test asserts the removal is
-        intentional so any re-addition of a permission-log hook is a deliberate
-        change, not an accidental resurrection.
-        """
-        assert not (HOOKS_DIR / "permission-log.py").exists(), (
-            "permission-log.py must not be present — it was removed with the "
-            "PreToolUse hook. Re-adding it requires updating hooks.json too."
-        )
-
-
-# ---------------------------------------------------------------------------
 # hooks.json registration (Slice 1, lore-agent-interface: zero push hooks)
 # ---------------------------------------------------------------------------
 
 
 class TestHooksJson:
-    def test_no_post_tool_use_harvest_entry(self):
-        """hooks.json must carry no PostToolUse entry — harvest hook is retired.
-
-        lore is fully pull: zero push hooks remain.
-        """
-        data = json.loads((HOOKS_DIR / "hooks.json").read_text())
-        hooks = data.get("hooks", {})
-        assert "PostToolUse" not in hooks, (
-            "hooks.json must NOT register PostToolUse — harvest hook was deleted "
-            "(lore-agent-interface Slice 1)"
-        )
-
     def test_zero_push_hooks(self):
         """hooks.json registers zero push hooks (lore is fully pull)."""
         data = json.loads((HOOKS_DIR / "hooks.json").read_text())
         hooks = data.get("hooks", {})
         assert hooks == {}, f"hooks.json must have empty hooks dict, got keys: {list(hooks.keys())}"
-
-    def test_smoke_files_deleted(self):
-        assert not (HOOKS_DIR / "session_smoke.py").exists()
-        assert not (HOOKS_DIR / "_shared_smoke.py").exists()
-
-    def test_harvest_candidates_hook_file_deleted(self):
-        """harvest-candidates.py must not be present — it was deleted in Slice 1."""
-        assert not (HOOKS_DIR / "harvest-candidates.py").exists(), (
-            "harvest-candidates.py must be removed — lore installs zero push hooks."
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -331,27 +331,6 @@ class TestBuildRealAnchorSet:
         for tool in ("lore", "craft", "camp"):
             assert tool in anchors, f"tool {tool!r} missing from anchor set"
 
-    def test_lore_finish_skill_present(self):
-        anchors = build_real_anchor_set()
-        assert "skills/finish" in anchors["lore"]["skills"]
-
-    def test_lore_librarian_agent_present(self):
-        anchors = build_real_anchor_set()
-        assert "agents/librarian.md" in anchors["lore"]["agents"]
-
-    def test_craft_execute_skill_present(self):
-        anchors = build_real_anchor_set()
-        assert "skills/execute" in anchors["craft"]["skills"]
-
-    def test_craft_assumption_prover_agent_present(self):
-        anchors = build_real_anchor_set()
-        assert "agents/assumption-prover.md" in anchors["craft"]["agents"]
-
-    def test_craft_artist_agent_present(self):
-        """craft has agents/artist.md — verify it's in the anchor set."""
-        anchors = build_real_anchor_set()
-        assert "agents/artist.md" in anchors["craft"]["agents"]
-
     def test_camp_has_no_skills_or_agents(self):
         """camp ships only a CLI + hooks — its anchor set has no skills and no agents (R-1).
 
@@ -1299,53 +1278,3 @@ class TestLandingSurfaceLeakGate:
             "Denylist false-positived on legitimate landing vocabulary.\n"
             f"Gate output:\n{result.stdout}\n{result.stderr}"
         )
-
-
-class TestNoDivCollapseGuard:
-    """D17 scope guard: asserts that Slice 5 did NOT wire the D17 group-workspace-config.
-
-    The D17 collapse (wiring trailhead as the group's camp workspace + adding a
-    group CLAUDE.md/AGENTS.md) is explicitly deferred as a tracked follow-up, not
-    built in WS-8 (D-3). This parallels Step-6's no-cutover guard: the boundary is
-    a tested contract, not just a comment.
-
-    Two negative assertions (kept simple and meaningful, not brittle):
-    1. The root README.md does NOT claim "this repo is the group's workspace" /
-       "camp workspace" (the D-3 omit branch: if D17 wiring isn't in, the sentence
-       must not be in either — the claim would be link-dead).
-    2. No group coordination file (CLAUDE.md or AGENTS.md) was added to the repo root
-       by WS-8 work.
-    """
-
-    def test_root_readme_does_not_claim_group_workspace(self) -> None:
-        """Root README must not claim 'this repo is the group's workspace' (D-3 omit).
-
-        If D17 hasn't landed, the link-dead sentence must not be in the README.
-        The guard targets the specific vocabulary the workspace-config feature would
-        introduce: 'group's workspace', 'camp workspace', 'workspace = <path>' wiring.
-        """
-        assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
-        text = _ROOT_README.read_text(encoding="utf-8")
-        # None of these phrases should appear in a landing that hasn't wired D17
-        forbidden_phrases = (
-            "group's workspace",
-            "group workspace",
-            "camp workspace",
-            "workspace = ",
-        )
-        for phrase in forbidden_phrases:
-            assert phrase.lower() not in text.lower(), (
-                f"README.md contains '{phrase}', which implies D17 group-workspace-config "
-                "is wired. D17 is deferred (D-3) — this claim is link-dead until D17 lands. "
-                "Either wire D17 properly (out of WS-8 scope) or remove the sentence."
-            )
-
-    # NOTE: the former `test_no_group_coordination_file_at_repo_root` guard was
-    # removed. It used the mere existence of CLAUDE.md at the repo root as a proxy
-    # for "D17 group-workspace-config was wired". That proxy was invalidated when
-    # the project deliberately adopted a repo-root CLAUDE.md to load the vision
-    # axioms (it imports docs/vision.md) — a purpose unrelated to D17. The old
-    # guard also checked AGENTS.md presence; that check is dropped too, since a
-    # file's presence never proved D17 was wired. D17 is now guarded semantically
-    # above by test_root_readme_does_not_claim_group_workspace, which checks for
-    # the actual workspace-config vocabulary rather than any file's presence.

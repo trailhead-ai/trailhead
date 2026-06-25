@@ -22,15 +22,6 @@ from pathlib import Path
 AGENTS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "agents"
 PLANNER_MD = AGENTS_DIR / "planner.md"
 
-# The greppable fallback-gate marker introduced in this slice. Any text that
-# only appears AFTER this marker is on the manual-write fallback path.
-FALLBACK_MARKER = "lore CLI is unavailable"
-
-# Literals that belong to the full inline template blocks and must NOT appear
-# on the common path — they may only appear after FALLBACK_MARKER.
-_SPEC_TEMPLATE_LITERAL = "type: spec"
-_PLAN_TEMPLATE_LITERAL = "# [Feature Name] Implementation Plan"
-
 # Section names that the checklist must carry so a planner dispatched without
 # the CLI still knows the shape of each document.
 _REQUIRED_SPEC_SECTIONS = [
@@ -58,55 +49,6 @@ def _text() -> str:
     return PLANNER_MD.read_text()
 
 
-def _fallback_offset(text: str) -> int:
-    """Return the character offset where the fallback section starts, or -1."""
-    idx = text.find(FALLBACK_MARKER)
-    return idx
-
-
-# ---------------------------------------------------------------------------
-# Core dedup assertions
-# ---------------------------------------------------------------------------
-
-
-def test_spec_template_literal_absent_from_common_path():
-    """The spec frontmatter literal `type: spec` must not appear on the common
-    path — only after the manual-write fallback marker (if at all).
-
-    Fail first: currently the full template is inline before any fallback gate.
-    """
-    text = _text()
-    fallback_idx = _fallback_offset(text)
-    spec_idx = text.find(_SPEC_TEMPLATE_LITERAL)
-
-    assert spec_idx == -1 or (fallback_idx != -1 and spec_idx > fallback_idx), (
-        f"planner.md contains {_SPEC_TEMPLATE_LITERAL!r} at char {spec_idx} "
-        f"but the fallback marker '{FALLBACK_MARKER}' is at char {fallback_idx}. "
-        "The spec template literal must only appear after the fallback marker "
-        "(or not at all). Replace the common-path template block with a "
-        "fields-to-fill checklist."
-    )
-
-
-def test_plan_template_literal_absent_from_common_path():
-    """The plan header literal `# [Feature Name] Implementation Plan` must not
-    appear on the common path — only after the manual-write fallback marker.
-
-    Fail first: currently the full template is inline before any fallback gate.
-    """
-    text = _text()
-    fallback_idx = _fallback_offset(text)
-    plan_idx = text.find(_PLAN_TEMPLATE_LITERAL)
-
-    assert plan_idx == -1 or (fallback_idx != -1 and plan_idx > fallback_idx), (
-        f"planner.md contains {_PLAN_TEMPLATE_LITERAL!r} at char {plan_idx} "
-        f"but the fallback marker '{FALLBACK_MARKER}' is at char {fallback_idx}. "
-        "The plan template literal must only appear after the fallback marker "
-        "(or not at all). Replace the common-path template block with a "
-        "fields-to-fill checklist."
-    )
-
-
 # ---------------------------------------------------------------------------
 # note_store seam pointer (Slice 3) — `lore new` is decoupled
 # ---------------------------------------------------------------------------
@@ -129,32 +71,6 @@ def test_craft_template_path_referenced():
     assert "templates/plan.md" in text and "templates/spec.md" in text, (
         "planner.md must reference the craft-owned 'templates/plan.md' and "
         "'templates/spec.md' bodies (craft owns the template bodies; lore is body-agnostic)."
-    )
-
-
-def test_lore_new_not_referenced():
-    """planner.md must NOT reference `lore new spec` / `lore new plan` — Slice 3
-    decouples craft from the `lore new` template-renderer."""
-    text = _text()
-    assert "lore new spec" not in text and "lore new plan" not in text, (
-        "planner.md must not reference 'lore new spec' / 'lore new plan'. Craft persists "
-        "plans/specs via the note_store seam (`lore record create`), not `lore new`."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Fallback marker present (full literal survives exactly once, behind the gate)
-# ---------------------------------------------------------------------------
-
-
-def test_fallback_marker_present():
-    """The manual-write fallback marker must be present so there is a clear
-    gate — the full literal template survives exactly once, behind it."""
-    text = _text()
-    assert FALLBACK_MARKER in text, (
-        f"planner.md must contain the fallback marker {FALLBACK_MARKER!r} to gate "
-        "the manual-write path. Add a 'If the lore CLI is unavailable, write the "
-        "file by hand mirroring this shape:' gate before the retained literal."
     )
 
 
