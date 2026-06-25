@@ -658,7 +658,7 @@ def _flush_current_session(args: argparse.Namespace) -> int:
             key,
             vault_root=str(vault),
             committer=committer,
-            open_index=_session_index_factory(),
+            open_index=_open_session_index,
         )
     except Exception as exc:
         print(f"error: session flush failed: {exc}", file=sys.stderr)
@@ -684,7 +684,7 @@ def _flush_current_session(args: argparse.Namespace) -> int:
                 key,
                 vault_root=str(vault),
                 committer=committer,
-                open_index=_session_index_factory(),
+                open_index=_open_session_index,
             )
         except Exception as exc:
             print(
@@ -774,7 +774,7 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
                 key,
                 vault_root=str(vault),
                 committer=committer,
-                open_index=_session_index_factory(),
+                open_index=_open_session_index,
             )
             # A session that raced clean since discovery is a benign skip.
             if verdict != session_store_mod.FLUSH_FLUSHED:
@@ -795,7 +795,7 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
                         key,
                         vault_root=str(vault),
                         committer=committer,
-                        open_index=_session_index_factory(),
+                        open_index=_open_session_index,
                     )
                 except Exception as revert_exc:
                     # A failed rollback re-creates the very orphan revert exists to
@@ -1855,14 +1855,14 @@ def _resolve_session_key(args: argparse.Namespace) -> tuple[str | None, int]:
         return None, 1
 
 
-def _session_index_factory():
-    """Return a no-arg factory opening a fresh global index connection.
+def _open_session_index():
+    """Open a fresh global index connection (the ``open_index`` seam for capture).
 
     Passed into the ``session_store`` capture primitives so the lock-spanning reindex
     opens the index inside the held lock (KU1) while honoring ``XDG_STATE_HOME`` test
     isolation via ``os.environ`` — the same env ``index_store.open_index`` reads.
     """
-    return lambda: index_store_mod.open_index(env=dict(os.environ))
+    return index_store_mod.open_index(env=dict(os.environ))
 
 
 def _cmd_session_candidate(args: argparse.Namespace) -> int:
@@ -1892,7 +1892,7 @@ def _cmd_session_candidate(args: argparse.Namespace) -> int:
 
     safe_body = record_store_mod.neutralize_fences(_read_stdin_body())
 
-    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = dt.datetime.now(dt.timezone.utc).strftime(session_store_mod.FLUSHED_AT_FORMAT)
     # A single record-candidate entry: a one-line header carrying KIND + PHASE +
     # timestamp, then the (possibly multi-line) neutralized body indented as a
     # block so the append stays one logical entry.
@@ -1908,7 +1908,7 @@ def _cmd_session_candidate(args: argparse.Namespace) -> int:
             key, entry,
             vault_root=vault_root,
             committer=committer,
-            open_index=_session_index_factory(),
+            open_index=_open_session_index,
         )
     except Exception as exc:
         print(f"error: session candidate write failed: {exc}", file=sys.stderr)
@@ -1934,7 +1934,7 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
         print("error: RECORD_ID is required", file=sys.stderr)
         return 1
 
-    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = dt.datetime.now(dt.timezone.utc).strftime(session_store_mod.FLUSHED_AT_FORMAT)
     # Neutralize fences in the entry (AC-FENCE1): RECORD_ID is a free-form arg, so
     # a `<external-memory>` token in it must not land live in the session record —
     # the referenced boundary neutralizes uniformly like candidate/create/blob.
@@ -1947,7 +1947,7 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
             key, entry,
             vault_root=vault_root,
             committer=committer,
-            open_index=_session_index_factory(),
+            open_index=_open_session_index,
         )
     except Exception as exc:
         print(f"error: session referenced write failed: {exc}", file=sys.stderr)

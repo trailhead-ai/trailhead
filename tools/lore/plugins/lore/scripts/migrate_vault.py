@@ -672,13 +672,10 @@ def _map_status_core(value: Any, kind: str) -> tuple[str, str | None, str | None
     ``complete``, and ``shelved → complete`` — which :func:`_map_status` then
     translates into the new ``dirty``/``clean`` vocab.
     """
-    vocab = STATUS_VOCAB[kind]
-    default = vocab[0]
     # Sessions are mapped against their legacy vocab so the legacy values survive
     # to the remap step; the wrapper translates the result into the new vocab.
-    if kind == "session":
-        vocab = _LEGACY_SESSION_VOCAB
-        default = vocab[0]
+    vocab = _LEGACY_SESSION_VOCAB if kind == "session" else STATUS_VOCAB[kind]
+    default = vocab[0]
 
     if value is None:
         return default, None, None

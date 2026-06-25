@@ -167,15 +167,38 @@ def resolve_project(cwd: Path | None = None) -> str:
     return target.name
 
 
+def _find_session_record(vault: Path, key: str | None) -> Path | None:
+    """Return the singular session record ``session/<key>.md`` for *key*, or None.
+
+    The shared resolver behind :func:`find_session_note` (worktree-name key) and
+    :func:`find_session_note_by_session_id` (GUID key) — since Slice 1 a session is
+    a first-class record under the singular ``session/`` kind dir, so both keys are
+    the same direct stem lookup. The ``# session: <key>`` body header is confirmed
+    so a same-named file of a different shape is not mistaken for the capture
+    record. Returns None when *key* is empty or no matching record exists; never
+    raises.
+    """
+    if not key:
+        return None
+    header = f"# session: {key}"
+    record_md = Path(vault) / "session" / f"{key}.md"
+    try:
+        if record_md.is_file() and any(
+            line.strip() == header for line in record_md.read_text().splitlines()
+        ):
+            return record_md
+    except Exception:
+        pass
+    return None
+
+
 def find_session_note(vault: Path, worktree_name: str | None = None) -> Path | None:
     """Return the worktree-keyed session record in ``vault/session/``, or None.
 
     Since Slice 1 a session is a first-class record under the singular
     ``session/`` kind dir, keyed by ``--session-id`` (a GUID) **or**, when no id
     is set, the worktree name (``_resolve_session_key`` in the CLI). So the
-    worktree fallback is a direct stem lookup: ``session/<worktree_name>.md``,
-    confirmed by its ``# session: <worktree_name>`` body header so a same-named
-    record of a different shape is not mistaken for the capture record.
+    worktree fallback is a direct stem lookup (see :func:`_find_session_record`).
 
     Slice 7 retired the legacy plural ``sessions/`` reads (the date-prefixed
     ``YYYY-MM-DD-HHMM-<worktree>.md`` frontmatter notes whose CREATE path was
@@ -184,18 +207,7 @@ def find_session_note(vault: Path, worktree_name: str | None = None) -> Path | N
 
     Returns None when *worktree_name* is empty or no matching record exists.
     """
-    if not worktree_name:
-        return None
-    header = f"# session: {worktree_name}"
-    record_md = Path(vault) / "session" / f"{worktree_name}.md"
-    try:
-        if record_md.is_file() and any(
-            line.strip() == header for line in record_md.read_text().splitlines()
-        ):
-            return record_md
-    except Exception:
-        pass
-    return None
+    return _find_session_record(vault, worktree_name)
 
 
 def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None:
@@ -203,9 +215,7 @@ def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None
 
     The live on-disk shape since Slice 1 is the **singular session record**
     ``session/<id>.{md,json}`` — a first-class indexed record (``# session: <id>``
-    body header + a ``.json`` sidecar). Matched by filename stem (``<id>.md``),
-    confirmed by the body header so a stray GUID-named file is not mistaken for a
-    capture record.
+    body header + a ``.json`` sidecar), resolved by :func:`_find_session_record`.
 
     Slice 7 retired the legacy plural ``sessions/`` reads (the pre-Slice-1
     body-only GUID file and the date-prefixed frontmatter note): nothing writes
@@ -213,19 +223,7 @@ def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None
 
     Returns None when the id is empty or no record matches. Never raises.
     """
-    if not session_id:
-        return None
-
-    header = f"# session: {session_id}"
-    record_md = Path(vault) / "session" / f"{session_id}.md"
-    try:
-        if record_md.is_file() and any(
-            line.strip() == header for line in record_md.read_text().splitlines()
-        ):
-            return record_md
-    except Exception:
-        pass
-    return None
+    return _find_session_record(vault, session_id)
 
 
 # A `.claude/worktrees/<name>/` path segment marks a Claude Code worktree.
