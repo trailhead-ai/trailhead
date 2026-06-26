@@ -29,7 +29,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import CLI_PATH, load_script  # noqa: E402
+from conftest import CLI_PATH, load_script, write_default_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

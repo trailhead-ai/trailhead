@@ -26,7 +26,13 @@ BIN_PATH = PLUGIN_ROOT / "bin" / "lore"
 
 def run_bin(args, env=None, cwd=None):
     """Run the bin/lore wrapper directly (as a subprocess, not via python3)."""
+    from conftest import write_default_config
     full_env = dict(os.environ)
+    _vault = (env or {}).get("LORE_VAULT")
+    if _vault:
+        _cfg = Path(_vault).parent / "_xdg_config"
+        full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
+        write_default_config(_cfg, Path(_vault))
     if env:
         full_env.update(env)
     return subprocess.run(
@@ -40,7 +46,13 @@ def run_bin(args, env=None, cwd=None):
 
 def run_cli_direct(args, env=None, cwd=None):
     """Run the Python CLI directly (python3 cli/lore) for reference comparison."""
+    from conftest import write_default_config
     full_env = dict(os.environ)
+    _vault = (env or {}).get("LORE_VAULT")
+    if _vault:
+        _cfg = Path(_vault).parent / "_xdg_config"
+        full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
+        write_default_config(_cfg, Path(_vault))
     if env:
         full_env.update(env)
     return subprocess.run(

@@ -91,8 +91,16 @@ def _write_area(
 # ---------------------------------------------------------------------------
 
 
-def _run_areas(vault_path: str | None) -> tuple[str, str, int]:
-    """Invoke cmd_areas in-process; returns (stdout, stderr, returncode)."""
+def _run_areas(
+    vault_path: str | None, config_home: Path | None = None
+) -> tuple[str, str, int]:
+    """Invoke cmd_areas in-process; returns (stdout, stderr, returncode).
+
+    ``config_home``: when provided, seeds a default-scope config.json and injects
+    ``XDG_CONFIG_HOME`` into the patched env (Slice 2 belt-and-suspenders for
+    config-based resolution; LORE_VAULT still takes effect when set).
+    """
+    from conftest import write_default_config
     cli = _load_cli()
     out = io.StringIO()
     err = io.StringIO()
@@ -100,6 +108,9 @@ def _run_areas(vault_path: str | None) -> tuple[str, str, int]:
     env_patch: dict[str, str] = {}
     if vault_path is not None:
         env_patch["LORE_VAULT"] = vault_path
+        if config_home is not None:
+            write_default_config(Path(config_home), Path(vault_path))
+            env_patch["XDG_CONFIG_HOME"] = str(config_home)
     else:
         # Ensure LORE_VAULT is absent so vault resolution fails predictably.
         env_patch = {k: v for k, v in os.environ.items() if k != "LORE_VAULT"}

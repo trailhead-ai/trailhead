@@ -48,9 +48,15 @@ INSTALLER_SH = HOOKS_DIR / "install-vault-hooks.sh"
 
 
 def run_cli(args, env=None, input_text=None):
+    from conftest import write_default_config
     full_env = dict(os.environ)
     if env:
         full_env.update(env)
+    _vault = (env or {}).get("LORE_VAULT")
+    if _vault:
+        _cfg = Path(_vault).parent / "_xdg_config"
+        full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
+        write_default_config(_cfg, Path(_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
         capture_output=True,

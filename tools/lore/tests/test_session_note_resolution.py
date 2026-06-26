@@ -30,12 +30,18 @@ def load_script(name: str):
 
 
 def run_cli(args, env=None, cwd=None):
+    from conftest import write_default_config
     full_env = dict(os.environ)
     # Drop session-id env that the host shell may carry, so tests are hermetic.
     for k in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
         full_env.pop(k, None)
     if env:
         full_env.update(env)
+    _vault = (env or {}).get("LORE_VAULT")
+    if _vault:
+        _cfg = Path(_vault).parent / "_xdg_config"
+        full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
+        write_default_config(_cfg, Path(_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
         capture_output=True, text=True, env=full_env, cwd=cwd,

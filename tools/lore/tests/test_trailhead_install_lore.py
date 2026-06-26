@@ -31,6 +31,9 @@ TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
+sys.path.insert(0, str(TESTS_DIR))
+from conftest import write_default_config  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Harness

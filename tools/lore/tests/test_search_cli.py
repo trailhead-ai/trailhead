@@ -16,7 +16,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import CLI_PATH, load_script  # noqa: E402
+from conftest import CLI_PATH, load_script, write_default_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +120,9 @@ def _run(args, *, vault, state, env_extra=None):
     full_env["LORE_VAULT"] = str(vault)
     full_env["XDG_STATE_HOME"] = str(state)
     full_env["LORE_EMAIL"] = "tester@example.com"
+    _cfg = Path(state) / "_xdg_config"
+    full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
+    write_default_config(_cfg, Path(vault))
     if env_extra:
         full_env.update(env_extra)
     return subprocess.run(

@@ -544,7 +544,16 @@ def _run_lore(args: list[str], env: dict) -> subprocess.CompletedProcess:
     Callers MUST fence both XDG_STATE_HOME and XDG_CONFIG_HOME in ``env``.
     LORE_VAULT alone is insufficient: cmd_reindex calls _load_vault_config()
     first and ignores LORE_VAULT when a real config.json is present.
+    Seeds a default-scope config.json in XDG_CONFIG_HOME (if not already present)
+    so config-based resolution finds the test vault (Slice 2 belt-and-suspenders).
     """
+    from conftest import write_default_config
+    _vault = env.get("LORE_VAULT")
+    _cfg_home = env.get("XDG_CONFIG_HOME")
+    if _vault and _cfg_home:
+        _cfg_path = Path(_cfg_home) / "lore" / "config.json"
+        if not _cfg_path.exists():
+            write_default_config(Path(_cfg_home), Path(_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH)] + args,
         capture_output=True,

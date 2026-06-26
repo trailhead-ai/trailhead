@@ -1,6 +1,7 @@
 """Shared pytest fixtures and import helpers for the lore test suite."""
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -12,6 +13,36 @@ SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
 
+def write_default_config(config_home: Path, vault_path: Path) -> None:
+    """Seed config.json under config_home with a single default-scope vault.
+
+    Writes ``config_home/lore/config.json`` (matching ``_resolve_config_path``'s
+    ``XDG_CONFIG_HOME → <home>/lore/config.json`` derivation) so that the CLI
+    subprocess can resolve the active vault from config rather than from
+    ``LORE_VAULT``.  Idempotent: overwrites any existing config.json.
+
+    Slice 2 (belt-and-suspenders): LORE_VAULT stays in the harness; this helper
+    prepares every runner for Slice 3 where LORE_VAULT is stripped.
+    """
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    (lore_cfg / "config.json").write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {
+                        "name": "default",
+                        "scope": "default",
+                        "path": str(vault_path),
+                    }
+                ]
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
     """Run the lore CLI as a subprocess; returns CompletedProcess.
 
@@ -19,19 +50,21 @@ def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
     XDG_STATE_HOME + XDG_CONFIG_HOME (+ a stable LORE_EMAIL) so tests never touch
     the real vault, state, or config dir. ``env_extra`` overlays extra env vars.
 
-    XDG_CONFIG_HOME is isolated to a fresh, config-less dir under ``state_dir`` so
-    these tests get deterministic **vanilla** vault resolution (no ``config.json``
-    → active LORE_VAULT). Because ``record create``/``update``/``delete``
+    XDG_CONFIG_HOME is isolated to ``state_dir/_xdg_config`` and seeded with a
+    ``config.json`` pointing at ``vault`` so that config-based resolution already
+    resolves to the test vault. Because ``record create``/``update``/``delete``
     consult ``config_dir("lore")/config.json``, an inherited ambient config (e.g.
     on a CI runner) would otherwise reroute records away from the test vault.
     Callers that exercise layered vaults pass their own XDG_CONFIG_HOME via
-    ``env_extra`` (applied last, so it wins).
+    ``env_extra`` (applied last, so their config wins over the seeded default).
     """
     full_env = dict(os.environ)
     full_env["LORE_VAULT"] = str(vault)
     full_env["XDG_STATE_HOME"] = str(state_dir)
-    full_env["XDG_CONFIG_HOME"] = str(Path(state_dir) / "_xdg_config")
+    _xdg_config = Path(state_dir) / "_xdg_config"
+    full_env["XDG_CONFIG_HOME"] = str(_xdg_config)
     full_env["LORE_EMAIL"] = "tester@example.com"
+    write_default_config(_xdg_config, Path(vault))
     if env_extra:
         full_env.update(env_extra)
     return subprocess.run(

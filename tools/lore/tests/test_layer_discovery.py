@@ -26,7 +26,7 @@ from pathlib import Path
 from unittest import mock
 
 
-from conftest import SCRIPTS_DIR, load_script
+from conftest import SCRIPTS_DIR, load_script, write_default_config
 
 # Ensure scripts dir is on path for direct imports
 if str(SCRIPTS_DIR) not in sys.path:
