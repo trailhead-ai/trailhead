@@ -36,7 +36,7 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 
 sys.path.insert(0, str(TESTS_DIR))
-from conftest import load_script, write_default_config  # noqa: E402
+from conftest import load_script  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

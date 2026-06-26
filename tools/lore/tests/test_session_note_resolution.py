@@ -29,7 +29,7 @@ def load_script(name: str):
     return mod
 
 
-def run_cli(args, env=None, cwd=None):
+def run_cli(args, env=None, cwd=None, *, seed_vault=None):
     from conftest import write_default_config
     full_env = dict(os.environ)
     # Drop session-id env that the host shell may carry, so tests are hermetic.
@@ -37,11 +37,10 @@ def run_cli(args, env=None, cwd=None):
         full_env.pop(k, None)
     if env:
         full_env.update(env)
-    _vault = (env or {}).get("LORE_VAULT")
-    if _vault:
-        _cfg = Path(_vault).parent / "_xdg_config"
+    if seed_vault is not None:
+        _cfg = Path(seed_vault).parent / "_xdg_config"
         full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
-        write_default_config(_cfg, Path(_vault))
+        write_default_config(_cfg, Path(seed_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
         capture_output=True, text=True, env=full_env, cwd=cwd,
@@ -265,6 +264,7 @@ def test_cli_resolves_via_claude_code_session_id_env(tmp_path):
     r = run_cli(
         ["session-note"],
         env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "live"},
+        seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == f"session/{want.name}"
@@ -280,6 +280,7 @@ def test_cli_session_id_flag_overrides_env(tmp_path):
     r = run_cli(
         ["session-note", "--session-id", "flagged"],
         env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "envid"},
+        seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == f"session/{want.name}"
@@ -296,6 +297,7 @@ def test_cli_worktree_flag_fallback(tmp_path):
     r = run_cli(
         ["session-note", "--worktree", "beta"],
         env={"LORE_VAULT": str(vault)},
+        seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == f"session/{want.name}"
@@ -308,6 +310,7 @@ def test_cli_miss_exits_1_with_diagnostic(tmp_path):
     r = run_cli(
         ["session-note", "--session-id", "nope", "--worktree", "ghost"],
         env={"LORE_VAULT": str(vault)},
+        seed_vault=vault,
     )
     assert r.returncode == 1
     assert not r.stdout.strip()
@@ -315,4 +318,3 @@ def test_cli_miss_exits_1_with_diagnostic(tmp_path):
     assert "session-note" in r.stderr
     assert "nope" in r.stderr
     assert "ghost" in r.stderr
-

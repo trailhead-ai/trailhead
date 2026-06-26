@@ -538,22 +538,21 @@ def test_rebuild_skips_orphan_json_without_md(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _run_lore(args: list[str], env: dict) -> subprocess.CompletedProcess:
+def _run_lore(args: list[str], env: dict, *, seed_vault=None) -> subprocess.CompletedProcess:
     """Run the lore CLI as a subprocess.
 
     Callers MUST fence both XDG_STATE_HOME and XDG_CONFIG_HOME in ``env``.
     LORE_VAULT alone is insufficient: cmd_reindex calls _load_vault_config()
     first and ignores LORE_VAULT when a real config.json is present.
-    Seeds a default-scope config.json in XDG_CONFIG_HOME (if not already present)
+    ``seed_vault``: explicit vault path to seed into XDG_CONFIG_HOME/lore/config.json
     so config-based resolution finds the test vault (Slice 2 belt-and-suspenders).
     """
     from conftest import write_default_config
-    _vault = env.get("LORE_VAULT")
     _cfg_home = env.get("XDG_CONFIG_HOME")
-    if _vault and _cfg_home:
+    if seed_vault is not None and _cfg_home:
         _cfg_path = Path(_cfg_home) / "lore" / "config.json"
         if not _cfg_path.exists():
-            write_default_config(Path(_cfg_home), Path(_vault))
+            write_default_config(Path(_cfg_home), Path(seed_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH)] + args,
         capture_output=True,
@@ -574,7 +573,7 @@ def test_lore_reindex_exits_0(tmp_path):
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
-    result = _run_lore(["reindex"], env)
+    result = _run_lore(["reindex"], env, seed_vault=vault_root)
     assert result.returncode == 0, f"stderr: {result.stderr}"
 
 
@@ -595,7 +594,7 @@ def test_lore_reindex_prints_row_count_to_stdout(tmp_path):
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
-    result = _run_lore(["reindex"], env)
+    result = _run_lore(["reindex"], env, seed_vault=vault_root)
     assert result.returncode == 0, f"stderr: {result.stderr}"
     stdout = result.stdout.strip()
     # stdout must contain the digit 1 (one record indexed)
@@ -620,7 +619,7 @@ def test_lore_reindex_count_reflects_vault_records(tmp_path):
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
     env["LORE_VAULT"] = str(vault_root)
 
-    result = _run_lore(["reindex"], env)
+    result = _run_lore(["reindex"], env, seed_vault=vault_root)
     assert result.returncode == 0
     assert "3" in result.stdout.strip()
 

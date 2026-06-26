@@ -26,7 +26,7 @@ from unittest import mock
 
 import pytest
 
-from conftest import REPO_ROOT, SCRIPTS_DIR, load_script, write_default_config
+from conftest import REPO_ROOT, SCRIPTS_DIR, load_script
 
 # Ensure scripts dir is on path for direct imports in subprocess helpers
 if str(SCRIPTS_DIR) not in sys.path:

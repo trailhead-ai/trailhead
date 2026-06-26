@@ -1,11 +1,22 @@
 """Slice 2 coverage guard + LORE_VAULT-unset smoke assertions.
 
 Coverage guard (Council Critical #3):
-  Enumerates every local-runner test file and asserts it contains the string
-  ``write_default_config``.  Files that use conftest's shared ``run_cli`` get
-  it via import; files with own runners must call or import it explicitly.
-  A missed file fails HERE (loudly, in Slice 2) rather than regressing in bulk
-  when LORE_VAULT is stripped in Slice 3.
+  Files are split into three categories.
+
+  MUST_CALL: files with their own subprocess runners that must explicitly call
+    ``write_default_config(`` (with opening paren — an actual call, not just an
+    import) using an explicit vault variable, not derived from env.get("LORE_VAULT").
+
+  USES_CONFTEST: files that delegate to conftest's shared ``run_cli`` (which
+    already seeds correctly via its explicit ``vault`` param).  The import of
+    ``write_default_config`` from conftest satisfies the presence check.
+
+  EXEMPT: files where config seeding is not applicable in Slice 2 — either
+    because lore init creates the config itself, the tests have no vault ops,
+    or because the in-process runner still uses mock.patch LORE_VAULT and will
+    be rewritten in Slice 3.
+
+  The accounting test asserts all 19 tracked files are in exactly one category.
 
 Smoke assertions (≥3 structurally distinct helpers):
   Prove that config-based resolution actually reaches the test vault with
@@ -41,10 +52,56 @@ sys.path.insert(0, str(TESTS_DIR))
 from conftest import load_script, write_default_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Coverage guard
+# Coverage guard — three-category structure
 # ---------------------------------------------------------------------------
 
-_LOCAL_RUNNER_FILES = [
+# Files with own subprocess runners that must call write_default_config(
+# using an explicit vault variable (not derived from env.get("LORE_VAULT")).
+_MUST_CALL = [
+    "test_session_note_resolution.py",
+    "test_search_cli.py",
+    "test_index_store.py",
+]
+
+# Files that delegate to conftest.run_cli (which seeds config via explicit vault param).
+# Presence of "write_default_config" in source (via conftest import) is sufficient.
+_USES_CONFTEST = [
+    "test_session_cli.py",
+    "test_record_cli_delete_blob.py",
+    "test_record_cli_create.py",
+    "test_record_cli_update.py",
+    "test_vault_routing.py",
+]
+
+# Files where seeding is not applicable in Slice 2.  Reason documented inline.
+_EXEMPT = {
+    "test_lore_cli.py":
+        "init tests — lore init creates config itself; no record ops",
+    "test_bin_wrapper.py":
+        "--help tests — no vault ops",
+    "test_layers_model.py":
+        "Slice-3 rewrite: in-process runner uses mock.patch LORE_VAULT",
+    "test_layer_discovery.py":
+        "Slice-3 rewrite: in-process runner uses mock.patch LORE_VAULT",
+    "test_lore_init.py":
+        "init tests — lore init creates config itself",
+    "test_lore_init_hooks.py":
+        "init tests — lore init creates config itself",
+    "test_lore_guardrail.py":
+        "init + guardrail — lore init creates config itself",
+    "test_lore_agent_rules.py":
+        "init + agent rules — lore init creates config itself",
+    "test_trailhead_install_lore.py":
+        "install tests — init creates config itself",
+    "test_vault_cli.py":
+        "vault management — vault add/init creates config itself",
+    "test_lore_areas.py":
+        "Slice-3 rewrite: in-process runner uses mock.patch LORE_VAULT",
+}
+
+_ALL_TRACKED = set(_MUST_CALL) | set(_USES_CONFTEST) | set(_EXEMPT)
+
+_EXPECTED_TRACKED = {
     "test_session_cli.py",
     "test_search_cli.py",
     "test_lore_areas.py",
@@ -64,21 +121,45 @@ _LOCAL_RUNNER_FILES = [
     "test_lore_cli.py",
     "test_lore_agent_rules.py",
     "test_trailhead_install_lore.py",
-]
+}
 
 
-@pytest.mark.parametrize("filename", _LOCAL_RUNNER_FILES)
-def test_runner_file_contains_write_default_config(filename):
-    """Each local-runner test file must reference write_default_config.
+def test_all_tracked_files_accounted_for():
+    """Every tracked file is in exactly one category — catches drift when new runners appear."""
+    assert _ALL_TRACKED == _EXPECTED_TRACKED, (
+        f"Category mismatch.\n"
+        f"  In categories but not expected: {_ALL_TRACKED - _EXPECTED_TRACKED}\n"
+        f"  Expected but missing from categories: {_EXPECTED_TRACKED - _ALL_TRACKED}"
+    )
+    total = len(_MUST_CALL) + len(_USES_CONFTEST) + len(_EXEMPT)
+    assert total == 19, f"Expected 19 tracked files, got {total}"
 
-    Files that use conftest's shared run_cli satisfy this via import; files with
-    their own runner must call it directly.  Any missed file fails here in Slice 2
-    rather than regressing in bulk when LORE_VAULT is stripped in Slice 3.
+
+@pytest.mark.parametrize("filename", _MUST_CALL)
+def test_must_call_file_has_write_default_config_call(filename):
+    """MUST_CALL runners must contain write_default_config( (an actual call, not just import).
+
+    The call must use an explicit vault variable — if the source derives the vault from
+    env.get("LORE_VAULT"), seeding silently fails when Slice 3 strips that env var.
     """
     src = (TESTS_DIR / filename).read_text(encoding="utf-8")
+    assert "write_default_config(" in src, (
+        f"{filename}: missing write_default_config() call — the runner must seed "
+        f"config from an explicit seed_vault parameter, not from env.get('LORE_VAULT')."
+    )
+    assert 'env.get("LORE_VAULT")' not in src and "(env or {}).get(\"LORE_VAULT\")" not in src, (
+        f"{filename}: runner still derives vault from env.get('LORE_VAULT') — "
+        f"this defeats Slice 2's purpose; derive from seed_vault parameter instead."
+    )
+
+
+@pytest.mark.parametrize("filename", _USES_CONFTEST)
+def test_conftest_runner_files_import_write_default_config(filename):
+    """USES_CONFTEST files must import write_default_config (conftest.run_cli calls it)."""
+    src = (TESTS_DIR / filename).read_text(encoding="utf-8")
     assert "write_default_config" in src, (
-        f"{filename}: missing write_default_config — add the call/import to its "
-        f"CLI runner so config-based resolution is seeded for Slice 3."
+        f"{filename}: missing write_default_config import — "
+        f"this file should delegate to conftest.run_cli which seeds config."
     )
 
 

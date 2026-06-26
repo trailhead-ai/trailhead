@@ -11,20 +11,14 @@ The old interactive scaffolding (positional path, --yes, --allow-outside-home,
 import os
 import subprocess
 import sys
-from pathlib import Path
 
-from conftest import CLI_PATH, write_default_config
+from conftest import CLI_PATH
 
 
 def run_cli(args, env=None, input_text=None, cwd=None):
     full_env = dict(os.environ)
     if env:
         full_env.update(env)
-    _vault = (env or {}).get("LORE_VAULT")
-    if _vault:
-        _cfg = Path(_vault).parent / "_xdg_config"
-        full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
-        write_default_config(_cfg, Path(_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
         capture_output=True,
