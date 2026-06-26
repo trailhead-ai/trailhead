@@ -99,18 +99,12 @@ def test_real_extension_points_discovered():
     """Sanity: the discovery actually found the known-real seams. If this list
     shrinks unexpectedly, the discovery regex broke (not the doc).
 
-    The brainstorm skill (and its `design_mockup` seam) was moved from
-    lore into craft, so `design_mockup` — along with the other brainstorm-sourced
-    seams — is now discovered in the craft tree, only when a craft checkout is
-    present."""
+    The feature_flags, observability, issue_tracker, and design_mockup seams were
+    removed from the craft skills/agents, so `build_test_commands` is the
+    remaining tagged extension point discovered in the craft tree (only when a
+    craft checkout is present)."""
     if CRAFT_PLUGIN is not None:
-        for expected in (
-            "design_mockup",
-            "feature_flags",
-            "observability",
-            "issue_tracker",
-            "build_test_commands",
-        ):
+        for expected in ("build_test_commands",):
             assert expected in REAL_POINTS, (
                 f"discovery did not find {expected!r} in the craft tree; found: {REAL_POINTS}"
             )

@@ -10,7 +10,7 @@ description: >
   handoff after `/planning` when the user approves the written plan.
   DO NOT TRIGGER when: no plan exists yet (use `/planning` or `planner` first), the plan has ≤2 slices
   with no unknowns and small scope (just build it yourself), or the user is debugging rather than
-  executing (use `systematic-debugging`).
+  executing.
 ---
 
 # Execute
@@ -40,21 +40,7 @@ The controller decides which to dispatch and absorbs findings between iterations
 
 In those cases, build it yourself following TDD and verification. Subagent overhead isn't free.
 
-## Pre-Loop: Feature Flag Setup
-
-Before the first slice, read the plan's `Feature Flag` field.
-
-- **Flag declared:** wire up the flag *now* (before slice 1) — provider SDK detection, flag creation, and any first-touch wire-up. **Feature-flag provider (extension point — `feature_flags`):** if a feature-flag provider is configured in your environment, dispatch its configuration skill now, passing the flag key, default state, and the touchpoint list from the plan; once it returns, proceed to slice 1. **If no feature-flag provider configured — flag setup skipped** (see the extend guide in `docs/DEGRADATION.md`); proceed to slice 1.
-- **`n/a`:** skip — no flag work this loop.
-- **Field missing:** stop. The plan is non-conformant. Bounce back to `planning` (or `brainstorm` if the spec is also missing the rollout decision). Do not invent a flag and do not proceed flagless if the plan should have one.
-
-When the flag is declared, every slice that touches the gated path **must** include test cases for both flag states (on and off) in its test contract. The `executor` is responsible for executing these via TDD; the controller verifies both states are covered before marking the slice DONE. Treat a slice that only tests the on-path as incomplete — bounce it back.
-
 ## The Loop
-
-### Issue tracker — advance to "in progress"
-
-Before dispatching the first slice (whether assumption-prover or executor for slice 1), advance the work item's status if an issue tracker is wired up. **Issue tracker (extension point — `issue_tracker`):** if an issue tracker is configured in your environment, advance the corresponding ticket to the in-progress status (e.g. "Code In Progress" or equivalent). **If no issue tracker configured — status transitions skipped**; proceed directly to slice 1.
 
 For each slice in the plan:
 
@@ -123,10 +109,6 @@ This is essential for session continuity — if context breaks (handoff, new ses
 Move to the next slice in the plan. Repeat from step 1.
 
 ## After All Slices
-
-### Issue tracker — advance to "complete"
-
-Before running verification, advance the work item's status if an issue tracker is wired up. **Issue tracker (extension point — `issue_tracker`):** if an issue tracker is configured in your environment, advance the corresponding ticket to the complete status (e.g. "Code Complete" or equivalent). **If no issue tracker configured — status transitions skipped**; proceed directly to verification.
 
 1. Run verification — dispatch `test-runner` for each applicable suite (the project's test run and lint/typecheck/CI checks) rather than running inline. Keeps the noisy test output out of your main context and returns a concise pass/fail.
 2. Report completion to the user and stop. Do **not** automatically invoke `/portage:open` — the user decides when to open a PR.

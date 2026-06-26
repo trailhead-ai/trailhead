@@ -47,20 +47,6 @@ def test_all_poke_dimensions_present():
     )
 
 
-def test_mandatory_decision_steps_present():
-    text = _text()
-    assert "Rollout & Gating (mandatory)" in text, (
-        "the mandatory Rollout & Gating decision step must survive trimming"
-    )
-    assert "Observability & Failure Visibility (mandatory)" in text, (
-        "the mandatory Observability & Failure Visibility decision step must survive trimming"
-    )
-    # the soak-observable rule is a real conformance check, not prose
-    assert "soak-invisible" in text, (
-        "the soak-observable `n/a — soak-invisible` conformance rule must survive trimming"
-    )
-
-
 def test_spec_canonical_sections_present():
     # Compressed to a single inline list, but every canonical section name must remain
     # so a planner reading the skill (no CLI) still knows the spec shape.
@@ -90,5 +76,3 @@ def test_recall_primary_and_spec_scaffold_anchors_present():
     assert "_shared/note-storage.md" in text
     assert "templates/spec.md" in text
     assert "lore new spec" not in text
-    # the design-mockup provider seam must remain
-    assert "design_mockup" in text and "artist" in text

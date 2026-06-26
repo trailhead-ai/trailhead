@@ -215,12 +215,6 @@ for _tok in _PLANNER_OBSERVABILITY_TOKENS:
     )
 
 
-# The exact observability visible-skip phrase the planner emits. Asserted PRESENT
-# as a distinctive contiguous substring so a silent omission of the degrade
-# notice fails. Mirrors the planning skill's observability degrade wording.
-_PLANNER_OBSERVABILITY_VISIBLE_SKIP = "no observability provider configured — see the extend guide"
-
-
 def test_planner_has_no_observability_seam_tokens():
     """The planner's old Health & Soak block carried the observability-vendor,
     evidence-pack, dotted-metric-prefix, and health-check-subsystem tokens. After
@@ -237,22 +231,6 @@ def test_planner_has_no_observability_seam_tokens():
             "'Observability & Failure Visibility' mapping + observability "
             "extension point + visible-skip notice."
         )
-
-
-def test_planner_observability_visible_skip_present():
-    """The planner must carry the observability visible-skip phrase as a
-    distinctive contiguous substring so the degrade announces itself rather than
-    silently omitting the soak-signal step (degrade present-assertion)."""
-    planner_md = AGENTS_DIR / "planner.md"
-    assert planner_md.exists(), (
-        f"Expected planner.md in {AGENTS_DIR}. Add the genericized agent first."
-    )
-    text = planner_md.read_text()
-    assert _PLANNER_OBSERVABILITY_VISIBLE_SKIP in text, (
-        f"planner.md must contain the observability visible-skip phrase "
-        f"{_PLANNER_OBSERVABILITY_VISIBLE_SKIP!r} so the degrade is visible to the "
-        "caller when no observability provider is configured."
-    )
 
 
 @pytest.mark.parametrize("stem", _VISIBLE_SKIP_AGENTS)

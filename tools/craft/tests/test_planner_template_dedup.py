@@ -30,7 +30,6 @@ _REQUIRED_SPEC_SECTIONS = [
     "Acceptance Criteria",
     "Non-Goals",
     "Constraints",
-    "Observability & Failure Visibility",
     "Open Questions",
     "Related",
 ]
@@ -38,7 +37,6 @@ _REQUIRED_SPEC_SECTIONS = [
 _REQUIRED_PLAN_SECTIONS = [
     "Goal",
     "Architecture",
-    "Observability & Failure Visibility",
     "Known Unknowns",
     "Slices",
 ]

@@ -63,7 +63,7 @@ Cover the dimensions that have real ambiguity for this idea:
 - **Scope:** Is this the real problem or a symptom? What's adjacent that we're explicitly *not* doing?
 - **Reversibility:** Can we ship and undo? Migration cost if we change our mind?
 - **Migration/backfill:** Existing users, data, or state affected?
-- **Failure visibility:** First signal a human or monitoring sees when this breaks — health flip, metric drop, customer report? Latency to detection matters. (The mandatory does-a-signal-exist question lives in the Observability & Failure Visibility step.)
+- **Failure visibility:** First signal a human or monitoring sees when this breaks — health flip, metric drop, customer report? Latency to detection matters.
 - **Blast radius:** Other teams, surfaces, code paths, or clients affected?
 
 Don't ask all dimensions every time — pick the ones with genuine ambiguity. Present as a ranked batch.
@@ -78,13 +78,13 @@ For each open question, route it:
 
 ### 4. Iterate UI/UX (when applicable)
 
-If the idea has a user-facing surface, describe the visual direction before locking objectives. Iterate until the user is satisfied. Reference any mockup files from the spec. Skip for backend-only or infra changes.
+If the idea has a user-facing surface, describe the visual direction before locking objectives. Iterate until the user is satisfied. Skip for backend-only or infra changes.
 
 ### 5. Write the Spec
 
 Persist the spec through the note_store `create` op (`skills/_shared/note-storage.md`): render craft's spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to the provider — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft`. The body is stored verbatim; lore owns the record sidecar.
 
-Fill in: **Problem** (real problem, why now) · **Objectives** (bulleted, outcome-framed) · **Acceptance Criteria** (testable, observable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical/business/timing) · **UI Direction** (omit if no UI surface) · **Observability & Failure Visibility** (mandatory; health check + metric + failure observable, each named or `n/a — <reason>`; bare `n/a` non-conformant) · **Open Questions / Risks** · **Related**
+Fill in: **Problem** (real problem, why now) · **Objectives** (bulleted, outcome-framed) · **Acceptance Criteria** (testable, observable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical/business/timing) · **UI Direction** (omit if no UI surface) · **Open Questions / Risks** · **Related**
 
 ### 6. Brainstorming Exit Gate
 
@@ -95,7 +95,6 @@ Before moving to planning, verify:
 - [ ] Non-goals are explicit
 - [ ] All open questions are resolved, deferred, or accepted-as-risk
 - [ ] UI direction is locked (if applicable)
-- [ ] Observability & Failure Visibility section is filled in (check + metric + failure observable, each named or `n/a — <reason>`)
 - [ ] Spec is written
 
 If all green, update spec frontmatter `status: draft` → `status: ready` and proceed to Planning.
@@ -108,7 +107,7 @@ If all green, update spec frontmatter `status: draft` → `status: ready` and pr
 
 Read the spec (if one exists), then check files, docs, and recent commits relevant to the request. If the request spans multiple independent subsystems, flag it — decompose before designing.
 
-If your vault has area profiles (check `$LORE_VAULT/areas/` or the area map in your session context), identify the areas this task touches and run `lore search 'area:<name>'` (one query per area) to pull relevant decisions, lessons, dead-ends, and open deferred items for those areas. Treat the search results as prior art before designing.
+If your vault has area profiles (check the area map in your session context, or `lore areas`), identify the areas this task touches and run `lore search 'area:<name>'` (one query per area) to pull relevant decisions, lessons, dead-ends, and open backlog items for those areas. Treat the search results as prior art before designing.
 
 For genuinely complex existing systems (many files, unclear shape), dispatch `researcher` before designing — reserve your xhigh context for the design itself, not for file surveying.
 
@@ -142,12 +141,6 @@ Call out assumptions that need to be proven before building on top of them:
 - Which unknowns are riskiest — highest cost if wrong?
 - Which slices depend on which unknowns?
 
-### 6b. Map Observability & Failure Visibility Touchpoints (mandatory)
-
-Read the spec's `Observability & Failure Visibility` section and own its signals in the plan. For each declared check/metric/failure observable, assign the slice that introduces or modifies it. If a new metric is named, name the emission event and emission site (`file:fn`) and allocate a slice (or part of one) for the check, its registration on the right surface(s), and the "not configured → degrades visibly" test case. Record any `n/a` reason verbatim in the plan's `Observability & Failure Visibility` block. If the spec is silent, stop and route back to brainstorming — non-conformant spec.
-
-**Observability provider (extension point — `observability`):** if an observability provider is configured in your environment, use its conventions for the metric/check and add the alert/rule touchpoint to the slice that introduces the metric. If none is configured — `no observability provider configured — see the extend guide` in `docs/DEGRADATION.md`; the Observability & Failure Visibility decision still happens, only the provider-specific metric naming, alert-rule generation, and health-check wiring are skipped.
-
 ### 7. Define Slices
 
 Break the feature into vertical slices of functionality that can be built, tested, and committed independently. Order so that:
@@ -162,7 +155,7 @@ Every slice must include a test contract — the behaviors to prove with failing
 
 Persist the plan through the note_store `create` op (`skills/_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to the provider — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --status draft`. If an upstream spec exists, `link` the plan to it (`lore record update <plan-id> --related spec=<spec-name>`) and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`; brainstorm leaves the frozen spec at `ready`).
 
-Fill in: **Goal** (one sentence) · **Architecture** (2-3 sentences) · **Observability & Failure Visibility** (mirror spec; name slice ownership; `n/a — <reason>` if none) · **Known Unknowns** (checkbox per unknown, each names the slice it blocks) · **Rollout & Gating** (`n/a` if no runtime) · **Slices** (each: Delivers + Test contract + Observability signal + Files; test contract = behaviors to prove with failing tests before implementation).
+Fill in: **Goal** (one sentence) · **Architecture** (2-3 sentences) · **Known Unknowns** (checkbox per unknown, each names the slice it blocks) · **Slices** (each: Delivers + Test contract + Files; test contract = behaviors to prove with failing tests before implementation).
 
 If the lore CLI is unavailable, write the plan to a `plans/` directory in your vault manually, mirroring this shape:
 
@@ -170,12 +163,10 @@ If the lore CLI is unavailable, write the plan to a `plans/` directory in your v
 # [Feature Name] Implementation Plan
 **Goal:**
 **Architecture:**
-**Observability & Failure Visibility:**
 **Known Unknowns:** - [ ] [unknown — blocks Slice N]
-**Rollout & Gating:**
 **Slices:**
 ### Slice N: [Name]
-**Delivers:** **Test contract:** **Observability signal:** **Files:**
+**Delivers:** **Test contract:** **Files:**
 ```
 
 ### 9. Present for Approval

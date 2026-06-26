@@ -17,7 +17,7 @@ Design the whole feature end-to-end, then build it in slices — proving unknown
 **Do NOT use this skill for:**
 - Small, well-scoped tasks the user frames as "small update", "fix this", or similar
 - Changes scoped to a single file with clear intent
-- Bug fixes (use a systematic-debugging skill instead)
+- Bug fixes (debug them directly, not via planning)
 
 If the user has already decided what to do, just do it.
 
@@ -80,31 +80,7 @@ After the design is agreed, explicitly call out assumptions that need to be prov
 
 These are the things that, if wrong, would change the design.
 
-### 7. Map Feature Flag Touchpoints (if spec declared a flag)
-
-Read the spec's `Rollout & Gating` section.
-
-- **Flag declared:** the plan must name the touchpoints — every call site, route, component, or query the flag will gate. Identify the evaluation point(s) (server-side preferred; client-side only if needed for UI flicker concerns) and the default-off behavior. Do NOT design the SDK setup or wire-up in detail here — that is the flag provider's job at execution time. The plan needs *where the flag goes*, not *how the provider evaluates it*. Carry the flag key, default state, and touchpoint list into the plan template's `Rollout & Gating` section.
-- **n/a:** record the spec's reason verbatim under `Rollout & Gating: n/a — <reason>` so the downstream execution workflow knows not to wire a flag.
-- **Spec is silent:** stop. Bounce back to brainstorming — the spec is non-conformant and the rollout decision is missing. Do not invent one in planning.
-
-**Feature-flag provider (extension point — `feature_flags`):** if a feature-flag provider is configured in your environment, use its naming conventions and dispatch its configuration skill at execution time. If no feature-flag provider configured — see the extend guide in `docs/DEGRADATION.md`. The touchpoint-mapping decision above still happens; only the provider-specific wire-up is skipped.
-
-Test coverage for the flagged behavior must appear in the slice test contracts: any slice that adds a gated code path needs tests for both flag states (on and off). Treat this like the existing TDD rule — it has no carve-out.
-
-### 7b. Map Observability & Failure Visibility Touchpoints (mandatory)
-
-Read the spec's `Observability & Failure Visibility` section.
-
-- **Signals named:** the plan must own them. For each declared health check / metric / soak observable, identify the slice that introduces or modifies it. If the signal is "extend `<ModuleName>`," name the file:line. If the signal is a new metric, name the emission event and the emission site (`file:fn`). If a new check is needed, allocate a slice (or part of one) for the check, its registration on the right surface(s), and the "not configured → degrades visibly" test case.
-- **n/a (any variant):** record the spec's reason verbatim in the plan's `Observability & Failure Visibility` block so the downstream execution workflow and reviewers know not to look for it.
-- **Spec is silent:** stop and bounce back to brainstorming — the spec is non-conformant and the observability decision is missing. Do not invent one in planning.
-
-**Observability provider (extension point — `observability`):** if an observability provider is configured in your environment (alerting rules, health endpoints, metric stores), use its conventions and dispatch its configuration skill at execution time, and add the alert/rule touchpoint to the slice that introduces the metric. If no observability provider configured — see the extend guide in `docs/DEGRADATION.md`. The Observability & Failure Visibility decision still happens; the provider-specific metric naming, alert-rule generation, and health-check wiring are skipped.
-
-Test coverage: any slice that registers a new check or emits a new metric needs tests for the happy path *and* the not-configured / short-circuit branch (the signal must still degrade visibly when the provider is absent).
-
-### 8. Define Slices
+### 7. Define Slices
 
 Break the feature into buildable slices. Each slice is a vertical cut of functionality that can be built, tested, and committed independently. Order slices so that:
 
@@ -116,7 +92,7 @@ Break the feature into buildable slices. Each slice is a vertical cut of functio
 
 Slices don't need step-by-step implementation detail. The subagent figures out how to build it. What the plan needs is: what the slice delivers, what files it touches, what unknown (if any) it depends on, and what test behaviors prove the slice works.
 
-### 9. Write the Plan
+### 8. Write the Plan
 
 Persist the plan through the note_store `create` op (`../_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to the provider — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --status draft`. The default provider stores it as a searchable lore `plan` record, which keeps it linkable from session notes and future planning.
 
@@ -126,21 +102,17 @@ If the `lore` CLI is not on PATH, write the plan to a `plans/` directory in your
 
 If an upstream spec exists, `link` the plan to it via the note_store seam (`lore record update <plan-id> --related spec=<spec-name>`) and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
 
-**Issue tracker (extension point — `issue_tracker`):** after writing the plan and before presenting for approval, if an issue tracker is configured in your environment, advance the corresponding ticket to the appropriate status (e.g. "Requirements Under Development" or equivalent). If no issue tracker configured — status sync skipped. The plan write still happens; only the ticket advancement is skipped.
-
 The plan body template (`templates/plan.md`) carries these canonical sections — fill each in:
 
 - **Goal** — one or two sentences
 - **Architecture** — 2-3 sentences about the approach
 - **Given Axioms** — the ground truth this plan rests on. Each axiom must be either (a) verifiable at a file:line citation, (b) traced to a recorded decision/ADR, or (c) a constraint stated by the user. If you'd need to investigate to know it's true, it belongs in **Known Unknowns**, not here.
-- **Rollout & Gating** — mirror the spec's decision: flag key + default state + touchpoint list, or `n/a — <reason>`.
-- **Observability & Failure Visibility** — mirror the spec's decision: the failure signal and its emission site, or `n/a — <reason>`.
 - **Known Unknowns** — checkbox list; each notes which slice it blocks.
 - **Slices** — each slice carries Delivers / Test contract / Files, plus "Unknown to resolve first" and "Depends on" where applicable.
 
-Leave the `## Council Review` section for Step 9.5 to append — do not pre-fill it.
+Leave the `## Council Review` section for Step 8.5 to append — do not pre-fill it.
 
-### 9.5. Council Review (mandatory)
+### 8.5. Council Review (mandatory)
 
 After the plan is written and before presenting it for approval, dispatch a council review. The council members review the plan + its linked spec in parallel; the main session synthesizes their findings and gates approval on disposition of any Critical findings.
 
@@ -201,13 +173,13 @@ If no Critical findings surfaced, the section still gets appended — record an 
 
 **Re-review:** no automatic re-review after the user resolves Critical findings inline. The user attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps mandatory-review cost bounded; if first-pass calibration is wrong, tune the per-lens bars in `_shared/council.md` rather than adding iteration cycles.
 
-**Hard-floor gate:** the "reply `build` to hand off" prompt in Step 10 must NOT be printed until every Critical finding has a disposition. Important and Minor findings do not block.
+**Hard-floor gate:** the "reply `build` to hand off" prompt in Step 9 must NOT be printed until every Critical finding has a disposition. Important and Minor findings do not block.
 
-### 10. Present for Approval
+### 9. Present for Approval
 
 Share the plan path and a short summary, then wait for explicit user approval before writing any implementation code. Do **not** call `ExitPlanMode` — this skill runs outside plan mode so the plan can be written directly into the vault.
 
-**Before printing the handoff prompt, confirm every Critical finding from Step 9.5 has a disposition recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print the handoff prompt — return to disposition gathering with the user.
+**Before printing the handoff prompt, confirm every Critical finding from Step 8.5 has a disposition recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print the handoff prompt — return to disposition gathering with the user.
 
 End the presentation with an explicit handoff prompt so the trigger is unambiguous, e.g.:
 

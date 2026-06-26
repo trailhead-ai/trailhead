@@ -41,9 +41,8 @@ BUILDER_BARS = """*Builder:*
 RELIABILITY_BARS = (
     "*Reliability:*\n"
     "- A slice has no test contract, OR test contract is vacuous\n"
-    "- New code path's failure mode is invisible (no health check, metric, log, "
-    "soak observable) AND the spec's Observability & Failure Visibility block says "
-    "`n/a — soak-invisible` without substantive reason\n"
+    "- New code path's failure mode is invisible — no health check, metric, log, "
+    "or other signal — with no substantive reason\n"
     "- Plan removes existing test coverage without replacement\n"
     "- A slice does irreversible work without dry-run / preview / staged rollout\n"
     "- A destructive migration or backfill runs without a gated, replayable console "

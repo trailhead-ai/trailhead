@@ -1,9 +1,10 @@
 # Design Authoring — `combine_design.py`
 
-This document covers the combine contract, the filename-prefix convention, the
-docbar-variant convention, the `combine_design.py` CLI, and the live
-`design_mockup` provider seam — the wire by which lore's `brainstorm` skill
-dispatches the `artist`.
+This document covers the combine contract, the filename-prefix convention (D-5), the
+docbar-variant convention (D-6), the `combine_design.py` CLI, and the `artist`
+design agent. The `design_mockup` provider seam that previously wired `brainstorm`
+to the `artist` has been **removed** — the `artist` is now invoked directly (see
+"How to invoke the artist directly" below).
 
 ---
 
@@ -25,32 +26,19 @@ The phase runs in two steps:
 
 ---
 
-## `design_mockup` provider seam
+## `design_mockup` provider seam (removed)
 
-**LIVE — wired.** Lore's `brainstorm` skill dispatches the `artist` agent as its
-default `design_mockup` provider.
+**Removed.** `brainstorm` previously dispatched the `artist` agent through a
+`design_mockup` provider seam at its UI/UX step. That wiring has been removed:
+`brainstorm` now settles UI direction verbally and writes it into the spec, and
+no skill dispatches the `artist` automatically.
 
-This is the named contract for how lore's `brainstorm` skill dispatches the
-`artist` agent as the `design_mockup` provider. The brainstorm cutover has
-landed: `brainstorm`'s design-mockup step (step 4) names the `artist` as the
-default provider and dispatches it with the brief shape below.
-
-**Provider contract:**
-
-| Field | Value |
-|-------|-------|
-| Agent name | `artist` |
-| Trigger | `design_mockup` provider slot in `brainstorm` |
-| Brief shape | See `artist.md` input fields: `feature`, `surface`, `designs_root`, `chrome_root`, `component_mapping` rows (each a `file:line` citation or `"new, no counterpart — <justification>"`) |
-
-The `artist` agent is invoked with the brief above and produces per-screen HTML
-files that the combine step assembles into the reference document.
-
-**Status:** LIVE. Lore's `brainstorm` skill (step 4, the `design_mockup`
-extension point) dispatches the `artist` as its default provider with the brief
-above. Retirement of the older upstream mockup-writer agent (its external
-copies) is tracked separately and is **not** complete as part of this wire — the
-in-repo path is the `artist`, and the external retirement is a follow-up.
+The `artist` agent itself remains available for **direct invocation** — see "How
+to invoke the artist directly" below. Its brief shape is unchanged: the
+`artist.md` input fields `feature`, `surface`, `designs_root`, `chrome_root`, and
+`component_mapping` rows (each a `file:line` citation or `"new, no counterpart —
+<justification>"`). The agent produces per-screen HTML files that the combine
+step assembles into the reference document.
 
 ---
 
@@ -158,8 +146,7 @@ This produces `path/to/designs/my-feature/my-feature-design-reference.html`.
 
 ### How to invoke the artist directly
 
-Outside the `brainstorm` flow you can also dispatch the `artist` agent directly
-by providing it a brief containing:
+Dispatch the `artist` agent directly by providing it a brief containing:
 
 - The feature name and design goals
 - The surface(s) being designed (to select the right chrome catalog)

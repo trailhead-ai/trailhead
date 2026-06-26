@@ -80,7 +80,7 @@ Paste the matching block into each member's dispatch (the `<lens-critical-bars>`
 
 *Reliability:*
 - A slice has no test contract, OR test contract is vacuous
-- New code path's failure mode is invisible (no health check, metric, log, soak observable) AND the spec's Observability & Failure Visibility block says `n/a — soak-invisible` without substantive reason
+- New code path's failure mode is invisible — no health check, metric, log, or other signal — with no substantive reason
 - Plan removes existing test coverage without replacement
 - A slice does irreversible work without dry-run / preview / staged rollout
 - A destructive migration or backfill runs without a gated, replayable console (the ORM / query layer or migration/backfill console) instead of an ad-hoc one-shot

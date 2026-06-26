@@ -6,8 +6,8 @@ own project-specific layer on top, without forking either plugin.
 
 If you only want to install and use lore as-is, see the
 [README](../README.md). This guide is for when you want craft's planning and
-review skills to talk to *your* feature-flag provider, *your* issue tracker,
-*your* metrics stack, or *your* test commands.
+review skills to use *your* test/build commands, or to bolt a project-specific
+provider onto one of craft's seams.
 
 > **Architecture as of 2026-06-04.** All three layers described below ship today:
 > lore and craft are published plugins, and the "app layer" pattern is a thin
@@ -150,9 +150,9 @@ layer and wiring it at the named step.
 **The re-add paths below are summarized — the canonical, never-stale source of
 truth is the DEGRADATION reference, which you should link to and follow:**
 
-- **craft `plugins/craft/docs/DEGRADATION.md`** — the formal table for
-  `feature_flags`, `observability`, and `issue_tracker`, with the exact
-  visible-skip phrase and re-add path for each.
+- **craft `plugins/craft/docs/DEGRADATION.md`** — the formal table for craft's
+  remaining seams (e.g. `note_store`), with the exact visible-skip phrase and
+  re-add path for each.
 - [lore DEGRADATION.md](DEGRADATION.md) — lore's own degradations (see
   Section 3.2).
 
@@ -160,16 +160,10 @@ truth is the DEGRADATION reference, which you should link to and follow:**
 
 | Extension point | What it gates | Default when unconfigured (visible-skip) | How you fill it |
 |---|---|---|---|
-| **`feature_flags`** | Provider-specific flag naming + the flag-configuration dispatch in `planning` and `execute`. The flag-touchpoint *decision* still happens; only provider wire-up is skipped. | `no feature-flag provider configured — see the extend guide` / `flag setup skipped` | Add a flag-configuration skill to your app layer that knows your provider's SDK and naming conventions; dispatch it at the Pre-Loop flag-setup step. |
-| **`observability`** | Provider-specific metric naming, alert-rule generation, and health-check wiring in `planning` and the `planner` agent. The Observability & Failure Visibility *decision* still happens. | `no observability provider configured — see the extend guide` | Add an alert/metric-configuration skill that knows your metrics/alerting provider's conventions; dispatch it at the provider step. |
-| **`issue_tracker`** | Advancing your work item's status (in-progress / complete transitions) from `planning`, `execute`, and `intake`. The plan is always written to the vault. | `no issue tracker configured — status sync skipped` / `status transitions skipped` | Add a tracker-sync skill that calls your tracker's API; hook it into the plan-write, loop-entry, and after-all-slices steps. |
-| **`design_mockup`** | The mockup-generation step in lore's `brainstorm` skill, for ideas with a user-facing surface. With craft installed this is wired LIVE to the craft `artist` agent (its default provider). | `the mockup step is skipped` (announced when design work isn't applicable or no chrome catalog exists; or when no `design_mockup` provider is available because craft isn't installed) | Install craft — `brainstorm` dispatches its `artist` agent by default. Or add your own design-mockup tool/skill to your app layer as the provider; `brainstorm` dispatches it with a structured brief. |
 | **`build_test_commands`** | The exact build/test/lint command the `test-runner` agent runs. The agent is stack-agnostic — it runs whatever command it is given. | (no provider banner — the caller simply supplies the command per invocation) | Pass your project's test runner, lint tool, or CI script as the command when you dispatch `test-runner`, or wrap it in an app skill that always supplies your stack's commands. |
 
-Describe these generically for your own stack: `issue_tracker` → *your* tracker's
-API; `observability` → *your* metrics/alerting provider; `build_test_commands` →
-*your* test/lint commands. There is nothing provider-specific baked into the
-plugins.
+Describe these generically for your own stack: `build_test_commands` → *your*
+test/lint commands. There is nothing provider-specific baked into the plugins.
 
 > **Not extension points.** The shipped agents `log-sifter` (a log path is just
 > passed in) and `pr-summarizer` (it summarizes whatever review-bot comments
@@ -209,9 +203,7 @@ your-app/
     hooks/
       app-context.py       # injects app-specific context at SessionStart
     skills/
-      flag-config/         # fills the feature_flags seam (your flag provider)
-      tracker-sync/        # fills the issue_tracker seam (your tracker's API)
-      alert-config/        # fills the observability seam (your metrics provider)
+      <app-specific skills your workflow needs>
     agents/
       <app-specific agents your workflow needs>
   project.config.json      # thin config: vault path overrides, command defaults
@@ -219,16 +211,6 @@ your-app/
 
 What this adds, and where:
 
-- **`flag-config/`** — a project skill that knows the adopter's feature-flag
-  provider SDK and naming conventions. Dispatched by `planning` /
-  `execute` at the `feature_flags` step. Without it, those
-  skills print `no feature-flag provider configured` and proceed.
-- **`tracker-sync/`** — a project skill that calls the adopter's issue tracker's
-  API to advance ticket status. Hooked into the `issue_tracker` steps. Without
-  it, status sync is skipped (the plan still lands in the vault).
-- **`alert-config/`** — a project skill that emits the adopter's metric/alert
-  conventions. Dispatched at the `observability` step. Without it, the decision
-  still happens but provider-specific wiring is skipped.
 - **`test-runner` invocation** — the adopter passes their stack's test/lint
   command (the `build_test_commands` seam); no project skill is required, just
   the right command.
@@ -256,9 +238,9 @@ the providers your team uses and write the thin skills that bridge to them.
 
 <!--
 Content-accuracy note: the extension points named in this guide
-(feature_flags, observability, issue_tracker, design_mockup,
-build_test_commands) are cross-checked against the shipped `extension point — X`
+(build_test_commands) are cross-checked against the shipped `extension point — X`
 seams by tests/test_extending_doc.py. If you add or rename a seam upstream,
-that test forces this guide to keep pace. Manual cross-check last performed
-2026-06-04 against the lore + craft shipped skills/agents and DEGRADATION.md.
+that test forces this guide to keep pace. The feature_flags, observability,
+issue_tracker, and design_mockup seams were removed from craft, so they no
+longer appear here.
 -->

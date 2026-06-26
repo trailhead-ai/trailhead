@@ -24,8 +24,6 @@ _PLAN_SECTIONS = [
     "Goal",
     "Architecture",
     "Given Axioms",
-    "Rollout & Gating",
-    "Observability & Failure Visibility",
     "Known Unknowns",
     "Slices",
 ]
@@ -37,8 +35,6 @@ _SPEC_SECTIONS = [
     "Non-Goals",
     "Constraints",
     "UI Direction",
-    "Rollout & Gating",
-    "Observability & Failure Visibility",
     "Open Questions",
     "Related",
 ]

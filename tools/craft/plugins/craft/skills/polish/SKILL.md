@@ -8,7 +8,7 @@ description: >
   CODE changes framed as "polish these fix-ups", "fix-ups", "iterate on these", "clean these up",
   or "tidy these up".
   DO NOT TRIGGER when: single small item (just do it inline), planning a new feature (use `plan`),
-  debugging a specific failure (use `systematic-debugging`), or the user wants to NOTE / capture a
+  debugging a specific failure, or the user wants to NOTE / capture a
   follow-up for later (that is lore's `follow-up` capture — "note a follow-up", "put this on my
   follow-ups" — not a batch of code edits to run now).
 ---
@@ -112,7 +112,6 @@ related-spec: [[specs/...]]              # optional, only if parent had one
 
 **Parent plan:** [[plans/<parent-plan-filename>]]   _(or "n/a — standalone follow-up")_
 **Working directory:** <absolute path to worktree>
-**Feature Flag:** n/a — follow-up iteration on already-shipped code
 
 ## Goal
 
@@ -197,4 +196,3 @@ Do NOT try to write a single brief that asks the executor to operate on multiple
 ## Notes
 
 - Briefs are a useful artifact — they document what changed and why during the iteration phase. Persist them through the note_store seam (`../_shared/note-storage.md`) to write them into your vault.
-- This skill does NOT touch an issue tracker hook. Fix-ups are post-implementation polish, not status transitions. If a fix-up is large enough that the tracker state should advance again, the user should run `/plan`, not `/polish`.
