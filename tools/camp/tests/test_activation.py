@@ -1,6 +1,6 @@
-"""Tests for activation.py — camp enter <member> (Slice 5).
+"""Tests for activation.py — camp enter <member>.
 
-Test contract:
+Covers:
 - camp enter <ready-member>: fires each hook once (list-mode, fake subprocess),
   prints the member's CLAUDE.md content, marks activated; re-enter → hooks NOT
   re-run, doc re-printed.
@@ -257,7 +257,7 @@ def test_enter_ready_fires_each_hook_once(tmp_path: Path) -> None:
 
 
 def test_enter_ready_hooks_run_shell_false(tmp_path: Path) -> None:
-    """Activation hooks are run with shell=False (list-mode, D-F trust)."""
+    """Activation hooks are run with shell=False (list-mode, author-trusted)."""
     from activation import enter_member
 
     group_name = "mygroup"
@@ -707,7 +707,7 @@ kind = "dep-install"
 
 
 # ---------------------------------------------------------------------------
-# Fix 1: GroupConfigError from the REAL CLI entrypoint (not just load_group).
+# GroupConfigError from the REAL CLI entrypoint (not just load_group).
 #
 # Regression: _resolve_group_for_command had a bare `except Exception: return
 # (None, None)` that swallowed GroupConfigError.  A malformed config (unknown
@@ -770,7 +770,7 @@ def test_cli_enter_unknown_hook_kind_exits_nonzero_with_legible_message(
 
 
 # ---------------------------------------------------------------------------
-# Fix 2: Failing activation hook — legible error, activated stays UNSET.
+# Failing activation hook — legible error, activated stays UNSET.
 # ---------------------------------------------------------------------------
 
 
@@ -889,7 +889,7 @@ def test_failing_hook_surfaces_legibly_via_cli(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Slice 9: inject strategy dispatch in enter_member
+# inject strategy dispatch in enter_member
 # ---------------------------------------------------------------------------
 
 

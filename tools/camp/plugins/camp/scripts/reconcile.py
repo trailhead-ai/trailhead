@@ -1,11 +1,11 @@
-"""Worktree lifecycle reconciler for camp — Slice 2 (unified workspace layout).
+"""Worktree lifecycle reconciler for camp (unified workspace layout).
 
 reconcile_worktree(group, slug):
     Idempotent create-or-reconcile. For each group member:
     - Ensures central_state_dir(group)/worktrees/<slug>/<member> exists on branch
       worktree-<slug>, branched off the member's configured `base` (default
       origin/main). The base ref is only used when it already resolves locally;
-      the actual `git fetch` is deferred to the Slice 3 async provisioner, so a
+      the actual `git fetch` is deferred to the async provisioner, so a
       missing base falls back to HEAD rather than failing synchronous bring-up.
     - Existence-guard before git worktree add (never blindly re-add).
     - Bootstraps each member's configured bootstrap list in parallel (shell=False).
@@ -171,7 +171,7 @@ def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
 
 
 def _fetch_base(repo_root: Path, base: str, *, timeout: float = FETCH_TIMEOUT_SECONDS) -> None:
-    """Fetch the member's base ref under a timeout (Slice 3 async provisioner).
+    """Fetch the member's base ref under a timeout (used by the async provisioner).
 
     The base looks like "origin/main"; the remote is the part before the first
     "/". A non-remote base (no "/") is a local ref and skips the fetch. A
@@ -228,7 +228,7 @@ def _add_worktree_for_member(
 ) -> None:
     """Add a git worktree for one member at wt_path, branched off `base`.
 
-    Admin-name control (Slice 1): git derives a worktree's INTERNAL admin name
+    Admin-name control: git derives a worktree's INTERNAL admin name
     (the dir under `.git/worktrees/<name>`, which Claude Code surfaces as
     `workspace.git_worktree`) from the basename of the add path, de-duplicating
     collisions as `<name>`, `<name>1`, …. Every camp member worktree is leaf-named
@@ -254,7 +254,7 @@ def _add_worktree_for_member(
     already the slug, so add directly at wt_path with no move (but still add).
 
     Branch-base policy: a new branch is created off `base` (default origin/main,
-    per-member overridable). Because the `git fetch` is deferred to the Slice 3
+    per-member overridable). Because the `git fetch` is deferred to the
     async provisioner, the base ref is only used when it already resolves in the
     local clone; otherwise it falls back to HEAD so synchronous bring-up never
     fails on a not-yet-fetched remote ref.
@@ -330,7 +330,7 @@ def _run_bootstrap(member: dict[str, Any], wt_path: Path) -> None:
     """Run a member's bootstrap command in the worktree directory.
 
     bootstrap is a flat list of strings representing a single command +
-    its arguments (shell=False, D-F trust boundary). E.g.:
+    its arguments (shell=False, author-trusted input). E.g.:
         ["pip", "install", "-e", "."]
 
     An empty list means no bootstrap; a no-op.
@@ -418,7 +418,7 @@ def reconcile_worktree(
 
     For each member:
       1. Ensures <repo_root>/.claude/worktrees/<slug> exists on branch worktree-<slug>.
-      2. Runs each member's bootstrap commands (shell=False, D-F).
+      2. Runs each member's bootstrap commands (shell=False, author-trusted).
     Then writes the central manifest atomically.
 
     Concurrent-run guard: a per-slug lock (threading + file lock) prevents two
@@ -461,7 +461,7 @@ def reconcile_worktree(
                     }
                 )
 
-            # -- Phase 2: Bootstrap members in parallel (shell=False, D-F)
+            # -- Phase 2: Bootstrap members in parallel (shell=False, author-trusted)
             any_bootstrap_failure: Exception | None = None
             if any(bool(m.get("bootstrap")) for m in members):
                 with ThreadPoolExecutor(max_workers=len(members)) as executor:

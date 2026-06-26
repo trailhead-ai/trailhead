@@ -1,9 +1,8 @@
-"""U1 permanent smoke: trailhead.vcs is importable from a landing script context.
+"""Permanent smoke: trailhead.vcs is importable from a landing script context.
 
-This test encodes the U1 assumption-prover result (VALIDATED 2026-06-12) as a
-permanent guard for the landing plugin. It fails if the on-disk layout shifts
-such that the four-tier ``_bootstrap.py`` loader can no longer reach the repo
-root from a landing script.
+This test locks that importability in as a permanent guard for the landing
+plugin. It fails if the on-disk layout shifts such that the four-tier
+``_bootstrap.py`` loader can no longer reach the repo root from a landing script.
 
 Two invariants are locked:
 
@@ -13,9 +12,9 @@ Two invariants are locked:
    ``trailhead/paths.py``) at iteration index 6 of the ``(here, *here.parents)``
    walk: file → scripts → landing → plugins → landing → tools → repo-root.
    In ``Path.parents`` terms (which excludes the file) that is ``parents[5]`` —
-   NOT ``parents[6]`` (the off-by-one Slice 3 caught).
+   NOT ``parents[6]`` (an easy off-by-one to get wrong).
 
-2. **S-5 in-process boundary** — once ``trailhead`` is importable (Tier-1
+2. **In-process boundary** — once ``trailhead`` is importable (Tier-1
    already-importable, which is exactly the landing pattern of one
    ``ensure_trailhead_importable()`` call per process), a hostile
    ``$TRAILHEAD_ROOT`` in the environment does NOT change the resolved
@@ -76,7 +75,7 @@ class TestS5InProcessBoundary:
         Plant a decoy ``trailhead/paths.py`` under a tmp dir, point
         ``$TRAILHEAD_ROOT`` at it, and assert that — because trailhead is already
         imported in this process — the resolved package still comes from the real
-        repo root, not the decoy. This is the S-5 in-process invariant.
+        repo root, not the decoy. This is the in-process invariant.
         """
         import trailhead  # already importable in this process (Tier-1)
 
@@ -94,6 +93,6 @@ class TestS5InProcessBoundary:
 
         assert Path(trailhead_after.__file__).resolve().parent == real_location, (
             "a hostile $TRAILHEAD_ROOT changed the resolved trailhead package — "
-            "Tier-1 already-importable must win (S-5 boundary)"
+            "Tier-1 already-importable must win"
         )
         assert str(decoy_root) not in str(Path(trailhead_after.__file__).resolve())

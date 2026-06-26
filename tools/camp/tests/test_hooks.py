@@ -1,12 +1,12 @@
 """Tests for camp init + SessionStart hook wiring.
 
-Slice 2 drops the WorktreeRemove hook wiring (camp owns teardown via `camp rm`);
+The WorktreeRemove hook wiring is dropped (camp owns teardown via `camp rm`);
 only the SessionStart hook is written into each member's .claude/settings.json.
 The `worktree-cleanup` handler itself is retained (still invocable) but no longer
 auto-wired. Member worktrees now live under the unified workspace layout
 central_state_dir(group)/worktrees/<slug>/<member>.
 
-Test contract (all must RED before implementation, GREEN after):
+Covers:
 
 1. init on a fake group writes the SessionStart hook entry (and NOT a
    WorktreeRemove entry) + the env.CAMP_BIN block into each member's
@@ -27,7 +27,7 @@ Test contract (all must RED before implementation, GREEN after):
    c. malformed group config → exit 0, empty stderr.
    d. slug=None (cwd is a repo root, not a worktree) → exit 0, empty stderr.
 
-7. D-H under a bare python3: running session-bootstrap from a context where
+7. Import guard under a bare python3: running session-bootstrap from a context where
    trailhead isn't already importable resolves via _bootstrap's walk-up (exit 0)
    OR emits the legible tier-4 error — never a raw ModuleNotFoundError traceback.
 
@@ -64,7 +64,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 
 # ---------------------------------------------------------------------------
-# Helpers shared with slice2 tests
+# Helpers shared with the lifecycle tests
 # ---------------------------------------------------------------------------
 
 
@@ -179,7 +179,7 @@ class TestHooksWriter:
         assert any("session-bootstrap" in cmd for cmd in commands)
 
     def test_does_not_write_worktree_remove_hook(self, two_member_group):
-        """Slice 2 drops WorktreeRemove wiring — camp owns teardown via `camp rm`.
+        """WorktreeRemove wiring is dropped — camp owns teardown via `camp rm`.
 
         No WorktreeRemove entry must be written into the member's settings.json.
         """
@@ -263,7 +263,7 @@ class TestHooksWriter:
         assert ss_commands.count(expected_ss) == 1, (
             f"Duplicate session-bootstrap entries: {ss_commands}"
         )
-        # WorktreeRemove wiring is dropped in Slice 2.
+        # WorktreeRemove wiring is dropped.
         assert "WorktreeRemove" not in hooks
 
     def test_preserves_existing_unrelated_keys(self, two_member_group):
@@ -544,7 +544,7 @@ bootstrap = []
 
 
 # ---------------------------------------------------------------------------
-# Test 4: D-H guard — bare python3, not ModuleNotFoundError
+# Test 4: import guard — bare python3, not ModuleNotFoundError
 # ---------------------------------------------------------------------------
 
 
@@ -818,7 +818,7 @@ bootstrap = []
 
 
 # ---------------------------------------------------------------------------
-# Refinement 1: session-bootstrap warns on genuine reconcile failure
+# session-bootstrap warns on genuine reconcile failure
 # ---------------------------------------------------------------------------
 
 
@@ -899,7 +899,7 @@ bootstrap = ["false"]
 
 
 # ---------------------------------------------------------------------------
-# Refinement 2: camp --help lists group (renamed from init in Slice 1)
+# camp --help lists group (renamed from init)
 # ---------------------------------------------------------------------------
 
 
@@ -919,7 +919,7 @@ class TestHelpMenuInit:
             f"Expected exit 0 from --help, got {result.returncode}: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        # Slice 1: 'init' renamed to 'group'.
+        # 'init' renamed to 'group'.
         assert "group" in combined, f"'group' not found in --help output:\n{combined}"
 
     def test_help_init_has_description(self):
@@ -930,7 +930,7 @@ class TestHelpMenuInit:
             text=True,
         )
         combined = result.stdout + result.stderr
-        # Slice 1: 'init' renamed to 'group'.
+        # 'init' renamed to 'group'.
         assert "group" in combined
         # Check for keywords that would appear in a one-liner description
         init_description_words = ["Wire", "wire", "hook", "Hook", "Setup", "setup", "config"]

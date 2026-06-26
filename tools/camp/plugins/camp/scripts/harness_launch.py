@@ -1,4 +1,4 @@
-"""Harness-launch seam — Slice 6 (config-shaped, claude default).
+"""Harness-launch seam (config-shaped, claude default).
 
 The single launch point at the tail of `camp ai`. A group-level optional
 [harness] config block declares how to launch the harness:
@@ -21,8 +21,8 @@ read fields off it directly. profile.launch() does the
 os.execvp's. Modality is terminal-exec (claude-specific); GUI/detached launch is
 deferred.
 
-Tests stub launch() (trailhead.paths is not isolated for the real claude runner —
-memory: harness-cli-not-isolated-by-trailhead-env). The CAMP_TEST_NO_EXEC escape
+Tests stub launch() (trailhead.paths is not isolated for the real claude runner).
+The CAMP_TEST_NO_EXEC escape
 hatch short-circuits the real os.execvp for the subprocess-level CLI tests that
 cannot monkeypatch in-process.
 """
@@ -83,7 +83,7 @@ class HarnessProfile:
     Built ONCE by resolve_harness_profile by merging a [harness] block over the
     baked-in claude default. Carries the still-unsubstituted templates for new /
     resume / cwd; launch() does the {slug}/{workspace} substitution at call time.
-    `pretrust` gates the claude trust pre-seed (bring_up_workspace, Slice 2); it is
+    `pretrust` gates the claude trust pre-seed (bring_up_workspace); it is
     only acted on for claude launches (see is_claude_launch).
     """
 

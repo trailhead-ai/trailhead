@@ -1,10 +1,10 @@
-"""Tests for the GitHubProvider deploy surface (Slice 2).
+"""Tests for the GitHubProvider deploy surface.
 
 deploy.workflow_runs() / deploy.status() / deploy.logs() — the surface
 landing's `doctor` interrogates for a post-merge deploy regression. All gh
 calls go through an injected stub runner — zero network.
 
-U2-proven field shapes (live-verified against cli/cli):
+Field shapes (live-verified against cli/cli):
   - workflow_runs(): REST `gh api repos/{o}/{r}/actions/runs`, parse `.workflow_runs[]`
     (`id` int, `name`, `status`, `conclusion`, `head_sha`, `created_at`, `html_url`,
     `workflow_id`). NOT `gh run list --json` (it names the id `databaseId`).
@@ -13,7 +13,7 @@ U2-proven field shapes (live-verified against cli/cli):
   - logs(): `gh api .../check-runs/{job_id}/annotations` filtered to
     `annotation_level=="failure"` → [{path, start_line, message}] + truncation sentinel.
 
-Carried-from-Slice-1 (M-4): the deploy paths must surface a legible in-band error
+The deploy paths must surface a legible in-band error
 distinguishing "gh failed (returncode + stderr)" from "gh returned non-JSON/empty".
 """
 
@@ -29,7 +29,7 @@ from trailhead.vcs.github import DeployError
 
 
 # ---------------------------------------------------------------------------
-# Fixtures (shaped like the U2 live samples)
+# Fixtures (shaped like the live samples)
 # ---------------------------------------------------------------------------
 
 _RUNS_PAYLOAD = {
@@ -137,7 +137,7 @@ class TestWorkflowRuns:
         assert runs[1]["status"] == "in_progress"
 
     def test_queries_rest_actions_runs_not_run_list(self) -> None:
-        """U2 correction: must use REST actions/runs (id), never `gh run list` (databaseId)."""
+        """Must use REST actions/runs (id), never `gh run list` (databaseId)."""
         calls: list[list[str]] = []
 
         def stub(cmd, **kw):
@@ -231,7 +231,7 @@ class TestStatus:
         assert s["log_url"] == "https://example.com/logs/9001"
 
     def test_zero_deployments_returns_empty_list_no_raise(self) -> None:
-        """U2: zero deployments is a VALID steady state — return [], never raise."""
+        """Zero deployments is a VALID steady state — return [], never raise."""
 
         def stub(cmd, **kw):
             resp = _remote_stub_response(cmd)
@@ -387,7 +387,7 @@ class TestLogs:
 
 
 # ---------------------------------------------------------------------------
-# M-4: legible in-band error distinguishing gh-failure from non-JSON/empty
+# Legible in-band error distinguishing gh-failure from non-JSON/empty
 # ---------------------------------------------------------------------------
 
 
@@ -425,7 +425,7 @@ class TestDeployErrorCause:
         assert "json" in msg, "non-JSON cause not surfaced"
 
     def test_two_branches_are_distinguishable(self) -> None:
-        """The nonzero-exit message and the non-JSON message must differ (M-4)."""
+        """The nonzero-exit message and the non-JSON message must differ."""
 
         def nonzero_stub(cmd, **kw):
             resp = _remote_stub_response(cmd)

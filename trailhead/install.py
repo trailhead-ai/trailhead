@@ -23,7 +23,7 @@ or CLI shim that a previous run installed.
 
 No harness found (and none named): warn, still build the CLI shims, exit non-zero.
 
-Hermeticity (B-3): detect_harnesses / wire / create_shims / get_harness are
+Hermeticity: detect_harnesses / wire / create_shims / get_harness are
 imported at module level so tests can patch them.
 """
 
@@ -65,7 +65,7 @@ def run_lore_init(
     here. ``lore init`` is itself non-interactive and idempotent, so this is safe
     to run on every install / re-install.
 
-    The runner is injectable (B-3 / Axiom 6) so tests never invoke the real
+    The runner is injectable (Axiom 6) so tests never invoke the real
     ``lore init`` against the user's vault/state. The default captures output and
     does NOT raise on a non-zero exit — the caller decides how to surface it (a
     failed bootstrap must propagate as a non-zero install exit with the lore

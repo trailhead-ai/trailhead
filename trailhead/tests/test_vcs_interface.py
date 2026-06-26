@@ -6,8 +6,8 @@ Contract:
   - get_provider("gitlab") (or any unregistered name) raises a legible error
     that names the documented extension point.
   - The injectable runner threads through get_provider(name, runner=...).
-  - The Provider interface exposes namespaced surfaces repos/pr/ci and declares
-    a deploy surface that is NOT implemented in Slice 1 (NotImplemented).
+  - The Provider interface exposes namespaced surfaces repos/pr/ci and a
+    deploy surface.
   - vcs-provider.md exists and names every repos/pr/ci interface method.
 """
 

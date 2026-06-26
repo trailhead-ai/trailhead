@@ -138,10 +138,12 @@ it unit-testable.
 ## Conventions worth matching
 
 - Commit subjects are scoped conventional commits: `feat(trailhead):`, `fix(craft):`,
-  `refactor(camp):`, `docs(...)`, `test(...)`. Work is organized into numbered
-  **Slices** and lettered **Specs** referenced in messages, docstrings, and tests
-  (e.g. "Slice 6", "Spec D", invariant tags like `D-1`, `S-3`, `C-1.2`). Preserve
-  those references when editing.
+  `refactor(camp):`, `docs(...)`, `test(...)`.
+- Comments, docstrings, and tests must stand on their own — explain intent and
+  contracts in terms a reader of the code can verify directly. Do **not** reference
+  internal planning artifacts (development "slices", lettered "specs" or invariant
+  tags like `D-1`/`S-3`, resolved "unknowns", plan documents, or council reviews);
+  those live in the project's working notes, not in the shipped code.
 - Modules carry long contract docstrings stating their invariants and security
   posture — read them before changing behavior; update them when the contract
   changes (Axiom 5).

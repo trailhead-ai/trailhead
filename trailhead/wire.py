@@ -17,7 +17,7 @@ Then, ONCE after the compose loop:
     6. ``harness.generate_manifest(<promoted>, composed_root)``.
     7. ``harness.register(composed_root)`` (gated on ``harness.is_registered``),
        then per promoted tool ``harness.install_tool`` (not yet installed) or
-       ``harness.rewire_tool`` (already installed — C-2 self-heal).
+       ``harness.rewire_tool`` (already installed — self-heal).
 
 Per-harness root (multi-harness isolation)
 ------------------------------------------
@@ -31,21 +31,21 @@ The manifest lists only the tools that promoted SUCCESSFULLY this run (validity 
 ``live_dest/.claude-plugin/plugin.json`` exists).  A tool whose compose/promote
 raised is omitted; an unselected tool is never processed → omitted.
 
-R-1 atomicity
--------------
+Atomicity
+---------
 All writes go to a temporary staging dir first; only after a clean compose is it
 atomically promoted via ``shutil.move``.  Staging cleanup always runs in a
-``try/finally`` (C-1.1), so a ``KeyboardInterrupt`` / ``SystemExit`` mid-compose
+``try/finally``, so a ``KeyboardInterrupt`` / ``SystemExit`` mid-compose
 never orphans ``_<tool>_staging_*`` dirs.
 
-C-1.2 / I-1 multi-tool semantics
---------------------------------
+Multi-tool semantics
+--------------------
 ``wire()`` is best-effort sequential: a failure on tool N raises
 ``WireError(tool=N, stage=…, cause=…)`` immediately; tools 0…N-1 stay wired,
 tools N+1… are not attempted.
 
-B-3 hermeticity
----------------
+Hermeticity
+-----------
 The harness-CLI runner is injectable via ``runner=`` (threaded through to the
 harness).  Tests always pass a stub; ``wire()`` itself never imports subprocess.
 """
@@ -101,7 +101,7 @@ def _release_wire_lock(lock_path: Path) -> None:
 
 @contextlib.contextmanager
 def wire_lock(*, env: dict[str, str] | None = None):
-    """Context manager that acquires/releases the shared wire lock (R-8).
+    """Context manager that acquires/releases the shared wire lock.
 
     Acquires the O_EXCL lock under state_dir("trailhead")/trailhead.lock and
     releases it in the finally block regardless of exceptions.
@@ -160,7 +160,7 @@ def wire(
                         ``TRAILHEAD_STATE_DIR`` override for test hermeticity).
         runner:         Injectable harness-CLI runner (passed to the harness).
 
-    Multi-tool semantics (C-1.2/I-1): best-effort sequential — a per-tool failure
+    Multi-tool semantics: best-effort sequential — a per-tool failure
     raises ``WireError`` naming the tool + stage; earlier tools stay wired.
     """
     _environ = env if env is not None else dict(os.environ)
@@ -203,7 +203,7 @@ def wire(
     if not harness.is_registered(composed_root):
         harness.register(composed_root, runner=runner)
 
-    # Per-tool install (not yet installed) or rewire (installed — C-2 self-heal).
+    # Per-tool install (not yet installed) or rewire (installed — self-heal).
     for tool in promoted:
         try:
             if harness.is_installed(tool, composed_root):
@@ -222,10 +222,10 @@ def _compose_tool(
     composed_root: Path,
     live_dest: Path,
 ) -> None:
-    """Compose one tool into the live dest using staging + atomic promote (R-1).
+    """Compose one tool into the live dest using staging + atomic promote.
 
-    Raises WireError (C-1.2) naming the tool and stage on any failure.
-    Staging cleanup always runs via try/finally (C-1.1).
+    Raises WireError naming the tool and stage on any failure.
+    Staging cleanup always runs via try/finally.
     """
     staging_parent = composed_root / "plugins"
     staging_dir_path: Path | None = None

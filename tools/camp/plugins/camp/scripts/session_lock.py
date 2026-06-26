@@ -1,4 +1,4 @@
-"""Workspace session lockfile — Slice 6 (refuse-concurrent).
+"""Workspace session lockfile (refuse-concurrent).
 
 One persisted harness session per workspace. The lockfile records the live PID
 that holds the session plus a session-start timestamp:
@@ -23,7 +23,7 @@ release_session_lock is defined for completeness and test use; production code
 does not call it (the execvp contract means there is no point in the call chain
 where it would run reliably).
 
-Liveness (U2, validated): os.kill(pid, 0) → ProcessLookupError means dead;
+Liveness: os.kill(pid, 0) → ProcessLookupError means dead;
 PermissionError means alive-but-not-ours (macOS DOES raise EPERM for cross-user
 PIDs) — treat as alive, conservative.
 """
@@ -56,7 +56,7 @@ def lock_path_for(workspace_dir: Path) -> Path:
 
 
 def is_pid_alive(pid: int) -> bool:
-    """Return True if a process with this PID exists (U2 reference)."""
+    """Return True if a process with this PID exists."""
     try:
         os.kill(pid, 0)
         return True

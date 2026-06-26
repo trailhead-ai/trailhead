@@ -13,7 +13,7 @@ baseline skills are always active when the tool is installed.
 [tool]
 name = "lore"                           # required
 base = ["skills/_shared", "skills/sync"]   # always-on dirs
-hooks_json = "hooks/hooks.json"         # optional — see D-E
+hooks_json = "hooks/hooks.json"         # optional — see "Hooks are a whole-tool unit"
 validate = true                         # optional, default true — see validate=false
 ```
 
@@ -21,7 +21,7 @@ validate = true                         # optional, default true — see validat
 |-----|------|----------|-------------|
 | `name` | string | yes | Tool identifier. Must match the plugin directory name under `plugins/`. |
 | `base` | list of strings | no (default `[]`) | Skill directories that are always loaded when the tool is installed, regardless of which capabilities are active. |
-| `hooks_json` | string | no | Path to the hooks registration file, relative to the plugin root. See [D-E: hooks are a whole-tool unit](#de-hooks-are-a-whole-tool-unit). |
+| `hooks_json` | string | no | Path to the hooks registration file, relative to the plugin root. See [Hooks are a whole-tool unit](#hooks-are-a-whole-tool-unit). |
 | `validate` | bool | no (default `true`) | When `false`, the loader parses and structures the manifest but skips all directory/file existence checks. See [validate=false escape hatch](#validatefalse-escape-hatch). |
 
 ---
@@ -74,7 +74,7 @@ tools/lore/plugins/lore/skills/decision
 
 ---
 
-## D-E: Hooks are a whole-tool unit
+## Hooks are a whole-tool unit
 
 Hooks are registered for the tool as a whole, not per-capability.  A tool
 with hooks ships a single `plugins/<name>/hooks/hooks.json` that registers
@@ -90,7 +90,7 @@ Craft has no hooks — `hooks_json` is omitted entirely.
 
 ---
 
-## D-F: Confinement guarantee
+## Confinement guarantee
 
 Every referenced path (all `base` entries, all capability `skills` /
 `agents` entries, and `hooks_json`) is verified to stay **inside the
@@ -121,8 +121,7 @@ The manifest is still parsed and structurally validated (required fields,
 key presence, confinement); only the filesystem checks are skipped.
 
 Use this for tools whose plugin directory tree does not yet exist on disk
-(e.g. a placeholder manifest committed before Step 2 lands the actual
-files).
+(e.g. a placeholder manifest committed before the actual files land).
 
 ```toml
 [tool]
@@ -178,7 +177,7 @@ skills = ["skills/checkpoint", "skills/finish"]
 agents = []
 
 [capabilities.shared-vaults]
-description = "Layered personal + shared vaults (WS-9, not yet built)."
+description = "Layered personal + shared vaults (not yet built)."
 skills = []
 agents = []
 ```

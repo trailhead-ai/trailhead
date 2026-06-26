@@ -1,6 +1,6 @@
-"""Slice 4: dev-layer consolidation structural tests.
+"""Dev-layer consolidation structural tests.
 
-TDD contract:
+This test verifies:
   1. Root /.claude-plugin/marketplace.json exists, parses, name == "trailhead-local",
      plugins[] has exactly 5 entries, every source starts with ./tools/ and resolves
      to an existing plugins/<tool>/.claude-plugin/plugin.json under the repo root.

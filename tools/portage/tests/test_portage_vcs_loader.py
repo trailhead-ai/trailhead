@@ -1,8 +1,8 @@
-"""U1 permanent smoke: trailhead.vcs is importable from a portage script context.
+"""Permanent smoke: trailhead.vcs is importable from a portage script context.
 
-This test encodes the U1 assumption-prover result (VALIDATED 2026-06-12) as a
-permanent guard. It fails if the on-disk layout shifts such that the four-tier
-``_bootstrap.py`` loader can no longer reach the repo root from a portage script.
+This test locks that importability in as a permanent guard. It fails if the
+on-disk layout shifts such that the four-tier ``_bootstrap.py`` loader can no
+longer reach the repo root from a portage script.
 
 Three invariants are locked:
 
@@ -12,19 +12,19 @@ Three invariants are locked:
    ``trailhead/paths.py``) at ``parents[6]`` from the script's resolved path:
    file → scripts → portage → plugins → portage → tools → repo-root.
 
-2. **S-5 in-process boundary** — once ``trailhead`` is importable (Tier-1
+2. **In-process boundary** — once ``trailhead`` is importable (Tier-1
    already-importable, which is exactly the portage pattern of one
    ``ensure_trailhead_importable()`` call per process), a hostile
    ``$TRAILHEAD_ROOT`` in the environment does NOT change the resolved
    ``trailhead`` package. The env var is irrelevant once Tier-1 wins.
 
-3. **S-5 cold-start boundary** — on a fresh process where Tier-1 fails (the
+3. **Cold-start boundary** — on a fresh process where Tier-1 fails (the
    normal thin-script state), the Tier-2 ``__file__`` walk wins over a hostile
    Tier-3 ``$TRAILHEAD_ROOT``; the env var is only a fallback when the walk
    finds no co-located checkout (camp's shim flow). See
    ``TestColdStartTier2Hardening`` below.
 
-Depth note: the prover's "parents[6]" counts the file itself as element 0 of the
+Depth note: the "parents[6]" depth counts the file itself as element 0 of the
 ``(here, *here.parents)`` iteration the bootstrap walks — file(0) → scripts(1) →
 portage(2) → plugins(3) → portage(4) → tools(5) → repo-root(6). In ``Path.parents``
 terms (which excludes the file) that is ``parents[5]``. This test asserts the
@@ -92,7 +92,7 @@ class TestS5InProcessBoundary:
         Plant a decoy ``trailhead/paths.py`` under a tmp dir, point
         ``$TRAILHEAD_ROOT`` at it, and assert that — because trailhead is already
         imported in this process — the resolved package still comes from the real
-        repo root, not the decoy. This is the S-5 in-process invariant.
+        repo root, not the decoy. This is the in-process invariant.
         """
         import trailhead  # already importable in this process (Tier-1)
 
@@ -110,7 +110,7 @@ class TestS5InProcessBoundary:
 
         assert Path(trailhead_after.__file__).resolve().parent == real_location, (
             "a hostile $TRAILHEAD_ROOT changed the resolved trailhead package — "
-            "Tier-1 already-importable must win (S-5 boundary)"
+            "Tier-1 already-importable must win"
         )
         assert str(decoy_root) not in str(Path(trailhead_after.__file__).resolve())
 
@@ -127,7 +127,7 @@ class TestS5InProcessBoundary:
 #
 # These tests exercise the genuinely cold path in a child interpreter (the only
 # faithful way to defeat Tier-1, since the pytest process already imported
-# trailhead). They lock the S-5 cold-start hardening: the __file__ walk (Tier 2)
+# trailhead). They lock the cold-start hardening: the __file__ walk (Tier 2)
 # wins over a hostile $TRAILHEAD_ROOT (Tier 3), while the camp shim's
 # walk-finds-nothing → env-fallback flow still works.
 
@@ -169,7 +169,7 @@ class TestColdStartTier2Hardening:
         """Cold process, real script inside the checkout, hostile $TRAILHEAD_ROOT.
 
         The walk anchors on the script's own location (inside the repo), so the
-        decoy env root is never consulted. This is the S-5 cold-start invariant
+        decoy env root is never consulted. This is the cold-start invariant
         the warm in-process test cannot reach.
         """
         decoy_root = tmp_path / "evil"

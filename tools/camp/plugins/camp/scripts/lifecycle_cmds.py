@@ -1,4 +1,4 @@
-"""Group-aware lifecycle commands for camp — Slice 2.
+"""Group-aware lifecycle commands for camp.
 
 These functions replace the SIBLING_REPOS-constant-based implementations in
 spine.py with group-config-driven equivalents. They operate on the central

@@ -1,6 +1,6 @@
-"""Group resolution for camp — state-dir path-parsing cwd/--group resolution (D-G).
+"""Group resolution for camp — state-dir path-parsing cwd/--group resolution.
 
-Resolution algorithm (state-dir-path-parsing, U4 — VALIDATED):
+Resolution algorithm (state-dir-path-parsing):
 1. cwd.relative_to(camp_state_dir) → if len(parts) >= 3 and parts[1] == "worktrees"
    → return (group=parts[0], slug=parts[2]), verifying the group is configured.
    This covers the unified workspace layout:
@@ -19,7 +19,7 @@ A repo listed in two groups is an error at resolve time and at eager
 validate_no_overlap time: raises GroupResolutionError naming both groups + the repo.
 
 group names are validated with validate_group_name before use in any path
-construction (D-E confinement).
+construction (confinement).
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-# The Step-1 resolver is the canonical owner of camp's state/config paths.
+# The trailhead.paths resolver is the canonical owner of camp's state/config paths.
 # Imported lazily inside central_state_dir so that module-level import of
-# group_resolve.py succeeds even if trailhead is not installed (the D-H guard
+# group_resolve.py succeeds even if trailhead is not installed (the import guard
 # in cli/camp catches that case before any command runs).
 
 
@@ -44,7 +44,7 @@ class GroupResolutionError(Exception):
 
 
 class GroupConfinementError(Exception):
-    """Raised when a group name fails the path-confinement check (D-E).
+    """Raised when a group name fails the path-confinement check.
 
     Mirrors trailhead.paths.PathResolutionError's contract for the group
     segment camp appends to state_dir("camp")/<group>/.
@@ -52,7 +52,7 @@ class GroupConfinementError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# D-E: group-name confinement
+# Group-name confinement
 # ---------------------------------------------------------------------------
 
 _INVALID_GROUP_CHARS = frozenset(("/", "\\", ".."))
@@ -95,7 +95,7 @@ def central_state_dir(
 ) -> Path:
     """Return the central state directory for a group: state_dir("camp")/<group>/.
 
-    Validates the group name before constructing any path (D-E).
+    Validates the group name before constructing any path.
 
     Args:
         group:    Group name. Must pass validate_group_name.
@@ -106,7 +106,7 @@ def central_state_dir(
         Absolute Path state_dir("camp")/<group>/  (directory may not exist).
 
     Raises:
-        GroupConfinementError: If group name fails D-E validation.
+        GroupConfinementError: If group name fails confinement validation.
         trailhead.paths.PathResolutionError: If the resolver cannot derive the dir.
     """
     validate_group_name(group)
@@ -191,7 +191,7 @@ def resolve_from_cwd(
     camp_state_dir: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> tuple[str, str | None]:
-    """Resolve (group_name, slug) from cwd via state-dir path parsing (D-G, U4).
+    """Resolve (group_name, slug) from cwd via state-dir path parsing.
 
     Algorithm:
       1. cwd relative to camp_state_dir → if the relative path is

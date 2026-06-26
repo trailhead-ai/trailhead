@@ -5,20 +5,20 @@ probe (landing's soak is its OWN concern — it is NOT behind the provider
 abstraction). The probe is a verbatim port; these tests lock the load-bearing
 contract so a future edit can't regress it.
 
-Test contract (Slice 4):
-  - Soak inert default (D-3): no soak_health_command configured → prints the
+Behavioral contract:
+  - Soak inert default: no soak_health_command configured → prints the
     EXACT string 'soak: n/a — no health command configured', exits 0, spawns NO
     subprocess.
-  - Soak runs + escalates (R-4): stubbed health command exits non-zero →
+  - Soak runs + escalates: stubbed health command exits non-zero →
     soak escalates (exit 1). One-shot: stub is invoked exactly once.
   - Healthy: a command that exits 0 → soak exits 0.
-  - S-1 no-shell: a soak_health_command containing '&&'/'$(...)' is passed
+  - No-shell: a soak_health_command containing '&&'/'$(...)' is passed
     literally (shlex.split → arg-list); metachars become string args, no subshell.
-  - R-3 timeout: a never-returning command is killed after the timeout (via
+  - Timeout: a never-returning command is killed after the timeout (via
     os.killpg over the whole process group, so a grandchild does not leak) and
     escalates (exit 1) without hanging.
-  - Min-1: malformed soak_health_command (unbalanced quote) → clean exit 2 with
-    an error message on stderr instead of a ValueError traceback.
+  - Malformed command: malformed soak_health_command (unbalanced quote) → clean
+    exit 2 with an error message on stderr instead of a ValueError traceback.
 
 Hermeticity: tmp_path-based stub commands; no network; stdlib only.
 """
@@ -80,61 +80,61 @@ def _run_soak(toml_path: Path, *, timeout_s: int = 30) -> subprocess.CompletedPr
 
 
 # ---------------------------------------------------------------------------
-# D-3: Soak inert default
+# Soak inert default
 # ---------------------------------------------------------------------------
 
 
 class TestSoakInertDefault:
     def test_no_health_command_exits_zero(self, tmp_path: Path) -> None:
-        """D-3: soak_health.py with no soak_health_command exits 0 (inert by default)."""
+        """soak_health.py with no soak_health_command exits 0 (inert by default)."""
         toml = _write_toml(tmp_path)
         r = _run_soak(toml)
         assert r.returncode == 0, (
             f"soak_health.py must exit 0 when no health command is configured "
-            f"(D-3 inert default);\n"
+            f"(inert default);\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
     def test_no_health_command_prints_exact_na_message(self, tmp_path: Path) -> None:
-        """D-3 (council Minor): the inert message is the EXACT locked string."""
+        """The inert message is the EXACT locked string."""
         toml = _write_toml(tmp_path)
         r = _run_soak(toml)
         assert INERT_MESSAGE in r.stdout, (
-            f"soak_health.py must print the exact inert message {INERT_MESSAGE!r} (D-3);\n"
+            f"soak_health.py must print the exact inert message {INERT_MESSAGE!r};\n"
             f"got stdout: {r.stdout!r}"
         )
 
     def test_no_health_command_no_subprocess_spawned(self, tmp_path: Path) -> None:
-        """D-3: soak_health.py with no health command must not spawn any subprocess."""
+        """soak_health.py with no health command must not spawn any subprocess."""
         sentinel = tmp_path / "sentinel.txt"
         toml = _write_toml(tmp_path)
         _run_soak(toml)
         assert not sentinel.exists(), "soak_health.py spawned a subprocess in inert mode"
 
     def test_missing_release_block_also_exits_zero(self, tmp_path: Path) -> None:
-        """D-3: a TOML with no [release] block at all still exits 0."""
+        """a TOML with no [release] block at all still exits 0."""
         toml = tmp_path / "group.toml"
         toml.write_text('[group]\nname = "x"\n', encoding="utf-8")
         r = _run_soak(toml)
         assert r.returncode == 0, (
-            f"soak_health.py must exit 0 when [release] block is absent (D-3);\n"
+            f"soak_health.py must exit 0 when [release] block is absent;\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
 
 # ---------------------------------------------------------------------------
-# R-4: One-shot escalate on non-zero health result
+# One-shot escalate on non-zero health result
 # ---------------------------------------------------------------------------
 
 
 class TestSoakRunsAndEscalates:
     def test_failing_health_command_exits_one(self, tmp_path: Path) -> None:
-        """R-4: a non-zero health result causes soak_health.py to exit 1 (escalate)."""
+        """a non-zero health result causes soak_health.py to exit 1 (escalate)."""
         stub = _write_stub_command(tmp_path, exit_code=1)
         toml = _write_toml(tmp_path, health_command=stub)
         r = _run_soak(toml)
         assert r.returncode == 1, (
-            f"soak_health.py must exit 1 when the health command fails (R-4 regression);\n"
+            f"soak_health.py must exit 1 when the health command fails (regression);\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
@@ -149,7 +149,7 @@ class TestSoakRunsAndEscalates:
         )
 
     def test_one_shot_no_retry(self, tmp_path: Path) -> None:
-        """R-4: one non-zero health result → immediate escalate; stub invoked exactly once."""
+        """one non-zero health result → immediate escalate; stub invoked exactly once."""
         counter = tmp_path / "count.txt"
         counter.write_text("0", encoding="utf-8")
         stub = tmp_path / "count_stub.sh"
@@ -163,19 +163,19 @@ class TestSoakRunsAndEscalates:
         assert r.returncode == 1
         count = int(counter.read_text().strip())
         assert count == 1, (
-            f"R-4: soak_health.py must invoke the health command exactly once on failure "
+            f"soak_health.py must invoke the health command exactly once on failure "
             f"(no retry), but it was invoked {count} times"
         )
 
 
 # ---------------------------------------------------------------------------
-# S-1: No-shell execution — metachars don't spawn subshells
+# No-shell execution — metachars don't spawn subshells
 # ---------------------------------------------------------------------------
 
 
 class TestSoakNoShell:
     def test_metachar_ampersand_does_not_expand(self, tmp_path: Path) -> None:
-        """S-1: '&&' in soak_health_command is NOT shell-expanded.
+        """'&&' in soak_health_command is NOT shell-expanded.
 
         Under shell=False + shlex.split: argv=['true', '&&', 'touch', '<sentinel>']
         — 'true' receives '&&', 'touch', '<sentinel>' as ignored args, but the
@@ -186,30 +186,30 @@ class TestSoakNoShell:
         toml = _write_toml(tmp_path, health_command=bad_cmd)
         _run_soak(toml)
         assert not sentinel.exists(), (
-            "S-1: soak_health.py must NOT create the sentinel file — "
+            "soak_health.py must NOT create the sentinel file — "
             "'&&' must be passed literally, not shell-expanded (shell=False is the guard)"
         )
 
     def test_dollar_paren_does_not_expand(self, tmp_path: Path) -> None:
-        """S-1: '$()' in soak_health_command is NOT expanded as a subshell."""
+        """'$()' in soak_health_command is NOT expanded as a subshell."""
         sentinel = tmp_path / "subshell_sentinel.txt"
         bad_cmd = f"echo $(touch {sentinel})"
         toml = _write_toml(tmp_path, health_command=bad_cmd)
         _run_soak(toml)
         assert not sentinel.exists(), (
-            "S-1: soak_health.py must NOT expand $(...) — "
+            "soak_health.py must NOT expand $(...) — "
             "the subshell must never execute (shell=False is the guard)"
         )
 
 
 # ---------------------------------------------------------------------------
-# R-3: Timeout kills a never-returning command via os.killpg (whole group)
+# Timeout kills a never-returning command via os.killpg (whole group)
 # ---------------------------------------------------------------------------
 
 
 class TestSoakTimeout:
     def test_hung_command_is_killed_and_escalates(self, tmp_path: Path) -> None:
-        """R-3: a never-returning health command is killed after the timeout and escalates."""
+        """a never-returning health command is killed after the timeout and escalates."""
         stub = tmp_path / "hung_stub.sh"
         stub.write_text("#!/bin/sh\nsleep 10\n", encoding="utf-8")
         stub.chmod(0o755)
@@ -220,15 +220,15 @@ class TestSoakTimeout:
         elapsed = time.monotonic() - start
 
         assert elapsed < 8.0, (
-            f"R-3: soak_health.py hung for {elapsed:.1f}s — the timeout must kill the command"
+            f"soak_health.py hung for {elapsed:.1f}s — the timeout must kill the command"
         )
         assert r.returncode == 1, (
-            f"R-3: soak_health.py must exit 1 when the health command times out (escalate);\n"
+            f"soak_health.py must exit 1 when the health command times out (escalate);\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
     def test_timeout_kills_whole_process_group_no_grandchild_leak(self, tmp_path: Path) -> None:
-        """R-3 (council Important): os.killpg reaps the WHOLE process group.
+        """os.killpg reaps the WHOLE process group.
 
         The stub spawns a grandchild ``sleep`` (behind a shell wrapper) that writes
         a sentinel only if it survives to completion. subprocess.run(timeout=) would
@@ -249,30 +249,30 @@ class TestSoakTimeout:
 
         r = _run_soak(toml, timeout_s=1)
         assert r.returncode == 1, (
-            f"R-3: timed-out soak must escalate (exit 1); stdout: {r.stdout}\nstderr: {r.stderr}"
+            f"timed-out soak must escalate (exit 1); stdout: {r.stdout}\nstderr: {r.stderr}"
         )
         # Wait past the grandchild's 3s sleep: if killpg failed to reap it, the
         # sentinel would appear here.
         time.sleep(4)
         assert not sentinel.exists(), (
-            "R-3: a grandchild survived the timeout kill — os.killpg must terminate "
+            "a grandchild survived the timeout kill — os.killpg must terminate "
             "the entire process group (start_new_session=True + killpg), not just the "
             "direct child. A leaked grandchild is the hang/orphan bug the seam prevents."
         )
 
     def test_fast_command_not_killed(self, tmp_path: Path) -> None:
-        """R-3: a fast-exiting health command is not killed by the timeout."""
+        """a fast-exiting health command is not killed by the timeout."""
         stub = _write_stub_command(tmp_path, exit_code=0)
         toml = _write_toml(tmp_path, health_command=stub)
         r = _run_soak(toml, timeout_s=5)
         assert r.returncode == 0, (
-            f"R-3: a fast-exiting health command must not be killed by the timeout;\n"
+            f"a fast-exiting health command must not be killed by the timeout;\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
 
 # ---------------------------------------------------------------------------
-# Min-1: malformed soak_health_command → clean exit-2, not ValueError traceback
+# malformed soak_health_command → clean exit-2, not ValueError traceback
 # ---------------------------------------------------------------------------
 
 
@@ -288,28 +288,28 @@ def _write_toml_raw_command(tmp_path: Path, raw_command: str) -> Path:
 
 class TestSoakMalformedCommand:
     def test_unbalanced_quote_exits_two(self, tmp_path: Path) -> None:
-        """Min-1: unbalanced quote in soak_health_command → exit 2, not a traceback."""
+        """unbalanced quote in soak_health_command → exit 2, not a traceback."""
         toml = _write_toml_raw_command(tmp_path, 'echo "unterminated')
         r = _run_soak(toml)
         assert r.returncode == 2, (
-            f"Min-1: malformed soak_health_command must exit 2 (named error), not "
+            f"malformed soak_health_command must exit 2 (named error), not "
             f"{r.returncode} (got stdout: {r.stdout!r}, stderr: {r.stderr!r})"
         )
 
     def test_unbalanced_quote_prints_error_to_stderr(self, tmp_path: Path) -> None:
-        """Min-1: malformed soak_health_command must print a human-readable error to stderr."""
+        """malformed soak_health_command must print a human-readable error to stderr."""
         toml = _write_toml_raw_command(tmp_path, 'echo "unterminated')
         r = _run_soak(toml)
         assert "malformed" in r.stderr.lower() or "error" in r.stderr.lower(), (
-            f"Min-1: soak_health.py must print a descriptive error to stderr for a "
+            f"soak_health.py must print a descriptive error to stderr for a "
             f"malformed soak_health_command; got stderr: {r.stderr!r}"
         )
 
     def test_unbalanced_quote_no_traceback(self, tmp_path: Path) -> None:
-        """Min-1: a malformed command must not produce a Python traceback."""
+        """a malformed command must not produce a Python traceback."""
         toml = _write_toml_raw_command(tmp_path, 'echo "unterminated')
         r = _run_soak(toml)
         assert "Traceback" not in r.stderr, (
-            f"Min-1: soak_health.py must not emit a ValueError traceback for a "
+            f"soak_health.py must not emit a ValueError traceback for a "
             f"malformed soak_health_command; got stderr: {r.stderr!r}"
         )

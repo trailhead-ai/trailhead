@@ -24,7 +24,7 @@ Schema:
 
 Bootstrap and hook commands are author-trusted local input. camp runs them
 list-mode (subprocess, shell=False). Sharing group configs from untrusted
-authors is explicitly out of scope (see D-F in the Step-2 plan).
+authors is explicitly out of scope.
 
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.
@@ -209,7 +209,7 @@ def load_group(path: Path) -> dict[str, Any]:
     if not isinstance(branch_pattern, str):
         raise GroupConfigError(f"{path}: field 'branch.pattern' must be a string")
 
-    # --- [harness] section (optional) — launch seam config (Slice 6) ---
+    # --- [harness] section (optional) — launch seam config ---
     harness = _parse_harness(raw.get("harness"), path)
 
     # --- [dev_env] section — warn-and-continue (deferred) ---
@@ -260,14 +260,14 @@ def load_group(path: Path) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# [harness] launch-seam block (Slice 6)
+# [harness] launch-seam block
 # ---------------------------------------------------------------------------
 
 # Placeholders the launch templates / cwd may reference. Any other {token} is a
 # misconfiguration (would KeyError at substitution time) → rejected at load.
 _HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace", "session_id"})
 
-# Mid-session context-injection strategies (Slice 9). "stdout" is the universal
+# Mid-session context-injection strategies. "stdout" is the universal
 # floor; "claude-hook" opts into the Claude Code PostToolUse → additionalContext
 # channel. An unknown value is rejected at load with a legible error.
 _INJECT_STRATEGIES = frozenset({"stdout", "claude-hook"})
@@ -298,7 +298,7 @@ def _validate_string_list_field(
     Each token is checked for type (must be str) and stripped-and-rejected if
     empty or whitespace-only.  allow_empty_list=False rejects an empty list (e.g.
     argv templates); True would permit it — currently always False at call sites
-    but the flag exists so Slice 9 can reuse the helper without kwargs surgery.
+    but the flag exists so future callers can reuse the helper without kwargs surgery.
     """
     if not isinstance(value, list) or (not allow_empty_list and len(value) == 0):
         raise GroupConfigError(f"{path}: {where} must be a non-empty list of strings")

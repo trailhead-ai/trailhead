@@ -1,4 +1,4 @@
-"""Injectable runner seam for the VCS provider library (R-1, S-4).
+"""Injectable runner seam for the VCS provider library.
 
 Every gh/git call in trailhead.vcs goes through this module. Production code
 calls run(...) with no runner argument. Tests inject a stub callable to capture

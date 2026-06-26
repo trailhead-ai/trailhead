@@ -16,7 +16,7 @@ Location: `state_dir("trailhead")/bin/`
 - One bash shim per **selected** CLI (`camp`, `lore`). The shim dir's *contents*
   encode the selection: `--no-lore` simply omits the `lore` shim, so a single
   PATH entry always reflects what the user asked for.
-- Each shim hardcodes `TRAILHEAD_ROOT` as an absolute literal (S-5) and `exec`s
+- Each shim hardcodes `TRAILHEAD_ROOT` as an absolute literal and `exec`s
   the tool's real `bin/<tool>` wrapper:
 
   ```bash
@@ -26,7 +26,7 @@ Location: `state_dir("trailhead")/bin/`
   exec "/abs/path/to/trailhead/tools/camp/plugins/camp/bin/camp" "$@"
   ```
 
-- S-6: shim names are checked against a denylist of system binaries
+- Shim names are checked against a denylist of system binaries
   (`python`, `git`, `sh`, …) before anything is written.
 
 `install` calls `create_shims()` and then tells the user how to put the shim dir

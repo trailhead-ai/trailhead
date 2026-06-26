@@ -1,10 +1,10 @@
-"""Tests for Slice 6: camp ai session attach + refuse-concurrent + launch seam.
+"""Tests for camp ai session attach + refuse-concurrent + launch seam.
 
 Exercises _cmd_ai_group_cli in-process: the launch seam (harness_launch.launch)
 and the session lock are stubbed so no real claude execs and no real lock-holder
 exists. Asserts the lock lifecycle + new-vs-resume choice around the stubbed seam.
 
-Test contract (Slice 6, camp ai portion):
+Covers (camp ai portion):
 - first camp ai (no workspace) → `new` template launch invoked; lock written.
 - second camp ai (existing workspace, no live lock) → `resume` template launch.
 - camp ai with a lock held by a LIVE PID → refuses, non-zero, names workspace +

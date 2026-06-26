@@ -1,12 +1,12 @@
-"""Tests for Slice 3: async provisioning, detached spawn, setup, status.
+"""Tests for async provisioning, detached spawn, setup, status.
 
-Test contract (all must RED before implementation, GREEN after):
+Covers:
 
-1. U1 real survival (BLOCKING gate): a fork-then-os.execvp integration test
+1. Real detached survival (BLOCKING gate): a fork-then-os.execvp integration test
    against a no-op provisioner asserts the detached child completes + writes its
    sentinel AFTER the parent process image is replaced — proving the spawn helper
-   actually detaches the child. This is the real proof the prover's probe stood in
-   for; the probe (test_u1_detached_survival.py) is REPLACED by this test.
+   actually detaches the child. This is the real proof that the spawn detaches; it
+   supersedes the earlier ad-hoc survival probe.
 
 2. spawn_detached_provisioner: builds the `camp setup --background` argv, spawns
    with start_new_session=True, stdin=DEVNULL, std streams → setup.log (0o600).
@@ -125,7 +125,7 @@ def two_member_group(tmp_path: Path):
 
 
 # ===========================================================================
-# Test 1: U1 real survival (BLOCKING gate)
+# Test 1: Real detached survival (BLOCKING gate)
 # ===========================================================================
 
 
@@ -230,7 +230,7 @@ class TestU1RealSurvival:
         assert "provisioner completed" in logfile.read_text()
 
     def test_setup_log_written_0600(self, tmp_path: Path) -> None:
-        """setup.log is created with mode 0o600 (council/Security)."""
+        """setup.log is created with mode 0o600 (owner-only)."""
         from provision import spawn_detached_provisioner
 
         logfile = tmp_path / "setup.log"
@@ -367,7 +367,7 @@ class TestAiSeedAndSpawn:
 
 
 # ===========================================================================
-# Slice 2: claude pretrust wiring (gated, best-effort)
+# claude pretrust wiring (gated, best-effort)
 # ===========================================================================
 
 
@@ -383,8 +383,7 @@ class TestPretrustWiring:
 
     Gated on profile.pretrust and profile.is_claude_launch(); best-effort (any
     exception is warned and non-fatal). env threads HOME through so the write
-    lands under tmp, never the real ~/.claude.json
-    (lesson: harness-cli-not-isolated-by-trailhead-env).
+    lands under tmp, never the real ~/.claude.json.
     """
 
     def _env(self, two_member_group):

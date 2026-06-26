@@ -13,7 +13,7 @@ Scripts under test (CLI contract ported verbatim from craft):
   detect_repos.py        → provider.repos.detect(manifest)
   check_pr_status.py     → provider.pr.status(...)
   pr_evaluate_status.py  → provider.pr.evaluate(provider.pr.status(...))
-  merge_prs.py           → provider.pr.merge(pairs, manifest, toml=...)  [R-6 gate]
+  merge_prs.py           → provider.pr.merge(pairs, manifest, toml=...)  [merge_order gate]
   wait_for_actionable.py → provider.ci.wait(pairs, ...)
   release_prs_sidecar.py → provider.pr.open(...) / provider.pr.read_sidecar(...)
 
@@ -180,7 +180,7 @@ class TestPrEvaluate:
 
 
 # ---------------------------------------------------------------------------
-# merge_prs.py — preserve R-6 gate + BLOCKED message
+# merge_prs.py — preserve merge_order gate + BLOCKED message
 # ---------------------------------------------------------------------------
 
 

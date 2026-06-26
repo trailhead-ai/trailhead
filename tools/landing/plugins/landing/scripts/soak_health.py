@@ -6,18 +6,18 @@ Reads `soak_health_command` from the `[release]` block of the group TOML
 NOT behind the provider abstraction; it is a verbatim port of craft's
 soak_health.py, stdlib-only (it never imports trailhead).
 
-Execution contract (D-3 / S-1 / R-3 / R-4):
+Execution contract:
   - Default (no command configured): prints 'soak: n/a — no health command
-    configured' and exits 0. No subprocess is spawned (D-3 inert-by-default).
+    configured' and exits 0. No subprocess is spawned (inert by default).
   - Command configured: runs it via shlex.split → Popen(args, shell=False) —
-    NEVER shell=True/os.system/f-string concat (S-1 no-shell). Group-TOML docs
+    NEVER shell=True/os.system/f-string concat (no shell). Group-TOML docs
     state the value is an arg-list, not a shell expression.
-  - Timeout (R-3): uses Popen + start_new_session=True + os.killpg, NOT
+  - Timeout: uses Popen + start_new_session=True + os.killpg, NOT
     subprocess.run(timeout=). subprocess.run only SIGKILLs the direct child —
     a grandchild (e.g. `sleep` behind a shell wrapper) survives, holds the
     caller's inherited pipe open, and causes a hang. killpg reaps the whole
     process group.
-  - One-shot escalate (R-4): one non-zero/timeout result → immediate escalate,
+  - One-shot escalate: one non-zero/timeout result → immediate escalate,
     no retry, no flake-tolerance. Exit nonzero on regression.
 
 Usage:
@@ -91,7 +91,7 @@ def run_soak(toml_path: Path, timeout_s: int) -> int:
         print("soak: n/a — no health command configured")
         return 0
 
-    # S-1: always use shlex.split → arg-list; NEVER shell=True
+    # Always use shlex.split → arg-list; NEVER shell=True
     try:
         args = shlex.split(cmd)
     except ValueError as e:
@@ -104,7 +104,7 @@ def run_soak(toml_path: Path, timeout_s: int) -> int:
     try:
         proc = subprocess.Popen(
             args,
-            shell=False,  # S-1: explicit no-shell
+            shell=False,  # explicit no-shell
             # Start in a new session so killpg terminates the entire process
             # group including grandchildren (e.g. a `sleep` behind a shell
             # wrapper). subprocess.run(timeout=) only SIGKILLs the direct
@@ -113,9 +113,9 @@ def run_soak(toml_path: Path, timeout_s: int) -> int:
             start_new_session=True,
         )
         try:
-            proc.wait(timeout=timeout_s)  # R-3: configurable timeout
+            proc.wait(timeout=timeout_s)  # configurable timeout
         except subprocess.TimeoutExpired:
-            # R-3: hung command is killed after timeout → escalate.
+            # hung command is killed after timeout → escalate.
             # Kill the entire process group to reap grandchildren.
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
@@ -123,7 +123,7 @@ def run_soak(toml_path: Path, timeout_s: int) -> int:
                 pass  # already exited
             proc.wait()  # reap the shell process
             print(
-                f"soak: regression — health command timed out after {timeout_s}s (R-3)",
+                f"soak: regression — health command timed out after {timeout_s}s",
                 file=sys.stderr,
             )
             return 1
@@ -133,10 +133,10 @@ def run_soak(toml_path: Path, timeout_s: int) -> int:
         print(f"soak: regression — health command not found: {e}", file=sys.stderr)
         return 1
 
-    # R-4: one-shot escalate — no retry
+    # one-shot escalate — no retry
     if proc.returncode != 0:
         print(
-            f"soak: regression — health command exited {proc.returncode} (R-4 one-shot escalate)",
+            f"soak: regression — health command exited {proc.returncode} (one-shot escalate)",
             file=sys.stderr,
         )
         return 1

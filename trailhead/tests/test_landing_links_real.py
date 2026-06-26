@@ -1,35 +1,35 @@
 """Gate: every claim in landing_claims.toml resolves to a real on-disk anchor.
 
-TDD contract (Slice 1 — forward check; Slice 2 — inverse anti-rot check):
+The gate has two halves — a forward check and an inverse anti-rot check.
 
-Slice 1 — forward check:
-1. Schema-pin (B-3): landing_claims.toml parses via tomllib into [[claim]] entries with
+Forward check:
+1. Schema-pin: landing_claims.toml parses via tomllib into claim entries with
    four required fields: kind / tool / ref / source.
-2. Closed kind set (S-5): gate rejects an unknown kind with a named assertion; never
+2. Closed kind set: gate rejects an unknown kind with a named assertion; never
    silently skips.
 3. Prose-assertion kinds (positioning / allowlisted-example) are explicitly skipped
-   by the resolver — tested contract of the U-1 boundary.
-4. Forward check: for every [[claim]], resolve ref against its oracle:
+   by the resolver.
+4. Forward check: for every claim, resolve ref against its oracle:
    - skill / agent  → build_real_anchor_set() (per-tool selectable inventory)
    - command        → _KNOWN_COMMANDS ({install, uninstall, doctor})
    - doc-link       → (REPO_ROOT / ref).exists()
    Fails closed with a named assertion on mismatch.
-5. build_real_anchor_set() enumerates from sorted glob of tools/*/capabilities.toml (R-1),
-   asserts m.validate is True for each (R-2), reads the convention-discovered subagents/
-   skills inventory off each Manifest, is deterministic (R-5).
+5. build_real_anchor_set() enumerates from sorted glob of tools/*/capabilities.toml,
+   asserts m.validate is True for each, reads the convention-discovered subagents/
+   skills inventory off each Manifest, and is deterministic.
 6. Hermeticity: only in-repo manifests + tmp_path synthetics; no network / ~/.claude/ / vault.
 
-Slice 2 — inverse anti-rot check (D-5, U-3, S-2, R-4, R-5):
+Inverse anti-rot check:
 7. README_INDEX names the four READMEs the gate scans.
 8. extract_fenced_commands(readme_text) → set[tuple[str,str]] extracts (tool, subcommand)
-   pairs from fenced ```sh / ```bash blocks ONLY (U-3 grammar boundedness).
+   pairs from fenced ```sh / ```bash blocks ONLY (grammar boundedness).
 9. extract_relative_links(readme_text) → set[str] extracts markdown relative links
    (leading ./ or ../) but NOT absolute http(s):// or anchor-only #frag links.
 10. check_inverse(readme_path, claims, repo_root) asserts:
-    - every extracted (tool, sub) is registered in claims or has kind=allowlisted-example (R-4)
-    - every extracted relative link is confined to the repo root (S-2) and exists on disk
+    - every extracted (tool, sub) is registered in claims or has kind=allowlisted-example
+    - every extracted relative link is confined to the repo root and exists on disk
       OR is registered as a doc-link claim
-    - R-5: all comparisons on sorted sets; READMEs scanned in sorted order
+    - all comparisons on sorted sets; READMEs scanned in sorted order
 """
 
 from __future__ import annotations
@@ -48,31 +48,31 @@ from trailhead.capabilities import load_manifest
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _CLAIMS_FILE = _REPO_ROOT / "trailhead" / "landing_claims.toml"
 
-# CLI subcommands — hardcoded closed set (B-1).
+# CLI subcommands — hardcoded closed set.
 # The config-driven CLI has exactly three commands: install / uninstall / doctor.
 # (The old preset/capability model and the update/config commands were removed.)
 # add new subcommands here
 _KNOWN_COMMANDS: frozenset[str] = frozenset({"install", "uninstall", "doctor"})
 
-# Valid kind values — closed set (S-5).
+# Valid kind values — closed set.
 # The capability-GROUP and preset concepts were removed; install selects subagents
 # and skills by name, so only command / skill / agent / doc-link resolve.
 _RESOLVABLE_KINDS = frozenset({"command", "skill", "agent", "doc-link"})
-# Prose-assertion kinds: explicitly skipped by the resolver (U-1 / S-5 named exception list).
+# Prose-assertion kinds: explicitly skipped by the resolver.
 _PROSE_KINDS = frozenset({"positioning", "allowlisted-example"})
 _ALL_VALID_KINDS = _RESOLVABLE_KINDS | _PROSE_KINDS
 
 
 # ---------------------------------------------------------------------------
-# Real anchor set builder (R-1, R-2, R-5)
+# Real anchor set builder
 # ---------------------------------------------------------------------------
 
 
 def build_real_anchor_set(root: Path = _REPO_ROOT) -> dict[str, dict[str, set[str]]]:
     """Enumerate {tool: {skills: set, agents: set}} from manifests.
 
-    Discovers manifests from sorted(root.glob("tools/*/capabilities.toml")) (R-1).
-    Asserts m.validate is True for each manifest before trusting its anchors (R-2).
+    Discovers manifests from sorted(root.glob("tools/*/capabilities.toml")).
+    Asserts m.validate is True for each manifest before trusting its anchors.
 
     The selectable inventory is read off the Manifest's convention-discovered
     subagents/skills (the capability-GROUP concept was removed). Anchors are stored
@@ -81,7 +81,7 @@ def build_real_anchor_set(root: Path = _REPO_ROOT) -> dict[str, dict[str, set[st
       * agents → "agents/<name>.md" for every name in m.subagents
 
     `root` defaults to the repo root; tests inject a tmp_path tools tree to exercise
-    the R-2 guard against the REAL code path (not a hand-copied assertion).
+    the validate guard against the REAL code path (not a hand-copied assertion).
     """
     anchors: dict[str, dict[str, set[str]]] = {}
     for path in sorted(root.glob("tools/*/capabilities.toml")):
@@ -106,11 +106,11 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
     """Resolve one claim entry against its oracle; raise AssertionError on failure.
 
     Explicitly skips prose-assertion kinds (positioning / allowlisted-example).
-    Rejects unknown kinds with a named failure (S-5).
+    Rejects unknown kinds with a named failure.
 
     Note: `source` is forward-looking metadata (which README makes the claim — used by
-    Slice 2's inverse check and in error messages); it is NOT a resolution input, so a
-    wrong `source` is not caught here (M-2).
+    the inverse check and in error messages); it is NOT a resolution input, so a
+    wrong `source` is not caught here.
     """
     kind = claim["kind"]
     ref = claim["ref"]
@@ -118,7 +118,7 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
     source = claim.get("source", "")
 
     if kind in _PROSE_KINDS:
-        return  # explicitly skipped — prose honesty is the Slice-3/4 review's job
+        return  # explicitly skipped — prose honesty is the review's job
 
     if kind not in _RESOLVABLE_KINDS:
         raise AssertionError(
@@ -153,13 +153,13 @@ def check_claim(claim: dict, anchor_set: dict[str, dict[str, set[str]]]) -> None
 
 
 # ---------------------------------------------------------------------------
-# B-3: Schema-pin tests (written FIRST — these must fail RED before the
+# Schema-pin tests (written FIRST — these must fail RED before the
 #      landing_claims.toml file exists)
 # ---------------------------------------------------------------------------
 
 
 class TestClaimsManifestSchema:
-    """B-3: pin the [[claim]] TOML schema before building the resolver."""
+    """Pin the claim TOML schema before building the resolver."""
 
     def test_claims_file_exists(self):
         """landing_claims.toml must exist at trailhead/landing_claims.toml."""
@@ -175,7 +175,7 @@ class TestClaimsManifestSchema:
         assert "claim" in data, "landing_claims.toml must have a [[claim]] array"
 
     def test_claims_entries_have_required_fields(self):
-        """Every [[claim]] entry must have: kind, tool, ref, source."""
+        """Every claim entry must have: kind, tool, ref, source."""
         with open(_CLAIMS_FILE, "rb") as f:
             data = tomllib.load(f)
         claims = data["claim"]
@@ -188,7 +188,7 @@ class TestClaimsManifestSchema:
                 )
 
     def test_claims_entries_have_valid_kind(self):
-        """Every [[claim]] entry must have a kind in the closed valid set."""
+        """Every claim entry must have a kind in the closed valid set."""
         with open(_CLAIMS_FILE, "rb") as f:
             data = tomllib.load(f)
         for claim in data["claim"]:
@@ -198,7 +198,7 @@ class TestClaimsManifestSchema:
             )
 
     def test_unknown_kind_synthetic_raises_named_assertion(self):
-        """check_claim must reject an unknown kind with a named AssertionError (S-5)."""
+        """check_claim must reject an unknown kind with a named AssertionError."""
         bad_claim = {"kind": "skil", "tool": "lore", "ref": "skills/area", "source": "lore"}
         with pytest.raises(AssertionError, match="unknown kind"):
             check_claim(bad_claim, {})
@@ -237,7 +237,7 @@ class TestForwardCheckPositive:
     def test_real_skill_claim_passes(self):
         """A claim for a known skill resolves without error."""
         anchor_set = build_real_anchor_set()
-        # lore has skills/flush (Slice 4 renamed finish→flush, deleted checkpoint)
+        # lore has skills/flush (finish was renamed to flush, checkpoint deleted)
         claim = {"kind": "skill", "tool": "lore", "ref": "skills/flush", "source": "lore"}
         check_claim(claim, anchor_set)
 
@@ -315,7 +315,7 @@ class TestForwardCheckNegative:
 
 
 # ---------------------------------------------------------------------------
-# build_real_anchor_set() oracle tests (R-1, R-2, R-5)
+# build_real_anchor_set() oracle tests
 # ---------------------------------------------------------------------------
 
 
@@ -332,7 +332,7 @@ class TestBuildRealAnchorSet:
             assert tool in anchors, f"tool {tool!r} missing from anchor set"
 
     def test_camp_has_no_skills_or_agents(self):
-        """camp ships only a CLI + hooks — its anchor set has no skills and no agents (R-1).
+        """camp ships only a CLI + hooks — its anchor set has no skills and no agents.
 
         The worktree SKILL was removed: the workspace exists before the harness
         opens, so worktree orchestration is operator-facing (README), not a skill.
@@ -344,15 +344,15 @@ class TestBuildRealAnchorSet:
         assert isinstance(anchors["camp"]["agents"], set)
 
     def test_result_is_stable_across_calls(self):
-        """Repeated calls return the same set (deterministic — R-5)."""
+        """Repeated calls return the same set (deterministic)."""
         a = build_real_anchor_set()
         b = build_real_anchor_set()
         assert a == b
 
     def test_build_real_anchor_set_raises_on_validate_false_manifest(self, tmp_path):
-        """build_real_anchor_set() itself must raise on a validate=false manifest (R-2).
+        """build_real_anchor_set() itself must raise on a validate=false manifest.
 
-        I-1 fix: drive the REAL function (via an injected tmp_path tools tree) instead of
+        Drive the REAL function (via an injected tmp_path tools tree) instead of
         re-typing the guard inline — so deleting/weakening the line-62 assertion fails this
         test. A validate=false tool could reference missing paths that load_manifest never
         validated; the gate must refuse to trust it.
@@ -389,10 +389,10 @@ class TestBuildRealAnchorSet:
 
 
 class TestForwardCheckOverRealClaims:
-    """Run the full forward check over every [[claim]] in landing_claims.toml."""
+    """Run the full forward check over every claim in landing_claims.toml."""
 
     def test_all_claims_resolve(self):
-        """Every [[claim]] in landing_claims.toml must resolve against its oracle."""
+        """Every claim in landing_claims.toml must resolve against its oracle."""
         assert _CLAIMS_FILE.exists(), f"landing_claims.toml not found at {_CLAIMS_FILE}"
         with open(_CLAIMS_FILE, "rb") as f:
             data = tomllib.load(f)
@@ -414,11 +414,11 @@ class TestForwardCheckOverRealClaims:
 
 
 # ---------------------------------------------------------------------------
-# Slice 2 — inverse anti-rot check (D-5, U-3, S-2, R-4, R-5)
+# Inverse anti-rot check
 # ---------------------------------------------------------------------------
 
-# The READMEs the gate scans (sorted — R-5 determinism).
-# Slice 3 added tools/portage/README.md; Slice 4 added tools/landing/README.md.
+# The READMEs the gate scans (sorted for determinism).
+# Includes tools/portage/README.md and tools/landing/README.md.
 README_INDEX: list[Path] = sorted(
     [
         _REPO_ROOT / "README.md",
@@ -433,23 +433,23 @@ README_INDEX: list[Path] = sorted(
 # Tools whose fenced-block commands the gate tracks.
 _TRACKED_TOOLS = frozenset({"trailhead", "lore", "craft", "camp", "portage", "landing"})
 
-# Fenced sh/bash block pattern (U-3: bounded to fenced blocks only).
+# Fenced sh/bash block pattern (bounded to fenced blocks only).
 _FENCED_BLOCK_RE = re.compile(r"```(?:sh|bash)\n(.*?)```", re.DOTALL)
 # Command line pattern within a fenced block.
 _CMD_LINE_RE = re.compile(r"^\s*(" + "|".join(sorted(_TRACKED_TOOLS)) + r")\s+(\S+)", re.MULTILINE)
 # Markdown relative link pattern: [label](./path) or [label](../path).
 # Excludes absolute http(s):// and anchor-only #frag links. The path capture stops
 # at whitespace so a markdown title attribute — [label](./p "title") — does not leak
-# into the path (M-2).
+# into the path.
 _REL_LINK_RE = re.compile(r"\[([^\]]*)\]\((\.\.?/[^)\s]+)")
 
 
 def extract_fenced_commands(readme_text: str) -> set[tuple[str, str]]:
-    """Extract (tool, subcommand) pairs from fenced ```sh / ```bash blocks (U-3).
+    """Extract (tool, subcommand) pairs from fenced ```sh / ```bash blocks.
 
     Only fenced blocks with language tag 'sh' or 'bash' are scanned —
     bare inline prose mentions ("you can run install") are NOT extracted.
-    Returns a set of (tool, subcommand) tuples; sorted() for determinism (R-5).
+    Returns a set of (tool, subcommand) tuples; sorted() for determinism.
     """
     found: set[tuple[str, str]] = set()
     for block_match in _FENCED_BLOCK_RE.finditer(readme_text):
@@ -463,7 +463,7 @@ def extract_relative_links(readme_text: str) -> set[str]:
     """Extract markdown relative links (leading ./ or ../) from readme_text.
 
     Excludes absolute http(s):// URLs and anchor-only #frag links.
-    Returns a set of path strings; sorted() for determinism (R-5).
+    Returns a set of path strings; sorted() for determinism.
     """
     return {m.group(2) for m in _REL_LINK_RE.finditer(readme_text)}
 
@@ -471,8 +471,8 @@ def extract_relative_links(readme_text: str) -> set[str]:
 def _is_command_registered(tool: str, subcommand: str, claims: list[dict]) -> bool:
     """Return True if (tool, subcommand) is registered in the claims manifest.
 
-    Matching rule (Slice 2 contract):
-    - kind="allowlisted-example" with ref="<tool> <subcommand>" — escape hatch (R-4)
+    Matching rule:
+    - kind="allowlisted-example" with ref="<tool> <subcommand>" — escape hatch
     - kind="command"  with tool=<tool> and ref=<subcommand>
     - kind="skill"    with tool=<tool> and ref starts with <subcommand>
                       (ref == subcommand, OR ref.startswith(subcommand + "/"))
@@ -504,17 +504,17 @@ def check_inverse(
     """Check a single README for commands/links that are unregistered in claims.
 
     For each extracted (tool, subcommand) from fenced sh/bash blocks:
-      - must be registered or allowlisted (R-4); else raises AssertionError with
+      - must be registered or allowlisted; else raises AssertionError with
         "README <path> shows command `<tool> <sub>` not registered in landing_claims.toml"
 
     For each extracted relative link:
-      - must be confined to repo_root (S-2); else raises with "relative link <x> escapes repo root"
+      - must be confined to repo_root; else raises with "relative link <x> escapes repo root"
       - must either exist on disk or be registered as a doc-link claim in claims. The link is
         normalized to a repo-root-relative path before the registration compare, since doc-link
         claim refs are repo-root-relative (e.g. "LICENSE") while extracted links are
-        readme-dir-relative with a ./ or ../ prefix (I-1).
+        readme-dir-relative with a ./ or ../ prefix.
 
-    Sets are sorted before assertions (R-5).
+    Sets are sorted before assertions.
     """
     readme_text = readme_path.read_text(encoding="utf-8")
     repo_root_resolved = repo_root.resolve()
@@ -535,7 +535,7 @@ def check_inverse(
     doc_link_refs = {c["ref"] for c in claims if c.get("kind") == "doc-link"}
     for link in sorted(links):
         resolved = (readme_dir / link).resolve()
-        # S-2: confinement check — must not escape repo root
+        # confinement check — must not escape repo root
         try:
             rel_to_root = resolved.relative_to(repo_root_resolved)
         except ValueError:
@@ -545,7 +545,7 @@ def check_inverse(
             )
         # Must exist on disk OR be registered as a doc-link claim. doc-link refs are
         # repo-root-relative, so compare against the normalized rel_to_root, not the raw
-        # readme-dir-relative link (I-1 — fixes the dead-branch namespace mismatch).
+        # readme-dir-relative link (fixes the dead-branch namespace mismatch).
         if not resolved.exists() and str(rel_to_root) not in doc_link_refs:
             raise AssertionError(
                 f"README {readme_path}: relative link {link!r} does not resolve to "
@@ -554,12 +554,12 @@ def check_inverse(
 
 
 # ---------------------------------------------------------------------------
-# Slice 2 tests (write FIRST — must fail RED before helpers are implemented)
+# Tests (write FIRST — must fail RED before helpers are implemented)
 # ---------------------------------------------------------------------------
 
 
 class TestExtractFencedCommands:
-    """extract_fenced_commands() grammar-boundedness tests (U-3)."""
+    """extract_fenced_commands() grammar-boundedness tests."""
 
     def test_extracts_command_from_sh_block(self):
         """A trailhead command in a ```sh block is extracted."""
@@ -574,13 +574,13 @@ class TestExtractFencedCommands:
         assert ("trailhead", "install") in result
 
     def test_bare_prose_mention_not_extracted(self):
-        """A bare inline mention 'you can run install' is NOT extracted (U-3)."""
+        """A bare inline mention 'you can run install' is NOT extracted."""
         text = "you can run trailhead install to get started\n"
         result = extract_fenced_commands(text)
         assert result == set()
 
     def test_plain_fenced_block_not_extracted(self):
-        """A plain ``` block (no sh/bash tag) is NOT extracted (U-3)."""
+        """A plain ``` block (no sh/bash tag) is NOT extracted."""
         text = "```\ntrailhead doctor\n```"
         result = extract_fenced_commands(text)
         assert result == set()
@@ -605,7 +605,7 @@ class TestExtractFencedCommands:
         assert result == {("trailhead", "install")}
 
     def test_sorted_result_is_deterministic(self):
-        """sorted() on the result is stable across calls (R-5)."""
+        """sorted() on the result is stable across calls."""
         text = "```sh\ntrailhead doctor\ntrailhead install\n```"
         r1 = sorted(extract_fenced_commands(text))
         r2 = sorted(extract_fenced_commands(text))
@@ -646,7 +646,7 @@ class TestExtractRelativeLinks:
         assert result == set()
 
     def test_sorted_result_is_deterministic(self):
-        """sorted() on the result is stable across calls (R-5)."""
+        """sorted() on the result is stable across calls."""
         text = "[a](./a.md) [b](./b.md)"
         r1 = sorted(extract_relative_links(text))
         r2 = sorted(extract_relative_links(text))
@@ -654,7 +654,7 @@ class TestExtractRelativeLinks:
 
 
 class TestCheckInverseFixtures:
-    """Fixture-driven inverse check tests (the Slice-2 contract)."""
+    """Fixture-driven inverse check tests."""
 
     _FIXTURE_CLAIMS = [
         {
@@ -696,7 +696,7 @@ class TestCheckInverseFixtures:
             check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
 
     def test_traversal_link_fails_escapes_repo_root(self, tmp_path):
-        """A path-traversal link escaping repo root fails with 'escapes repo root' (S-2)."""
+        """A path-traversal link escaping repo root fails with 'escapes repo root'."""
         readme = tmp_path / "README.md"
         # ../../../etc/passwd escapes tmp_path — this must fail even if /etc/passwd exists
         readme.write_text("[evil](../../../etc/passwd)\n")
@@ -704,7 +704,7 @@ class TestCheckInverseFixtures:
             check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
 
     def test_allowlisted_example_does_not_fail(self, tmp_path):
-        """A deliberately-wrong command in an allowlisted-example claim does not fail (R-4)."""
+        """A deliberately-wrong command in an allowlisted-example claim does not fail."""
         allowlist_claims = [
             {
                 "kind": "allowlisted-example",
@@ -719,7 +719,7 @@ class TestCheckInverseFixtures:
         check_inverse(readme, allowlist_claims, tmp_path)
 
     def test_bare_prose_not_flagged(self, tmp_path):
-        """A bare inline prose mention is NOT extracted/flagged (U-3)."""
+        """A bare inline prose mention is NOT extracted/flagged."""
         readme = tmp_path / "README.md"
         readme.write_text("you can run trailhead frobnicate to get started\n")
         # frobnicate is not in claims, but prose mentions are not extracted → must not raise
@@ -755,7 +755,7 @@ class TestCheckInverseFixtures:
         check_inverse(readme, [], tmp_path)
 
     def test_sorted_extraction_determinism(self, tmp_path):
-        """Extraction result sorted before assertion is stable (R-5)."""
+        """Extraction result sorted before assertion is stable."""
         readme = tmp_path / "README.md"
         readme.write_text("```sh\ntrailhead doctor\ntrailhead install\n```\n")
         claims = [
@@ -768,7 +768,7 @@ class TestCheckInverseFixtures:
 
     def test_registered_doc_link_to_absent_file_passes_via_registration(self, tmp_path):
         """A registered doc-link claim is the ONLY thing that can pass a link to an
-        absent file — proves the registration branch is live, not dead (I-1).
+        absent file — proves the registration branch is live, not dead.
 
         The link target does not exist on disk, so existence cannot pass it; only the
         repo-root-relative doc-link claim match can. doc-link refs are repo-root-relative
@@ -782,7 +782,7 @@ class TestCheckInverseFixtures:
         check_inverse(readme, claims, tmp_path)
 
     def test_unregistered_absent_link_still_fails_after_normalization(self, tmp_path):
-        """The I-1 normalization must not loosen the dangling-link guard: an absent,
+        """The normalization must not loosen the dangling-link guard: an absent,
         UN-registered link still fails."""
         claims = [
             {"kind": "doc-link", "tool": "trailhead", "ref": "docs/other.md", "source": "root"}
@@ -794,7 +794,7 @@ class TestCheckInverseFixtures:
 
     def test_link_with_title_attribute_does_not_leak_into_path(self, tmp_path):
         """A markdown title attribute — [label](./p "title") — must not leak into the
-        extracted path (M-2)."""
+        extracted path."""
         docs = tmp_path / "docs"
         docs.mkdir()
         (docs / "paths.md").write_text("# paths")
@@ -807,7 +807,7 @@ class TestCheckInverseFixtures:
 
 class TestRealReadmeInverseScan:
     """Real-README inverse scan over the four indexed READMEs: every fenced command
-    and relative link in each README is registered in landing_claims.toml (D-5)."""
+    and relative link in each README is registered in landing_claims.toml."""
 
     def test_all_real_readmes_pass_inverse_check(self):
         """Every fenced command + relative link in the four READMEs is registered."""
@@ -831,7 +831,7 @@ class TestRealReadmeInverseScan:
 
 
 # ---------------------------------------------------------------------------
-# Slice 3 — honesty guards (R-3, S-3)
+# Honesty guards
 # ---------------------------------------------------------------------------
 
 
@@ -844,19 +844,19 @@ _TOOL_READMES: list[Path] = [
 
 
 class TestLoreRecallHonestyGuards:
-    """D22 recall-fix honesty guards — positive (R-3) + negative.
+    """Recall-fix honesty guards — positive + negative.
 
     The lore README "How search works" section must:
       - Document the area-mediated memory mechanism — now `lore search 'area:<name>'`,
-        which superseded `lore recall --areas` in S3 (R-3 positive).
+        which superseded `lore recall --areas`.
       - Not assert branch-keyword recall as a live mechanism (removed 2026-06-05).
       - Not present Tier-2 semantic/embedding recall as a built feature.
     """
 
     def test_lore_readme_contains_area_search_positive(self):
-        """R-3 positive: the lore README must document the real area-memory mechanism.
+        """The lore README must document the real area-memory mechanism.
 
-        S3 retired `lore recall --areas` and replaced it with the area-membership
+        The `lore recall --areas` command was retired and replaced with the area-membership
         case of `lore search` (`lore search 'area:<name>'`). The README must document
         that real mechanism — the guard's intent (the actual mechanism is documented,
         not just that the old oversell is absent) is unchanged; only the mechanism is.
@@ -865,9 +865,9 @@ class TestLoreRecallHonestyGuards:
         text = _LORE_README.read_text(encoding="utf-8")
         assert "lore search" in text and "area:" in text, (
             "lore README must document the area-mediated memory mechanism — "
-            "`lore search 'area:<name>'` (which superseded `lore recall --areas` in S3) "
-            "(R-3 positive: ensures the real mechanism is documented, not just that the "
-            "old oversell is absent)"
+            "`lore search 'area:<name>'` (which superseded `lore recall --areas`) "
+            "— ensures the real mechanism is documented, not just that the "
+            "old oversell is absent"
         )
 
     def test_lore_readme_no_branch_keyword_recall_as_live_feature(self):
@@ -892,7 +892,7 @@ class TestLoreRecallHonestyGuards:
         """Negative regression sentinel: lore README must not present Tier-2 semantic/
         embedding recall as built.
 
-        Tier-2 local embeddings are opt-in and NOT built (D23). This is a *phrase-pinned*
+        Tier-2 local embeddings are opt-in and NOT built. This is a *phrase-pinned*
         regression guard: it triggers on the embedding/semantic vocabulary a reintroduction
         would most likely use, and only passes such a line if it carries a not-yet-built
         qualifier. It is dormant today (none of these phrases appear), and is a sentinel
@@ -918,50 +918,50 @@ class TestLoreRecallHonestyGuards:
 
 
 class TestNoToolReadmePypiLine:
-    """S-3: none of the three tool READMEs may contain a 'pip install trailhead' line."""
+    """None of the three tool READMEs may contain a 'pip install trailhead' line."""
 
     @pytest.mark.parametrize("readme", _TOOL_READMES, ids=lambda p: p.parent.name)
     def test_no_pip_install_trailhead_line(self, readme):
-        """Tool README must not contain 'pip install trailhead' (name-squat exposure, S-3)."""
+        """Tool README must not contain 'pip install trailhead' (name-squat exposure)."""
         assert readme.exists(), f"README not found at {readme}"
         text = readme.read_text(encoding="utf-8")
         assert "pip install trailhead" not in text, (
             f"{readme.parent.name}/README.md must not contain 'pip install trailhead' — "
             "the public PyPI install does not exist yet (lands with the org/repo-homing work); "
-            "showing it implies a live install that would 404 (S-3)"
+            "showing it implies a live install that would 404"
         )
 
 
 # ---------------------------------------------------------------------------
-# Slice 4 — root README honesty + structural guards
+# Root README honesty + structural guards
 # ---------------------------------------------------------------------------
 
 _ROOT_README = _REPO_ROOT / "README.md"
 
 
 class TestRootReadmeNoPypiLine:
-    """S-3 applied to the root README: no 'pip install trailhead' line allowed.
+    """Root README: no 'pip install trailhead' line allowed.
 
     The current root README has TWO such lines; the narrative landing must remove them.
     """
 
     def test_root_readme_no_pip_install_trailhead(self):
-        """Root README must not contain 'pip install trailhead' (S-3, D-2 no-lie)."""
+        """Root README must not contain 'pip install trailhead'."""
         assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
         text = _ROOT_README.read_text(encoding="utf-8")
         assert "pip install trailhead" not in text, (
             "README.md must not contain 'pip install trailhead' — "
             "the public PyPI install does not exist yet (lands with the org/repo-homing work). "
             "Use the editable local install block ('Try it today') + the registry-future block "
-            "instead (S-3 / D-2)."
+            "instead."
         )
 
 
 class TestRootReadmeNoSemanticRecallOversell:
-    """Root README must not present Tier-2 semantic/embedding recall as a built feature (D-2).
+    """Root README must not present Tier-2 semantic/embedding recall as a built feature.
 
-    Mirrors the lore-README guard from Slice 3. Tier-2 local embeddings are opt-in and
-    NOT built (D23). Any mention must carry a not-yet-built qualifier.
+    Mirrors the lore-README guard. Tier-2 local embeddings are opt-in and
+    NOT built. Any mention must carry a not-yet-built qualifier.
     """
 
     def test_root_readme_no_unqualified_semantic_recall(self):
@@ -989,11 +989,11 @@ class TestRootReadmeNoSemanticRecallOversell:
 
 
 class TestRootReadmeStructuralGuard:
-    """A-3: the root README must NOT place a four-tool markdown table before the lore lead.
+    """The root README must NOT place a four-tool markdown table before the lore lead.
 
     The funnel rule: the lore use-case + first command must appear BEFORE any
     multi-tool table that names lore, camp, and craft together in a single row.
-    This prevents the 'concept-map first' anti-pattern the plan warns against.
+    This prevents the 'concept-map first' anti-pattern.
 
     Implementation: find the character-offset of the first fenced sh/bash block
     (the lore lead's two commands) and the first multi-tool table row (a Markdown
@@ -1006,7 +1006,7 @@ class TestRootReadmeStructuralGuard:
 
         A multi-tool table row is any '| ... |' line that names at least two of the
         three tools (lore, camp, craft) — the signal that a 'What's included' concept
-        map has started. The lore use-case must come first (A-3).
+        map has started. The lore use-case must come first.
         """
         assert _ROOT_README.exists(), f"root README not found at {_ROOT_README}"
         text = _ROOT_README.read_text(encoding="utf-8")
@@ -1042,11 +1042,11 @@ class TestRootReadmeStructuralGuard:
 
 
 # ---------------------------------------------------------------------------
-# Slice 5 — mandatory landing leak gate (S-1) + no-D17-collapse scope guard
+# Mandatory landing leak gate + scope guard
 # ---------------------------------------------------------------------------
 
 # The landing-surface files the gate must certify as clean.
-# Slice 3 added tools/portage/README.md; Slice 4 added tools/landing/README.md.
+# Includes tools/portage/README.md and tools/landing/README.md.
 _LANDING_FILES: list[Path] = [
     _REPO_ROOT / "README.md",
     _REPO_ROOT / "tools" / "lore" / "README.md",
@@ -1060,7 +1060,7 @@ _LANDING_FILES: list[Path] = [
 # Path to the leak_gate.py script.
 _LEAK_GATE = _REPO_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "leak_gate.py"
 
-# Denylist token classes seeded into the ephemeral denylist (S-1).
+# Denylist token classes seeded into the ephemeral denylist.
 #
 # Regex design rationale:
 #   brain/ path tokens — brain/ prefix catches vault path references in any context
@@ -1094,7 +1094,7 @@ _DENYLIST_ENTRIES: list[str] = [
 ]
 
 _DENYLIST_COMMENT = (
-    "# Slice-5 ephemeral landing-surface denylist — business-context strings, not secrets\n"
+    "# ephemeral landing-surface denylist — business-context strings, not secrets\n"
 )
 
 
@@ -1147,21 +1147,21 @@ def _run_gate(trees: list[Path], denylist: Path) -> subprocess.CompletedProcess:
 
 
 class TestLandingSurfaceLeakGate:
-    """S-1: mandatory, gating leak-gate run over the landing-surface files.
+    """Mandatory, gating leak-gate run over the landing-surface files.
 
     Uses an ephemeral, repo-tracked denylist written to tmp_path so the gate
     runs identically on any checkout — never depends on ~/.claude/leak-gate.denylist.
 
     Test structure:
     1. Positive (GATING): scanning the real landing files with the denylist exits 0.
-       This is the mandatory S-1 gate — a real leak makes the suite RED.
+       This is the mandatory gate — a real leak makes the suite RED.
     2. Non-vacuous negative twin: a tmp_path file seeded with a denylist token exits 1,
        proving the denylist actually catches leaks (so the exit-0 is not vacuous).
     3. Fail-closed (exit 2): missing path and empty denylist.
     """
 
     def test_positive_gate_landing_surface_is_clean(self, tmp_path: Path) -> None:
-        """S-1 GATING: the landing-surface files must exit 0 with the ephemeral denylist.
+        """GATING: the landing-surface files must exit 0 with the ephemeral denylist.
 
         A real leak (e.g. a brain/ path reference, a WS-\\d+ workstream ID, a bare
         'zenith' token) in any of the files makes this test RED — that is the

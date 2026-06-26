@@ -1,14 +1,14 @@
-"""Tests for trailhead.vcs.runner — the injectable runner seam (R-1, S-4).
+"""Tests for trailhead.vcs.runner — the injectable runner seam.
 
-Copied from craft's runner_protocol.py contract. Proves:
+Proves:
 
-  R-1a: the stub receives the EXACT gh/git subcommand + args the caller
-        constructed — no args dropped, no shell interpolation.
-  R-1b: the no-runner production path works against a real tmp_path git repo
-        (git init + commit) to catch env={}-style blindspots.
-  S-4:  a pr_number or branch containing shell metacharacters (';', '&&',
-        '$(...)') is passed LITERALLY — no subshell spawned.
-  SHELL_FALSE invariant sentinel is True.
+  - the stub receives the EXACT gh/git subcommand + args the caller
+    constructed — no args dropped, no shell interpolation.
+  - the no-runner production path works against a real tmp_path git repo
+    (git init + commit) to catch env={}-style blindspots.
+  - a pr_number or branch containing shell metacharacters (';', '&&',
+    '$(...)') is passed LITERALLY — no subshell spawned.
+  - the SHELL_FALSE invariant sentinel is True.
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ class TestRunnerProduction:
 
 
 # ---------------------------------------------------------------------------
-# S-4: shell metacharacters in args are passed literally — no subshell
+# Shell metacharacters in args are passed literally — no subshell
 # ---------------------------------------------------------------------------
 
 

@@ -1,7 +1,7 @@
-"""S6 Slice 5 — the new read/capture/dispatch skills (search / record / research)
+"""The new read/capture/dispatch skills (search / record / research)
 plus the FINAL cross-skill lockstep grep gate.
 
-This slice adds three skills on top of the rewired session skills (Slice 4):
+These three skills sit on top of the rewired session skills:
   - `search`  — wraps `lore search` (KQL-subset read path; replaces old `recall`).
                 Carries the `<external-memory>` injection-defense guard because
                 search results land in the MAIN session and can include shared-

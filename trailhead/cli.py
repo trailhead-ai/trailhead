@@ -4,7 +4,7 @@ Subcommands: install / uninstall / doctor / shellenv
 
 Everything is CLI/config-driven and non-interactive so an agent can run it.
 
-A-9 hygiene:
+Output hygiene:
   - errors → stderr, normal output → stdout
   - main() returns an int exit code
   - bare `trailhead` and `trailhead --help` print a curated grouped menu
@@ -32,7 +32,7 @@ from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
 from trailhead.wire import LockError, WireError
 
-# Named error family — maps to a clean 'trailhead: <message>' line (A-9).
+# Named error family — maps to a clean 'trailhead: <message>' line.
 _TRAILHEAD_ERRORS = (
     ConfigResolveError,
     ManifestError,
@@ -238,7 +238,7 @@ def main() -> int:
         print(f"trailhead: unknown command {args.command!r}", file=sys.stderr)
         return 1
 
-    # A-9: top-level error guard — named errors produce a clean
+    # Top-level error guard — named errors produce a clean
     # 'trailhead: <message>' line on stderr + nonzero exit; no raw tracebacks.
     try:
         return handler(args)

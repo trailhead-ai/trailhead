@@ -16,10 +16,10 @@ Schema (v1):
             {
                 "name": "<repo-name>",
                 "repo_root": "/absolute/path/to/canonical/repo",
-                # Unified workspace layout (Slice 2):
+                # Unified workspace layout:
                 #   central_state_dir(group)/worktrees/<slug>/<name>
                 "worktree_path": "/abs/.../worktrees/<slug>/<name>",
-                # Async provisioning state (Slice 3): "pending" | "ready" | "failed".
+                # Async provisioning state: "pending" | "ready" | "failed".
                 # Seeded "pending" by camp ai; flipped by the (foreground or
                 # background) provisioner. A "failed" member also carries "reason".
                 "provision_state": "pending",

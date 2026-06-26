@@ -55,7 +55,7 @@ python3 <SCRIPTS_DIR>/detect_repos.py --manifest <manifest_path>
 ```
 
 Returns a JSON array of `{ repo, path, branch, ahead, dirty }` for the active members. Members
-whose `worktree_path` no longer exists are silently skipped (R-7 graceful degrade). If the array
+whose `worktree_path` no longer exists are silently skipped (graceful degradation). If the array
 is empty, report a noop and finish — nothing to push.
 
 ### Step 2 — Preflight + push (per-repo, parallel for 2+ repos)
@@ -89,7 +89,7 @@ link/sidecar.
 If 2+ PRs were created/updated, update the `## Linked Docs` section of each PR body to
 cross-link the siblings.
 
-### Step 4 — Record the prs.json sidecar (D-1)
+### Step 4 — Record the prs.json sidecar
 
 Record PR associations to the portage-owned `prs.json` sidecar that lives alongside the camp manifest:
 

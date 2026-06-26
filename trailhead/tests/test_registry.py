@@ -2,7 +2,7 @@
 
 TDD: written BEFORE implementation. All must fail first, then pass.
 
-Contract (B-3 HERMETICITY):
+Contract (HERMETICITY):
   - registry.generate_marketplace_json writes ONE marketplace.json at
     <composed_root>/.claude-plugin/marketplace.json with name "trailhead",
     one plugins[] entry per tool, deterministic order, atomic write.
@@ -517,7 +517,7 @@ class TestRewireTool:
         )
 
     def test_rewire_tool_does_not_call_plugin_update(self, tmp_path):
-        """rewire_tool must NOT use 'plugin update' (U-1(e): stale cache bug)."""
+        """rewire_tool must NOT use 'plugin update' (it has a stale cache bug)."""
         from trailhead.registry import rewire_tool
 
         composed_root = tmp_path / "composed"
@@ -531,7 +531,7 @@ class TestRewireTool:
 
         update_calls = [args for args in calls_seen if "update" in args]
         assert len(update_calls) == 0, (
-            f"rewire_tool must not call 'plugin update' (U-1(e)); got {update_calls}"
+            f"rewire_tool must not call 'plugin update'; got {update_calls}"
         )
 
     def test_rewire_tool_uses_trailhead_ref(self, tmp_path):
@@ -607,7 +607,7 @@ class TestRewireTool:
         )
 
     def test_rewire_tool_no_marker_when_install_raises(self, tmp_path):
-        """Per-tool marker absent when install raises (C-2 self-heal)."""
+        """Per-tool marker absent when install raises (self-heal)."""
         from trailhead.registry import rewire_tool
 
         composed_root = tmp_path / "composed"

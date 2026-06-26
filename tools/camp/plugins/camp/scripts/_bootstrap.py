@@ -3,7 +3,7 @@
 git-only distribution; no PyPI (name taken). The trailhead shared library
 is reached by putting the repo root on sys.path — no editable install needed.
 
-Four-tier fallback (S-5 cold-start hardening: the `__file__` walk has
+Four-tier fallback (cold-start hardening: the `__file__` walk has
 precedence over the env var):
   1. Already importable (pytest run from repo root, or homebrew-installed future).
   2. Walk upward from this file looking for a dir that contains trailhead/paths.py
@@ -17,7 +17,7 @@ precedence over the env var):
      at write time). Trusted only after the marker is confirmed to exist there.
   4. Hard error with a legible message (NOT a raw ModuleNotFoundError).
 
-S-5 — on a cold invocation (Tier 1 fails: trailhead not yet importable, the
+On a cold invocation (Tier 1 fails: trailhead not yet importable, the
 normal state for a fresh thin-script process) a hostile $TRAILHEAD_ROOT must not
 redirect the import to an attacker-planted trailhead/paths.py. The walk-first
 ordering closes that: when the script runs from inside a checkout, the env var
@@ -46,7 +46,7 @@ def ensure_trailhead_importable() -> None:
 
     # Tier 2: walk upward from this file for the marker (trailhead/paths.py).
     # Co-located with the executing code, so it takes precedence over Tier 3
-    # (the environment) — see the S-5 cold-start note above.
+    # (the environment) — see the cold-start note above.
     here = Path(__file__).resolve()
     for p in (here, *here.parents):
         if (p / "trailhead" / "paths.py").exists():

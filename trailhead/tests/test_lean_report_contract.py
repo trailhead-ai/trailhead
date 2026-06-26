@@ -1,14 +1,14 @@
 """Lean execute-loop controller — prompt contract guards.
 
-Plan: 2026-06-12-trailhead-lean-execute-loop-controller
-- Slice 1: executor report head/tail split (agents/executor.md)
-- Slice 2: code-reviewer structured verdict
+These guard the craft execute-loop prompt files:
+- executor report head/tail split (agents/executor.md)
+- code-reviewer structured verdict
   (agents/code-reviewer.md + skills/review/code-reviewer.md)
-- Slice 3: execute SKILL §4 single-pass + §5 working set (skills/execute/SKILL.md)
+- execute SKILL §4 single-pass + §5 working set (skills/execute/SKILL.md)
 
-TDD contract: grep-style body guards on the craft agent/skill prompt files.
+They are grep-style body guards on the craft agent/skill prompt files.
 
-Per the binding vacuous-test lesson: assert *distinctive, contiguous* phrases,
+To avoid vacuous tests: assert *distinctive, contiguous* phrases,
 and pair every "added" assertion with a "removed" / negative assertion. The
 load-bearing NEGATIVE assertion (never skip): the tail sub-section headings
 must appear *only* under the durable-tail heading, not in the controller-facing
@@ -84,7 +84,7 @@ def _durable_tail_template(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: NEGATIVE load-bearing split assertion
+# NEGATIVE load-bearing split assertion
 # ---------------------------------------------------------------------------
 
 
@@ -135,7 +135,7 @@ class TestExecutorSplitNegative:
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: INVARIANT — security-relevant self-review surfacing
+# INVARIANT — security-relevant self-review surfacing
 # ---------------------------------------------------------------------------
 
 
@@ -153,7 +153,7 @@ class TestSecurityEscalationInHead:
 
         Asserts the contiguous directive phrase, NOT whole-document co-occurrence of the
         common tokens 'security' + 'blocking' — the latter goes vacuously green the moment
-        any unrelated edit adds 'security' elsewhere (Slice 1 review, Minor #1)."""
+        any unrelated edit adds 'security' elsewhere."""
         text = _executor_text()
         lower = text.lower()
         # The directive must route the finding to the head's blocking/unknowns field via a
@@ -172,7 +172,7 @@ class TestSecurityEscalationInHead:
 
 
 # ---------------------------------------------------------------------------
-# Slice 2: code-reviewer structured verdict contract
+# Code-reviewer structured verdict contract
 #
 # Both files (agents/code-reviewer.md + skills/review/code-reviewer.md) must
 # agree on the structured output shape.
@@ -198,7 +198,7 @@ class TestCodeReviewerSecurityEscalationInvariant:
     """INVARIANT: security-auditor escalation directive must survive the rewrite in both files.
 
     A rewrite that strips this to satisfy the negative assertions must go RED.
-    The directive is thoroughness, not format — the spec Non-Goals forbid removing it.
+    The directive is thoroughness, not format — it must not be removed.
     """
 
     def test_agent_contains_security_auditor_escalation(self):
@@ -285,11 +285,9 @@ class TestCodeReviewerSeverityLabelsInvariant:
 
 
 # ---------------------------------------------------------------------------
-# Slice 3: execute SKILL §4 single-pass + verdict-only absorb, §5 working set
+# execute SKILL §4 single-pass + verdict-only absorb, §5 working set
 #
-# Plan: 2026-06-12-trailhead-lean-execute-loop-controller, Slice 3
-#
-# Test contract:
+# This section verifies:
 #   POSITIVE §4: large-tier row has single-combined-pass directive + "second pass only
 #     when saturated/over-length"; absorb directive containing "verdict + Critical".
 #   NEGATIVE §4: "Dispatch `code-reviewer` twice" is ABSENT.
@@ -360,7 +358,7 @@ class TestExecuteSkillSection5WorkingSet:
     def test_section5_preserves_source_of_truth_language(self):
         """INVARIANT: §5 must retain plan-file-as-source-of-truth language.
 
-        The spec Constraint forbids regressing this invariant. A rewrite that strips
+        This invariant must not be regressed. A rewrite that strips
         'source of truth' must go RED.
         """
         text = _execute_skill_text()
@@ -373,7 +371,7 @@ class TestExecuteSkillSection5WorkingSet:
     def test_section5_preserves_draft_to_in_progress_status_flip(self):
         """INVARIANT: §5 must retain the draft→in-progress status-flip behavior.
 
-        The spec Constraint requires this behavior to be preserved. Stripping 'draft' or
+        This behavior must be preserved. Stripping 'draft' or
         'in-progress' from §5 must cause this test to go RED.
         """
         text = _execute_skill_text()

@@ -10,7 +10,7 @@ has installed, discovered from on-disk state:
 
 ``exit_code`` is always 0 unless the report itself crashes.
 
-Injectability (B-3): ``which_runner`` and ``python_version_runner`` are injectable
+Injectability: ``which_runner`` and ``python_version_runner`` are injectable
 so tests never shell out.
 """
 

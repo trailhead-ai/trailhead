@@ -1,11 +1,11 @@
 """Tests for group_resolve.py — cwd/--group resolution.
 
-Slice 2 reworks resolution from marker-scan (old `<repo>/.claude/worktrees/<slug>`
+The resolver was reworked from marker-scan (old `<repo>/.claude/worktrees/<slug>`
 layout) to state-dir path parsing for the unified workspace layout:
 
     central_state_dir(group)/worktrees/<slug>/<member>/
 
-Resolution algorithm (U4 — VALIDATED):
+Resolution algorithm:
   1. cwd.relative_to(camp_state_dir) → if len(parts) >= 3 and parts[1] == "worktrees"
      → (group=parts[0], slug=parts[2]), verifying the group is configured.
   2. else walk cwd upward for a member repo_root match → (group, None).
@@ -15,13 +15,13 @@ The resolver resolves BOTH cwd and camp_state_dir with .resolve() before the
 prefix check.  camp_state_dir is injectable (tests pass it directly; production
 derives it from trailhead.paths.state_dir("camp", env=...)).
 
-Test contract:
+Tests cover:
 - 8-position state-dir matrix (workspace root, each member subdir, deep path,
   canonical member repo → (group, None), non-member → error, renamed slug, nested).
 - --group override beats cwd.
 - cwd ∉ any group + no --group → explicit legible error.
 - A repo in two groups → error naming both groups + the repo.
-- D-E: group name containing ../ or a separator → named confinement error.
+- Group name containing ../ or a separator → named confinement error.
 - The central state path equals state_dir("camp")/<group>/ for a CAMP_STATE_DIR-
   overridden fixture (proving the override flows through).
 """
@@ -71,7 +71,7 @@ def _make_group_config(
 
 
 # ---------------------------------------------------------------------------
-# U4 8-position matrix — state-dir-path-parsing resolution (NEW layout)
+# 8-position matrix — state-dir-path-parsing resolution (NEW layout)
 # ---------------------------------------------------------------------------
 
 
@@ -373,7 +373,7 @@ def test_repo_in_two_groups_surfaces_on_cwd_resolve(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# D-E: group-name confinement
+# Group-name confinement
 # ---------------------------------------------------------------------------
 
 
@@ -388,7 +388,7 @@ def test_repo_in_two_groups_surfaces_on_cwd_resolve(tmp_path: Path) -> None:
     ],
 )
 def test_group_name_confinement_rejects_path_traversal(tmp_path: Path, bad_name: str) -> None:
-    """D-E: group names with path separators / '..' / null → named confinement error."""
+    """Group names with path separators / '..' / null → named confinement error."""
     from group_resolve import GroupConfinementError, validate_group_name
 
     with pytest.raises(GroupConfinementError):

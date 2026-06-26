@@ -1,4 +1,4 @@
-"""Async workspace provisioning for camp — Slice 3.
+"""Async workspace provisioning for camp.
 
 camp ai brings a workspace up in two phases:
 
@@ -9,7 +9,7 @@ camp ai brings a workspace up in two phases:
   2. Detached provision (spawn_detached_provisioner): spawn `camp setup --background`
      in its own session (start_new_session=True, stdin=DEVNULL, std streams →
      setup.log 0o600) that survives the parent's os.execvp into the harness. The
-     U1 assumption (validated) is that this detached child runs to completion after
+     assumption (validated) is that this detached child runs to completion after
      the parent process image is replaced — no double-fork needed.
 
 bring_up_workspace ties the two together: seed, then spawn.
@@ -41,7 +41,7 @@ _CAMP_BIN = Path(__file__).resolve().parent.parent / "bin" / "camp"
 
 
 # ---------------------------------------------------------------------------
-# Detached spawn (U1)
+# Detached spawn
 # ---------------------------------------------------------------------------
 
 
@@ -57,7 +57,7 @@ def spawn_detached_provisioner(
     Builds the `camp setup --background <slug> --group <group_name>` argv (unless
     _argv overrides it for tests), opens logfile_path 0o600, and Popen's the child
     with start_new_session=True + stdin=DEVNULL + std streams → the logfile. The
-    logfile fd is held by the child, so it survives the parent exec (U1).
+    logfile fd is held by the child, so it survives the parent exec.
 
     Returns the Popen object (the caller does not wait — it execs into the harness).
     """
@@ -73,7 +73,7 @@ def spawn_detached_provisioner(
             group_name,
         ]
 
-    # Open the logfile 0o600 (council/Security). opener enforces the mode at
+    # Open the logfile with mode 0o600 (owner-only). opener enforces the mode at
     # creation so it is umask-proof.
     def _opener(path: str, flags: int) -> int:
         return os.open(path, flags, 0o600)
@@ -246,7 +246,7 @@ def provision_member(
     base = member.get("base") or DEFAULT_BASE
     wt_path = workspace_dir(group_name, slug, env=env) / member["name"]
 
-    # Fetch the base ref under a timeout (deferred from Slice 2). A TimeoutExpired
+    # Fetch the base ref under a timeout. A TimeoutExpired
     # propagates so an unreachable remote fails the member. A non-timeout fetch
     # failure is fatal only when the base ref does not already resolve locally
     # (raising ReconcileError) — otherwise branching off HEAD would silently put

@@ -52,12 +52,12 @@ Two distinct cases arise when the same destination path appears more than once:
 | Same `src` → same `dest` | Benign overlap: a base dir re-listed by a capability, or the same dir in two capabilities. | De-duplicated to a single `CopyOp`.  No error. |
 | Different `src` → same `dest` | Genuine collision: two different source trees claim the same destination path. | `CollisionError(dest, src_a, src_b)` raised in the **pure planning phase**, before `apply_plan` writes anything.  Never leave a half-assembled plugin dir. |
 
-## D-F dual-end path confinement (binding)
+## Dual-end path confinement (binding)
 
 Every path is confirmed to stay inside its expected root **before** any stat or write:
 
 - **Source confinement**: every `src` must be `is_relative_to(plugin_root.resolve())`.
-  This is checked by the Slice 3 loader at manifest-load time; `compose_plan` re-asserts it.
+  This is checked by the manifest loader at manifest-load time; `compose_plan` re-asserts it.
 - **Destination confinement**: every `dest` must be `is_relative_to(dest.resolve())`.
   A manifest entry must never write outside the destination plugin dir.
 
@@ -75,24 +75,24 @@ landing in the destination with a live escaping reference.
 ## The `plugin_root` field
 
 `compose_plan` needs to resolve source paths relative to the tool's plugin root.
-The `Manifest` dataclass (Slice 3) stores `plugin_root: Path` — the absolute path
+The `Manifest` dataclass stores `plugin_root: Path` — the absolute path
 to `<manifest_dir>/plugins/<tool_name>/`.  `compose_plan` uses `manifest.plugin_root`
 directly; it does not re-parse the manifest or reimplement the confinement helper.
 
-## U3 resolution
+## Structural validity
 
-**Structural validity is proven** (Slice 4 / U3 spike):
+**Structural validity is proven**:
 
 After `apply_plan(plan, mode="copy")`:
 
 - `dest/.claude-plugin/plugin.json` exists and parses as valid JSON.
 - Selected skill dirs (e.g. `dest/skills/decision`) exist and contain content.
 
-This satisfies U3: structural validity by inspection.
+This confirms structural validity by inspection.
 
 **What is deferred**: live harness-load validation (confirming Claude Code
 actually loads the composed plugin as a working harness extension).  This
-requires the installer UX to exist and is deferred to Step 5.
+requires the installer UX to exist and is deferred until then.
 
 ## Multi-tool orchestration: `wire.py` + `registry.py`
 
@@ -102,7 +102,7 @@ lives in `wire.py`, which sequences:
 1. For each tool in the selection, call `compose_plan` (pure).
 2. Write to a **staging dir** under `state_dir("trailhead")/composed/tmp/`.
 3. **Atomic promote**: `shutil.rmtree(live_dest)` then `shutil.move(staging, live_dest)`.
-   A mid-compose failure leaves the prior live dest untouched (R-1).
+   A mid-compose failure leaves the prior live dest untouched.
 4. Call `registry.generate_marketplace_json` and `registry.register` (or `rewire`).
 
 `registry.py` owns the narrow harness-registration concern: generate

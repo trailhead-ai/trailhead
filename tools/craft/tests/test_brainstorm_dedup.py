@@ -1,4 +1,4 @@
-"""Slice 5 — brainstorm dedup guards.
+"""Brainstorm dedup guards.
 
 Asserts three trims in brainstorm/SKILL.md and injection-defense
 canonical-inline dedup:

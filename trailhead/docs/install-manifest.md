@@ -19,7 +19,7 @@ rev    = "<40-char-lowercase-hex-sha>"     # full commit SHA — see rules below
 source = "${registry}/trailhead"           # ${registry}-relative or fully-qualified URL
 tools  = ["trailhead", "lore", "camp", "craft"]  # tool set this repo provides
 
-# Local-self entry (L-1) — installs the working tree, tracking HEAD
+# Local-self entry — installs the working tree, tracking HEAD
 [[repo]]
 name   = "trailhead"
 source = "local"                           # the checkout you're running from
@@ -30,7 +30,7 @@ tools  = ["trailhead", "lore", "camp", "craft"]
 Each manifest may contain one or more `[[repo]]` entries.  Duplicate `name`
 values are rejected at parse time (no last-wins silencing).
 
-## Local-self source (`source = "local"`) — L-1
+## Local-self source (`source = "local"`)
 
 A `source` of the reserved value `"local"` marks a **local-self** entry: the
 install uses the working tree `trailhead` is being run from, tracking `HEAD`
@@ -106,7 +106,7 @@ Two forms are accepted:
    source = "git@github.com:myorg/trailhead"        # SSH
    ```
 
-### Source security rules (S-3)
+### Source security rules
 
 The resolved source is validated before any git invocation:
 
@@ -115,7 +115,7 @@ The resolved source is validated before any git invocation:
   metacharacters — the loader never passes source through a shell, but
   rejects them defensively).
 - Local filesystem paths are passed through the `_confine` confinement
-  primitive against the provided `local_root` (D-3 reuse — no new confiner).
+  primitive against the provided `local_root` (reuses the existing confiner — no new one).
 - The reserved value `"local"` is not a source URL/path at all — it selects the
   local-self path (see "Local-self source" above) and bypasses this validation.
 
@@ -150,12 +150,12 @@ gpg --recv-keys 74AEB40C93C4250A
 
 Integrity verification — including `git verify-commit` of the pinned SHA,
 asserting `HEAD == rev`, and the key-not-imported hard-fail — is implemented
-in `trailhead/fetch.py` (Slice 2).  This document records the key fingerprint
+in `trailhead/fetch.py`.  This document records the key fingerprint
 as the out-of-band trust anchor per §1113.
 
 This trust anchor applies to **remote** entries.  A **local-self** entry
-(`source = "local"`, L-1) is the checkout you already control: it is not fetched
+(`source = "local"`) is the checkout you already control: it is not fetched
 and has no pinned commit to authenticate, so the SHA + GPG gate does not apply —
 verification confirms only that the path is a git checkout.
 
-_Integrity verification details: see Slice 2 (`trailhead/fetch.py`)._
+_Integrity verification details: see `trailhead/fetch.py`._

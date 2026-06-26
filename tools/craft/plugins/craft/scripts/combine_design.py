@@ -240,7 +240,7 @@ def _screen_section_html(number: str, name: str, anchor: str, body_html: str) ->
         f'<section id="{anchor}" style="padding:20px;border-top:2px solid #ddd;">\n'
         f'  <h2 style="font-family:sans-serif;">'
         f"{_html_escape(number)} — {_html_escape(name)}</h2>\n"
-        f"  <!-- begin verbatim screen markup (D-4: assembled verbatim, not re-rendered) -->\n"
+        f"  <!-- begin verbatim screen markup (assembled verbatim, not re-rendered) -->\n"
         f"  {body_html}\n"
         f"  <!-- end verbatim screen markup -->\n"
         f"</section>\n"
@@ -429,8 +429,8 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Assemble per-screen HTML files into a single self-contained design reference. "
-            "Reads <surface>-<screen>.html files from --designs-dir (D-5 convention), "
-            "the chrome catalog from --chrome-path for variant declarations (D-6), "
+            "Reads <surface>-<screen>.html files from --designs-dir, "
+            "the chrome catalog from --chrome-path for variant declarations, "
             "and emits <slug>-design-reference.html (or --output path)."
         )
     )

@@ -465,7 +465,7 @@ def test_path_traversal_rejected_nonzero_exit_no_output(tmp_path: Path):
         )
 
     assert exc_info.value.code != 0, "Path traversal must cause nonzero exit"
-    assert not out_path.exists(), "No output file must be written on traversal error (R-8)"
+    assert not out_path.exists(), "No output file must be written on traversal error"
 
 
 def test_path_traversal_via_cli_nonzero_no_output(tmp_path: Path):

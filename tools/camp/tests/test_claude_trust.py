@@ -1,6 +1,6 @@
-"""Tests for Slice 1: claude_trust.pretrust_workspace + HarnessProfile helpers.
+"""Tests for claude_trust.pretrust_workspace + HarnessProfile helpers.
 
-Test contract (all with env={"HOME": str(tmp_path)} — never touch real ~/.claude.json):
+Covers (all with env={"HOME": str(tmp_path)} — never touch real ~/.claude.json):
 - Absent ~/.claude.json → file created with projects.<key>.hasTrustDialogAccepted == true;
   key is realpath of launch_dir; created (final) mode is 0o600. (The tmp file's
   0o600 mode during the write window is guaranteed by tempfile.mkstemp, not
@@ -10,7 +10,7 @@ Test contract (all with env={"HOME": str(tmp_path)} — never touch real ~/.clau
 - Idempotent: second call produces an identical file.
 - Malformed existing JSON → returns without raising, does NOT overwrite; emits camp: stderr.
 - Unreadable existing file (OSError/EACCES) → aborts without overwriting; emits camp: stderr.
-- Confinement (C2): launch_dir == workspace_root and workspace_root/sub → written;
+- Confinement: launch_dir == workspace_root and workspace_root/sub → written;
   launch_dir outside workspace_root → refused with camp: stderr, no write.
 - Stderr copy distinguishes unreadable/parse-error from permission-denied from
   out-of-confinement.
@@ -77,7 +77,7 @@ class TestAbsentFile:
         assert real in data["projects"]
 
     def test_only_trust_flag_written_no_extra_keys(self, tmp_path):
-        """U1-verified: only hasTrustDialogAccepted is written; no companion keys."""
+        """Only hasTrustDialogAccepted is written; no companion keys."""
         from claude_trust import pretrust_workspace
 
         launch_dir = tmp_path / "ws"
@@ -122,7 +122,7 @@ class TestExistingFile:
 
     def test_loose_existing_mode_tightened_to_0o600(self, tmp_path):
         """~/.claude.json holds OAuth secrets — a looser pre-existing mode is
-        tightened to 0o600, never preserved (council/Security)."""
+        tightened to 0o600, never preserved."""
         from claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
@@ -229,7 +229,7 @@ class TestUnexpectedStructure:
 
     Guards the build path (data.setdefault chain) against a non-dict top level or
     a non-dict projects/entry — the module's "never raises" contract must hold
-    without relying on the Slice 2 caller's try/except.
+    without relying on the caller's try/except.
     """
 
     def _run(self, tmp_path, content):
@@ -321,7 +321,7 @@ class TestUnreadableFile:
 
 
 # ---------------------------------------------------------------------------
-# pretrust_workspace — confinement (C2)
+# pretrust_workspace — confinement
 # ---------------------------------------------------------------------------
 
 

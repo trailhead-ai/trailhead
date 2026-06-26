@@ -1,6 +1,6 @@
 """Tests for group_scaffold.py — TOML render + pre-write validation.
 
-Test contract (Slice 1):
+Covers:
 - render_group_toml output parses under tomllib AND round-trips through load_group.
 - Rendered repo_root paths are absolute and correctly escaped (path-with-spaces case).
 - A ~/... member path is expanded to an absolute home path (no literal "~" in output).

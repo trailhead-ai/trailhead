@@ -1,6 +1,6 @@
 """Tests for trailhead/install.py — config-driven, multi-harness install.
 
-wire / create_shims / detect_harnesses are patched (B-3 hermeticity):
+wire / create_shims / detect_harnesses are patched for hermeticity:
 these tests never compose real trees or touch the user's harness/PATH.
 """
 
@@ -25,7 +25,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
 def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr=""):
     """Patch wire, create_shims, detect_harnesses, run_lore_init.
 
-    ``run_lore_init`` is ALWAYS patched (B-3 / Axiom 6): these tests must never
+    ``run_lore_init`` is ALWAYS patched (Axiom 6): these tests must never
     invoke the real ``lore init`` against the user's vault/state. The default
     stub reports success; tests that exercise the failure path pass a non-zero
     ``lore_init_rc`` + ``lore_init_stderr``.
@@ -194,7 +194,7 @@ class TestJsonOutput:
 
 
 # ---------------------------------------------------------------------------
-# lore init integration (Slice 5, S5)
+# lore init integration
 # ---------------------------------------------------------------------------
 
 

@@ -1,4 +1,4 @@
-"""Slice 6 tests: status guard, lore sync, init git-init wiring.
+"""Status guard, lore sync, and init git-init wiring tests.
 
 Covers (TDD — written before implementation):
 

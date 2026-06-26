@@ -1,4 +1,4 @@
-"""Lazy member activation for camp — Slice 5.
+"""Lazy member activation for camp.
 
 camp enter <member>:
   (a) Ensures the member is ready — else raises MemberNotReadyError with a
@@ -8,7 +8,7 @@ camp enter <member>:
       manifest; re-enter is a cheap no-op (hooks not re-run), doc re-printed.
   (c) Prints the member's CLAUDE.md to stdout so the calling agent ingests it.
 
-Hooks run shell=False (list-mode, D-F bootstrap-trust posture).
+Hooks run shell=False (list-mode, author-trusted bootstrap posture).
 """
 
 from __future__ import annotations

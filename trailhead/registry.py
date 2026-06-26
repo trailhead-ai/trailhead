@@ -13,17 +13,17 @@ Architecture
    **atomic** (temp-file + ``os.replace()``) so a torn write can never
    leave the shared file in an invalid state.
 2. ``register_marketplace`` — shells ``claude plugin marketplace add
-   --scope user <composed_root>`` (idempotent per U-1(d)) and writes the
+   --scope user <composed_root>`` (idempotent) and writes the
    global ``<composed_root>/.trailhead-registered`` marker only after
    success.
 3. ``install_tool`` — shells ``claude plugin install <tool>@trailhead
    --scope user`` and writes the per-tool
    ``<composed_root>/.trailhead-installed-<tool>`` marker on success.
 4. ``rewire_tool`` — refreshes an already-installed tool via
-   **uninstall + install** (NOT ``plugin update`` — U-1(e): version-keyed
+   **uninstall + install** (NOT ``plugin update``, which is version-keyed
    and keeps stale content at a static version).  Clears the per-tool
-   marker before the pair; rewrites it only after install succeeds (C-2
-   self-heal).
+   marker before the pair; rewrites it only after install succeeds
+   (self-heal).
 
 Marker layout (split markers)
 ------------------------------
@@ -34,8 +34,8 @@ the atomic promote ``rmtree``s on every re-wire.
 - Per-tool: ``<composed_root>/.trailhead-installed-<tool>``
 
 The global marker is a skip-optimisation for ``register_marketplace``
-(the call itself is idempotent per U-1(d)).  The per-tool marker is a
-C-2 self-heal signal for the ``wire()`` loop: a missing marker means
+(the call itself is idempotent).  The per-tool marker is a
+self-heal signal for the ``wire()`` loop: a missing marker means
 ``install_tool`` should run; a present marker means ``rewire_tool``.
 
 Input guard
@@ -43,8 +43,8 @@ Input guard
 Every ``tool`` value is validated against ``^[a-z][a-z0-9_-]*$`` before
 it reaches any CLI arg, marker filename, or ``source`` path.
 
-Hermeticity contract (B-3)
---------------------------
+Hermeticity contract
+--------------------
 The CLI invocation is injectable via a ``runner=`` keyword argument.
 Tests ALWAYS pass a stub runner and NEVER invoke the real ``claude plugin``
 CLI against the user's harness.  The default runner is ``subprocess.run``
@@ -185,7 +185,7 @@ def register_marketplace(
     Shells:
       ``claude plugin marketplace add --scope user <composed_root>``
 
-    Idempotent per U-1(d) — safe to call every wire regardless of the global
+    Idempotent — safe to call every wire regardless of the global
     marker.  Writes the global ``<composed_root>/.trailhead-registered`` marker
     only after the CLI call succeeds (skip-optimisation for future wires).
 
@@ -193,7 +193,7 @@ def register_marketplace(
         composed_root: Shared marketplace root directory (absolute).
         runner:        Callable(args: list[str], **kwargs).  Defaults to
                        ``subprocess.run`` with ``check=True``.  Always pass
-                       a stub in tests (B-3).
+                       a stub in tests.
     """
     if runner is None:
         runner = _default_runner
@@ -229,7 +229,7 @@ def install_tool(
     Args:
         tool:          Tool name (must match ^[a-z][a-z0-9_-]*$).
         composed_root: Shared marketplace root directory (absolute).
-        runner:        Injectable runner (B-3 contract).
+        runner:        Injectable runner.
     """
     _validate_tool(tool)
 
@@ -257,7 +257,7 @@ def rewire_tool(
 ) -> None:
     """Refresh an already-installed tool after recomposition.
 
-    Sequence: **uninstall THEN install** (NOT ``plugin update`` — U-1(e):
+    Sequence: **uninstall THEN install** (NOT ``plugin update``:
     ``plugin update`` is version-keyed and keeps stale content when the
     version is static).
 
@@ -267,13 +267,13 @@ def rewire_tool(
       2. ``claude plugin install <tool>@trailhead --scope user``
 
     Clears the per-tool marker before the pair; rewrites it only after
-    install succeeds (C-2 self-heal — a failure mid-pair leaves the marker
+    install succeeds (self-heal — a failure mid-pair leaves the marker
     absent so the next wire re-attempts cleanly).
 
     Args:
         tool:          Tool name (must match ^[a-z][a-z0-9_-]*$).
         composed_root: Shared marketplace root directory.
-        runner:        Injectable runner (B-3 contract).
+        runner:        Injectable runner.
     """
     _validate_tool(tool)
 
@@ -281,7 +281,7 @@ def rewire_tool(
         runner = _default_runner
 
     marker = composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}"
-    # Clear before the CLI pair (C-2: failure leaves marker absent).
+    # Clear before the CLI pair (failure leaves marker absent).
     marker.unlink(missing_ok=True)
 
     try:
@@ -338,7 +338,7 @@ def unregister_tool(
     Args:
         tool:          Tool name (must match ^[a-z][a-z0-9_-]*$).
         composed_root: Shared marketplace root directory.
-        runner:        Injectable runner (B-3 contract).
+        runner:        Injectable runner.
     """
     _validate_tool(tool)
 
@@ -379,7 +379,7 @@ def unregister_marketplace(
 
     Args:
         composed_root: Shared marketplace root directory.
-        runner:        Injectable runner (B-3 contract).
+        runner:        Injectable runner.
     """
     if runner is None:
         runner = _default_runner

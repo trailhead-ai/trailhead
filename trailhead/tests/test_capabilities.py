@@ -85,7 +85,7 @@ class TestLoreInventory:
         assert load_manifest(_LORE_MANIFEST).hooks_json is None
 
     def test_lore_agents_discovered(self):
-        # S6 Slice 3 established the lore agent roster: librarian (unchanged) +
+        # The lore agent roster: librarian (unchanged) +
         # investigator (deep investigation, opus/xhigh) + researcher (lighter
         # lookups + tracking-backlog polling, haiku/low).
         m = load_manifest(_LORE_MANIFEST)
@@ -96,18 +96,18 @@ class TestLoreInventory:
         }
 
     def test_session_skills_selectable(self):
-        # S6 Slice 2: the 7 per-kind capture skills (area, check-in, dead-end, decision,
+        # The 7 per-kind capture skills (area, check-in, dead-end, decision,
         # defer, follow-up, seed) were deleted — replaced by the lore record/session CLI.
-        # S6 Slice 3 MOVED 'brainstorm' to the craft plugin. Slice 4 RENAMED
-        # 'finish' → 'flush' and DELETED 'checkpoint'. The retained lore skills
+        # 'brainstorm' moved to the craft plugin. 'finish' was renamed to
+        # 'flush' and 'checkpoint' deleted. The retained lore skills
         # are flush, sync, search, record, research.
         m = load_manifest(_LORE_MANIFEST)
         for name in ("flush", "sync", "search", "record", "research"):
             assert name in m.skills
             assert m.skills[name] == f"skills/{name}"
-        assert "brainstorm" not in m.skills, "brainstorm moved to the craft plugin (S6 Slice 3)"
-        assert "checkpoint" not in m.skills, "checkpoint deleted (Slice 4)"
-        assert "finish" not in m.skills, "finish renamed to flush (Slice 4)"
+        assert "brainstorm" not in m.skills, "brainstorm moved to the craft plugin"
+        assert "checkpoint" not in m.skills, "checkpoint deleted"
+        assert "finish" not in m.skills, "finish renamed to flush"
 
     def test_sync_is_now_selectable(self):
         # sync was always-on (base) under the capability model; it has a SKILL.md
@@ -122,7 +122,7 @@ class TestLoreInventory:
         m = load_manifest(_LORE_MANIFEST)
         assert m.all_selectable() == set(m.subagents) | set(m.skills)
         assert "librarian" in m.all_selectable()
-        # Slice 4: 'checkpoint' deleted, 'finish' renamed to 'flush' — flush retained.
+        # 'checkpoint' deleted, 'finish' renamed to 'flush' — flush retained.
         assert "flush" in m.all_selectable()
 
 
@@ -160,15 +160,15 @@ class TestCraftInventory:
 
     def test_lifecycle_skills_now_selectable(self):
         # These skills each have a SKILL.md and are discovered as selectable.
-        # S6 Slice 3 MOVED 'brainstorm' into craft (discovery → frozen spec, runs
+        # 'brainstorm' was moved into craft (discovery → frozen spec, runs
         # before planning) — it is now a selectable craft skill. (shelve/pickup
-        # were retired in Slice 2 — see test_lifecycle_skills_shelve_pickup_retired.)
+        # were retired — see test_lifecycle_skills_shelve_pickup_retired.)
         m = load_manifest(_CRAFT_MANIFEST)
         for name in ("polish", "plan", "execute", "review", "consult", "brainstorm"):
             assert name in m.skills
 
     def test_lifecycle_skills_shelve_pickup_retired(self):
-        # Slice 2 retired the shelve/pickup dev rituals (the lore `handoff`/
+        # The shelve/pickup dev rituals were retired (the lore `handoff`/
         # `shelved`/`resume` verbs + the `shelved` status they backed are gone;
         # camp session-resume replaces them). They must no longer be selectable.
         m = load_manifest(_CRAFT_MANIFEST)

@@ -88,7 +88,7 @@ def test_manifest_validates_against_disk(tool: str):
 
 @pytest.mark.parametrize("tool", _TOOLS)
 def test_every_declared_capability_resolves_to_existing_src(tool: str, tmp_path: Path):
-    """R-6 oracle: compose_plan for a tool's FULL inventory must produce only
+    """Oracle: compose_plan for a tool's FULL inventory must produce only
     CopyOps whose src exists on disk — no manifest entry or discovered selectable
     may dangle.
 

@@ -1,12 +1,12 @@
-"""Tests for Slice 6: workspace session lockfile (refuse-concurrent).
+"""Tests for the workspace session lockfile (refuse-concurrent).
 
-Behavioral coverage that replaces the U2 assumption probe
-(test_u2_pid_liveness.py). The lockfile records a live PID + a session-start
+Behavioral coverage that replaces the earlier PID-liveness assumption probe.
+The lockfile records a live PID + a session-start
 timestamp; a lock held by a LIVE PID refuses (naming workspace + PID +
 timestamp), a stale lock (dead PID) is reclaimed, and an age-bound fallback
 reclaim covers PID recycling (psutil is absent → no create_time comparison).
 
-Test contract (Slice 6, lock portion):
+Covers (lock portion):
 - is_pid_alive: dead PID → False; self/live PID → True; PermissionError → True.
 - acquire writes {pid, started_at, workspace} with the current PID + UTC timestamp.
 - acquire against a LIVE-PID lock → SessionLockHeld naming workspace + PID + timestamp;

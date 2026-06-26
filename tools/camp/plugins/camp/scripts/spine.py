@@ -5,16 +5,16 @@ worktree command handlers (cmd_status, cmd_sync,
 cmd_restock, cmd_ls, cmd_path, cmd_code, cmd_sweep, cmd_foreach,
 cmd_doctor, cmd_help).
 
-De-zenithed from zenith/bin/camp (quarry provenance — Slice 0):
-- _SIBLING_REPOS constant removed (becomes group-config read in Slice 2).
+De-zenithed from zenith/bin/camp (quarry provenance):
+- _SIBLING_REPOS constant removed (becomes a group-config read).
 - _import_dev_env / _ensure_dev_env_on_path removed.
 - cmd_sweep: dev-env prune path raises NotImplementedError (deferred).
 - cmd_doctor: dev-env probes stripped; keeps asdf + consistency checks.
 - _canonical_zenith() renamed to _canonical_root() and sourced from
-  CAMP_CANONICAL_ROOT env var (Slice 1 will wire to trailhead.paths).
-- _check_trailhead_paths_importable() is the D-H guard (shared entry point).
+  CAMP_CANONICAL_ROOT env var (will be wired to trailhead.paths).
+- _check_trailhead_paths_importable() is the shared import guard.
 
-Source: zenith/bin/camp (quarry provenance — Slice 0).
+Source: zenith/bin/camp (quarry provenance).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import IO, Any, NoReturn
 
-from verb_taxonomy import (  # noqa: E402 — single source of truth (FIX 9)
+from verb_taxonomy import (  # noqa: E402 — single source of truth
     DISABLED_VERBS,
     LEGACY_REDIRECTS,
     NEEDS_GROUP_VERBS,
@@ -66,7 +66,7 @@ RESERVED = frozenset(
         "init",
         "session-bootstrap",
         "worktree-cleanup",
-        # Slice 1: new verb surface
+        # New verb surface
         "group",
         "ai",
         "rm",
@@ -77,7 +77,7 @@ RESERVED = frozenset(
 )
 
 # ---------------------------------------------------------------------------
-# D-H guard: single import guard, hook-subprocess-proof
+# Import guard: single guard, hook-subprocess-proof
 # ---------------------------------------------------------------------------
 
 
@@ -126,8 +126,8 @@ def _canonical_root() -> Path:
     """Return the canonical camp root.
 
     CAMP_CANONICAL_ROOT overrides the derived path for test isolation.
-    In Slice 1 this will be wired to trailhead.paths.state_dir("camp").
-    For Slice 0, defaults to the parent of the plugin dir.
+    This will be wired to trailhead.paths.state_dir("camp").
+    Currently defaults to the parent of the plugin dir.
     """
     override = os.environ.get("CAMP_CANONICAL_ROOT")
     if override:
@@ -558,7 +558,7 @@ def cmd_code(args: list[str], dry_run: bool = False) -> None:
 
 
 def _import_dev_env() -> Any:
-    """Stub: dev-env engine deferred to a later slice.
+    """Stub: dev-env engine not yet implemented.
 
     This is the single call-site guard for the dev-env prune path. The
     worktree-orphan half of cmd_sweep (orphan_worktrees) is CLEAN and remains.
@@ -596,11 +596,11 @@ def _collect_orphan_worktrees(workspace_root: Path, active: set[str]) -> dict[st
     """Return {"<repo>/<name>": {repo,name,path,class}} for orphan worktrees.
 
     Quarried from zenith/bin/camp. The _SIBLING_REPOS constant is removed;
-    this function now accepts any group member repos. In Slice 2 it will
-    iterate over group-config members; for Slice 0 it's wired to trailhead only.
+    this function now accepts any group member repos. It will eventually
+    iterate over group-config members; currently it's wired to trailhead only.
     """
     orphans: dict[str, dict[str, str]] = {}
-    # Slice 0: only trailhead itself; Slice 2 will expand to group members.
+    # Currently only trailhead itself; will expand to group members.
     repos_to_check = [("trailhead", workspace_root / "trailhead")]
     for repo, repo_root in repos_to_check:
         if not (repo_root / ".git").exists():
@@ -822,14 +822,14 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
     SAFE BY DEFAULT: dirty or off-main siblings are SKIPPED.
     --force reproduces the legacy reset behavior.
 
-    In Slice 2 this will operate on group-config members. For Slice 0 it
+    This will eventually operate on group-config members. Currently it
     operates on the trailhead repo only.
     """
     as_json = "--json" in args
     force = "--force" in args
 
     workspace_root = _workspace_root()
-    # Slice 0: trailhead only; Slice 2 expands to group members.
+    # Currently trailhead only; will expand to group members.
     sibling_repos = [("trailhead", workspace_root / "trailhead")]
 
     siblings: dict[str, Any] = {}
@@ -938,8 +938,8 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
 def cmd_restock(args: list[str], dry_run: bool = False) -> None:
     """camp restock [--json] — refresh canonical sibling dep caches.
 
-    In Slice 2 this will operate on group-config members with configured
-    bootstrap commands. For Slice 0 it's a passthrough that reports the trailhead
+    This will eventually operate on group-config members with configured
+    bootstrap commands. Currently it's a passthrough that reports the trailhead
     repo.
     """
     as_json = "--json" in args
@@ -948,7 +948,7 @@ def cmd_restock(args: list[str], dry_run: bool = False) -> None:
     errors = 0
     siblings: dict[str, Any] = {}
 
-    # Slice 0: trailhead only; Slice 2 expands to group members.
+    # Currently trailhead only; will expand to group members.
     repo, repo_root = "trailhead", workspace_root / "trailhead"
     if not (repo_root / ".git").exists():
         siblings[repo] = {"action": "absent"}
@@ -1378,7 +1378,7 @@ def cmd_rebase(args: list[str], dry_run: bool = False) -> None:
     if not rebase_script.is_file():
         _die(
             f"camp rebase: rebase script not found at {rebase_script}\n"
-            "  Worktree lifecycle is implemented in Slice 2."
+            "  The worktree rebase helper is missing from this installation."
         )
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -1489,7 +1489,7 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: new verb handlers
+# New verb handlers
 # ---------------------------------------------------------------------------
 
 _DISABLED_MESSAGE = (
@@ -1518,7 +1518,7 @@ def cmd_needs_group(verb: str) -> None:
     These verbs' real behavior lives on the group-aware path in cli/camp; reaching
     spine.main for one of them means no group resolved (no --group flag and cwd is
     outside any member dir). Emit the per-verb "needs a group" error and exit
-    non-zero. The exact message text is owned by verb_taxonomy (FIX 9), collapsing
+    non-zero. The exact message text is owned by verb_taxonomy, collapsing
     the five formerly-duplicated per-verb stubs into one helper.
     """
     _die(needs_group_message(verb))
@@ -1576,16 +1576,16 @@ def main() -> None:
         cmd_path(rest, dry_run=dry_run)
     elif first in ("help", "--help", "-h"):
         cmd_help(rest)
-    # Slice 1: new verb surface — these need a resolved group; reaching spine
-    # means none resolved (FIX 9: single NEEDS_GROUP_VERBS source of truth).
+    # New verb surface — these need a resolved group; reaching spine
+    # means none resolved (single NEEDS_GROUP_VERBS source of truth).
     elif first in NEEDS_GROUP_VERBS:
         cmd_needs_group(first)
     elif first == "group":
         cmd_group(rest, dry_run=dry_run)
-    # Slice 1: disabled verbs (hidden from help, legible error)
+    # Disabled verbs (hidden from help, legible error)
     elif first in DISABLED_VERBS:
         cmd_disabled(first)
-    # Slice 1: legacy verb redirects
+    # Legacy verb redirects
     elif first in LEGACY_REDIRECTS:
         cmd_legacy_redirect(first, LEGACY_REDIRECTS[first])
     else:

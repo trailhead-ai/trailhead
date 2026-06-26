@@ -1,9 +1,9 @@
-"""Manifest-validity tests (originally Slice 1, repointed in Slice 4).
+"""Manifest-validity tests.
 
-The Slice-1 smoke hook (session_smoke.py / _shared_smoke.py) was removed once
-the real lifecycle hooks landed in Slice 4. These tests preserve the durable
-coverage that survived that removal: plugin.json / marketplace.json / hooks.json
-remain valid and structurally correct.
+An earlier smoke hook (session_smoke.py / _shared_smoke.py) was removed once the
+real lifecycle hooks landed. These tests preserve the durable coverage that
+survived that removal: plugin.json / marketplace.json / hooks.json remain valid
+and structurally correct.
 """
 
 import json
