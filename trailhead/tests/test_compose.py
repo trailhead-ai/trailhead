@@ -131,8 +131,8 @@ class TestNameSelection:
     def test_selected_skill_dir_in_plan(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
-        dests = {op.dest for op in compose_plan(m, {}, {"checkpoint": None}, dest).ops}
-        assert dest / "skills" / "checkpoint" in dests
+        dests = {op.dest for op in compose_plan(m, {}, {"flush": None}, dest).ops}
+        assert dest / "skills" / "flush" in dests
 
     def test_selected_subagent_file_in_plan(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
@@ -143,7 +143,7 @@ class TestNameSelection:
     def test_src_under_plugin_root_for_in_repo(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
         root = (_LORE_MANIFEST.parent / "plugins" / "lore").resolve()
-        plan = compose_plan(m, {"librarian": None}, {"checkpoint": None}, tmp_path / "d")
+        plan = compose_plan(m, {"librarian": None}, {"flush": None}, tmp_path / "d")
         for op in plan.ops:
             assert op.src.is_relative_to(root)
 
@@ -260,7 +260,7 @@ class TestPurity:
     def test_compose_plan_creates_nothing(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
         before = set(tmp_path.rglob("*"))
-        compose_plan(m, {"librarian": None}, {"checkpoint": None}, tmp_path / "dest")
+        compose_plan(m, {"librarian": None}, {"flush": None}, tmp_path / "dest")
         assert set(tmp_path.rglob("*")) == before
 
 
@@ -273,10 +273,10 @@ class TestApply:
     def test_roundtrip_structural_validity(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "composed"
-        apply_plan(compose_plan(m, {}, {"checkpoint": None}, dest), mode="copy")
+        apply_plan(compose_plan(m, {}, {"flush": None}, dest), mode="copy")
         plugin_json = dest / ".claude-plugin" / "plugin.json"
         assert json.loads(plugin_json.read_text())["name"] == "lore"
-        assert (dest / "skills" / "checkpoint").is_dir()
+        assert (dest / "skills" / "flush").is_dir()
         if m.hooks_json:
             assert (dest / m.hooks_json).is_file()
 

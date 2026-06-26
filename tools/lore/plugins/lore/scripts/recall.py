@@ -7,7 +7,7 @@ compact on-demand area menu and the always-injected SessionStart pointer that
 sends the agent to ``lore search``:
 
   1. build_area_map(vault)          -> list[AreaEntry]
-     Scans areas/*.md, reads name/keywords/one-liner per area, returns the
+     Scans area/*.md, reads name/keywords/one-liner per area, returns the
      on-demand area menu (alpha order, hard caps applied). Served by
      `lore areas`; no longer always-loaded at session start.
 
@@ -93,14 +93,14 @@ def _first_overview_sentence(text: str) -> str:
 def build_area_map(vault: Path) -> list[AreaEntry]:
     """Build the compact area menu.
 
-    Scans areas/*.md, reads name/keywords/one-liner per area. Deterministically
+    Scans area/*.md, reads name/keywords/one-liner per area. Deterministically
     ordered alpha by name. Hard caps applied (D-8c). Non-UTF-8/malformed files
     silently skipped (D-8d). Area-name resolution is enumeration-only (D-7).
 
-    Returns [] when the areas/ dir is absent (never raises).
+    Returns [] when the area/ dir is absent (never raises).
     """
     vault = Path(vault)
-    areas_dir = vault / "areas"
+    areas_dir = vault / "area"
     if not areas_dir.is_dir():
         return []
 

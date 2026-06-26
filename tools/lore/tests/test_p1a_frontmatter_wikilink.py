@@ -4,9 +4,10 @@ All fixtures use SYNTHETIC vocabulary (synth-alpha, synth-tool, synth-spec-slug,
 etc.) per the public-repo fixture discipline axiom — never real brain content.
 
 Test contract (all must fail before the fix, pass after):
-- Block-style surfaces:  - '[[areas/synth-alpha]]' → ["synth-alpha"]
-- Inline surfaces: ["[[areas/synth-alpha]]", "[[tools/synth-tool]]"] → ["synth-alpha", "synth-tool"]
-- Prefix coverage: areas/, tools/, AND plans/ all strip to bare slug for overlap keys
+- Block-style surfaces:  - '[[area/synth-alpha]]' → ["synth-alpha"]
+- Inline surfaces: ["[[area/synth-alpha]]", "[[tools/synth-tool]]"] → ["synth-alpha", "synth-tool"]
+- Prefix coverage: area/, tools/, AND plan/ all strip to bare slug for overlap keys
+  (Slice 7: singular vault dirs — areas/ and plans/ prefixes are retired)
 - related-spec: '[[specs/synth-spec-slug]]' → "specs/synth-spec-slug"
   (full path, NOT slug-reduced, NOT a list)
 - Bare-slug forms (inline [a, b] and block - a) unchanged (regression guard)
@@ -67,8 +68,9 @@ class TestBlockStyleListParsing:
 
 class TestWikilinkUnwrapSlugReduced:
     def test_block_wikilink_areas_prefix_stripped(self):
-        """Block-style [[areas/synth-alpha]] → synth-alpha for surfaces key."""
-        result = _fm("surfaces:\n  - '[[areas/synth-alpha]]'")
+        """Block-style [[area/synth-alpha]] → synth-alpha for surfaces key.
+        Slice 7: singular vault dirs — area/ (not areas/)."""
+        result = _fm("surfaces:\n  - '[[area/synth-alpha]]'")
         assert result["surfaces"] == ["synth-alpha"]
 
     def test_block_wikilink_tools_prefix_stripped(self):
@@ -77,36 +79,37 @@ class TestWikilinkUnwrapSlugReduced:
         assert result["surfaces"] == ["synth-tool"]
 
     def test_block_wikilink_plans_prefix_stripped(self):
-        """Block-style [[plans/synth-plan]] → synth-plan for surfaces key."""
-        result = _fm("surfaces:\n  - '[[plans/synth-plan]]'")
+        """Block-style [[plan/synth-plan]] → synth-plan for surfaces key.
+        Slice 7: singular vault dirs — plan/ (not plans/)."""
+        result = _fm("surfaces:\n  - '[[plan/synth-plan]]'")
         assert result["surfaces"] == ["synth-plan"]
 
     def test_block_wikilink_double_quoted(self):
-        """Block-style double-quoted wikilink → slug-reduced."""
-        result = _fm('surfaces:\n  - "[[areas/synth-alpha]]"')
+        """Block-style double-quoted wikilink → slug-reduced (singular prefix)."""
+        result = _fm('surfaces:\n  - "[[area/synth-alpha]]"')
         assert result["surfaces"] == ["synth-alpha"]
 
     def test_inline_wikilink_list_areas_stripped(self):
-        """Inline list with wikilink entries → slug-reduced."""
-        result = _fm('surfaces: ["[[areas/synth-alpha]]", "[[tools/synth-tool]]"]')
+        """Inline list with singular wikilink entries → slug-reduced."""
+        result = _fm('surfaces: ["[[area/synth-alpha]]", "[[tools/synth-tool]]"]')
         assert result["surfaces"] == ["synth-alpha", "synth-tool"]
 
     def test_areas_key_slug_reduced(self):
-        """areas: is an overlap key — slug-reduce applies."""
-        result = _fm("areas:\n  - '[[areas/synth-alpha]]'")
+        """areas: is an overlap key — slug-reduce applies with singular prefix."""
+        result = _fm("areas:\n  - '[[area/synth-alpha]]'")
         assert result["areas"] == ["synth-alpha"]
 
     def test_related_areas_key_slug_reduced(self):
-        """related-areas: is an overlap key — slug-reduce applies."""
-        result = _fm("related-areas:\n  - '[[areas/synth-alpha]]'")
+        """related-areas: is an overlap key — slug-reduce applies with singular prefix."""
+        result = _fm("related-areas:\n  - '[[area/synth-alpha]]'")
         assert result["related-areas"] == ["synth-alpha"]
 
     def test_all_three_prefixes_for_each_overlap_key(self):
-        """areas/, tools/, plans/ all strip for surfaces key."""
+        """area/, tools/, plan/ all strip for surfaces key (Slice 7: singular)."""
         for prefix, slug in [
-            ("areas", "synth-alpha"),
+            ("area", "synth-alpha"),
             ("tools", "synth-tool"),
-            ("plans", "synth-plan"),
+            ("plan", "synth-plan"),
         ]:
             result = _fm(f"surfaces:\n  - '[[{prefix}/{slug}]]'")
             assert result["surfaces"] == [slug], (

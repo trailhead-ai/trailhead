@@ -78,7 +78,7 @@ STATUS_VOCAB: dict[str, tuple[str, ...]] = {
     "decision": ("active", "superseded", "dropped"),
     "lesson": ("active", "conditional"),
     "plan": ("draft", "ready", "in-progress", "complete", "superseded", "dropped"),
-    "session": ("active", "complete"),
+    "session": ("dirty", "clean"),
     "spec": ("draft", "ready", "planned", "complete", "superseded", "dropped"),
 }
 

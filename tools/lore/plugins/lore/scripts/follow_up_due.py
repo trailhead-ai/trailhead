@@ -22,7 +22,7 @@ Cadence rules:
   - unknown  → treated as daily (conservative)
 
 Canonical status vocab for follow-up notes: ``active | resolved | dropped``
-(from ``status_validator.CANONICAL["follow-ups"]``). A note carrying any other
+(from ``status_validator.CANONICAL["follow-up"]``). A note carrying any other
 status (e.g. a legacy "snoozed") is skipped and placed in
 ``skipped_legacy``; the helper never crashes on an unexpected value.
 """

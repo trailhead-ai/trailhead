@@ -50,7 +50,7 @@ def test_status_vocab_matches_spec_per_kind():
         "superseded",
         "dropped",
     }
-    assert set(vocab["session"]) == {"active", "complete"}
+    assert set(vocab["session"]) == {"dirty", "clean"}
     assert set(vocab["spec"]) == {
         "draft",
         "ready",
@@ -78,7 +78,7 @@ def test_initial_status_per_kind():
     assert m.initial_status("decision") == "active"
     assert m.initial_status("lesson") == "active"
     assert m.initial_status("plan") == "draft"
-    assert m.initial_status("session") == "active"
+    assert m.initial_status("session") == "dirty"
     assert m.initial_status("spec") == "draft"
 
 
@@ -578,3 +578,80 @@ def test_annotations_same_key_rules_as_labels():
         result = rm().validate(sidecar)
         msg = f"expected error for {desc} key {bad_key!r}"
         assert any(bad_key in e for e in result.errors), msg
+
+
+# --- Slice 0: session status vocab → {dirty, clean} -------------------------
+
+
+def test_session_status_vocab_is_dirty_clean():
+    """Session vocab is exactly {dirty, clean} — not active/complete (Slice 0)."""
+    vocab = rm().STATUS_VOCAB
+    assert set(vocab["session"]) == {"dirty", "clean"}
+
+
+def test_session_initial_status_is_dirty():
+    """Sessions are born dirty; first element of ordered tuple is 'dirty' (Slice 0)."""
+    assert rm().initial_status("session") == "dirty"
+
+
+def test_session_status_vocab_order_dirty_first():
+    """dirty must be the first element so initial_status('session') == 'dirty'."""
+    assert rm().STATUS_VOCAB["session"][0] == "dirty"
+
+
+def test_session_clean_is_valid_status():
+    """clean is a valid session status post-Slice 0."""
+    m = rm()
+    sidecar = _base_sidecar_with(kind="session", status="clean")
+    result = m.validate(sidecar)
+    assert result.errors == []
+
+
+def test_session_dirty_is_valid_status():
+    """dirty is a valid session status post-Slice 0."""
+    m = rm()
+    sidecar = _base_sidecar_with(kind="session", status="dirty")
+    result = m.validate(sidecar)
+    assert result.errors == []
+
+
+def test_session_active_is_rejected():
+    """active is no longer a valid session status (Slice 0)."""
+    m = rm()
+    sidecar = _base_sidecar_with(kind="session", status="active")
+    result = m.validate(sidecar)
+    assert result.errors, "active must be rejected for session kind"
+    assert any("active" in e for e in result.errors)
+
+
+def test_session_complete_is_rejected():
+    """complete is no longer a valid session status (Slice 0)."""
+    m = rm()
+    sidecar = _base_sidecar_with(kind="session", status="complete")
+    result = m.validate(sidecar)
+    assert result.errors, "complete must be rejected for session kind"
+    assert any("complete" in e for e in result.errors)
+
+
+def test_session_shelved_is_rejected():
+    """shelved was never valid; still rejected post-Slice 0."""
+    m = rm()
+    sidecar = _base_sidecar_with(kind="session", status="shelved")
+    result = m.validate(sidecar)
+    assert result.errors, "shelved must be rejected for session kind"
+
+
+def test_session_handoff_is_rejected():
+    """handoff is not in the session vocab; rejected (Slice 0)."""
+    m = rm()
+    sidecar = _base_sidecar_with(kind="session", status="handoff")
+    result = m.validate(sidecar)
+    assert result.errors, "handoff must be rejected for session kind"
+
+
+def test_session_finalized_is_rejected():
+    """finalized is not in the session vocab; rejected (Slice 0)."""
+    m = rm()
+    sidecar = _base_sidecar_with(kind="session", status="finalized")
+    result = m.validate(sidecar)
+    assert result.errors, "finalized must be rejected for session kind"

@@ -174,98 +174,63 @@ def resolve_project(cwd: Path | None = None) -> str:
     return target.name
 
 
-_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+def _find_session_record(vault: Path, key: str | None) -> Path | None:
+    """Return the singular session record ``session/<key>.md`` for *key*, or None.
 
-# Matches the timestamp prefix and captures everything after it as the worktree.
-_STEM_WORKTREE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{4}-(.+)$")
-
-
-def _worktree_from_stem(stem: str) -> str | None:
-    """Return the worktree name encoded in a session note stem, or None."""
-    m = _STEM_WORKTREE_RE.match(stem)
-    return m.group(1) if m else None
+    The shared resolver behind :func:`find_session_note` (worktree-name key) and
+    :func:`find_session_note_by_session_id` (GUID key) — since Slice 1 a session is
+    a first-class record under the singular ``session/`` kind dir, so both keys are
+    the same direct stem lookup. The ``# session: <key>`` body header is confirmed
+    so a same-named file of a different shape is not mistaken for the capture
+    record. Returns None when *key* is empty or no matching record exists; never
+    raises.
+    """
+    if not key:
+        return None
+    header = f"# session: {key}"
+    record_md = Path(vault) / "session" / f"{key}.md"
+    try:
+        if record_md.is_file() and any(
+            line.strip() == header for line in record_md.read_text().splitlines()
+        ):
+            return record_md
+    except Exception:
+        pass
+    return None
 
 
 def find_session_note(vault: Path, worktree_name: str | None = None) -> Path | None:
-    """Return the newest matching session note in vault/sessions/, or None.
+    """Return the worktree-keyed session record in ``vault/session/``, or None.
 
-    Candidates must have a date-prefixed filename (``YYYY-MM-DD-HHMM-<worktree>.md``).
-    When *worktree_name* is given, only notes whose stem encodes exactly that
-    worktree are considered — this prevents a note from worktree ``beta``
-    being returned when the caller belongs to worktree ``alpha``.  The match
-    is done by parsing the worktree out of the stem (anchored on the timestamp
-    boundary) so ``foo`` cannot accidentally match ``super-foo``.
-    When *worktree_name* is None, returns the newest dated note overall.
-    Returns None when no matching note exists or the sessions dir is missing.
+    Since Slice 1 a session is a first-class record under the singular
+    ``session/`` kind dir, keyed by ``--session-id`` (a GUID) **or**, when no id
+    is set, the worktree name (``_resolve_session_key`` in the CLI). So the
+    worktree fallback is a direct stem lookup (see :func:`_find_session_record`).
+
+    Slice 7 retired the legacy plural ``sessions/`` reads (the date-prefixed
+    ``YYYY-MM-DD-HHMM-<worktree>.md`` frontmatter notes whose CREATE path was
+    already retired in Slice 1/2): nothing writes them and the live vault is
+    singular, so there is nothing left to scan.
+
+    Returns None when *worktree_name* is empty or no matching record exists.
     """
-    sessions_dir = Path(vault) / "sessions"
-    if not sessions_dir.is_dir():
-        return None
-
-    def _is_candidate(p: Path) -> bool:
-        if not _DATE_PREFIX_RE.match(p.name):
-            return False
-        if worktree_name is None:
-            return True
-        return _worktree_from_stem(p.stem) == worktree_name
-
-    notes = sorted(
-        (p for p in iter_note_paths(sessions_dir, recursive=True) if _is_candidate(p)),
-        key=lambda p: p.name,
-        reverse=True,
-    )
-    return notes[0] if notes else None
+    return _find_session_record(vault, worktree_name)
 
 
 def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None:
-    """Return the session note for ``session_id``, by id — cwd-independent.
+    """Return the singular session record for ``session_id``, by id — cwd-independent.
 
-    Two on-disk shapes carry the id, and both resolve here (Slice 0.5, KU1):
+    The live on-disk shape since Slice 1 is the **singular session record**
+    ``session/<id>.{md,json}`` — a first-class indexed record (``# session: <id>``
+    body header + a ``.json`` sidecar), resolved by :func:`_find_session_record`.
 
-      1. **Body-only GUID capture file** ``sessions/<id>.md`` — what
-         ``session_store.create_or_append`` writes on first capture (header
-         ``# session: <id>``, no frontmatter). This is the live capture artifact
-         the session skills target. Matched by filename stem (``<id>.md``),
-         confirmed by the ``# session: <id>`` body header so a stray file named
-         like a GUID without the header is not mistaken for a capture note.
-      2. **Frontmatter note** carrying ``session_id: <id>`` in its frontmatter
-         block — the legacy date-prefixed shape produced by
-         ``ensure_session_note``. Only the frontmatter is inspected; a
-         ``session_id:`` string in the body never counts.
+    Slice 7 retired the legacy plural ``sessions/`` reads (the pre-Slice-1
+    body-only GUID file and the date-prefixed frontmatter note): nothing writes
+    them and the live vault is singular.
 
-    A stem match (shape 1) is preferred when present — it is the exact capture
-    file. Otherwise the newest frontmatter match (shape 2) wins.
-
-    Returns None when the id is empty, the sessions dir is missing, or no note
-    matches. Never raises.
+    Returns None when the id is empty or no record matches. Never raises.
     """
-    if not session_id:
-        return None
-    sessions_dir = Path(vault) / "sessions"
-    if not sessions_dir.is_dir():
-        return None
-
-    header = f"# session: {session_id}"
-    needle = f"session_id: {session_id}"
-    frontmatter_matches: list[Path] = []
-    for p in iter_note_paths(sessions_dir, recursive=True):
-        try:
-            text = p.read_text()
-        except Exception:
-            continue
-        if not text.startswith("---"):
-            # Body-only capture file: match by stem, confirmed by the header.
-            if p.stem == session_id and any(line.strip() == header for line in text.splitlines()):
-                return p
-            continue
-        end = text.find("\n---", 3)  # close of the frontmatter block
-        front = text[:end] if end >= 0 else text
-        if any(line.strip() == needle for line in front.splitlines()):
-            frontmatter_matches.append(p)
-    if not frontmatter_matches:
-        return None
-    # Pathological: two notes share an id → prefer the newest stem.
-    return sorted(frontmatter_matches, key=lambda p: p.name, reverse=True)[0]
+    return _find_session_record(vault, session_id)
 
 
 # A `.claude/worktrees/<name>/` path segment marks a Claude Code worktree.
@@ -324,12 +289,13 @@ def resolve_session_note(
 ) -> Path | None:
     """Resolve the session note for the current session.
 
-    Order: exact session-id match (cwd-independent) → worktree-name fallback
-    (newest by filename timestamp). The id-first match covers BOTH the body-only
-    GUID capture file ``sessions/<id>.md`` (the live S1/S2 artifact) and the
-    legacy frontmatter note (see :func:`find_session_note_by_session_id`).
-    ``worktree_name`` defaults to :func:`detect_worktree_name` when not supplied.
-    Returns None when nothing resolves.
+    Order: exact session-id match (cwd-independent) → worktree-name fallback.
+    Both resolve the singular session record ``session/<key>.{md,json}`` (the
+    live capture artifact since Slice 1) — by id stem for the first, by worktree
+    stem for the fallback (see :func:`find_session_note_by_session_id` /
+    :func:`find_session_note`). ``worktree_name`` defaults to
+    :func:`detect_worktree_name` when not supplied. Returns None when nothing
+    resolves.
     """
     if session_id:
         hit = find_session_note_by_session_id(vault, session_id)

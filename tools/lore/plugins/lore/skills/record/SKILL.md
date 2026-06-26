@@ -1,6 +1,6 @@
 ---
 name: record
-description: Log ONE specific item to the vault right now — a single deliberate capture you already have in mind (this decision, this lesson, this dead-end). Orients you to the `lore record` capture surface for one item. Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson". To instead go back over everything you forgot to log this session, use /lore:checkpoint.
+description: Log ONE specific item to the vault right now — a single deliberate capture you already have in mind (this decision, this lesson, this dead-end). Orients you to the `lore record` capture surface for one item. Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson". For a batch promotion of the session's pending items, use /lore:flush.
 ---
 
 # /lore:record — Capture one deliberate item now
@@ -9,9 +9,10 @@ description: Log ONE specific item to the vault right now — a single deliberat
 want it in the vault **now** — this decision, this lesson, this dead-end. It is a
 *single deliberate capture*, not a review of the session.
 
-This is the complement of `/lore:checkpoint`: checkpoint *sweeps* the whole
-session for anything you forgot to log; `record` captures the one item you
-already know you want. If you want the sweep, use `/lore:checkpoint`.
+This is the complement of `/lore:flush`: flush *evaluates all outstanding session
+candidates* and promotes them to records in batch; `record` captures the one
+item you already know you want right now. If you want the batch evaluation,
+use `/lore:flush`.
 
 This skill is a **guide** — it orients you to the capture surface. The CLI does
 the writing.
@@ -72,6 +73,6 @@ the lighter default — it's lazy-created and travels with the session note.
 
 ## Edge cases
 
-- **You're not sure what to capture / want a full pass.** That's a *sweep*, not a
-  single record — use `/lore:checkpoint`.
+- **You want to evaluate all outstanding session candidates.** That's a batch
+  evaluation, not a single capture — use `/lore:flush`.
 - **You want to read, not write.** Use `/lore:search`.

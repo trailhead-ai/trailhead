@@ -18,6 +18,7 @@ they NEVER touch real config, state, or vault data (Axiom 6).
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -290,3 +291,26 @@ class TestInitInstallsNoHooks:
         assert after_first == after_second, (
             "lore init changed settings.json on second run (not idempotent)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Structural retirement: the harvest module + starter protocol are gone
+# (relocated from the deleted test_finish.py when finish → flush, Slice 2).
+# ---------------------------------------------------------------------------
+
+class TestHarvestModuleRetired:
+    def test_harvest_script_no_longer_exists(self):
+        assert not (SCRIPTS_DIR / "harvest.py").exists()
+
+    def test_harvest_protocol_starter_no_longer_exists(self):
+        assert not (PLUGIN_ROOT / "starter" / "harvest-protocol.md").exists()
+
+    def test_importing_harvest_module_fails(self):
+        if str(SCRIPTS_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS_DIR))
+        sys.modules.pop("harvest", None)
+        try:
+            mod = importlib.util.find_spec("harvest")
+        except ModuleNotFoundError:
+            mod = None
+        assert mod is None, "the harvest module must no longer be importable"

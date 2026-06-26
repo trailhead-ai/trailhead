@@ -111,4 +111,3 @@ def test_template_has_no_private_tokens(template_md: Path):
 # and private-token scans above still cover whatever lore skills remain.
 # ---------------------------------------------------------------------------
 
-

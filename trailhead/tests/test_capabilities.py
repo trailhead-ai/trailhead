@@ -98,13 +98,16 @@ class TestLoreInventory:
     def test_session_skills_selectable(self):
         # S6 Slice 2: the 7 per-kind capture skills (area, check-in, dead-end, decision,
         # defer, follow-up, seed) were deleted — replaced by the lore record/session CLI.
-        # S6 Slice 3 MOVED 'brainstorm' to the craft plugin. The retained
-        # session/ritual lore skills are checkpoint, finish, sync.
+        # S6 Slice 3 MOVED 'brainstorm' to the craft plugin. Slice 4 RENAMED
+        # 'finish' → 'flush' and DELETED 'checkpoint'. The retained lore skills
+        # are flush, sync, search, record, research.
         m = load_manifest(_LORE_MANIFEST)
-        for name in ("checkpoint", "finish", "sync"):
+        for name in ("flush", "sync", "search", "record", "research"):
             assert name in m.skills
             assert m.skills[name] == f"skills/{name}"
         assert "brainstorm" not in m.skills, "brainstorm moved to the craft plugin (S6 Slice 3)"
+        assert "checkpoint" not in m.skills, "checkpoint deleted (Slice 4)"
+        assert "finish" not in m.skills, "finish renamed to flush (Slice 4)"
 
     def test_sync_is_now_selectable(self):
         # sync was always-on (base) under the capability model; it has a SKILL.md
@@ -119,8 +122,8 @@ class TestLoreInventory:
         m = load_manifest(_LORE_MANIFEST)
         assert m.all_selectable() == set(m.subagents) | set(m.skills)
         assert "librarian" in m.all_selectable()
-        # S6 Slice 2: decision and other per-kind skills deleted; checkpoint retained.
-        assert "checkpoint" in m.all_selectable()
+        # Slice 4: 'checkpoint' deleted, 'finish' renamed to 'flush' — flush retained.
+        assert "flush" in m.all_selectable()
 
 
 # ---------------------------------------------------------------------------

@@ -85,11 +85,33 @@ def bootstrap_vault(vaults_root: Path, vault_path: Path | None = None) -> Path:
         # Already present — check if git init is needed.
         if default.is_dir() and not (default / ".git").is_dir():
             git_init(default)
+        _scaffold_gitignore(default)
         return default
 
     default.mkdir(parents=True, exist_ok=True)
     git_init(default)
+    _scaffold_gitignore(default)
     return default
+
+
+# Patterns a freshly-initialised vault ignores. ``*.lock`` covers the
+# ``session/<key>.lock`` flock sidecars the capture path creates: without this,
+# ``lore sync``'s ``git add -A`` (the only catch-all stage path) would commit
+# them. The flush commit path uses explicit paths and is unaffected.
+_GITIGNORE_PATTERNS = ("*.lock",)
+
+
+def _scaffold_gitignore(vault: Path) -> None:
+    """Ensure the vault carries a ``.gitignore`` covering the flock sidecars.
+
+    Idempotent: only writes when ``.gitignore`` is absent, so a user's own
+    additions are never clobbered. A missing ``.gitignore`` is the only state
+    this repairs (it does not merge into an existing one).
+    """
+    gitignore = vault / ".gitignore"
+    if gitignore.exists():
+        return
+    gitignore.write_text("\n".join(_GITIGNORE_PATTERNS) + "\n", encoding="utf-8")
 
 
 def git_init(path: Path) -> None:

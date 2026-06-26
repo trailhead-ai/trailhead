@@ -57,18 +57,60 @@ def test_all_capture_and_ritual_skills_present():
 
     S6 Slice 3 MOVED 'brainstorm' to the craft plugin. S6 Slice 5 ADDED the
     three new skills 'search' (read path / replaces recall), 'record' (single
-    deliberate capture), and 'research' (dispatch investigator/researcher), so
-    the retained lore skills are: checkpoint, finish, sync, search, record,
-    research (+ _shared, exempt).
+    deliberate capture), and 'research' (dispatch investigator/researcher).
+
+    This slice (plan Slice 4) RENAMED 'finish' → 'flush' and DELETED 'checkpoint'.
+    The retained lore skills are: flush, sync, search, record, research
+    (+ _shared, exempt).
     """
     names = {p.parent.name for p in _skill_files()}
     expected = {
-        "checkpoint",
-        "finish",
-        "sync",
-        "search",
-        "record",
-        "research",
+        "flush", "sync",
+        "search", "record", "research",
     }
     missing = expected - names
     assert not missing, f"expected skills missing from the plugin: {sorted(missing)}"
+
+
+def test_finish_renamed_to_flush_checkpoint_deleted():
+    """Plan Slice 4: 'finish' was renamed to 'flush'; 'checkpoint' was deleted.
+
+    Guard that neither the old 'finish' nor the deleted 'checkpoint' exist.
+    """
+    names = {p.parent.name for p in _skill_files()}
+    assert "finish" not in names, (
+        "finish skill must not exist — Slice 4 renamed it to 'flush'"
+    )
+    assert "checkpoint" not in names, (
+        "checkpoint skill must not exist — Slice 4 deleted it "
+        "(candidate capture is continuous via `lore session candidate`; "
+        "flush evaluates)"
+    )
+
+
+def test_brainstorm_moved_to_craft_absent_from_lore():
+    """S6 Slice 3 moved the brainstorm skill out of lore into the craft plugin.
+
+    Guard against it being accidentally re-added under lore — its home is now
+    tools/craft/plugins/craft/skills/brainstorm/.
+    """
+    names = {p.parent.name for p in _skill_files()}
+    assert "brainstorm" not in names, (
+        "brainstorm must not exist under the lore plugin — S6 Slice 3 moved it to "
+        "the craft plugin (tools/craft/plugins/craft/skills/brainstorm/)"
+    )
+
+
+def test_obsolete_per_kind_capture_skills_absent():
+    """S6 Slice 2 deleted the 7 obsolete per-kind capture skills.
+
+    These skills are replaced by the `lore record` / `lore session` CLI surface.
+    Guard against them being accidentally re-added.
+    """
+    names = {p.parent.name for p in _skill_files()}
+    deleted = {"area", "check-in", "dead-end", "decision", "defer", "follow-up", "seed"}
+    present = deleted & names
+    assert not present, (
+        f"obsolete per-kind capture skills must not exist (S6 Slice 2 deleted them): "
+        f"{sorted(present)}"
+    )

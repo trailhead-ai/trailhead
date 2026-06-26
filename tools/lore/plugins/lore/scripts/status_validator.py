@@ -8,33 +8,39 @@ against these sets so a note can never carry an off-vocabulary status. (The
 
 The canonical sets are the single source of truth for the whole plugin —
 do not invent statuses; add them here and to the scaffolded glossary.
+
+Session vocab (Slice 0): ``session`` is keyed by its singular name and carries
+``{dirty, clean}``. ``dirty`` = candidates pending; ``clean`` = no outstanding
+candidates. The old ``active``/``complete`` values are retired; the ``session→sessions``
+alias is dropped because ``session`` is now a direct CANONICAL key.
 """
 
 from __future__ import annotations
 
-# Canonical status sets per note type, keyed by the directory / plural name.
+# Canonical status sets per note type, keyed by the **singular** kind name
+# (Slice 7: vault directories and kinds standardize on singular). ``session``
+# was already singularized in Slice 0; the remaining keys
+# (plan/spec/follow-up/lesson/dead-end) were singularized here. ``deferred`` is
+# already singular-shaped; it has no live S1 kind (deferred → backlog via
+# migrate_vault) and is the lone legacy survivor, retained until a cross-user
+# scan confirms no ``deferred`` notes remain (tracked: backlog
+# ``retire-legacy-plural-taxonomy-survivors-...``).
 CANONICAL: dict[str, frozenset[str]] = {
-    "plans": frozenset({"draft", "ready", "in-progress", "complete", "superseded", "dropped"}),
-    "specs": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped"}),
-    "sessions": frozenset({"active", "complete"}),
+    "plan": frozenset({"draft", "ready", "in-progress", "complete", "superseded", "dropped"}),
+    "spec": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped"}),
+    "session": frozenset({"dirty", "clean"}),
     "deferred": frozenset({"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}),
-    "follow-ups": frozenset({"active", "resolved", "dropped"}),
-    "lessons": frozenset({"active", "superseded"}),
-    "dead-ends": frozenset({"active", "archived"}),
+    "follow-up": frozenset({"active", "resolved", "dropped"}),
+    "lesson": frozenset({"active", "superseded"}),
+    "dead-end": frozenset({"active", "archived"}),
 }
 
-# Note `type:` frontmatter is usually singular ("deferred", "session",
-# "dead-end"); directory names are the keys above. Map the singular form to
-# the canonical key so callers can pass either.
-_TYPE_ALIASES: dict[str, str] = {
-    "plan": "plans",
-    "spec": "specs",
-    "session": "sessions",
-    "deferred": "deferred",
-    "follow-up": "follow-ups",
-    "lesson": "lessons",
-    "dead-end": "dead-ends",
-}
+# Note `type:` frontmatter is singular ("deferred", "session", "dead-end"), and
+# the CANONICAL keys are now singular too, so the singular form resolves
+# directly as a CANONICAL key. The old singular→plural ``_TYPE_ALIASES`` map is
+# gone (Slice 7); only a true alias (a name that differs from its key) belongs
+# here, of which there are currently none.
+_TYPE_ALIASES: dict[str, str] = {}
 
 
 def _canonical_key(note_type: str | None) -> str | None:

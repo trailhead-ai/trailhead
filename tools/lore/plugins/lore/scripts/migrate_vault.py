@@ -29,7 +29,14 @@ Design (expanded for the KU-2 live-vault findings):
   recursive scan over the transcoded sidecar finds no ``[[`` wikilink syntax.
 - **Status mapping** normalizes legacy vocab per target kind; blob-dir statuses
   collapse to ``active`` (``STATUS_VOCAB["blob"] == ("active",)``); an
-  unclassifiable base value flags review.
+  unclassifiable base value flags review. Sessions adopt the S1 ``("dirty","clean")``
+  vocab: ``_SESSION_STATUS_REMAP`` translates the legacy ``active → dirty`` /
+  ``complete → clean`` (incl. the ``shelved → complete`` second path), and an
+  already-migrated ``dirty``/``clean`` passes through unchanged (idempotent).
+- **Session naming** keys a session by its ``session_id``; an absent id — or the
+  literal string ``"null"`` from a legacy ``session_id: null`` (YAML null parsed as
+  the string ``"null"``, KU5) — is repaired to the sanitized title slug so no
+  session lands unnamed or mis-keyed ``session/null``.
 - **Provenance**: ``created-at`` from the legacy ``date``; ``created-by`` from
   ``git log`` against the **original** path (captured before any rename — A-side
   council finding), with the current git email as the genuine-absence fallback.
@@ -41,6 +48,7 @@ Design (expanded for the KU-2 live-vault findings):
 # absent (see record_model.py's matching note). Every annotation here is a valid
 # runtime expression on 3.11+ with no forward references.
 
+import hashlib
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -172,9 +180,25 @@ STATUS_VOCAB: dict[str, tuple[str, ...]] = {
     "decision": ("active", "superseded", "dropped"),
     "lesson": ("active", "conditional"),
     "plan": ("draft", "ready", "in-progress", "complete", "superseded", "dropped"),
-    "session": ("active", "complete"),
+    "session": ("dirty", "clean"),
     "spec": ("draft", "ready", "planned", "complete", "superseded", "dropped"),
 }
+
+#: Session-kind status remap (Slice 6 / KU5). The legacy session vocab was
+#: ``("active","complete")`` — the OLD *in-vocab* values — so the generic
+#: ``_STATUS_REMAP`` (which only fires for OFF-vocab bases) never touched them and
+#: they survived migration to FAIL the new ``record_model`` validator. This map is
+#: applied to the **mapped** session status so it fires for ``active``/``complete``
+#: regardless, and — because the ``shelved`` branch also yields ``complete`` for
+#: sessions — it covers that second path too. ``dirty``/``clean`` are absent from
+#: the map, so an already-migrated record passes through unchanged (idempotent).
+_SESSION_STATUS_REMAP: dict[str, str] = {"active": "dirty", "complete": "clean"}
+
+#: Session vocab the core mapper recognizes: the NEW vocab (so an already-migrated
+#: ``dirty``/``clean`` is in-vocab and idempotent) PLUS the legacy ``active``/
+#: ``complete`` (so legacy values survive the core unchanged for the wrapper's
+#: ``_SESSION_STATUS_REMAP`` to translate, rather than being defaulted + flagged).
+_LEGACY_SESSION_VOCAB: tuple[str, ...] = ("dirty", "clean", "active", "complete")
 
 #: Legacy status base value → v1 status, applied only when the value is not
 #: already in the target kind's vocab. ``shelved`` is kind-sensitive (handled in
@@ -531,14 +555,19 @@ def transcode(legacy: LegacyRecord) -> Transcoded:
     if annotations:
         sidecar["annotations"] = annotations
 
-    # --- Session naming (name == session_id; missing → review). -------------
+    # --- Session naming (name == session_id; absent → repair from title). ----
+    # A real `session_id: null` in the legacy YAML is parsed by the bespoke reader
+    # as the STRING "null" (not Python None), which passed the truthy check and
+    # silently keyed the record `session/null` (KU5). Treat the literal "null"
+    # (case-insensitive) as effectively absent and fall back to the title-derived,
+    # sanitized slug — the same general repair used when session_id is genuinely
+    # missing, so no session lands unnamed.
     if kind == "session":
         session_id = fm.get("session_id")
-        if isinstance(session_id, str) and session_id.strip():
+        if isinstance(session_id, str) and session_id.strip() and session_id.strip().lower() != "null":
             name = session_id.strip()
         else:
-            name = ""
-            flags.append(Flag.review(f"{legacy.path}: session missing session_id"))
+            name = _session_slug(sidecar["title"])
     else:
         name = _name_from_path(legacy.path)
 
@@ -557,6 +586,21 @@ def _title_from_path(path: str) -> str:
 
 def _name_from_path(path: str) -> str:
     return Path(path).stem
+
+
+def _session_slug(title: str) -> str:
+    """Sanitize a session title into a kebab-case filename slug.
+
+    Mirrors ``record_store._kebab`` (the canonical record-naming convention):
+    lowercase, collapse runs of non-alphanumerics to a single hyphen, trim, and
+    fall back to ``note-<sha1[:6]>`` when the slug would be empty. Used to repair
+    a session whose ``session_id`` is absent or the literal ``"null"`` (KU5), so
+    the resulting name is always a valid on-disk filename.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if not slug:
+        slug = f"note-{hashlib.sha1(title.encode()).hexdigest()[:6]}"
+    return slug
 
 
 def _iso_datetime(value: Any) -> str | None:
@@ -609,8 +653,32 @@ def _map_status(value: Any, kind: str) -> tuple[str, str | None, str | None]:
     Compound/prose-suffixed values (``base | suffix — prose``) keep the base and
     move the prose to a breadcrumb. Blob-dir kinds collapse everything to the only
     vocab value. An unclassifiable base flags review.
+
+    Session vocab adoption (Slice 6 / KU5): the private session vocab is now
+    ``("dirty","clean")``, but legacy session records carry ``active``/``complete``
+    (and ``shelved`` resolves to ``complete``). Those are OFF the new vocab, so the
+    core mapping below would default + flag them. ``_SESSION_STATUS_REMAP`` is
+    applied to the **mapped** session status so it fires for ``active``/``complete``
+    and the ``shelved → complete`` second path alike; an already-migrated
+    ``dirty``/``clean`` is in-vocab and passes through unchanged (idempotent).
     """
-    vocab = STATUS_VOCAB[kind]
+    status, prose, flag = _map_status_core(value, kind)
+    if kind == "session" and status in _SESSION_STATUS_REMAP:
+        status = _SESSION_STATUS_REMAP[status]
+        flag = None
+    return status, prose, flag
+
+
+def _map_status_core(value: Any, kind: str) -> tuple[str, str | None, str | None]:
+    """Kind-generic legacy-status mapping (see :func:`_map_status` for the wrapper).
+
+    For sessions this resolves against the **legacy** session intent — ``active``,
+    ``complete``, and ``shelved → complete`` — which :func:`_map_status` then
+    translates into the new ``dirty``/``clean`` vocab.
+    """
+    # Sessions are mapped against their legacy vocab so the legacy values survive
+    # to the remap step; the wrapper translates the result into the new vocab.
+    vocab = _LEGACY_SESSION_VOCAB if kind == "session" else STATUS_VOCAB[kind]
     default = vocab[0]
 
     if value is None:
