@@ -11,14 +11,16 @@ from conftest import load_script
 
 
 def test_canonical_vocab_matches_source():
-    """The canonical sets match the reconciled vocabulary (source validator +
-    glossary's `scheduled` for deferred).
+    """The canonical sets match the reconciled vocabulary.
 
     Slice 0 updated the session vocab to {dirty, clean} and moved it to the
     singular key 'session'. Slice 2 retired `shelved` and the legacy
     `finalized`/`handoff` session terminal statuses — none are canonical.
-    Slice 7 singularized the remaining CANONICAL keys (plan/spec/follow-up/
-    lesson/dead-end); `deferred` is already singular-shaped and retained.
+    Slice 7 singularized the remaining CANONICAL keys and retired the legacy
+    plural-taxonomy kinds ("deferred", "follow-up", "dead-end"): their living
+    folders and one-shot migrations are gone, and they now consolidate into
+    `backlog`/`lesson` sidecar records (validated by record_model), not inline
+    frontmatter — so they no longer appear here.
     """
     sv = load_script("status_validator")
     assert sv.CANONICAL["plan"] == frozenset(
@@ -28,27 +30,25 @@ def test_canonical_vocab_matches_source():
         {"draft", "ready", "planned", "complete", "superseded", "dropped"}
     )
     assert sv.CANONICAL["session"] == frozenset({"dirty", "clean"})
-    assert sv.CANONICAL["deferred"] == frozenset(
-        {"open", "scheduled", "resolved", "dropped", "graduated", "resurfaced"}
-    )
-    assert sv.CANONICAL["follow-up"] == frozenset({"active", "resolved", "dropped"})
     assert sv.CANONICAL["lesson"] == frozenset({"active", "superseded"})
-    assert sv.CANONICAL["dead-end"] == frozenset({"active", "archived"})
+    # The retired legacy kinds are gone — their types are now unconstrained.
+    assert "deferred" not in sv.CANONICAL
+    assert "follow-up" not in sv.CANONICAL
+    assert "dead-end" not in sv.CANONICAL
 
 
 def test_is_valid_status_accepts_canonical():
     sv = load_script("status_validator")
-    assert sv.is_valid_status("deferred", "open") is True
-    assert sv.is_valid_status("deferred", "scheduled") is True
     assert sv.is_valid_status("session", "dirty") is True
     assert sv.is_valid_status("session", "clean") is True
     assert sv.is_valid_status("plan", "in-progress") is True
+    assert sv.is_valid_status("lesson", "superseded") is True
 
 
 def test_is_valid_status_rejects_noncanonical():
     sv = load_script("status_validator")
-    assert sv.is_valid_status("deferred", "active") is False
-    assert sv.is_valid_status("follow-up", "open") is False
+    assert sv.is_valid_status("session", "open") is False
+    assert sv.is_valid_status("plan", "active") is False
     assert sv.is_valid_status("lesson", "complete") is False
 
 
@@ -63,11 +63,24 @@ def test_is_valid_status_keys_are_singular_only():
     """
     sv = load_script("status_validator")
     # singular type form resolves to the real vocab
-    assert sv.is_valid_status("dead-end", "active") is True
-    assert sv.is_valid_status("dead-end", "bogus") is False
+    assert sv.is_valid_status("lesson", "active") is True
+    assert sv.is_valid_status("lesson", "bogus") is False
     # plural directory form is no longer a tracked key → untracked → unconstrained
-    assert sv.permitted_statuses("dead-ends") is None
-    assert sv.is_valid_status("dead-ends", "anything") is True
+    assert sv.permitted_statuses("lessons") is None
+    assert sv.is_valid_status("lessons", "anything") is True
+
+
+def test_retired_legacy_types_are_unconstrained():
+    """The retired legacy plural-taxonomy types are no longer tracked, so any
+    status passes (untracked → unconstrained), including a once-invalid value."""
+    sv = load_script("status_validator")
+    assert sv.is_valid_status("deferred", "open") is True
+    assert sv.is_valid_status("deferred", "anything") is True
+    assert sv.is_valid_status("follow-up", "whatever") is True
+    assert sv.is_valid_status("dead-end", "whatever") is True
+    assert sv.permitted_statuses("deferred") is None
+    assert sv.permitted_statuses("follow-up") is None
+    assert sv.permitted_statuses("dead-end") is None
 
 
 def test_is_valid_status_unknown_type_is_valid():
@@ -79,7 +92,8 @@ def test_is_valid_status_unknown_type_is_valid():
 
 def test_permitted_statuses_lists_canonical():
     sv = load_script("status_validator")
-    assert sorted(sv.permitted_statuses("follow-up")) == ["active", "dropped", "resolved"]
+    assert sorted(sv.permitted_statuses("session")) == ["clean", "dirty"]
+    assert sorted(sv.permitted_statuses("lesson")) == ["active", "superseded"]
     assert sv.permitted_statuses("nonexistent") is None
 
 

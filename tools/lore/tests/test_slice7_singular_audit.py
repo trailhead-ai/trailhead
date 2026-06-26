@@ -76,38 +76,16 @@ _PREFIX_LIT_RE = re.compile(
 #
 # Every entry is (relative_path, reason). A flagged line in an allowlisted file
 # is tolerated; nothing else is. Keep this list TIGHT — when a survivor is
-# retired (see the two tracked backlog follow-ups), delete its entry so the
-# audit re-asserts singular across the freed surface.
-# ---------------------------------------------------------------------------
-# NOTE on migrate_vault.py (KU4 #9): its KIND_BY_DIR is the migration's
-# INTENTIONAL legacy-input map (plural on-disk dir -> singular record kind) and
-# must never be singularized. It needs NO allowlist entry here because its plural
-# names are dict-KEY literals (`"dead-ends": "lesson"`), not the *path-like*
-# shapes this audit flags (a `/ "x"` path-join or a `"x/"` prefix). The audit is
-# scoped to directory-reference literals on purpose, so KIND_BY_DIR is exempt by
-# construction. (Verified: migrate_vault.py has zero path-like plural hits.)
-# NOTE on regenerate_indices.py (KU4 #3): it is LIVE-but-harmless (its JOBS dirs
-# are absent from the S1 vault and main() skips absent dirs) and was kept wired
-# this slice; retirement is tracked as a backlog follow-up (post-_index.md
-# sunset). It needs NO allowlist entry because its plural names are JOBS-config
-# tuple data feeding a *variable* path-join (`VAULT / folder_name`), not the
-# path-like literal shapes this audit flags. (Verified: zero path-like hits.)
-_ALLOWLIST: dict[str, str] = {
-    # KU4 #4 / tracked follow-up: the legacy `deferred` status key has no live
-    # S1 kind (deferred -> backlog via migrate_vault). follow_up_due.py reads
-    # follow-ups/ but has no production wiring. migrate_radar_to_follow_ups.py
-    # is a one-shot legacy migration. All three are kept-and-tracked rather than
-    # silently retired (backlog: retire-legacy-plural-taxonomy-survivors-...).
-    "scripts/follow_up_due.py": (
-        "Orphaned legacy follow-ups/ reader (no production wiring); KU4 #4 said "
-        "keep it working. Retirement tracked in backlog "
-        "(retire-legacy-plural-taxonomy-survivors-...)."
-    ),
-    "scripts/migrate_radar_to_follow_ups.py": (
-        "One-shot legacy radar -> follow-ups/ migration. Retirement tracked in "
-        "backlog (retire-legacy-plural-taxonomy-survivors-...)."
-    ),
-}
+# retired, delete its entry so the audit re-asserts singular across the freed
+# surface.
+#
+# The legacy plural-taxonomy survivors KU4 #4 had kept-and-tracked
+# (follow_up_due.py, migrate_radar_to_follow_ups.py, migrate_vault.py and the
+# `deferred`/`follow-up`/`dead-end` status keys) were RETIRED by the
+# retire-legacy-plural-taxonomy-survivors follow-up — their files are deleted and
+# the status keys are gone from CANONICAL — so the allowlist is now empty and the
+# audit asserts singular across the whole tree.
+_ALLOWLIST: dict[str, str] = {}
 
 
 def _code_files():
@@ -178,16 +156,22 @@ class TestSingularDirAudit:
     def test_status_validator_keys_are_singular(self):
         """status_validator CANONICAL exposes singular kind keys (KU4 #4).
 
-        The live kinds (plan/spec/follow-up/lesson/dead-end) resolve as singular
-        direct keys; the legacy `deferred` key is the only plural-shaped survivor
-        (tracked for retirement).
+        The live kinds (plan/spec/lesson/session) resolve as singular direct
+        keys. The legacy `deferred`/`follow-up`/`dead-end` kinds were retired
+        (consolidated into backlog/lesson sidecar records, validated by
+        record_model) so they no longer resolve here.
         """
         sv = load_script("status_validator")
-        for kind in ("plan", "spec", "follow-up", "lesson", "dead-end", "session"):
+        for kind in ("plan", "spec", "lesson", "session"):
             assert sv.permitted_statuses(kind) is not None, (
                 f"singular kind {kind!r} should resolve in status_validator"
             )
-        # No plural live key survives in CANONICAL (deferred is exempt/tracked).
+        # The retired legacy kinds are unconstrained (no CANONICAL entry).
+        for retired in ("deferred", "follow-up", "dead-end"):
+            assert sv.permitted_statuses(retired) is None, (
+                f"retired kind {retired!r} should no longer resolve"
+            )
+        # No plural live key survives in CANONICAL.
         plural_live = {"plans", "specs", "follow-ups", "lessons", "dead-ends", "sessions"}
         assert not (plural_live & set(sv.CANONICAL)), (
             f"plural CANONICAL keys still present: {plural_live & set(sv.CANONICAL)}"
