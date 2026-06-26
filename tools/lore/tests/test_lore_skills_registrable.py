@@ -49,19 +49,18 @@ def test_all_capture_and_ritual_skills_present():
 
     Note: 'subsystem' was renamed to 'area'; 'vault-sync' was renamed to 'sync';
     'finished' was renamed to 'finish'; the watchlist skill was renamed to
-    'follow-up'; its polling companion was renamed to 'check-in'. Slice 7
-    DELETED the 'reflect', 'tend'/'review', and 'ping' skills entirely.
-    S6 Slice 2 DELETED the 7 obsolete per-kind capture skills: 'area',
-    'check-in', 'dead-end', 'decision', 'defer', 'follow-up', 'seed'.
-    These are replaced by the `lore record` / `lore session` CLI surface.
+    'follow-up'; its polling companion was renamed to 'check-in'. The 'reflect',
+    'tend'/'review', and 'ping' skills were deleted entirely. The 7 obsolete
+    per-kind capture skills were also deleted: 'area', 'check-in', 'dead-end',
+    'decision', 'defer', 'follow-up', 'seed'. These are replaced by the
+    `lore record` / `lore session` CLI surface.
 
-    S6 Slice 3 MOVED 'brainstorm' to the craft plugin. S6 Slice 5 ADDED the
-    three new skills 'search' (read path / replaces recall), 'record' (single
-    deliberate capture), and 'research' (dispatch investigator/researcher).
+    'brainstorm' moved to the craft plugin. Three new skills were added:
+    'search' (read path / replaces recall), 'record' (single deliberate
+    capture), and 'research' (dispatch investigator/researcher).
 
-    This slice (plan Slice 4) RENAMED 'finish' → 'flush' and DELETED 'checkpoint'.
-    The retained lore skills are: flush, sync, search, record, research
-    (+ _shared, exempt).
+    'finish' was renamed to 'flush' and 'checkpoint' deleted. The retained
+    lore skills are: flush, sync, search, record, research (+ _shared, exempt).
     """
     names = {p.parent.name for p in _skill_files()}
     expected = {

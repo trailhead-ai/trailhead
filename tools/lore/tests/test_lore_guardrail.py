@@ -1,12 +1,12 @@
-"""Tests for Slice 3, S5: the vault write-protection guardrail.
+"""Tests for the vault write-protection guardrail.
 
 The guardrail is a path-canonicalizing PreToolUse hook (``hooks/vault-guard.py``)
 that denies Write/Edit targeting paths under ``$XDG_STATE_HOME/lore/vaults/**``
 **and** the resolved real target of the ``default`` symlink. Symlink resolution
-happens at hook EXECUTION time, not install time (council Reliability), so a
+happens at hook EXECUTION time, not install time, so a
 symlink retargeted after ``lore init`` is always covered.
 
-Covers every bullet of the Slice 3 test contract:
+Covers the test contract:
   - A simulated Write under ``…/vaults/**`` is DENIED (exit 2); a Write outside
     is ALLOWED (exit 0).
   - Mandatory symlink case: with ``default`` a symlink to an arbitrary real dir,
@@ -17,7 +17,7 @@ Covers every bullet of the Slice 3 test contract:
     preserved.
   - ``--local`` installs the guardrail into the project settings file.
 
-KU1 (VALIDATED, Slice 0): deny = exit code 2 (stderr carries the reason; stdout
+Deny = exit code 2 (stderr carries the reason; stdout
 ignored). The vault root(s) are passed via the ``LORE_VAULT_GUARD_ROOT`` env var
 (colon-separated). The hook ``os.path.realpath``s both target and roots.
 
@@ -64,7 +64,7 @@ def _make_payload(file_path: str, tool_name: str = "Write") -> str:
 
 
 # The runtime guard reads the vault root list from LORE_VAULT_GUARD_ROOT split on
-# NEWLINE (fix 4 — a byte that cannot appear in a POSIX path, so a vault path
+# NEWLINE (a byte that cannot appear in a POSIX path, so a vault path
 # containing a literal ':' is not corrupted).
 GUARD_ROOT_DELIM = "\n"
 
@@ -262,12 +262,12 @@ class TestGuardHookSymlinkResolution:
 
 
 # ===========================================================================
-# 2b. Security-audit fixes (Slice 3 hardening, S5)
+# 2b. Security-audit fixes (hardening)
 # ===========================================================================
 
 
 class TestGuardToolCoverage:
-    """Fix 1: MultiEdit/NotebookEdit must not bypass the matcher.
+    """MultiEdit/NotebookEdit must not bypass the matcher.
 
     The guard extracts the target from ``tool_input.file_path`` OR
     ``tool_input.notebook_path`` (whichever is present), so a MultiEdit
@@ -328,7 +328,7 @@ class TestGuardToolCoverage:
 
 
 class TestGuardUnsetRootWarns:
-    """Fix 2: an empty/unset LORE_VAULT_GUARD_ROOT must warn on stderr while
+    """An empty/unset LORE_VAULT_GUARD_ROOT must warn on stderr while
     still exiting 0 — converting silent mis-protection into an observable signal.
     """
 
@@ -360,7 +360,7 @@ class TestGuardUnsetRootWarns:
 
 
 class TestGuardCaseInsensitiveBypass:
-    """Fix 3: ``os.path.realpath`` preserves input case, so on a case-insensitive
+    """``os.path.realpath`` preserves input case, so on a case-insensitive
     FS an alternate-case spelling evades the prefix check. The guard casefolds
     both the resolved target and the resolved root before comparing.
     """
@@ -382,7 +382,7 @@ class TestGuardCaseInsensitiveBypass:
 
 
 class TestGuardColonInPath:
-    """Fix 4: the root list delimiter is a NEWLINE, not ``os.pathsep`` (``:``),
+    """The root list delimiter is a NEWLINE, not ``os.pathsep`` (``:``),
     so a vault root whose path contains a literal ':' still guards correctly.
     """
 
@@ -407,7 +407,7 @@ class TestGuardColonInPath:
 
 
 class TestGuardDocstringScope:
-    """Fixes 6 & 7: accurate comment on the no-path allow branch, and an explicit
+    """Accurate comment on the no-path allow branch, and an explicit
     accepted-out-of-scope note for Bash-mediated writes.
     """
 
@@ -551,7 +551,7 @@ class TestInitInstallsGuardrail:
         )
 
     def test_init_guard_root_uses_newline_delimiter(self, tmp_path):
-        """Fix 4: the install side must join the root list on NEWLINE (not ':'),
+        """The install side must join the root list on NEWLINE (not ':'),
         so a vault path containing a literal ':' is not corrupted. The value
         covers both the vaults dir and vaults/default, so it must be multi-entry."""
         state, config, home = _dirs(tmp_path)
@@ -570,7 +570,7 @@ class TestInitInstallsGuardrail:
         assert str(default_link) in parts
 
     def test_init_matcher_covers_multiedit_and_notebookedit(self, tmp_path):
-        """Fix 1: the PreToolUse matcher must also cover MultiEdit and NotebookEdit."""
+        """The PreToolUse matcher must also cover MultiEdit and NotebookEdit."""
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
@@ -600,7 +600,7 @@ class TestInitInstallsGuardrail:
         )
 
     def test_init_adds_symmetric_write_and_edit_deny(self, tmp_path):
-        """Fix 5: the static deny must cover both Write( and Edit( over vaults/**,
+        """The static deny must cover both Write( and Edit( over vaults/**,
         each anchored with the // double-slash absolute grammar."""
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
@@ -625,7 +625,7 @@ class TestInitInstallsGuardrail:
         assert len(guard_cmds) == 1, f"re-run duplicated the guard entry: {guard_cmds!r}"
         deny = data.get("permissions", {}).get("deny", [])
         vault_denies = [r for r in deny if "vaults" in r]
-        # Two rules expected (Write + Edit, fix 5); re-run must not duplicate either.
+        # Two rules expected (Write + Edit); re-run must not duplicate either.
         assert len(vault_denies) == 2, f"re-run changed the deny rules: {vault_denies!r}"
         assert len(set(vault_denies)) == 2, f"re-run duplicated a deny rule: {vault_denies!r}"
 
@@ -662,7 +662,7 @@ class TestInitInstallsGuardrail:
 
     def test_init_aborts_cleanly_on_corrupt_settings(self, tmp_path):
         """A present-but-corrupt settings file → clean `error:` + nonzero, no traceback
-        (mirrors the Slice 1 config-seed pattern; settings_writer raises ValueError)."""
+        (mirrors the config-seed pattern; settings_writer raises ValueError)."""
         state, config, home = _dirs(tmp_path)
         settings = home / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True, exist_ok=True)

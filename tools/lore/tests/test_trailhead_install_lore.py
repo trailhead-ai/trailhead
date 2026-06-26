@@ -1,6 +1,6 @@
-"""Lore-side tests for Slice 5, S5 — ``trailhead install`` integration prep.
+"""Lore-side tests for ``trailhead install`` integration prep.
 
-Covers the lore half of the Slice 5 contract:
+Covers the lore half of the contract:
   - ``lore init`` with an UNSET git identity (no ``$LORE_EMAIL``, empty
     ``git config --global user.email``) still exits 0 (bootstrap succeeds) AND
     prints a one-line advisory **to stderr** (so it survives even if
@@ -111,7 +111,7 @@ def test_init_unset_identity_emits_advisory_to_stderr(tmp_path):
 def test_init_unset_identity_advisory_not_on_stdout(tmp_path):
     state, config, home = _dirs(tmp_path)
     res = _run(["init"], state=state, config=config, home=home, identity=None)
-    # The identity advisory must NOT be on stdout (council Advocate/Security):
+    # The identity advisory must NOT be on stdout:
     # trailhead may filter lore stdout, so the warning belongs on stderr only.
     assert "user.email" not in res.stdout
 

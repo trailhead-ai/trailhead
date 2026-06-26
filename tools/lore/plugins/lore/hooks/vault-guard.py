@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vault write-protection PreToolUse guard (Slice 3, S5).
+"""Vault write-protection PreToolUse guard.
 
 Claude Code invokes this hook before every file-mutating tool call (matcher
 ``Edit|Write|MultiEdit|NotebookEdit``). It reads the PreToolUse JSON payload from
@@ -11,11 +11,11 @@ The write target is read from ``tool_input.file_path`` (Edit/Write/MultiEdit) OR
 ``tool_input.notebook_path`` (NotebookEdit), whichever is present — the guard
 treats both keys as the path source so no covered tool can slip a path past it.
 
-Deny mechanism (KU1, VALIDATED Slice 0): **exit code 2**. Claude Code treats a
+Deny mechanism: **exit code 2**. Claude Code treats a
 nonzero exit of exactly 2 as a hard block and shows this hook's stderr to the
 model as the reason; stdout is ignored. Exit 0 = allow / defer.
 
-Execution-time canonicalization (council Reliability): the real paths are
+Execution-time canonicalization: the real paths are
 resolved on EVERY invocation, never snapshotted at install time. So if the
 ``default`` vault is a symlink that the user retargets after ``lore init``, the
 guard always covers the symlink's *current* real target — the deny set is never
@@ -43,7 +43,7 @@ Accepted out-of-scope (no code fix possible): ``Bash``-mediated writes to the
 vault (``> file``, ``tee``, ``sed -i``, ``cp``, ``mv``) are opaque at PreToolUse
 time — they carry no ``file_path`` and Bash is not in the matcher — so they are
 NOT covered by this runtime hook. They are covered only by the agent-rules
-prohibition (Slice 4).
+prohibition.
 
 Fail-open posture: a malformed stdin payload or any unexpected error allows the
 tool call (exit 0) rather than blocking every covered call in the session. The

@@ -1,4 +1,4 @@
-"""Slice 1 tests: shared-layer discovery from the group's camp config.
+"""Tests for shared-layer discovery from the group's camp config.
 
 Test contract (all must RED before implementation, GREEN after):
 
@@ -7,14 +7,14 @@ Test contract (all must RED before implementation, GREEN after):
 2. no group config dir → [personal], no raise.
 3. group with no [[shared_vaults]] → [personal].
 4. cwd in no group → [personal] (graceful single-personal fallback).
-5. camp absent (simulated ImportError) → [personal], no raise (B-1/D20).
-6. malformed-but-valid-TOML group config → [personal], no raise (C-3).
+5. camp absent (simulated ImportError) → [personal], no raise.
+6. malformed-but-valid-TOML group config → [personal], no raise.
 7. [[shared_vaults]] root that doesn't exist → omitted + named stderr line;
    remaining layers resolve.
-8. shared name of '../evil' → named error, that layer dropped, the rest survive (A-4).
-9. shared root that resolves to same path as personal root → dropped + stderr (A-4).
-10. relative root in the TOML resolves relative to TOML file location, not cwd (A-4).
-11. two groups claiming the cwd → [personal] + stderr overlap warning (C-4 recall degrade).
+8. shared name of '../evil' → named error, that layer dropped, the rest survive.
+9. shared root that resolves to same path as personal root → dropped + stderr.
+10. relative root in the TOML resolves relative to TOML file location, not cwd.
+11. two groups claiming the cwd → [personal] + stderr overlap warning (recall degrade).
 """
 
 from __future__ import annotations
@@ -224,13 +224,13 @@ class TestGracefulFallback:
 
 
 # ---------------------------------------------------------------------------
-# 5. camp absent → [personal], no raise (B-1/D20)
+# 5. camp absent → [personal], no raise
 # ---------------------------------------------------------------------------
 
 
 class TestCampAbsent:
     def test_camp_import_error_returns_personal_only(self, tmp_path: Path) -> None:
-        """camp ImportError → [personal], no raise (B-1/D20)."""
+        """camp ImportError → [personal], no raise."""
         m = _layers()
 
         personal_root = tmp_path / "personal-vault"
@@ -256,13 +256,13 @@ class TestCampAbsent:
 
 
 # ---------------------------------------------------------------------------
-# 6. Malformed group config → [personal], no raise (C-3)
+# 6. Malformed group config → [personal], no raise
 # ---------------------------------------------------------------------------
 
 
 class TestMalformedConfig:
     def test_malformed_group_config_returns_personal_only(self, tmp_path: Path, capsys) -> None:
-        """Malformed group config (missing group.name) → [personal], no raise (C-3)."""
+        """Malformed group config (missing group.name) → [personal], no raise."""
         m = _layers()
 
         personal_root = tmp_path / "personal-vault"
@@ -360,13 +360,13 @@ class TestMissingSharedRoot:
 
 
 # ---------------------------------------------------------------------------
-# 8. Bad layer name (../evil) → dropped + named stderr (A-4)
+# 8. Bad layer name (../evil) → dropped + named stderr
 # ---------------------------------------------------------------------------
 
 
 class TestConfinementViolations:
     def test_bad_shared_name_dropped_with_stderr(self, tmp_path: Path, capsys) -> None:
-        """A [[shared_vaults]] name of '../evil' → that layer dropped + named stderr (A-4)."""
+        """A [[shared_vaults]] name of '../evil' → that layer dropped + named stderr."""
         m = _layers()
 
         personal_root = tmp_path / "personal-vault"
@@ -394,7 +394,7 @@ class TestConfinementViolations:
         assert captured.err  # named error
 
     def test_bad_name_dropped_but_good_name_survives(self, tmp_path: Path, capsys) -> None:
-        """Bad name dropped; good-name vault in same config survives (A-4)."""
+        """Bad name dropped; good-name vault in same config survives."""
         m = _layers()
 
         personal_root = tmp_path / "personal-vault"
@@ -428,13 +428,13 @@ class TestConfinementViolations:
 
 
 # ---------------------------------------------------------------------------
-# 9. Shared root resolves to same path as personal root → dropped + stderr (A-4)
+# 9. Shared root resolves to same path as personal root → dropped + stderr
 # ---------------------------------------------------------------------------
 
 
 class TestPromoteToSelfCollision:
     def test_shared_root_same_as_personal_root_dropped(self, tmp_path: Path, capsys) -> None:
-        """Shared root == personal root → dropped + stderr collision warning (A-4)."""
+        """Shared root == personal root → dropped + stderr collision warning."""
         m = _layers()
 
         personal_root = tmp_path / "my-vault"
@@ -462,7 +462,7 @@ class TestPromoteToSelfCollision:
 
 
 # ---------------------------------------------------------------------------
-# 10. Relative root resolves relative to TOML file location (A-4)
+# 10. Relative root resolves relative to TOML file location
 # ---------------------------------------------------------------------------
 
 
@@ -511,13 +511,13 @@ class TestRelativeRootResolution:
 
 
 # ---------------------------------------------------------------------------
-# 11. Two groups claiming the cwd → [personal] + stderr overlap warning (C-4)
+# 11. Two groups claiming the cwd → [personal] + stderr overlap warning
 # ---------------------------------------------------------------------------
 
 
 class TestOverlapDegradation:
     def test_two_groups_claim_cwd_degrades_to_personal(self, tmp_path: Path, capsys) -> None:
-        """Two groups claiming cwd → [personal] + stderr warning (C-4 recall degrade)."""
+        """Two groups claiming cwd → [personal] + stderr warning (recall degrade)."""
         m = _layers()
 
         personal_root = tmp_path / "personal-vault"

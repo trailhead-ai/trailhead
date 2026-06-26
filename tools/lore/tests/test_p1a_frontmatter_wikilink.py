@@ -1,4 +1,4 @@
-"""P1-A tests: frontmatter block-style list parsing + wikilink unwrapping.
+"""Tests for frontmatter block-style list parsing + wikilink unwrapping.
 
 All fixtures use SYNTHETIC vocabulary (synth-alpha, synth-tool, synth-spec-slug,
 etc.) per the public-repo fixture discipline axiom — never real brain content.
@@ -12,7 +12,7 @@ Test contract (all must fail before the fix, pass after):
   (full path, NOT slug-reduced, NOT a list)
 - Bare-slug forms (inline [a, b] and block - a) unchanged (regression guard)
 
-(The end-to-end `recall_areas` overlap cases were removed in Slice 5 when the
+(The end-to-end `recall_areas` overlap cases were removed when the
 recall command path was retired; membership is now an index-projection property
 covered by test_index_projection.py.)
 """

@@ -1,10 +1,9 @@
-"""Slice 2 (S4) tests: vault resolution algorithm — ``vault_resolve.py``.
+"""Tests for the vault resolution algorithm — ``vault_resolve.py``.
 
-Covers the Slice 2 test contract from the S4 plan
-(``2026-06-18-lore-layered-vaults-s4.md``):
+Covers the test contract:
 
-- Four worked examples (a–d) from the spec's "Worked resolution acceptance tests"
-  section, using the spec's exact worked config as a fixture.
+- Four worked resolution examples (a–d), using a representative config as a
+  fixture.
 - (a) no scopes → default.
 - (b) ``--team marketing`` with no matching vault → default (fall-through).
 - (c) only flag-supplied scopes participate (a non-supplied scope is absent from
@@ -16,7 +15,7 @@ Covers the Slice 2 test contract from the S4 plan
 - Highest-precedence selection among multiple eligibles.
 - Default floor when all higher scopes ineligible.
 - Eligible set never empty (totality invariant).
-- 3-scope / 2-ineligible fall-through (Reliability hardening).
+- 3-scope / 2-ineligible fall-through.
 """
 
 from conftest import load_script
@@ -27,7 +26,7 @@ def vr():
 
 
 # ---------------------------------------------------------------------------
-# Spec's worked config fixture (authoritative from the spec)
+# Worked config fixture
 # ---------------------------------------------------------------------------
 #
 # Config used in all worked-example tests:
@@ -55,7 +54,7 @@ def _make_vault(name, scope, records=None, shared=False):
 
 
 def _spec_config():
-    """Return the spec's worked config as a list[Vault]."""
+    """Return the worked config as a list[Vault]."""
     return [
         _make_vault("default", "default"),
         _make_vault("trailhead-ai_trailhead", "repo", records=["decision", "spec", "plan"]),
@@ -227,7 +226,7 @@ def test_totality_default_floor_always_eligible():
 
 
 # ---------------------------------------------------------------------------
-# Reliability hardening: 3-scope / 2-ineligible fall-through
+# 3-scope / 2-ineligible fall-through
 # ---------------------------------------------------------------------------
 
 

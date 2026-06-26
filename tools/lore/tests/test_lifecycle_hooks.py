@@ -1,15 +1,15 @@
-"""Slice 4 tests: session lifecycle hooks.
+"""Tests for session lifecycle hooks.
 
 Covers (TDD — written before the hooks):
 - sessions.ensure_session_note: creates a note with valid `session` frontmatter
   and the five required body headings; resumes a note modified inside the window.
 - permission-log.py: appends an entry.
 
-Slice 2, S5 (F5): the SessionStart hook and WorktreeRemove hook were deleted;
+The SessionStart hook and WorktreeRemove hook were deleted;
 their test coverage was removed here accordingly (lore is fully pull — orientation
 lives in agent-rules).
 
-Slice 1 (lore-agent-interface): the PostToolUse harvest-candidates hook was
+The PostToolUse harvest-candidates hook was
 deleted; lore installs zero push hooks. harvest-candidates.py is gone and
 hooks.json carries no PostToolUse entry.
 """
@@ -52,7 +52,7 @@ class TestPermissionLog:
 
 
 # ---------------------------------------------------------------------------
-# hooks.json registration (Slice 1, lore-agent-interface: zero push hooks)
+# hooks.json registration (zero push hooks)
 # ---------------------------------------------------------------------------
 
 class TestHooksJson:
@@ -88,10 +88,10 @@ class TestHooksJson:
 
 
 # ---------------------------------------------------------------------------
-# Slice 7: the legacy plural-``sessions/`` finders (sessions.py
+# The legacy plural-``sessions/`` finders (sessions.py
 # session_note_path / all_session_notes_for_worktree / sweep_orphan_skeletons)
-# were retired with the module — no production caller remained after Slice 1/2
-# moved capture to the singular ``session/`` record. The nested-name-collision
+# were retired with the module — no production caller remained after capture
+# moved to the singular ``session/`` record. The nested-name-collision
 # guard those finders carried is now structural: the singular resolver does an
 # exact-stem lookup (``session/<key>.md``), so worktree ``foo`` can never match
 # ``super-foo`` by construction (covered in test_session_note_resolution.py).

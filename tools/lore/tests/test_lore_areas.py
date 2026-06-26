@@ -1,4 +1,4 @@
-"""Slice 1 — `lore areas` on-demand area lister.
+"""`lore areas` on-demand area lister.
 
 Test contract (TDD — written BEFORE cmd_areas exists):
   1. Vault with 2 areas → stdout contains both area names, one-liners, keywords.
@@ -6,7 +6,7 @@ Test contract (TDD — written BEFORE cmd_areas exists):
      no traceback.
   3. Unresolvable vault → stderr one-liner AND a degraded stdout line, exit 0.
 
-The command must follow the never-fail D-1 contract that cmd_recall already uses.
+The command must follow the never-fail contract that cmd_recall already uses.
 """
 
 from __future__ import annotations
@@ -183,8 +183,8 @@ class TestAreasWithContent:
         assert "Traceback" not in stdout
 
     def test_stdout_contains_lore_search_instruction(self, tmp_path):
-        """render_area_menu includes a 'lore search' instruction (Slice 5 cutover:
-        the per-area lookup is `lore search 'area:<name>'`, not `lore recall`)."""
+        """render_area_menu includes a 'lore search' instruction (the per-area
+        lookup is `lore search 'area:<name>'`, not `lore recall`)."""
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth", ["oauth"], summary="Auth flows")
 
@@ -234,13 +234,13 @@ class TestAreasEmpty:
 
 
 # ---------------------------------------------------------------------------
-# Tests: unresolvable vault (D-1 degradation contract)
+# Tests: unresolvable vault (degradation contract)
 # ---------------------------------------------------------------------------
 
 
 class TestAreasUnresolvableVault:
     def test_exit_code_is_zero(self, tmp_path):
-        """Vault resolution failure must still exit 0 (D-1)."""
+        """Vault resolution failure must still exit 0."""
         bad_vault = str(tmp_path / "nonexistent" / "vault")
 
         _, _, rc = _run_areas(bad_vault)

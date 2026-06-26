@@ -1,4 +1,4 @@
-"""Slice 0 tests: VaultLayer model, resolve_layers(), layer_for_path(),
+"""Tests for the VaultLayer model, resolve_layers(), layer_for_path(),
 _bootstrap.ensure_trailhead_importable(), and confinement helpers.
 
 Test contract (all must RED before implementation, GREEN after):
@@ -7,12 +7,12 @@ Test contract (all must RED before implementation, GREEN after):
    kind="personal", root == resolve_vault(); with $LORE_VAULT unset → ~/lore default.
 2. VaultLayer is frozen/immutable; trusted defaults from kind (personal→True).
 3. layer_for_path maps a path under a root to that layer; under no root → None;
-   a symlinked path resolving into a root still maps (A-4).
+   a symlinked path resolving into a root still maps.
 4. _bootstrap.ensure_trailhead_importable() succeeds when run from the repo and
    emits the legible error (not raw ModuleNotFoundError) under a forced-missing probe.
 5. validate_layer_name("../evil") raises LayerConfinementError; benign name passes.
 6. assert_within_root(<escape>) raises LayerConfinementError; benign path passes;
-   a symlinked-escape is caught because .resolve() runs first (A-4).
+   a symlinked-escape is caught because .resolve() runs first.
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ class TestVaultLayerDataclass:
 
 
 # ---------------------------------------------------------------------------
-# 2. resolve_layers() — personal-only in Slice 0
+# 2. resolve_layers() — personal-only
 # ---------------------------------------------------------------------------
 
 
@@ -169,7 +169,7 @@ class TestLayerForPath:
         assert result is None
 
     def test_symlinked_path_resolving_into_root_returns_layer(self, tmp_path: Path) -> None:
-        """A-4: a symlinked path that resolves into a root still maps to that layer."""
+        """A symlinked path that resolves into a root still maps to that layer."""
         m = _layers()
         real_vault = tmp_path / "real-vault"
         real_vault.mkdir()
@@ -213,7 +213,7 @@ class TestBootstrapImportable:
         b.ensure_trailhead_importable()
 
     def test_bare_python3_no_raw_module_not_found_error(self, tmp_path: Path) -> None:
-        """A-4 / D-H: running with no TRAILHEAD_ROOT, bare python3 — emits legible
+        """Running with no TRAILHEAD_ROOT, bare python3 — emits legible
         error (not raw ModuleNotFoundError traceback) or succeeds via walk-up."""
         bootstrap_path = SCRIPTS_DIR / "_bootstrap.py"
 
@@ -403,7 +403,7 @@ class TestAssertWithinRoot:
             m.assert_within_root(escape, root)
 
     def test_symlinked_escape_is_caught(self, tmp_path: Path) -> None:
-        """A-4: a symlink pointing outside the root is caught because .resolve() runs first."""
+        """A symlink pointing outside the root is caught because .resolve() runs first."""
         m = _layers()
         root = tmp_path / "vault"
         root.mkdir()

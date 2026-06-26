@@ -19,7 +19,7 @@ can reference them without tripping the gate).
 ## Band 2: Middle-band app-flavored tokens (runtime-constructed — no source literal)
 These tokens are app-flavored but not secret. Building them at runtime (via
 string-join) means the test source stays leak-gate-clean regardless of future
-denylist evolution (the "P1-F self-referential trap": a test file that carries a
+denylist evolution (the self-referential trap: a test file that carries a
 forbidden literal can block commits to its own fix).
 
 INVARIANT: none of the joined results appears verbatim as a contiguous string
@@ -144,7 +144,7 @@ def test_agent_has_no_middle_band_tokens(agent_md: Path):
 
 
 # ---------------------------------------------------------------------------
-# Slice P3A-2 behavioral tests
+# Behavioral tests
 # ---------------------------------------------------------------------------
 
 # Agents that dispatched brain-librarian and must now carry a visible skip notice
@@ -162,14 +162,14 @@ _VISIBLE_SKIP_AGENTS: list[str] = [
 
 
 # ---------------------------------------------------------------------------
-# Slice P3C2-4 (planner) — observability-seam Band-2 tokens + visible-skip
+# Observability-seam Band-2 tokens + visible-skip
 #
 # The planner agent carried an app-specific "Health & Soak" block whose tokens
 # are NOT in the shared MIDDLE_BAND_TOKENS list (those cover the stack/repo
 # flavor). These are the planner's specific observability seams; name them so a
-# partial strip of the Health & Soak block can't survive (council Security
-# Critical). Runtime-constructed, same join-form invariant as MIDDLE_BAND_TOKENS
-# (the module self-check above scans this whole source).
+# partial strip of the Health & Soak block can't survive. Runtime-constructed,
+# same join-form invariant as MIDDLE_BAND_TOKENS (the module self-check above
+# scans this whole source).
 # ---------------------------------------------------------------------------
 
 _PLANNER_OBSERVABILITY_TOKENS: list[str] = [
@@ -217,8 +217,7 @@ for _tok in _PLANNER_OBSERVABILITY_TOKENS:
 
 # The exact observability visible-skip phrase the planner emits. Asserted PRESENT
 # as a distinctive contiguous substring so a silent omission of the degrade
-# notice fails (council Reliability — visible-skip present-assertion). Mirrors
-# the planning skill's observability degrade wording.
+# notice fails. Mirrors the planning skill's observability degrade wording.
 _PLANNER_OBSERVABILITY_VISIBLE_SKIP = "no observability provider configured — see the extend guide"
 
 
@@ -260,13 +259,13 @@ def test_planner_observability_visible_skip_present():
 def test_visible_skip_notice_present(stem: str):
     """Agents that formerly dispatched brain-librarian must carry a visible notice
     telling the caller when the prior-art synthesis pass was skipped — not a silent
-    prose hedge (council Advocate C1: no-silent-degradation rule).
+    prose hedge.
 
     The notice must contain the distinctive phrase fragment 'synthesis pass was
     skipped' so the caller knows results may be incomplete without the
     knowledge-synthesis subagent. (Matching the full fragment rather than a bare
     word like 'skipped'/'shallower' avoids false-passing on unrelated prose that
-    merely happens to use one of those words — code-reviewer Minor from P3A-2.)
+    merely happens to use one of those words.)
     """
     agent_md = AGENTS_DIR / f"{stem}.md"
     assert agent_md.exists(), (

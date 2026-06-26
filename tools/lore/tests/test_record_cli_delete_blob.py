@@ -1,7 +1,6 @@
-"""Slice 5 (S2) tests: ``lore record delete`` CLI.
+"""Tests for the ``lore record delete`` CLI.
 
-Covers every bullet in the Slice 5 test contract
-(plan ``lore-record-and-session-cli-s2.md``):
+Covers the test contract:
 
   delete:
     - delete removes all three artifacts (md + json + index row).
@@ -61,7 +60,7 @@ def _open_index(state_dir):
 
 
 def test_delete_removes_body(tmp_path):
-    """delete removes the .md body file (AC13)."""
+    """delete removes the .md body file."""
     vault, state = _make_vault(tmp_path)
     record_id = _create_record(vault, state)
     kind, name = record_id.split("/", 1)
@@ -74,7 +73,7 @@ def test_delete_removes_body(tmp_path):
 
 
 def test_delete_removes_sidecar(tmp_path):
-    """delete removes the .json sidecar file (AC13)."""
+    """delete removes the .json sidecar file."""
     vault, state = _make_vault(tmp_path)
     record_id = _create_record(vault, state)
     kind, name = record_id.split("/", 1)
@@ -87,7 +86,7 @@ def test_delete_removes_sidecar(tmp_path):
 
 
 def test_delete_removes_index_row(tmp_path):
-    """delete removes the index row (AC13)."""
+    """delete removes the index row."""
     vault, state = _make_vault(tmp_path)
     record_id = _create_record(vault, state)
     kind, name = record_id.split("/", 1)
@@ -107,7 +106,7 @@ def test_delete_removes_index_row(tmp_path):
 
 
 def test_delete_nonexistent_id_exits_nonzero(tmp_path):
-    """delete with a nonexistent RECORD_ID → non-zero (AC13)."""
+    """delete with a nonexistent RECORD_ID → non-zero."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "delete", "spec/does-not-exist"],
@@ -130,7 +129,7 @@ def test_delete_invalid_id_format_exits_nonzero(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# CRITICAL security regression (audit Finding 1/5): RECORD_ID confinement on
+# CRITICAL security regression: RECORD_ID confinement on
 # delete + update. A crafted ID with '..' / absolute segments must NOT delete
 # or overwrite .md/.json files outside the active vault.
 # ---------------------------------------------------------------------------
@@ -155,7 +154,7 @@ def _make_outside_victim(tmp_path: Path) -> Path:
     ],
 )
 def test_delete_rejects_record_id_escaping_vault(tmp_path, evil_id):
-    """A traversal RECORD_ID on delete → non-zero, victim files untouched (AC14a)."""
+    """A traversal RECORD_ID on delete → non-zero, victim files untouched."""
     vault, state = _make_vault(tmp_path)
     victim = _make_outside_victim(tmp_path)
 
@@ -175,7 +174,7 @@ def test_delete_rejects_record_id_escaping_vault(tmp_path, evil_id):
     ],
 )
 def test_update_rejects_record_id_escaping_vault(tmp_path, evil_id):
-    """A traversal RECORD_ID on update → non-zero, victim files unmodified (AC14a)."""
+    """A traversal RECORD_ID on update → non-zero, victim files unmodified."""
     vault, state = _make_vault(tmp_path)
     victim = _make_outside_victim(tmp_path)
     before = (victim / "victim.md").read_text(encoding="utf-8")

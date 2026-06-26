@@ -125,7 +125,7 @@ def test_by_session_id_no_sessions_dir_returns_none(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# find_session_note_by_session_id: GUID session records (Slice 1 singular shape)
+# find_session_note_by_session_id: GUID session records (singular shape)
 # ---------------------------------------------------------------------------
 
 # A canonical GUID is what session_store names the capture key.

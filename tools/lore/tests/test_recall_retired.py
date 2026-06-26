@@ -1,4 +1,4 @@
-"""Slice 5 (S3) — `recall` command retired, call sites rewired to `lore search`.
+"""The `recall` command is retired; call sites are rewired to `lore search`.
 
 The destructive cutover: the `recall` COMMAND surface is gone (`cmd_recall`, the
 `recall` subparser, and the recall-command machinery in `recall.py`). The

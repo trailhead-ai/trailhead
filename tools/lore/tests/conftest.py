@@ -21,7 +21,7 @@ def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
 
     XDG_CONFIG_HOME is isolated to a fresh, config-less dir under ``state_dir`` so
     these tests get deterministic **vanilla** vault resolution (no ``config.json``
-    → active LORE_VAULT). Since S4 made ``record create``/``update``/``delete``
+    → active LORE_VAULT). Because ``record create``/``update``/``delete``
     consult ``config_dir("lore")/config.json``, an inherited ambient config (e.g.
     on a CI runner) would otherwise reroute records away from the test vault.
     Callers that exercise layered vaults pass their own XDG_CONFIG_HOME via

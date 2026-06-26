@@ -177,7 +177,7 @@ def test_missing_tree_exits_2(tmp_path: Path, denylist: Path):
     assert r.returncode == 2
 
 
-# ---- KU2: real shippable surfaces are clean (skip if denylist absent) -------
+# ---- real shippable surfaces are clean (skip if denylist absent) ------------
 
 REAL_DENYLIST = Path.home() / ".claude" / "leak-gate.denylist"
 

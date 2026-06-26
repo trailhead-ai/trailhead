@@ -1,4 +1,4 @@
-"""End-to-end tests for ``lore search`` (Slice 4, S3).
+"""End-to-end tests for ``lore search``.
 
 Loads the CLI via ``CLI_PATH`` (subprocess) and builds a fixture index with
 ``index_store.open_index(env=...)`` + ``rebuild(...)`` over a ``tmp_path`` vault,
@@ -220,7 +220,7 @@ def test_unbalanced_quote_nonzero(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 4 — label.<key>:<value> / has:label.<key> selectors (end-to-end)
+# label.<key>:<value> / has:label.<key> selectors (end-to-end)
 # ---------------------------------------------------------------------------
 
 
@@ -523,7 +523,7 @@ def test_fresh_index_no_staleness_hint(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Security: fail-safe shared classification (Fix 1)
+# Security: fail-safe shared classification
 # ---------------------------------------------------------------------------
 
 
@@ -630,7 +630,7 @@ def test_nonstandard_shared_value_rendered_as_shared(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Security: injection payloads in shared title, status, vault name (Fix 3)
+# Security: injection payloads in shared title, status, vault name
 # ---------------------------------------------------------------------------
 
 

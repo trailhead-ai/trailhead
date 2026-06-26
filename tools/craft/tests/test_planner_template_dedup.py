@@ -1,11 +1,11 @@
-"""Slice 4: planner.md template dedup — inline literals replaced by checklist + CLI pointer.
+"""planner.md template dedup — inline literals replaced by checklist + CLI pointer.
 
-TDD contract (Slice 4):
+TDD contract:
   1. The two large inline literal template blocks (spec frontmatter `type: spec` block
      and the plan `# [Feature Name] Implementation Plan` literal) do NOT appear on the
      common path — they must only appear after the manual-write fallback marker.
   2. `planner.md` references the `note_store` contract (`_shared/note-storage.md`) and the
-     craft template path — NOT `lore new spec` / `lore new plan` (Slice 3 decoupling).
+     craft template path — NOT `lore new spec` / `lore new plan`.
   3. `planner.md` still contains the required section names the checklist must carry
      (every section a spec/plan needs, including Observability & Failure Visibility and
      Known Unknowns).
@@ -50,7 +50,7 @@ def _text() -> str:
 
 
 # ---------------------------------------------------------------------------
-# note_store seam pointer (Slice 3) — `lore new` is decoupled
+# note_store seam pointer — `lore new` is decoupled
 # ---------------------------------------------------------------------------
 
 

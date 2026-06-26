@@ -1,6 +1,6 @@
-"""Tests for the non-interactive, idempotent ``lore init`` (Slice 1, S5).
+"""Tests for the non-interactive, idempotent ``lore init``.
 
-Covers every bullet of the Slice 1 test contract:
+Covers the test contract:
   - Fresh ``lore init`` creates vaults/default as a git repo + index parent; exits 0.
   - Resolved index path is NOT under any vault root.
   - Re-run is a pure no-op: no second git-init, no duplicate config, existing vault untouched.

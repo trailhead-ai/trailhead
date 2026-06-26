@@ -1,6 +1,6 @@
-"""Slice 1 (S2) tests: minimal derived index store + ``lore reindex``.
+"""Tests for the minimal derived index store + ``lore reindex``.
 
-Covers every bullet in the Slice 1 test contract:
+Covers the test contract:
   - ``open_index`` creates the DB at the resolved state path (honoring a tmp
     ``$XDG_STATE_HOME`` override) and reports ``journal_mode == "wal"``.
   - ``upsert_row`` is idempotent: upserting the same key twice leaves one row;
@@ -208,7 +208,7 @@ def test_upsert_row_idempotent_same_key_leaves_one_row(tmp_path):
         mod.upsert_row(conn, "/vault", "spec", "my-spec", sidecar, "second")
         conn.commit()
         count = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
-        # S3 moved body text into the populated record_fts table (no records.body
+        # Body text lives in the populated record_fts table (no records.body
         # column); read it back via the rowid alias join.
         body = conn.execute(
             "SELECT record_fts.body FROM records "
@@ -617,7 +617,7 @@ def test_lore_reindex_count_reflects_vault_records(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# scan_vault / remove_vault — per-vault incremental helpers (Slice 4, S4)
+# scan_vault / remove_vault — per-vault incremental helpers
 # ---------------------------------------------------------------------------
 
 

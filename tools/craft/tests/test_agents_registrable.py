@@ -5,7 +5,7 @@ agent `.md` only registers as a dispatchable `subagent_type` if it opens with a
 YAML frontmatter block carrying a non-empty `name:` and `description:`. This
 test locks that invariant so an agent can't silently fail to register.
 
-Live proof of the mechanism (KU1): the lore plugin's `librarian` agent
+Live proof of the mechanism: the lore plugin's `librarian` agent
 appears in the running session's registry as the namespaced subagent_type
 `lore:librarian`. craft's agents register the same way as `craft:<name>`.
 """
@@ -67,7 +67,7 @@ def test_planner_tools_line_is_generic():
     """The planner agent dropped its `mcp__brain__*` tools during genericization.
     Its `tools:` line must be exactly the generic resolvable list — `Write` is
     required so the agent can still emit specs/plans — and must carry NO
-    `mcp__brain__*` residue (council Builder Important)."""
+    `mcp__brain__*` residue."""
     planner_md = AGENTS_DIR / "planner.md"
     assert planner_md.exists(), f"Expected planner.md in {AGENTS_DIR}"
     tools = _tools_line(_frontmatter(planner_md))

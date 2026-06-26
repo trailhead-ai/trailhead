@@ -11,9 +11,9 @@ These three skills sit on top of the rewired session skills:
                 `checkpoint` (which is a session *sweep*).
   - `research` — dispatches the lore `investigator` agent (deep) or `researcher`
                 agent (lighter / `tracking`-backlog polling). Dispatch targets
-                must resolve to real agent FILES (council Builder).
+                must resolve to real agent FILES.
 
-The FINAL LOCKSTEP GATE (spec AC) greps ALL retained lore skills for the removed
+The FINAL LOCKSTEP GATE greps ALL retained lore skills for the removed
 commands (`lore new`, `lore recall`, `lore patch`) and asserts zero matches.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
 AGENTS_DIR = PLUGIN_ROOT / "agents"
 
-# The three new skills this slice introduces.
+# The three new skills introduced here.
 NEW_SKILLS = ("search", "record", "research")
 
 
@@ -187,9 +187,9 @@ def test_research_names_both_dispatch_agents():
 
 
 def test_research_dispatch_targets_resolve_to_real_agent_files():
-    """The agents `research` dispatches to must exist as real files (council
-    Builder — not merely name-resolution): if KU3 coordination slipped, this
-    fails instead of dispatching to a nonexistent agent."""
+    """The agents `research` dispatches to must exist as real files (not merely
+    name-resolution): if coordination slipped, this fails instead of
+    dispatching to a nonexistent agent."""
     for agent in ("investigator", "researcher"):
         agent_file = AGENTS_DIR / f"{agent}.md"
         assert agent_file.exists(), (

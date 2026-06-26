@@ -1,4 +1,4 @@
-"""Slice 3 (S3) tests: KQL AST → SQL compiler (review redesign).
+"""KQL AST → SQL compiler tests.
 
 Full-text is a SQL-composable predicate so the WHOLE boolean tree composes
 uniformly in SQL. Each FullText/Phrase node compiles to
@@ -11,7 +11,7 @@ as SQL boolean. Ranking, when any full-text term is present, is a correlated bm2
 subquery over the OR-combined POSITIVE (non-negated) full-text terms; pure-facet
 queries use recency order.
 
-FINAL SELECT shape Slice 4 executes (LOCKED — no mandatory FTS JOIN):
+FINAL SELECT shape the executor runs (no mandatory FTS JOIN):
 
   SELECT * FROM records
   WHERE <predicates, full-text predicates inline>
@@ -586,7 +586,7 @@ class TestParamAlignment:
 
 
 # ---------------------------------------------------------------------------
-# SQL injection safety (council-flagged, REQUIRED)
+# SQL injection safety
 # ---------------------------------------------------------------------------
 
 
@@ -753,7 +753,7 @@ class TestEmptyAfterStrip:
 
 
 # ---------------------------------------------------------------------------
-# Full SELECT query shape (Slice 4 compatibility)
+# Full SELECT query shape
 # ---------------------------------------------------------------------------
 
 
@@ -810,7 +810,7 @@ class TestFullQueryShape:
 
 
 # ---------------------------------------------------------------------------
-# Slice 4 — label selectors (LabelEq / LabelExists)
+# Label selectors (LabelEq / LabelExists)
 # ---------------------------------------------------------------------------
 
 

@@ -1,15 +1,15 @@
 """Tests for combine_design.py — the per-screen HTML assembler.
 
-Design contract (D-4/D-5/D-6/S-2/R-8/A-7):
-  - D-4: ASSEMBLES (concatenates) approved per-screen markup VERBATIM — no re-render.
-  - D-5: per-screen files are <surface>-<screen>.html flat in the design dir.
-  - D-6: docbar toggles driven by chrome's declared variants; none declared → no toggles.
-  - S-2: path-traversal guard — every globbed filename validated as relative to design_dir.
-  - R-8: glob via sorted() (determinism); assembly in-memory, written once; no partial output.
-  - A-7: named CLI args tested here so the documented invocation is real.
+Design contract:
+  - ASSEMBLES (concatenates) approved per-screen markup VERBATIM — no re-render.
+  - per-screen files are <surface>-<screen>.html flat in the design dir.
+  - docbar toggles driven by chrome's declared variants; none declared → no toggles.
+  - path-traversal guard — every globbed filename validated as relative to design_dir.
+  - glob via sorted() (determinism); assembly in-memory, written once; no partial output.
+  - named CLI args tested here so the documented invocation is real.
 
 Hermeticity: whole test runs under tmp_path, no network, no real ~/.claude/, no real vault.
-Import pattern: sys.path.insert(SCRIPTS_DIR) per test_handoff_capture.py:28-31 (U-1).
+Import pattern: sys.path.insert(SCRIPTS_DIR) per test_handoff_capture.py:28-31.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _write(p: Path, name: str, body: str) -> Path:
 
 
 def _make_screen_html(title: str, body_content: str) -> str:
-    """Minimal but realistic per-screen HTML (verbatim body must survive D-4)."""
+    """Minimal but realistic per-screen HTML (verbatim body must survive)."""
     return (
         "<!DOCTYPE html>\n"
         "<html>\n"
@@ -89,18 +89,18 @@ def _minimal_index(rows: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# U-1: confirm import cleanly via sys.path.insert pattern (hermeticity)
+# confirm import cleanly via sys.path.insert pattern (hermeticity)
 # ---------------------------------------------------------------------------
 
 
 def test_import_via_scripts_dir_harness():
-    """combine_design imports cleanly via the established craft harness (U-1)."""
+    """combine_design imports cleanly via the established craft harness."""
     assert hasattr(cd, "assemble")
     assert hasattr(cd, "main")
 
 
 # ---------------------------------------------------------------------------
-# A-7: CLI interface tested (named args + --help)
+# CLI interface tested (named args + --help)
 # ---------------------------------------------------------------------------
 
 
@@ -131,12 +131,12 @@ def test_cli_spec_link_arg_present():
 
 
 # ---------------------------------------------------------------------------
-# D-4: verbatim assembly — exact reviewed markup survives (no re-render)
+# verbatim assembly — exact reviewed markup survives (no re-render)
 # ---------------------------------------------------------------------------
 
 
 def test_verbatim_body_survives_in_output(tmp_path: Path):
-    """Both screens' VERBATIM bodies must appear unchanged in the reference file (D-4)."""
+    """Both screens' VERBATIM bodies must appear unchanged in the reference file."""
     designs = tmp_path / "designs"
     designs.mkdir()
 
@@ -175,7 +175,7 @@ def test_verbatim_body_survives_in_output(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# D-4: numbered sections + in-page TOC
+# numbered sections + in-page TOC
 # ---------------------------------------------------------------------------
 
 
@@ -219,12 +219,12 @@ def test_numbered_sections_and_toc(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# D-6: docbar toggles driven by chrome variants (or none)
+# docbar toggles driven by chrome variants (or none)
 # ---------------------------------------------------------------------------
 
 
 def test_docbar_no_toggles_when_chrome_declares_none(tmp_path: Path):
-    """Chrome with no Variants section → no docbar toggles in output (D-6)."""
+    """Chrome with no Variants section → no docbar toggles in output."""
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "web-home.html", _make_screen_html("Home", "<p>home</p>"))
@@ -257,7 +257,7 @@ def test_docbar_no_toggles_when_chrome_declares_none(tmp_path: Path):
 
 
 def test_docbar_toggles_present_for_declared_variants(tmp_path: Path):
-    """Chrome declaring two variants → docbar emits exactly those two toggles (D-6)."""
+    """Chrome declaring two variants → docbar emits exactly those two toggles."""
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "web-home.html", _make_screen_html("Home", "<p>home</p>"))
@@ -291,12 +291,12 @@ def test_docbar_toggles_present_for_declared_variants(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# D-5: multi-surface filename prefix grouping
+# multi-surface filename prefix grouping
 # ---------------------------------------------------------------------------
 
 
 def test_multi_surface_sections_labeled_by_prefix(tmp_path: Path):
-    """admin-*.html + mobile-*.html → sections labeled by surface prefix (D-5)."""
+    """admin-*.html + mobile-*.html → sections labeled by surface prefix."""
     designs = tmp_path / "designs"
     designs.mkdir()
     _write(designs, "admin-home.html", _make_screen_html("Admin Home", "<p>admin home</p>"))
@@ -340,7 +340,7 @@ def test_multi_surface_sections_labeled_by_prefix(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# D-4 + self-contained: spec link + no decision log duplication
+# self-contained: spec link + no decision log duplication
 # ---------------------------------------------------------------------------
 
 
@@ -425,12 +425,12 @@ def test_no_external_stylesheet_link_except_flagged_webfont(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# S-2: path-traversal guard
+# path-traversal guard
 # ---------------------------------------------------------------------------
 
 
 def test_path_traversal_rejected_nonzero_exit_no_output(tmp_path: Path):
-    """A crafted ../../outside.html filename → nonzero exit, no output file written (S-2)."""
+    """A crafted ../../outside.html filename → nonzero exit, no output file written."""
     designs = tmp_path / "designs"
     designs.mkdir()
 
@@ -469,7 +469,7 @@ def test_path_traversal_rejected_nonzero_exit_no_output(tmp_path: Path):
 
 
 def test_path_traversal_via_cli_nonzero_no_output(tmp_path: Path):
-    """CLI invocation with a symlink escaping designs_dir → nonzero exit, no output (S-2)."""
+    """CLI invocation with a symlink escaping designs_dir → nonzero exit, no output."""
     designs = tmp_path / "designs"
     designs.mkdir()
 
@@ -515,12 +515,12 @@ def test_path_traversal_via_cli_nonzero_no_output(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# R-8: determinism — index.md row order is authoritative
+# determinism — index.md row order is authoritative
 # ---------------------------------------------------------------------------
 
 
 def test_index_order_is_authoritative_over_filename_alpha(tmp_path: Path):
-    """index.md row order must be preserved even when it is non-alphabetical (R-8 / D-5).
+    """index.md row order must be preserved even when it is non-alphabetical.
 
     A designer writing login→dashboard→settings must NOT get alphabetized output.
     This test sets up web-zzz before web-aaa in index.md and asserts zzz comes
@@ -571,12 +571,12 @@ def test_index_order_is_authoritative_over_filename_alpha(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# R-8: no partial output on error
+# no partial output on error
 # ---------------------------------------------------------------------------
 
 
 def test_no_partial_output_on_missing_screen_file(tmp_path: Path):
-    """Missing per-screen file → nonzero exit, no output written (R-8)."""
+    """Missing per-screen file → nonzero exit, no output written."""
     designs = tmp_path / "designs"
     designs.mkdir()
     # web-home.html exists; web-missing.html does NOT
@@ -786,7 +786,7 @@ def test_design_tokens_swatch_section_present(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# M-1: _html_escape must also escape single quotes (defense-in-depth)
+# _html_escape must also escape single quotes (defense-in-depth)
 # ---------------------------------------------------------------------------
 
 
@@ -808,7 +808,7 @@ def test_html_escape_escapes_all_required_chars():
 
 
 # ---------------------------------------------------------------------------
-# Leak gate: combine_design.py + docs surface are zenith-token-clean (D-7/S-3)
+# Leak gate: combine_design.py + docs surface are zenith-token-clean
 # ---------------------------------------------------------------------------
 
 _STEP6_DENYLIST_TOKENS = [
@@ -829,14 +829,14 @@ _STEP6_DENYLIST_TOKENS = [
 
 
 def _write_ephemeral_denylist(p: Path) -> Path:
-    """Write an ephemeral denylist to tmp_path (S-3: never depend on machine-local)."""
+    """Write an ephemeral denylist to tmp_path (never depend on machine-local)."""
     dl = p / "step6-denylist.txt"
     dl.write_text("\n".join(_STEP6_DENYLIST_TOKENS) + "\n", encoding="utf-8")
     return dl
 
 
 # ---------------------------------------------------------------------------
-# I-1: env-var root-resolution fallbacks (DESIGNS_ROOT / CHROME_ROOT)
+# env-var root-resolution fallbacks (DESIGNS_ROOT / CHROME_ROOT)
 # ---------------------------------------------------------------------------
 
 
@@ -1041,7 +1041,7 @@ def test_cli_neither_flag_nor_env_exits_nonzero(tmp_path: Path):
 
 
 def test_leak_gate_combine_design_script_is_clean(tmp_path: Path):
-    """combine_design.py must have no Step-6 zenith tokens (D-7/S-3)."""
+    """combine_design.py must have no leaked zenith tokens."""
     script_path = SCRIPTS_DIR / "combine_design.py"
     if not script_path.exists():
         pytest.skip("combine_design.py not yet implemented")

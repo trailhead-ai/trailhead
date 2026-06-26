@@ -1,6 +1,6 @@
-"""Slice 3: craft owns the plan/spec template bodies + persists via the note_store seam.
+"""Craft owns the plan/spec template bodies + persists via the note_store seam.
 
-TDD contract (Slice 3):
+TDD contract:
   1. The two craft-owned template BODIES exist at `templates/{plan,spec}.md` and carry the
      canonical section headers. They are bodies — lore owns the record sidecar/frontmatter — so
      this checks the section skeleton, NOT a `status:` frontmatter block.
@@ -128,7 +128,7 @@ def test_note_storage_documents_link_op():
 
 def test_note_storage_defers_non_lore_provider():
     """The seam names lore as the sole/default provider; per-repo config resolution and any
-    non-lore provider are explicitly deferred (out of scope for this slice)."""
+    non-lore provider are explicitly deferred (out of scope)."""
     text = NOTE_STORAGE_MD.read_text().lower()
     assert "defer" in text, (
         "note-storage.md must explicitly defer per-repo config resolution + any non-lore "

@@ -1,7 +1,6 @@
-"""Slice 1 (S4) tests: vault config model — ``vault_config.py``.
+"""Tests for the vault config model — ``vault_config.py``.
 
-Covers the Slice 1 test contract from the S4 plan
-(``2026-06-18-lore-layered-vaults-s4.md``):
+Covers the test contract:
 
 - A valid multi-vault config parses to the expected Vault list; default path
   derives under a tmp ``$XDG_STATE_HOME``; an explicit path is honored.
@@ -158,7 +157,7 @@ def test_repo_vault_with_slash_stored_as_normalized(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
     cfg = vc()
     # The config already stores the normalized name (normalization happens at
-    # add time, Slice 4). When stored as trailhead-ai/trailhead in config, the
+    # add time). When stored as trailhead-ai/trailhead in config, the
     # load_config should normalize it on load.
     data = {
         "vaults": [

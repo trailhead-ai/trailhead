@@ -1,6 +1,6 @@
-"""Tests for Slice 2, S5: lore installs zero hooks (no SessionStart, no WorktreeRemove).
+"""lore installs zero hooks (no SessionStart, no WorktreeRemove).
 
-Covers every bullet of the Slice 2 test contract:
+Covers the test contract:
   - After init, resolved settings.json has no lore SessionStart entry and no
     WorktreeRemove/finalize entry.
   - An unrelated pre-existing hook in the file is preserved.
@@ -84,7 +84,7 @@ class TestSettingsWriter:
         sw.remove_hook(settings_path, "SessionStart", "some-cmd.py")
         # remove_hook on absent file should not error; if we then upsert...
         # Actually test the ensure_no_hook contract: absent file → no hook present
-        # (we don't call upsert here — Slice 2 is about *not* installing hooks)
+        # (we don't call upsert here — this band is about *not* installing hooks)
 
     def test_ensure_no_lore_hooks_on_fresh_file(self, tmp_path):
         """remove_hook on absent settings file is a no-op (no error)."""

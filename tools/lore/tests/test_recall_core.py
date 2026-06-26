@@ -2,7 +2,7 @@
 
 Covers ``build_area_map`` — the on-demand area menu served by ``lore areas`` and
 the SessionStart pointer. The ``recall_areas`` / ``render_recall_banner`` command
-path was retired in Slice 5 (S3); ``lore search`` is now the query interface, so
+path was retired; ``lore search`` is now the query interface, so
 the recall-command tests that used to live here were removed.
 
   build_area_map:
@@ -10,11 +10,11 @@ the recall-command tests that used to live here were removed.
     - keyword-less area still appears (agent can match on one-liner)
     - malformed / binary / non-UTF-8 area file silently skipped (no raise)
     - deterministic alpha order by name
-    - one-liner <= 120 chars (D-8c hard cap enforced)
-    - keywords capped (D-8c)
-    - summary: field used when present (D-2)
-    - first ## Overview sentence used as fallback (D-2)
-    - HTML-comment Overview lines skipped (D-2, pr-dashboard gotcha)
+    - one-liner <= 120 chars (hard cap enforced)
+    - keywords capped
+    - summary: field used when present
+    - first ## Overview sentence used as fallback
+    - HTML-comment Overview lines skipped (pr-dashboard gotcha)
     - area with no summary and no usable Overview: appears with empty one-liner
 """
 

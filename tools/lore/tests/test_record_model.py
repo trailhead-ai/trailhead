@@ -1,7 +1,7 @@
-"""Spec S1 tests: the canonical lore record model + pure sidecar validator.
+"""Tests for the canonical lore record model + pure sidecar validator.
 
-Slice 1 pins the declarative model (kinds, per-kind status vocab, phases, the
-v1 field schema) and the pure accessors. Slice 2 pins the pure ``validate``
+Pins the declarative model (kinds, per-kind status vocab, phases, the
+v1 field schema) and the pure accessors, plus the pure ``validate``
 contract. Loaded via ``conftest.load_script("record_model")`` like every other
 lore script.
 """
@@ -13,7 +13,7 @@ def rm():
     return load_script("record_model")
 
 
-# --- Slice 1: declarative model + accessors ---------------------------------
+# --- declarative model + accessors ---------------------------------
 
 
 def test_kinds_are_exactly_the_nine():
@@ -95,7 +95,7 @@ def test_is_valid_phase():
 
 def test_fields_v1_required_optional_and_autoset_flags():
     fields = rm().FIELDS_V1
-    # ``keywords`` is relaxed to optional (Slice 1, dedicated-field-flags plan).
+    # ``keywords`` is relaxed to optional.
     for key in ("version", "kind", "title", "status"):
         assert fields[key].required is True
         assert fields[key].auto_set is False
@@ -137,7 +137,7 @@ def test_field_spec_accessor_returns_v1():
 
 
 def test_accessor_contract_unknown_kind_returns_none_never_raises():
-    """Council Critical: unknown kind returns None, does not raise."""
+    """Unknown kind returns None, does not raise."""
     m = rm()
     assert m.is_valid_kind("foo") is False
     assert m.permitted_statuses("foo") is None
@@ -156,17 +156,17 @@ def test_auto_set_keys_exact():
 def test_required_operator_keys_exact_equality():
     """Exact equality, not superset (status/version defaulted; auto-set excluded).
 
-    ``keywords`` is relaxed to optional (Slice 1, dedicated-field-flags plan), so
+    ``keywords`` is relaxed to optional, so
     the required operator key set is exactly ``{kind, title}``.
     """
     assert rm().required_operator_keys() == {"kind", "title"}
 
 
-# --- Slice 2: KU1 — datetime Z-suffix parsing -------------------------------
+# --- datetime Z-suffix parsing -------------------------------
 
 
 def test_datetime_z_suffix_parses():
-    """KU1: ``datetime.fromisoformat`` accepts the ``Z`` suffix on this runtime.
+    """``datetime.fromisoformat`` accepts the ``Z`` suffix on this runtime.
 
     Resolved as a test (not a module-level assert that would crash import on an
     unexpected build): the validator type-checks datetimes via try/except, so a
@@ -177,7 +177,7 @@ def test_datetime_z_suffix_parses():
     assert datetime.fromisoformat("2026-06-17T14:32:00Z") is not None
 
 
-# --- Slice 2: the pure validator --------------------------------------------
+# --- the pure validator --------------------------------------------
 
 
 def _worked_example_spec_sidecar():
@@ -248,7 +248,7 @@ def test_missing_operator_required_keys_error():
 
 
 def test_missing_keywords_validates_clean():
-    """``keywords`` is optional (Slice 1): a sidecar without it validates clean."""
+    """``keywords`` is optional: a sidecar without it validates clean."""
     sidecar = _worked_example_spec_sidecar()
     del sidecar["keywords"]
     result = rm().validate(sidecar)
@@ -403,7 +403,7 @@ def test_validate_kind_arg_overrides_sidecar_kind():
     assert not any("status" in e for e in result.errors)
 
 
-# --- Slice 1 (plan 2026-06-20): labels and annotations map fields -----------
+# --- labels and annotations map fields -----------
 
 
 def _base_sidecar_with(**extra):

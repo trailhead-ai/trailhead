@@ -1,7 +1,6 @@
-"""Slice 3 (S2) tests: ``lore record create`` CLI — thin shell over Slice 2.
+"""Tests for the ``lore record create`` CLI — a thin shell over the record store.
 
-Covers every bullet in the Slice 3 test contract
-(plan ``lore-record-and-session-cli-s2.md``):
+Covers the test contract:
 
   - create with piped body → RECORD_ID on stdout; body/sidecar/index all
     present and consistent.
@@ -10,11 +9,11 @@ Covers every bullet in the Slice 3 test contract
   - missing ``--kind`` → non-zero, stderr names the requirement, nothing
     created.
   - body whose first line is ``---`` is stored verbatim (sidecar unaffected)
-    (AC-TX3: a leading ``---`` block is NOT parsed as frontmatter).
-  - unknown subcommand → non-zero with a "did you mean" hint (AC-DISP1).
+    (a leading ``---`` block is NOT parsed as frontmatter).
+  - unknown subcommand → non-zero with a "did you mean" hint.
 
-Slice 1 (dedicated-field-flags plan) replaced the generic ``--set``/``--unset``
-patch idiom with dedicated per-field flags. This file now exercises:
+Dedicated per-field flags replaced the generic ``--set``/``--unset``
+patch idiom. This file now exercises:
   - ``--status`` (scalar) sets the field; off-vocab status → non-zero, vocab named.
   - list flags ``--keyword`` / ``--related-file`` / ``--related-url`` /
     ``--related-phase`` append; ``--unset-<field> VALUE`` removes one item.
@@ -24,7 +23,7 @@ patch idiom with dedicated per-field flags. This file now exercises:
   - ``--set``/``--unset`` are gone (argparse-unrecognized).
   - provenance fields remain unwritable (no flag exists for them).
 
-Slice 2 (dedicated-field-flags plan) unifies scope flags on ``create``: the
+Scope flags on ``create`` are unified: the
 routing flags ``--team``/``--suite``/``--product``/``--repo`` additionally write
 their raw value into the namesake sidecar field, from the same loop that builds
 the routing scope.  One input, both effects — field value and routing value
@@ -107,12 +106,12 @@ _BASE_ARGS = [
 
 
 # ---------------------------------------------------------------------------
-# AC1: body from stdin → stored verbatim; sidecar + index consistent
+# body from stdin → stored verbatim; sidecar + index consistent
 # ---------------------------------------------------------------------------
 
 
 def test_create_with_piped_body_returns_id_on_stdout(tmp_path):
-    """create with piped body → RECORD_ID printed on stdout (AC4)."""
+    """create with piped body → RECORD_ID printed on stdout."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
@@ -185,12 +184,12 @@ def test_create_with_piped_body_index_row_present(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC1: no stdin → empty body, sidecar has only auto-set / required metadata
+# no stdin → empty body, sidecar has only auto-set / required metadata
 # ---------------------------------------------------------------------------
 
 
 def test_create_no_stdin_empty_body(tmp_path):
-    """With no stdin the stored body is empty (AC1)."""
+    """With no stdin the stored body is empty."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
@@ -204,7 +203,7 @@ def test_create_no_stdin_empty_body(tmp_path):
 
 
 def test_create_no_stdin_sidecar_has_auto_fields_only(tmp_path):
-    """With no stdin the sidecar carries auto-set + operator-required fields (AC1)."""
+    """With no stdin the sidecar carries auto-set + operator-required fields."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
@@ -225,12 +224,12 @@ def test_create_no_stdin_sidecar_has_auto_fields_only(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC2: missing --kind → non-zero, nothing created
+# missing --kind → non-zero, nothing created
 # ---------------------------------------------------------------------------
 
 
 def test_create_missing_kind_exits_nonzero(tmp_path):
-    """Missing --kind → non-zero exit; nothing written (AC2)."""
+    """Missing --kind → non-zero exit; nothing written."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--title", "Test", "--keyword", "foo"],
@@ -245,12 +244,12 @@ def test_create_missing_kind_exits_nonzero(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC-TX3: leading ``---`` in body is preserved verbatim, NOT parsed
+# leading ``---`` in body is preserved verbatim, NOT parsed
 # ---------------------------------------------------------------------------
 
 
 def test_create_leading_triple_dash_body_stored_verbatim(tmp_path):
-    """A body starting with '---' is stored as-is; sidecar is NOT affected (AC-TX3)."""
+    """A body starting with '---' is stored as-is; sidecar is NOT affected."""
     vault, state = _make_vault(tmp_path)
     body_text = "---\nsome: yaml-like-content\n---\n\nActual body here.\n"
     r = _run(
@@ -270,7 +269,7 @@ def test_create_leading_triple_dash_body_stored_verbatim(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: --status (scalar) sets the field; off-vocab → non-zero, vocab named
+# --status (scalar) sets the field; off-vocab → non-zero, vocab named
 # ---------------------------------------------------------------------------
 
 
@@ -288,7 +287,7 @@ def test_status_flag_sets_field(tmp_path):
 
 
 def test_status_off_vocab_nonzero_names_vocab(tmp_path):
-    """An off-vocab --status → non-zero; stderr names the permitted vocab (A3)."""
+    """An off-vocab --status → non-zero; stderr names the permitted vocab."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         [
@@ -314,7 +313,7 @@ def test_status_off_vocab_nonzero_names_vocab(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: repeatable list flags append; --unset-<field> VALUE removes one
+# repeatable list flags append; --unset-<field> VALUE removes one
 # ---------------------------------------------------------------------------
 
 
@@ -416,7 +415,7 @@ def test_related_phase_flag_appends(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: --related <kind>=<name> map flag
+# --related <kind>=<name> map flag
 # ---------------------------------------------------------------------------
 
 
@@ -471,7 +470,7 @@ def test_related_map_empty_kind_rejected_by_guard(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: keywords optional — create with no --keyword succeeds
+# keywords optional — create with no --keyword succeeds
 # ---------------------------------------------------------------------------
 
 
@@ -489,7 +488,7 @@ def test_create_no_keyword_succeeds(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: --set/--unset are gone; provenance remains unwritable
+# --set/--unset are gone; provenance remains unwritable
 # ---------------------------------------------------------------------------
 
 
@@ -530,12 +529,12 @@ def test_no_flag_for_provenance_fields(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC-DISP1: unknown subcommand → non-zero with "did you mean" hint
+# unknown subcommand → non-zero with "did you mean" hint
 # ---------------------------------------------------------------------------
 
 
 def test_unknown_subcommand_hints_did_you_mean(tmp_path):
-    """An unrecognized command → non-zero + 'did you mean' hint (AC-DISP1)."""
+    """An unrecognized command → non-zero + 'did you mean' hint."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["frob"],
@@ -548,13 +547,12 @@ def test_unknown_subcommand_hints_did_you_mean(tmp_path):
 
 
 def test_search_is_a_registered_command(tmp_path):
-    """``search`` is a real command in Slice 4 (S3), not an unknown-command hint.
+    """``search`` is a real command, not an unknown-command hint.
 
-    Slice 4 registers the ``search`` subcommand, so the dormant S2 ``search→recall``
+    The ``search`` subcommand is registered, so the dormant ``search→recall``
     dispatch-hint scaffold is gone. Typing ``lore search`` with no query is now a
     *valid command* failing on a missing positional arg (argparse usage error) —
-    it must NOT be mislabelled as an unknown command pointing at ``recall``. The
-    ``recall→search`` cutover hint is owned by Slice 5.
+    it must NOT be mislabelled as an unknown command pointing at ``recall``.
     """
     vault, state = _make_vault(tmp_path)
     r = _run(
@@ -574,7 +572,7 @@ def test_search_is_a_registered_command(tmp_path):
 def test_valid_command_bad_arg_does_not_emit_unknown_command_hint(tmp_path):
     """A valid command failing on a sub-argument must NOT be mislabelled.
 
-    Regression guard (AC-DISP1): 'record create' missing --kind is a legitimate
+    Regression guard: 'record create' missing --kind is a legitimate
     argparse error under a *valid* top-level command; the unknown-command hint
     must not fire and claim 'unknown command record'.
     """
@@ -590,7 +588,7 @@ def test_valid_command_bad_arg_does_not_emit_unknown_command_hint(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 2: --label / --annotation / --unset-label / --unset-annotation
+# --label / --annotation / --unset-label / --unset-annotation
 # ---------------------------------------------------------------------------
 
 
@@ -676,8 +674,8 @@ def test_create_label_value_with_equals_splits_on_first(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 2 (dedicated-field-flags plan): scope flags write the namesake sidecar
-# field AND drive vault routing — one input, both effects (AC-ROUTE1 positive).
+# scope flags write the namesake sidecar
+# field AND drive vault routing — one input, both effects.
 # ---------------------------------------------------------------------------
 
 
@@ -686,10 +684,10 @@ def test_scope_team_with_config_writes_field_and_routes(tmp_path):
     ``team: alpha`` and the record physically lands in the scoped vault.
 
     One input drives both the field write and vault selection; the field value
-    and the routing value always agree (Slice 2, dedicated-field-flags plan).
+    and the routing value always agree.
 
     Note: the config vault's ``name`` must equal ``normalize_vault_name("alpha")``
-    == "alpha" for resolution to elect the scoped vault (KU-1 VALIDATED).
+    == "alpha" for resolution to elect the scoped vault.
     """
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "config"
@@ -734,7 +732,7 @@ def test_scope_team_with_config_writes_field_and_routes(tmp_path):
 
 def test_scope_team_no_config_writes_field_in_active_vault(tmp_path):
     """--team alpha with no config: sidecar has ``team: alpha``, record in the
-    active vault (KU-1 state (b) — vanilla routing, field write still fires).
+    active vault (vanilla routing, field write still fires).
     """
     vault, state = _make_vault(tmp_path)
     r = _run(
@@ -800,7 +798,7 @@ def test_scope_field_raw_value_not_scope_string(tmp_path):
 
 
 def test_scope_cannot_decouple_set_team_rejected(tmp_path):
-    """``--set team=…`` is gone (Slice 1): no decoupled setter can write ``team``
+    """``--set team=…`` is gone: no decoupled setter can write ``team``
     to a value that differs from the routing scope.  Argparse rejects ``--set``.
     """
     vault, state = _make_vault(tmp_path)

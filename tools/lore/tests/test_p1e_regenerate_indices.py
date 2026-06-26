@@ -1,4 +1,4 @@
-"""P1-E tests: regenerate_indices.py — folder _index.md regeneration.
+"""Tests for regenerate_indices.py — folder _index.md regeneration.
 
 All fixtures use SYNTHETIC vocabulary (synth-*, invented slugs/content) per the
 public-repo fixture discipline axiom. No real brain content, no real subsystem names.
@@ -524,7 +524,7 @@ def _get_tree_files(vault: Path) -> set[str]:
 
 
 class TestBucketedScan:
-    """Slice 4: plans/specs/designs index regeneration recurses one level into
+    """Plans/specs/designs index regeneration recurses one level into
     YYYY-MM/ buckets and emits resolvable vault-relative wikilinks. Out-of-scope
     folders (deferred/follow-ups/lessons) stay flat.
 
@@ -610,8 +610,8 @@ class TestBucketedScan:
         assert "[[plans/2026-06/synth-bucketed-plan]]" in content
 
     def test_deferred_index_recurses_into_buckets(self, tmp_path):
-        """Slice 6 inverts the Slice 4 guard: deferred is now bucketed, so its
-        index lists both flat AND YYYY-MM-bucketed notes with resolvable links."""
+        """Deferred is now bucketed, so its index lists both flat AND
+        YYYY-MM-bucketed notes with resolvable links."""
         vault = _make_vault(tmp_path, "deferred/2026-06")
         _write_deferred(vault, "synth-flat-deferred")
         (vault / "deferred" / "2026-06" / "synth-nested-deferred.md").write_text(
@@ -662,8 +662,8 @@ class TestBucketedScan:
 
 class TestPreCommitHookStagesIndices:
     """The pre-commit hook must stage regenerated _index.md files so they
-    are included in the commit being made (P1-D's lesson: unstaged changes
-    leave the vault dirty).
+    are included in the commit being made — unstaged changes would otherwise
+    leave the vault dirty.
     """
 
     def test_index_included_in_commit_tree(self, tmp_path):

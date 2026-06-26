@@ -1,4 +1,4 @@
-"""Slice 2 tests: config resolver (vault.py).
+"""Tests for the config resolver (vault.py).
 
 resolve_vault(): $LORE_VAULT (expanded+resolved) or ~/lore resolved. Never raises.
 resolve_user(): $LORE_USER → git config user.name → "you", sanitized.
@@ -87,9 +87,9 @@ def test_resolve_user_git_failure_falls_back_to_you():
 
 
 # ---------------------------------------------------------------------------
-# find_session_note: worktree-scoped singular record lookup (Slice 7)
+# find_session_note: worktree-scoped singular record lookup
 #
-# Since Slice 1, a session is a first-class record under session/ (singular).
+# A session is a first-class record under session/ (singular).
 # find_session_note reads session/<worktree_name>.md confirmed by the body
 # header "# session: <worktree_name>". The old plural sessions/ reader is
 # retired; tests now use the singular session/ layout.

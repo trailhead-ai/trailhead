@@ -38,9 +38,9 @@ def test_plugin_json_parses_and_has_required_keys():
 def test_hooks_json_parses_and_has_no_push_hooks():
     """hooks/hooks.json is valid JSON with zero push hooks.
 
-    Slice 2, S5 (F5): SessionStart and WorktreeRemove entries were removed —
-    lore is fully pull; orientation lives in agent-rules and S6 skill descriptions.
-    Slice 1 (lore-agent-interface): PostToolUse harvest-candidates entry removed —
+    SessionStart and WorktreeRemove entries were removed —
+    lore is fully pull; orientation lives in agent-rules and skill descriptions.
+    The PostToolUse harvest-candidates entry was removed —
     lore installs zero push hooks.
     """
     path = PLUGIN_ROOT / "hooks" / "hooks.json"

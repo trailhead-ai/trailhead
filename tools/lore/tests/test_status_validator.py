@@ -1,10 +1,10 @@
-"""Slice 2 tests: ported canonical-status validator.
+"""Tests for the canonical-status validator.
 
 The validator answers: given a note's `type` and a candidate `status`,
 is the status canonical for that type? The canonical vocabulary is ported
 from the source validator and reconciled against the glossary — notably the
 glossary's `scheduled` (date-bound deferral) is included so `/defer` can emit
-it and the pre-commit guard (Slice 6) won't reject it.
+it and the pre-commit guard won't reject it.
 """
 
 from conftest import load_script
@@ -13,14 +13,14 @@ from conftest import load_script
 def test_canonical_vocab_matches_source():
     """The canonical sets match the reconciled vocabulary.
 
-    Slice 0 updated the session vocab to {dirty, clean} and moved it to the
-    singular key 'session'. Slice 2 retired `shelved` and the legacy
-    `finalized`/`handoff` session terminal statuses — none are canonical.
-    Slice 7 singularized the remaining CANONICAL keys and retired the legacy
-    plural-taxonomy kinds ("deferred", "follow-up", "dead-end"): their living
-    folders and one-shot migrations are gone, and they now consolidate into
-    `backlog`/`lesson` sidecar records (validated by record_model), not inline
-    frontmatter — so they no longer appear here.
+    The session vocab is {dirty, clean} under the singular key 'session'. The
+    `shelved` status and the legacy `finalized`/`handoff` session terminal
+    statuses were retired — none are canonical. The remaining CANONICAL keys
+    were singularized and the legacy plural-taxonomy kinds ("deferred",
+    "follow-up", "dead-end") retired: their living folders and one-shot
+    migrations are gone, and they now consolidate into `backlog`/`lesson`
+    sidecar records (validated by record_model), not inline frontmatter — so
+    they no longer appear here.
     """
     sv = load_script("status_validator")
     assert sv.CANONICAL["plan"] == frozenset(
@@ -97,11 +97,11 @@ def test_permitted_statuses_lists_canonical():
     assert sv.permitted_statuses("nonexistent") is None
 
 
-# ---- Slice 2: shelved + legacy session terminal statuses are retired --------
+# ---- shelved + legacy session terminal statuses are retired --------
 
 def test_shelved_rejected_for_plan_spec_session():
     """`shelved` is no longer canonical for any note type — the shelve/pickup
-    feature it backed was retired (Slice 2). Slice 7 keys are singular; the
+    feature it backed was retired. The canonical keys are singular; the
     plural directory forms are untracked (unconstrained) so only the singular
     `type:` forms are asserted as rejecting `shelved`."""
     sv = load_script("status_validator")
@@ -112,8 +112,8 @@ def test_shelved_rejected_for_plan_spec_session():
 
 def test_legacy_session_statuses_rejected():
     """`finalized`/`handoff` were the deprecated back-compat session terminal
-    statuses; the DEPRECATED accommodation is removed (Slice 2), so they reject.
-    The `sessions` plural key is gone (Slice 0); use the singular `session`."""
+    statuses; the DEPRECATED accommodation is removed, so they reject.
+    The `sessions` plural key is gone; use the singular `session`."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "finalized") is False
     assert sv.is_valid_status("session", "handoff") is False
@@ -158,8 +158,8 @@ def test_clean_session_passes_validation(tmp_path, capsys):
 
 
 def test_body_only_guid_session_note_passes_clean(tmp_path, capsys):
-    """A finalized body-only GUID note keeps its status in the `.json` sidecar
-    (A-sidecar), so the `.md` carries no frontmatter status — the validator must
+    """A finalized body-only GUID note keeps its status in the `.json` sidecar,
+    so the `.md` carries no frontmatter status — the validator must
     pass it cleanly (exit 0, no violation) rather than choke on the missing
     frontmatter."""
     sv = load_script("status_validator")

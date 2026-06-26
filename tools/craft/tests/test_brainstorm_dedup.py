@@ -12,7 +12,7 @@ canonical-inline dedup:
 (c) The injection-defense canonical wording is present in brainstorm/SKILL.md
     and is byte-identical to the pinned canonical block (drift-prevention).
 
-S6 Slice 3 moved brainstorm from the lore plugin into craft. The injection-
+The brainstorm skill was moved from the lore plugin into craft. The injection-
 defense block was previously cross-checked byte-for-byte against lore's
 `librarian.md`; now that brainstorm lives in a different plugin, the canonical
 wording is pinned as a fixture (`fixtures/injection_defense_canonical.txt`,

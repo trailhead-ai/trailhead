@@ -1,4 +1,4 @@
-"""Tests for lore's static agent-ruleset content (Slice 2 + Slice 5).
+"""Tests for lore's static agent-ruleset content.
 
 ``scripts/agent_ruleset.py`` renders lore's user-level ruleset: the
 write-prohibition rules (minus the stale per-project multi-rules-file "Drift

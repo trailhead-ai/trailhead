@@ -1,4 +1,4 @@
-"""Slice 2 drift-guard + behavior-preservation for the council review scaffolding.
+"""Drift-guard + behavior-preservation for the council review scaffolding.
 
 The per-lens Critical bars, the synthesis rules, and the parameterized prompt
 template are hoisted out of `plan/SKILL.md` and `consult/SKILL.md` into the
@@ -30,7 +30,7 @@ CONSULT = SKILLS_DIR / "consult" / "SKILL.md"
 
 
 # --- byte-for-byte bar strings, captured from plan/SKILL.md before the hoist ---
-# Each is a contiguous block exactly as it read at HEAD~ (Slice 1b tip). If a
+# Each is a contiguous block exactly as it read at HEAD~. If a
 # reviewer edits a bar's wording, the assertion below fails.
 BUILDER_BARS = """*Builder:*
 - Slice ordering creates a dependency that can't be tested
@@ -121,7 +121,7 @@ def test_prompt_template_skeleton_in_shared():
 def test_template_output_calibration_pinned():
     # The output-shape constraints ARE review-calibration behavior — a future edit
     # that loosens "≤2 Critical" to "≤3" or drops the no-speculative rule changes
-    # how every council review prioritizes. Pin the binding literals (review M-2).
+    # how every council review prioritizes. Pin the binding literals.
     text = SHARED.read_text()
     assert "≤2 Critical" in text, "the ≤2-Critical forced-prioritization cap must stay pinned"
     assert "≤300 words total" in text, "the ≤300-word output budget must stay pinned"
@@ -133,7 +133,7 @@ def test_template_output_calibration_pinned():
 
 
 def test_lens_substitution_documented_in_shared():
-    # The <lens> fill instruction now lives ONLY in the shared file (review I-1).
+    # The <lens> fill instruction now lives ONLY in the shared file.
     # Pin that the shared file both names the token and enumerates its four values,
     # so the dispatcher always knows what to substitute.
     text = SHARED.read_text()
