@@ -16,18 +16,21 @@ Frontmatter is parsed with a small hand-rolled YAML reader (only the fields
 we care about — no PyYAML dependency). Files without recognized frontmatter
 land in an "Uncategorized" bucket so they're visible.
 
-Invoked from the vault pre-commit hook before every vault commit.
+Takes the vault root as ``sys.argv[1]`` (param-threaded — no environment read).
+Invoked from the vault pre-commit hook, which derives the vault from
+``git rev-parse --show-toplevel`` and passes it as the sole argument.
 Idempotent — safe to run any time.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 from pathlib import Path
 
-VAULT = Path(os.environ.get("LORE_VAULT", Path.home() / "lore"))
+# Set from sys.argv[1] by main() before any render runs. Declared (not bound) at
+# module level so the link helpers can reference it as a global.
+VAULT: Path
 
 # ---- Status bucketing for plans/specs/designs --------------------------------
 
@@ -477,7 +480,14 @@ JOBS = [
 ]
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv if argv is None else argv
+    if len(args) < 2 or not args[1]:
+        print("usage: regenerate_indices.py <vault-path>", file=sys.stderr)
+        return 2
+
+    global VAULT
+    VAULT = Path(args[1])
     if not VAULT.is_dir():
         print(f"vault not found: {VAULT}", file=sys.stderr)
         return 2
