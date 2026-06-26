@@ -117,11 +117,10 @@ def _make_fixture(tmp_path: Path):
 
 def _run(args, *, vault, state, env_extra=None):
     full_env = dict(os.environ)
-    full_env["LORE_VAULT"] = str(vault)
     full_env["XDG_STATE_HOME"] = str(state)
     full_env["LORE_EMAIL"] = "tester@example.com"
     _cfg = Path(state) / "_xdg_config"
-    full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
+    full_env["XDG_CONFIG_HOME"] = str(_cfg)
     write_default_config(_cfg, Path(vault))
     if env_extra:
         full_env.update(env_extra)
@@ -195,7 +194,6 @@ def test_empty_query_nonzero(tmp_path):
 def test_no_args_nonzero(tmp_path):
     personal, shared, state = _make_fixture(tmp_path)
     full_env = dict(os.environ)
-    full_env["LORE_VAULT"] = str(personal)
     full_env["XDG_STATE_HOME"] = str(state)
     full_env["LORE_EMAIL"] = "tester@example.com"
     r = subprocess.run(

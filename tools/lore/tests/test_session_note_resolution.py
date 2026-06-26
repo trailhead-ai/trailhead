@@ -263,7 +263,7 @@ def test_cli_resolves_via_claude_code_session_id_env(tmp_path):
 
     r = run_cli(
         ["session-note"],
-        env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "live"},
+        env={"CLAUDE_CODE_SESSION_ID": "live"},
         seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
@@ -279,7 +279,7 @@ def test_cli_session_id_flag_overrides_env(tmp_path):
 
     r = run_cli(
         ["session-note", "--session-id", "flagged"],
-        env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "envid"},
+        env={"CLAUDE_CODE_SESSION_ID": "envid"},
         seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
@@ -296,7 +296,6 @@ def test_cli_worktree_flag_fallback(tmp_path):
     # No session id at all → resolve by explicit --worktree.
     r = run_cli(
         ["session-note", "--worktree", "beta"],
-        env={"LORE_VAULT": str(vault)},
         seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
@@ -309,7 +308,6 @@ def test_cli_miss_exits_1_with_diagnostic(tmp_path):
 
     r = run_cli(
         ["session-note", "--session-id", "nope", "--worktree", "ghost"],
-        env={"LORE_VAULT": str(vault)},
         seed_vault=vault,
     )
     assert r.returncode == 1
@@ -318,3 +316,4 @@ def test_cli_miss_exits_1_with_diagnostic(tmp_path):
     assert "session-note" in r.stderr
     assert "nope" in r.stderr
     assert "ghost" in r.stderr
+

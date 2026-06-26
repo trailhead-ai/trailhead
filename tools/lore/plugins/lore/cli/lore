@@ -182,8 +182,9 @@ def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     (from ``record_id``) plus the command's routing flags (``--repo/--product/
     --suite/--team``) — so delete operates on the very vault create routed the
     record to (a no-scope record lands in, and is deleted from, the ``default``
-    vault). When **no** config exists, fall back to the active vault
-    (``vault.resolve_vault()``) — vanilla usage is unchanged (Axiom 3).
+    vault). When **no** config exists, fall back to the config-resolved active
+    vault (``vault_config.resolve_active_vault()`` → the floor) — vanilla usage
+    is unchanged (Axiom 3).
 
     NOTE: ``record update`` no longer uses this resolver. Its scope flags
     express the *destination*, not the current location, so update locates the record via
@@ -197,7 +198,7 @@ def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     """
     loaded = _load_vault_config()
     if loaded is None:
-        return str(vault_mod.resolve_vault())
+        return str(vault_config_mod.resolve_active_vault())
     _, vaults = loaded
     kind = record_id.split("/", 1)[0]
     participating_scopes = {
@@ -483,7 +484,7 @@ def _vault_is_git_toplevel(vault: Path) -> bool:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
-    vault = Path(vault_mod.resolve_vault())
+    vault = Path(vault_config_mod.resolve_active_vault())
 
     if not vault.exists():
         print(f"error: vault not found: {vault}", file=sys.stderr)
@@ -668,7 +669,7 @@ def _flush_current_session(args: argparse.Namespace) -> int:
         pinned key/ISO-UTC format), reindex the one record, then commit the
         record's EXPLICIT paths only (the `.json` + `.md`; never `git add -A`).
     """
-    vault = Path(vault_mod.resolve_vault())
+    vault = Path(vault_config_mod.resolve_active_vault())
     key, rc = _resolve_session_key(args)
     if key is None:
         return rc
@@ -778,7 +779,7 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
     match set is a clean no-op (exit 0). A roll-up of the flushed count closes a
     successful batch.
     """
-    vault = Path(vault_mod.resolve_vault())
+    vault = Path(vault_config_mod.resolve_active_vault())
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 
     try:
@@ -882,7 +883,7 @@ def cmd_session_note(args: argparse.Namespace) -> int:
     to stderr and exits 1, so callers don't invent exploratory `ls`/`git`
     commands to guess.
     """
-    vault = Path(vault_mod.resolve_vault())
+    vault = Path(vault_config_mod.resolve_active_vault())
     session_id = _session_id_from_args_or_env(args)
     worktree_name = args.worktree or vault_mod.detect_worktree_name()
 
@@ -919,7 +920,7 @@ def cmd_areas(args: argparse.Namespace) -> int:
     _NO_AREAS_LINE = "No areas defined yet."
 
     try:
-        vault = Path(vault_mod.resolve_vault())
+        vault = Path(vault_config_mod.resolve_active_vault())
         if not vault.exists():
             raise FileNotFoundError(vault)
     except Exception as exc:
@@ -978,7 +979,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         single = (
             Path(vault_override).expanduser().resolve()
             if vault_override
-            else Path(vault_mod.resolve_vault())
+            else Path(vault_config_mod.resolve_active_vault())
         )
         vault_roots = [str(single)]
         shared_roots = None
@@ -1045,7 +1046,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             except Exception:
                 vault_roots = []
             if not vault_roots:
-                vault_roots = [str(Path(vault_mod.resolve_vault()))]
+                vault_roots = [str(Path(vault_config_mod.resolve_active_vault()))]
     except Exception:
         vault_roots = []
 
@@ -1079,10 +1080,11 @@ def cmd_search(args: argparse.Namespace) -> int:
 # ---- vault ------------------------------------------------------------------
 
 def cmd_vault(args: argparse.Namespace) -> int:
-    """Dispatch ``lore vault <action>`` — add / delete / ls / config.
+    """Dispatch ``lore vault <action>`` — add / delete / ls / config / path.
 
     Thin shell over ``vault_config`` (the parse/validate/mutate boundary) and
     ``index_store`` (the per-vault scan/remove seam). Routes by ``vault_action``.
+    ``path`` prints the config-resolved active vault root.
     """
     action = getattr(args, "vault_action", None)
     if action == "add":
@@ -1093,13 +1095,28 @@ def cmd_vault(args: argparse.Namespace) -> int:
         return _cmd_vault_ls(args)
     if action == "config":
         return _cmd_vault_config(args)
+    if action == "path":
+        return _cmd_vault_path(args)
     print(
         f"lore vault: unknown action {action!r}. "
         f"Use 'lore vault add', 'lore vault delete', 'lore vault ls', "
-        f"or 'lore vault config'.",
+        f"'lore vault config', or 'lore vault path'.",
         file=sys.stderr,
     )
     return 1
+
+
+def _cmd_vault_path(args: argparse.Namespace) -> int:
+    """Print the config-resolved active (default-scope) vault root to stdout.
+
+    The agent-facing way to resolve the active vault now that ``$LORE_VAULT`` is
+    gone: ``cat "$(lore vault path)/$(lore session-note)"``. Mirrors the CLI's own
+    resolution (``vault_config.resolve_active_vault`` → config default, silent
+    floor fallback), so agents and the CLI never disagree about which vault is
+    active.
+    """
+    print(vault_config_mod.resolve_active_vault())
+    return 0
 
 
 def _read_raw_config(config_path: Path) -> dict:
@@ -1791,7 +1808,7 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
                 f"\n{resolution.skipped.name} excluded: {resolution.skipped_reason}"
             )
     else:
-        vault_root = Path(vault_mod.resolve_vault())
+        vault_root = Path(vault_config_mod.resolve_active_vault())
 
     try:
         conn = index_store_mod.open_index()
@@ -1951,7 +1968,7 @@ def _cmd_session_candidate(args: argparse.Namespace) -> int:
         entry_lines.append(f"  {line}")
     entry = "\n".join(entry_lines)
 
-    vault_root = str(vault_mod.resolve_vault())
+    vault_root = str(vault_config_mod.resolve_active_vault())
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
     try:
         session_store_mod.capture_candidate(
@@ -1990,7 +2007,7 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
     # the referenced boundary neutralizes uniformly like candidate/create/blob.
     entry = record_store_mod.neutralize_fences(f"- referenced {now} {record_id}")
 
-    vault_root = str(vault_mod.resolve_vault())
+    vault_root = str(vault_config_mod.resolve_active_vault())
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
     try:
         session_store_mod.capture_referenced(
@@ -2021,7 +2038,7 @@ def _find_current_record_location(record_id: str):
     """
     loaded = _load_vault_config()
     if loaded is None:
-        root = str(vault_mod.resolve_vault())
+        root = str(vault_config_mod.resolve_active_vault())
         return record_store_mod.locate_record(record_id, vault_root=root)
     _, vaults = loaded
     for v in vaults:
@@ -2048,7 +2065,7 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
     """
     loaded = _load_vault_config()
     if loaded is None:
-        return str(vault_mod.resolve_vault()), 0
+        return str(vault_config_mod.resolve_active_vault()), 0
     _, vaults = loaded
     participating_scopes = {
         flag: merged_sidecar[flag]
@@ -2563,10 +2580,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_record_delete.add_argument("--team", default=None, help=argparse.SUPPRESS)
     p_record_delete.set_defaults(func=cmd_record)
 
-    # vault subcommand: ``lore vault add|delete|ls|config``.
+    # vault subcommand: ``lore vault add|delete|ls|config|path``.
     p_vault = sub.add_parser(
         "vault",
-        help="Manage configured layered vaults (add/delete/ls/config)",
+        help="Manage configured layered vaults (add/delete/ls/config/path)",
     )
     p_vault_sub = p_vault.add_subparsers(dest="vault_action", required=True)
 
@@ -2605,6 +2622,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_vault_config = p_vault_sub.add_parser("config", help="Edit config.json in $EDITOR")
     p_vault_config.set_defaults(func=cmd_vault)
+
+    p_vault_path = p_vault_sub.add_parser(
+        "path", help="Print the config-resolved active vault root"
+    )
+    p_vault_path.set_defaults(func=cmd_vault)
 
     # session subcommand: ``lore session candidate|referenced``.
     # A SEPARATE endpoint from ``lore record`` — it does NOT route through the

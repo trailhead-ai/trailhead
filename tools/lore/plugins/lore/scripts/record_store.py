@@ -358,6 +358,17 @@ def resolve_committer_email() -> str:
     return vault_mod.resolve_committer_email()
 
 
+def _active_vault_root() -> str:
+    """Resolve the active vault root from config, as a ``str``.
+
+    Function-local import of ``vault_config`` (which imports ``layers`` +
+    ``record_model``) keeps this module free of the ``vault ↔ vault_config``
+    module-load cycle — ``vault.py`` stays pure-stdlib (Axiom 6).
+    """
+    import vault_config
+    return str(vault_config.resolve_active_vault())
+
+
 def neutralize_fences(text: str) -> str:
     """Neutralize ``<external-memory>`` / ``</external-memory>`` fence tokens.
 
@@ -517,9 +528,9 @@ def place_record(
 ) -> RecordLocation:
     """Resolve the on-disk target for a new record (naming + collision).
 
-    Resolves the target vault (``vault_root`` when given, else the active vault
-    via ``vault_mod.resolve_vault()`` — the multi-vault eligibility hook). The
-    vault-relative name is ``_kebab(name)`` with a ``-2``/``-3``
+    Resolves the target vault (``vault_root`` when given, else the config-resolved
+    active vault via :func:`_active_vault_root` — the multi-vault eligibility
+    hook). The vault-relative name is ``_kebab(name)`` with a ``-2``/``-3``
     collision suffix, **except** ``session`` kind, whose name is the
     ``session_id`` GUID **verbatim** (no slug, no suffix). Collision occupancy
     checks both the ``.md`` and ``.json`` stem.
@@ -527,7 +538,7 @@ def place_record(
     ``scope`` is accepted for the multi-vault routing hook; it is currently unused.
     Returns a :class:`RecordLocation` whose ``record_id`` is ``<kind>/<name>``.
     """
-    root = vault_root if vault_root is not None else vault_mod.resolve_vault()
+    root = vault_root if vault_root is not None else _active_vault_root()
     kind_dir = Path(root) / kind
 
     if kind == "session":
@@ -558,7 +569,7 @@ def locate_record(
     in place (preserving the ID). Raises :class:`RecordNotFoundError` when neither
     artifact exists.
     """
-    root = vault_root if vault_root is not None else vault_mod.resolve_vault()
+    root = vault_root if vault_root is not None else _active_vault_root()
     kind, name, body_path, sidecar_path = _confine_record_id(record_id, root)
     if not body_path.exists() and not sidecar_path.exists():
         raise RecordNotFoundError(f"record not found: {record_id}")
@@ -756,7 +767,7 @@ def move_record(
 
     Returns the new ``RecordId``.
     """
-    old_root = old_vault_root if old_vault_root is not None else vault_mod.resolve_vault()
+    old_root = old_vault_root if old_vault_root is not None else _active_vault_root()
     old_kind, old_name, old_body_path, old_sidecar_path = _confine_record_id(old_id, old_root)
 
     # Dest-confinement: the destination paths must be descendants of the
@@ -822,7 +833,7 @@ def delete_record(
 
     A missing ID (neither artifact on disk) → :class:`RecordNotFoundError`.
     """
-    root = vault_root if vault_root is not None else vault_mod.resolve_vault()
+    root = vault_root if vault_root is not None else _active_vault_root()
     kind, name, body_path, sidecar_path = _confine_record_id(record_id, root)
 
     if not body_path.exists() and not sidecar_path.exists():

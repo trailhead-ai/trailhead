@@ -3,8 +3,9 @@ _bootstrap.ensure_trailhead_importable(), and confinement helpers.
 
 Test contract (all must RED before implementation, GREEN after):
 
-1. resolve_layers() with $LORE_VAULT set → exactly one layer: personal, trusted,
-   kind="personal", root == resolve_vault(); with $LORE_VAULT unset → ~/lore default.
+1. resolve_layers() with a config default vault → exactly one layer: personal,
+   trusted, kind="personal", root == resolve_active_vault(); with no config →
+   the state-dir floor vaults/default.
 2. VaultLayer is frozen/immutable; trusted defaults from kind (personal→True).
 3. layer_for_path maps a path under a root to that layer; under no root → None;
    a symlinked path resolving into a root still maps.
@@ -26,7 +27,7 @@ from unittest import mock
 
 import pytest
 
-from conftest import REPO_ROOT, SCRIPTS_DIR, load_script
+from conftest import REPO_ROOT, SCRIPTS_DIR, load_script, write_default_config
 
 # Ensure scripts dir is on path for direct imports in subprocess helpers
 if str(SCRIPTS_DIR) not in sys.path:
@@ -89,42 +90,50 @@ class TestVaultLayerDataclass:
 
 
 class TestResolveLayers:
-    def test_with_lore_vault_set_returns_one_personal_layer(self, tmp_path: Path) -> None:
-        """$LORE_VAULT set → exactly one personal layer with root == resolve_vault()."""
+    def test_config_default_vault_returns_one_personal_layer(self, tmp_path: Path) -> None:
+        """Config default vault → one personal layer rooted at resolve_active_vault()."""
         m = _layers()
         vault_dir = tmp_path / "my-vault"
         vault_dir.mkdir()
+        config_home = tmp_path / "xdg_config"
+        state_home = tmp_path / "xdg_state"
+        write_default_config(config_home, vault_dir)
         # Hermetic: point groups_dir at an empty dir so no real on-disk shared
         # vault declaration (e.g. a user's trailhead group config) leaks in.
         no_groups = tmp_path / "no-groups"
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault_dir)}, clear=False):
+        with mock.patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+            clear=False,
+        ):
             layers = m.resolve_layers(groups_dir=no_groups)
         assert len(layers) == 1
         layer = layers[0]
         assert layer.name == "personal"
         assert layer.kind == "personal"
         assert layer.trusted is True
-        # root must equal resolve_vault() output
-        from vault import resolve_vault
+        # root must equal the config default vault (resolve_active_vault output)
+        assert layer.root == vault_dir.resolve()
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault_dir)}, clear=False):
-            expected_root = resolve_vault()
-        assert str(layer.root) == expected_root
-
-    def test_without_lore_vault_uses_home_lore_default(self, tmp_path: Path) -> None:
-        """$LORE_VAULT unset → root is ~/lore resolved."""
+    def test_no_config_uses_state_floor_default(self, tmp_path: Path) -> None:
+        """No config.json → personal root is the state-dir floor vaults/default."""
         m = _layers()
+        config_home = tmp_path / "xdg_config"  # empty: no config.json seeded
+        state_home = tmp_path / "xdg_state"
         no_groups = tmp_path / "no-groups"
-        env = {k: v for k, v in os.environ.items() if k != "LORE_VAULT"}
-        with mock.patch.dict(os.environ, env, clear=True):
+        with mock.patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+            clear=False,
+        ):
             layers = m.resolve_layers(groups_dir=no_groups)
         assert len(layers) == 1
         layer = layers[0]
         assert layer.name == "personal"
         assert layer.kind == "personal"
         assert layer.trusted is True
-        expected = str(Path("~/lore").expanduser().resolve())
-        assert str(layer.root) == expected
+        expected = state_home / "lore" / "vaults" / "default"
+        assert layer.root == expected
 
     def test_resolve_layers_returns_list(self, tmp_path: Path) -> None:
         """resolve_layers() returns a list (not a generator or tuple)."""

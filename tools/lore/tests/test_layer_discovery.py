@@ -26,7 +26,7 @@ from pathlib import Path
 from unittest import mock
 
 
-from conftest import SCRIPTS_DIR, load_script
+from conftest import SCRIPTS_DIR, load_script, write_default_config
 
 # Ensure scripts dir is on path for direct imports
 if str(SCRIPTS_DIR) not in sys.path:
@@ -76,6 +76,25 @@ def _layers():
     return load_script("layers")
 
 
+def _seed_personal(tmp_path: Path, personal_root: Path):
+    """Seed a config.json whose default vault is ``personal_root`` and return an
+    ``os.environ`` patch pointing XDG at hermetic tmp dirs.
+
+    Replaces the pre-Slice-3 ``LORE_VAULT`` injection: the personal layer 0 is now
+    resolved from the config default vault (``resolve_active_vault``), not the env
+    var. ``XDG_STATE_HOME`` is fenced so config validation never touches the real
+    state dir (Axiom 6).
+    """
+    config_home = tmp_path / "xdg_config"
+    state_home = tmp_path / "xdg_state"
+    write_default_config(config_home, personal_root)
+    return mock.patch.dict(
+        os.environ,
+        {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+        clear=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. Happy path: group with one existing shared_vaults entry
 # ---------------------------------------------------------------------------
@@ -102,7 +121,7 @@ class TestSharedLayerDiscovery:
             shared_vaults=[{"name": "team-vault", "root": str(shared_root)}],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 2
@@ -139,7 +158,7 @@ class TestSharedLayerDiscovery:
             ],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 3
@@ -163,7 +182,7 @@ class TestGracefulFallback:
         groups_dir = tmp_path / "nonexistent-groups"
         # not created
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=tmp_path, groups_dir=groups_dir)
 
         assert len(layers) == 1
@@ -187,7 +206,7 @@ class TestGracefulFallback:
             shared_vaults=[],  # no shared vaults
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 1
@@ -215,7 +234,7 @@ class TestGracefulFallback:
             shared_vaults=[{"name": "team-vault", "root": str(shared_root)}],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             # cwd is unrelated_cwd — not a member of any group
             layers = m.resolve_layers(cwd=unrelated_cwd, groups_dir=groups_dir)
 
@@ -248,7 +267,7 @@ class TestCampAbsent:
                 "camp.scripts.group_resolve": None,
             },
         ):
-            with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+            with _seed_personal(tmp_path, personal_root):
                 layers = m.resolve_layers(cwd=tmp_path, groups_dir=groups_dir)
 
         assert len(layers) == 1
@@ -278,7 +297,7 @@ class TestMalformedConfig:
             '[group]\n# name is missing\n\n[[members]]\nname = "r"\nrepo_root = "/tmp/r"\n'
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 1
@@ -315,7 +334,7 @@ class TestMissingSharedRoot:
             shared_vaults=[{"name": "missing-vault", "root": str(nonexistent)}],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 1
@@ -349,7 +368,7 @@ class TestMissingSharedRoot:
             ],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 2
@@ -385,7 +404,7 @@ class TestConfinementViolations:
             shared_vaults=[{"name": "../evil", "root": str(evil_vault)}],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 1
@@ -418,7 +437,7 @@ class TestConfinementViolations:
             ],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 2
@@ -452,7 +471,7 @@ class TestPromoteToSelfCollision:
             shared_vaults=[{"name": "my-vault", "root": str(personal_root)}],
         )
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         assert len(layers) == 1
@@ -501,7 +520,7 @@ class TestRelativeRootResolution:
         # cwd is somewhere completely different from groups_dir
         unrelated_cwd = repo_root
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=unrelated_cwd, groups_dir=groups_dir)
 
         # The relative "../shared-vault" from groups_dir should land at tmp_path/shared-vault
@@ -560,7 +579,7 @@ class TestOverlapDegradation:
         (groups_dir / "alpha.toml").write_text(toml1)
         (groups_dir / "beta.toml").write_text(toml2)
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(personal_root)}, clear=False):
+        with _seed_personal(tmp_path, personal_root):
             layers = m.resolve_layers(cwd=repo_root, groups_dir=groups_dir)
 
         # Must degrade to personal-only (never raise)

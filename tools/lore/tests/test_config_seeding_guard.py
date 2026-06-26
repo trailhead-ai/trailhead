@@ -11,10 +11,8 @@ Coverage guard (Council Critical #3):
     already seeds correctly via its explicit ``vault`` param).  The import of
     ``write_default_config`` from conftest satisfies the presence check.
 
-  EXEMPT: files where config seeding is not applicable in Slice 2 — either
-    because lore init creates the config itself, the tests have no vault ops,
-    or because the in-process runner still uses mock.patch LORE_VAULT and will
-    be rewritten in Slice 3.
+  EXEMPT: files where config seeding is not applicable — either because lore
+    init creates the config itself or the tests have no vault ops.
 
   The accounting test asserts all 19 tracked files are in exactly one category.
 
@@ -55,12 +53,18 @@ from conftest import load_script, write_default_config  # noqa: E402
 # Coverage guard — three-category structure
 # ---------------------------------------------------------------------------
 
-# Files with own subprocess runners that must call write_default_config(
-# using an explicit vault variable (not derived from env.get("LORE_VAULT")).
+# Files that must call write_default_config( with an explicit vault variable
+# (not derived from env.get("LORE_VAULT")).  Covers both own-subprocess runners
+# and in-process direct-import runners (the latter seed config + fence XDG so
+# resolve_active_vault resolves to the test vault — Slice 3).
 _MUST_CALL = [
     "test_session_note_resolution.py",
     "test_search_cli.py",
     "test_index_store.py",
+    # Slice 3: rewritten from mock.patch LORE_VAULT to config-based resolution.
+    "test_layers_model.py",
+    "test_layer_discovery.py",
+    "test_lore_areas.py",
 ]
 
 # Files that delegate to conftest.run_cli (which seeds config via explicit vault param).
@@ -79,10 +83,6 @@ _EXEMPT = {
         "init tests — lore init creates config itself; no record ops",
     "test_bin_wrapper.py":
         "--help tests — no vault ops",
-    "test_layers_model.py":
-        "Slice-3 rewrite: in-process runner uses mock.patch LORE_VAULT",
-    "test_layer_discovery.py":
-        "Slice-3 rewrite: in-process runner uses mock.patch LORE_VAULT",
     "test_lore_init.py":
         "init tests — lore init creates config itself",
     "test_lore_init_hooks.py":
@@ -95,8 +95,6 @@ _EXEMPT = {
         "install tests — init creates config itself",
     "test_vault_cli.py":
         "vault management — vault add/init creates config itself",
-    "test_lore_areas.py":
-        "Slice-3 rewrite: in-process runner uses mock.patch LORE_VAULT",
 }
 
 _ALL_TRACKED = set(_MUST_CALL) | set(_USES_CONFTEST) | set(_EXEMPT)

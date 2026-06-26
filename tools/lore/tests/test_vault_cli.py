@@ -29,7 +29,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import CLI_PATH, load_script  # noqa: E402
+from conftest import CLI_PATH, load_script, write_default_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -37,14 +37,12 @@ from conftest import CLI_PATH, load_script  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _run(args, *, state, config, vault=None, stdin_text=None, extra=None):
+def _run(args, *, state, config, stdin_text=None, extra=None):
     """Run the lore CLI with isolated XDG state/config dirs."""
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CONFIG_HOME"] = str(config)
     env["LORE_EMAIL"] = "tester@example.com"
-    if vault is not None:
-        env["LORE_VAULT"] = str(vault)
     if extra:
         env.update(extra)
     return subprocess.run(
@@ -550,3 +548,30 @@ def test_ls_tolerates_absent_config(tmp_path):
     assert res.returncode == 0, res.stderr
     # No traceback.
     assert "Traceback" not in res.stderr
+
+
+# ---------------------------------------------------------------------------
+# `lore vault path` — print the config-resolved active vault root (Slice 3)
+# ---------------------------------------------------------------------------
+
+
+def test_vault_path_prints_config_default_vault(tmp_path):
+    """`lore vault path` prints the config default vault's path (config-only)."""
+    state, config = _dirs(tmp_path)
+    vault_dir = tmp_path / "my-vault"
+    vault_dir.mkdir()
+    write_default_config(config, vault_dir)
+
+    res = _run(["vault", "path"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == str(vault_dir.resolve())
+
+
+def test_vault_path_prints_floor_when_no_config(tmp_path):
+    """With no config.json, `lore vault path` prints the state-dir floor vault."""
+    state, config = _dirs(tmp_path)
+
+    res = _run(["vault", "path"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    expected = state / "lore" / "vaults" / "default"
+    assert res.stdout.strip() == str(expected)

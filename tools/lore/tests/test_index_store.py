@@ -542,10 +542,10 @@ def _run_lore(args: list[str], env: dict, *, seed_vault=None) -> subprocess.Comp
     """Run the lore CLI as a subprocess.
 
     Callers MUST fence both XDG_STATE_HOME and XDG_CONFIG_HOME in ``env``.
-    LORE_VAULT alone is insufficient: cmd_reindex calls _load_vault_config()
-    first and ignores LORE_VAULT when a real config.json is present.
+    cmd_reindex resolves the vault solely via config (``_load_vault_config`` /
+    ``resolve_active_vault``); there is no LORE_VAULT fallback (Slice 3).
     ``seed_vault``: explicit vault path to seed into XDG_CONFIG_HOME/lore/config.json
-    so config-based resolution finds the test vault (Slice 2 belt-and-suspenders).
+    so config-based resolution finds the test vault.
     """
     from conftest import write_default_config
     _cfg_home = env.get("XDG_CONFIG_HOME")
@@ -571,7 +571,6 @@ def test_lore_reindex_exits_0(tmp_path):
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
-    env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env, seed_vault=vault_root)
     assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -592,7 +591,6 @@ def test_lore_reindex_prints_row_count_to_stdout(tmp_path):
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
-    env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env, seed_vault=vault_root)
     assert result.returncode == 0, f"stderr: {result.stderr}"
@@ -617,7 +615,6 @@ def test_lore_reindex_count_reflects_vault_records(tmp_path):
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(fake_state)
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
-    env["LORE_VAULT"] = str(vault_root)
 
     result = _run_lore(["reindex"], env, seed_vault=vault_root)
     assert result.returncode == 0

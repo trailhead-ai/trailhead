@@ -37,5 +37,6 @@ from `$CLAUDE_CODE_SESSION_ID` — no note needs to exist beforehand.
 
 ## Vault path
 
-The vault is resolved via `$LORE_VAULT` automatically. Pass `--vault "$LORE_VAULT"`
-explicitly only when the env var is not set in the current shell.
+The vault is resolved automatically from `config.json` (the configured **default**
+vault, with a silent floor at `~/.local/state/lore/vaults/default`). You never pass
+`--vault` — resolution is automatic. To see the resolved root, run `lore vault path`.
