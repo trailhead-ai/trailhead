@@ -1,5 +1,5 @@
 """End-to-end tests for ``lore vault add|delete|ls|config`` + ``lore init``
-config seeding (Slice 4, S4).
+config seeding.
 
 Loads the CLI via ``CLI_PATH`` (subprocess) and isolates every path through
 injected ``XDG_STATE_HOME`` (vaults root + index) and ``XDG_CONFIG_HOME``
@@ -7,7 +7,7 @@ injected ``XDG_STATE_HOME`` (vaults root + index) and ``XDG_CONFIG_HOME``
 config, index, or vault (Axiom 6). Index-scope assertions open the index at the
 ``index_store`` boundary and query it directly.
 
-Covers the Slice 4 test contract:
+Covers the test contract:
   - ``add`` writes the config entry AND scans an existing populated dir's records
     into the index, keyed + ``shared``-flagged correctly; missing ``--scope`` →
     non-zero; duplicate name → non-zero; ``--scope default --record blob`` →
@@ -127,7 +127,7 @@ def _index_rows_for(state, vault_root):
 
 
 # ---------------------------------------------------------------------------
-# init seeding (Slice 1, S5 — non-interactive installer)
+# init seeding (non-interactive installer)
 # ---------------------------------------------------------------------------
 
 

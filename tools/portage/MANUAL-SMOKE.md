@@ -3,7 +3,7 @@
 This is the manual parity gate for the deployment-extraction hard cut.
 
 Run this checklist on a **real PR** after the full automated suites are green
-and **before** Slice 6b deletes craft's `release` capability cluster. A written
+and **before** craft's `release` capability cluster is deleted. A written
 PASS recorded in the log below is the trigger for that deletion.
 
 For day-to-day portage/landing operation, see the tool READMEs instead.
@@ -87,11 +87,11 @@ Confirm:
       in the declared order; a PR is never merged before its dependency.
 - [ ] For a **multi-PR group WITHOUT `merge_order`**: the skill refuses to merge
       and surfaces a clear message instructing the operator to declare
-      `merge_order` in the group TOML (R-6 gate).
+      `merge_order` in the group TOML.
 - [ ] On merge success, the sidecar is updated or removed as appropriate.
 
-**Pass criteria:** correct merge outcome for the group's PR count; R-6 gate
-fires as described.
+**Pass criteria:** correct merge outcome for the group's PR count; the
+no-`merge_order` refusal fires as described.
 
 ---
 
@@ -151,21 +151,21 @@ a bad token) and surfaced in-band.
 
 ## Written-PASS log
 
-Record date, PR URL, and PASS/FAIL per step here. Slice 6b's deletion of
+Record date, PR URL, and PASS/FAIL per step here. The deletion of
 craft's `release` capability is gated on a PASS recorded in this table.
 
 | Date | PR URL | Step 1 open | Step 2 monitor | Step 3 merge | Step 4 soak | Step 5 doctor | Step 6 visibility | Overall |
 |------|--------|-------------|----------------|--------------|-------------|---------------|-------------------|---------|
 | _pending_ | | | | | | | | |
 
-**Do not proceed to Slice 6b (craft `release` deletion) until at least one row
+**Do not proceed with the craft `release` deletion until at least one row
 above shows PASS in all step columns.**
 
 ---
 
 ## Rollback path
 
-The Slice 6b deletion lands as a **single, revertable commit**. If a
+The deletion lands as a **single, revertable commit**. If a
 post-deletion gap surfaces after the craft `release` cluster is removed, the
 escape hatch is:
 

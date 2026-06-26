@@ -109,7 +109,7 @@ def resolve_user() -> str:
 def resolve_committer_email() -> str:
     """Return the committer email for record provenance (``*-by`` fields).
 
-    **Deterministic, not cwd-dependent (Slice 2 / council/Security).** Fixed
+    **Deterministic, not cwd-dependent.** Fixed
     order: ``$LORE_EMAIL`` (test/override) → ``git config --global user.email``.
     Deliberately **not** a bare ``git config user.email`` — that would silently
     inherit a repo-local override from whatever working repo the CLI was invoked
@@ -117,7 +117,7 @@ def resolve_committer_email() -> str:
     ``--global`` scope pins the human's identity regardless of cwd.
 
     Returns the email, or the **empty string** when unset (no silent fallback —
-    the empty-email decision KU4 belongs to ``record_store.validate_and_write``,
+    the empty-email decision belongs to ``record_store.validate_and_write``,
     which turns empty into a hard typed error). Distinct from
     :func:`resolve_user`, which returns git user.NAME with a ``"you"`` fallback —
     wrong field and wrong fallback for ``*-by``.
@@ -178,7 +178,7 @@ def _find_session_record(vault: Path, key: str | None) -> Path | None:
     """Return the singular session record ``session/<key>.md`` for *key*, or None.
 
     The shared resolver behind :func:`find_session_note` (worktree-name key) and
-    :func:`find_session_note_by_session_id` (GUID key) — since Slice 1 a session is
+    :func:`find_session_note_by_session_id` (GUID key) — a session is
     a first-class record under the singular ``session/`` kind dir, so both keys are
     the same direct stem lookup. The ``# session: <key>`` body header is confirmed
     so a same-named file of a different shape is not mistaken for the capture
@@ -202,14 +202,14 @@ def _find_session_record(vault: Path, key: str | None) -> Path | None:
 def find_session_note(vault: Path, worktree_name: str | None = None) -> Path | None:
     """Return the worktree-keyed session record in ``vault/session/``, or None.
 
-    Since Slice 1 a session is a first-class record under the singular
+    A session is a first-class record under the singular
     ``session/`` kind dir, keyed by ``--session-id`` (a GUID) **or**, when no id
     is set, the worktree name (``_resolve_session_key`` in the CLI). So the
     worktree fallback is a direct stem lookup (see :func:`_find_session_record`).
 
-    Slice 7 retired the legacy plural ``sessions/`` reads (the date-prefixed
+    The legacy plural ``sessions/`` reads (the date-prefixed
     ``YYYY-MM-DD-HHMM-<worktree>.md`` frontmatter notes whose CREATE path was
-    already retired in Slice 1/2): nothing writes them and the live vault is
+    already retired) were dropped: nothing writes them and the live vault is
     singular, so there is nothing left to scan.
 
     Returns None when *worktree_name* is empty or no matching record exists.
@@ -220,13 +220,13 @@ def find_session_note(vault: Path, worktree_name: str | None = None) -> Path | N
 def find_session_note_by_session_id(vault: Path, session_id: str) -> Path | None:
     """Return the singular session record for ``session_id``, by id — cwd-independent.
 
-    The live on-disk shape since Slice 1 is the **singular session record**
+    The live on-disk shape is the **singular session record**
     ``session/<id>.{md,json}`` — a first-class indexed record (``# session: <id>``
     body header + a ``.json`` sidecar), resolved by :func:`_find_session_record`.
 
-    Slice 7 retired the legacy plural ``sessions/`` reads (the pre-Slice-1
-    body-only GUID file and the date-prefixed frontmatter note): nothing writes
-    them and the live vault is singular.
+    The legacy plural ``sessions/`` reads (the older body-only GUID file and the
+    date-prefixed frontmatter note) were retired: nothing writes them and the
+    live vault is singular.
 
     Returns None when the id is empty or no record matches. Never raises.
     """
@@ -291,8 +291,8 @@ def resolve_session_note(
 
     Order: exact session-id match (cwd-independent) → worktree-name fallback.
     Both resolve the singular session record ``session/<key>.{md,json}`` (the
-    live capture artifact since Slice 1) — by id stem for the first, by worktree
-    stem for the fallback (see :func:`find_session_note_by_session_id` /
+    live capture artifact) — by id stem for the first, by worktree stem for the
+    fallback (see :func:`find_session_note_by_session_id` /
     :func:`find_session_note`). ``worktree_name`` defaults to
     :func:`detect_worktree_name` when not supplied. Returns None when nothing
     resolves.

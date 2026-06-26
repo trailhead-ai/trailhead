@@ -1,13 +1,13 @@
-"""Slice 5 (S4) tests: config-driven routing + shared projection + orphan guard.
+"""Tests for config-driven routing + shared projection + orphan guard.
 
 These cross-reference the ``test_record_store`` / ``test_index_store`` unit suites;
 here we exercise the *wired* end-to-end behavior through the CLI subprocess, with a
 ``config.json`` placed under a tmp ``$XDG_CONFIG_HOME`` (Axiom 6).
 
-Covers the Slice 5 test contract (plan ``lore-layered-vaults-s4.md``):
+Covers the test contract:
 
   - End-to-end routing: ``--team product-engineering --repo trailhead-ai/trailhead``
-    (worked example d) lands in ``product-engineering``; no scope flags → default.
+    lands in ``product-engineering``; no scope flags → default.
   - Routing confirmation line names the elected vault + scope (every create); names
     the fall-through reason on example-d.
   - The created record's index row carries the resolved vault's ``shared``: own-vault
@@ -84,7 +84,7 @@ def _write_config(config_home: Path, vaults: list[dict]) -> Path:
 
 
 def _spec_config_vaults(state: Path) -> list[dict]:
-    """The spec's worked-example-d config, with explicit paths under state/vaults."""
+    """The worked-example-d config, with explicit paths under state/vaults."""
     root = state / "lore" / "vaults"
     return [
         {"name": "default", "scope": "default", "path": str(root / "default")},
@@ -118,12 +118,12 @@ def _run_with_config(args, *, vault, state, config_home, stdin_text=None):
 
 
 # ---------------------------------------------------------------------------
-# Deliverable 1 + 3: config-driven routing + confirmation line
+# Config-driven routing + confirmation line
 # ---------------------------------------------------------------------------
 
 
 def test_routing_example_d_lands_in_team_vault(tmp_path):
-    """(d) ``--team product-engineering --repo trailhead-ai/trailhead`` with --kind
+    """``--team product-engineering --repo trailhead-ai/trailhead`` with --kind
     blob lands in the product-engineering vault (repo excludes blob, falls through)."""
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "config"
@@ -160,10 +160,9 @@ def test_routing_example_d_lands_in_team_vault(tmp_path):
 
 
 # NOTE: the former ``test_routing_set_team_does_not_route`` exercised the deleted
-# ``--set team=...`` frontmatter-only-without-routing path. Slice 1
-# (dedicated-field-flags plan) removed the generic ``--set`` patch idiom; Slice 2
-# unifies the scope flags so a scope value can no longer be set without routing.
-# The test was removed with the flag it tested.
+# ``--set team=...`` frontmatter-only-without-routing path. The generic ``--set``
+# patch idiom was removed, and the scope flags were unified so a scope value can
+# no longer be set without routing. The test was removed with the flag it tested.
 
 
 def test_routing_no_scope_flags_lands_in_default(tmp_path):
@@ -244,7 +243,7 @@ def test_routing_confirmation_names_vault_and_scope(tmp_path):
 
 
 def test_routing_confirmation_names_fallthrough_reason(tmp_path):
-    """Example-d: the higher repo vault is skipped (blob not in allowlist); the
+    """The higher repo vault is skipped (blob not in allowlist); the
     confirmation names the fall-through reason."""
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "config"
@@ -276,7 +275,7 @@ def test_routing_confirmation_names_fallthrough_reason(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Deliverable 2: shared threaded into the index write
+# Shared threaded into the index write
 # ---------------------------------------------------------------------------
 
 
@@ -348,7 +347,7 @@ def test_shared_true_vault_record_indexed_shared_one(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Update-path shared trust (dedicated-field-flags Slice 3): the resolved vault's
+# Update-path shared trust: the resolved vault's
 # shared flag is threaded through BOTH the auto-move and in-place index writes,
 # so an update never silently un-fences (or fails to fence) a record's row.
 # ---------------------------------------------------------------------------
@@ -446,7 +445,7 @@ def test_update_in_place_preserves_shared_trust(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Deliverable 4 + 5: multi-vault reindex, config-sourced shared, freshness
+# Multi-vault reindex, config-sourced shared, freshness
 # ---------------------------------------------------------------------------
 
 
@@ -584,14 +583,14 @@ def test_stale_config_index_surfaces_freshness_warning(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Deliverable 6: orphan-ID guard
+# Orphan-ID guard
 # ---------------------------------------------------------------------------
 #
 # The ``record update --move-to`` orphan-guard test was removed with the
-# ``--move-to`` flag (Slice 3, dedicated-field-flags plan): relocation is now an
-# automatic byproduct of a scope-flag change and the destination is only ever a
-# config-declared vault root (resolved via the create-side resolver), so the
-# explicit-unconfigured-destination path the guard protected no longer exists.
+# ``--move-to`` flag: relocation is now an automatic byproduct of a scope-flag
+# change and the destination is only ever a config-declared vault root (resolved
+# via the create-side resolver), so the explicit-unconfigured-destination path
+# the guard protected no longer exists.
 # The ``delete`` orphan path below is unaffected and stays.
 
 

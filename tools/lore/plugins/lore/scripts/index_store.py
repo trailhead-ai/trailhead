@@ -1,27 +1,26 @@
-"""Derived SQLite + FTS5 index for the lore vault (Slice 1, S3).
+"""Derived SQLite + FTS5 index for the lore vault.
 
 This module provisions and maintains a **derived** global index of lore records
 at ``state_dir("lore")/index.sqlite`` (WAL mode, created on first use). It is the
-authoritative index store the KQL ``search`` facade (S2–S4) reads — scalar facets
+authoritative index store the KQL ``search`` facade reads — scalar facets
 for ``WHERE`` predicates, ``record_facet`` membership edges for alias queries, and
 a populated ``record_fts`` virtual table for full-text ``MATCH`` + BM25 ranking.
 
-**Text-wins / index-derived posture (locked, umbrella decision 7; spec AC-TX2):**
+**Text-wins / index-derived posture:**
 The git-tracked text files (``<kind>/<name>.md`` + ``<kind>/<name>.json``) are the
 source of truth. The index is a cached projection — never the write target, always
 rebuildable via ``rebuild(vaults, conn)``. On any partial failure the text already
 on disk wins; ``lore reindex`` reconstructs the index from the vault tree.
 
-**Realized schema (S3, LOCKED behavior).** S3 brings S2's *minimal* scalar table up
-to the spec's locked schema. Because the index is derived and ``rebuild``-able, S3
-**drops + recreates** S2's table on schema upgrade rather than ALTERing — at zero
+**Schema.** Because the index is derived and ``rebuild``-able, a schema upgrade
+**drops + recreates** the table rather than ALTERing — at zero
 migration cost (``reindex`` repopulates):
 
 - ``records`` — ``id TEXT PRIMARY KEY`` (``"<vault>/<kind>/<name>"``); ``vault/kind/
   name`` (``UNIQUE``); ``title/status`` NOT NULL; ``team/suite/product/repo``; the
   ISO dates; ``shared INTEGER NOT NULL`` with a **``CHECK (shared IN (0, 1))``**
   constraint so a bad trust value fails at ingest rather than silently emitting
-  untrusted content unfenced (council/Security); ``src_mtime REAL NOT NULL`` /
+  untrusted content unfenced; ``src_mtime REAL NOT NULL`` /
   ``src_size INTEGER NOT NULL`` for drift detection. **There is no ``body`` column** —
   body text lives only in the markdown file and is fed into ``record_fts.body``.
 - ``record_facet(id REFERENCES records(id) ON DELETE CASCADE, facet, value)`` +
@@ -29,55 +28,55 @@ migration cost (``reindex`` repopulates):
   ``related-<kind>``, ``related-phases``, ``related-files-or-folders``,
   ``related-urls``). The sidecar's nested ``related`` map flattens to forward
   ``facet='related-<kind>', value=<target name>`` rows; reverse rows are materialized
-  in ``reindex`` pass 2 (see I-4).
+  in ``reindex`` pass 2.
 - ``record_labels(id REFERENCES records(id) ON DELETE CASCADE, key, value)`` +
   ``idx_labels`` — the indexed ``labels`` sidecar map, one row per ``(key, value)``
-  pair (Slice 3). Unlike ``record_facet``/``record_fts``, this table uses **FK
+  pair. Unlike ``record_facet``/``record_fts``, this table uses **FK
   ``ON DELETE CASCADE``**, so ``_delete_projection`` needs no manual cleanup — the
   ``records`` delete clears the linked label rows (relies on ``PRAGMA
   foreign_keys=ON``). The ``annotations`` sidecar map is free-form and **not**
   projected into any index table.
 - ``record_fts`` — a **populated** ``fts5(title, keywords, body,
   tokenize='unicode61 remove_diacritics 2')`` table with **NO ``content=`` option**
-  (KU1, validated Slice 0). ``records`` has no ``body``/``keywords`` column, so
+  ``records`` has no ``body``/``keywords`` column, so
   external-content ``'rebuild'`` cannot read them; the indexer fills the table
   directly via ``INSERT INTO record_fts(rowid, title, keywords, body)`` where
   ``rowid`` aliases ``records.rowid``, ``keywords`` is the joined keyword values, and
   ``body`` is read from the record's ``.md`` file. ``'rebuild'`` is never called.
   ``bm25(record_fts, 3.0, 2.0, 1.0)`` maps weights positionally to title/keywords/body.
 
-**MANDATORY — FK enforcement (Slice 0 verdict).** SQLite defaults ``PRAGMA
+**MANDATORY — FK enforcement.** SQLite defaults ``PRAGMA
 foreign_keys`` to OFF and does NOT persist it in the file, so ``open_index`` issues
 ``PRAGMA foreign_keys = ON`` on **every** connection it opens. Without it, the
 ``record_facet`` FK guard and ``ON DELETE CASCADE`` silently no-op.
 
 **Invariants:**
-- I-1: ``records.id`` is the primary key (``"<vault>/<kind>/<name>"``); the shared
+- ``records.id`` is the primary key (``"<vault>/<kind>/<name>"``); the shared
   projection is idempotent — re-projecting a key replaces its row, forward facets,
   and FTS row in place.
-- I-2: ``rebuild`` drops all rows and repopulates in a single two-pass transaction —
+- ``rebuild`` drops all rows and repopulates in a single two-pass transaction —
   the recovery path after any drift between disk and index.
-- I-3: The shared projection (``_project_record``) is used by **both** the
+- The shared projection (``_project_record``) is used by **both** the
   ``update_index`` write seam (via ``upsert_row``) and ``rebuild``: it writes the
   scalar columns, the forward ``record_facet`` rows, and the FTS row. Reverse facet
-  rows are a ``reindex``-only, two-pass property (I-4).
-- I-4: ``reindex`` pass 1 inserts ALL ``records`` rows across ALL vaults + forward
+  rows are a ``reindex``-only, two-pass property.
+- ``reindex`` pass 1 inserts ALL ``records`` rows across ALL vaults + forward
   facets + FTS; pass 2 inserts **reverse** ``record_facet`` edges. The FK
   ``record_facet.id REFERENCES records(id)`` is satisfied because every record row
   exists before any facet row (incl. cross-vault reverse targets ingested in a later
   vault). Reverse edges make ``related``/alias membership symmetric. The incremental
   ``update_index`` path emits **forward** edges only; full reverse symmetry is a
   documented ``reindex``-only gap — safe because the index is derived.
-- I-5: ``shared`` is ``0`` (trusted, unfenced) for the user's own/owned vault and
-  ``1`` (untrusted/shared — must be fenced by ``search``) otherwise. **S4 wired the
-  config source:** ``rebuild`` takes ``shared_roots`` (the set of resolved root paths
+- ``shared`` is ``0`` (trusted, unfenced) for the user's own/owned vault and
+  ``1`` (untrusted/shared — must be fenced by ``search``) otherwise. The config
+  source: ``rebuild`` takes ``shared_roots`` (the set of resolved root paths
   ``config.json`` marks ``shared: true``) and derives ``shared=1`` iff the vault's
   root is in that set; when ``shared_roots`` is ``None`` it falls back to the
   owned-vault heuristic (first vault — or ``owned_vault`` — is ``shared=0``, rest
   ``1``) for vanilla no-config usage. The incremental ``upsert_row`` write path is
   passed the resolved vault's ``shared`` by ``record_store`` (default ``0``). The
   column shape (``shared`` 0/1) and the ``search`` classification are unchanged.
-- I-6: ``delete_row`` removes the ``records`` row (CASCADE clears its facets) and the
+- ``delete_row`` removes the ``records`` row (CASCADE clears its facets) and the
   matching ``record_fts`` row; a missing key is a silent no-op (never raises).
 """
 
@@ -122,7 +121,7 @@ def _resolve_index_path(env: dict[str, str] | None = None) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Schema (realized S3 — locked behavior)
+# Schema
 # ---------------------------------------------------------------------------
 
 _DDL = """\
@@ -241,12 +240,12 @@ def _project_record(
     """Project one record into ``records`` + forward ``record_facet`` rows + FTS.
 
     The **shared projection** used by both ``upsert_row`` (the write seam) and
-    ``rebuild`` pass 1. Idempotent (I-1): any existing projection for this id is
+    ``rebuild`` pass 1. Idempotent: any existing projection for this id is
     dropped first, so re-projecting replaces the row, its forward facets, and its FTS
     row in place. Returns the ``records.id``.
 
     Reverse facet edges are NOT emitted here — they are a ``reindex``-only pass-2
-    property (I-4).
+    property.
     """
     record_id = _record_id(vault, kind, name)
     _delete_projection(conn, record_id)
@@ -340,11 +339,11 @@ def upsert_row(
     *,
     shared: int = 0,
 ) -> None:
-    """Project the record keyed ``(vault, kind, name)`` (the write seam, I-3).
+    """Project the record keyed ``(vault, kind, name)`` (the write seam).
 
     Thin wrapper over the shared projection: writes the scalar columns, the forward
     ``record_facet`` rows, and the FTS row in one call. Reverse edges are a
-    ``reindex``-only property (I-4). ``shared`` defaults to ``0`` (trusted/unfenced)
+    ``reindex``-only property. ``shared`` defaults to ``0`` (trusted/unfenced)
     because the incremental write path always targets the user's own (owned) vault.
 
     ``src_mtime``/``src_size`` are derived from the in-memory ``body`` (the write
@@ -371,7 +370,7 @@ def delete_row(
     kind: str,
     name: str,
 ) -> None:
-    """Remove the projection for ``(vault, kind, name)`` (I-6).
+    """Remove the projection for ``(vault, kind, name)``.
 
     Deletes the ``records`` row (CASCADE clears its facets) and the matching FTS row.
     Silent no-op when the key does not exist. The caller must ``conn.commit()``.
@@ -385,20 +384,20 @@ def scan_vault(
     *,
     shared: int,
 ) -> int:
-    """Scan one vault root and ``upsert_row`` each complete record pair (S4).
+    """Scan one vault root and ``upsert_row`` each complete record pair.
 
     The **per-vault incremental** companion to ``rebuild`` used by ``lore vault
     add`` to fold a single (possibly already-populated) vault's records into the
     global index without dropping everything else. Scans ``<kind>/<name>.json`` +
     ``<kind>/<name>.md`` pairs under *vault_root*; only complete pairs are indexed.
 
-    Mirrors ``rebuild``'s skip-guard (I-2): a single malformed sidecar — bad JSON,
+    Mirrors ``rebuild``'s skip-guard: a single malformed sidecar — bad JSON,
     unreadable body, or a NOT NULL / CHECK violation at INSERT — skips that one
     record instead of aborting the scan. Each surviving record is projected via
-    ``upsert_row`` (idempotent, I-1), stamped with the caller-supplied ``shared``
+    ``upsert_row`` (idempotent), stamped with the caller-supplied ``shared``
     flag (0 = own/trusted, 1 = untrusted/shared).
 
-    Reverse facet edges are a ``reindex``-only, two-pass property (I-4); a one-pass
+    Reverse facet edges are a ``reindex``-only, two-pass property; a one-pass
     per-vault scan emits forward edges only — acceptable because the index is derived
     and ``lore reindex`` restores full reverse symmetry.
 
@@ -443,7 +442,7 @@ def scan_vault(
 
 
 def remove_vault(vault_root: str, conn: sqlite3.Connection) -> int:
-    """Remove every row for *vault_root* from the index (S4).
+    """Remove every row for *vault_root* from the index.
 
     The per-vault companion to ``delete_row`` used by ``lore vault delete``. A bulk
     ``DELETE FROM records WHERE vault=?`` would orphan the matching ``record_fts``
@@ -467,7 +466,7 @@ def remove_vault(vault_root: str, conn: sqlite3.Connection) -> int:
 
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
-    """Upsert a key/value row into ``index_meta`` (S4 config-freshness signal).
+    """Upsert a key/value row into ``index_meta`` (config-freshness signal).
 
     The ``index_meta`` table records derived-index provenance the read path needs
     to detect drift it cannot see by stat alone — notably ``config_mtime``, the
@@ -484,7 +483,7 @@ def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
 
 
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
-    """Return the ``index_meta`` value for *key*, or ``None`` if unset (S4)."""
+    """Return the ``index_meta`` value for *key*, or ``None`` if unset."""
     row = conn.execute("SELECT value FROM index_meta WHERE key=?", (key,)).fetchone()
     return None if row is None else row[0]
 
@@ -496,7 +495,7 @@ def rebuild(
     owned_vault: str | None = None,
     shared_roots: set[str] | None = None,
 ) -> int:
-    """Drop and two-pass repopulate the index from the vault directory trees (I-2/I-4).
+    """Drop and two-pass repopulate the index from the vault directory trees.
 
     Scans each vault root for ``<kind>/<name>.json`` + ``<kind>/<name>.md`` pairs.
     Only **complete pairs** (both files present) are indexed.
@@ -508,9 +507,9 @@ def rebuild(
     FK is satisfied because every record row exists before any facet row, even when a
     reverse-edge target lives in a later-ingested vault.
 
-    **``shared`` derivation source (I-5).** Two modes:
+    **``shared`` derivation source.** Two modes:
 
-    - **Config-sourced (S4, preferred):** when ``shared_roots`` is given, a vault's
+    - **Config-sourced (preferred):** when ``shared_roots`` is given, a vault's
       rows get ``shared=1`` iff its root string ∈ ``shared_roots`` (the set of
       resolved root paths the config marks ``shared: true``), else ``shared=0``.
       This is the per-vault ``config.json`` source the spec mandates — a config edit
@@ -563,7 +562,7 @@ def rebuild(
                 md_path = kind_dir / f"{name}.md"
                 if not md_path.exists():
                     continue
-                # I-2: the projection (records INSERT included) is inside the
+                # The projection (records INSERT included) is inside the
                 # skip guard so a single malformed sidecar — bad JSON, unreadable
                 # body, OR a NOT NULL / CHECK violation at INSERT — skips that one
                 # record instead of aborting the whole rebuild. ``reindex`` is the
@@ -600,7 +599,7 @@ def rebuild(
 
     # Pass 2 — reverse edges. For each forward ``related-<kind>`` edge whose target
     # resolves to a real record, emit a symmetric reverse row on the target so the
-    # source is findable from the target's side (membership is symmetric, I-4).
+    # source is findable from the target's side (membership is symmetric).
     for source_id, source_name, rel_kind, target_name in forward_related:
         target_id = name_index.get((rel_kind, target_name))
         if target_id is None:

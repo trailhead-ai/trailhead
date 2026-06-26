@@ -1,6 +1,6 @@
-"""Slice 2 (S3) tests: KQL tokenizer + recursive-descent parser → backend-agnostic AST.
+"""KQL tokenizer + recursive-descent parser → backend-agnostic AST tests.
 
-Covers every bullet in the plan's Slice 2 test contract:
+Covers the test contract:
 
   - Grammar matrix: each supported construct parses to the expected AST shape.
   - Quoting rules: slash-forced quoting, unquoted field tokens, space-as-boundary.
@@ -50,7 +50,7 @@ def test_status_and_kind(kql):
 
 
 def test_or_binds_looser_than_and(kql):
-    # Precedence contract (Slice 3 compiles boolean SQL against this shape):
+    # Precedence contract (the compiler builds boolean SQL against this shape):
     # `a or b and c` → Or(a, And(b, c)) — AND binds tighter than OR.
     ast = kql.parse("kind:spec or kind:plan and status:active")
     assert isinstance(ast, kql.Or), "OR must be the top node (binds loosest)"
@@ -385,9 +385,9 @@ def test_product_field(kql):
 
 
 # ---------------------------------------------------------------------------
-# Slice 4 — label.<key>:<value> and has:label.<key> selectors
+# label.<key>:<value> and has:label.<key> selectors
 #
-# The dot-form is the resolved KU1 syntax: `.` is already a word char so
+# The dot-form syntax: `.` is already a word char so
 # `label.worktree` is a single token, routed past the _ALL_FIELDS guard to a
 # LabelEq/LabelExists node. Namespaced keys encode `/` as `.` (dot-for-slash)
 # since a bare `/` is rejected by the lexer.

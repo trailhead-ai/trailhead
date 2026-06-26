@@ -1,6 +1,6 @@
 """Area-map menu + SessionStart pointer for the lore vault.
 
-The ``recall`` *command* was retired in Slice 5 (S3): ``lore search`` is now the
+The ``recall`` *command* was retired: ``lore search`` is now the
 single general query interface, and area-membered memory lookup is
 ``lore search 'area:<name>'``. What survives here is the **area-map path** — the
 compact on-demand area menu and the always-injected SessionStart pointer that
@@ -20,12 +20,12 @@ sends the agent to ``lore search``:
      `lore search 'area:<name>'` without inlining the full menu. Returns "" for
      0 areas.
 
-Security (D-7): area resolution is a LOOKUP into the enumerated area names from
+Security: area resolution is a LOOKUP into the enumerated area names from
 build_area_map — never a path built from a caller-supplied string. Only the area
 count (not names) reaches the SessionStart injection, so untrusted frontmatter
 does not flow into the injected context via the pointer.
 
-Interpreter gotcha (Slice 2): ``@dataclass`` + ``importlib``-loaded module +
+Interpreter gotcha: ``@dataclass`` + ``importlib``-loaded module +
 ``from __future__ import annotations`` crashes the local interpreter's dataclass
 field resolution — this module OMITS that future import for that reason.
 """
@@ -41,7 +41,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import frontmatter as _fm_mod  # noqa: E402
 
-# Hard caps (D-8c)
+# Hard caps
 _ONE_LINER_MAX = 120
 _KEYWORDS_MAX = 8
 
@@ -79,7 +79,7 @@ def _first_overview_sentence(text: str) -> str:
         if not stripped:
             continue
         if stripped.startswith("<!--"):
-            continue  # HTML comment — skip (D-2 filter)
+            continue  # HTML comment — skip
         # Found a usable sentence
         return stripped[:_ONE_LINER_MAX]
     return ""
@@ -94,8 +94,8 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
     """Build the compact area menu.
 
     Scans area/*.md, reads name/keywords/one-liner per area. Deterministically
-    ordered alpha by name. Hard caps applied (D-8c). Non-UTF-8/malformed files
-    silently skipped (D-8d). Area-name resolution is enumeration-only (D-7).
+    ordered alpha by name. Hard caps applied. Non-UTF-8/malformed files
+    silently skipped. Area-name resolution is enumeration-only.
 
     Returns [] when the area/ dir is absent (never raises).
     """
@@ -111,7 +111,7 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
         try:
             text = p.read_text(encoding="utf-8")
         except Exception:
-            continue  # D-8d: silently skip non-UTF-8 / binary files
+            continue  # silently skip non-UTF-8 / binary files
 
         try:
             fm = _fm_mod._parse_fm_text(text)
@@ -122,14 +122,14 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
         if not name:
             continue
 
-        # One-liner: summary: > first ## Overview sentence > empty (D-2)
+        # One-liner: summary: > first ## Overview sentence > empty
         summary = (fm.get("summary") or "").strip()
         if summary:
             one_liner = summary[:_ONE_LINER_MAX]
         else:
             one_liner = _first_overview_sentence(text)[:_ONE_LINER_MAX]
 
-        # Keywords (D-8c: cap)
+        # Keywords (cap)
         raw_kw = fm.get("keywords") or []
         if isinstance(raw_kw, list):
             keywords = [str(k).strip() for k in raw_kw if str(k).strip()]
@@ -146,14 +146,14 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
 
 
 def render_area_menu(entries: list[AreaEntry]) -> str:
-    """Render the area-map menu block (D-7 structural label).
+    """Render the area-map menu block.
 
     Called by `lore areas` to render the full on-demand area menu.
     Returns empty string when entries is empty (cmd_areas prints "no areas"
     instead). Never raises (pure function over already-parsed entries).
 
-    The per-area memory lookup is ``lore search 'area:<name>'`` (Slice 5 cutover:
-    ``recall`` is retired; ``search`` is the single query interface).
+    The per-area memory lookup is ``lore search 'area:<name>'`` (``recall`` is
+    retired; ``search`` is the single query interface).
     """
     if not entries:
         return ""
@@ -187,14 +187,14 @@ def render_area_pointer(vault: Path) -> str:
     behavior — the hook then omits the block).
 
     May raise (like build_area_map). The sole caller build_context wraps this
-    in a D-8a try/except that prints a stderr diagnostic and degrades gracefully
+    in a try/except that prints a stderr diagnostic and degrades gracefully
     (pointer omitted, vault index intact).
 
     Security: only the count is emitted, not area names, so untrusted
     frontmatter does not reach the injection via this path.
 
-    The per-area memory lookup is ``lore search 'area:<name>'`` (Slice 5 cutover:
-    ``recall`` is retired in favor of the ``search`` facade).
+    The per-area memory lookup is ``lore search 'area:<name>'`` (``recall`` is
+    retired in favor of the ``search`` facade).
     """
     vault = Path(vault)
     entries = build_area_map(vault)

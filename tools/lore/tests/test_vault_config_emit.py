@@ -1,7 +1,6 @@
-"""Slice 3 (S4) tests: config mutation API + atomic JSON write.
+"""Tests for the config mutation API + atomic JSON write.
 
-Covers the Slice 3 test contract from the S4 plan
-(``2026-06-18-lore-layered-vaults-s4.md``):
+Covers the test contract:
 
 - Round-trip: load ``config.json`` → ``add_vault_entry`` → ``write_config_atomic``
   → re-read; new entry is present and existing entries are intact; result
@@ -137,7 +136,7 @@ def test_special_chars_in_name_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(state))
     cfg = vc()
     # We use a raw name; the mutation API stores it as-is in the dict
-    # (normalization is applied at add-command time in Slice 4)
+    # (normalization is applied at add-command time)
     tricky_name = 'team-"x\\_y/z'
     config_path = _write_config(tmp_path, _minimal_config())
     config = _read_config(config_path)

@@ -1,26 +1,24 @@
-"""Slice 4 (S2) tests: ``lore record update`` CLI + the KU2 unified-diff applier.
+"""Tests for the ``lore record update`` CLI + the unified-diff applier.
 
-Covers every bullet in the Slice 4 test contract
-(plan ``lore-record-and-session-cli-s2.md``):
+Covers the test contract:
 
-  - full-body replace (piped stdin replaces the whole body; AC9).
+  - full-body replace (piped stdin replaces the whole body).
   - metadata-only (no stdin) leaves the body byte-identical; ``updated-*``
-    advances while ``created-*`` stays stable (AC10/AC11); prints the
-    ``no stdin`` notice to stderr at exit 0 (council/Advocate).
+    advances while ``created-*`` stays stable; prints the
+    ``no stdin`` notice to stderr at exit 0.
   - ``--diff`` clean apply updates the body + index.
   - ``--diff`` stale hunk → non-zero, body byte-for-byte unchanged, no index
-    update, parseable rejected-hunk line on stderr (AC-DIFF1).
+    update, parseable rejected-hunk line on stderr.
   - ``--diff`` hunk inserting ``<external-memory>`` → stored body has the fence
-    neutralized (the diff path is not a neutralization bypass; council/Security).
-  - invalid RECORD_ID → non-zero (AC8).
+    neutralized (the diff path is not a neutralization bypass).
+  - invalid RECORD_ID → non-zero.
   - vault-move via ``move_record`` (two injected vault roots): new ID returned,
     artifacts under the new vault, old copy gone, index re-keyed; a
-    crash-simulated move + ``reindex`` leaves exactly the new copy (AC12).
+    crash-simulated move + ``reindex`` leaves exactly the new copy.
 
-Plus direct unit tests for ``record_store.apply_unified_diff`` over the three KU2
+Plus direct unit tests for ``record_store.apply_unified_diff`` over the three
 adversarial cases (CRLF, trailing-newline, adjacent hunks) with byte-for-byte
-``==`` assertions on every reject path — these replace the deleted prover test
-(``tests/test_ku2_diff_applier.py``).
+``==`` assertions on every reject path.
 
 CLI tests run the lore CLI as a subprocess via CLI_PATH (conftest pattern). Never
 writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
@@ -69,7 +67,7 @@ def _open_index(state: Path):
 def _index_rows(state: Path, vault: Path, kind: str, name: str) -> list:
     """Return ``(name, fts_body)`` rows for the keyed record.
 
-    S3 moved body text out of ``records`` into the populated ``record_fts`` table;
+    The body text lives outside ``records`` in the populated ``record_fts`` table;
     the body is read back via the rowid alias join so these write-path assertions
     still observe the indexed body.
     """
@@ -117,12 +115,12 @@ def _make_diff(old: str, new: str) -> str:
 
 
 # ===========================================================================
-# CLI: full-body replace (AC9)
+# CLI: full-body replace
 # ===========================================================================
 
 
 def test_update_full_body_replaces_body(tmp_path):
-    """Piped stdin replaces the full body by default (AC9)."""
+    """Piped stdin replaces the full body by default."""
     vault, state = _make_vault(tmp_path)
     record_id = _create(vault, state, body="old body\n")
 
@@ -180,12 +178,12 @@ def test_update_full_body_restamps_updated_keeps_created(tmp_path):
 
 
 # ===========================================================================
-# CLI: metadata-only (no stdin) — AC10 / AC11 + stderr notice
+# CLI: metadata-only (no stdin) + stderr notice
 # ===========================================================================
 
 
 def test_update_metadata_only_leaves_body_byte_identical(tmp_path):
-    """No stdin → body unchanged; only sidecar params applied (AC10)."""
+    """No stdin → body unchanged; only sidecar params applied."""
     vault, state = _make_vault(tmp_path)
     body = "stable body line one\nstable body line two\n"
     record_id = _create(vault, state, body=body)
@@ -203,7 +201,7 @@ def test_update_metadata_only_leaves_body_byte_identical(tmp_path):
 
 
 def test_update_metadata_only_prints_no_stdin_notice_to_stderr(tmp_path):
-    """No stdin → the metadata-only notice goes to stderr; exit stays 0 (Advocate)."""
+    """No stdin → the metadata-only notice goes to stderr; exit stays 0."""
     vault, state = _make_vault(tmp_path)
     record_id = _create(vault, state)
 
@@ -239,7 +237,7 @@ def test_update_metadata_only_advances_updated_keeps_created(tmp_path):
 
 
 # ===========================================================================
-# Slice 1 (dedicated-field-flags): dedicated per-field setters on update
+# dedicated per-field setters on update
 # ===========================================================================
 
 
@@ -309,7 +307,7 @@ def test_update_set_flag_is_unrecognized(tmp_path):
 
 
 # ===========================================================================
-# CLI: --diff clean apply (AC9 / AC-DIFF1)
+# CLI: --diff clean apply
 # ===========================================================================
 
 
@@ -337,7 +335,7 @@ def test_update_diff_clean_apply_updates_body_and_index(tmp_path):
 
 
 # ===========================================================================
-# CLI: --diff stale hunk → atomic reject (AC-DIFF1)
+# CLI: --diff stale hunk → atomic reject
 # ===========================================================================
 
 
@@ -393,7 +391,7 @@ def test_update_diff_stale_hunk_parseable_rejected_line(tmp_path):
 
 
 # ===========================================================================
-# CLI: --diff is not a fence-neutralization bypass (council/Security)
+# CLI: --diff is not a fence-neutralization bypass
 # ===========================================================================
 
 
@@ -422,12 +420,12 @@ def test_update_diff_inserting_fence_is_neutralized(tmp_path):
 
 
 # ===========================================================================
-# CLI: invalid RECORD_ID (AC8)
+# CLI: invalid RECORD_ID
 # ===========================================================================
 
 
 def test_update_invalid_record_id_nonzero(tmp_path):
-    """A nonexistent RECORD_ID → non-zero exit (AC8)."""
+    """A nonexistent RECORD_ID → non-zero exit."""
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "update", "spec/does-not-exist"],
@@ -440,7 +438,7 @@ def test_update_invalid_record_id_nonzero(tmp_path):
 
 
 # ===========================================================================
-# CLI: automatic relocation on a scope change (Slice 3, dedicated-field-flags)
+# CLI: automatic relocation on a scope change
 # ===========================================================================
 #
 # ``--move-to`` is removed — relocation is an automatic byproduct of a scope-flag
@@ -527,7 +525,7 @@ def test_update_scope_change_auto_moves_to_routed_vault(tmp_path):
     assert _index_rows(state, vault_a, kind, name) == []
     assert len(_index_rows(state, vault_b, kind, name)) == 1
 
-    # Structured stdout signal — no silent move (re-review Critical-2).
+    # Structured stdout signal — no silent move.
     assert f"moved: {rid} →" in r.stdout
 
 
@@ -557,7 +555,7 @@ def test_update_same_scope_is_noop_with_symlinked_vault_root(tmp_path):
     """``update --team alpha`` on a record already in A is a no-op (normalized-path eq).
 
     A symlinked alias of vault A's root is in play so a symlink/trailing-slash
-    mismatch never triggers a spurious self-move (re-review Important).
+    mismatch never triggers a spurious self-move.
     """
     vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
     rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
@@ -674,7 +672,7 @@ def test_update_scope_change_field_equals_vault_invariant(tmp_path):
 def test_update_scope_change_restamps_updated_preserves_created(tmp_path):
     """A moved record's ``updated-*`` is re-stamped fresh; ``created-*`` preserved.
 
-    Finding KU-2 #4: move_record writes verbatim, so the auto-move path must stamp
+    move_record writes verbatim, so the auto-move path must stamp
     via the shared helper BEFORE the write — the moved sidecar must carry fresh
     ``updated-*`` and the original ``created-*``, not stale/missing provenance.
     """
@@ -718,7 +716,7 @@ def test_update_move_to_flag_is_removed(tmp_path):
 
 
 # ===========================================================================
-# Unit tests for apply_unified_diff — KU2 adversarial cases (replace prover test)
+# Unit tests for apply_unified_diff — adversarial cases
 # ===========================================================================
 
 
@@ -743,7 +741,7 @@ class TestApplierCleanApply:
 
 
 class TestApplierCRLF:
-    """KU2 case (a): CRLF body vs LF diff context — verbatim compare must reject."""
+    """CRLF body vs LF diff context — verbatim compare must reject."""
 
     def test_crlf_body_lf_diff_rejected_body_unchanged(self, rs):
         body_crlf = "line one\r\nline two\r\nline three\r\n"
@@ -768,7 +766,7 @@ class TestApplierCRLF:
 
 
 class TestApplierTrailingNewline:
-    """KU2 case (b): trailing-newline mismatch — reject, body unchanged."""
+    """Trailing-newline mismatch — reject, body unchanged."""
 
     def test_body_without_newline_diff_with_rejected(self, rs):
         diff = _make_diff(
@@ -791,7 +789,7 @@ class TestApplierTrailingNewline:
 
 
 class TestApplierAdjacentHunks:
-    """KU2 case (c): adjacent hunks — offset tracking + atomic reject."""
+    """Adjacent hunks — offset tracking + atomic reject."""
 
     def test_two_hunks_offset_tracking_applies(self, rs):
         body = "A\nB\nC\nD\nE\n"
@@ -813,7 +811,7 @@ class TestApplierAdjacentHunks:
 
 
 # ===========================================================================
-# Slice 2: --label / --annotation / --unset-label / --unset-annotation
+# --label / --annotation / --unset-label / --unset-annotation
 # ===========================================================================
 
 

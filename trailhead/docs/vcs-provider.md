@@ -49,7 +49,7 @@ The `Provider` interface (`trailhead/vcs/interface.py`) exposes four surfaces:
 | `repos`  | Active-repo detection from camp's manifest (membership stays camp's). |
 | `pr`     | Open/record, status, evaluate, and merge pull/merge requests. |
 | `ci`     | CI checks read + poll-to-actionable. |
-| `deploy` | Workflow-run + deployment status + log interrogation. **Slice 2** — declared here, methods raise `NotImplementedError` in Slice 1. |
+| `deploy` | Workflow-run + deployment status + log interrogation. |
 
 ## Per-method GitLab mapping
 
@@ -65,11 +65,11 @@ differ (the impedance mismatches are the design risk this mapping de-risks).
 | `pr.read_sidecar(sidecar_path)` | local `prs.json` sidecar read + schema validation | **identical** — local state read, provider-orthogonal | The symmetric read half of `pr.open`; promoted onto the ABC so consumers read the sidecar through the typed surface. |
 | `pr.status(repo_path, pr_number)` | `gh pr view --json mergeable,mergeStateStatus,isDraft,reviews` | `glab mr view <iid>` → `GET /projects/:id/merge_requests/:iid` | Field mapping: `mergeable` → `merge_status`/`detailed_merge_status`; `mergeStateStatus` → `detailed_merge_status`; `isDraft` → `draft` (bool); `reviews` → MR approvals/notes. |
 | `pr.evaluate(status)` | pure classifier over the `status` dict (`done`/`rebase`/`fix_ci`/`rerun_ci`/`review`/`wait`) | **identical** — operates on the normalized `status` dict, not on raw platform JSON | The normalization in `pr.status`/`ci.checks` is what keeps `evaluate` provider-agnostic. |
-| `pr.merge(pr_pairs, manifest_path)` | `gh pr merge <n> --merge --author-email …`; `git push origin --delete -- <branch>` | `glab mr merge <iid>` → `PUT /projects/:id/merge_requests/:iid/merge`; branch delete via `--remove-source-branch` | R-6 ordered-merge safety gate is provider-orthogonal (operates on `merge_order` + manifest). |
+| `pr.merge(pr_pairs, manifest_path)` | `gh pr merge <n> --merge --author-email …`; `git push origin --delete -- <branch>` | `glab mr merge <iid>` → `PUT /projects/:id/merge_requests/:iid/merge`; branch delete via `--remove-source-branch` | The ordered-merge safety gate is provider-orthogonal (operates on `merge_order` + manifest). |
 | `ci.checks(repo_path, pr_number)` | `gh pr checks --json name,state,link` + `gh api repos/{o}/{r}/check-runs/{job_id}/annotations` | `glab ci status` / `GET /projects/:id/merge_requests/:iid/pipelines` → `GET /projects/:id/pipelines/:pid/jobs` | **Impedance mismatch:** GitLab has no per-job *annotations* concept. The nearest signal is the job trace (`GET /projects/:id/jobs/:job_id/trace`) parsed for failures, or pipeline/job `status`. A `GitLabProvider` normalizes pipeline jobs into the same `failingChecks[{name,state,link,annotations}]` shape `evaluate` expects. |
 | `ci.wait(pr_pairs)` | polls `pr.status` → `pr.evaluate` until actionable/timeout | **identical** — built on `pr.status` + `pr.evaluate`, both already mapped | Poll loop is platform-agnostic. |
 
-### `deploy` surface (Slice 2)
+### `deploy` surface
 
 The `deploy` surface is the post-merge deploy-health signal `landing`'s `doctor`
 interrogates. Every call is list-form `gh api` through the runner (`shell=False`);

@@ -1,11 +1,11 @@
-"""Tests for Slice 2: unified-layout worktree lifecycle + central manifest.
+"""Tests for the unified-layout worktree lifecycle + central manifest.
 
-Slice 2 relocates member worktrees from the OLD per-repo layout
+The unified layout relocates member worktrees from the OLD per-repo layout
     <repo_root>/.claude/worktrees/<slug>/
 to the unified workspace layout
     central_state_dir(group)/worktrees/<slug>/<member>/
 
-Test contract (all must RED before implementation, GREEN after):
+Covers:
 
 1. reconcile creates …/worktrees/<slug>/<member> for each member on
    worktree-<slug>; the central manifest lists both with worktree_path under the
@@ -33,9 +33,9 @@ Test contract (all must RED before implementation, GREEN after):
 
 9. Branch-base policy: default base origin/main; per-member `base` override
    honored. Asserts the `git worktree add -b <branch> <wt> <base>` invocation on
-   a fake (the fetch is deferred to the Slice 3 async provisioner).
+   a fake (the fetch is deferred to the async provisioner).
 
-10. Success summary (D-I): a one-line summary on success.
+10. Success summary: a one-line summary on success.
 
 Fixtures use synthetic git repos in tmp_path (real git init + commit so
 git worktree add actually works) plus fake-git assertions for the branch-base
@@ -429,7 +429,7 @@ class TestBootstrapFailureAtomicity:
 
 
 # ---------------------------------------------------------------------------
-# Test: branch-base policy (fake git — fetch deferred to Slice 3)
+# Test: branch-base policy (fake git — fetch deferred to the async provisioner)
 # ---------------------------------------------------------------------------
 
 
@@ -547,7 +547,7 @@ class TestBranchBasePolicy:
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: worktree admin name == slug (stage + git worktree move)
+# Worktree admin name == slug (stage + git worktree move)
 # ---------------------------------------------------------------------------
 
 
@@ -710,7 +710,7 @@ class TestWorktreeAdminName:
 
 
 # ---------------------------------------------------------------------------
-# Test 5: break removal confinement (D-E)
+# Test 5: break removal confinement
 # ---------------------------------------------------------------------------
 
 
@@ -1027,7 +1027,7 @@ class TestCentralManifestPath:
 
 
 # ---------------------------------------------------------------------------
-# Test 10: success summary (D-I)
+# Test 10: success summary
 # ---------------------------------------------------------------------------
 
 

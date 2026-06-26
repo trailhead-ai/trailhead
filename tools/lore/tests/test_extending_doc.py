@@ -14,8 +14,8 @@ Two failure modes this guard catches:
 
 The set of real extension points is DISCOVERED from the source tree at test time
 (not hard-coded), so adding or renaming a seam upstream forces the cookbook to
-keep pace. The craft tree is the dev-agent half. S6 Slice 3 moved the brainstorm
-skill (and its `design_mockup` seam) from lore into craft, so the seamed skills
+keep pace. The craft tree is the dev-agent half. The brainstorm
+skill (and its `design_mockup` seam) was moved from lore into craft, so the seamed skills
 now live craft-side; the lore skills tree is still scanned for any lore-resident
 seams. Both trees are scanned.
 
@@ -99,7 +99,7 @@ def test_real_extension_points_discovered():
     """Sanity: the discovery actually found the known-real seams. If this list
     shrinks unexpectedly, the discovery regex broke (not the doc).
 
-    S6 Slice 3 moved the brainstorm skill (and its `design_mockup` seam) from
+    The brainstorm skill (and its `design_mockup` seam) was moved from
     lore into craft, so `design_mockup` — along with the other brainstorm-sourced
     seams — is now discovered in the craft tree, only when a craft checkout is
     present."""

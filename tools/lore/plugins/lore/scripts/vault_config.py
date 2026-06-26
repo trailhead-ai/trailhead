@@ -1,17 +1,17 @@
-"""Config model for lore layered vaults (Slices 1 + 3, S4).
+"""Config model for lore layered vaults.
 
 This module is the **single parse+validate boundary** for ``config.json`` —
 the ``$XDG_CONFIG_HOME/lore/config.json`` file that declares all configured
 vaults. It exposes a ``Vault`` NamedTuple, ``load_config`` for parse+validate,
 the lightweight query helpers ``is_shared`` / ``is_configured_vault``, and the
-**config-mutation API** (Slice 3): ``add_vault_entry``, ``remove_vault_entry``,
+**config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
 ``write_config_atomic``.
 
-**Mutation API (Slice 3):**
+**Mutation API:**
 
 All three helpers operate on the *raw parsed config dict* (the JSON object with
 its ``"vaults"`` array), not on the validated ``list[Vault]``.  This matches the
-on-disk JSON shape and is the ergonomic input for Slice 4's CLI (load → mutate →
+on-disk JSON shape and is the ergonomic input for the CLI (load → mutate →
 write).
 
 - ``add_vault_entry(config, vault_entry)`` — append a dict to
@@ -20,11 +20,11 @@ write).
   after normalization; no-op if absent.
 - ``write_config_atomic(path, config)`` — **``json.dump`` to a temp file in the
   same directory, ``json.load``-re-read to verify the file is valid + structurally
-  sane, then ``os.replace`` over ``config.json``** (council/Reliability).  A crash
+  sane, then ``os.replace`` over ``config.json``**.  A crash
   or malformed write never leaves ``config.json`` unparseable; the temp file is
   cleaned up on failure.
 
-**Vault model invariants (locked, Slice 1 test contract):**
+**Vault model invariants:**
 
 - ``name`` is stored **normalized** (``/`` → ``_`` via
   :func:`normalize_vault_name`).  Raw names like ``trailhead-ai/trailhead``
@@ -67,7 +67,7 @@ root so realpath-confinement can resolve through real directories — i.e.
 name like ``trailhead-ai/trailhead`` contains ``/`` verbatim. Normalization
 converts it to ``trailhead-ai_trailhead`` first; the validator then passes.
 
-Pure stdlib: ``json``, ``os``, ``pathlib``. References: Slice 1, S4 plan.
+Pure stdlib: ``json``, ``os``, ``pathlib``.
 """
 # NOTE: deliberately no ``from __future__ import annotations``. The lore test
 # harness loads scripts via ``conftest.load_script`` (importlib without
@@ -100,7 +100,7 @@ class VaultConfigError(Exception):
     """Parse or validation error in config.json.
 
     Each instance names the specific violation in its message so the CLI
-    layer (Slice 4) can re-emit it as a clean non-zero stderr line without
+    layer can re-emit it as a clean non-zero stderr line without
     needing to inspect the exception type further.
     """
 
@@ -164,7 +164,7 @@ def is_shared(vault: Vault) -> bool:
     Reads ``vault.shared`` directly — the attribute is set from the config
     entry's ``"shared"`` boolean (or defaulted to ``False`` when absent).
     The ``default``-scope vault is always ``False``; a ``shared: true`` vault
-    is trusted external content from S3's perspective.
+    is trusted external content from the index's perspective.
     """
     return vault.shared
 
@@ -172,11 +172,11 @@ def is_shared(vault: Vault) -> bool:
 def shared_flag(vault: Vault) -> int:
     """Return the index trust flag for ``vault`` — ``1`` shared, ``0`` own.
 
-    The single source of the ``bool → 0/1`` mapping that S3's ``records.shared``
+    The single source of the ``bool → 0/1`` mapping that the index's ``records.shared``
     column expects, so the write path (``record create``), the per-vault scan
     (``vault add``), and the full ``reindex`` cannot derive the trust flag
     differently. Untrusted (``shared: true``) content must fence identically
-    however it reached the index — see [[vault_resolve]] / S3's fence.
+    however it reached the index — see [[vault_resolve]] / the index's fence.
     """
     return 1 if is_shared(vault) else 0
 
@@ -351,7 +351,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
             if records:
                 raise VaultConfigError(
                     f"lore: the default-scope vault {name!r} may not carry a "
-                    "records allowlist (umbrella decision 6); it is the "
+                    "records allowlist; it is the "
                     "resolution floor and must accept every kind"
                 )
             # --- 5. default vault may NOT be shared: true ---
@@ -411,7 +411,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Config mutation API (Slice 3)
+# Config mutation API
 # ---------------------------------------------------------------------------
 
 
@@ -419,7 +419,7 @@ def add_vault_entry(config: dict, vault_entry: dict) -> None:
     """Append *vault_entry* to the ``"vaults"`` array in *config*.
 
     Operates on the raw parsed config dict (the JSON object shape); does not
-    validate the entry.  Validation is the caller's responsibility (Slice 4's
+    validate the entry.  Validation is the caller's responsibility (the
     CLI validates before calling this).
 
     Args:
@@ -455,7 +455,7 @@ def remove_vault_entry(config: dict, name: str) -> None:
 def write_config_atomic(path, config: dict) -> None:
     """Write *config* to *path* atomically with post-write verification.
 
-    **Protocol (council/Reliability):**
+    **Protocol:**
 
     1. ``json.dump`` the config to a temp file in the same directory as
        *path* (same-directory temp ensures ``os.replace`` is atomic — same

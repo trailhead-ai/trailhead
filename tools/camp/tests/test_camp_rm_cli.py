@@ -1,6 +1,6 @@
 """camp rm CLI integration: wiring to reconcile_break.
 
-Test contract (TDD — all must RED before implementation, GREEN after):
+Covers:
 
 1. camp rm <slug> invokes the real reconcile_break for the resolved group/slug
    (not the stub). Exit 0 on success; manifest removed.
@@ -9,7 +9,7 @@ Test contract (TDD — all must RED before implementation, GREEN after):
 4. unknown slug → legible error, non-zero exit.
 5. camp rm --name <slug> resolves via the --name flag.
 6. camp rm with no slug and cwd outside a workspace → legible error.
-7. The Slice-1 stub tests in test_slice1_cli_surface.py for camp rm have been
+7. The earlier stub tests in test_cli_surface.py for camp rm have been
    replaced: camp rm via the group-aware path now exits 0 on a clean workspace,
    not non-zero with a stub message.
 

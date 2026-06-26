@@ -18,7 +18,7 @@ can reference them without tripping the gate).
 
 Identifying tokens (developer handle / org name / machine path) are NOT checked
 here — those are the leak gate's exclusive responsibility. Adding them here as
-literals would trip the gate on this file itself (the P1-F self-referential trap).
+literals would trip the gate on this file itself (the self-referential leak-gate trap).
 
 `skills/_shared/` is a reference doc, not a skill, and is exempt.
 
@@ -26,7 +26,7 @@ literals would trip the gate on this file itself (the P1-F self-referential trap
 templates/*.md are shipped public files. They receive the same structural-seam
 check as SKILL.md files so a token cannot bypass the per-skill scan by living
 in a template. App-flavored tokens are constructed at runtime below (same
-P1-F trap avoidance as the test_cli_new.py band).
+trap avoidance as the test_cli_new.py band).
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ STRUCTURAL_SEAMS: list[str] = [
     "code/brain",
 ]
 
-# Private app-specific tokens constructed at runtime to avoid the P1-F
+# Private app-specific tokens constructed at runtime to avoid the
 # self-referential leak-gate trap (the test file is itself scanned by the gate).
 _PRIVATE_TOKENS: list[str] = [
     "".join(["post", "hog"]),
@@ -104,7 +104,7 @@ def test_template_has_no_private_tokens(template_md: Path):
 
 
 # ---------------------------------------------------------------------------
-# brainstorm — moved to the craft plugin (S6 Slice 3).
+# brainstorm — moved to the craft plugin.
 #
 # The brainstorm skill and its generic-hygiene / visible-skip assertions moved to
 # craft (tools/craft/tests/test_brainstorm_generic.py). The structural-brain-seam

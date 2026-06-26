@@ -8,7 +8,7 @@ assert:
 
   - a failing run surfaces the failure annotation (the doctor signal),
   - a clean / not-found (404 → []) run does NOT false-alarm,
-  - (Slice-2 C-1) a non-404 gh failure raises DeployError rather than silently
+  - a non-404 gh failure raises DeployError rather than silently
     returning empty — doctor must never read an *uncheckable* deploy as *healthy*.
 
 Unique basename — no collision with craft's per-script tests.
@@ -91,7 +91,7 @@ class TestDiagnoseDeployCleanRun:
 
 class TestDiagnoseDeployGhFailureRaises:
     def test_non_404_gh_failure_surfaces_error_not_empty(self, tmp_path, monkeypatch, capsys):
-        """Slice-2 C-1: a non-404 gh failure must surface as a legible error, NOT empty.
+        """a non-404 gh failure must surface as a legible error, NOT empty.
 
         doctor must never read an uncheckable deploy (auth/rate-limit/outage) as
         healthy. The provider raises DeployError; the thin script surfaces it as a

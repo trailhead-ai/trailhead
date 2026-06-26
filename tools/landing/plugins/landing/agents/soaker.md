@@ -4,7 +4,7 @@ description: |
   Background post-merge soak operator for a camp group. Runs the configured
   health command once via soak_health.py to verify a deploy is healthy.
   Escalates to doctor on regression; exits clean when no health command is
-  configured (inert by default — D-3).
+  configured (inert by default).
 
   Good fits:
   - Receiving a `post_merge_handoff` JSON marker from portage monitor's completion summary
@@ -13,7 +13,7 @@ description: |
 
   Bad fits:
   - Before merges have completed (run portage monitor first)
-  - When you need continuous multi-minute soak windows (the seam is one-shot — R-4)
+  - When you need continuous multi-minute soak windows (the seam is one-shot)
 model: sonnet
 effort: medium
 tools: Bash, Read, Agent
@@ -34,7 +34,7 @@ configured health command, report the result, and escalate if the deploy regress
 The camp manifest (schema v1) lives at `manifest_path` and carries:
 `{schema_version:1, group, slug, branch, members:[{name, repo_root, worktree_path}]}`.
 
-## Config-summary on launch (A-2)
+## Config-summary on launch
 
 On launch, before running the health command, emit a one-line summary:
 
@@ -68,7 +68,7 @@ python3 <SCRIPTS_DIR>/soak_health.py \
 
 `soak_health.py` reads `soak_health_command` from the `[release]` block of the group TOML.
 
-**Exit 0 — no health command configured (D-3 inert default):**
+**Exit 0 — no health command configured (inert default):**
 
 ```
 soak: n/a — no health command configured
@@ -84,7 +84,7 @@ soak: healthy
 
 Log: `Soaker: soak clean.` Exit clean.
 
-**Exit nonzero — health command failed or timed out (R-4 one-shot escalate):**
+**Exit nonzero — health command failed or timed out (one-shot escalate):**
 
 Escalate by dispatching the `doctor` subagent (via the Agent tool):
 
@@ -114,7 +114,7 @@ When you finish, return a short summary:
 
 ## Anti-patterns
 
-- Don't retry the health command on failure — one non-zero result escalates immediately (R-4).
+- Don't retry the health command on failure — one non-zero result escalates immediately.
 - Don't bake in any specific health endpoint, URL, or vendor — the health command is
   entirely user-configured in the group TOML [release] block.
 - Don't run the soak if the health command is absent — exit clean and log the n/a state.

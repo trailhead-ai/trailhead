@@ -1,6 +1,6 @@
-"""Slice 1 (S3) tests: locked index schema + full ingest projection + two-pass reindex.
+"""Tests for the locked index schema + full ingest projection + two-pass reindex.
 
-Covers every bullet in the plan's Slice 1 test contract (S3), proving the realized
+Covers the test contract, proving the realized
 schema (`records` + `record_facet` + `record_fts`) and the shared projection used by
 BOTH the `update_index` write seam and `reindex`:
 
@@ -120,7 +120,7 @@ def _write_record(vault_root: Path, kind: str, name: str, sidecar: dict, body: s
 
 
 # ---------------------------------------------------------------------------
-# FK enforcement (MANDATORY per Slice 0 verdict)
+# FK enforcement (mandatory)
 # ---------------------------------------------------------------------------
 
 
@@ -180,7 +180,7 @@ def test_open_index_provisions_realized_tables(env):
 
 
 def test_records_has_locked_columns(env):
-    """records carries the locked S3 columns incl. id, shared, src_mtime, src_size."""
+    """records carries the locked columns incl. id, shared, src_mtime, src_size."""
     mod = load_index_store()
     conn = mod.open_index(env=env)
     try:
@@ -608,7 +608,7 @@ def test_reindex_idempotent(env, tmp_path):
 
 
 def test_reindex_skips_malformed_sidecar_without_aborting(env, tmp_path):
-    """One malformed sidecar must skip that record, not abort the whole rebuild (I-2).
+    """One malformed sidecar must skip that record, not abort the whole rebuild.
 
     ``reindex`` is the recovery path; it must stay rebuildable even over a corrupted
     or hand-truncated sidecar. A sidecar missing a NOT NULL field (here ``created-at``,
@@ -772,7 +772,7 @@ def test_upsert_row_re_upsert_replaces_facets_and_fts(env, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Labels projection (Slice 3) — labels indexed, annotations NOT
+# Labels projection — labels indexed, annotations NOT
 # ---------------------------------------------------------------------------
 
 

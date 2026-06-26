@@ -19,7 +19,7 @@ These tokens name the app-specific seams that the genericized skills strip
 (observability vendor, flag-provider skill, schema name, build/test CLIs, issue
 tracker, cost-history report). Building each at runtime (via string-join) keeps
 this test source leak-gate-clean regardless of future denylist evolution — the
-"P1-F self-referential trap": a test file carrying a forbidden literal can block
+self-referential trap: a test file carrying a forbidden literal can block
 commits to its own fix. The module self-check below enforces that none of the
 joined results appears verbatim as a contiguous source literal here.
 
@@ -183,7 +183,7 @@ def test_skill_has_no_app_seam_tokens(skill_md: Path):
 
 # skill stem -> list of contiguous visible-skip phrases that MUST be present
 _VISIBLE_SKIP_PHRASES: dict[str, list[str]] = {
-    # planning skill renamed to plan in Spec A / Slice 4.
+    # planning skill renamed to plan.
     "plan": [
         "no feature-flag provider configured",
         "no observability provider configured",
@@ -231,10 +231,10 @@ def test_skill_visible_skip_phrases_present(stem: str):
 # ---------------------------------------------------------------------------
 
 _GENERALIZE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
-    # skill stems renamed in Spec A / Slice 4 (followup→polish; the old code-review
+    # skill stems renamed (followup→polish; the old code-review
     # request skill → review).
     "polish": [
-        # Slice 3: brief persistence goes through the note_store seam, not `lore new plan`.
+        # brief persistence goes through the note_store seam, not `lore new plan`.
         (
             "brain/plans/",
             "_shared/note-storage.md",
@@ -285,7 +285,7 @@ def test_skill_generalize_replacement_landed(stem: str):
 # scan can't tell a faithful copy from a copy-paste corruption. The
 # execute review-threshold table was relocated inline from
 # the host project's CLAUDE.md — guard its boundary values so a future edit
-# that scrambles them fails loud (council Reliability Minor).
+# that scrambles them fails loud.
 #
 # skill stem -> list of substrings that MUST be present verbatim
 # ---------------------------------------------------------------------------

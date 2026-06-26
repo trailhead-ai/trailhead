@@ -1,6 +1,6 @@
 """Behavior-preservation guard for brainstorm/SKILL.md trims.
 
-The brainstorm skill has been compressed in two passes (Slice 5 structural dedup,
+The brainstorm skill has been compressed in two passes (a structural dedup,
 then a deeper connective-prose trim). Compression must stay *behavior-preserving*:
 the prose may shrink, but the behavior-bearing anchors — the discovery dimensions
 the agent sweeps, the two mandatory decision steps, and the spec's canonical
@@ -82,11 +82,11 @@ def test_spec_canonical_sections_present():
 
 def test_recall_primary_and_spec_scaffold_anchors_present():
     text = _text()
-    # `lore search` is the imperative primary lookup post Slice-5 cutover
+    # `lore search` is the imperative primary lookup
     # (also covered by test_recall_wiring).
     assert "run `lore search" in text.lower()
-    # Slice 3: spec scaffolding goes through the note_store seam + craft template
-    # body, NOT `lore new spec` (which Slice 4 removes).
+    # spec scaffolding goes through the note_store seam + craft template
+    # body, NOT `lore new spec`.
     assert "_shared/note-storage.md" in text
     assert "templates/spec.md" in text
     assert "lore new spec" not in text

@@ -210,7 +210,7 @@ source = "portage"
 
 # ---------------------------------------------------------------------------
 # lore tool README anchors — skills (kind=skill)
-# S6 Slice 2: deleted area, defer, dead-end, decision, follow-up, check-in, seed
+# the per-kind capture skills (area, defer, dead-end, decision, follow-up, check-in, seed) were removed
 # ---------------------------------------------------------------------------
 
 [[claim]]

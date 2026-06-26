@@ -175,7 +175,7 @@ class TestReposDetect:
         assert str(bad) in str(exc_info.value)
 
     def test_empty_members_returns_empty_list(self, tmp_path: Path) -> None:
-        """M-3: a valid manifest with members absent or empty returns [] — not an error."""
+        """A valid manifest with members absent or empty returns [] — not an error."""
         manifest_absent = tmp_path / "absent_members.json"
         manifest_absent.write_text(
             json.dumps({"schema_version": 1, "group": "grp", "slug": "feat"}),

@@ -1,7 +1,7 @@
-"""Spec S1 tests: the canonical lore record model + pure sidecar validator.
+"""Tests for the canonical lore record model + pure sidecar validator.
 
-Slice 1 pins the declarative model (kinds, per-kind status vocab, phases, the
-v1 field schema) and the pure accessors. Slice 2 pins the pure ``validate``
+Pins the declarative model (kinds, per-kind status vocab, phases, the
+v1 field schema) and the pure accessors, plus the pure ``validate``
 contract. Loaded via ``conftest.load_script("record_model")`` like every other
 lore script.
 """
@@ -13,7 +13,7 @@ def rm():
     return load_script("record_model")
 
 
-# --- Slice 1: declarative model + accessors ---------------------------------
+# --- declarative model + accessors ---------------------------------
 
 
 def test_kinds_are_exactly_the_nine():
@@ -95,7 +95,7 @@ def test_is_valid_phase():
 
 def test_fields_v1_required_optional_and_autoset_flags():
     fields = rm().FIELDS_V1
-    # ``keywords`` is relaxed to optional (Slice 1, dedicated-field-flags plan).
+    # ``keywords`` is relaxed to optional.
     for key in ("version", "kind", "title", "status"):
         assert fields[key].required is True
         assert fields[key].auto_set is False
@@ -137,7 +137,7 @@ def test_field_spec_accessor_returns_v1():
 
 
 def test_accessor_contract_unknown_kind_returns_none_never_raises():
-    """Council Critical: unknown kind returns None, does not raise."""
+    """Unknown kind returns None, does not raise."""
     m = rm()
     assert m.is_valid_kind("foo") is False
     assert m.permitted_statuses("foo") is None
@@ -156,17 +156,17 @@ def test_auto_set_keys_exact():
 def test_required_operator_keys_exact_equality():
     """Exact equality, not superset (status/version defaulted; auto-set excluded).
 
-    ``keywords`` is relaxed to optional (Slice 1, dedicated-field-flags plan), so
+    ``keywords`` is relaxed to optional, so
     the required operator key set is exactly ``{kind, title}``.
     """
     assert rm().required_operator_keys() == {"kind", "title"}
 
 
-# --- Slice 2: KU1 — datetime Z-suffix parsing -------------------------------
+# --- datetime Z-suffix parsing -------------------------------
 
 
 def test_datetime_z_suffix_parses():
-    """KU1: ``datetime.fromisoformat`` accepts the ``Z`` suffix on this runtime.
+    """``datetime.fromisoformat`` accepts the ``Z`` suffix on this runtime.
 
     Resolved as a test (not a module-level assert that would crash import on an
     unexpected build): the validator type-checks datetimes via try/except, so a
@@ -177,7 +177,7 @@ def test_datetime_z_suffix_parses():
     assert datetime.fromisoformat("2026-06-17T14:32:00Z") is not None
 
 
-# --- Slice 2: the pure validator --------------------------------------------
+# --- the pure validator --------------------------------------------
 
 
 def _worked_example_spec_sidecar():
@@ -248,7 +248,7 @@ def test_missing_operator_required_keys_error():
 
 
 def test_missing_keywords_validates_clean():
-    """``keywords`` is optional (Slice 1): a sidecar without it validates clean."""
+    """``keywords`` is optional: a sidecar without it validates clean."""
     sidecar = _worked_example_spec_sidecar()
     del sidecar["keywords"]
     result = rm().validate(sidecar)
@@ -403,7 +403,7 @@ def test_validate_kind_arg_overrides_sidecar_kind():
     assert not any("status" in e for e in result.errors)
 
 
-# --- Slice 1 (plan 2026-06-20): labels and annotations map fields -----------
+# --- labels and annotations map fields -----------
 
 
 def _base_sidecar_with(**extra):
@@ -580,17 +580,17 @@ def test_annotations_same_key_rules_as_labels():
         assert any(bad_key in e for e in result.errors), msg
 
 
-# --- Slice 0: session status vocab → {dirty, clean} -------------------------
+# --- session status vocab → {dirty, clean} ---------------------------------
 
 
 def test_session_status_vocab_is_dirty_clean():
-    """Session vocab is exactly {dirty, clean} — not active/complete (Slice 0)."""
+    """Session vocab is exactly {dirty, clean} — not active/complete."""
     vocab = rm().STATUS_VOCAB
     assert set(vocab["session"]) == {"dirty", "clean"}
 
 
 def test_session_initial_status_is_dirty():
-    """Sessions are born dirty; first element of ordered tuple is 'dirty' (Slice 0)."""
+    """Sessions are born dirty; first element of ordered tuple is 'dirty'."""
     assert rm().initial_status("session") == "dirty"
 
 
@@ -600,7 +600,7 @@ def test_session_status_vocab_order_dirty_first():
 
 
 def test_session_clean_is_valid_status():
-    """clean is a valid session status post-Slice 0."""
+    """clean is a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="clean")
     result = m.validate(sidecar)
@@ -608,7 +608,7 @@ def test_session_clean_is_valid_status():
 
 
 def test_session_dirty_is_valid_status():
-    """dirty is a valid session status post-Slice 0."""
+    """dirty is a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="dirty")
     result = m.validate(sidecar)
@@ -616,7 +616,7 @@ def test_session_dirty_is_valid_status():
 
 
 def test_session_active_is_rejected():
-    """active is no longer a valid session status (Slice 0)."""
+    """active is no longer a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="active")
     result = m.validate(sidecar)
@@ -625,7 +625,7 @@ def test_session_active_is_rejected():
 
 
 def test_session_complete_is_rejected():
-    """complete is no longer a valid session status (Slice 0)."""
+    """complete is no longer a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="complete")
     result = m.validate(sidecar)
@@ -634,7 +634,7 @@ def test_session_complete_is_rejected():
 
 
 def test_session_shelved_is_rejected():
-    """shelved was never valid; still rejected post-Slice 0."""
+    """shelved was never valid; still rejected."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="shelved")
     result = m.validate(sidecar)
@@ -642,7 +642,7 @@ def test_session_shelved_is_rejected():
 
 
 def test_session_handoff_is_rejected():
-    """handoff is not in the session vocab; rejected (Slice 0)."""
+    """handoff is not in the session vocab; rejected."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="handoff")
     result = m.validate(sidecar)
@@ -650,7 +650,7 @@ def test_session_handoff_is_rejected():
 
 
 def test_session_finalized_is_rejected():
-    """finalized is not in the session vocab; rejected (Slice 0)."""
+    """finalized is not in the session vocab; rejected."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="finalized")
     result = m.validate(sidecar)

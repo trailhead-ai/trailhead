@@ -1,21 +1,22 @@
-"""Structural / efficiency fixes from a code review (FIX 6, 7, 9 + carry-forwards).
+"""Structural / efficiency fixes.
 
-FIX 6 — the hidden `camp inject --drain` PostToolUse hook fires on every Bash
-  tool call. The inject route must be near-free: it must NOT import the heavy
-  ~1700-line spine module on its account, and must skip the cold-subprocess
+Inject-drain lightness — the hidden `camp inject --drain` PostToolUse hook fires
+  on every Bash tool call. The inject route must be near-free: it must NOT import
+  the heavy ~1700-line spine module on its account, and must skip the cold-subprocess
   ensure_trailhead_importable() bootstrap. The drain still works.
 
-FIX 7 — `_slug_from_args_or_cwd` dropped `env`, breaking the "all callers pass
-  the same env" invariant. resolve_from_cwd derives camp_state_dir from
+env threading — `_slug_from_args_or_cwd` dropped `env`, breaking the "all callers
+  pass the same env" invariant. resolve_from_cwd derives camp_state_dir from
   state_dir("camp", env=env) when not given camp_state_dir, so a non-None env
   must reach it — otherwise a slug-from-cwd handler resolves against a different
   state dir than the downstream manifest/workspace ops.
 
-FIX 9 — the disabled-verb set + legacy-redirect map are sourced from a single
-  module (verb_taxonomy) that BOTH cli/camp and spine consult, and the 5 spine
-  "no group resolved" stubs collapse into one cmd_needs_group.
+Verb-taxonomy single source — the disabled-verb set + legacy-redirect map are
+  sourced from a single module (verb_taxonomy) that BOTH cli/camp and spine
+  consult, and the 5 spine "no group resolved" stubs collapse into one
+  cmd_needs_group.
 
-C1 — the rmtree-confinement guard in reconcile_break (anchored on
+rmtree-confinement guard — the guard in reconcile_break (anchored on
   central_state_dir/worktrees) is exercised: member worktree_paths stay inside
   the resolved workspace dir (pre-check passes), but the workspace dir itself is a
   symlink escaping worktrees_root, so the dedicated rmtree guard fires.
@@ -51,7 +52,7 @@ def _load_cli_module():
 
 
 # ===========================================================================
-# FIX 6 — inject drain is near-free: no spine import on its account
+# inject drain is near-free: no spine import on its account
 # ===========================================================================
 
 
@@ -120,7 +121,7 @@ class TestFix6InjectIsLight:
 
 
 # ===========================================================================
-# FIX 7 — _slug_from_args_or_cwd threads env to resolve_from_cwd
+# _slug_from_args_or_cwd threads env to resolve_from_cwd
 # ===========================================================================
 
 
@@ -158,7 +159,7 @@ class TestFix7SlugFromCwdThreadsEnv:
 
 
 # ===========================================================================
-# FIX 9 — single source of truth verb taxonomy
+# single source of truth verb taxonomy
 # ===========================================================================
 
 
@@ -186,7 +187,7 @@ class TestFix9VerbTaxonomy:
 
 
 # ===========================================================================
-# C1 — rmtree-confinement guard fires when the workspace dir symlink-escapes
+# rmtree-confinement guard fires when the workspace dir symlink-escapes
 # ===========================================================================
 
 

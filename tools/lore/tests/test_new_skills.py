@@ -1,7 +1,7 @@
-"""S6 Slice 5 — the new read/capture/dispatch skills (search / record / research)
+"""The new read/capture/dispatch skills (search / record / research)
 plus the FINAL cross-skill lockstep grep gate.
 
-This slice adds three skills on top of the rewired session skills (Slice 4):
+These three skills sit on top of the rewired session skills:
   - `search`  — wraps `lore search` (KQL-subset read path; replaces old `recall`).
                 Carries the `<external-memory>` injection-defense guard because
                 search results land in the MAIN session and can include shared-
@@ -11,9 +11,9 @@ This slice adds three skills on top of the rewired session skills (Slice 4):
                 `checkpoint` (which is a session *sweep*).
   - `research` — dispatches the lore `investigator` agent (deep) or `researcher`
                 agent (lighter / `tracking`-backlog polling). Dispatch targets
-                must resolve to real agent FILES (council Builder).
+                must resolve to real agent FILES.
 
-The FINAL LOCKSTEP GATE (spec AC) greps ALL retained lore skills for the removed
+The FINAL LOCKSTEP GATE greps ALL retained lore skills for the removed
 commands (`lore new`, `lore recall`, `lore patch`) and asserts zero matches.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
 AGENTS_DIR = PLUGIN_ROOT / "agents"
 
-# The three new skills this slice introduces.
+# The three new skills introduced here.
 NEW_SKILLS = ("search", "record", "research")
 
 
@@ -71,7 +71,7 @@ def test_new_skill_present_with_registrable_frontmatter(name: str):
     """Each new skill exists with a closed frontmatter block + non-empty
     description (the field Claude Code uses to register `/lore:<name>`)."""
     skill_md = SKILLS_DIR / name / "SKILL.md"
-    assert skill_md.exists(), f"{name}/SKILL.md must exist (Slice 5)"
+    assert skill_md.exists(), f"{name}/SKILL.md must exist"
     assert _description(name), f"{name}/SKILL.md must carry a non-empty description:"
 
 
@@ -140,7 +140,7 @@ def test_record_references_only_record_and_session_surface():
 def test_record_and_flush_descriptions_are_scope_disjoint():
     """The `record` and `flush` trigger descriptions must carve non-overlapping scopes.
 
-    Plan Slice 4 deleted `checkpoint` and renamed `finish` → `flush`. The
+    `checkpoint` was deleted and `finish` was renamed → `flush`. The
     scope-disjointness concern now applies to `record` vs `flush`:
 
       - record = "log ONE specific item NOW" (a single deliberate capture)
@@ -187,9 +187,9 @@ def test_research_names_both_dispatch_agents():
 
 
 def test_research_dispatch_targets_resolve_to_real_agent_files():
-    """The agents `research` dispatches to must exist as real files (council
-    Builder — not merely name-resolution): if KU3 coordination slipped, this
-    fails instead of dispatching to a nonexistent agent."""
+    """The agents `research` dispatches to must exist as real files (not merely
+    name-resolution): if coordination slipped, this fails instead of
+    dispatching to a nonexistent agent."""
     for agent in ("investigator", "researcher"):
         agent_file = AGENTS_DIR / f"{agent}.md"
         assert agent_file.exists(), (
@@ -263,7 +263,7 @@ def test_final_lockstep_gate_enumerates_expected_retained_set():
     the enumeration actually covers the five retained lore skills (so the gate
     above is not vacuously passing over a shrunken set).
 
-    Plan Slice 4 renamed 'finish' → 'flush' and deleted 'checkpoint'.
+    'finish' was renamed → 'flush' and 'checkpoint' was deleted.
     Retained set: flush, sync, search, record, research.
     """
     names = {p.parent.name for p in _all_retained_skill_files()}

@@ -1,7 +1,6 @@
-"""Slice 2 (S2) tests: the reusable record write library ``record_store``.
+"""Tests for the reusable record write library ``record_store``.
 
-Covers every bullet in the Slice 2 test contract (plan
-``lore-record-and-session-cli-s2.md``):
+Covers the test contract:
 
   - Round-trip: ``validate_and_write`` produces a verbatim ``<kind>/<name>.md``
     body, a pretty-printed sorted-key ``<name>.json`` sidecar, and a matching
@@ -9,13 +8,13 @@ Covers every bullet in the Slice 2 test contract (plan
   - Auto-set provenance: ``created-at``/``updated-at`` are ISO-8601 UTC ``…Z``;
     ``*-by`` == the resolved git email; ``created-*`` is set once, ``updated-*``
     re-stamped on a second write.
-  - Empty git email (KU4) → typed error, **nothing written**.
-  - Validation failure (from S1) → typed error carrying S1's messages, nothing
+  - Empty git email → typed error, **nothing written**.
+  - Validation failure → typed error carrying the validator's messages, nothing
     written.
-  - Fence neutralization (AC-FENCE1): a body containing ``<external-memory>`` /
+  - Fence neutralization: a body containing ``<external-memory>`` /
     ``</external-memory>`` is stored neutralized; the round-trip cannot
     reconstruct a live fence.
-  - Text-wins on index failure (AC-TX2): with ``update_index`` forced to raise,
+  - Text-wins on index failure: with ``update_index`` forced to raise,
     the body+sidecar are intact on disk (text not rolled back); a subsequent
     ``reindex`` reconciles.
   - Atomic write: a simulated crash between temp-write and rename leaves no
@@ -132,7 +131,7 @@ def test_place_record_collision_appends_suffix(rs, tmp_path):
 
 
 def test_place_record_orphan_json_occupies_stem(rs, tmp_path):
-    """An orphaned <stem>.json (no .md) still makes the stem occupied (KU5)."""
+    """An orphaned <stem>.json (no .md) still makes the stem occupied."""
     vault = tmp_path / "vault"
     (vault / "spec").mkdir(parents=True)
     # Crash-orphaned sidecar with no matching .md.
@@ -227,7 +226,7 @@ def test_validate_and_write_round_trip(rs, conn, tmp_path):
     raw = js.read_text()
     parsed = json.loads(raw)
     assert parsed["title"] == "My Spec"
-    # Compact single-line, sorted keys, no trailing newline (Slice 0).
+    # Compact single-line, sorted keys, no trailing newline.
     assert raw == json.dumps(parsed, sort_keys=True, separators=(",", ":"))
 
     row = conn.execute(
@@ -241,7 +240,7 @@ def test_validate_and_write_round_trip(rs, conn, tmp_path):
 
 
 def test_validate_and_write_sidecar_compact_json(rs, conn, tmp_path):
-    """Sidecar is single-line compact JSON, keys sorted, no trailing newline (Slice 0)."""
+    """Sidecar is single-line compact JSON, keys sorted, no trailing newline."""
     vault = tmp_path / "vault"
     vault.mkdir()
     loc = rs.place_record("My Spec", "spec", None, str(vault))
@@ -297,7 +296,7 @@ def test_validate_and_write_created_once_updated_restamped(rs, conn, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Empty git email (KU4) → typed error, nothing written
+# Empty git email → typed error, nothing written
 # ---------------------------------------------------------------------------
 
 
@@ -317,7 +316,7 @@ def test_empty_email_raises_typed_error_nothing_written(rs, conn, tmp_path, monk
 
 
 # ---------------------------------------------------------------------------
-# Validation failure → typed error carrying S1 messages, nothing written
+# Validation failure → typed error carrying validator messages, nothing written
 # ---------------------------------------------------------------------------
 
 
@@ -330,7 +329,7 @@ def test_validation_failure_raises_typed_error_nothing_written(rs, conn, tmp_pat
     with pytest.raises(rs.RecordValidationError) as ei:
         rs.validate_and_write(loc, bad, "body", conn)
 
-    # Carries S1's messages.
+    # Carries the validator's messages.
     assert ei.value.errors
     assert any("status" in m for m in ei.value.errors)
 
@@ -340,7 +339,7 @@ def test_validation_failure_raises_typed_error_nothing_written(rs, conn, tmp_pat
 
 
 # ---------------------------------------------------------------------------
-# Fence neutralization (AC-FENCE1)
+# Fence neutralization
 # ---------------------------------------------------------------------------
 
 
@@ -373,7 +372,7 @@ def test_validate_and_write_neutralizes_fence_in_body(rs, conn, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Text-wins on index failure (AC-TX2)
+# Text-wins on index failure
 # ---------------------------------------------------------------------------
 
 
@@ -468,9 +467,9 @@ def test_move_record_relocates_rekeys_and_removes_old(rs, conn, tmp_path):
     ["../other-vault/spec/victim", "spec/../../other-vault/spec/victim", "/etc/passwd"],
 )
 def test_move_record_confines_old_id_against_traversal(rs, conn, tmp_path, evil_old_id):
-    """A traversal old_id is confined at the library boundary (security audit follow-up).
+    """A traversal old_id is confined at the library boundary.
 
-    move_record is a direct S7-callable API; a crafted old_id must not read/unlink
+    move_record is a directly callable library API; a crafted old_id must not read/unlink
     files outside the source vault → InvalidRecordIdError, victim untouched.
     """
     src_vault = tmp_path / "vault-a"
@@ -525,14 +524,14 @@ def test_move_record_interrupted_keeps_old_intact(rs, conn, tmp_path, monkeypatc
 
 
 # ---------------------------------------------------------------------------
-# move_record — in-memory overrides (Slice 3: single durable write at dest)
+# move_record — in-memory overrides (single durable write at dest)
 # ---------------------------------------------------------------------------
 
 
 def test_move_record_overrides_write_mutated_record_at_dest_only(rs, conn, tmp_path):
     """``new_sidecar``/``new_body`` write the mutated record AT the destination only.
 
-    Slice 3 single-durable-write requirement (re-review Critical-1): the mutated
+    Single-durable-write requirement: the mutated
     sidecar must NEVER appear at the old location, only at the destination. The
     overrides bypass the verbatim disk re-read so the already-mutated record lands
     at the destination directly.
@@ -578,7 +577,7 @@ def test_move_record_overrides_write_mutated_record_at_dest_only(rs, conn, tmp_p
 def test_move_record_rejects_dest_outside_dest_vault_root(rs, conn, tmp_path):
     """``move_record`` confines the DESTINATION to its declared vault root.
 
-    Slice 3 dest-confinement guard (re-review Important): a destination whose
+    Dest-confinement guard: a destination whose
     realpath escapes the declared dest vault root is rejected
     (``InvalidRecordIdError``), mirroring the existing source ``_confine_record_id``.
     The library offers no guard if a direct caller hands it an unconfined dest;
@@ -659,7 +658,7 @@ def test_delete_record_missing_id_raises_not_found(rs, conn, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Slice 1: labels/annotations round-trip (plan 2026-06-20)
+# labels/annotations round-trip
 # ---------------------------------------------------------------------------
 
 

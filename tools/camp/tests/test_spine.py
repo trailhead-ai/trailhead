@@ -1,12 +1,12 @@
 """Tests for the quarried camp worktree spine.
 
-Test contract from the plan (Slice 0):
-- U2 regression: spine imports without dev_env modules (they are absent).
+Covers:
+- import regression: spine imports without dev_env modules (they are absent).
 - slug normalize/validate: accept/reject the right inputs.
 - git-wrapper shapes: _git / _git_out form the expected argv.
 - cmd_sweep with no registry → orphan_instances={}, no NotImplementedError.
 - cmd_sweep --prune path hitting stub → raises NotImplementedError.
-- D-H guard: the guard function emits a legible message on ImportError,
+- import guard: the guard function emits a legible message on ImportError,
   not a raw traceback.
 """
 
@@ -30,7 +30,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 
 # ---------------------------------------------------------------------------
-# U2 regression: spine imports without dev_env engine
+# Import regression: spine imports without dev_env engine
 # ---------------------------------------------------------------------------
 
 
@@ -162,7 +162,7 @@ def test_git_out_returns_empty_on_nonzero(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# D-H guard: legible ImportError, not raw traceback
+# Import guard: legible ImportError, not raw traceback
 # ---------------------------------------------------------------------------
 
 

@@ -1,19 +1,19 @@
-"""KQL AST → SQL compiler (Slice 3, S3 — review redesign).
+"""KQL AST → SQL compiler.
 
 Compiles a backend-agnostic KQL AST (produced by ``kql.py``) into a parameterized
 SQL fragment set for execution against the realized index schema (``index_store.py``).
 
 No I/O, no sqlite execution, no imports from kql.py — takes AST node objects and
-returns a :class:`CompiledQuery`. The caller (Slice 4) executes the query.
+returns a :class:`CompiledQuery`. The caller executes the query.
 
 NOTE: This module intentionally omits ``from __future__ import annotations``.  The
 ``@dataclass`` machinery looks up ``cls.__module__`` in ``sys.modules`` when
 annotations are stored as strings (which ``from __future__ import annotations``
 forces). The ``load_script`` test harness loads this module via ``importlib.util``
 without registering it in ``sys.modules``, so string-annotation mode would crash
-(same gotcha as ``kql.py``, Slice 2 contract).
+(same gotcha as ``kql.py``).
 
-**Full-text is a SQL-composable predicate (review redesign — CRITICAL #1).**
+**Full-text is a SQL-composable predicate.**
 
 The earlier design treated FTS ``MATCH`` and SQL ``WHERE`` as two independent
 channels rejoined with a hard-coded top-level ``AND``. That broke boolean
@@ -31,7 +31,7 @@ Every combination is now correct:
   - ``not foo``          → ``NOT (rowid IN (… MATCH ?))`` (no FTS syntax error)
   - ``kind:spec not foo`` → ``(records.kind = ?) AND (NOT (rowid IN (… MATCH ?)))``
 
-**FINAL exact SELECT shape Slice 4 executes (LOCKED — no mandatory FTS JOIN):**
+**Exact SELECT shape (no mandatory FTS JOIN):**
 
   SELECT * FROM records
   WHERE <predicates — full-text predicates live inline in the tree>
@@ -41,7 +41,7 @@ Every combination is now correct:
 Use ``CompiledQuery.full_query()`` to obtain the assembled SQL; it is positionally
 aligned with ``CompiledQuery.params``.
 
-**Ranking (LOCKED — bm25 weights + sign proven in Slice 0, KU3).**
+**Ranking (bm25 weights + sign).**
 
 When the query carries ANY full-text term, order by bm25 with the locked weights
 ``(3.0, 2.0, 1.0)`` for ``(title, keywords, body)``, best-first = ASC (bm25 is
@@ -72,28 +72,28 @@ node at all) orders by ``updated_at DESC, last_referenced_at DESC`` (no bm25).
      and the ``ASC`` key. Only present when the query has full-text.
   3. The ``LIMIT ?`` value, always last.
 
-**Alias resolution (LOCKED):**
+**Alias resolution:**
   ``area`` → ``related-area``,  ``phase`` → ``related-phases``,  ``keyword`` → ``keywords``
   Real keys (``related-area``, ``related-phases``, ``keywords``) pass through unchanged.
 
-**Indexed-label selectors (LOCKED — Slice 4):**
+**Indexed-label selectors:**
   ``LabelEq(key, value)`` → ``EXISTS(SELECT 1 FROM record_labels WHERE id=records.id
   AND key=? AND value=?)``;  ``LabelExists(key)`` → the same EXISTS without the
   ``value`` predicate. BOTH ``key`` and ``value`` are BIND params — never
   interpolated (the dot-for-slash key decoding happens in ``kql.py``, so ``key`` is
   already the real stored key). ``annotations`` have NO selector.
 
-**Scalar field → column mapping (LOCKED):**
+**Scalar field → column mapping:**
   ``kind``, ``status``, ``repo``, ``team``, ``product``, ``suite`` (identity).
 
-**Comparison field → column mapping (LOCKED):**
+**Comparison field → column mapping:**
   ``created-at`` → ``created_at``,  ``updated-at`` → ``updated_at``,
   ``last-referenced-at`` → ``last_referenced_at``.
 
-**Scope (LOCKED):**
+**Scope:**
   ``vault=X`` → ``AND records.vault = ?`` bound;  ``vault=None`` → no vault predicate.
 
-**Security — injection defense (council-flagged, REQUIRED):**
+**Security — injection defense (REQUIRED):**
 
   *Scalar WHERE values* (field/facet/comparison values, vault, LIMIT) are BIND
   PARAMS — never string-interpolated. SQL injection via any value is structurally
@@ -172,7 +172,7 @@ def _sanitize_bare_term(raw: str) -> str:
     """Sanitize a bare ``FullText`` term into a single-token MATCH string.
 
     Strict allowlist: a token that fully matches ``^[-A-Za-z0-9._]+$`` and is not a
-    reserved bare operator is emitted as-is (so ``foo`` → ``foo`` per the LOCKED
+    reserved bare operator is emitted as-is (so ``foo`` → ``foo`` per the
     MATCH encoding). Anything else is wrapped as a quoted FTS5 string literal so it
     is treated as a literal token, never FTS5 syntax. Raises ``ValueError`` on a
     token that is empty after stripping interior quotes (generic message — no

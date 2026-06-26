@@ -11,10 +11,10 @@ the release cluster is deleted):
   - release_prs_sidecar.py   → pr.open() / pr.read_sidecar()
   - check_pr_status.py       → pr.status() + ci.checks()
   - pr_evaluate_status.py    → pr.evaluate()
-  - merge_prs.py             → pr.merge() (ordered, R-6 safety gate)
+  - merge_prs.py             → pr.merge() (ordered, with the merge safety gate)
   - wait_for_actionable.py   → ci.wait()
 
-Safety invariants preserved: R-6 merge gate, shell=False, option-injection
+Safety invariants preserved: the merge gate, shell=False, option-injection
 guards (pr_number digits-only, branch leading-dash / push ``--`` terminator),
 no hardcoded review-bot login (a passed param).
 """
@@ -55,7 +55,7 @@ class SidecarError(Exception):
 
 
 class MergeOrderRequiredError(Exception):
-    """Raised when >1 PR is queued but no merge_order is declared (R-6/A-1)."""
+    """Raised when >1 PR is queued but no merge_order is declared."""
 
 
 class MergeConfigError(Exception):
@@ -72,7 +72,7 @@ class DeployError(Exception):
     Unlike the lossy ``_gh`` collapse used by repos/pr/ci, the deploy paths ARE
     the doctor signal, so this carries the cause: it distinguishes a gh nonzero
     exit (returncode + stderr) from a gh that exited zero but returned non-JSON
-    / empty stdout (M-4).
+    / empty stdout.
     """
 
 
@@ -160,7 +160,7 @@ class _GitHubRepos(ReposSurface):
             name = member.get("name", "")
             wt_path = member.get("worktree_path", "")
 
-            # R-7: graceful degrade — missing worktree_path → skip.
+            # Graceful degrade — missing worktree_path → skip.
             if not wt_path or not Path(wt_path).exists():
                 continue
 
@@ -516,7 +516,7 @@ def _merge_prs(
 
     merge_order = _load_merge_order(toml_path)
 
-    # R-6 safety gate
+    # Merge safety gate
     if len(pr_pairs) > 1 and not merge_order:
         n = len(pr_pairs)
         raise MergeOrderRequiredError(
@@ -789,7 +789,7 @@ class _GitHubDeploy(DeploySurface):
     (shell=False); the jq ``-q`` filter is a list element, not a shell pipe.
 
     ``workflow_runs`` and ``status`` use ``_gh_or_raise`` (not the lossy
-    ``_gh``) so a failed deploy query surfaces a legible cause to doctor (M-4).
+    ``_gh``) so a failed deploy query surfaces a legible cause to doctor.
     ``logs`` is the exception: it bypasses ``_gh_or_raise`` to special-case a
     404 (not-found job) into ``[]`` so a missing job never false-alarms — any
     *other* nonzero gh exit still raises (see ``logs``).
@@ -831,7 +831,7 @@ class _GitHubDeploy(DeploySurface):
         and some repos deploy out-of-band) — that case returns ``[]``, it does
         not raise. A *failed* gh query (auth, rate-limit, non-JSON) still raises
         ``DeployError`` via ``_gh_or_raise`` — a broken query is the doctor
-        signal (M-4), not a silent empty list.
+        signal, not a silent empty list.
         """
         owner_repo = _resolve_owner_repo(repo_path, self._runner)
         deployments = _gh_or_raise(
@@ -906,7 +906,7 @@ class _GitHubDeploy(DeploySurface):
 
 
 class GitHubProvider(Provider):
-    """GitHub backend: repos/pr/ci implemented; deploy in Slice 2."""
+    """GitHub backend implementing the repos/pr/ci/deploy surfaces."""
 
     def __init__(self, runner: rp.Runner | None = None) -> None:
         effective = runner if runner is not None else rp._default_runner

@@ -1,20 +1,20 @@
 """``lore session candidate|referenced`` CLI + session_store sanitization tests.
 
 The capture-path behavioral contract (singular indexed records, born dirty, the
-KU1 lock-spanning race, the KU2 ``referenced`` semantics, the worktree-name
-confinement guard) lives in ``test_session_records.py`` (Slice 1). This file keeps
+lock-spanning race, the ``referenced`` semantics, the worktree-name
+confinement guard) lives in ``test_session_records.py``. This file keeps
 the cross-cutting endpoint tests that are independent of the storage model:
 
-  session_id sanitization (council/Security — entry-point confinement):
+  session_id sanitization (entry-point confinement):
     - ``--session-id`` containing ``/`` or ``..`` → non-zero, nothing written
       (no escape from ``session/``).
     - NUL byte is rejected by the sanitizer (defense-in-depth; execve already
       rejects NUL in argv, so this is asserted at the library level).
 
-  fence neutralization (AC-FENCE1):
+  fence neutralization:
     - a candidate body with ``<external-memory>`` tokens is stored neutralized.
 
-  no prefix-abbrev clash (council/Advocate):
+  no prefix-abbrev clash:
     - ``lore session-note`` still resolves to ``cmd_session_note`` and is not
       shadowed by the ``session`` subcommand.
 
@@ -85,7 +85,7 @@ class TestSessionIdSanitization:
 
 
 # ---------------------------------------------------------------------------
-# fence neutralization (AC-FENCE1)
+# fence neutralization
 # ---------------------------------------------------------------------------
 
 class TestFenceNeutralization:
@@ -109,8 +109,8 @@ class TestFenceNeutralization:
     def test_referenced_record_id_fence_neutralized(self, tmp_path):
         """A RECORD_ID carrying a fence token is neutralized at the referenced boundary.
 
-        referenced interpolates the free-form RECORD_ID arg; AC-FENCE1 must hold at
-        this write boundary too. A session must exist first (KU2: referenced no-ops
+        referenced interpolates the free-form RECORD_ID arg; fence neutralization must hold at
+        this write boundary too. A session must exist first (referenced no-ops
         on a non-existent session), so a candidate creates it before the referenced.
         """
         vault, state = _make_vault(tmp_path)

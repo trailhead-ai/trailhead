@@ -1,6 +1,6 @@
 """brainstorm/SKILL.md generic-hygiene + visible-skip guards.
 
-S6 Slice 3 moved the brainstorm skill from the lore plugin into craft. These
+The brainstorm skill was moved from the lore plugin into craft. These
 assertions — the extension-point visible-skip notices, the live `artist`
 design_mockup provider, and the private-token scan — moved with it from lore's
 test_lore_skills_generic.py so the contract follows the skill.
@@ -19,7 +19,7 @@ import pytest
 SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 _BRAINSTORM_SKILL = SKILLS_DIR / "brainstorm" / "SKILL.md"
 
-# Private app-specific tokens constructed at runtime to avoid the P1-F
+# Private app-specific tokens constructed at runtime to avoid the
 # self-referential leak-gate trap (the test file is itself scanned by the gate).
 _PRIVATE_TOKENS: list[str] = [
     "".join(["post", "hog"]),
@@ -32,7 +32,7 @@ _PRIVATE_TOKENS: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
-# brainstorm — visible-skip notices (council 3-lens requirement)
+# brainstorm — visible-skip notices
 # Each stripped seam must ANNOUNCE its absence with a visible-skip phrase, not
 # silently omit the step. Each phrase below is a SINGLE DISTINCTIVE CONTIGUOUS
 # substring that must appear verbatim — deleting the seam's notice deletes the
@@ -57,7 +57,7 @@ def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
     phrase — a silent omission must fail this test."""
     assert _BRAINSTORM_SKILL.exists(), (
         "brainstorm/SKILL.md does not exist — it should now live under the craft "
-        "plugin (S6 Slice 3 moved it from lore)"
+        "plugin (it moved here from lore)"
     )
     text = _BRAINSTORM_SKILL.read_text()
     assert phrase in text, (
@@ -68,7 +68,7 @@ def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
 
 def test_brainstorm_dispatches_artist_as_design_mockup_provider():
     """The design_mockup seam is LIVE: brainstorm names the craft `artist` as its
-    default provider (Slice 8 cutover). The genericized skill may name `artist`
+    default provider. The genericized skill may name `artist`
     (a craft agent stem, not a private app token) but never the retired
     `design-mockup-writer`."""
     assert _BRAINSTORM_SKILL.exists(), "brainstorm/SKILL.md does not exist"
@@ -97,8 +97,8 @@ def test_brainstorm_skill_has_no_private_tokens():
 
 
 # ---------------------------------------------------------------------------
-# brainstorm SKILL — prior-art lookup rewired to `lore search` (Slice 5 cutover).
-# Moved here from lore's test_recall_wiring.py with the skill (S6 Slice 3). The
+# brainstorm SKILL — prior-art lookup rewired to `lore search`.
+# Moved here from lore's test_recall_wiring.py with the skill. The
 # brainstorm skill still drives the lore `lore search` surface even though it now
 # lives in the craft plugin.
 # ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ class TestBrainstormSearchWiring:
         text = _BRAINSTORM_SKILL.read_text()
         assert "lore search 'area:" in text, (
             "brainstorm/SKILL.md must reference `lore search 'area:<name>'` as the "
-            "primary prior-art mechanism (Slice 5 cutover)."
+            "primary prior-art mechanism."
         )
 
     def test_brainstorm_no_lore_recall(self):
@@ -136,8 +136,7 @@ class TestBrainstormSearchWiring:
 
 # ---------------------------------------------------------------------------
 # brainstorm SKILL — injection-defense instruction (shared content is data, not
-# instructions). Moved here from lore's test_slice5_docs.py with the skill
-# (S6 Slice 3).
+# instructions). Moved here from lore's prior test suite with the skill.
 # ---------------------------------------------------------------------------
 
 

@@ -8,7 +8,7 @@ For an adopter quickstart, see the README instead.
 
 ---
 
-## KU1 — does an installed plugin register *agents* as dispatchable subagent_types?
+## Agent registration — does an installed plugin register *agents* as dispatchable subagent_types?
 
 **Result: PASS (mechanism), 2026-06-03.**
 
@@ -21,9 +21,8 @@ copies appear *un*-namespaced (e.g. `pr-updater`). The `lore:` prefix is direct
 proof that marketplace-installed plugins register agents, not merely skills.
 
 **Implication:** craft's agents register as `craft:<name>` once installed + the
-session restarts. P3's "host the 13 general dev agents in craft" is therefore
-unblocked — agents migrated into `plugins/craft/agents/` are dispatchable as
-`craft:<name>`.
+session restarts. Hosting the general dev agents in craft is therefore viable —
+agents migrated into `plugins/craft/agents/` are dispatchable as `craft:<name>`.
 
 **Craft-specific confirmation (manual — run once):** install craft and dispatch
 a craft agent in a fresh session (steps below). Record PASS/FAIL here.
@@ -34,8 +33,8 @@ a craft agent in a fresh session (steps below). Record PASS/FAIL here.
 
 > **Fallback if craft-specific install ever FAILs** (mechanism is proven, so this
 > is not expected): host the dev agents via a de-symlinked `~/.claude/agents`
-> directory instead of a plugin (spec Decision-1 alternative). Do not proceed
-> into P3's craft-agent migration on an un-rerun gate without noting it here.
+> directory instead of a plugin. Do not proceed into the craft-agent migration
+> on an un-rerun gate without noting it here.
 
 ---
 
@@ -77,7 +76,7 @@ doc-finder agent") on a trivial lookup.
 
 Pass criteria: the agent is found and dispatched (it appears in the available
 subagent types as `craft:doc-finder`) and returns a result.
-**Record the result in the KU1 table above.**
+**Record the result in the agent-registration table above.**
 
 ---
 

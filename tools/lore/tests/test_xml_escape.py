@@ -1,4 +1,4 @@
-"""Tests for the extracted xml_escape module (Slice 4, S3).
+"""Tests for the extracted xml_escape module.
 
 ``xml_escape.py`` is the single source of truth for the injection-defense
 helpers that used to live in ``recall.py``: ``xml_attr_escape``,

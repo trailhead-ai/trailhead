@@ -1,7 +1,7 @@
-"""Reusable record write library for the lore vault (Slice 2, S2).
+"""Reusable record write library for the lore vault.
 
 This module is the **single importable write API** into the vault — no argv/stdout
-coupling (AC-LIB1/LIB2), so the S7 migration calls it per-record exactly as the
+coupling, so a bulk migration calls it per-record exactly as the
 ``lore record`` CLI does. Every write keeps three artifacts consistent:
 
   - ``<vault>/<kind>/<name>.md``   — the markdown body, verbatim (modulo fence
@@ -9,7 +9,7 @@ coupling (AC-LIB1/LIB2), so the S7 migration calls it per-record exactly as the
   - ``<vault>/<kind>/<name>.json`` — the JSON sidecar, pretty-printed + sorted-key.
   - one derived SQLite index row    — a cached projection (``index_store``).
 
-**Text-wins / index-derived (locked, umbrella decision 7; spec AC-TX2).** The
+**Text-wins / index-derived.** The
 git-tracked text files are the source of truth; the index is a derived projection
 that ``lore reindex`` rebuilds. On any partial failure the text on disk wins — we
 never roll back a durable body/sidecar to satisfy the index. So
@@ -17,31 +17,31 @@ never roll back a durable body/sidecar to satisfy the index. So
 index; if the index update raises, the text is already durable and the exception
 propagates with the text intact (the caller's ``reindex`` reconciles).
 
-**Validation is S1's, not ours.** ``validate_and_write`` calls the pure
+**Validation lives in ``record_model``, not here.** ``validate_and_write`` calls the pure
 ``record_model.validate`` (it returns ``(normalized, errors)`` and never raises).
 On non-empty ``errors`` we raise :class:`RecordValidationError` carrying those
 messages and write nothing. We do not re-implement validation.
 
-**Provenance posture (AC, council/Security).** ``created-by``/``updated-by`` are
+**Provenance posture.** ``created-by``/``updated-by`` are
 written from :func:`resolve_committer_email` — ``$LORE_EMAIL`` then
 ``git config --global user.email`` — which is **deterministic, not cwd-dependent**
 (a repo-local ``user.email`` override cannot change the stamped value). An empty
-email is the KU4 **hard error** (:class:`ProvenanceError`): we write nothing,
-because a placeholder would pollute provenance the way AC17 forbids silent list
-garbage. ``*-by`` is **self-asserted, spoofable provenance PII** — it is written
+email is a **hard error** (:class:`ProvenanceError`): we write nothing,
+because a placeholder would silently pollute provenance. ``*-by`` is
+**self-asserted, spoofable provenance PII** — it is written
 for humans and **nothing keys trust on it**; it is never an authz/authn signal.
 
-**Atomic write (AC-TX1/LIB3).** Bodies and sidecars land via
+**Atomic write.** Bodies and sidecars land via
 :func:`write_temp_then_rename` — write a sibling temp file, ``fsync``, then
 ``os.replace`` it onto the target. A crash before the rename leaves only the temp
 file (or nothing), never a half-written target.
 
-**Fence neutralization (AC-FENCE1).** The injection fence token is the literal
-``<external-memory …>`` / ``</external-memory>`` pair (the S3 output-wrapping
+**Fence neutralization.** The injection fence token is the literal
+``<external-memory …>`` / ``</external-memory>`` pair (the output-wrapping
 contract). Write-time neutralization is the structural backstop: a body can never
 land a *live* fence on disk, even via a future ``--diff`` path.
 
-**Move safety (AC-LIB3 / AC12).** :func:`move_record` copies the new artifacts →
+**Move safety.** :func:`move_record` copies the new artifacts →
 repoints the index → deletes the old copy **in that order**. A crash after the
 index repoint but before the old delete leaves a stranded old artifact whose ID
 the index no longer resolves — the *safe* direction (no data loss; the new copy is
@@ -49,8 +49,7 @@ durable and indexed), self-healing via ``lore reindex``. Callers holding the old
 ID must re-read.
 
 Pure stdlib (``json``, ``sqlite3`` via ``index_store``, ``os``/``pathlib``,
-``subprocess`` for git identity, ``datetime``). References: Slice 2, AC-TX1/TX2,
-AC-LIB1/2/3, AC-FENCE1, AC12/AC13, KU4/KU5.
+``subprocess`` for git identity, ``datetime``).
 """
 
 from __future__ import annotations
@@ -71,16 +70,16 @@ import vault as vault_mod
 # Types
 # ---------------------------------------------------------------------------
 
-# The record ID is the vault-relative ``<kind>/<name>`` path (KU5). Vault
-# qualification (a vault token prefix) is S4's job; in S2 the active vault is
-# implicit, so a plain str suffices.
+# The record ID is the vault-relative ``<kind>/<name>`` path. Vault
+# qualification (a vault token prefix) is a future multi-vault concern; today the
+# active vault is implicit, so a plain str suffices.
 RecordId = str
 
 
 class RecordLocation(NamedTuple):
     """A resolved write target: the vault root, kind, slugged name, and ID.
 
-    ``record_id`` is the vault-relative ``<kind>/<name>`` (KU5). ``body_path`` and
+    ``record_id`` is the vault-relative ``<kind>/<name>``. ``body_path`` and
     ``sidecar_path`` are the absolute on-disk paths for the ``.md`` / ``.json``
     pair.
     """
@@ -103,11 +102,11 @@ class RecordStoreError(Exception):
 
 
 class ProvenanceError(RecordStoreError):
-    """Empty committer email (KU4) — provenance is required and cannot be defaulted."""
+    """Empty committer email — provenance is required and cannot be defaulted."""
 
 
 class RecordValidationError(RecordStoreError):
-    """Sidecar failed S1 validation; carries the ordered S1 error messages."""
+    """Sidecar failed validation; carries the ordered validation error messages."""
 
     def __init__(self, errors: list[str]) -> None:
         self.errors = errors
@@ -123,19 +122,19 @@ class InvalidRecordIdError(RecordStoreError):
 
     A RECORD_ID is a vault-relative ``<kind>/<name>`` path. Any ``..`` segment,
     absolute component, NUL byte, or empty part is rejected here — the same
-    confinement AC14a mandates for ``blob`` paths, applied symmetrically to every
+    confinement enforced for ``blob`` paths, applied symmetrically to every
     RECORD_ID-bearing op (``update``/``delete``) so a crafted ID cannot read,
     overwrite, or unlink ``.md``/``.json`` files outside the active vault.
     """
 
 
 class DiffRejectError(RecordStoreError):
-    """A unified diff is valid format but its context doesn't match the body (Slice 4, KU2).
+    """A unified diff is valid format but its context doesn't match the body.
 
     A *stale* diff: the structure parses, but one or more hunks' context/deletion
     lines do not match the current body verbatim (so the diff was generated from a
     different version of the body). On reject the on-disk body is byte-for-byte
-    unchanged and NO index update happens (AC-DIFF1).
+    unchanged and NO index update happens.
 
     Attributes:
         original_body: the body exactly as received — byte-for-byte unmodified.
@@ -152,7 +151,7 @@ class DiffRejectError(RecordStoreError):
 
 
 class DiffFormatError(RecordStoreError):
-    """A unified diff string is structurally unparseable (Slice 4, KU2).
+    """A unified diff string is structurally unparseable.
 
     Distinct from :class:`DiffRejectError` (valid format, stale context). The known
     trigger is ``difflib.unified_diff``'s **concatenated-no-newline** edge case:
@@ -165,7 +164,7 @@ class DiffFormatError(RecordStoreError):
 
 
 # ---------------------------------------------------------------------------
-# Unified-diff applier (Slice 4, KU2 — proven pure-stdlib decision rule)
+# Unified-diff applier (pure-stdlib decision rule)
 # ---------------------------------------------------------------------------
 
 # The two-phase applier: Phase 1 verifies EVERY hunk's context+deletion lines
@@ -174,7 +173,7 @@ class DiffFormatError(RecordStoreError):
 # invariant); if ANY hunk fails it raises :class:`DiffRejectError` with the body
 # unmodified and runs NO Phase 2. Phase 2 (only if all hunks verified) applies in
 # order tracking ``offset = Σ(new_count − old_count)`` of prior hunks so each hunk
-# indexes the evolving result correctly. Proven on the three KU2 adversarial cases
+# indexes the evolving result correctly. Verified against three adversarial cases
 # (CRLF body, trailing-newline mismatch, adjacent hunks).
 
 _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -254,7 +253,7 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
 
 
 def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
-    """Apply a unified *diff* to *body* (Slice 4, KU2). Returns ``(new_body, [])``.
+    """Apply a unified *diff* to *body*. Returns ``(new_body, [])``.
 
     Two-phase, atomic:
       - **Phase 1** — parse all hunks, then verify EVERY hunk's context (`` ``) +
@@ -337,7 +336,7 @@ def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
 # Provenance + helpers
 # ---------------------------------------------------------------------------
 
-# The injection fence pair (S3 output-wrapping contract). Matched
+# The injection fence pair (output-wrapping contract). Matched
 # case-insensitively across the open/close tokens, attributes tolerated; the
 # captured ``external`` group is rewritten in place so a mixed-case
 # ``<External-Memory>`` is neutralized too (the literal spelling is lowercase, but
@@ -360,7 +359,7 @@ def resolve_committer_email() -> str:
 
 
 def neutralize_fences(text: str) -> str:
-    """Neutralize ``<external-memory>`` / ``</external-memory>`` fence tokens (AC-FENCE1).
+    """Neutralize ``<external-memory>`` / ``</external-memory>`` fence tokens.
 
     Replaces any open/close ``external-memory`` tag with a non-parseable but
     legible form, so a stored body can never reconstruct a *live* fence. Idempotent
@@ -377,7 +376,7 @@ def write_temp_then_rename(path: Path, text: str) -> None:
 
     Writes ``<path>.<pid>.tmp``, ``fsync``s it, then renames it onto the target.
     A crash before the rename leaves only the temp file (or nothing) — never a
-    half-written target (AC-TX1). Cleans up the temp file on any failure.
+    half-written target. Cleans up the temp file on any failure.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -432,11 +431,11 @@ def _kebab(title: str) -> str:
 
 
 def _stem_occupied(kind_dir: Path, stem: str) -> bool:
-    """A stem is occupied if EITHER ``<stem>.md`` or ``<stem>.json`` exists (KU5).
+    """A stem is occupied if EITHER ``<stem>.md`` or ``<stem>.json`` exists.
 
     The pair-aware occupancy check: a crash can leave an orphaned ``<stem>.json``
     with no ``.md``; treating the slot as free on ``.md``-absence alone would
-    silently overwrite that orphan (council/Reliability).
+    silently overwrite that orphan.
     """
     return (kind_dir / f"{stem}.md").exists() or (kind_dir / f"{stem}.json").exists()
 
@@ -468,7 +467,7 @@ def _realpath_is_descendant(target: str | Path, root_real: str) -> bool:
 
 
 def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, Path]:
-    """Validate a ``<kind>/<name>`` RECORD_ID and resolve its confined paths (AC14a).
+    """Validate a ``<kind>/<name>`` RECORD_ID and resolve its confined paths.
 
     Returns ``(kind, name, body_path, sidecar_path)``. Raises
     :class:`InvalidRecordIdError` if the ID is malformed or would escape the vault:
@@ -516,16 +515,16 @@ def place_record(
     scope: str | None,
     vault_root: str | None = None,
 ) -> RecordLocation:
-    """Resolve the on-disk target for a new record (KU5 naming + collision).
+    """Resolve the on-disk target for a new record (naming + collision).
 
     Resolves the target vault (``vault_root`` when given, else the active vault
-    via ``vault_mod.resolve_vault()`` — the multi-vault eligibility hook is where
-    S4 plugs in). The vault-relative name is ``_kebab(name)`` with a ``-2``/``-3``
+    via ``vault_mod.resolve_vault()`` — the multi-vault eligibility hook). The
+    vault-relative name is ``_kebab(name)`` with a ``-2``/``-3``
     collision suffix, **except** ``session`` kind, whose name is the
     ``session_id`` GUID **verbatim** (no slug, no suffix). Collision occupancy
     checks both the ``.md`` and ``.json`` stem.
 
-    ``scope`` is accepted for the S4 multi-vault routing hook; it is unused in S2.
+    ``scope`` is accepted for the multi-vault routing hook; it is currently unused.
     Returns a :class:`RecordLocation` whose ``record_id`` is ``<kind>/<name>``.
     """
     root = vault_root if vault_root is not None else vault_mod.resolve_vault()
@@ -552,12 +551,12 @@ def locate_record(
     record_id: RecordId,
     vault_root: str | None = None,
 ) -> RecordLocation:
-    """Resolve an **existing** ``<kind>/<name>`` record to its on-disk location (Slice 4).
+    """Resolve an **existing** ``<kind>/<name>`` record to its on-disk location.
 
     Unlike :func:`place_record`, this does NOT slug or apply a collision suffix —
     it points at the record's existing ``.md``/``.json`` pair so an update writes
     in place (preserving the ID). Raises :class:`RecordNotFoundError` when neither
-    artifact exists (AC8).
+    artifact exists.
     """
     root = vault_root if vault_root is not None else vault_mod.resolve_vault()
     kind, name, body_path, sidecar_path = _confine_record_id(record_id, root)
@@ -588,12 +587,12 @@ def update_index(
 ) -> None:
     """Upsert the index row for *record_id* (thin pass-through to ``index_store``).
 
-    The seam S3 enriches (FTS5/BM25). *record_id* is ``<kind>/<name>``; the index
-    is keyed ``(vault, kind, name)``.
+    The write seam the FTS5/BM25 search builds on. *record_id* is ``<kind>/<name>``;
+    the index is keyed ``(vault, kind, name)``.
 
     ``shared`` is the trust flag stamped on the row (0 = own/trusted, unfenced by
     ``search``; 1 = untrusted/shared, fenced). It **defaults to 0** so the vanilla
-    no-config write path (and every pre-S4 caller) keeps stamping trusted rows. S4's
+    no-config write path keeps stamping trusted rows. The
     config-driven create path passes ``shared=1`` when the resolved destination is a
     ``shared: true`` vault (``vault_config.is_shared``), so a record routed into a
     shared vault is fenced correctly — the trust source now matches the vault, not a
@@ -615,19 +614,19 @@ def validate_stamp_neutralize(
 ) -> tuple[dict[str, Any], str]:
     """Validate + provenance-stamp the sidecar and neutralize the body's fences.
 
-    The shared pre-write step (Slice 3) factored out of :func:`validate_and_write`
+    The shared pre-write step factored out of :func:`validate_and_write`
     so the in-place write path and the override-move write path stamp + neutralize
-    **identically** (finding KU-2 #4): :func:`move_record` writes its overrides
+    **identically**: :func:`move_record` writes its overrides
     VERBATIM (it does NOT stamp or neutralize), so the auto-move update path runs
     this first and hands the result to ``move_record``. Steps:
 
-      1. Validate via S1 ``record_model.validate``; non-empty errors →
+      1. Validate via ``record_model.validate``; non-empty errors →
          :class:`RecordValidationError`, returns nothing.
-      2. Resolve the committer email; empty → :class:`ProvenanceError` (KU4).
+      2. Resolve the committer email; empty → :class:`ProvenanceError`.
       3. Stamp provenance on the (normalized) sidecar: ``created-at``/``-by`` set
          once (preserved if already present on rewrite, recovered from the on-disk
          sidecar at ``location`` otherwise), ``updated-at``/``-by`` re-stamped.
-      4. Neutralize ``<external-memory>`` fences in the body (AC-FENCE1).
+      4. Neutralize ``<external-memory>`` fences in the body.
 
     Returns ``(stamped_sidecar, safe_body)``.
     """
@@ -637,7 +636,7 @@ def validate_stamp_neutralize(
         raise RecordValidationError(list(result.errors))
     normalized = result.sidecar
 
-    # 2 — provenance is required and cannot be defaulted (KU4).
+    # 2 — provenance is required and cannot be defaulted.
     email = resolve_committer_email()
     if not email:
         raise ProvenanceError(
@@ -668,17 +667,17 @@ def validate_and_write(
     conn,
     shared: int = 0,
 ) -> RecordId:
-    """Validate, stamp provenance, and durably write a record (AC-TX1/LIB3).
+    """Validate, stamp provenance, and durably write a record.
 
     Pipeline (text-wins / index-derived):
       1-4. Validate + stamp provenance + neutralize fences via
          :func:`validate_stamp_neutralize` (the shared pre-write step). Non-empty
          validation errors → :class:`RecordValidationError`, an empty committer
-         email → :class:`ProvenanceError` (KU4) — **nothing written** in either case.
+         email → :class:`ProvenanceError` — **nothing written** in either case.
       5. Atomically write body then sidecar (write-temp-then-rename).
-      6. Update the index with the resolved vault's ``shared`` trust flag (S4 —
-         default 0/own preserves vanilla). **If this raises, the text is already
-         durable and wins** (AC-TX2) — we do not roll back; the exception propagates.
+      6. Update the index with the resolved vault's ``shared`` trust flag
+         (default 0/own preserves vanilla). **If this raises, the text is already
+         durable and wins** — we do not roll back; the exception propagates.
 
     ``shared`` is the trust flag for the destination vault (0 = own/trusted, 1 =
     untrusted/shared). The caller (the CLI) computes it from
@@ -690,13 +689,13 @@ def validate_and_write(
 
     # 5 — durable text first (atomic). Body before sidecar; both atomic.
     # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
-    # diff/grep and later slice round-trip asserts.
+    # diff/grep and round-trip asserts.
     sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
     write_temp_then_rename(location.body_path, safe_body)
     write_temp_then_rename(location.sidecar_path, sidecar_text)
 
-    # 6 — index last; on failure the text already won (AC-TX2 — no rollback).
-    # ``shared`` is the resolved vault's trust flag (S4): default 0 (own/trusted)
+    # 6 — index last; on failure the text already won (no rollback).
+    # ``shared`` is the resolved vault's trust flag: default 0 (own/trusted)
     # preserves vanilla; the config-driven create path passes 1 for a shared vault.
     update_index(
         conn,
@@ -724,18 +723,18 @@ def move_record(
     new_body: str | None = None,
     shared: int = 0,
 ) -> RecordId:
-    """Relocate a record to a new vault/path (AC-LIB3 / AC12).
+    """Relocate a record to a new vault/path.
 
-    Order (the *safe* direction — council/Reliability): **copy-new →
+    Order (the *safe* direction): **copy-new →
     index-repoint → delete-old**. A crash after the repoint but before the delete
     leaves a stranded old artifact whose ID the index no longer resolves — no data
     loss (the new copy is durable + indexed), self-healing via ``lore reindex``.
 
     By default the old body+sidecar are read verbatim and written atomically under
-    *new_location*. **In-memory overrides (Slice 3)** — ``new_sidecar`` /
+    *new_location*. **In-memory overrides** — ``new_sidecar`` /
     ``new_body`` — write the *already-mutated, validated, provenance-stamped* record
     AT the destination instead of re-reading the old disk. This is the
-    single-durable-write-at-destination requirement (re-review Critical-1): a
+    single-durable-write-at-destination requirement: a
     scope-changing ``record update`` stamps + validates the mutated sidecar in
     memory, then moves it here, so the mutated sidecar (e.g. ``team: beta``) is
     NEVER written at the old location and then relocated. The overrides are written
@@ -748,7 +747,7 @@ def move_record(
     outside the source vault), and *new_location*'s paths via
     :func:`_realpath_is_descendant` against the declared dest vault root, so a
     destination that escapes its vault root is rejected before any write
-    (re-review Important — the destination was previously trusted from the caller).
+    (the destination was previously trusted from the caller).
 
     ``shared`` is the destination vault's trust flag (0 = own/trusted, 1 =
     ``shared: true``), stamped on the repointed index row so a relocation into a
@@ -760,7 +759,7 @@ def move_record(
     old_root = old_vault_root if old_vault_root is not None else vault_mod.resolve_vault()
     old_kind, old_name, old_body_path, old_sidecar_path = _confine_record_id(old_id, old_root)
 
-    # Dest-confinement (Slice 3): the destination paths must be descendants of the
+    # Dest-confinement: the destination paths must be descendants of the
     # declared dest vault root (mirrors the source-side _confine_record_id guard).
     dest_root_real = os.path.realpath(new_location.vault_root)
     for p in (new_location.body_path, new_location.sidecar_path):
@@ -792,7 +791,7 @@ def move_record(
     write_temp_then_rename(new_location.sidecar_path, sidecar_text)
 
     # index-repoint: drop the old keyed row, upsert the new one. ``shared`` is the
-    # destination vault's trust flag (Slice 3): a relocation INTO a ``shared: true``
+    # destination vault's trust flag: a relocation INTO a ``shared: true``
     # vault must stamp the new row shared=1, not the default 0 — otherwise the moved
     # record leaks into ``search`` as own-vault until the next ``lore reindex``.
     index_store.delete_row(conn, old_root, old_kind, old_name)
@@ -819,7 +818,7 @@ def delete_record(
     conn,
     vault_root: str | None = None,
 ) -> None:
-    """Remove a record's body+sidecar+index row in one op (AC13).
+    """Remove a record's body+sidecar+index row in one op.
 
     A missing ID (neither artifact on disk) → :class:`RecordNotFoundError`.
     """

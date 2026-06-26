@@ -3,7 +3,7 @@
 The CLI exposes three commands: install / uninstall / doctor. (update + config
 were removed in the config-driven rewrite.)
 
-A-9 hygiene: bare `trailhead` and `--help` print a curated grouped menu, never a
+Output hygiene: bare `trailhead` and `--help` print a curated grouped menu, never a
 raw argparse dump; main() returns an int exit code.
 """
 

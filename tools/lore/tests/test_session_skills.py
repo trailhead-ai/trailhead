@@ -1,6 +1,6 @@
-"""Plan Slice 4 — /lore:flush skill replaces /lore:finish; /checkpoint deleted.
+"""Session skills — /lore:flush replaces /lore:finish; /checkpoint is gone.
 
-Delivers:
+Asserts:
   - The 'flush' skill directory exists; 'finish' and 'checkpoint' do not.
   - The skill registry lists 'flush', NOT 'finish' or 'checkpoint'.
   - No skill, agent, or rules file in the lore plugin tree references '/checkpoint'.
@@ -8,12 +8,6 @@ Delivers:
   - The SKILL.md describes the candidate→record evaluation model and reads
     the flushed-at watermark from the sidecar directly (not via KQL).
   - The SKILL.md describes all three scoping forms: no-arg, all, <search>.
-
-Test contract (plan):
-  - skill registry no longer lists checkpoint; lists flush, not finish.
-  - a test asserts no skill/agent/rules file references /checkpoint anywhere
-    in the lore plugin tree.
-  - the flush skill test exercises the real CLI flush path.
 """
 from __future__ import annotations
 
@@ -95,7 +89,7 @@ def test_registry_does_not_list_checkpoint():
     """The skill registry no longer lists 'checkpoint'."""
     names = {p.parent.name for p in _skill_files()}
     assert "checkpoint" not in names, (
-        "checkpoint skill must not exist — Slice 4 deleted it "
+        "checkpoint skill must not exist — it was deleted "
         "(continuous capture via `lore session candidate`; flush evaluates)"
     )
 
@@ -119,7 +113,7 @@ def test_no_checkpoint_reference_in_any_lore_md_file():
     ]
     assert not offenders, (
         "Found checkpoint reference(s) in lore plugin — must be removed "
-        f"(Slice 4 deleted checkpoint): {offenders}"
+        f"(checkpoint is deleted): {offenders}"
     )
 
 
@@ -164,7 +158,7 @@ def test_flush_skill_reads_sidecar_not_kql_for_watermark():
     """flush/SKILL.md must document reading the sidecar directly for the flushed-at watermark.
 
     annotations is sidecar-only, NOT indexed — reading it requires reading the
-    session/<key>.json directly, NOT via KQL (cross-slice contract, plan KU3).
+    session/<key>.json directly, NOT via KQL.
     """
     text = _skill_text("flush")
     # Must mention reading the .json sidecar directly

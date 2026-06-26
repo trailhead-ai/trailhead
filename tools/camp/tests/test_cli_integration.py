@@ -1,11 +1,11 @@
-"""Slice 3 CLI integration: camp ai / camp setup / camp status end-to-end.
+"""CLI integration: camp ai / camp setup / camp status end-to-end.
 
 Exercises the real cli/camp dispatch through CAMP_CONFIG_DIR + CAMP_STATE_DIR
 overrides (no real ~/.claude, no real claude exec). camp ai's harness launch is
 suppressed via CAMP_TEST_NO_EXEC so the test can assert the seed+spawn without the
-os.execvp into claude (the real launch lands in Slice 6).
+os.execvp into claude (the real launch happens later).
 
-Test contract:
+Covers:
 - camp ai <slug> seeds the manifest pending and (with the real background
   provisioner) drives every member to ready; the workspace dir + setup.log exist.
 - camp setup (foreground) completes provisioning; camp status exit codes

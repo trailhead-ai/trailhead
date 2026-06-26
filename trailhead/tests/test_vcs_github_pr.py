@@ -222,7 +222,7 @@ class TestPrStatus:
         assert all(c[0] in ("gh", "git") for c in calls)
 
     def test_since_filter_excludes_older_bot_reviews(self) -> None:
-        """M-2: bot reviews with submittedAt <= since are filtered out."""
+        """Bot reviews with submittedAt <= since are filtered out."""
         view = {
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
@@ -693,7 +693,7 @@ class TestCiWait:
         assert result.get("timeout") is True
 
     def test_total_slept_does_not_exceed_timeout(self) -> None:
-        """I-1: the loop must never sleep past timeout (no overshoot on terminal iteration)."""
+        """The loop must never sleep past timeout (no overshoot on terminal iteration)."""
         draft_view = {
             "mergeable": "MERGEABLE",
             "mergeStateStatus": "CLEAN",
@@ -729,7 +729,7 @@ class TestCiWait:
         )
 
     def test_wait_routes_evaluate_through_pr_surface(self) -> None:
-        """I-3: ci.wait must call self._pr.evaluate so a subclass override is honoured."""
+        """ci.wait must call self._pr.evaluate so a subclass override is honoured."""
         from trailhead.vcs.github import _GitHubCI, _GitHubPR
 
         evaluate_calls: list[dict] = []

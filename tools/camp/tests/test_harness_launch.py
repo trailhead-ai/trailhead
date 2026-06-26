@@ -1,4 +1,4 @@
-"""Tests for Slice 6: harness-launch seam (config-shaped, claude default).
+"""Tests for the harness-launch seam (config-shaped, claude default).
 
 A group-level optional [harness] block declares `new` + `resume` argv templates
 + `cwd`, with {slug} / {workspace} / {session_id} substitution. When absent the
@@ -6,7 +6,7 @@ baked-in claude default applies (new→["claude","--session-id","{session_id}"]
 cwd=workspace; resume→["claude","--resume","{session_id}"]). The launch seam os.execvp's;
 tests stub the exec (no real claude).
 
-Test contract (harness portion):
+Covers (harness portion):
 - no [harness] config → claude default argv (new seeds the deterministic session
   id with --session-id, resume continues it with --resume; cwd=workspace).
 - custom [harness] block → configured argv with {slug}/{workspace}/{session_id}
@@ -263,7 +263,7 @@ class TestLaunch:
 
 
 # ---------------------------------------------------------------------------
-# profile.launch — per-field merge over claude default (Fix 1)
+# profile.launch — per-field merge over claude default
 # ---------------------------------------------------------------------------
 
 
@@ -324,7 +324,7 @@ class TestPartialHarnessMerge:
 
 
 # ---------------------------------------------------------------------------
-# profile.inject — mid-session context-injection strategy (Slice 9)
+# profile.inject — mid-session context-injection strategy
 # ---------------------------------------------------------------------------
 
 

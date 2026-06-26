@@ -12,13 +12,13 @@ PATH) for your shell — exactly like ``brew shellenv``.  Because the shim dir's
 entry is all the profile needs, and re-running install updates it in place.
 
 camp is the forcing case: it's the front door, run outside any Claude Code
-session.  Each shim hardcodes TRAILHEAD_ROOT (S-5) so the monorepo is reachable
+session.  Each shim hardcodes TRAILHEAD_ROOT so the monorepo is reachable
 without CLAUDE_PLUGIN_ROOT; shellenv also exports it for good measure.
 
 Shell detection: ``$SHELL`` basename, with a ``--shell`` override (fish|zsh|bash).
   fish → ``set -gx`` / ``fish_add_path``;  zsh/bash → ``export``.
 
-S-6 — shim names are checked against a denylist of system binaries.
+Shim names are checked against a denylist of system binaries.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from pathlib import Path
 from trailhead.paths import ensure_dir, state_dir
 
 # ---------------------------------------------------------------------------
-# S-6 denylist
+# System-binary denylist
 # ---------------------------------------------------------------------------
 
 _SHIM_DENYLIST = frozenset(
@@ -60,7 +60,7 @@ class PathIntegrationError(Exception):
 
 
 class ShimDenylistError(Exception):
-    """Raised when a requested shim name matches the system-binary denylist (S-6)."""
+    """Raised when a requested shim name matches the system-binary denylist."""
 
 
 # ---------------------------------------------------------------------------
@@ -101,11 +101,11 @@ def create_shims(
     Args:
         wired_tools:    Mapping of CLI name → absolute path to the tool's bin
                         wrapper (e.g. tools/camp/plugins/camp/bin/camp).
-        trailhead_root: Absolute trailhead repo root, hardcoded into each shim (S-5).
+        trailhead_root: Absolute trailhead repo root, hardcoded into each shim.
         env:            Environment dict override for path resolution.
 
     Raises:
-        ShimDenylistError:    If any name matches the system-binary denylist (S-6).
+        ShimDenylistError:    If any name matches the system-binary denylist.
         PathIntegrationError: If the shim dir cannot be created/written.
     """
     for name in wired_tools:
@@ -131,7 +131,7 @@ def create_shims(
 
 
 def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
-    """Generate a single bash shim wrapper (S-5: TRAILHEAD_ROOT hardcoded)."""
+    """Generate a single bash shim wrapper (TRAILHEAD_ROOT hardcoded)."""
     return (
         "#!/usr/bin/env bash\n"
         f"# trailhead-managed shim for {name}\n"

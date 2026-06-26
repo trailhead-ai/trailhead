@@ -1,4 +1,4 @@
-"""Slice 2 tests: ported frontmatter parser + set_status / patch_section primitives."""
+"""Tests for the frontmatter parser + set_status / patch_section primitives."""
 
 from conftest import load_script
 

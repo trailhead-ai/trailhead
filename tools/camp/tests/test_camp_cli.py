@@ -1,13 +1,13 @@
 """Tests for the camp CLI entry points (bin/camp, cli/camp, capabilities.toml).
 
-Test contract:
+Covers:
 - camp --help exits 0 and prints a grouped menu (not a raw argparse dump).
 - camp --version prints the binary path.
 - camp --which prints the binary path.
-- capabilities.toml loads + validates via the Step-1 loader.
+- capabilities.toml loads + validates via the capabilities loader.
 - bin/camp wrapper resolves cli/camp (smoke: exits 0 via python invocation).
 - marketplace.json source resolves (./plugins/camp).
-- D-H guard: cli/camp --help succeeds; guard function tested in test_spine.py.
+- Import guard: cli/camp --help succeeds; guard function tested in test_spine.py.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def test_camp_help_contains_key_commands() -> None:
         text=True,
     )
     output = result.stdout
-    # Slice 1: 'break' → 'rm', 'sweep' is disabled and removed from help.
+    # 'break' → 'rm', 'sweep' is disabled and removed from help.
     for cmd in ("ls", "status", "rm", "sync"):
         assert cmd in output, f"Expected {cmd!r} in --help output, got:\n{output}"
 
@@ -135,7 +135,7 @@ def test_bin_camp_wrapper_exits_0_on_help() -> None:
 
 
 # ---------------------------------------------------------------------------
-# capabilities.toml loads + validates via the Step-1 loader
+# capabilities.toml loads + validates via the capabilities loader
 # ---------------------------------------------------------------------------
 
 
@@ -169,7 +169,7 @@ def test_capabilities_toml_no_skills() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Slice 2: camp init authoring (--member / --scaffold / --force)
+# camp init authoring (--member / --scaffold / --force)
 # ---------------------------------------------------------------------------
 
 
@@ -204,7 +204,7 @@ def _run_init(
 ) -> subprocess.CompletedProcess:
     """Run `camp group <args>` via cli/camp with config/state overrides.
 
-    Slice 1: 'camp init' was renamed to 'camp group'; tests updated to match.
+    'camp init' was renamed to 'camp group'; tests updated to match.
     """
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)

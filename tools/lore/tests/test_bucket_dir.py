@@ -1,9 +1,9 @@
 """Tests for the ``vault.bucket_dir`` YYYY-MM month-bucket helper.
 
 The session-note month-bucket CREATE tests that lived here (via
-``sessions.ensure_session_note``) were retired in Slice 2 when the frontmatter
+``sessions.ensure_session_note``) were retired when the frontmatter
 session-note lifecycle was removed — capture is now the singular indexed
-``session/`` record (Slice 1), covered by test_session_records.py. The
+``session/`` record, covered by test_session_records.py. The
 ``bucket_dir`` helper itself is still live (it computes the YYYY-MM archive
 subdir for the date-bucketed folders) and stays tested here.
 
@@ -33,9 +33,9 @@ class TestBucketDir:
 
 
 # ---------------------------------------------------------------------------
-# (sessions.ensure_session_note month-bucket creation tests were retired in
-# Slice 2 — the frontmatter-note CREATE lifecycle is gone; capture is now the
-# singular ``session/`` record, covered by test_session_records.py.)
+# (sessions.ensure_session_note month-bucket creation tests were retired —
+# the frontmatter-note CREATE lifecycle is gone; capture is now the singular
+# ``session/`` record, covered by test_session_records.py.)
 # ---------------------------------------------------------------------------
 
 

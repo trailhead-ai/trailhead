@@ -1,4 +1,4 @@
-"""Mid-session context-injection queue + drain — Slice 9 (claude-hook strategy).
+"""Mid-session context-injection queue + drain (claude-hook strategy).
 
 The claude-hook inject strategy decouples `camp enter` (which knows the member
 and where its doc lives) from the Claude Code PostToolUse hook (which fires on the

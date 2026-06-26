@@ -1,6 +1,6 @@
-"""Tests for Slice 4: workspace doc (CLAUDE.md + AGENT.md) and workspace SessionStart hook.
+"""Tests for the workspace doc (CLAUDE.md + AGENT.md) and workspace SessionStart hook.
 
-Test contract (all must RED before implementation, GREEN after):
+Covers:
 
 1. workspace CLAUDE.md + AGENT.md written at bring-up:
    a. Both files exist at the workspace root after bring_up_workspace.
@@ -444,7 +444,7 @@ class TestWorkspaceHooks:
 
 
 # ---------------------------------------------------------------------------
-# Slice 9: PostToolUse → camp inject --drain workspace hook
+# PostToolUse → camp inject --drain workspace hook
 # ---------------------------------------------------------------------------
 
 
@@ -673,7 +673,7 @@ class TestBringUpWorkspaceIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Slice 8: doc_files (resolve_harness_profile) + 7b Members-line removal
+# doc_files (resolve_harness_profile) + Members-line removal
 # ---------------------------------------------------------------------------
 
 
@@ -726,7 +726,7 @@ class TestResolveDocFiles:
 
 
 class TestWriteWorkspaceDocFiles:
-    """Tests for write_workspace_doc file-selection behavior (Slice 8)."""
+    """Tests for write_workspace_doc file-selection behavior."""
 
     def test_default_writes_only_claude_md(self, tmp_path: Path):
         """No [harness] config → only CLAUDE.md written, AGENT.md not written."""
@@ -795,7 +795,7 @@ class TestWriteWorkspaceDocFiles:
 
 
 class TestRenderedDocMembersLine:
-    """Slice 8 7b: the trailing 'Members: ...' line must be removed."""
+    """The trailing 'Members: ...' line must be removed."""
 
     def _get_content(self, tmp_path: Path, member_names=None) -> str:
         from workspace_doc import write_workspace_doc

@@ -1,19 +1,16 @@
-"""Slice 2 tests: `lore flush` replaces `lore finish` — clean/dirty flip + flushed-at.
-
-Covers the Slice 2 test contract (plan
-``lore-clean-dirty-sessions-flush-and-singular-dir-standardization.md``):
+"""`lore flush` replaces `lore finish` — clean/dirty flip + flushed-at.
 
   mechanical flip + commit (current session):
     - a ``clean`` session → exit 0, a notice that DISTINGUISHES "clean — nothing
-      to flush" from "no session exists" (council/Advocate Minor), and NO commit.
+      to flush" from "no session exists", and NO commit.
     - a ``dirty`` session → status becomes ``clean``, ``annotations['flushed-at']``
       is stamped in the pinned key/format, the one record is reindexed, and exactly
       ONE commit is made — staging EXPLICIT paths only (never ``git add -A``).
     - re-flush of a now-``clean`` session is an idempotent no-op (no second commit).
     - NO code path ever writes ``status: complete`` / ``status: active`` — the
-      sidecar status is only ever ``dirty`` / ``clean`` (the vocab retired in S0).
+      sidecar status is only ever ``dirty`` / ``clean``.
 
-  shared cross-slice contract (KU3 — producer here, Slice 4 consumes):
+  shared contract (the key/format are pinned here; other readers import them):
     - ``session_store.FLUSHED_AT_KEY`` / ``FLUSHED_AT_FORMAT`` pin the key + ISO
       format as a single importable source of truth.
     - ``session_store.parse_flushed_at`` is the validate-before-trust reader: a
@@ -171,7 +168,7 @@ class TestFlushDirtySession:
 
 
 # ---------------------------------------------------------------------------
-# clean no-op vs no-session — distinct notices, no commit (council/Advocate)
+# clean no-op vs no-session — distinct notices, no commit
 # ---------------------------------------------------------------------------
 
 class TestFlushCleanNoop:
@@ -232,8 +229,8 @@ class TestNoLegacyStatus:
 
 
 # ---------------------------------------------------------------------------
-# shared cross-slice contract: FLUSHED_AT_KEY / FORMAT + parse_flushed_at
-# (KU3 — the producer pins it here; Slice 4 imports it)
+# shared contract: FLUSHED_AT_KEY / FORMAT + parse_flushed_at
+# (the producer pins it here; other readers import it)
 # ---------------------------------------------------------------------------
 
 class TestFlushedAtSharedContract:

@@ -18,7 +18,7 @@ Teardown steps:
   4. Remove PATH integration (rc block + shim dir).
   5. Delete trailhead's leftover state (empty composed/ dir).
 
-A-9 hygiene mirrors install. Best-effort harness warnings do not fail the run.
+Output hygiene mirrors install. Best-effort harness warnings do not fail the run.
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ Contract:
   - a selected subagent name -> a CopyOp for agents/<name>.md (a file, not a dir).
   - apply_plan lands the file under dest/agents/.
   - unselected subagents never appear in the plan.
-  - apply_plan(mode="copy") produces real files, never symlinks (S-2).
+  - apply_plan(mode="copy") produces real files, never symlinks.
 """
 
 from pathlib import Path

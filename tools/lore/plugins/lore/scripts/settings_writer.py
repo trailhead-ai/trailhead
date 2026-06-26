@@ -1,4 +1,4 @@
-"""Idempotent settings.json helper for the lore plugin (Slice 2, S5).
+"""Idempotent settings.json helper for the lore plugin.
 
 Mirrors the pattern from camp's ``tools/camp/plugins/camp/scripts/hooks_writer.py``:
 stdlib ``json.load/dump`` only (no f-strings, no hand-rolled serializer), preserves
@@ -18,7 +18,7 @@ remove_hook(settings_path, event, command)
 
 upsert_permission_deny(settings_path, rule)
     Ensure *rule* appears exactly once in ``permissions.deny``. Defense-in-depth
-    only (Slice 3): a coarse static prefix deny backing the runtime PreToolUse
+    only: a coarse static prefix deny backing the runtime PreToolUse
     guard. Idempotent; preserves unrelated permission rules and keys.
 
 set_env_var(settings_path, name, value)
@@ -164,7 +164,7 @@ def remove_hook(settings_path: Path, event: str, command: str) -> None:
 def upsert_permission_deny(settings_path: Path, rule: str) -> None:
     """Ensure *rule* appears exactly once in ``permissions.deny``.
 
-    Defense-in-depth only (Slice 3, S5): the static ``permissions.deny`` prefix
+    Defense-in-depth only: the static ``permissions.deny`` prefix
     cannot cover an arbitrary symlink's real target, so it is breadth-only — the
     runtime PreToolUse vault-guard hook is the mandatory primary mechanism. This
     coarse rule (``Write(//abs/.../vaults/**)`` — note the ``//`` double-slash for

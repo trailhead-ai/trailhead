@@ -8,7 +8,7 @@ Owns three responsibilities:
 - validate_scaffold: run group-name confinement, repo-root existence/git check,
   and no-overlap across groups before any file is written.
 
-No file I/O in this module — callers write the rendered string atomically (Slice 2).
+No file I/O in this module — callers write the rendered string atomically.
 """
 
 from __future__ import annotations

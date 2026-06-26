@@ -24,15 +24,15 @@ Selection shape:
     name -> None. Empty maps ({}, {}) = always-on set only.
   - harness is REQUIRED — every wire() call passes harness=ClaudeCodeHarness().
 
-Contract preserved from prior slices:
-  - The harness CLI runner is stubbed in all tests (B-3 hermeticity).
-  - S-2: apply_plan(mode="copy") — no symlinks in composed tree.
-  - R-1: staging-dir + atomic promote — a mid-compose failure leaves the
+Contract:
+  - The harness CLI runner is stubbed in all tests (hermeticity).
+  - apply_plan(mode="copy") — no symlinks in composed tree.
+  - staging-dir + atomic promote — a mid-compose failure leaves the
     prior dest unchanged.
-  - C-1.1: staging cleanup runs on ANY exception (try/finally).
-  - C-1.2/I-1: WireError names tool + stage; multi-tool wire is best-effort
+  - staging cleanup runs on ANY exception (try/finally).
+  - WireError names tool + stage; multi-tool wire is best-effort
     sequential.
-  - B-5: minimal preset → no camp/craft dests.
+  - minimal selection → no camp/craft dests.
   - Consolidated marketplace.json content: name + multi-tool plugins[].
   - On-disk-truth blast-radius: a failed tool is absent from plugins[] while
     an earlier-wired tool is present (content-level assertion).
@@ -58,11 +58,10 @@ _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 _FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 
 # All session skills for lore (the names a "minimal lore" picks).
-# S6 Slice 2 deleted the 7 obsolete per-kind capture skills (area, check-in,
-# dead-end, decision, defer, follow-up, seed) — replaced by the lore record/session CLI.
-# S6 Slice 3 MOVED 'brainstorm' to the craft plugin.
-# Slice 4 RENAMED 'finish' → 'flush' and DELETED 'checkpoint' — retained lore
-# skills: flush, sync, search, record, research.
+# The 7 obsolete per-kind capture skills (area, check-in, dead-end, decision,
+# defer, follow-up, seed) were deleted — replaced by the lore record/session CLI.
+# 'brainstorm' moved to the craft plugin. 'finish' was renamed to 'flush' and
+# 'checkpoint' deleted — retained lore skills: flush, sync, search, record, research.
 _LORE_CAPTURE_SESSION_SKILLS = {
     "flush": None,
     "sync": None,
@@ -144,7 +143,7 @@ def _marketplace_json(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# T-W1: minimal preset — lore only, no camp/craft dests (B-5 enforcement)
+# Minimal selection — lore only, no camp/craft dests
 # ---------------------------------------------------------------------------
 
 
@@ -164,7 +163,7 @@ class TestMinimalPresetGating:
         assert _live_dest(tmp_path, "lore").exists(), "lore plugin dest missing after minimal wire"
 
     def test_minimal_no_camp_dest(self, tmp_path):
-        """wire with minimal preset creates NO camp dest (B-5)."""
+        """wire with minimal preset creates NO camp dest."""
         from trailhead.wire import wire
 
         selection = {"lore": ({}, {"flush": None})}
@@ -180,7 +179,7 @@ class TestMinimalPresetGating:
         )
 
     def test_minimal_no_craft_dest(self, tmp_path):
-        """wire with minimal preset creates NO craft dest (B-5)."""
+        """wire with minimal preset creates NO craft dest."""
         from trailhead.wire import wire
 
         selection = {"lore": ({}, {"flush": None})}
@@ -213,7 +212,7 @@ class TestMinimalPresetGating:
 
 
 # ---------------------------------------------------------------------------
-# T-W2: wire mechanics on a craft SUBSET — dests created; subagents of
+# Wire mechanics on a craft SUBSET — dests created; subagents of
 # unselected entries stay out of the composed tree.
 #
 # NOTE: the selection dicts below are HAND-BUILT, not resolve("standard"). They
@@ -327,7 +326,7 @@ class TestCraftSubsetWiring:
 
 
 # ---------------------------------------------------------------------------
-# T-W3: consolidated marketplace.json — name == "trailhead", multi-tool plugins[]
+# Consolidated marketplace.json — name == "trailhead", multi-tool plugins[]
 # ---------------------------------------------------------------------------
 
 
@@ -403,7 +402,7 @@ class TestConsolidatedMarketplace:
         assert not (composed_root / "camp" / ".claude-plugin").exists()
 
     def test_s2_no_symlinks_in_wired_tree(self, tmp_path):
-        """S-2: the composed tree must contain no symlinks."""
+        """The composed tree must contain no symlinks."""
         from trailhead.wire import wire
 
         selection = {
@@ -419,11 +418,11 @@ class TestConsolidatedMarketplace:
         )
         composed_root = _composed_root(tmp_path)
         for path in composed_root.rglob("*"):
-            assert not path.is_symlink(), f"symlink found in composed tree (S-2 violation): {path}"
+            assert not path.is_symlink(), f"symlink found in composed tree (symlinks are disallowed): {path}"
 
 
 # ---------------------------------------------------------------------------
-# T-W4: idempotency — re-wiring same selection leaves same tree, no duplicates
+# Idempotency — re-wiring same selection leaves same tree, no duplicates
 # ---------------------------------------------------------------------------
 
 
@@ -481,18 +480,18 @@ class TestIdempotency:
             runner=_noop_runner,
         )
         assert not (plugin_dest / "agents" / "librarian.md").exists(), (
-            "librarian.md still present after rewiring without librarian (S-4/R-1)"
+            "librarian.md still present after rewiring without librarian"
         )
 
 
 # ---------------------------------------------------------------------------
-# T-W5: R-1 atomicity — mid-compose failure leaves prior dest unchanged
+# Atomicity — mid-compose failure leaves prior dest unchanged
 # ---------------------------------------------------------------------------
 
 
 class TestAtomicPromote:
     def test_mid_compose_failure_leaves_prior_dest_intact(self, tmp_path):
-        """R-1: if compose fails mid-way, the prior wired dest is untouched."""
+        """If compose fails mid-way, the prior wired dest is untouched."""
         from trailhead.wire import wire
 
         selection = {"lore": ({}, {"flush": None})}
@@ -526,13 +525,13 @@ class TestAtomicPromote:
             str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
         }
         assert before_files == after_files, (
-            "R-1 violated: mid-compose failure mutated the live dest\n"
+            "mid-compose failure mutated the live dest\n"
             f"  removed: {before_files - after_files}\n"
             f"  added:   {after_files - before_files}"
         )
 
     def test_first_wire_failure_leaves_no_dest(self, tmp_path):
-        """R-1: if the very first wire fails, no partial dest is left."""
+        """If the very first wire fails, no partial dest is left."""
         from trailhead.wire import wire
 
         selection = {"lore": ({}, {"flush": None})}
@@ -549,11 +548,11 @@ class TestAtomicPromote:
                     runner=_noop_runner,
                 )
 
-        assert not plugin_dest.exists(), "R-1 violated: partial dest exists after failed first wire"
+        assert not plugin_dest.exists(), "partial dest exists after failed first wire"
 
 
 # ---------------------------------------------------------------------------
-# T-W6: registry sequencing — register ONCE, install/rewire per tool
+# Registry sequencing — register ONCE, install/rewire per tool
 # ---------------------------------------------------------------------------
 
 
@@ -651,7 +650,7 @@ class TestRegistrySequencing:
 
 
 # ---------------------------------------------------------------------------
-# T-W7: lore minimal wire content check (canonical integration)
+# Lore minimal wire content check (canonical integration)
 # ---------------------------------------------------------------------------
 
 
@@ -697,13 +696,13 @@ class TestMinimalLoreContent:
 
 
 # ---------------------------------------------------------------------------
-# T-W8: C-1.1 — staging cleanup runs on BaseException (try/finally)
+# Staging cleanup runs on BaseException (try/finally)
 # ---------------------------------------------------------------------------
 
 
 class TestStagingCleanupOnBaseException:
     def test_staging_dir_cleaned_on_keyboard_interrupt(self, tmp_path):
-        """C-1.1: a KeyboardInterrupt mid-compose must leave no staging dir."""
+        """A KeyboardInterrupt mid-compose must leave no staging dir."""
         import trailhead.wire as wire_mod
         from trailhead.wire import wire
 
@@ -725,11 +724,11 @@ class TestStagingCleanupOnBaseException:
         if staging_parent.exists():
             leftover = list(staging_parent.glob("_lore_staging_*"))
             assert leftover == [], (
-                f"C-1.1 violated: staging dirs orphaned after KeyboardInterrupt: {leftover}"
+                f"staging dirs orphaned after KeyboardInterrupt: {leftover}"
             )
 
     def test_staging_dir_cleaned_on_system_exit(self, tmp_path):
-        """C-1.1: a SystemExit mid-compose must leave no staging dir."""
+        """A SystemExit mid-compose must leave no staging dir."""
         import trailhead.wire as wire_mod
         from trailhead.wire import wire
 
@@ -751,7 +750,7 @@ class TestStagingCleanupOnBaseException:
         if staging_parent.exists():
             leftover = list(staging_parent.glob("_lore_staging_*"))
             assert leftover == [], (
-                f"C-1.1 violated: staging dirs orphaned after SystemExit: {leftover}"
+                f"staging dirs orphaned after SystemExit: {leftover}"
             )
 
     def test_successful_promote_leaves_no_staging_dir(self, tmp_path):
@@ -771,14 +770,14 @@ class TestStagingCleanupOnBaseException:
 
 
 # ---------------------------------------------------------------------------
-# T-W9: C-1.2/I-1 — WireError names the failing tool + stage; best-effort
+# WireError names the failing tool + stage; best-effort
 #        sequential; on-disk-truth blast-radius isolation.
 # ---------------------------------------------------------------------------
 
 
 class TestWireErrorIsolation:
     def test_wire_error_raised_naming_failing_tool(self, tmp_path):
-        """C-1.2: a per-tool failure raises WireError naming the tool."""
+        """A per-tool failure raises WireError naming the tool."""
         import trailhead.wire as wire_mod
         from trailhead.wire import WireError, wire
 
@@ -808,7 +807,7 @@ class TestWireErrorIsolation:
         assert isinstance(err.__cause__, RuntimeError)
 
     def test_already_wired_tool_stays_committed_after_later_failure(self, tmp_path):
-        """C-1.2/I-1: lore stays wired when craft fails — best-effort sequential."""
+        """lore stays wired when craft fails — best-effort sequential."""
         import trailhead.wire as wire_mod
         from trailhead.wire import WireError, wire
 
@@ -838,7 +837,7 @@ class TestWireErrorIsolation:
         )
 
     def test_no_orphaned_staging_dir_after_wire_error(self, tmp_path):
-        """C-1.2: WireError after craft failure leaves no craft staging dir."""
+        """WireError after craft failure leaves no craft staging dir."""
         import trailhead.wire as wire_mod
         from trailhead.wire import WireError, wire
 
@@ -938,7 +937,7 @@ class TestWireErrorIsolation:
 
 
 # ---------------------------------------------------------------------------
-# T-W10: split markers — global register marker + per-tool install marker;
+# Split markers — global register marker + per-tool install marker;
 #        install-vs-rewire keyed on the per-tool marker.
 # ---------------------------------------------------------------------------
 
@@ -1052,6 +1051,6 @@ class TestSplitMarkers:
         assert len(uninstall_calls) >= 1, (
             f"rewire (uninstall+install) not called for installed tool: {calls}"
         )
-        # And it must NOT use plugin update (U-1(e)).
+        # And it must NOT use plugin update.
         update_calls = [c for c in calls if "update" in c]
-        assert update_calls == [], f"rewire must not use 'plugin update' (U-1(e)): {update_calls}"
+        assert update_calls == [], f"rewire must not use 'plugin update': {update_calls}"

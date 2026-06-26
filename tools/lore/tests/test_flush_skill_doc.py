@@ -1,9 +1,9 @@
-"""Slice 2 tests: doc-consistency check for the session-finalization skill.
+"""Doc-consistency checks for the session-finalization skill.
 
-S6 Slice 2 originally verified the `finish` skill's structural invariants.
-Plan Slice 4 renamed `finish` → `flush` and rewrote the skill for the
-clean/dirty + candidate-evaluation model. These tests now track the `flush`
-skill's non-regression invariants that the Slice 4 rewrite must not break.
+The `finish` skill was renamed to `flush` and rewritten for the clean/dirty +
+candidate-evaluation model. These tests track the `flush` skill's structural
+invariants: `finish` must be gone, `flush` must be present, and its frontmatter
+must stay registrable.
 """
 from pathlib import Path
 
@@ -21,11 +21,11 @@ def _skill_text() -> str:
 # ---------------------------------------------------------------------------
 
 def test_finish_skill_absent_flush_skill_present():
-    """Plan Slice 4 renamed 'finish' to 'flush'. Guard the rename is stable."""
+    """'finish' was renamed to 'flush'. Guard the rename is stable."""
     assert not (SKILLS_DIR / "finish" / "SKILL.md").exists(), (
-        "finish/SKILL.md must not exist — Slice 4 renamed it to flush"
+        "finish/SKILL.md must not exist — it was renamed to flush"
     )
-    assert FLUSH_SKILL.exists(), "flush/SKILL.md must exist after the Slice 4 rename"
+    assert FLUSH_SKILL.exists(), "flush/SKILL.md must exist after the rename"
 
 
 # ---------------------------------------------------------------------------

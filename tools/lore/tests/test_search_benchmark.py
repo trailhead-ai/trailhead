@@ -1,6 +1,6 @@
-"""Slice 5 (S3) — `lore search` latency benchmark.
+"""`lore search` latency benchmark.
 
-Pins the latency target decided in the plan: **p95 < 100 ms** for a representative
+Pins the latency target: **p95 < 100 ms** for a representative
 query, measured at ~current vault size (~2,149 records, the "1×" corpus).
 
 The benchmark builds SYNTHETIC fixture indexes in ``tmp_path`` via
@@ -26,7 +26,7 @@ CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
 from conftest import load_script  # noqa: E402
 
-# Pinned plan target.
+# Pinned target.
 TARGET_P95_MS = 100.0
 
 # Per-corpus hard ceiling.

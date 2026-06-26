@@ -6,7 +6,7 @@ Thin consumer of trailhead.vcs: bootstraps the shared library, then delegates to
 fetch that IS the doctor signal. A failing run surfaces its annotations; a clean
 or not-found (404 → []) run yields no annotations and does NOT false-alarm.
 
-Slice-2 C-1: a non-404 gh failure (auth / rate-limit / outage) makes
+A non-404 gh failure (auth / rate-limit / outage) makes
 ``deploy.logs()`` raise ``DeployError`` — the script surfaces that cause on
 stderr and exits 1, so doctor never reads an *uncheckable* deploy as *healthy*.
 

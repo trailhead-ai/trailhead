@@ -1,4 +1,4 @@
-"""Slice 5 (S3) — `recall` command retired, call sites rewired to `lore search`.
+"""The `recall` command is retired; call sites are rewired to `lore search`.
 
 The destructive cutover: the `recall` COMMAND surface is gone (`cmd_recall`, the
 `recall` subparser, and the recall-command machinery in `recall.py`). The
@@ -62,7 +62,7 @@ class TestAreaPointerCallSite:
     def test_area_pointer_references_search_not_recall(self, tmp_path):
         """The area-pointer (serve `lore areas` / recall flows) must point at
         `lore search`, not the removed `lore recall`.
-        Slice 7: area profiles live under area/ (singular), not areas/."""
+        Area profiles live under area/ (singular), not areas/."""
         recall = load_script("recall")
         vault = tmp_path / "vault"
         (vault / "area").mkdir(parents=True)

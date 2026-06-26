@@ -54,7 +54,7 @@ python3 <SCRIPTS_DIR>/detect_repos.py --manifest <manifest_path>
 Then for each repo: `gh pr list --head <branch> --json number --jq '.[0].number'`.
 Build pairs as `<repo_path>:<pr_number>:<member_name>` using `members[].name` from the manifest.
 
-## Config-summary on launch (A-2)
+## Config-summary on launch
 
 On launch, before entering the watch loop, emit a one-line summary of what's active vs inert:
 
@@ -93,7 +93,7 @@ python3 <SCRIPTS_DIR>/wait_for_actionable.py \
 ```
 
 Pass `--review-bot-login <login>` only when `review_bot_login` is configured in the group TOML
-`[release]` block; omit it entirely when absent (preserves CI-only default, D-3 inert-by-default).
+`[release]` block; omit it entirely when absent (preserves the CI-only default — inert by default).
 
 Handle each actionable entry's `action` field:
 
@@ -134,7 +134,7 @@ Each pair is `<repo_path>:<pr_number>:<member_name>` where `member_name` comes f
 `members[].name` in the camp manifest (not the worktree basename, which may differ).
 
 `merge_prs.py` reads `merge_order` from the `[release]` block of the group TOML (`--toml`);
-without `--toml`, no merge_order is found and multi-PR merge is refused (R-6 gate).
+without `--toml`, no merge_order is found and multi-PR merge is refused.
 If >1 PR is queued and no `merge_order` is declared, `merge_prs.py` refuses with a named error —
 honor that exit code and surface it as
 `BLOCKED: merge_prs.py requires merge_order configured in [release] of the group TOML`.
@@ -146,7 +146,7 @@ Then clean up per repo: `git -C <repo_path> checkout main && git -C <repo_path> 
 
 Finally, update the prs.json sidecar at `<manifest_dir>/prs.json` to reflect the merged state.
 
-## External tracker seam (D-3)
+## External tracker seam
 
 After a successful merge, check the group TOML `[release]` block for `external_tracker`:
 
@@ -197,7 +197,7 @@ Field notes:
 - `sidecar_path` — absolute path to the `prs.json` sidecar alongside the manifest.
 - `group_toml_path` — absolute path to the group TOML file. Required by the deploy soak
   to locate `[release].soak_health_command`. monitor already reads this TOML for its
-  A-2 config summary, so the path is always available at emit time.
+  config summary, so the path is always available at emit time.
 
 The top-level session locates this marker by reading the last non-empty line of the completion
 summary and attempting `json.loads`. If it parses and contains `post_merge_handoff`, the session

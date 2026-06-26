@@ -1,4 +1,4 @@
-"""Slice 6 tests: status guard, lore sync, init git-init wiring.
+"""Status guard, lore sync, and init git-init wiring tests.
 
 Covers (TDD — written before implementation):
 
@@ -141,7 +141,7 @@ def test_validator_cli_exits_zero_for_valid_files(tmp_path):
     good1 = tmp_path / "good1.md"
     good2 = tmp_path / "good2.md"
     _make_note(good1, "lesson", "active")
-    _make_note(good2, "session", "dirty")  # Slice 0: active → dirty
+    _make_note(good2, "session", "dirty")  # session vocab: dirty
     r = run_validator([str(good1), str(good2)])
     assert r.returncode == 0
 
@@ -161,7 +161,7 @@ def test_validator_cli_no_files_exits_zero():
 def test_validator_cli_mixed_valid_and_invalid(tmp_path):
     good = tmp_path / "good.md"
     bad = tmp_path / "bad.md"
-    _make_note(good, "session", "clean")  # Slice 0: active → clean
+    _make_note(good, "session", "clean")  # session vocab: clean
     # 'session' is tracked, so a non-canonical status is rejected. (follow-up /
     # deferred / dead-end are now retired → unconstrained, so they can't serve
     # as the invalid case.)
@@ -296,10 +296,10 @@ def test_guard_noop_for_non_md_file(tmp_path):
     assert r.returncode == 0, r.stderr + r.stdout
 
 
-# ── lore init git-init wiring (Slice 1, S5 — non-interactive installer) ──────
+# ── lore init git-init wiring (non-interactive installer) ──────
 #
 # The old tests verified lore init <path> --yes scaffolded a vault at an
-# arbitrary user-specified location. Slice 1 (S5) replaced that with a
+# arbitrary user-specified location. That was replaced with a
 # non-interactive installer: init now bootstraps $XDG_STATE_HOME/lore/vaults/default.
 # The tests below verify the new semantics.
 
@@ -321,7 +321,7 @@ def test_init_creates_git_repo(tmp_path):
 
 
 def test_init_installs_pre_commit_hook(tmp_path):
-    """Slice 1, S5: init does NOT install any pre-commit hook (removed)."""
+    """init does NOT install any pre-commit hook (removed)."""
     state = tmp_path / "state"
     config = tmp_path / "config"
     state.mkdir(parents=True, exist_ok=True)
@@ -458,11 +458,11 @@ def test_sync_accepts_custom_message(tmp_path):
     assert "my custom commit" in log.stdout
 
 
-# ── C1: guard fails CLOSED when plugin has moved (LORE_GUARD_STRICT) ─────────
+# ── guard fails CLOSED when plugin has moved (LORE_GUARD_STRICT) ─────────
 
 
 def test_guard_strict_blocks_when_plugin_root_missing(tmp_path):
-    """C1: With LORE_GUARD_STRICT=1 and a non-existent LORE_PLUGIN_ROOT,
+    """With LORE_GUARD_STRICT=1 and a non-existent LORE_PLUGIN_ROOT,
     running the guard exits non-zero (fail closed), not silently 0."""
     r = subprocess.run(
         ["bash", str(GUARD_SH)],
@@ -480,7 +480,7 @@ def test_guard_strict_blocks_when_plugin_root_missing(tmp_path):
 
 
 def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
-    """C1 end-to-end: install the hook, bake a bad LORE_PLUGIN_ROOT, then verify
+    """End-to-end: install the hook, bake a bad LORE_PLUGIN_ROOT, then verify
     ANY commit (even clean notes) is blocked (non-zero)."""
     vault = tmp_path / "vault"
     _git_init(vault)
@@ -499,7 +499,7 @@ def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
     # The hook must also carry LORE_GUARD_STRICT=1 (from the installer fix)
     # We verify: if STRICT is set and root is gone → fail closed
     # For test, we inject STRICT manually since the installer may not set it yet
-    # Once C1 fix is complete, the installer will bake it automatically
+    # Once the fix is complete, the installer will bake it automatically
     hook.write_text(
         broken_text.replace(
             "export LORE_PLUGIN_ROOT=",
@@ -530,7 +530,7 @@ def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
 
 
 def test_installer_bakes_strict_flag(tmp_path):
-    """C1: The generated wrapper must contain LORE_GUARD_STRICT=1."""
+    """The generated wrapper must contain LORE_GUARD_STRICT=1."""
     vault = tmp_path / "vault"
     _git_init(vault)
     r = _install_guard(vault)
@@ -542,7 +542,7 @@ def test_installer_bakes_strict_flag(tmp_path):
 
 
 def test_guard_lenient_without_strict_when_plugin_missing(tmp_path):
-    """C1: Standalone invocation without STRICT stays lenient (exit 0) — existing
+    """Standalone invocation without STRICT stays lenient (exit 0) — existing
     behavior for development / direct invocation use-cases."""
     r = subprocess.run(
         ["bash", str(GUARD_SH)],
@@ -557,11 +557,11 @@ def test_guard_lenient_without_strict_when_plugin_missing(tmp_path):
     assert r.returncode == 0, "standalone (no STRICT) may stay lenient"
 
 
-# ── C2: non-ASCII filenames bypass the guard ──────────────────────────────────
+# ── non-ASCII filenames bypass the guard ──────────────────────────────────
 
 
 def test_guard_rejects_bad_status_non_ascii_filename(tmp_path):
-    """C2: A note with a non-ASCII filename carrying a bad status must be rejected."""
+    """A note with a non-ASCII filename carrying a bad status must be rejected."""
     vault = _setup_guarded_vault(tmp_path)
     non_ascii_note = vault / "sessions" / "café-redesign.md"
     _make_note(non_ascii_note, "session", "bad-nonascii-status")
@@ -578,7 +578,7 @@ def test_guard_rejects_bad_status_non_ascii_filename(tmp_path):
 
 
 def test_guard_passes_good_status_non_ascii_filename(tmp_path):
-    """C2: A note with a non-ASCII filename carrying a valid status must pass."""
+    """A note with a non-ASCII filename carrying a valid status must pass."""
     vault = _setup_guarded_vault(tmp_path)
     non_ascii_note = vault / "sessions" / "café-redesign.md"
     _make_note(non_ascii_note, "session", "dirty")
@@ -594,22 +594,22 @@ def test_guard_passes_good_status_non_ascii_filename(tmp_path):
     assert r.returncode == 0, f"good non-ASCII note must pass: {r.stderr} {r.stdout}"
 
 
-# ── I1: validator silently skips unreadable files → must fail closed ──────────
+# ── validator silently skips unreadable files → must fail closed ──────────
 
 
 def test_validator_cli_exits_nonzero_for_nonexistent_file(tmp_path):
-    """I1: Passing a non-existent path to the validator must produce non-zero exit."""
+    """Passing a non-existent path to the validator must produce non-zero exit."""
     r = run_validator(["/nonexistent/path/that/does/not/exist.md"])
     assert r.returncode != 0, "validator must fail closed for a missing argv path"
     combined = r.stdout + r.stderr
     assert "nonexistent" in combined or "not found" in combined or "missing" in combined
 
 
-# ── I2: guard reads working tree, not staged blob ─────────────────────────────
+# ── guard reads working tree, not staged blob ─────────────────────────────
 
 
 def test_guard_validates_staged_blob_not_working_copy(tmp_path):
-    """I2a: Stage a BAD-status note, then fix working copy without re-staging.
+    """Stage a BAD-status note, then fix working copy without re-staging.
     Guard must reject (staged blob is bad) even though working copy is good."""
     vault = _setup_guarded_vault(tmp_path)
     note = vault / "sessions" / "tricky.md"
@@ -628,7 +628,7 @@ def test_guard_validates_staged_blob_not_working_copy(tmp_path):
 
 
 def test_guard_passes_good_staged_blob_even_if_working_copy_bad(tmp_path):
-    """I2b: Stage a GOOD-status note, then corrupt working copy without re-staging.
+    """Stage a GOOD-status note, then corrupt working copy without re-staging.
     Guard must allow the commit (staged blob is good)."""
     vault = _setup_guarded_vault(tmp_path)
     note = vault / "sessions" / "sneaky.md"
@@ -649,7 +649,7 @@ def test_guard_passes_good_staged_blob_even_if_working_copy_bad(tmp_path):
     )
 
 
-# ── I3: lore sync exit code after push failure ────────────────────────────────
+# ── lore sync exit code after push failure ────────────────────────────────
 
 
 def _make_sync_vault_with_failing_remote(tmp_path: Path) -> tuple[Path, Path]:
@@ -678,7 +678,7 @@ def _make_sync_vault_with_failing_remote(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
-    """I3: When commit succeeds but push fails (offline/auth), lore sync must exit 0
+    """When commit succeeds but push fails (offline/auth), lore sync must exit 0
     and print a prominent notice — commit is durable, push failure is soft."""
     vault = _make_sync_vault_with_failing_remote(tmp_path)
     (vault / "README.md").write_text("vault updated\n")
@@ -708,11 +708,11 @@ def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
     )
 
 
-# ── M2: pass "$@" to the guard in chained wrapper ────────────────────────────
+# ── pass "$@" to the guard in chained wrapper ────────────────────────────
 
 
 def test_installer_chained_wrapper_passes_args(tmp_path):
-    """M2: When chaining over an existing hook, the wrapper passes $@ to the guard."""
+    """When chaining over an existing hook, the wrapper passes $@ to the guard."""
     vault = tmp_path / "vault"
     _git_init(vault)
     hook_path = vault / ".git" / "hooks" / "pre-commit"
@@ -728,15 +728,15 @@ def test_installer_chained_wrapper_passes_args(tmp_path):
     )
 
 
-# ── M3: lore init completes successfully (Slice 1, S5) ───────────────────────
+# ── lore init completes successfully ───────────────────────
 #
-# The old M3 tested that a planned-tree preview text matched directories created
-# by the interactive scaffolding. Slice 1 (S5) removed the interactive scaffolding
+# The old test verified that a planned-tree preview text matched directories created
+# by the interactive scaffolding. The interactive scaffolding was removed
 # entirely. The new invariant is simply: init exits 0 and the canonical vault exists.
 
 
 def test_init_planned_tree_shows_both_template_dirs(tmp_path):
-    """M3 (updated for S5): init exits 0 and bootstraps the default vault."""
+    """init exits 0 and bootstraps the default vault."""
     state = tmp_path / "state"
     config = tmp_path / "config"
     state.mkdir(parents=True, exist_ok=True)

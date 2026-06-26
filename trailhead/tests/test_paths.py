@@ -26,7 +26,7 @@ from trailhead.paths import (
 
 
 # ---------------------------------------------------------------------------
-# U2 injection test — must be FIRST.
+# Injection test — must be FIRST.
 # Proves that the injection mechanism reaches all three OS branches on one dev box.
 # ---------------------------------------------------------------------------
 
@@ -425,7 +425,7 @@ class TestEnsureDir:
 
 
 # ---------------------------------------------------------------------------
-# Camp consumer contract (D6)
+# Camp consumer contract
 # ---------------------------------------------------------------------------
 
 

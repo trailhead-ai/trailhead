@@ -2,10 +2,10 @@
 
 This is camp's launch-time analog of trailhead/harness/claude_code.py — harness-
 specific code that lives in the camp plugin alongside the existing claude-specific
-hooks_writer.py.  It is invoked by bring_up_workspace (Slice 2) immediately before
+hooks_writer.py.  It is invoked by bring_up_workspace immediately before
 the harness is exec'd.
 
-U1-verified entry shape (2026-06-16, manual interactive validation):
+Verified entry shape (2026-06-16, manual interactive validation):
   {
     "projects": {
       "<realpath>": {"hasTrustDialogAccepted": true}
@@ -23,7 +23,7 @@ Design notes:
 - HOME is resolved from the injected env dict (env["HOME"] or env["USERPROFILE"]),
   falling back to Path.home() — mirrors claude_code.py:detect().  Every test
   passes env={"HOME": str(tmp_path)} and never touches the real ~/.claude.json
-  (Axiom 6 / lesson: harness-cli-not-isolated-by-trailhead-env).
+  (Axiom 6).
 - Silent-miss limitation: a write that claude silently ignores (e.g. because
   Claude changed the file schema) produces no error signal here.  If the dialog
   reappears after bring-up, re-run the manual interactive check to validate the
@@ -37,7 +37,7 @@ the best-effort caller (bring_up_workspace) catches it, logs `camp: pretrust
 failed`, and continues.  Either way launch proceeds and, on failure, the user
 simply sees Claude Code's trust dialog instead.
 
-Security (council/Security C2 — confinement):
+Security (confinement):
   pretrust_workspace only writes when launch_dir is workspace_root or a
   descendant of it (realpath comparison).  A crafted cwd = "/etc" in the group
   config is silently refused — same posture as compose.py's dual-end confinement.
@@ -91,7 +91,7 @@ def pretrust_workspace(
 
     launch_dir   — the directory the harness will be launched in (the trust target).
     workspace_root — the workspace root; launch_dir must equal or be under this
-                    (confinement / council/Security C2).
+                    (confinement).
     env          — optional environment dict; HOME is resolved from it so tests
                    can sandbox under tmp_path without touching the real ~/.claude.json.
 
@@ -103,7 +103,7 @@ def pretrust_workspace(
     launch_dir = Path(launch_dir).resolve()
     workspace_root = Path(workspace_root).resolve()
 
-    # Confinement check (C2): launch_dir must be workspace_root or a descendant.
+    # Confinement check: launch_dir must be workspace_root or a descendant.
     try:
         launch_dir.relative_to(workspace_root)
     except ValueError:
@@ -148,7 +148,7 @@ def pretrust_workspace(
         # Parseable but structurally wrong (top-level or projects/entry not a
         # mapping) is treated like malformed: abort without overwriting so the
         # "never raises, never clobbers" contract holds on the build path too,
-        # not just the read path (council/Reliability — non-dict shapes).
+        # not just the read path (guards against non-dict shapes).
         if not _is_mergeable(existing_data, str(launch_dir)):
             print(
                 f"camp: pretrust skipped — {claude_json_path} has an unexpected "
@@ -174,7 +174,7 @@ def pretrust_workspace(
     # The file lands 0o600 unconditionally — tempfile.mkstemp creates the tmp file
     # 0o600 by construction and we never widen it. This is deliberate: ~/.claude.json
     # holds OAuth secrets, so we always enforce owner-only perms rather than
-    # preserving a (possibly looser) pre-existing mode (council/Security).
+    # preserving a (possibly looser) pre-existing mode.
     fd, tmp_path_str = tempfile.mkstemp(dir=str(home), prefix=".claude-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as fh:

@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """Deterministic, stdlib-only HTML assembler for design references.
 
-Given a design dir of per-screen <surface>-<screen>.html files (D-5 filename-prefix
+Given a design dir of per-screen <surface>-<screen>.html files (the filename-prefix
 convention) + an index.md + a chrome catalog's declared variants, emits ONE
 self-contained <slug>-design-reference.html containing:
-  - a docbar with global toggles driven by the chrome's declared variants (D-6;
-    none declared → title + TOC only)
+  - a docbar with global toggles driven by the chrome's declared variants
+    (none declared → title + TOC only)
   - a '00 Design tokens' swatch section (from chrome brand tokens table)
   - an in-page 'Screens' TOC anchoring each section
   - numbered screen+state sections assembled by concatenating approved per-screen
-    markup VERBATIM (D-4 — assemble, NOT re-render)
+    markup VERBATIM (assemble, NOT re-render)
   - a link back to the spec (does NOT duplicate the decision log)
 
 Self-contained: inline styles + toggle JS in one file. Any CDN web-font link is
 flagged mockup-only as an in-file comment. Roots are explicit CLI args, never a
 hardcoded path.
 
-Security (S-2): every globbed per-screen filename is validated as relative to the
+Security: every globbed per-screen filename is validated as relative to the
 design_dir root — any path escaping the root is rejected with a named nonzero error
 and NO partial output written.
 
-Determinism (R-8): assembly order follows the deterministic index.md row sequence;
+Determinism: assembly order follows the deterministic index.md row sequence;
 output is built in-memory, written once at the end.
 
 Usage:
@@ -133,7 +133,7 @@ def _parse_index(index_text: str) -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Path traversal guard (S-2)
+# Path traversal guard
 # ---------------------------------------------------------------------------
 
 
@@ -162,7 +162,7 @@ def _slug_anchor(text: str) -> str:
 
 
 def _docbar_html(variants: list[str], title: str) -> str:
-    """Emit the docbar header. Includes toggles only if variants are declared (D-6)."""
+    """Emit the docbar header. Includes toggles only if variants are declared."""
     lines = [
         '<div id="docbar" style="'
         "font-family:sans-serif;padding:12px 20px;background:#f5f5f5;"
@@ -240,7 +240,7 @@ def _screen_section_html(number: str, name: str, anchor: str, body_html: str) ->
         f'<section id="{anchor}" style="padding:20px;border-top:2px solid #ddd;">\n'
         f'  <h2 style="font-family:sans-serif;">'
         f"{_html_escape(number)} — {_html_escape(name)}</h2>\n"
-        f"  <!-- begin verbatim screen markup (D-4: assembled verbatim, not re-rendered) -->\n"
+        f"  <!-- begin verbatim screen markup (assembled verbatim, not re-rendered) -->\n"
         f"  {body_html}\n"
         f"  <!-- end verbatim screen markup -->\n"
         f"</section>\n"
@@ -323,7 +323,7 @@ def assemble(
 ) -> None:
     """Assemble a self-contained design reference HTML.
 
-    Raises SystemExit(1) on any error; no partial output is written (R-8).
+    Raises SystemExit(1) on any error; no partial output is written.
     """
     designs_dir = designs_dir.resolve()
 
@@ -351,13 +351,13 @@ def assemble(
         )
         raise SystemExit(1)
 
-    # Build ordered screen list from index (D-4/R-8: index.md row order is authoritative)
+    # Build ordered screen list from index (index.md row order is authoritative)
     ordered_screens: list[tuple[str, str, Path]] = []  # (surface, screen_label, path)
     for row in screen_rows:
         fname = row["file"]
         screen_path = (designs_dir / fname).resolve()
 
-        # S-2: path traversal guard
+        # path traversal guard
         _validate_screen_path(screen_path, designs_dir, fname)
 
         if not screen_path.exists():
@@ -380,7 +380,7 @@ def assemble(
         anchor = f"screen-{_slug_anchor(display)}"
         toc_entries.append((number, display, anchor))
 
-    # Read screen bodies (verbatim, D-4) — all in memory before any write (R-8)
+    # Read screen bodies (verbatim) — all in memory before any write
     screen_bodies: list[str] = []
     for _, _, screen_path in ordered_screens:
         screen_bodies.append(screen_path.read_text(encoding="utf-8"))
@@ -416,7 +416,7 @@ def assemble(
         has_variants=bool(variants),
     )
 
-    # Write ONCE at the end (R-8: no partial output)
+    # Write ONCE at the end (no partial output)
     output_path.write_text(html, encoding="utf-8")
 
 
@@ -429,8 +429,8 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         description=(
             "Assemble per-screen HTML files into a single self-contained design reference. "
-            "Reads <surface>-<screen>.html files from --designs-dir (D-5 convention), "
-            "the chrome catalog from --chrome-path for variant declarations (D-6), "
+            "Reads <surface>-<screen>.html files from --designs-dir, "
+            "the chrome catalog from --chrome-path for variant declarations, "
             "and emits <slug>-design-reference.html (or --output path)."
         )
     )

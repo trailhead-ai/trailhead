@@ -1,6 +1,6 @@
 """Tests for group_config.py — tomllib loader + schema validation.
 
-Test contract (Slice 1):
+Covers:
 - Loads a valid trailhead.toml config.
 - A malformed config (missing required field) → error naming file + failing field.
 - A malformed config (bad type) → error naming file + failing field.
@@ -97,7 +97,7 @@ def test_load_branch_pattern_defaults(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-member branch base (Slice 2)
+# Per-member branch base
 # ---------------------------------------------------------------------------
 
 
@@ -351,7 +351,7 @@ def test_groups_example_trailhead_toml_loads() -> None:
     # The trailhead fleet group spans exactly three sibling repos.
     member_names = {m["name"] for m in cfg["members"]}
     assert member_names == {"trailhead", "trailhead-ai.github.io", "outpost"}
-    # Must NOT carry a [dev_env] block (per D-D). load_group strips dev_env via
+    # Must NOT carry a [dev_env] block. load_group strips dev_env via
     # warn-and-continue, so `"dev_env" not in cfg` is trivially true — assert on
     # the SOURCE TEXT instead so the check actually proves the block is absent.
     # Match an actual table header (a line that is exactly `[dev_env]`), not the
@@ -361,7 +361,7 @@ def test_groups_example_trailhead_toml_loads() -> None:
 
 
 # ---------------------------------------------------------------------------
-# [[shared_vaults]] block — B-2: parse + thread into returned dict
+# [[shared_vaults]] block — parse + thread into returned dict
 # ---------------------------------------------------------------------------
 
 _VALID_TOML_WITH_SHARED_VAULTS = """\
@@ -442,7 +442,7 @@ root = ""
 
 
 def test_shared_vaults_round_trips_into_dict(tmp_path: Path) -> None:
-    """B-2/B-3: a valid [[shared_vaults]] block is returned in the dict."""
+    """A valid [[shared_vaults]] block is returned in the dict."""
     from group_config import load_group
 
     f = tmp_path / "testgroup.toml"
@@ -520,7 +520,7 @@ def test_shared_vaults_empty_root_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [harness] partial / composable block (Fix 1)
+# [harness] partial / composable block
 # ---------------------------------------------------------------------------
 
 

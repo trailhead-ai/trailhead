@@ -7,9 +7,9 @@ A ``Provider`` exposes four namespaced surfaces:
 - ``ci``    — CI checks read + poll-to-actionable.
 - ``deploy``— workflow-run + deployment status + log interrogation.
 
-Slice 1 implements ``repos`` / ``pr`` / ``ci``. The ``deploy`` surface is
-declared here so the interface shape is stable, but its methods raise
-``NotImplementedError`` until Slice 2 fills them on ``GitHubProvider``.
+All four surfaces are declared here so the interface shape is stable and a
+second backend maps onto the same method set; ``GitHubProvider`` implements
+them against GitHub.
 
 The interface is GitHub-agnostic by construction: a second backend (GitLab via
 ``glab``/REST) maps onto the same method set. See ``trailhead/docs/vcs-provider.md``
@@ -49,7 +49,7 @@ class PRSurface(ABC):
 
         Symmetric seam: ``open()`` records, ``read_sidecar()`` reads. Promoted
         onto the ABC so portage's monitor reads the sidecar through the typed
-        surface (resolves the Slice-1 review I-2 asymmetry).
+        surface, keeping the read/write halves symmetric.
         """
 
     @abstractmethod
@@ -81,7 +81,7 @@ class PRSurface(ABC):
         *,
         toml_path: str | None = None,
     ) -> dict[str, Any]:
-        """Merge PRs in dependency order with the R-6 safety gate."""
+        """Merge PRs in dependency order with the safety gate."""
 
 
 class CISurface(ABC):
@@ -120,11 +120,11 @@ class DeploySurface(ABC):
 
     @abstractmethod
     def workflow_runs(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        """List GitHub-Actions workflow runs (Slice 2)."""
+        """List GitHub-Actions workflow runs."""
 
     @abstractmethod
     def status(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        """List deployment statuses (Slice 2)."""
+        """List deployment statuses."""
 
     @abstractmethod
     def logs(self, repo_path: str, *, job_id: str, **kwargs: Any) -> list[dict]:

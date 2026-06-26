@@ -4,7 +4,7 @@ For each member repo in the group config, calls hooks_writer to wire
 SessionStart (session-bootstrap) and WorktreeRemove (worktree-cleanup)
 into the member's .claude/settings.json.
 
-Also surfaces the eager config-overlap validation (Slice 1) before writing.
+Also surfaces the eager config-overlap validation before writing.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def run_init(
     Raises:
         GroupResolutionError: If a repo is listed in multiple groups.
     """
-    # Eager config-overlap validation (Slice 1)
+    # Eager config-overlap validation
     if group_configs is not None:
         validate_no_overlap(group_configs)
 

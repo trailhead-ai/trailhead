@@ -1,14 +1,11 @@
-"""Slice 1 test contract: command skeleton — renames, disable-stubs, help.
+"""Tests for the command skeleton — renames, disable-stubs, help.
 
-TDD tests written before implementation.
-
-Contract:
+Covers:
 - camp group/ai/rm/pwd/enter/setup each dispatch to their handler (RESERVED updated).
 - bare slug (camp foo) → exit non-zero, message names 'camp ai foo'.
 - restock/sweep/code/fire → disabled message + non-zero exit; NOT in camp help.
 - removed verbs init/open/break → legible error pointing at new verb.
-- camp help: golden-structure assert (new verbs, none disabled) — per lesson
-  [[2026-06-04-port-parity-golden-structure-not-substring]].
+- camp help: golden-structure assert (new verbs, none disabled).
 - group-aware path (_dispatch_group_command): disabled verbs, ai, rm all stub
   correctly when a group resolves (exercised via CAMP_CONFIG_DIR + --group flag).
 """
@@ -40,7 +37,7 @@ def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedPro
 
 
 # ---------------------------------------------------------------------------
-# camp group → dispatches (stub behavior for Slice 1)
+# camp group → dispatches (stub behavior)
 # ---------------------------------------------------------------------------
 
 
@@ -67,7 +64,7 @@ def test_camp_group_without_args_shows_usage() -> None:
 
 
 # ---------------------------------------------------------------------------
-# camp ai → dispatches (stub behavior for Slice 1)
+# camp ai → dispatches (stub behavior)
 # ---------------------------------------------------------------------------
 
 
@@ -251,8 +248,8 @@ def test_group_path_disabled_verb_prints_stabilizes_message(
     )
 
 
-# camp ai via group-aware path → real (Slice 3): seeds pending + spawns provisioner.
-# CAMP_TEST_NO_EXEC suppresses the placeholder claude exec (the real launch is Slice 6).
+# camp ai via group-aware path → real: seeds pending + spawns provisioner.
+# CAMP_TEST_NO_EXEC suppresses the placeholder claude exec (the real launch happens later).
 
 
 def test_group_path_ai_seeds_and_exits_zero(stub_group_env: dict[str, str], tmp_path: Path) -> None:
@@ -278,7 +275,7 @@ def test_group_path_ai_announces_background_provisioning(
     )
 
 
-# camp rm via group-aware path → real (graduated from Slice 1 stub in cleanup pass)
+# camp rm via group-aware path → real (graduated from the earlier stub)
 # camp rm now routes to reconcile_break; it exits non-zero for an unknown slug
 # (no manifest present), NOT with a "not yet implemented" stub message.
 

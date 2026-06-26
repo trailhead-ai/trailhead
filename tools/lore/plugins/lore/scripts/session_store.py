@@ -1,6 +1,6 @@
 """Race-safe session-RECORD capture + ``session_id`` / worktree-name sanitization.
 
-This module owns the **session** endpoint's storage primitive (Slice 1). A session
+This module owns the **session** endpoint's storage primitive. A session
 **is a first-class record** under the singular ``session/`` kind dir: a ``.md`` body
 (the capture log) plus a ``.json`` sidecar carrying ``kind: session`` + a clean/dirty
 status — so it is natively SQLite-indexed and KQL-discoverable
@@ -8,36 +8,36 @@ status — so it is natively SQLite-indexed and KQL-discoverable
 worlds" defect (body-only ``sessions/`` plural, unindexed, vs. indexed ``session/``
 records produced only by migration) into one world.
 
-This is a deliberate **rewrite** of the pre-Slice-1 contract, which wrote a body-only
+This is a deliberate **rewrite** of the earlier contract, which wrote a body-only
 file under plural ``sessions/`` and asserted it "never touches the derived SQLite
-index". After Slice 1 the capture path DOES write the sidecar and DOES reindex the
+index". Now the capture path DOES write the sidecar and DOES reindex the
 one record per candidate — inside the lock (see the flock invariant below).
 
 Three responsibilities live here:
 
   1. :func:`sanitize_session_id` — the **confinement guard** for the GUID key. The
      session id becomes the record filename, so it is a trust boundary for
-     ``session/`` (council/Security). Rejects a path separator, a ``..`` component,
+     ``session/``. Rejects a path separator, a ``..`` component,
      a NUL byte, or anything not matching the canonical GUID shape Claude Code
      session ids take. Validate-or-raise; call it at the CLI entry point BEFORE any
      path is constructed.
 
   2. :func:`sanitize_worktree_name` — the **sibling confinement guard** for the
-     worktree-name fallback key (council/Security Critical 3). The spec keys a
-     session by ``--session-id`` (a GUID) **or** ``detect_worktree_name()``.
+     worktree-name fallback key. The session is keyed
+     by ``--session-id`` (a GUID) **or** ``detect_worktree_name()``.
      :func:`sanitize_session_id` is GUID-only and would reject every worktree name,
      so it CANNOT guard that path. A worktree literally named ``../../evil`` must
      never become ``session/../../evil.md``. This guard admits only a bounded
      ``[A-Za-z0-9_-]+`` allowlist; everything else raises.
 
   3. :func:`capture_candidate` / :func:`capture_referenced` — the **race-safe
-     capture primitives** (KU1, VALIDATED on darwin).
+     capture primitives**.
 
-**flock invariant (KU1, proven — DO NOT relax).** The pre-Slice-1 lock covered ONLY
+**flock invariant (proven — DO NOT relax).** The earlier lock covered ONLY
 the body ``.md`` append; the sidecar write + reindex sat OUTSIDE it and were proven
 racy (torn JSON from concurrent ``write_text``, a stale FTS snapshot where the body
 holds an entry the index doesn't, and ``sqlite3.OperationalError: database is
-locked``). Slice 1 therefore extends the held ``fcntl.flock`` LOCK_EX to span ONE
+locked``). The lock therefore extends the held ``fcntl.flock`` LOCK_EX to span ONE
 critical section:
 
     existence-check → lazy-create-or-ensure-dirty (sidecar) → body-append →
@@ -45,7 +45,7 @@ critical section:
 
 so a concurrent second candidate can never interleave between the body append and
 the reindex. Per-candidate ``upsert_row``+commit is ~0.1-0.2ms (negligible inside
-the lock; KU1 timing).
+the lock).
 
   - The lock object is a SEPARATE sidecar ``<key>.lock`` file, NOT the record — so
     concurrent *reads* are never blocked and the record fds are never aliased.
@@ -61,8 +61,6 @@ iterations.
 Pure stdlib (``fcntl``, ``re``, ``json``, ``pathlib``) + the sibling ``index_store``
 and ``record_store`` modules. ``fcntl`` is stdlib on darwin/linux; flock is
 unreliable over NFS (non-issue — the vault is local git). darwin ``LOCK_UN == 8``.
-References: Slice 1, KU1, KU2, council/Security Critical 3, council/Reliability
-Critical 2.
 """
 
 from __future__ import annotations
@@ -96,7 +94,7 @@ _WORKTREE_MAX_LEN = 128
 
 
 class InvalidSessionIdError(ValueError):
-    """A session key (GUID or worktree name) is not safe (Slice 1, council/Security).
+    """A session key (GUID or worktree name) is not safe.
 
     Raised by :func:`sanitize_session_id` / :func:`sanitize_worktree_name` for
     anything containing a path separator, a ``..`` component, a NUL byte, or
@@ -107,7 +105,7 @@ class InvalidSessionIdError(ValueError):
 
 
 def sanitize_session_id(session_id: str) -> str:
-    """Validate *session_id* and return it verbatim, or raise (Slice 1, Security).
+    """Validate *session_id* and return it verbatim, or raise.
 
     The id becomes the record filename (``session/<session_id>.{md,json}``), so this
     is the trust boundary for the GUID key. Rejects (→ :class:`InvalidSessionIdError`):
@@ -135,7 +133,7 @@ def sanitize_session_id(session_id: str) -> str:
 def sanitize_worktree_name(name: str) -> str:
     """Validate a worktree-name session key and return it verbatim, or raise.
 
-    The sibling confinement guard (council/Security Critical 3) for the
+    The sibling confinement guard for the
     ``detect_worktree_name()`` fallback key, which :func:`sanitize_session_id`
     cannot guard (it is GUID-only). The name becomes the record filename
     (``session/<name>.{md,json}``), so a worktree named ``../../evil`` must be
@@ -160,9 +158,9 @@ def sanitize_worktree_name(name: str) -> str:
     return name
 
 
-# --- flushed-at: the cross-slice flush watermark (Slice 2, KU3) ---------------
+# --- flushed-at: the flush watermark ------------------------------------------
 #
-# `lore flush` (Slice 2, producer) stamps this; the `/lore:flush` skill (Slice 4,
+# `lore flush` (the producer) stamps this; the `/lore:flush` skill (the
 # consumer) reads it to tell already-flushed candidate lines from new ones. Both
 # the KEY and the FORMAT are PINNED here as the single source of truth — drift
 # between producer and consumer would silently drop candidates.
@@ -180,7 +178,7 @@ FLUSHED_AT_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
 def parse_flushed_at(raw: Any) -> dt.datetime | None:
-    """Validate-before-trust reader for the flush watermark (Slice 2, KU3, Slice 4).
+    """Validate-before-trust reader for the flush watermark.
 
     Parse *raw* (the value at ``annotations[FLUSHED_AT_KEY]``) and return an
     aware UTC ``datetime``, or ``None`` on ANY failure — missing, empty, non-str,
@@ -211,7 +209,7 @@ def _header(key: str) -> str:
 
 
 def _synthetic_title(key: str) -> str:
-    """A synthetic ``title`` for a session record (Slice 1).
+    """A synthetic ``title`` for a session record.
 
     The key (GUID or worktree name) when present; never empty. Callers always pass a
     sanitized non-empty key, so this is simply the key — a fallback ``session
@@ -221,7 +219,7 @@ def _synthetic_title(key: str) -> str:
 
 
 def _new_sidecar(key: str, committer: str, now: str) -> dict[str, Any]:
-    """A fresh, born-``dirty`` session sidecar (Slice 1).
+    """A fresh, born-``dirty`` session sidecar.
 
     Mirrors the record sidecar shape (``record_model.FIELDS_V1``) so the record is a
     valid, indexable ``session`` record: ``version``/``kind``/``title``/``status`` +
@@ -241,7 +239,7 @@ def _new_sidecar(key: str, committer: str, now: str) -> dict[str, Any]:
 
 
 def _reindex(conn, vault_root: str, key: str, sidecar: dict[str, Any], body: str) -> None:
-    """Single-record reindex of the session record (KU1 — inside the lock)."""
+    """Single-record reindex of the session record (inside the lock)."""
     index_store_mod.upsert_row(conn, vault_root, "session", key, sidecar, body)
     conn.commit()
 
@@ -261,7 +259,7 @@ def capture_candidate(
     back) and bumps ``updated-at``. In both cases *entry* (the ``- candidate …``
     block) is appended to the body and the one record is reindexed.
 
-    The KU1 critical section: the existence-check, the sidecar create-or-ensure-dirty,
+    The critical section: the existence-check, the sidecar create-or-ensure-dirty,
     the body append, and the ``upsert_row``+commit ALL happen inside a single held
     ``fcntl.flock`` LOCK_EX on a sidecar ``<key>.lock`` file (see the module
     docstring). *open_index* is a no-arg factory returning a fresh index connection
@@ -313,7 +311,7 @@ def capture_candidate(
         lock_fd.close()
 
 
-# Flush verdicts (Slice 2). The CLI maps these to user-facing notices + the
+# Flush verdicts. The CLI maps these to user-facing notices + the
 # commit decision: only ``"flushed"`` mutates the record and warrants a commit.
 FLUSH_FLUSHED = "flushed"      # a dirty session was flipped clean + stamped
 FLUSH_ALREADY_CLEAN = "clean"  # session exists but was already clean — no-op
@@ -327,11 +325,11 @@ def flush_session(
     committer: str,
     open_index: Callable[[], Any],
 ) -> str:
-    """Mechanically flush ONE session record by *key* (Slice 2, KU3).
+    """Mechanically flush ONE session record by *key*.
 
     Resolves ``session/<key>.json``:
       - no sidecar → returns :data:`FLUSH_NO_SESSION` (the CLI distinguishes this
-        from an already-clean session — council/Advocate Minor); writes nothing.
+        from an already-clean session); writes nothing.
       - status already ``clean`` → returns :data:`FLUSH_ALREADY_CLEAN`; idempotent
         no-op, no write, no reindex.
       - status ``dirty`` → flips it ``clean``, stamps ``annotations[FLUSHED_AT_KEY]``
@@ -339,9 +337,9 @@ def flush_session(
         record, and returns :data:`FLUSH_FLUSHED`.
 
     The flip never writes ``status: complete`` / ``active`` — those vocab values
-    were retired in Slice 0; a session status is only ever ``dirty`` / ``clean``.
+    were retired; a session status is only ever ``dirty`` / ``clean``.
 
-    Same KU1 critical section as :func:`capture_candidate`: the existence/status
+    Same critical section as :func:`capture_candidate`: the existence/status
     check, the sidecar rewrite, and the ``upsert_row``+commit are ONE held-lock
     unit, so a concurrent candidate cannot interleave between the status read and
     the reindex. Caller MUST pass an already-sanitized *key*.
@@ -397,7 +395,7 @@ def revert_flush(
     committer: str,
     open_index: Callable[[], Any],
 ) -> None:
-    """Roll a session back ``clean`` → ``dirty`` + drop the ``flushed-at`` stamp (Slice 3).
+    """Roll a session back ``clean`` → ``dirty`` + drop the ``flushed-at`` stamp.
 
     The batch-flush recovery primitive: :func:`flush_session` flips the sidecar +
     index ``clean`` BEFORE the git commit, so a commit failure would otherwise leave
@@ -462,13 +460,13 @@ def capture_referenced(
 ) -> bool:
     """Race-safe append a ``- referenced`` *entry* to an EXISTING session record.
 
-    KU2 contract: ``referenced`` on a **non-existent** session is a **no-op — it
+    Contract: ``referenced`` on a **non-existent** session is a **no-op — it
     creates NOTHING** (returns ``False``). On an **existing** session it appends the
     body line, bumps ``last-referenced-at`` in the sidecar ``annotations`` map, and
     reindexes — but **never flips status** (never dirties, never cleans). Returns
     ``True`` when an existing record was updated.
 
-    Same KU1 critical section as :func:`capture_candidate`: the existence-check, the
+    Same critical section as :func:`capture_candidate`: the existence-check, the
     sidecar bump, the body append, and the reindex are one held-lock unit.
     """
     session_dir = Path(vault_root) / "session"
@@ -476,7 +474,7 @@ def capture_referenced(
     sidecar_path = session_dir / f"{key}.json"
     lock_path = session_dir / f"{key}.lock"
 
-    # No record (neither artifact) → no-op, create nothing (KU2). Checked outside the
+    # No record (neither artifact) → no-op, create nothing. Checked outside the
     # lock as a fast path; re-checked inside the lock before any write.
     if not body_path.exists() and not sidecar_path.exists():
         return False
@@ -499,8 +497,8 @@ def capture_referenced(
         # body-only legacy record (no sidecar) is never indexed and carries no status;
         # fabricating a ``{}`` sidecar would write a malformed sidecar to disk and
         # project an off-vocab ``status:""`` row into the index — and would violate the
-        # KU2 rule that ``referenced`` never materializes a record. Touch the body only
-        # here and leave normalization of legacy shapes to the S7 migration.
+        # rule that ``referenced`` never materializes a record. Touch the body only
+        # here and leave normalization of legacy shapes to a later migration.
         if sidecar_path.exists():
             sidecar = json.loads(sidecar_path.read_text())
             annotations = sidecar.get("annotations")

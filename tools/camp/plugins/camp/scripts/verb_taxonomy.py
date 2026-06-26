@@ -1,4 +1,4 @@
-"""Single source of truth for camp's verb dispatch taxonomy (FIX 9).
+"""Single source of truth for camp's verb dispatch taxonomy.
 
 Both entry points — cli/camp (`_dispatch_group_command`) and spine.main — consult
 these tables instead of inlining the verb literals, so adding / renaming / disabling

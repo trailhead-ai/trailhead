@@ -1,9 +1,7 @@
-"""Slice 3 tests: `lore flush` scoping — `all` + `<search>`.
+"""`lore flush` scoping — `all` + `<search>`.
 
-Covers the Slice 3 test contract (plan
-``lore-clean-dirty-sessions-flush-and-singular-dir-standardization.md``):
-
-  two positional scopes on ``lore flush`` (no-arg current-session stays Slice 2):
+  two positional scopes on ``lore flush`` (the no-arg form flushes the current
+  session):
     - ``lore flush all`` (the literal reserved token ``all``) → discover every
       ``dirty`` session via the search facade (``kind:session status:dirty``) and
       flush each; ``clean`` sessions are left untouched.
@@ -13,13 +11,13 @@ Covers the Slice 3 test contract (plan
     - a bare ``all`` routes to the all-scope, NOT a KQL parse (real KQL queries are
       field-qualified, e.g. ``status:dirty`` — a bare ``all`` is never a query).
 
-  per-session atomicity (mirrors Slice 2 AC20-23 race-safety):
+  per-session atomicity:
     - a named fault-injection mechanism (monkeypatch the per-session commit to
       raise AFTER the first session) proves earlier sessions stay ``clean``, the
       failed session is NAMED with retry-safe guidance, and the command exits
-      non-zero (council/Reliability Important).
+      non-zero.
 
-  injection safety (council/Security Important):
+  injection safety:
     - a ``<search>`` KQL string containing ``'; DROP TABLE …`` produces no SQL
       error / injection — the negative test names the existing ``kql_compile``
       guard (values are BIND params, never string-interpolated).
@@ -170,8 +168,8 @@ class TestFlushAll:
 
         Discovery passes a high limit + rejects a truncated result, so a vault with
         more dirty sessions than the default `run_search` limit is flushed in full
-        rather than silently leaving the overflow dirty (Slice 3 discovery-limit
-        correctness — the live vault holds dozens of session records).
+        rather than silently leaving the overflow dirty (discovery-limit
+        correctness — a real vault can hold dozens of session records).
         """
         vault, state = _make_vault(tmp_path)
         _git_init(vault)
@@ -269,7 +267,7 @@ class TestFlushSearch:
 
 
 # ---------------------------------------------------------------------------
-# per-session atomicity — fault injection (council/Reliability Important)
+# per-session atomicity — fault injection
 # ---------------------------------------------------------------------------
 
 class TestMidBatchFaultInjection:
@@ -467,7 +465,7 @@ class TestBatchPushesOnce:
 
 
 # ---------------------------------------------------------------------------
-# injection safety — names the kql_compile guard (council/Security Important)
+# injection safety — names the kql_compile guard
 # ---------------------------------------------------------------------------
 
 class TestKqlInjectionSafety:

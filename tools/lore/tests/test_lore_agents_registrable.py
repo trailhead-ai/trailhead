@@ -1,7 +1,7 @@
 """Lore agent roster — presence, frontmatter, and injection-defense guard.
 
-S6 Slice 3 establishes the lore agent roster:
-  - `librarian` (unchanged — byte-pinned against a pre-Slice-3 fixture)
+The lore agent roster:
+  - `librarian` (unchanged — byte-pinned against a fixture)
   - `investigator` (fork/rebrand of craft `researcher.md`: opus / xhigh)
   - `researcher` (fork of craft `doc-finder.md`: haiku / low)
 
@@ -20,14 +20,14 @@ AGENTS_DIR = Path(__file__).parent.parent / "plugins" / "lore" / "agents"
 
 
 # ---------------------------------------------------------------------------
-# Presence + frontmatter profile (KU2)
+# Presence + frontmatter profile
 # ---------------------------------------------------------------------------
 
 
 def test_researcher_documents_tracking_backlog_polling():
     """The lore researcher's description must document its use for polling
     tracking-status backlog items (periodic status checks) — the distinguishing
-    purpose that justifies the lighter profile (Slice 3)."""
+    purpose that justifies the lighter profile."""
     text = (AGENTS_DIR / "researcher.md").read_text()
     assert "tracking" in text, (
         "researcher must document its use for polling `tracking`-status backlog items"
@@ -35,7 +35,7 @@ def test_researcher_documents_tracking_backlog_polling():
 
 
 # ---------------------------------------------------------------------------
-# Injection-defense guard (council Important — Security)
+# Injection-defense guard
 # ---------------------------------------------------------------------------
 
 

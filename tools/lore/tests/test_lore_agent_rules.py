@@ -1,9 +1,9 @@
-"""Tests for lore agent-interface Slice 3: user-level ruleset install via the seam.
+"""Tests for the lore agent-interface user-level ruleset install via the seam.
 
 ``lore init`` installs lore's static ruleset into every detected harness through
 the trailhead ``Harness`` seam (for Claude Code: ``~/.claude/rules/trailhead-lore.md``).
 There is NO ``CLAUDE.md`` block injection, NO ``lore:agent-rules`` markers, and NO
-``--local`` mode — the old S5 marker-delimited injection machinery is gone.
+``--local`` mode — the old marker-delimited injection machinery is gone.
 
 This file owns the ``lore init`` / ``lore status`` integration coverage:
   - ``lore init`` writes ``~/.claude/rules/trailhead-lore.md`` byte-exact AND the
@@ -16,7 +16,7 @@ This file owns the ``lore init`` / ``lore status`` integration coverage:
 
 Seam-unit coverage (``install_user_ruleset`` / ``user_ruleset_status`` /
 ``UNSUPPORTED_RULESET_NOTICE`` degrade-visibly) lives in
-``trailhead/tests/test_harness.py`` (Slice 2).
+``trailhead/tests/test_harness.py``.
 
 All tests isolate via a tmp ``HOME`` + ``TRAILHEAD_CLAUDE_DIR`` so they NEVER touch
 the real ``~/.claude`` (Axiom 6).

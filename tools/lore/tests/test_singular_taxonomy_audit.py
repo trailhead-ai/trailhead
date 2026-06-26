@@ -1,11 +1,9 @@
-"""Slice 7 — full-tree plural→singular taxonomy audit + vault `.gitignore` scaffolding.
+"""Full-tree plural→singular taxonomy audit + vault `.gitignore` scaffolding.
 
-Keystone test for the Slice 7 directive (plan
-``lore-clean-dirty-sessions-flush-and-singular-dir-standardization``, KU4): lore
-vault directories are **singular**. This module greps the lore plugin tree for
-**path-like** plural kind-dir literals — i.e. directory references, not field or
-kind *names* — and asserts that singular is the only convention, with a small,
-explicitly-documented allowlist for the legitimate survivors KU4 classified as
+lore vault directories are **singular**. This module greps the lore plugin tree
+for **path-like** plural kind-dir literals — i.e. directory references, not field
+or kind *names* — and asserts that singular is the only convention, with a small,
+explicitly-documented allowlist for the legitimate plural survivors classified as
 keep-and-track.
 
 Two path-like shapes are flagged (these are how a *directory* is referenced in
@@ -79,7 +77,7 @@ _PREFIX_LIT_RE = re.compile(
 # retired, delete its entry so the audit re-asserts singular across the freed
 # surface.
 #
-# The legacy plural-taxonomy survivors KU4 #4 had kept-and-tracked
+# The legacy plural-taxonomy survivors that were once kept-and-tracked
 # (follow_up_due.py, migrate_radar_to_follow_ups.py, migrate_vault.py and the
 # `deferred`/`follow-up`/`dead-end` status keys) were RETIRED by the
 # retire-legacy-plural-taxonomy-survivors follow-up — their files are deleted and
@@ -149,12 +147,12 @@ class TestSingularDirAudit:
             )
 
     def test_taxonomy_constant_is_deleted(self):
-        """The dead TAXONOMY plural list (cli/lore) is removed (KU4 #1)."""
+        """The dead TAXONOMY plural list (cli/lore) is removed."""
         text = CLI_PATH.read_text(encoding="utf-8")
         assert "TAXONOMY" not in text, "dead TAXONOMY constant still present in cli/lore"
 
     def test_status_validator_keys_are_singular(self):
-        """status_validator CANONICAL exposes singular kind keys (KU4 #4).
+        """status_validator CANONICAL exposes singular kind keys.
 
         The live kinds (plan/spec/lesson/session) resolve as singular direct
         keys. The legacy `deferred`/`follow-up`/`dead-end` kinds were retired
@@ -178,7 +176,7 @@ class TestSingularDirAudit:
         )
 
     def test_frontmatter_slug_prefixes_are_singular(self):
-        """frontmatter._SLUG_PREFIXES is singularized (KU4 #6)."""
+        """frontmatter._SLUG_PREFIXES is singularized."""
         fm = load_script("frontmatter")
         assert "area/" in fm._SLUG_PREFIXES
         assert "plan/" in fm._SLUG_PREFIXES
@@ -187,7 +185,7 @@ class TestSingularDirAudit:
 
 
 # ---------------------------------------------------------------------------
-# Vault .gitignore scaffolding (Slice 1 carryover)
+# Vault .gitignore scaffolding
 # ---------------------------------------------------------------------------
 
 class TestVaultGitignoreScaffolding:
