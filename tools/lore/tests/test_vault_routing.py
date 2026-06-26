@@ -759,7 +759,7 @@ def test_scoped_record_updatable_and_deletable_with_same_flags(tmp_path):
 
 
 def test_vanilla_no_config_create_uses_floor_vault(tmp_path):
-    """With NO config.json, create lands in the floor vault (Slice 3: config-only
+    """With NO config.json, create lands in the floor vault (config-only
     resolution, no $LORE_VAULT — the silent floor is state/lore/vaults/default)."""
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "empty_config"  # no config.json here
@@ -828,8 +828,8 @@ def test_vanilla_no_config_update_delete_no_orphan_guard(tmp_path):
 
 
 def test_vanilla_no_config_reindex_single_vault(tmp_path):
-    """With NO config.json, reindex uses the single floor vault (Slice 3:
-    config-only resolution resolves to state/lore/vaults/default)."""
+    """With NO config.json, reindex uses the single floor vault (config-only
+    resolution resolves to state/lore/vaults/default)."""
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "empty_config"
     config_home.mkdir()

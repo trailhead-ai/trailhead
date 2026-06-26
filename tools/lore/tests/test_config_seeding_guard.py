@@ -1,4 +1,4 @@
-"""Slice 2 coverage guard + LORE_VAULT-unset smoke assertions.
+"""Coverage guard + LORE_VAULT-unset smoke assertions.
 
 Coverage guard (Council Critical #3):
   Files are split into three categories.
@@ -56,12 +56,12 @@ from conftest import load_script, write_default_config  # noqa: E402
 # Files that must call write_default_config( with an explicit vault variable
 # (not derived from env.get("LORE_VAULT")).  Covers both own-subprocess runners
 # and in-process direct-import runners (the latter seed config + fence XDG so
-# resolve_active_vault resolves to the test vault — Slice 3).
+# resolve_active_vault resolves to the test vault).
 _MUST_CALL = [
     "test_session_note_resolution.py",
     "test_search_cli.py",
     "test_index_store.py",
-    # Slice 3: rewritten from mock.patch LORE_VAULT to config-based resolution.
+    # Rewritten from mock.patch LORE_VAULT to config-based resolution.
     "test_layers_model.py",
     "test_layer_discovery.py",
     "test_lore_areas.py",
@@ -77,7 +77,7 @@ _USES_CONFTEST = [
     "test_vault_routing.py",
 ]
 
-# Files where seeding is not applicable in Slice 2.  Reason documented inline.
+# Files where seeding is not applicable.  Reason documented inline.
 _EXEMPT = {
     "test_lore_cli.py":
         "init tests — lore init creates config itself; no record ops",
@@ -138,7 +138,7 @@ def test_must_call_file_has_write_default_config_call(filename):
     """MUST_CALL runners must contain write_default_config( (an actual call, not just import).
 
     The call must use an explicit vault variable — if the source derives the vault from
-    env.get("LORE_VAULT"), seeding silently fails when Slice 3 strips that env var.
+    env.get("LORE_VAULT"), seeding silently fails once LORE_VAULT is no longer injected.
     """
     src = (TESTS_DIR / filename).read_text(encoding="utf-8")
     assert "write_default_config(" in src, (
@@ -147,7 +147,7 @@ def test_must_call_file_has_write_default_config_call(filename):
     )
     assert 'env.get("LORE_VAULT")' not in src and "(env or {}).get(\"LORE_VAULT\")" not in src, (
         f"{filename}: runner still derives vault from env.get('LORE_VAULT') — "
-        f"this defeats Slice 2's purpose; derive from seed_vault parameter instead."
+        f"this defeats the seeding's purpose; derive from seed_vault parameter instead."
     )
 
 
@@ -171,7 +171,7 @@ def test_smoke_direct_import_resolve_active_vault_no_lore_vault(tmp_path, monkey
 
     Structural kind: direct-import (in-process, no subprocess).
     Proves config-based resolution reaches the test vault when LORE_VAULT is absent
-    from os.environ — the invariant Slice 3 depends on.
+    from os.environ — the invariant config-only resolution depends on.
     """
     vault_dir = tmp_path / "test_vault"
     vault_dir.mkdir()
@@ -221,7 +221,7 @@ def test_smoke_subprocess_vanilla_config_seeded_no_lore_vault(tmp_path):
     Structural kind: subprocess-spawned, vanilla (single default-scope vault).
     The CLI reads XDG_CONFIG_HOME/lore/config.json and routes the record to the
     declared default vault path — proving that the config resolution path is live
-    even before Slice 3 strips LORE_VAULT from the harness.
+    even with LORE_VAULT stripped from the harness.
     """
     vault_dir = tmp_path / "seeded_vault"
     vault_dir.mkdir()

@@ -551,7 +551,7 @@ def test_ls_tolerates_absent_config(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# `lore vault path` — print the config-resolved active vault root (Slice 3)
+# `lore vault path` — print the config-resolved active vault root
 # ---------------------------------------------------------------------------
 
 

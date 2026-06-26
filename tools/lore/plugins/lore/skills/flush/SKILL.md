@@ -43,7 +43,7 @@ lore flush 'updated-at:>=2026-06-17'
 
 Read the current session record's sidecar `.json` directly to determine its
 status and the last `flushed-at` watermark. The sidecar is at
-`$LORE_VAULT/session/<key>.json`. `annotations` is sidecar-only and NOT indexed —
+`$(lore vault path)/session/<key>.json`. `annotations` is sidecar-only and NOT indexed —
 read the `.json` file directly, NOT via KQL:
 
 ```bash
@@ -51,8 +51,8 @@ lore session-note
 ```
 
 Use the key it prints to locate the sidecar and body:
-- `$LORE_VAULT/session/<key>.json` — sidecar (status + annotations)
-- `$LORE_VAULT/session/<key>.md` — body (candidate log)
+- `$(lore vault path)/session/<key>.json` — sidecar (status + annotations)
+- `$(lore vault path)/session/<key>.md` — body (candidate log)
 
 **Outcomes:**
 - **Clean session** (`status: clean`): nothing to flush — report this and stop.

@@ -80,7 +80,7 @@ def _seed_personal(tmp_path: Path, personal_root: Path):
     """Seed a config.json whose default vault is ``personal_root`` and return an
     ``os.environ`` patch pointing XDG at hermetic tmp dirs.
 
-    Replaces the pre-Slice-3 ``LORE_VAULT`` injection: the personal layer 0 is now
+    Replaces the former ``LORE_VAULT`` injection: the personal layer 0 is now
     resolved from the config default vault (``resolve_active_vault``), not the env
     var. ``XDG_STATE_HOME`` is fenced so config validation never touches the real
     state dir (Axiom 6).

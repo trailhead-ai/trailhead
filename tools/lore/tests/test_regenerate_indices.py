@@ -178,7 +178,7 @@ def _git_vault(tmp_path: Path, *dirs: str) -> Path:
 def _run_main(vault: Path) -> int:
     """Run regenerate_indices.main() with the vault passed as sys.argv[1].
 
-    Slice 4: the script no longer reads LORE_VAULT — the vault is param-threaded
+    The script no longer reads LORE_VAULT — the vault is param-threaded
     as the sole CLI argument, so the helper passes an explicit argv list.
     """
     mod = load_regen()
@@ -729,7 +729,7 @@ class TestPreCommitHookStagesIndices:
 
 
 # ---------------------------------------------------------------------------
-# Slice 4 (KU1): the regen hook derives the committed vault from
+# The regen hook derives the committed vault from
 # `git rev-parse --show-toplevel`, not from LORE_VAULT.
 # ---------------------------------------------------------------------------
 
@@ -739,7 +739,7 @@ def _run_regen_hook(cwd: Path, *, plugin_root: Path = PLUGIN_ROOT) -> subprocess
     at the repo top level).
 
     LORE_VAULT is explicitly UNSET so the test proves the hook derives the vault
-    from `git rev-parse --show-toplevel`, not from the environment (Slice 4).
+    from `git rev-parse --show-toplevel`, not from the environment.
     """
     env = dict(os.environ)
     env["LORE_PLUGIN_ROOT"] = str(plugin_root)
@@ -754,7 +754,7 @@ def _run_regen_hook(cwd: Path, *, plugin_root: Path = PLUGIN_ROOT) -> subprocess
 
 
 class TestRegenHookDerivesVaultFromGitRoot:
-    """Slice 4 (KU1): the regen hook derives the committed vault from
+    """The regen hook derives the committed vault from
     `git rev-parse --show-toplevel`, NOT from LORE_VAULT, and never blocks a commit.
     """
 

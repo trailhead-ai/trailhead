@@ -543,7 +543,7 @@ def _run_lore(args: list[str], env: dict, *, seed_vault=None) -> subprocess.Comp
 
     Callers MUST fence both XDG_STATE_HOME and XDG_CONFIG_HOME in ``env``.
     cmd_reindex resolves the vault solely via config (``_load_vault_config`` /
-    ``resolve_active_vault``); there is no LORE_VAULT fallback (Slice 3).
+    ``resolve_active_vault``); there is no LORE_VAULT fallback.
     ``seed_vault``: explicit vault path to seed into XDG_CONFIG_HOME/lore/config.json
     so config-based resolution finds the test vault.
     """

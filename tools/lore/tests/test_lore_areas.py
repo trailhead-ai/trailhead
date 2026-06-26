@@ -97,7 +97,7 @@ def _config_env(vault_path: str):
 
     Config-only resolution: cmd_areas resolves the vault via
     ``resolve_active_vault`` (no LORE_VAULT). ``vault_path`` may be a nonexistent
-    absolute path — config honors it and cmd_areas degrades (D-1) when missing.
+    absolute path — config honors it and cmd_areas degrades when missing.
     XDG_STATE_HOME is fenced so config validation never touches the real state
     dir (Axiom 6).
     """
