@@ -1,4 +1,4 @@
-"""Canonical lore record model + pure sidecar validator (Spec S1).
+"""Canonical lore record model + pure sidecar validator.
 
 This module is the single, machine-checkable definition of *what a lore record
 is*: the closed set of 9 kinds, the per-record JSON sidecar field schema (`v1`),
@@ -7,12 +7,12 @@ taxonomy, and a **pure** `validate(sidecar, kind)` function.
 
 It mirrors the shape of the legacy `status_validator.py` (canonical module-level
 data + pure predicate/accessor functions) but is a **new** module: the legacy
-validator keeps guarding old-vocabulary notes until the S7 migration cuts over.
+validator keeps guarding old-vocabulary notes until the migration cuts over.
 Nothing here reads files or touches the search index — the validator operates on
-an already-parsed dict and is shared verbatim by S2 (the `lore record` CLI) and
-S7 (the migration). The file/dedicated-per-field-flag wrapper is S2; the index is S3.
+an already-parsed dict and is shared verbatim by the `lore record` CLI and the
+migration.
 
-Invariants (Spec S1):
+Invariants:
 - The kind set is closed: exactly the 9 kinds in ``KINDS``; any other ``kind`` is
   rejected.
 - Each record carries ``version: v1``; the schema is keyed by ``(kind, version)``,
@@ -22,12 +22,12 @@ Invariants (Spec S1):
 - The validator checks **shape, not referential integrity**: ``related`` keys must
   be valid kinds and values ``list[str]``, but referenced names are *not* verified
   to exist (a dangling ``{"plan": ["nope"]}`` validates clean — existence is
-  enforced nowhere; S3 materializes whatever edges exist).
+  enforced nowhere; the index materializes whatever edges exist).
 - ``created-by``/``updated-by`` are plaintext provenance PII (e.g. a git email),
   git-tracked, exactly as the legacy YAML frontmatter already stored. They are
   **never** an authz/authn signal — self-asserted and spoofable. Data
-  classification/retention for them is owned by S2 (which writes them); S1 only
-  fixes the keys' shape.
+  classification/retention for them is owned by the CLI (which writes them); this
+  module only fixes the keys' shape.
 """
 # NOTE: deliberately no ``from __future__ import annotations``. The lore test
 # harness loads scripts via ``conftest.load_script`` (importlib without
@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
-# --- Canonical declarative model (Slice 1) ----------------------------------
+# --- Canonical declarative model --------------------------------------------
 
 #: The closed set of 9 record kinds. Any other ``kind`` value is rejected.
 KINDS: frozenset[str] = frozenset(
@@ -63,8 +63,8 @@ KINDS: frozenset[str] = frozenset(
 _SORTED_KINDS: list[str] = sorted(KINDS)
 
 #: The sidecar-schema version stamped on every record. The schema is keyed by
-#: ``(kind, version)``; only ``v1`` exists today (umbrella decision 3 defers the
-#: versioned registry until a ``v2`` exists).
+#: ``(kind, version)``; only ``v1`` exists today (the versioned registry is
+#: deferred until a ``v2`` exists).
 VERSION: str = "v1"
 
 #: Per-kind status vocabulary as an **ordered tuple** — the first element is the
@@ -92,7 +92,7 @@ class FieldSpec:
     """Schema for a single sidecar key.
 
     ``required`` — the key must be present on a validated record, **except** when
-    it is ``auto_set`` (filled in by S2's CLI on create/update, so the pure
+    it is ``auto_set`` (filled in by the CLI on create/update, so the pure
     validator tolerates its absence) or defaulted (``status``/``version``).
     ``type_tag`` — one of ``str``/``list[str]``/``datetime``/``related-map``.
     ``auto_set`` — populated by the CLI, not operator-supplied.
@@ -144,8 +144,8 @@ FIELDS_V1: dict[str, FieldSpec] = {
 _SCHEMAS: dict[str, dict[str, FieldSpec]] = {"v1": FIELDS_V1}
 
 # Derived key sets are constant per version, so compute them once at import
-# rather than rebuilding a frozenset on every accessor call (S7 may validate
-# thousands of records).
+# rather than rebuilding a frozenset on every accessor call (the migration may
+# validate thousands of records).
 _AUTO_SET_KEYS: dict[str, frozenset[str]] = {
     version: frozenset(k for k, spec in fields.items() if spec.auto_set)
     for version, fields in _SCHEMAS.items()
@@ -160,7 +160,7 @@ _REQUIRED_OPERATOR_KEYS: dict[str, frozenset[str]] = {
 }
 
 
-# --- Accessors (Slice 1) ----------------------------------------------------
+# --- Accessors --------------------------------------------------------------
 
 
 def is_valid_kind(kind: str | None) -> bool:
@@ -218,12 +218,12 @@ def required_operator_keys(version: str = "v1") -> frozenset[str]:
 
     Required keys minus the auto-set keys (filled by the CLI) and the defaulted
     keys (``status``/``version``). For ``v1`` this is exactly ``{kind, title}``
-    (``keywords`` is optional — Slice 1, dedicated-field-flags plan).
+    (``keywords`` is optional).
     """
     return _REQUIRED_OPERATOR_KEYS[version]
 
 
-# --- Pure validator (Slice 2) -----------------------------------------------
+# --- Pure validator ---------------------------------------------------------
 
 
 class ValidationResult(NamedTuple):
@@ -245,8 +245,8 @@ def _is_list_of_str(value: object) -> bool:
 def _is_iso8601_utc(value: object) -> bool:
     """True iff ``value`` is an ISO-8601 **UTC** datetime string.
 
-    The spec locks datetimes to ISO-8601 UTC (e.g. ``2026-06-17T14:32:00Z``) and
-    S2/S7 trust that guarantee, so this enforces what the error message claims:
+    Datetimes are locked to ISO-8601 UTC (e.g. ``2026-06-17T14:32:00Z``) and
+    the CLI and migration trust that guarantee, so this enforces what the error message claims:
     the value must parse via ``datetime.fromisoformat`` (which accepts the ``Z``
     suffix on 3.11+) **and** carry a zero UTC offset. Naive (no tzinfo),
     date-only, and non-UTC-offset values are rejected.

@@ -9,7 +9,7 @@ against these sets so a note can never carry an off-vocabulary status. (The
 The canonical sets are the single source of truth for the whole plugin —
 do not invent statuses; add them here and to the scaffolded glossary.
 
-Session vocab (Slice 0): ``session`` is keyed by its singular name and carries
+Session vocab: ``session`` is keyed by its singular name and carries
 ``{dirty, clean}``. ``dirty`` = candidates pending; ``clean`` = no outstanding
 candidates. The old ``active``/``complete`` values are retired; the ``session→sessions``
 alias is dropped because ``session`` is now a direct CANONICAL key.
@@ -18,8 +18,8 @@ alias is dropped because ``session`` is now a direct CANONICAL key.
 from __future__ import annotations
 
 # Canonical status sets per note type, keyed by the **singular** kind name
-# (Slice 7: vault directories and kinds standardize on singular). ``session``
-# was already singularized in Slice 0 and carries ``{dirty, clean}``.
+# (vault directories and kinds standardize on singular). ``session``
+# carries ``{dirty, clean}``.
 #
 # The legacy plural-taxonomy kinds ("deferred", "follow-up", "dead-end") were
 # retired once their living folders were gone from every vault and the one-shot
@@ -36,8 +36,8 @@ CANONICAL: dict[str, frozenset[str]] = {
 
 # Note `type:` frontmatter is singular ("session", "plan", "lesson"), and the
 # CANONICAL keys are now singular too, so the singular form resolves directly as
-# a CANONICAL key. The old singular→plural ``_TYPE_ALIASES`` map is gone
-# (Slice 7); only a true alias (a name that differs from its key) belongs here,
+# a CANONICAL key. The old singular→plural ``_TYPE_ALIASES`` map is gone;
+# only a true alias (a name that differs from its key) belongs here,
 # of which there are currently none.
 _TYPE_ALIASES: dict[str, str] = {}
 

@@ -2,13 +2,13 @@
 
 The single source of truth for the shared-content wrapping that guards against
 prompt-injection from untrusted (shared-vault) note content. Extracted out of
-``recall.py`` (Slice 4, S3) so the consumer — ``search.py`` — does not depend on
-``recall.py``, which Slice 5 guts. ``recall.py`` imports these helpers; there is
+``recall.py`` so the consumer — ``search.py`` — does not depend on
+``recall.py``. ``recall.py`` imports these helpers; there is
 one implementation of the wrapper logic.
 
 Pure, no I/O.
 
-**Injection defense (A-3, both directions):**
+**Injection defense (both directions):**
 - A literal ``</external-memory>`` in shared content must not terminate the data
   channel early. Encoding the leading ``<`` as ``&lt;`` makes the channel
   un-escapable.

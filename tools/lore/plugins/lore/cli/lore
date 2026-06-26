@@ -154,7 +154,7 @@ def _resolve_vaults_root() -> Path:
 def _load_vault_config():
     """Return ``(config_path, list[Vault])`` if config.json exists & loads, else ``None``.
 
-    The single gate for all S4 config-driven behavior (Slice 5): routing, config-
+    The single gate for all config-driven behavior: routing, config-
     sourced ``shared`` reindex, config-freshness signal, and the orphan-ID guard
     all fire **only** when this returns a value. A missing ``config.json`` returns
     ``None`` so every path falls back to vanilla (Axiom 3 — support vanilla usage).
@@ -177,7 +177,7 @@ def _load_vault_config():
 def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     """Resolve the vault root that ``record delete`` should act on.
 
-    Symmetric with ``record create`` (S4): when a ``config.json`` exists, the
+    Symmetric with ``record create``: when a ``config.json`` exists, the
     target vault is chosen by the SAME config resolution — the record's ``kind``
     (from ``record_id``) plus the command's routing flags (``--repo/--product/
     --suite/--team``) — so delete operates on the very vault create routed the
@@ -185,9 +185,8 @@ def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     vault). When **no** config exists, fall back to the active vault
     (``vault.resolve_vault()``) — vanilla usage is unchanged (Axiom 3).
 
-    NOTE: ``record update`` no longer uses this resolver. Since the
-    dedicated-field-flags change (Slice 3) its scope flags express the
-    *destination*, not the current location, so update locates the record via
+    NOTE: ``record update`` no longer uses this resolver. Its scope flags
+    express the *destination*, not the current location, so update locates the record via
     ``_find_current_record_location`` (a config scan independent of the flag
     values) and re-resolves the destination via ``_resolve_destination_root``.
 
@@ -264,14 +263,14 @@ def _seed_or_merge_config(config_path: Path) -> None:
 
 # The PreToolUse guard command. ``${CLAUDE_PLUGIN_ROOT}`` is expanded by Claude
 # Code at hook-run time, so the wired command stays valid wherever the plugin is
-# installed (and the hook canonicalizes paths on every invocation — Slice 3).
+# installed (and the hook canonicalizes paths on every invocation).
 _GUARD_COMMAND = (
     'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/vault-guard.py"'
 )
 # The matcher covers every file-mutating tool that carries a target path:
 # Edit/Write/MultiEdit use ``file_path``; NotebookEdit uses ``notebook_path``.
 # Bash is intentionally absent — its writes are opaque at PreToolUse time and are
-# covered only by the agent-rules prohibition (Slice 4).
+# covered only by the agent-rules prohibition.
 _GUARD_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 
 # The vault-root list delimiter passed to the hook via LORE_VAULT_GUARD_ROOT.
@@ -283,7 +282,7 @@ _GUARD_ROOT_DELIM = "\n"
 def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     """Install the vault write-protection guardrail into *settings_path*.
 
-    Wires (Slice 3, S5):
+    Wires:
       1. A PreToolUse ``Edit|Write|MultiEdit|NotebookEdit`` hook running
          ``hooks/vault-guard.py`` — the mandatory primary, runtime-canonicalizing
          mechanism (exit-2 deny).
@@ -371,7 +370,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    # Step 5: install the vault write-protection guardrail (Slice 3).
+    # Step 5: install the vault write-protection guardrail.
     # A present-but-corrupt settings.json raises ValueError from settings_writer —
     # surface it as a clean error rather than clobbering the user's file.
     try:
@@ -402,13 +401,13 @@ def cmd_init(args: argparse.Namespace) -> int:
         else:
             print(f"lore: {h.name}: installed {path}", file=sys.stderr)
 
-    # Step 7: first-run git-identity advisory (Slice 5, S5).
+    # Step 7: first-run git-identity advisory.
     # `lore init` only bootstraps — it does NOT require a git identity (the
-    # `*-by` author fallback is the write-path's concern, S2). But when no
+    # `*-by` author fallback is the write-path's concern). But when no
     # identity resolves ($LORE_EMAIL → `git config --global user.email`, both
     # empty) the FIRST record write would fail with a typed error; surface a
     # one-line advisory now so that failure isn't a surprise. Routed to STDERR
-    # (council Advocate/Security) so it survives even if `trailhead install`
+    # so it survives even if `trailhead install`
     # filters lore stdout.
     if not vault_mod.resolve_committer_email():
         print(
@@ -544,10 +543,9 @@ def _flush_commit(vault: Path, key: str, *, push: bool = True) -> int:
     """Stage the flushed session record's EXPLICIT path(s) + commit in ONE commit.
 
     Never `git add -A` — only `session/<key>.json` (the flipped sidecar) and its
-    `.md` body are staged, so unrelated dirty vault files are never swept in
-    (Slice 2 test contract). The staged-index gate (`git diff --cached --quiet`)
-    makes an already-clean flush a no-op rather than a failed empty commit.
-    Returns exit code.
+    `.md` body are staged, so unrelated dirty vault files are never swept in.
+    The staged-index gate (`git diff --cached --quiet`) makes an already-clean
+    flush a no-op rather than a failed empty commit. Returns exit code.
 
     The per-session *commit* is the deliberate atomicity unit and always runs here.
     The *push* is NOT per-session: a batch flush passes ``push=False`` and pushes
@@ -616,7 +614,7 @@ def _flush_push(vault: Path) -> int:
     return 0
 
 
-# The literal reserved scope token (Slice 3). It is unambiguous against a KQL
+# The literal reserved scope token. It is unambiguous against a KQL
 # query because real KQL queries are field-qualified (e.g. `status:dirty`) — a bare
 # `all` is never a valid scoping query, so it is reclaimed as the all-sessions verb.
 FLUSH_SCOPE_ALL = "all"
@@ -628,26 +626,26 @@ _FLUSH_ALL_QUERY = "kind:session status:dirty"
 def cmd_flush(args: argparse.Namespace) -> int:
     """Flush sessions — current (no arg), `all`, or a `<search>` KQL query.
 
-    Three positional scopes (Slice 2 + Slice 3):
+    Three positional scopes:
 
-      - **no positional** → the CURRENT session (Slice 2): resolve by `--session-id`
+      - **no positional** → the CURRENT session: resolve by `--session-id`
         / `$CLAUDE_CODE_SESSION_ID` GUID, else the sanitized worktree-name fallback.
-      - **the reserved token `all`** (Slice 3) → discover every `dirty` session via
+      - **the reserved token `all`** → discover every `dirty` session via
         the search facade (`kind:session status:dirty`) and flush each.
-      - **any other positional** (Slice 3) → treat it as a KQL query, run it through
+      - **any other positional** → treat it as a KQL query, run it through
         the same facade, INTERSECT with `dirty`, and flush each match. An empty /
         non-matching / only-clean set is a clean no-op.
 
     `all` vs `<search>` is disambiguated by the reserved-token check alone: `all` is
     never a field-qualified KQL query, so it can be reclaimed as the all-scope verb.
 
-    Per-session atomicity (Slice 3, mirrors Slice 2 AC20-23): each session is its own
-    flip + commit unit (`flush_session` + `_flush_commit`). A mid-batch failure leaves
+    Per-session atomicity: each session is its own flip + commit unit
+    (`flush_session` + `_flush_commit`). A mid-batch failure leaves
     already-flushed sessions `clean`, NAMES the failed one, states a re-run safely
     retries (re-run is idempotent by design), and exits non-zero.
 
-    No code path writes `status: complete` / `active` — that vocab was retired in
-    Slice 0; a session status is only ever `dirty` / `clean`.
+    No code path writes `status: complete` / `active` — that vocab was retired;
+    a session status is only ever `dirty` / `clean`.
     """
     scope = getattr(args, "scope", None)
     if scope == FLUSH_SCOPE_ALL:
@@ -658,16 +656,16 @@ def cmd_flush(args: argparse.Namespace) -> int:
 
 
 def _flush_current_session(args: argparse.Namespace) -> int:
-    """Flush the CURRENT session record: dirty → clean + commit, else no-op (Slice 2).
+    """Flush the CURRENT session record: dirty → clean + commit, else no-op.
 
     Reads `session/<key>.json` for the resolved current-session key:
 
       - no record → exit 0 with a "no session exists" notice (distinct from a
-        clean session, council/Advocate Minor); writes nothing, no commit.
+        clean session); writes nothing, no commit.
       - already `clean` → exit 0 with a "clean — nothing to flush" notice; an
         idempotent no-op, no commit.
       - `dirty` → flip `status` to `clean`, stamp `annotations[flushed-at]` (the
-        pinned KU3 key/ISO-UTC format), reindex the one record, then commit the
+        pinned key/ISO-UTC format), reindex the one record, then commit the
         record's EXPLICIT paths only (the `.json` + `.md`; never `git add -A`).
     """
     vault = Path(vault_mod.resolve_vault())
@@ -701,7 +699,7 @@ def _flush_current_session(args: argparse.Namespace) -> int:
         # record `clean` on disk BEFORE the commit, so a commit failure would leave
         # a clean-on-disk-but-uncommitted record that `status:dirty` re-discovery
         # could never re-find. Revert the flip so a re-run can retry it
-        # (council/Reliability — the single path shares the batch's atomicity need).
+        # (the single path shares the batch's atomicity need).
         try:
             session_store_mod.revert_flush(
                 key,
@@ -722,7 +720,7 @@ def _flush_current_session(args: argparse.Namespace) -> int:
 # Discovery must return EVERY dirty session, not the search facade's default page
 # (`run_search` defaults to limit=20). The live vault holds dozens of session
 # records, so an `all`/`<search>` flush capped at 20 would silently leave the rest
-# dirty (a Slice 3 correctness bug). Use a high ceiling AND assert non-truncation
+# dirty (a correctness bug). Use a high ceiling AND assert non-truncation
 # so an overflow is a loud error, never a silent partial flush.
 _FLUSH_DISCOVERY_LIMIT = 100_000
 
@@ -730,8 +728,8 @@ _FLUSH_DISCOVERY_LIMIT = 100_000
 def _discover_dirty_session_keys(query: str) -> list[str]:
     """Run *query* through the search facade and return the matching DIRTY session keys.
 
-    REUSES the KQL search facade (`search.run_search`) — never a second query engine
-    (Slice 3 constraint). The facade is the injection boundary: it compiles *query*
+    REUSES the KQL search facade (`search.run_search`) — never a second query engine.
+    The facade is the injection boundary: it compiles *query*
     via `kql_compile`, which BINDS every value as a `?` param (never interpolated),
     so a malicious `<search>` string cannot inject SQL. A facade parse/compile error
     raises so the caller can report it and exit non-zero.
@@ -765,7 +763,7 @@ def _discover_dirty_session_keys(query: str) -> list[str]:
 
 
 def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> int:
-    """Flush every DIRTY session matching *query*, one atomic unit at a time (Slice 3).
+    """Flush every DIRTY session matching *query*, one atomic unit at a time.
 
     Discovers keys via :func:`_discover_dirty_session_keys` (the facade), then for
     each key runs the SAME per-session primitive the current-session path uses
@@ -817,7 +815,7 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
             # commit failure roll the flip BACK to `dirty` — otherwise the session
             # is clean-on-disk-but-uncommitted and a re-run's discovery query
             # (`status:dirty`) could never re-find it. Reverting keeps the failed
-            # session retry-discoverable (council/Reliability Important).
+            # session retry-discoverable.
             if flipped:
                 try:
                     session_store_mod.revert_flush(
@@ -913,7 +911,7 @@ def cmd_session_note(args: argparse.Namespace) -> int:
 def cmd_areas(args: argparse.Namespace) -> int:
     """Print the full area menu (names, one-liners, keywords) to stdout.
 
-    Exit code is always 0 — must never fail a session (D-1).
+    Exit code is always 0 — must never fail a session.
     Prints a one-line stderr signal and a degraded stdout "no areas" line when
     the resolved vault path does not exist on disk, or when build_area_map
     raises. Empty or absent areas/ dir prints a friendly "no areas" line.
@@ -954,10 +952,10 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     the number of indexed rows to **stdout** on success; errors go to
     **stderr**.  Exits 0.
 
-    Text-wins / index-derived posture (AC-TX2): the index is always
+    Text-wins / index-derived posture: the index is always
     rebuildable from the git-tracked text files.
 
-    **Multi-vault + config-sourced ``shared`` (Slice 5, S4).** When a
+    **Multi-vault + config-sourced ``shared``.** When a
     ``config.json`` exists & loads (and no explicit ``--vault`` narrows the
     scope), reindex spans **all** configured vault roots and derives each vault's
     ``shared`` from its config flag (``shared_roots`` — the set of roots marked
@@ -991,8 +989,8 @@ def cmd_reindex(args: argparse.Namespace) -> int:
             count = index_store_mod.rebuild(
                 vault_roots, conn, shared_roots=shared_roots
             )
-            # Stamp the config mtime so search can flag a stale-config index
-            # (council/Reliability + Security). No config → no stamp.
+            # Stamp the config mtime so search can flag a stale-config index.
+            # No config → no stamp.
             if config_path is not None:
                 try:
                     mtime = config_path.stat().st_mtime
@@ -1051,7 +1049,7 @@ def cmd_search(args: argparse.Namespace) -> int:
     except Exception:
         vault_roots = []
 
-    # Config-freshness signal (Slice 5, S4): pass the current config.json mtime so
+    # Config-freshness signal: pass the current config.json mtime so
     # run_search can warn when the index was built against an older config. No
     # config → None → no config-staleness note (vanilla).
     config_mtime = None
@@ -1081,7 +1079,7 @@ def cmd_search(args: argparse.Namespace) -> int:
 # ---- vault ------------------------------------------------------------------
 
 def cmd_vault(args: argparse.Namespace) -> int:
-    """Dispatch ``lore vault <action>`` — add / delete / ls / config (Slice 4, S4).
+    """Dispatch ``lore vault <action>`` — add / delete / ls / config.
 
     Thin shell over ``vault_config`` (the parse/validate/mutate boundary) and
     ``index_store`` (the per-vault scan/remove seam). Routes by ``vault_action``.
@@ -1134,11 +1132,11 @@ def _cmd_vault_add(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # The default vault may not carry a records allowlist (umbrella decision 6).
+    # The default vault may not carry a records allowlist.
     if scope == "default" and records:
         print(
-            "lore: the default-scope vault may not carry a --record allowlist "
-            "(umbrella decision 6); it is the resolution floor and accepts every kind",
+            "lore: the default-scope vault may not carry a --record allowlist; "
+            "it is the resolution floor and accepts every kind",
             file=sys.stderr,
         )
         return 1
@@ -1421,15 +1419,15 @@ def _cmd_vault_config(args: argparse.Namespace) -> int:
 
 # Provenance keys (``created/updated-at/by``) are auto-set on every write and
 # have no operator flag — there is no generic setter to override them through
-# (the old ``--set``/``--unset`` patch idiom is gone; Slice 1, dedicated-field-flags
-# plan). Provenance protection is structural: no flag exists, nothing to block.
+# (the old ``--set``/``--unset`` patch idiom is gone). Provenance protection is
+# structural: no flag exists, nothing to block.
 
 
 # Dedicated non-scope list fields: each maps a repeatable ``--<flag>`` /
-# ``--unset-<flag> VALUE`` pair to its sidecar key (Slice 1, dedicated-field-flags
-# plan). Scalars (--status, --title) and the --related map flag are handled
-# inline by the applier. Scope fields (team/suite/product/repo) are NOT here —
-# they remain routing flags owned by Slice 2/3.
+# ``--unset-<flag> VALUE`` pair to its sidecar key. Scalars (--status, --title)
+# and the --related map flag are handled inline by the applier. Scope fields
+# (team/suite/product/repo) are NOT here — they remain routing flags handled by
+# the record-write layer.
 _LIST_FIELD_FLAGS: dict[str, str] = {
     "keyword": "keywords",
     "related_file": "related-files-or-folders",
@@ -1446,19 +1444,19 @@ def _apply_record_fields(
 
     Structural mirror of :func:`_apply_map_labels_annotations` (upsert/unset on a
     copy, errors surfaced to the caller), but with heterogeneous type dispatch
-    (Slice 1, dedicated-field-flags plan):
+    of the per-field flags:
 
       - scalars: ``--status`` (always), ``--title`` (update-only setter; create
         builds it from the required positional) overwrite the scalar key.
       - repeatable list flags (``--keyword`` / ``--related-file`` /
         ``--related-url`` / ``--related-phase``) **append** to their list key;
         each ``--unset-<field> VALUE`` removes one matching item (a value not
-        present is a tolerated no-op, mirroring the deleted AC16 semantics).
+        present is a tolerated no-op).
       - ``--related <kind>=<name>`` (repeatable) splits on the FIRST ``=`` and
         appends ``name`` to ``related[kind]``. An empty kind (``=foo``) or empty
         name (``plan=``) is rejected HERE, before ``validate()`` ever sees it.
 
-    All mutations still flow through ``validate()`` downstream (A3): off-vocab
+    All mutations still flow through ``validate()`` downstream: off-vocab
     ``--status`` and bad ``related`` kinds are caught there. This helper only
     guards the degenerate ``--related`` split that ``validate()`` could not name.
 
@@ -1517,8 +1515,8 @@ def _apply_record_fields(
 def _add_record_field_flags(parser: argparse.ArgumentParser) -> None:
     """Register the shared dedicated per-field flags on a record subparser.
 
-    Adds the non-scope field flags common to ``create`` and ``update``
-    (Slice 1, dedicated-field-flags plan): the ``--status`` scalar, the
+    Adds the non-scope field flags common to ``create`` and ``update``:
+    the ``--status`` scalar, the
     repeatable list flags with their per-item ``--unset-<field> VALUE`` removers,
     and the ``--related <kind>=<name>`` map flag. ``--title`` is NOT added here —
     create declares it as a required argument and update as an optional setter.
@@ -1583,7 +1581,7 @@ def _apply_map_labels_annotations(
     """Apply --label/--annotation/--unset-label/--unset-annotation to *sidecar*.
 
     Map-field branch — intentionally separate from ``_apply_record_fields``'s
-    scalar/list logic (Slice 2, labels/annotations plan).
+    scalar/list logic.
 
     Semantics:
       - set = upsert: ``--label k=v`` overwrites an existing key silently.
@@ -1627,10 +1625,9 @@ def _apply_map_labels_annotations(
 
 
 def cmd_record(args: argparse.Namespace) -> int:
-    """Dispatch ``lore record <action>`` — create (Slice 3) / update (Slice 4) /
-    delete (Slice 5) (S2).
+    """Dispatch ``lore record <action>`` — create / update / delete.
 
-    Thin shell over ``record_store`` (Slice 2). Routes to the appropriate handler
+    Thin shell over ``record_store``. Routes to the appropriate handler
     by ``record_action``; all handlers are argv→library adapters with no
     validation or I/O logic of their own.
     """
@@ -1651,15 +1648,15 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 
 def _cmd_record_delete(args: argparse.Namespace) -> int:
-    """``lore record delete RECORD_ID`` (Slice 5, S2) — thin shell over ``record_store``.
+    """``lore record delete RECORD_ID`` — thin shell over ``record_store``.
 
     Removes the body (``.md``), sidecar (``.json``), and index row for RECORD_ID
-    in one operation (AC13). Uses :func:`record_store.delete_record`, which is the
-    transactional delete primitive from Slice 2 — this function does NOT
+    in one operation. Uses :func:`record_store.delete_record`, which is the
+    transactional delete primitive — this function does NOT
     re-implement removal logic.
 
     RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
-    An invalid format or nonexistent record → non-zero + clear stderr (AC13).
+    An invalid format or nonexistent record → non-zero + clear stderr.
     """
     record_id = getattr(args, "record_id", None)
     if not record_id or "/" not in record_id:
@@ -1696,25 +1693,25 @@ def _cmd_record_delete(args: argparse.Namespace) -> int:
 
 
 def _cmd_record_create(args: argparse.Namespace) -> int:
-    """``lore record create`` (Slice 3, S2) — thin shell over ``record_store``.
+    """``lore record create`` — thin shell over ``record_store``.
 
     Builds the sidecar dict, reads the body from stdin (empty string when stdin is
     not piped), calls ``place_record`` + ``validate_and_write``, and prints the
     vault-relative RECORD_ID on stdout.
 
     Body is read verbatim from stdin — a leading ``---`` block is **never**
-    parsed as frontmatter (AC-TX3); it is stored as body text.
+    parsed as frontmatter; it is stored as body text.
 
-    Routing flags (--repo / --product / --suite / --team) are dual-purpose
-    (Slice 2, dedicated-field-flags plan): they both select the destination vault
+    Routing flags (--repo / --product / --suite / --team) are dual-purpose:
+    they both select the destination vault
     via ``place_record``'s ``scope`` argument AND write the namesake sidecar field
     with the same value.  One input drives both effects, so the field value and the
     routing vault always agree — a record cannot carry ``team: beta`` while living
     in alpha's vault.  Non-scope sidecar fields are set through the dedicated
     per-field flags (``--status``, ``--keyword``, ``--related-*``, ``--related``)
-    applied by :func:`_apply_record_fields` (Slice 1).
+    applied by :func:`_apply_record_fields`.
     """
-    # --kind is required (AC2).
+    # --kind is required.
     kind = getattr(args, "kind", None)
     if not kind:
         print("error: --kind is required", file=sys.stderr)
@@ -1726,8 +1723,8 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         print("error: --title is required", file=sys.stderr)
         return 1
 
-    # Build the scope string from routing flags (AC5). These are routing hints
-    # passed to place_record; their sidecar-write semantics are Slice 2's.
+    # Build the scope string from routing flags. These are routing hints
+    # passed to place_record; their sidecar-write semantics are the record-write layer's.
     scope_parts: list[str] = []
     for flag in ("repo", "product", "suite", "team"):
         val = getattr(args, flag, None)
@@ -1736,14 +1733,14 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
     scope = ",".join(scope_parts) if scope_parts else None
 
     # Seed the sidecar with the required operator fields. ``keywords`` is optional
-    # (relaxed in Slice 1) — it is populated only when --keyword is supplied.
+    # (optional) — it is populated only when --keyword is supplied.
     sidecar: dict = {
         "kind": kind,
         "title": title,
     }
 
     # Apply the dedicated per-field flags (--status / --keyword / --related-* /
-    # --related) — Slice 1, dedicated-field-flags plan. On create --title is the
+    # --related). On create --title is the
     # required positional already seeded above, so the applier leaves it alone.
     sidecar, field_errors = _apply_record_fields(sidecar, args)
     if field_errors:
@@ -1751,7 +1748,7 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
             print(msg, file=sys.stderr)
         return 1
 
-    # Apply --label / --annotation / --unset-label / --unset-annotation (Slice 2).
+    # Apply --label / --annotation / --unset-label / --unset-annotation.
     sidecar = _apply_map_labels_annotations(
         sidecar,
         label_pairs=list(getattr(args, "label_pairs", None) or []),
@@ -1760,11 +1757,11 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         unset_annotations=list(getattr(args, "unset_annotations", None) or []),
     )
 
-    # Body from stdin (AC1). No stdin → empty body.  The leading ``---``
-    # check is intentionally absent — we read verbatim (AC-TX3).
+    # Body from stdin. No stdin → empty body.  The leading ``---``
+    # check is intentionally absent — we read verbatim.
     body = _read_stdin_body()
 
-    # --- vault routing (Slice 5, S4) ---------------------------------------
+    # --- vault routing -----------------------------------------------------
     # ``participating_scopes`` is built ONLY from the routing FLAGS
     # (--repo/--product/--suite/--team). When a
     # config.json exists & loads, resolution picks the destination vault; a
@@ -1826,12 +1823,12 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         print(f"error: record create failed: {exc}", file=sys.stderr)
         return 1
 
-    # Routing confirmation goes to STDERR (council/Advocate) so the RECORD_ID stays
-    # the sole parseable stdout line (the S2 create contract — test_record_cli_create).
+    # Routing confirmation goes to STDERR so the RECORD_ID stays
+    # the sole parseable stdout line (the create contract — test_record_cli_create).
     if routing_line is not None:
         print(routing_line, file=sys.stderr)
 
-    # AC4: print the vault-relative RECORD_ID on stdout.
+    # Print the vault-relative RECORD_ID on stdout.
     print(record_id)
     return 0
 
@@ -1839,19 +1836,19 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
 # ---- session ----------------------------------------------------------------
 
 def cmd_session(args: argparse.Namespace) -> int:
-    """Dispatch ``lore session <action>`` — candidate / referenced (Slice 1).
+    """Dispatch ``lore session <action>`` — candidate / referenced.
 
     A session **is a first-class record** under the singular ``session/`` kind dir
     (``session/<key>.{md,json}``): the capture path writes the sidecar AND reindexes
     the one record, so the session is KQL-discoverable
-    (``lore search 'kind:session status:dirty'``). This is the Slice 1 collapse of the
-    former "two worlds" defect (the pre-Slice-1 endpoint wrote a body-only, unindexed
+    (``lore search 'kind:session status:dirty'``). This collapses the
+    former "two worlds" defect (the earlier endpoint wrote a body-only, unindexed
     file under plural ``sessions/``). ``candidate`` materializes/dirties; ``referenced``
-    never dirties and no-ops on a non-existent session (KU2). The
+    never dirties and no-ops on a non-existent session. The
     sidecar-ensure-dirty + body-append + reindex are one race-safe critical section
-    via the ``session_store`` capture primitives (``fcntl.flock``, KU1).
+    via the ``session_store`` capture primitives (``fcntl.flock``).
 
-    **Confinement (council/Security Critical 3):** the session KEY becomes the record
+    **Confinement:** the session KEY becomes the record
     filename, so it is sanitized at this entry point BEFORE any path is constructed.
     A GUID key goes through ``session_store.sanitize_session_id``; the worktree-name
     fallback key through ``session_store.sanitize_worktree_name`` (the GUID guard
@@ -1873,12 +1870,12 @@ def cmd_session(args: argparse.Namespace) -> int:
 
 
 def _resolve_session_key(args: argparse.Namespace) -> tuple[str | None, int]:
-    """Resolve + sanitize the session record KEY for a session subcommand (Slice 1).
+    """Resolve + sanitize the session record KEY for a session subcommand.
 
     A session record is keyed by ``--session-id`` (or ``$CLAUDE_CODE_SESSION_ID``) —
     a GUID — **or**, when neither is set, the worktree-name fallback (``--worktree``
-    or ``detect_worktree_name()``). The two keys have DIFFERENT confinement guards
-    (council/Security Critical 3): a GUID via :func:`session_store.sanitize_session_id`,
+    or ``detect_worktree_name()``). The two keys have DIFFERENT confinement guards:
+    a GUID via :func:`session_store.sanitize_session_id`,
     a worktree name via :func:`session_store.sanitize_worktree_name` (the GUID guard
     would reject every worktree name and so cannot guard that path).
 
@@ -1913,23 +1910,22 @@ def _open_session_index():
     """Open a fresh global index connection (the ``open_index`` seam for capture).
 
     Passed into the ``session_store`` capture primitives so the lock-spanning reindex
-    opens the index inside the held lock (KU1) while honoring ``XDG_STATE_HOME`` test
+    opens the index inside the held lock while honoring ``XDG_STATE_HOME`` test
     isolation via ``os.environ`` — the same env ``index_store.open_index`` reads.
     """
     return index_store_mod.open_index(env=dict(os.environ))
 
 
 def _cmd_session_candidate(args: argparse.Namespace) -> int:
-    """``lore session candidate --session-id ID --kind KIND --phase PHASE`` (Slice 1).
+    """``lore session candidate --session-id ID --kind KIND --phase PHASE``.
 
     Body from stdin. The first candidate for the resolved KEY materializes the
     singular session record ``session/<key>.{md,json}`` born ``dirty``; a candidate
     on a ``clean`` record flips it back to ``dirty``. In both cases a record-candidate
     entry carrying KIND + PHASE is appended to the body and the one record is
-    reindexed. The body is fence-neutralized (AC-FENCE1) via
+    reindexed. The body is fence-neutralized via
     ``record_store.neutralize_fences``; the sidecar-ensure-dirty + body-append +
-    reindex are ONE race-safe critical section via ``session_store.capture_candidate``
-    (KU1).
+    reindex are ONE race-safe critical section via ``session_store.capture_candidate``.
     """
     key, rc = _resolve_session_key(args)
     if key is None:
@@ -1971,13 +1967,13 @@ def _cmd_session_candidate(args: argparse.Namespace) -> int:
 
 
 def _cmd_session_referenced(args: argparse.Namespace) -> int:
-    """``lore session referenced RECORD_ID --session-id ID`` (Slice 1, KU2).
+    """``lore session referenced RECORD_ID --session-id ID``.
 
-    Logs that RECORD_ID was used this session. KU2 contract: on a **non-existent**
+    Logs that RECORD_ID was used this session. On a **non-existent**
     session this is a **no-op — it creates NOTHING**; on an **existing** session it
     appends the reference line and bumps ``last-referenced-at`` in the sidecar
     ``annotations`` map, but **never flips status**. The append + bump + reindex are
-    one race-safe critical section via ``session_store.capture_referenced`` (KU1).
+    one race-safe critical section via ``session_store.capture_referenced``.
     """
     key, rc = _resolve_session_key(args)
     if key is None:
@@ -1989,7 +1985,7 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
         return 1
 
     now = dt.datetime.now(dt.timezone.utc).strftime(session_store_mod.FLUSHED_AT_FORMAT)
-    # Neutralize fences in the entry (AC-FENCE1): RECORD_ID is a free-form arg, so
+    # Neutralize fences in the entry: RECORD_ID is a free-form arg, so
     # a `<external-memory>` token in it must not land live in the session record —
     # the referenced boundary neutralizes uniformly like candidate/create/blob.
     entry = record_store_mod.neutralize_fences(f"- referenced {now} {record_id}")
@@ -2012,9 +2008,9 @@ def _cmd_session_referenced(args: argparse.Namespace) -> int:
 def _find_current_record_location(record_id: str):
     """Locate the record's CURRENT vault, independent of the new scope-flag values.
 
-    The scope flags (``--team`` etc.) now mean **destination** (Slice 3), so the
-    current location can no longer be derived from them (that is what produced the
-    spurious ``RecordNotFoundError`` KU-2 reproduced). Strategy: scan every
+    The scope flags (``--team`` etc.) now mean **destination**, so the
+    current location can no longer be derived from them (deriving it from them
+    would produce a spurious ``RecordNotFoundError``). Strategy: scan every
     configured vault path with :func:`record_store.locate_record` until the record
     is found — config-driven, index-independent, and with no circular dependence on
     the sidecar's own scope fields. Falls back to the active vault when no config
@@ -2037,7 +2033,7 @@ def _find_current_record_location(record_id: str):
 
 
 def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int]:
-    """Resolve the DESTINATION ``(vault_root, shared_flag)`` from the merged scope (Slice 3).
+    """Resolve the DESTINATION ``(vault_root, shared_flag)`` from the merged scope.
 
     Merged scope = the existing sidecar scope fields overlaid with the new flag
     values (the merge is already baked into ``merged_sidecar`` by the caller).
@@ -2064,24 +2060,23 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
 
 
 def _cmd_record_update(args: argparse.Namespace) -> int:
-    """``lore record update RECORD_ID`` (Slice 4, S2; auto-move Slice 3) — thin shell.
+    """``lore record update RECORD_ID`` (with auto-move) — thin shell.
 
     Body sources (mutually exclusive on stdin):
-      - **Full-body** (default, piped stdin): stdin replaces the whole body (AC9).
+      - **Full-body** (default, piped stdin): stdin replaces the whole body.
       - **``--diff``**: stdin is a unified diff applied to the existing body via
-        ``record_store.apply_unified_diff`` (KU2). The post-hunk body flows through
+        ``record_store.apply_unified_diff``. The post-hunk body flows through
         the shared validate/stamp/neutralize step before the atomic rename, so a
         hunk injecting an ``<external-memory>`` token cannot land a live fence
-        (council/Security — the diff path is not a neutralization bypass). Any hunk
-        failing → non-zero, record byte-for-byte unmodified, no index update
-        (AC-DIFF1); rejected hunks print to stderr one-line-per-hunk for agent retry.
+        (the diff path is not a neutralization bypass). Any hunk
+        failing → non-zero, record byte-for-byte unmodified, no index update;
+        rejected hunks print to stderr one-line-per-hunk for agent retry.
       - **Metadata-only** (no stdin): the body is unchanged and only the
-        dedicated per-field flags apply (AC10/AC11). A ``note: no stdin — body
+        dedicated per-field flags apply. A ``note: no stdin — body
         unchanged, metadata-only update`` is printed to **stderr** (exit stays 0)
-        so an agent that *forgot* to pipe a body can detect the mode
-        (council/Advocate).
+        so an agent that *forgot* to pipe a body can detect the mode.
 
-    **Scope flags drive automatic relocation (Slice 3, dedicated-field-flags plan).**
+    **Scope flags drive automatic relocation.**
     ``--team/--suite/--product/--repo`` are field-setters that also re-resolve the
     destination vault from the **merged scope** (existing sidecar scope fields
     overlaid with the new flag values). The flow: (1) locate the record's CURRENT
@@ -2096,18 +2091,17 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
         spurious self-move): a normal in-place ``validate_and_write``, no move.
       - destination != current vault: a single durable write AT the destination via
         ``move_record``'s in-memory overrides (the mutated sidecar is NEVER written
-        at the old location and then moved — re-review Critical-1), old artifacts
-        removed last (copy→repoint→delete, A11). A structured
+        at the old location and then moved), old artifacts
+        removed last (copy→repoint→delete). A structured
         ``moved: <old id> → <new id>`` line is printed to **stdout** in addition to
-        the RECORD_ID so a tool can detect the relocation (re-review Critical-2 —
-        no silent move).
+        the RECORD_ID so a tool can detect the relocation (no silent move).
 
     ``updated-at``/``updated-by`` are re-stamped every update; ``created-*`` are
     preserved. The relocation is automatic; there is no manual ``--move-to`` flag —
     removing it also closed an unconfined-destination write path (the dest is now
     only ever a config-declared vault root, and ``move_record`` confines it too).
 
-    Invalid/nonexistent RECORD_ID → non-zero (AC8).
+    Invalid/nonexistent RECORD_ID → non-zero.
     """
     import json
 
@@ -2123,7 +2117,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
 
     # stdin detection: a TTY is never "piped"; otherwise read what's there. An
     # empty read (no pipe / /dev/null / closed stdin) is the metadata-only signal
-    # (AC10) — distinct from a non-empty body replace (AC9). An intentional
+    # — distinct from a non-empty body replace. An intentional
     # empty-body replace is degenerate and out of scope; clear the body via a
     # ``--diff`` deleting every line instead.
     stdin_text = _read_stdin_body()
@@ -2133,7 +2127,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
         conn = index_store_mod.open_index()
         try:
             # (1) Resolve the CURRENT location, decoupled from the scope flags
-            # (which now mean destination). AC8 → RecordNotFoundError.
+            # (which now mean destination); a missing record → RecordNotFoundError.
             location = _find_current_record_location(record_id)
 
             # Load the existing sidecar so the field flags mutate the live record.
@@ -2156,13 +2150,13 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
 
             # --- resolve the new body -----------------------------------------
             if use_diff:
-                # stdin is a unified diff applied to the existing body (KU2).
+                # stdin is a unified diff applied to the existing body.
                 try:
                     new_body, _ = record_store_mod.apply_unified_diff(
                         existing_body, stdin_text
                     )
                 except record_store_mod.DiffRejectError as exc:
-                    # Atomic reject (AC-DIFF1): body byte-for-byte unchanged, no
+                    # Atomic reject: body byte-for-byte unchanged, no
                     # index update. Parseable one-line-per-hunk stderr for retry.
                     for header, reason in exc.rejected:
                         print(f"rejected hunk {header}: {reason}", file=sys.stderr)
@@ -2171,11 +2165,11 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                     print(f"error: unparseable diff: {exc}", file=sys.stderr)
                     return 1
             elif has_stdin:
-                # Full-body replace (AC9).
+                # Full-body replace.
                 new_body = stdin_text
             else:
-                # Metadata-only (AC10/AC11): body unchanged. Emit the notice to
-                # stderr (council/Advocate) — exit stays 0.
+                # Metadata-only: body unchanged. Emit the notice to
+                # stderr — exit stays 0.
                 new_body = existing_body
                 print(
                     "note: no stdin — body unchanged, metadata-only update",
@@ -2198,7 +2192,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                     print(msg, file=sys.stderr)
                 return 1
 
-            # Apply --label / --annotation / --unset-label / --unset-annotation (Slice 2).
+            # Apply --label / --annotation / --unset-label / --unset-annotation.
             sidecar = _apply_map_labels_annotations(
                 sidecar,
                 label_pairs=list(getattr(args, "label_pairs", None) or []),
@@ -2226,7 +2220,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
                 # (4b) validate + stamp + neutralize the mutated record IN MEMORY,
                 # then write it ONCE at the destination via move_record overrides —
                 # the mutated sidecar is NEVER written at the old location and then
-                # moved (single durable write at destination; re-review Critical-1).
+                # moved (single durable write at destination).
                 stamped, safe_body = record_store_mod.validate_stamp_neutralize(
                     location, sidecar, new_body
                 )
@@ -2269,7 +2263,7 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
         print(f"error: record update failed: {exc}", file=sys.stderr)
         return 1
 
-    # The relocation signal (re-review Critical-2 — no silent move) precedes the
+    # The relocation signal (no silent move) precedes the
     # RECORD_ID so the existing stdout contract for the no-move case is unchanged
     # (RECORD_ID stays the trailing parseable line); the moved case adds the signal.
     if moved_line is not None:
@@ -2280,8 +2274,8 @@ def _cmd_record_update(args: argparse.Namespace) -> int:
 
 # ---- unknown-command dispatch hint ------------------------------------------
 
-# Table mapping removed/renamed commands to their replacements (AC-DISP1).
-# Slice 5 (S3) retires the ``recall`` command and rewires its call sites to
+# Table mapping removed/renamed commands to their replacements.
+# The ``recall`` command was retired and its call sites rewired to
 # ``search``; this entry redirects an agent that still types the old command to
 # its replacement so the retired ``recall`` subcommand resolves to a clear
 # non-zero error with a "did you mean 'lore search'?" hint, never a silent no-op.
@@ -2322,7 +2316,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_lore_status = sub.add_parser(
         "status",
-        help="Show lore installation status and surface rules-file drift (Slice 4, S5)",
+        help="Show lore installation status and surface rules-file drift",
     )
     p_lore_status.set_defaults(func=cmd_status)
 
@@ -2370,9 +2364,9 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help=(
-            "Flush scope: omit = current session (Slice 2); the reserved token "
+            "Flush scope: omit = current session; the reserved token "
             "`all` = every dirty session; any other value = a KQL query "
-            "(intersected with dirty) — Slice 3"
+            "(intersected with dirty)"
         ),
     )
     _add_session_selectors(p_flush)
@@ -2422,9 +2416,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_search.set_defaults(func=cmd_search)
 
-    # record subcommand: ``lore record create`` (Slice 3, S2).
+    # record subcommand: ``lore record create``.
     # ``--team`` etc. are the *routing* flags (scope → place_record); their
-    # sidecar-write semantics are owned by Slice 2 (dedicated-field-flags plan).
+    # sidecar-write semantics are owned by the record-write layer.
     p_record = sub.add_parser(
         "record",
         help="Create, update, delete, or manage vault records",
@@ -2441,23 +2435,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--title", required=True,
         help="Human-readable title (used to derive the record name slug)",
     )
-    # Routing flags (AC5): passed to place_record as scope. These influence vault
-    # selection (S4 hook); their sidecar-write semantics are owned by Slice 2.
+    # Routing flags: passed to place_record as scope. These influence vault
+    # selection; their sidecar-write semantics are owned by the record-write layer.
     p_record_create.add_argument(
         "--repo", default=None,
-        help="Routing scope: restrict to this repo's vault (AC5)",
+        help="Routing scope: restrict to this repo's vault",
     )
     p_record_create.add_argument(
         "--product", default=None,
-        help="Routing scope: restrict to this product's vault (AC5)",
+        help="Routing scope: restrict to this product's vault",
     )
     p_record_create.add_argument(
         "--suite", default=None,
-        help="Routing scope: restrict to this suite's vault (AC5)",
+        help="Routing scope: restrict to this suite's vault",
     )
     p_record_create.add_argument(
         "--team", default=None,
-        help="Routing scope: restrict to this team's vault (AC5)",
+        help="Routing scope: restrict to this team's vault",
     )
     _add_record_field_flags(p_record_create)
     # Map flags (labels/annotations): dedicated branch.
@@ -2484,7 +2478,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_record_create.set_defaults(func=cmd_record)
 
-    # ``lore record update RECORD_ID`` (Slice 4, S2).
+    # ``lore record update RECORD_ID``.
     p_record_update = p_record_sub.add_parser(
         "update", help="Update an existing vault record (full-body / --diff / metadata-only)"
     )
@@ -2495,11 +2489,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_record_update.add_argument(
         "--diff", action="store_true",
-        help="Treat piped stdin as a unified diff applied to the existing body "
-             "(KU2). On any non-applying hunk the record is left byte-for-byte "
-             "unmodified and the rejected hunks print to stderr (AC-DIFF1).",
+        help="Treat piped stdin as a unified diff applied to the existing body. "
+             "On any non-applying hunk the record is left byte-for-byte "
+             "unmodified and the rejected hunks print to stderr.",
     )
-    # Scope flags (Slice 3, dedicated-field-flags plan): dual field-setter +
+    # Scope flags: dual field-setter +
     # routing on update too. Each writes its namesake sidecar field AND re-resolves
     # the destination vault from the merged scope; when the destination differs from
     # the record's current vault the record is auto-moved (no manual --move-to).
@@ -2550,7 +2544,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_record_update.set_defaults(func=cmd_record)
 
-    # ``lore record delete RECORD_ID`` (Slice 5, S2).
+    # ``lore record delete RECORD_ID``.
     p_record_delete = p_record_sub.add_parser(
         "delete", help="Delete a vault record (body + sidecar + index row)"
     )
@@ -2569,7 +2563,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_record_delete.add_argument("--team", default=None, help=argparse.SUPPRESS)
     p_record_delete.set_defaults(func=cmd_record)
 
-    # vault subcommand: ``lore vault add|delete|ls|config`` (Slice 4, S4).
+    # vault subcommand: ``lore vault add|delete|ls|config``.
     p_vault = sub.add_parser(
         "vault",
         help="Manage configured layered vaults (add/delete/ls/config)",
@@ -2612,20 +2606,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_vault_config = p_vault_sub.add_parser("config", help="Edit config.json in $EDITOR")
     p_vault_config.set_defaults(func=cmd_vault)
 
-    # session subcommand: ``lore session candidate|referenced`` (Slice 6, S2).
+    # session subcommand: ``lore session candidate|referenced``.
     # A SEPARATE endpoint from ``lore record`` — it does NOT route through the
-    # record write path (AC23, endpoint isolation). Registered with EXPLICIT
+    # record write path (endpoint isolation). Registered with EXPLICIT
     # subcommand names; the action is required. The name is the exact string
     # ``session`` — it does NOT clash with the existing flat ``session-note``
     # command, because argparse prefers an exact subcommand match over an
-    # abbreviation (council/Advocate; the no-prefix-abbrev-clash test pins this).
+    # abbreviation (the no-prefix-abbrev-clash test pins this).
     p_session = sub.add_parser(
         "session",
-        help="Log record candidates / references for a session (race-safe, AC20-23)",
+        help="Log record candidates / references for a session (race-safe)",
     )
     p_session_sub = p_session.add_subparsers(dest="session_action", required=True)
 
-    # ``lore session candidate --session-id ID --kind KIND --phase PHASE`` (AC20/AC21).
+    # ``lore session candidate --session-id ID --kind KIND --phase PHASE``.
     p_session_candidate = p_session_sub.add_parser(
         "candidate",
         help="Log a record-candidate (lazy-creates the session note, race-safe)",
@@ -2650,7 +2644,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_session_candidate.set_defaults(func=cmd_session)
 
-    # ``lore session referenced RECORD_ID --session-id ID`` (AC22).
+    # ``lore session referenced RECORD_ID --session-id ID``.
     p_session_referenced = p_session_sub.add_parser(
         "referenced",
         help="Log that a RECORD_ID was used this session (feeds last-referenced-at)",
@@ -2679,7 +2673,7 @@ def _known_commands(parser: argparse.ArgumentParser) -> frozenset[str]:
     """Return the set of registered top-level subcommand names.
 
     Introspects the parser's ``_SubParsersAction`` so the unknown-command hint
-    (AC-DISP1) can tell a genuinely unrecognized command from a *valid* command
+    can tell a genuinely unrecognized command from a *valid* command
     that merely failed on a sub-argument (e.g. ``record create`` missing
     ``--kind``) — the latter must NOT be mislabelled "unknown command".
     """
@@ -2692,7 +2686,7 @@ def _known_commands(parser: argparse.ArgumentParser) -> frozenset[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     # Intercept argparse's SystemExit so we can emit the ``did you mean …?``
-    # hint (AC-DISP1) before re-raising. argparse calls sys.exit(2) on an
+    # hint before re-raising. argparse calls sys.exit(2) on an
     # unrecognized command, so we catch that here.
     raw = argv if argv is not None else sys.argv[1:]
     try:
@@ -2701,7 +2695,7 @@ def main(argv: list[str] | None = None) -> int:
         cmd = raw[0] if raw else ""
         # Only treat this as an unknown command when the first token is not a
         # flag and not a registered subcommand. A valid command that fails on a
-        # sub-argument re-raises argparse's own error untouched (AC-DISP1: do
+        # sub-argument re-raises argparse's own error untouched (do
         # not swallow / mislabel legitimate argparse errors).
         if exc.code == 2 and cmd and not cmd.startswith("-") and cmd not in _known_commands(parser):
             hint = _unknown_command_hint(cmd)

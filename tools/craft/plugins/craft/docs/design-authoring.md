@@ -1,9 +1,9 @@
 # Design Authoring — `combine_design.py`
 
-This document covers the combine contract, the filename-prefix convention (D-5), the
-docbar-variant convention (D-6), the `combine_design.py` CLI, and the live
+This document covers the combine contract, the filename-prefix convention, the
+docbar-variant convention, the `combine_design.py` CLI, and the live
 `design_mockup` provider seam — the wire by which lore's `brainstorm` skill
-dispatches the `artist` (A-6).
+dispatches the `artist`.
 
 ---
 
@@ -59,15 +59,15 @@ in-repo path is the `artist`, and the external retirement is a follow-up.
 A design in craft consists of:
 
 1. **A design directory** — a flat directory of per-screen `<surface>-<screen>.html` files
-   (the filename-prefix convention, D-5) plus an `index.md` engineering record.
+   (the filename-prefix convention) plus an `index.md` engineering record.
 2. **A chrome catalog** — a `<surface>.md` file declaring brand tokens and (optionally)
-   cross-cutting variants (D-6).
+   cross-cutting variants.
 3. **`combine_design.py`** — assembles all per-screen files into one self-contained
    `<slug>-design-reference.html` reference document.
 
 ---
 
-## Filename-prefix convention (D-5)
+## Filename-prefix convention
 
 Per-screen files are named `<surface>-<screen>.html`, flat in the design directory.
 
@@ -98,7 +98,7 @@ Example `index.md` table:
 
 ---
 
-## Docbar-variant convention (D-6)
+## Docbar-variant convention
 
 The combined reference's docbar exposes a toggle for each cross-cutting variant a
 chrome catalog declares. A chrome that declares no variants produces a docbar with
@@ -179,8 +179,8 @@ The combined reference contains:
 1. **Docbar** — slug title + toggles for each declared chrome variant (if any)
 2. **Screens TOC** — in-page navigation anchoring each numbered section
 3. **00 Design tokens** — swatch table from the chrome catalog's brand tokens
-4. **Numbered screen sections** — per-screen markup assembled VERBATIM (D-4,
-   assemble-not-re-render); each section is wrapped in a labeled `<section>` element
+4. **Numbered screen sections** — per-screen markup assembled VERBATIM
+   (assemble-not-re-render); each section is wrapped in a labeled `<section>` element
 5. **Spec link** — a back-link to the spec URL if `--spec-url` was provided
 
 The output is self-contained: inline styles and toggle JS are embedded in the file.
@@ -199,7 +199,7 @@ wrapper is **NOT a sanitization or containment boundary** — a body containing
 mockups from the same operator running the tool; iframe isolation is out of scope.
 
 The `--output` path is intentionally operator-chosen and unconstrained. The input
-security boundary (S-2) applies to globbed *inputs* only, not the output path.
+security boundary applies to globbed *inputs* only, not the output path.
 
 ---
 

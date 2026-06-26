@@ -1,4 +1,4 @@
-"""``lore search`` executor + renderer (Slice 4, S3).
+"""``lore search`` executor + renderer.
 
 The query path for the KQL-subset facade: parse → compile → execute ONE SQL
 query over the global derived index → assemble → render. This module is a
@@ -16,7 +16,7 @@ spirit (no INSERT/UPDATE/DELETE, no commit) and closes it.
    ``records`` column — stay index-only; never read the vault ``.md`` files).
 6. Render — human banner or ``--json``.
 
-**Injection-defense output (airtight, A-3).** Each hit's ``shared`` flag (read
+**Injection-defense output (airtight).** Each hit's ``shared`` flag (read
 straight from the index ``shared`` INTEGER column — never re-resolved) decides
 wrapping. ``_is_shared`` reads the raw value with a **fail-safe default**: a hit is
 trusted/unfenced ONLY when ``shared`` is exactly the integer ``0``; ANY other value
@@ -26,23 +26,23 @@ leaking untrusted content unfenced. ``shared`` hits — INCLUDING their snippets
 emitted inside ``<external-memory layer="shared" source="…">`` via
 ``xml_escape.wrap_shared`` so a literal ``</external-memory>`` in shared content/
 snippet is entity-escaped and cannot break out or spoof the fence. (The fence wire
-format's ``layer="shared"`` literal is the LOCKED output contract the agent reads —
+format's ``layer="shared"`` literal is the output contract the agent reads —
 it is unrelated to the index ``shared`` column.) Trusted (``shared=0``) hits are
 unfenced. Trusted and shared hits go in clearly delimited, NON-interleaved blocks
 (all trusted first; all shared inside the fence, grouped by source vault).
 
-**Error-path escape (council Critical).** Any reflected query token echoed in a
+**Error-path escape.** Any reflected query token echoed in a
 hard-error message is XML-body-escaped before being written to stderr, so a query
 like ``<external-memory`` (which generates an error containing ``<``) cannot break
 the fence on the error path. ``run_search`` returns the error text already escaped;
 the CLI writes it verbatim to stderr.
 
-**Freshness + completeness footer (council Critical).** Read-only signalling — it
+**Freshness + completeness footer.** Read-only signalling — it
 never mutates the index:
   (a) a coarse staleness hint when the index file's mtime is older than the vault
       root dir's mtime (a cheap stat-vs-stat heuristic; NO per-record disk walk).
-      ``src_mtime==0.0`` sentinel rows are NOT used for staleness (Slice 1
-      carry-forward: the incremental write path stores ``0.0`` = unknown).
+      ``src_mtime==0.0`` sentinel rows are NOT used for staleness (the
+      incremental write path stores ``0.0`` = unknown).
   (b) a ``(showing N of M)`` truncation note when the returned row count hits the
       ``--limit`` (so truncation is not mistaken for exhaustion). The compiled query
       fetches exactly ``limit`` rows; ``_count_total`` issues a separate
@@ -51,7 +51,7 @@ never mutates the index:
       full membership" note when the query used a reverse-edge alias
       (``area:``/``phase:``/``keyword:``).
 
-**tty param** (council Minor): ``tty`` is accepted by ``run_search`` for render-time
+**tty param:** ``tty`` is accepted by ``run_search`` for render-time
 detection (not cached at import) but is not yet wired into the renderer. Detection
 happens at render time when wired — never at import time.
 """
@@ -98,8 +98,8 @@ def _is_shared(raw_shared) -> bool:
     The strict ``is 0`` check (not ``== 0``) excludes ``False`` and ``0.0`` —
     only a genuine integer ``0`` from the ``shared INTEGER`` column is trusted.
 
-    **S4 follow-up:** the index ``shared`` derivation source swaps to per-vault
-    ``config.json`` in S4; this classification (read the column, fence iff not
+    **Follow-up:** the index ``shared`` derivation source swaps to per-vault
+    ``config.json``; this classification (read the column, fence iff not
     integer 0) stays unchanged.
     """
     return not (
@@ -141,8 +141,8 @@ def _index_is_stale(env, vault_roots) -> bool:
     configured vault root directory. If any vault root's mtime is newer than the
     index file, the index *may* be stale (a record could have changed since the
     last reindex). This NEVER walks the vault tree per-record and NEVER reads
-    ``src_mtime`` (the incremental write path stores a ``0.0`` sentinel — Slice 1
-    carry-forward — so per-row mtime is not a reliable staleness signal).
+    ``src_mtime`` (the incremental write path stores a ``0.0`` sentinel, so
+    per-row mtime is not a reliable staleness signal).
 
     Returns False when the index file or a vault root is missing/unstattable
     (absence is not staleness).
@@ -163,7 +163,7 @@ def _index_is_stale(env, vault_roots) -> bool:
 
 
 def _config_is_stale(conn, config_mtime) -> bool:
-    """True ⇒ the index was built against an OLDER ``config.json`` (Slice 5, S4).
+    """True ⇒ the index was built against an OLDER ``config.json``.
 
     Compares the current ``config.json`` mtime (passed by the CLI) against the
     ``index_meta`` ``config_mtime`` stamped at the last reindex. A newer config
@@ -323,7 +323,7 @@ def _footer_lines(*, total, limit, shown, stale, reverse_edge, config_stale=Fals
             "note: the index may be stale (older than the vault) — run `lore reindex` to refresh."
         )
     if config_stale:
-        # Config-freshness signal (Slice 5, S4 — council/Reliability + Security): the
+        # Config-freshness signal: the
         # index was built against an OLDER config.json than the current one, so an
         # out-of-band edit (e.g. flipping a vault's ``shared`` flag) may leave rows'
         # trust wrong until a reindex re-derives them.
@@ -386,8 +386,8 @@ def run_search(
         config_mtime: The current ``config.json`` mtime (float) when a config is
                      present, else ``None``. ``run_search`` compares it against the
                      ``index_meta`` ``config_mtime`` the index was built against; a
-                     newer config emits a config-freshness footer note (Slice 5 —
-                     joins the existing freshness footer; pure read, never writes).
+                     newer config emits a config-freshness footer note (joins
+                     the existing freshness footer; pure read, never writes).
 
     Returns:
         ``(text, exit_code)``. On a parse/compile error, ``exit_code`` is non-zero

@@ -1,4 +1,4 @@
-"""KQL-subset tokenizer + recursive-descent parser (Slice 2, S3).
+"""KQL-subset tokenizer + recursive-descent parser.
 
 Turns a KQL-subset query string into a **backend-agnostic AST** of frozen
 dataclass nodes. No I/O, no SQL, no sqlite — pure string → AST.
@@ -14,7 +14,7 @@ mode would crash. Using concrete runtime type annotations avoids that.
 The parser keeps the SURFACE field name on every AST node (e.g. ``area``,
 ``phase``, ``keyword``, ``related-area``). Alias resolution to the real index key
 (``area`` → ``related-area``, ``phase`` → ``related-phases``,
-``keyword`` → ``keywords``) is deferred to Slice 3's ``kql_compile.py`` so this
+``keyword`` → ``keywords``) is deferred to ``kql_compile.py`` so this
 module stays backend-agnostic. A ``FacetMembership`` node is emitted whenever the
 field name is a known facet alias or its resolved real key; a ``FieldEq`` node is
 emitted for direct scalar fields; a ``Compare`` node is emitted for comparison

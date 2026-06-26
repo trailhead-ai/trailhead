@@ -18,7 +18,7 @@ from pathlib import Path
 _SLUG_REDUCED_KEYS = frozenset({"surfaces", "areas", "related-areas"})
 
 # Path prefixes stripped when slug-reducing overlap-key wikilink values.
-# Singular kind dirs (Slice 7): vault directories are singular, so a wikilink
+# Singular kind dirs: vault directories are singular, so a wikilink
 # like ``[[area/foo]]`` / ``[[plan/foo]]`` slug-reduces to ``foo``.
 _SLUG_PREFIXES = ("area/", "tools/", "plan/")
 
