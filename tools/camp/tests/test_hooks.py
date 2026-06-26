@@ -6,7 +6,7 @@ The `worktree-cleanup` handler itself is retained (still invocable) but no longe
 auto-wired. Member worktrees now live under the unified workspace layout
 central_state_dir(group)/worktrees/<slug>/<member>.
 
-Covers:
+Test contract (all must RED before implementation, GREEN after):
 
 1. init on a fake group writes the SessionStart hook entry (and NOT a
    WorktreeRemove entry) + the env.CAMP_BIN block into each member's
@@ -64,7 +64,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 
 # ---------------------------------------------------------------------------
-# Helpers shared with the lifecycle tests
+# Helpers shared with slice2 tests
 # ---------------------------------------------------------------------------
 
 

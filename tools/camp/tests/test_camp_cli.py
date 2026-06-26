@@ -1,10 +1,10 @@
 """Tests for the camp CLI entry points (bin/camp, cli/camp, capabilities.toml).
 
-Covers:
+Test contract:
 - camp --help exits 0 and prints a grouped menu (not a raw argparse dump).
 - camp --version prints the binary path.
 - camp --which prints the binary path.
-- capabilities.toml loads + validates via the capabilities loader.
+- capabilities.toml loads + validates via the Step-1 loader.
 - bin/camp wrapper resolves cli/camp (smoke: exits 0 via python invocation).
 - marketplace.json source resolves (./plugins/camp).
 - Import guard: cli/camp --help succeeds; guard function tested in test_spine.py.
@@ -135,7 +135,7 @@ def test_bin_camp_wrapper_exits_0_on_help() -> None:
 
 
 # ---------------------------------------------------------------------------
-# capabilities.toml loads + validates via the capabilities loader
+# capabilities.toml loads + validates via the Step-1 loader
 # ---------------------------------------------------------------------------
 
 

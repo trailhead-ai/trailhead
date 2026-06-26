@@ -4,6 +4,7 @@ trailhead no longer edits the shell rc; it builds a shim dir and `shellenv`
 prints the export lines the user adds to their profile.
 """
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -124,3 +125,144 @@ class TestShellenv:
         out = shellenv_lines(shell="zsh", env=_env(tmp_path))
         assert "TRAILHEAD_ROOT=" in out
         assert "trailhead" in out
+
+
+# ---------------------------------------------------------------------------
+# camp() cd-wrapper
+# ---------------------------------------------------------------------------
+
+
+class TestCampWrapperPosix:
+    """The bash/zsh `camp()` wrapper appended to shellenv output."""
+
+    @pytest.fixture(params=["bash", "zsh"])
+    def out(self, request, tmp_path):
+        return shellenv_lines(shell=request.param, env=_env(tmp_path), trailhead_root="/repo")
+
+    def test_defines_a_camp_function(self, out):
+        assert "camp() {" in out
+
+    def test_uses_command_camp_to_avoid_path_recursion(self, out):
+        # Both the capture (new) and the passthrough branch must call `command camp`.
+        assert 'command camp "$@"' in out
+
+    def test_cds_only_on_the_new_branch(self, out):
+        assert '[ "$1" = "new" ]' in out
+        # Exactly one cd — guarded inside the `new` branch, not the passthrough.
+        assert out.count("cd -- ") == 1
+
+    def test_cd_is_quote_safe(self, out):
+        assert 'cd -- "$p"' in out
+
+    def test_exports_marker_only_around_new(self, out):
+        assert "CAMP_SHELL_INTEGRATION=1 command camp" in out
+
+    def test_does_not_spawn_a_subshell_function_body(self, out):
+        # A `camp() ( … )` body would run the cd in a subshell and never reach the
+        # parent shell. The function must be brace-bodied (current shell).
+        assert "camp() (" not in out
+
+    def test_keeps_the_existing_path_lines(self, out):
+        assert 'export TRAILHEAD_ROOT="/repo"' in out
+        assert "export PATH=" in out
+
+
+class TestCampWrapperFish:
+    """The fish `camp()` wrapper (separate body — fish syntax differs)."""
+
+    @pytest.fixture
+    def out(self, tmp_path):
+        return shellenv_lines(shell="fish", env=_env(tmp_path), trailhead_root="/repo")
+
+    def test_defines_a_camp_function(self, out):
+        assert "function camp" in out
+        assert "\nend\n" in out or out.rstrip().endswith("end")
+
+    def test_uses_command_camp_to_avoid_path_recursion(self, out):
+        assert "command camp $argv" in out
+
+    def test_cds_only_on_the_new_branch(self, out):
+        assert 'test "$argv[1]" = new' in out
+        assert out.count("cd -- ") == 1
+
+    def test_cd_is_quote_safe(self, out):
+        # fish cmd-sub splits on newlines, not spaces, so a one-line path is a
+        # single-element list → `cd -- $p` is quote-safe.
+        assert "cd -- $p" in out
+
+    def test_exports_marker_with_function_scoped_set(self, out):
+        # Must NOT use `env VAR=val command camp` (env execs a binary named
+        # `command`); function-scoped `set -lx` is the validated form.
+        assert "set -lx CAMP_SHELL_INTEGRATION 1" in out
+        assert "env CAMP_SHELL_INTEGRATION" not in out
+
+    def test_keeps_the_existing_path_lines(self, out):
+        assert 'set -gx TRAILHEAD_ROOT "/repo"' in out
+        assert "fish_add_path" in out
+
+
+class TestCampWrapperBehavior:
+    """Exercise the emitted bash wrapper end-to-end."""
+
+    def test_space_path_cds_correctly(self, tmp_path):
+        target = tmp_path / "work space"  # a directory whose path contains a space
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text(
+            "#!/usr/bin/env bash\n"
+            'if [ "$1" = "new" ]; then\n'
+            '  mkdir -p "$TARGET"\n'
+            '  printf "%s\\n" "$TARGET"\n'
+            "fi\n"
+        )
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = (
+            f"{wrapper}\n"
+            f'export PATH="{fakebin}:$PATH"\n'
+            "camp new feat\n"
+            "pwd\n"
+        )
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env={"TARGET": str(target), "PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        # Last line of stdout is the cwd after the wrapper cd'd us in.
+        assert proc.stdout.strip().splitlines()[-1] == str(target)
+
+    def test_other_verbs_pass_through_without_cd(self, tmp_path):
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text(
+            "#!/usr/bin/env bash\n"
+            'printf "ran: %s\\n" "$*"\n'
+        )
+        fake_camp.chmod(0o755)
+
+        start = tmp_path / "start"
+        start.mkdir()
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = (
+            f"{wrapper}\n"
+            f'export PATH="{fakebin}:$PATH"\n'
+            "camp list\n"
+            "pwd\n"
+        )
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(start),
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "ran: list" in proc.stdout
+        # No cd happened — still in the starting dir.
+        assert proc.stdout.strip().splitlines()[-1] == str(start)

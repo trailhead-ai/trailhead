@@ -7,7 +7,7 @@ additionalContext JSON contract to stdout, then clears the queue. An empty queue
 emits NOTHING (exit 0). The drain is resilient — on any internal error it exits 0
 with no output so it never crashes a tool call.
 
-Covers:
+Test contract:
 - camp inject --drain with a queued doc → valid PostToolUse additionalContext JSON
   (parse it, assert the doc content is inside additionalContext); queue cleared.
 - camp inject --drain with an empty queue → no output, exit 0.

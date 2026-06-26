@@ -122,16 +122,43 @@ def remove_central_manifest(path: Path) -> None:
         pass
 
 
-@contextmanager
-def reconcile_lock(manifest_dir: Path):
-    """Acquire the slug-scoped .reconcile.lock guarding manifest mutations.
+def lock_path_for(ws_dir: Path) -> Path:
+    """Return the slug-scoped lockfile path for a workspace dir.
 
-    All status flips (background provisioner + foreground `camp setup`)
-    serialize on this lock, the same lock reconcile_worktree uses, so concurrent
-    writers never tear the whole-manifest temp+rename write.
+    The lockfile is a SIBLING of the workspace dir — <worktrees-root>/<slug>.lock,
+    NOT a file inside it. This is load-bearing for cross-process mutual exclusion:
+    reconcile_break's teardown `shutil.rmtree`'s the entire workspace dir, so a
+    lockfile held INSIDE it would have its inode deleted mid-critical-section. A
+    concurrent acquirer (blocked on the old inode, or arriving in the
+    rmtree→release window) would then mkdir the dir + flock a brand-NEW inode and
+    get zero mutual exclusion. Keying the lock on the persistent worktrees
+    root closes that window — the inode the holder flocks is never the one rmtree
+    removes.
+
+    ws_dir is central_state_dir(group)/worktrees/<slug>, so ws_dir.name is the
+    slug and ws_dir.parent is the worktrees root.
     """
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = manifest_dir / ".reconcile.lock"
+    ws_dir = Path(ws_dir)
+    return ws_dir.parent / f"{ws_dir.name}.lock"
+
+
+@contextmanager
+def reconcile_lock(ws_dir: Path):
+    """Acquire the slug-scoped lock guarding manifest mutations.
+
+    All status flips (background provisioner + foreground `camp setup`),
+    reconcile_worktree's create, reconcile_break's teardown, and
+    seed_pending_workspace's seed serialize on this lock so concurrent writers
+    never tear the whole-manifest temp+rename write AND a `camp new` seed never
+    races a `camp remove` teardown into a ghost workspace.
+
+    The lockfile lives OUTSIDE ws_dir at <worktrees-root>/<slug>.lock (see
+    lock_path_for) so reconcile_break's rmtree of ws_dir cannot delete the held
+    lock inode. Only the worktrees root is mkdir'd here — locking a slug
+    never pre-creates that slug's workspace dir.
+    """
+    lock_path = lock_path_for(ws_dir)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = open(str(lock_path), "w")
     try:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)

@@ -1,12 +1,12 @@
-"""CLI integration: camp ai / camp setup / camp status end-to-end.
+"""CLI integration: camp new / camp setup / camp status end-to-end.
 
 Exercises the real cli/camp dispatch through CAMP_CONFIG_DIR + CAMP_STATE_DIR
-overrides (no real ~/.claude, no real claude exec). camp ai's harness launch is
+overrides (no real ~/.claude, no real claude exec). camp new's harness launch is
 suppressed via CAMP_TEST_NO_EXEC so the test can assert the seed+spawn without the
-os.execvp into claude (the real launch happens later).
+os.execvp into claude.
 
-Covers:
-- camp ai <slug> seeds the manifest pending and (with the real background
+Test contract:
+- camp new <slug> seeds the manifest pending and (with the real background
   provisioner) drives every member to ready; the workspace dir + setup.log exist.
 - camp setup (foreground) completes provisioning; camp status exit codes
   0=ready / 2=pending / 3=failed; --json shape stable.
@@ -129,14 +129,14 @@ def _states(cli_env, slug):
     return {m["name"]: m["provision_state"] for m in data["members"]}
 
 
-class TestCampAi:
-    def test_ai_seeds_and_background_provisions_to_ready(self, cli_env):
-        """camp ai seeds pending, spawns the detached provisioner, which drives
+class TestCampNew:
+    def test_new_seeds_and_background_provisions_to_ready(self, cli_env):
+        """camp new seeds pending, spawns the detached provisioner, which drives
         every member to ready. The workspace dir + setup.log exist."""
         r = _camp(
-            cli_env, "ai", "feat-x", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
+            cli_env, "new", "feat-x", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
         )
-        assert r.returncode == 0, f"camp ai failed: {r.stderr}"
+        assert r.returncode == 0, f"camp new failed: {r.stderr}"
 
         ws = cli_env["state_dir"] / "mygroup" / "worktrees" / "feat-x"
         assert ws.is_dir()
@@ -153,8 +153,8 @@ class TestCampAi:
         assert (ws / "setup.log").exists()
         assert (ws / "setup.log").stat().st_mode & 0o777 == 0o600
 
-    def test_ai_requires_slug(self, cli_env):
-        r = _camp(cli_env, "ai", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"})
+    def test_new_requires_slug(self, cli_env):
+        r = _camp(cli_env, "new", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"})
         assert r.returncode != 0
         assert "slug" in r.stderr.lower()
 
@@ -162,11 +162,11 @@ class TestCampAi:
 class TestCampSetup:
     def test_foreground_setup_drives_ready(self, cli_env):
         """camp setup (foreground) completes provisioning of a seeded workspace."""
-        # Seed only (no background provisioner) via a hidden seam: camp ai with
+        # Seed only (no background provisioner) via a hidden seam: camp new with
         # CAMP_TEST_NO_EXEC still spawns the bg provisioner, so instead drive setup
-        # directly on a fresh slug by seeding through camp ai then setup --retry.
+        # directly on a fresh slug by seeding through camp new then setup --retry.
         r = _camp(
-            cli_env, "ai", "feat-s", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
+            cli_env, "new", "feat-s", "--group", "mygroup", extra_env={"CAMP_TEST_NO_EXEC": "1"}
         )
         assert r.returncode == 0, r.stderr
 

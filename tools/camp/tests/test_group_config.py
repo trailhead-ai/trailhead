@@ -1,6 +1,6 @@
 """Tests for group_config.py — tomllib loader + schema validation.
 
-Covers:
+Test contract:
 - Loads a valid trailhead.toml config.
 - A malformed config (missing required field) → error naming file + failing field.
 - A malformed config (bad type) → error naming file + failing field.
@@ -361,7 +361,7 @@ def test_groups_example_trailhead_toml_loads() -> None:
 
 
 # ---------------------------------------------------------------------------
-# [[shared_vaults]] block — parse + thread into returned dict
+# [[shared_vaults]] block — B-2: parse + thread into returned dict
 # ---------------------------------------------------------------------------
 
 _VALID_TOML_WITH_SHARED_VAULTS = """\
@@ -442,7 +442,7 @@ root = ""
 
 
 def test_shared_vaults_round_trips_into_dict(tmp_path: Path) -> None:
-    """A valid [[shared_vaults]] block is returned in the dict."""
+    """B-2/B-3: a valid [[shared_vaults]] block is returned in the dict."""
     from group_config import load_group
 
     f = tmp_path / "testgroup.toml"
@@ -520,7 +520,7 @@ def test_shared_vaults_empty_root_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# [harness] partial / composable block
+# [harness] partial / composable block (Fix 1)
 # ---------------------------------------------------------------------------
 
 
@@ -536,18 +536,18 @@ def _write_and_load(tmp_path: Path, toml_body: str):
 
 
 def test_harness_doc_files_only_loads(tmp_path: Path) -> None:
-    """[harness] with only doc_files (no new/resume/cwd) must load without error."""
+    """[harness] with only doc_files (no binary/cwd) must load without error."""
     cfg = _write_and_load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
     assert "harness" in cfg
     assert cfg["harness"]["doc_files"] == ["AGENTS.md"]
 
 
-def test_harness_doc_files_only_no_new_key(tmp_path: Path) -> None:
-    """[harness] with only doc_files must not populate new/resume/cwd keys."""
+def test_harness_doc_files_only_no_binary_key(tmp_path: Path) -> None:
+    """[harness] with only doc_files must not populate binary/cwd keys."""
     cfg = _write_and_load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
     h = cfg["harness"]
-    assert "new" not in h
-    assert "resume" not in h
+    assert "binary" not in h
+    assert "cwd" not in h
 
 
 def test_harness_cwd_only_loads(tmp_path: Path) -> None:
@@ -557,24 +557,23 @@ def test_harness_cwd_only_loads(tmp_path: Path) -> None:
     assert cfg["harness"]["cwd"] == "{workspace}/sub"
 
 
-def test_harness_new_only_loads(tmp_path: Path) -> None:
-    """[harness] with only new (resume falls back) must load without error."""
-    cfg = _write_and_load(tmp_path, '[harness]\nnew = ["myharness"]\n')
+def test_harness_binary_only_loads(tmp_path: Path) -> None:
+    """[harness] with only binary must load without error."""
+    cfg = _write_and_load(tmp_path, '[harness]\nbinary = "myharness"\n')
     assert "harness" in cfg
-    assert cfg["harness"]["new"] == ["myharness"]
-    assert "resume" not in cfg["harness"]
+    assert cfg["harness"]["binary"] == "myharness"
 
 
 def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> None:
     """Round-trip the groups.example commented [harness] block.
 
-    The example shows [harness] + doc_files = ["AGENTS.md"] alone (no new/resume).
+    The example shows [harness] + doc_files = ["AGENTS.md"] alone (no binary).
     Uncommenting it must produce a valid config that loads, and the profile's
-    doc_files must be ["AGENTS.md"] while launch falls back to claude defaults.
+    doc_files must be ["AGENTS.md"] while the binary still falls back to the claude
+    default (the launch surface was removed).
     """
     from group_config import load_group
-    from harness_launch import resolve_harness_profile
-    from session_identity import session_id_for
+    from harness_profile import resolve_harness_profile
 
     f = tmp_path / "trailhead.toml"
     f.write_text(
@@ -587,15 +586,8 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
 
     profile = resolve_harness_profile(cfg)
     assert profile.doc_files == ["AGENTS.md"]
-
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    sid = session_id_for("trailhead", "feat-x")
-    argv, cwd = profile.launch(slug="feat-x", workspace=str(ws), is_resume=False, session_id=sid)
-    assert argv == ["claude", "--session-id", sid]
-    assert cwd == ws
-
-    argv_resume, _ = profile.launch(
-        slug="feat-x", workspace=str(ws), is_resume=True, session_id=sid
-    )
-    assert argv_resume == ["claude", "--resume", sid]
+    # inject defaults to "stdout" when a [harness] block is present without inject
+    assert profile.inject == "stdout"
+    # binary name still falls back to the claude default
+    assert profile.binary == "claude"
+    assert profile.is_claude_launch() is True

@@ -1,22 +1,21 @@
-"""Structural / efficiency fixes.
+"""Structural / efficiency fixes from a code review.
 
-Inject-drain lightness — the hidden `camp inject --drain` PostToolUse hook fires
-  on every Bash tool call. The inject route must be near-free: it must NOT import
-  the heavy ~1700-line spine module on its account, and must skip the cold-subprocess
+The hidden `camp inject --drain` PostToolUse hook fires on every Bash
+  tool call. The inject route must be near-free: it must NOT import the heavy
+  ~1700-line spine module on its account, and must skip the cold-subprocess
   ensure_trailhead_importable() bootstrap. The drain still works.
 
-env threading — `_slug_from_args_or_cwd` dropped `env`, breaking the "all callers
-  pass the same env" invariant. resolve_from_cwd derives camp_state_dir from
+`_slug_from_args_or_cwd` dropped `env`, breaking the "all callers pass
+  the same env" invariant. resolve_from_cwd derives camp_state_dir from
   state_dir("camp", env=env) when not given camp_state_dir, so a non-None env
   must reach it — otherwise a slug-from-cwd handler resolves against a different
   state dir than the downstream manifest/workspace ops.
 
-Verb-taxonomy single source — the disabled-verb set + legacy-redirect map are
-  sourced from a single module (verb_taxonomy) that BOTH cli/camp and spine
-  consult, and the 5 spine "no group resolved" stubs collapse into one
-  cmd_needs_group.
+The disabled-verb set + legacy-redirect map are sourced from a single
+  module (verb_taxonomy) that BOTH cli/camp and spine consult, and the 5 spine
+  "no group resolved" stubs collapse into one cmd_needs_group.
 
-rmtree-confinement guard — the guard in reconcile_break (anchored on
+C1 — the rmtree-confinement guard in reconcile_break (anchored on
   central_state_dir/worktrees) is exercised: member worktree_paths stay inside
   the resolved workspace dir (pre-check passes), but the workspace dir itself is a
   symlink escaping worktrees_root, so the dedicated rmtree guard fires.
@@ -164,7 +163,7 @@ class TestFix7SlugFromCwdThreadsEnv:
 
 
 class TestFix9VerbTaxonomy:
-    @pytest.mark.parametrize("verb", ["ai", "setup"])
+    @pytest.mark.parametrize("verb", ["new", "setup"])
     def test_needs_group_configure_message(self, verb, capsys):
         import spine
 
@@ -174,7 +173,7 @@ class TestFix9VerbTaxonomy:
         err = capsys.readouterr().err
         assert "no camp group resolves from this directory" in err
 
-    @pytest.mark.parametrize("verb", ["rm", "cd", "enter"])
+    @pytest.mark.parametrize("verb", ["remove", "pwd", "activate"])
     def test_needs_group_pass_group_message(self, verb, capsys):
         import spine
 
@@ -187,7 +186,7 @@ class TestFix9VerbTaxonomy:
 
 
 # ===========================================================================
-# rmtree-confinement guard fires when the workspace dir symlink-escapes
+# C1 — rmtree-confinement guard fires when the workspace dir symlink-escapes
 # ===========================================================================
 
 

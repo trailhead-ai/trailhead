@@ -16,17 +16,17 @@ the brew-style `shellenv` line to your shell profile (fish/zsh/bash all handled)
 eval "$(/path/to/trailhead/bin/trailhead shellenv)"
 ```
 
-Then `camp ai <slug>` works from a plain shell. See the [root README](../../README.md)
+Then `camp new <slug>` works from a plain shell. See the [root README](../../README.md)
 for the full install flow.
 
 ## Quick start
 
 ```
-camp ai <slug>       # create or resume a workspace
+camp new <slug>      # create or enter a workspace
 camp pwd <slug>      # print workspace path
-camp ls              # list all worktrees
+camp list            # list all worktrees (alias: ls)
 camp status          # show git + drift status
-camp rm              # tear down a worktree
+camp remove          # tear down a worktree (alias: rm)
 camp --help          # full command reference
 camp --version       # show version + resolved binary path
 ```

@@ -12,10 +12,10 @@ same inputs produces identical output with no duplication or appending.
 The doc embeds:
   - the member list (each member name, in a ## Members bulleted block)
   - a verbatim, invocable command table with exact strings:
-      camp enter <member>   -- activate a member for the current session
-      camp status           -- check provisioning status
-      camp setup            -- retry failed/pending provisioning
-  - guidance that members are INERT until `camp enter <member>`
+      camp activate <member>   -- activate a member for the current session
+      camp status              -- check provisioning status
+      camp setup               -- retry failed/pending provisioning
+  - guidance that members are INERT until `camp activate <member>`
   - guidance that setup may be in flight (background provisioner)
 """
 
@@ -24,7 +24,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from harness_launch import resolve_harness_profile
+from harness_profile import resolve_harness_profile
 
 
 def _render_doc(
@@ -53,8 +53,8 @@ def _render_doc(
 ## Important: Members are INERT until activated
 
 Each member worktree is provisioned in the background and is **inert until
-you explicitly activate it** with `camp enter <member>`. Do not attempt to
-work in a member directory until you have entered it.
+you explicitly activate it** with `camp activate <member>`. Do not attempt to
+work in a member directory until you have activated it.
 
 Setup may be in flight (background provisioner is running). Check status
 before acting on any member.
@@ -63,7 +63,7 @@ before acting on any member.
 
 | Command | Purpose |
 |---------|---------|
-| `camp enter <member>` | Activate a member for the current session |
+| `camp activate <member>` | Activate a member for the current session |
 | `camp status` | Check provisioning status (exit 0=ready, 2=pending, 3=failed) |
 | `camp setup` | Retry failed or pending member provisioning |
 
@@ -71,7 +71,7 @@ before acting on any member.
 
 1. Run `camp status` to see which members are ready.
 2. If setup is still in flight (pending), wait or run `camp setup`.
-3. Run `camp enter <member>` to activate a member — this prints its CLAUDE.md
+3. Run `camp activate <member>` to activate a member — this prints its CLAUDE.md
    and marks it active for the session.
 4. Work in the activated member's worktree directory.
 """

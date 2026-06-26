@@ -39,7 +39,7 @@ bootstrap = []
 [branch]
 pattern = "worktree-{slug}"
 
-# [harness] — optional launch-seam config.
+# [harness] — optional harness-profile config (doc surfacing, injection, trust).
 #
 # camp defaults to the claude harness (writes CLAUDE.md as the workspace doc).
 # Override doc_files when using a different AI coding tool:
@@ -47,6 +47,11 @@ pattern = "worktree-{slug}"
 #   [harness]
 #   # For Codex, Copilot, or Cursor — they read AGENTS.md as the workspace doc.
 #   # doc_files = ["AGENTS.md"]
+#
+# binary — the harness binary NAME (default "claude"). camp does not launch it;
+#   only its basename is read, to detect a claude launch and scope the trust
+#   pre-seed below. Set it for a renamed/wrapped claude binary, or leave default.
+#   # binary = "claude"
 #
 # You can also supply both to support multiple tools simultaneously:
 #   # doc_files = ["AGENTS.md", "CLAUDE.md"]

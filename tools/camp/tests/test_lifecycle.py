@@ -1,11 +1,11 @@
-"""Tests for the unified-layout worktree lifecycle + central manifest.
+"""Tests for unified-layout worktree lifecycle + central manifest.
 
-The unified layout relocates member worktrees from the OLD per-repo layout
+This relocates member worktrees from the OLD per-repo layout
     <repo_root>/.claude/worktrees/<slug>/
 to the unified workspace layout
     central_state_dir(group)/worktrees/<slug>/<member>/
 
-Covers:
+Test contract (all must RED before implementation, GREEN after):
 
 1. reconcile creates …/worktrees/<slug>/<member> for each member on
    worktree-<slug>; the central manifest lists both with worktree_path under the
@@ -547,7 +547,7 @@ class TestBranchBasePolicy:
 
 
 # ---------------------------------------------------------------------------
-# Worktree admin name == slug (stage + git worktree move)
+# worktree admin name == slug (stage + git worktree move)
 # ---------------------------------------------------------------------------
 
 

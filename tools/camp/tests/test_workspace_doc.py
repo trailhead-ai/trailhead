@@ -1,13 +1,13 @@
-"""Tests for the workspace doc (CLAUDE.md + AGENT.md) and workspace SessionStart hook.
+"""Tests for workspace doc (CLAUDE.md + AGENT.md) and workspace SessionStart hook.
 
-Covers:
+Test contract (all must RED before implementation, GREEN after):
 
 1. workspace CLAUDE.md + AGENT.md written at bring-up:
    a. Both files exist at the workspace root after bring_up_workspace.
    b. Each file contains a verbatim, invocable command table with exact strings
-      'camp enter <member>', 'camp status', 'camp setup' (exact-string match).
+      'camp activate <member>', 'camp status', 'camp setup' (exact-string match).
    c. Doc contains the member list (each member name).
-   d. Doc contains "inert until camp enter" or equivalent phrasing.
+   d. Doc contains "inert until" or equivalent phrasing.
    e. Doc contains "setup may be in flight" or equivalent phrasing.
 
 2. Rewrite on re-run is idempotent — no duplication, stable content for stable inputs:
@@ -129,11 +129,11 @@ class TestWorkspaceDocCommandTable:
         write_workspace_doc(ws_dir, group, "feat-x")
         return (ws_dir / "CLAUDE.md").read_text()
 
-    def test_claude_md_contains_camp_enter_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp enter <member>'."""
+    def test_claude_md_contains_camp_activate_exact(self, tmp_path: Path):
+        """CLAUDE.md contains the exact string 'camp activate <member>'."""
         content = self._get_claude_md(tmp_path)
-        assert "camp enter <member>" in content, (
-            f"Expected 'camp enter <member>' in CLAUDE.md, not found.\nContent:\n{content}"
+        assert "camp activate <member>" in content, (
+            f"Expected 'camp activate <member>' in CLAUDE.md, not found.\nContent:\n{content}"
         )
 
     def test_claude_md_contains_camp_status_exact(self, tmp_path: Path):
@@ -157,8 +157,8 @@ class TestWorkspaceDocCommandTable:
             f"Found 'camp setup --retry' in CLAUDE.md — this flag was removed.\nContent:\n{content}"
         )
 
-    def test_configured_agents_md_contains_camp_enter_exact(self, tmp_path: Path):
-        """When doc_files=[AGENTS.md], that file contains 'camp enter <member>'."""
+    def test_configured_agents_md_contains_camp_activate_exact(self, tmp_path: Path):
+        """When doc_files=[AGENTS.md], that file contains 'camp activate <member>'."""
         from workspace_doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
@@ -170,8 +170,21 @@ class TestWorkspaceDocCommandTable:
         )
         write_workspace_doc(ws_dir, group, "feat-x")
         content = (ws_dir / "AGENTS.md").read_text()
-        assert "camp enter <member>" in content, (
-            f"Expected 'camp enter <member>' in AGENTS.md, not found.\nContent:\n{content}"
+        assert "camp activate <member>" in content, (
+            f"Expected 'camp activate <member>' in AGENTS.md, not found.\nContent:\n{content}"
+        )
+
+    def test_claude_md_has_no_stale_verbs(self, tmp_path: Path):
+        """Generated CLAUDE.md names 'camp activate' and no removed 'camp enter'/'camp ai'."""
+        content = self._get_claude_md(tmp_path)
+        assert "camp activate" in content, (
+            f"Generated doc must name 'camp activate'.\nContent:\n{content}"
+        )
+        assert "camp enter" not in content, (
+            f"Generated doc must not name the removed 'camp enter'.\nContent:\n{content}"
+        )
+        assert "camp ai" not in content, (
+            f"Generated doc must not name the removed 'camp ai'.\nContent:\n{content}"
         )
 
 
@@ -682,21 +695,20 @@ class TestResolveDocFiles:
 
     def test_no_harness_returns_claude_md(self):
         """No [harness] block → doc_files is ['CLAUDE.md']."""
-        from harness_launch import resolve_harness_profile
+        from harness_profile import resolve_harness_profile
 
         group = {"group": {"name": "g"}, "members": []}
         assert resolve_harness_profile(group).doc_files == ["CLAUDE.md"]
 
     def test_harness_without_doc_files_returns_claude_md(self):
         """[harness] block without doc_files → ['CLAUDE.md']."""
-        from harness_launch import resolve_harness_profile
+        from harness_profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
             "members": [],
             "harness": {
-                "new": ["claude"],
-                "resume": ["claude", "-r", "{slug}"],
+                "binary": "claude",
                 "cwd": "{workspace}",
             },
         }
@@ -704,7 +716,7 @@ class TestResolveDocFiles:
 
     def test_configured_doc_files_returned(self):
         """Configured doc_files is returned as-is."""
-        from harness_launch import resolve_harness_profile
+        from harness_profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -715,7 +727,7 @@ class TestResolveDocFiles:
 
     def test_multiple_doc_files_returned(self):
         """Multiple configured doc_files are all returned."""
-        from harness_launch import resolve_harness_profile
+        from harness_profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -846,8 +858,7 @@ name = "myrepo"
 repo_root = "/tmp/myrepo"
 
 [harness]
-new = ["claude"]
-resume = ["claude", "-r", "{{slug}}"]
+binary = "claude"
 doc_files = {doc_files_toml}
 """
 
@@ -922,8 +933,7 @@ name = "myrepo"
 repo_root = "/tmp/myrepo"
 
 [harness]
-new = ["claude"]
-resume = ["claude", "-r", "{slug}"]
+binary = "claude"
 """
         f = tmp_path / "g.toml"
         f.write_text(toml)

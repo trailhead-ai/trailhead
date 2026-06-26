@@ -49,6 +49,6 @@ def cmd_pwd(
         raise WorkspaceNotFoundError(
             f"camp pwd: no workspace for slug {slug!r} in group {group_name!r} "
             f"(expected: {ws_dir})\n"
-            f"  Run 'camp ai {slug}' to create it."
+            f"  Run 'camp new {slug}' to create it."
         )
     return ws_dir

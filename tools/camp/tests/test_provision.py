@@ -1,12 +1,12 @@
 """Tests for async provisioning, detached spawn, setup, status.
 
-Covers:
+Test contract (all must RED before implementation, GREEN after):
 
-1. Real detached survival (BLOCKING gate): a fork-then-os.execvp integration test
+1. Real survival (BLOCKING gate): a fork-then-os.execvp integration test
    against a no-op provisioner asserts the detached child completes + writes its
    sentinel AFTER the parent process image is replaced — proving the spawn helper
-   actually detaches the child. This is the real proof that the spawn detaches; it
-   supersedes the earlier ad-hoc survival probe.
+   actually detaches the child. This is the real proof the prover's probe stood in
+   for; the probe (test_u1_detached_survival.py) is REPLACED by this test.
 
 2. spawn_detached_provisioner: builds the `camp setup --background` argv, spawns
    with start_new_session=True, stdin=DEVNULL, std streams → setup.log (0o600).
@@ -125,7 +125,7 @@ def two_member_group(tmp_path: Path):
 
 
 # ===========================================================================
-# Test 1: Real detached survival (BLOCKING gate)
+# Test 1: real survival (BLOCKING gate)
 # ===========================================================================
 
 
@@ -230,7 +230,7 @@ class TestU1RealSurvival:
         assert "provisioner completed" in logfile.read_text()
 
     def test_setup_log_written_0600(self, tmp_path: Path) -> None:
-        """setup.log is created with mode 0o600 (owner-only)."""
+        """setup.log is created with mode 0o600 (security)."""
         from provision import spawn_detached_provisioner
 
         logfile = tmp_path / "setup.log"
@@ -383,7 +383,8 @@ class TestPretrustWiring:
 
     Gated on profile.pretrust and profile.is_claude_launch(); best-effort (any
     exception is warned and non-fatal). env threads HOME through so the write
-    lands under tmp, never the real ~/.claude.json.
+    lands under tmp, never the real ~/.claude.json
+    (the harness CLI is not isolated by the trailhead env).
     """
 
     def _env(self, two_member_group):
@@ -451,7 +452,7 @@ class TestPretrustWiring:
         g = two_member_group
         env = self._env(g)
         group = dict(g["group"])
-        group["harness"] = {"new": ["codex"]}
+        group["harness"] = {"binary": "codex"}
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
         bring_up_workspace(group, "feat-codex", env=env)
@@ -665,6 +666,44 @@ class TestForegroundSetup:
 
 
 class TestConcurrency:
+    def test_seed_blocks_on_held_slug_lock(self, two_member_group, monkeypatch):
+        """seed_pending_workspace must contend on the slug lock so a
+        `camp new` seed cannot race a `camp remove` teardown into a ghost
+        workspace. Proof: while the test holds the slug reconcile lock, a seed
+        running in another thread blocks — it writes no manifest until released."""
+        from manifest import reconcile_lock, workspace_dir
+        import provision
+
+        g = two_member_group
+        slug = "feat-seedlock"
+        ws_dir = workspace_dir("testgroup", slug, env=g["env"])
+        mpath = ws_dir / "manifest.json"
+
+        done = threading.Event()
+
+        def run_seed():
+            provision.seed_pending_workspace(g["group"], slug, env=g["env"])
+            done.set()
+
+        with reconcile_lock(ws_dir):
+            t = threading.Thread(target=run_seed)
+            t.start()
+            # Give the seed thread time to start and block on the held lock.
+            time.sleep(0.25)
+            manifest_absent_while_locked = not mpath.exists()
+            seed_blocked = not done.is_set()
+
+        # Lock released → the seed proceeds.
+        t.join(timeout=10)
+
+        assert manifest_absent_while_locked, (
+            "seed must not write the manifest while the slug lock is held"
+        )
+        assert seed_blocked, "seed must block on the held slug lock"
+        assert done.is_set() and mpath.exists(), (
+            "seed completes and writes the manifest once the lock releases"
+        )
+
     def test_setup_serializes_on_reconcile_lock(self, two_member_group, monkeypatch):
         """A foreground setup started while a provisioner holds the lock
         serializes — no torn manifest, no double-add."""

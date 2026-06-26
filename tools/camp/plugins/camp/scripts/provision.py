@@ -9,7 +9,7 @@ camp ai brings a workspace up in two phases:
   2. Detached provision (spawn_detached_provisioner): spawn `camp setup --background`
      in its own session (start_new_session=True, stdin=DEVNULL, std streams →
      setup.log 0o600) that survives the parent's os.execvp into the harness. The
-     assumption (validated) is that this detached child runs to completion after
+     The assumption (validated) is that this detached child runs to completion after
      the parent process image is replaced — no double-fork needed.
 
 bring_up_workspace ties the two together: seed, then spawn.
@@ -73,7 +73,7 @@ def spawn_detached_provisioner(
             group_name,
         ]
 
-    # Open the logfile with mode 0o600 (owner-only). opener enforces the mode at
+    # Open the logfile 0o600 (security). opener enforces the mode at
     # creation so it is umask-proof.
     def _opener(path: str, flags: int) -> int:
         return os.open(path, flags, 0o600)
@@ -106,50 +106,58 @@ def seed_pending_workspace(
     Idempotent: a member already listed keeps its existing provision_state so a
     re-run of camp ai does not reset a ready member back to pending.
     """
+    import reconcile
+    from manifest import read_central_manifest, reconcile_lock
+
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")
     branch = branch_pattern.format(slug=slug)
 
     ws_dir = workspace_dir(group_name, slug, env=env)
-    ws_dir.mkdir(parents=True, exist_ok=True)
-
     mpath = manifest_path_for(group_name, slug, env=env)
 
-    existing_states: dict[str, dict[str, Any]] = {}
-    if mpath.is_file():
-        from manifest import read_central_manifest
+    # Serialize the seed against a concurrent `camp remove` teardown of the
+    # same slug. The mkdir + manifest write is otherwise unlocked, so it could
+    # interleave with reconcile_break's locked rmtree such that the seed survives a
+    # remove that already "completed" — a ghost pending workspace. Contend on the
+    # SAME slug lock reconcile_break/reconcile_worktree hold (threading + file
+    # lock, keyed OUTSIDE ws_dir) so seed and teardown can never overlap.
+    with reconcile._slug_lock(f"{group_name}/{slug}"), reconcile_lock(ws_dir):
+        ws_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            prior = read_central_manifest(mpath)
-            for m in prior.get("members", []):
-                existing_states[m["name"]] = m
-        except Exception:
-            existing_states = {}
+        existing_states: dict[str, dict[str, Any]] = {}
+        if mpath.is_file():
+            try:
+                prior = read_central_manifest(mpath)
+                for m in prior.get("members", []):
+                    existing_states[m["name"]] = m
+            except Exception:
+                existing_states = {}
 
-    member_entries: list[dict[str, Any]] = []
-    for member in group["members"]:
-        name = member["name"]
-        wt_path = ws_dir / name
-        prior = existing_states.get(name)
-        state = prior.get("provision_state", "pending") if prior else "pending"
-        entry: dict[str, Any] = {
-            "name": name,
-            "repo_root": str(Path(member["repo_root"])),
-            "worktree_path": str(wt_path),
-            "provision_state": state,
+        member_entries: list[dict[str, Any]] = []
+        for member in group["members"]:
+            name = member["name"]
+            wt_path = ws_dir / name
+            prior = existing_states.get(name)
+            state = prior.get("provision_state", "pending") if prior else "pending"
+            entry: dict[str, Any] = {
+                "name": name,
+                "repo_root": str(Path(member["repo_root"])),
+                "worktree_path": str(wt_path),
+                "provision_state": state,
+            }
+            if prior and prior.get("reason"):
+                entry["reason"] = prior["reason"]
+            member_entries.append(entry)
+
+        manifest_data = {
+            "schema_version": 1,
+            "group": group_name,
+            "slug": slug,
+            "branch": branch,
+            "members": member_entries,
         }
-        if prior and prior.get("reason"):
-            entry["reason"] = prior["reason"]
-        member_entries.append(entry)
-
-    manifest_data = {
-        "schema_version": 1,
-        "group": group_name,
-        "slug": slug,
-        "branch": branch,
-        "members": member_entries,
-    }
-    write_central_manifest(mpath, manifest_data)
+        write_central_manifest(mpath, manifest_data)
     return mpath
 
 
@@ -179,7 +187,7 @@ def bring_up_workspace(
     """
     from workspace_doc import write_workspace_doc
     from hooks_writer import write_workspace_hooks, write_workspace_inject_hook
-    from harness_launch import resolve_harness_profile
+    from harness_profile import resolve_harness_profile
 
     if profile is None:
         profile = resolve_harness_profile(group)

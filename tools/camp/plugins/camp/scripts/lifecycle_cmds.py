@@ -179,7 +179,16 @@ def cmd_ls_group(
     """Return a list of all worktrees for the group.
 
     Returns:
-        [{"slug": str, "branch": str, "manifest_path": str}, ...]
+        [
+            {
+                "slug": str,
+                "branch": str,
+                "manifest_path": str,
+                "group": str,
+                "workspace_path": str,  # absolute path; same as workspace_dir(group, slug)
+            },
+            ...
+        ]
     """
     pairs = _list_group_worktrees(group, env=env)
     entries = []
@@ -192,11 +201,54 @@ def cmd_ls_group(
                     "branch": data.get("branch", ""),
                     "manifest_path": str(mpath),
                     "group": data.get("group", ""),
+                    # mpath is <workspace_dir>/manifest.json, so its parent IS the
+                    # workspace dir — no need to recompute workspace_dir() (which
+                    # re-runs central_state_dir) per row.
+                    "workspace_path": str(mpath.parent),
                 }
             )
         except ManifestError:
             pass
     return entries
+
+
+# Fixed JSON schema for `camp list --json`, emitted identically by BOTH entry
+# points so a parser never KeyErrors switching between them.
+_LIST_JSON_KEYS = ("slug", "branch", "workspace_path", "group")
+
+
+def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> None:
+    """Single renderer for `camp list`/`ls` output — consulted by BOTH dispatchers
+    (cli/camp's group-aware `_cmd_ls_group_cli` and spine.main's no-group `cmd_ls`)
+    so the human + --json surface is identical regardless of cwd.
+
+    Each entry must carry `slug` and `workspace_path`; `branch` and `group` are
+    optional (group is None for the standalone fallback). Output:
+      - human: one `slug workspace_path` line per entry; empty → no stdout.
+      - --json: a list of {slug, branch, workspace_path, group} dicts (the fixed
+        _LIST_JSON_KEYS schema); empty → `[]`.
+
+    The renderer PROJECTS each entry onto the fixed schema (ignoring any
+    source-specific extras like manifest_path), so the two data models — group
+    central manifests vs. the legacy worktree registry — surface one stable shape.
+    """
+    import json as _json
+
+    if as_json:
+        rows = [
+            {
+                "slug": e["slug"],
+                "branch": e.get("branch", ""),
+                "workspace_path": e["workspace_path"],
+                "group": e.get("group"),
+            }
+            for e in entries
+        ]
+        print(_json.dumps(rows))
+        return
+
+    for e in entries:
+        print(f"{e['slug']} {e['workspace_path']}")
 
 
 def cmd_setup_group(
