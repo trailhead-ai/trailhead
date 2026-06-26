@@ -33,9 +33,9 @@ class TestBucketDir:
 
 
 # ---------------------------------------------------------------------------
-# (sessions.ensure_session_note month-bucket creation tests were retired in
-# Slice 2 — the frontmatter-note CREATE lifecycle is gone; capture is now the
-# singular ``session/`` record, covered by test_session_records.py.)
+# (sessions.ensure_session_note month-bucket creation tests were retired —
+# the frontmatter-note CREATE lifecycle is gone; capture is now the singular
+# ``session/`` record, covered by test_session_records.py.)
 # ---------------------------------------------------------------------------
 
 

@@ -7,7 +7,7 @@ Test contract (all must fail before the fix, pass after):
 - Block-style surfaces:  - '[[area/synth-alpha]]' → ["synth-alpha"]
 - Inline surfaces: ["[[area/synth-alpha]]", "[[tools/synth-tool]]"] → ["synth-alpha", "synth-tool"]
 - Prefix coverage: area/, tools/, AND plan/ all strip to bare slug for overlap keys
-  (Slice 7: singular vault dirs — areas/ and plans/ prefixes are retired)
+  (singular vault dirs — areas/ and plans/ prefixes are retired)
 - related-spec: '[[specs/synth-spec-slug]]' → "specs/synth-spec-slug"
   (full path, NOT slug-reduced, NOT a list)
 - Bare-slug forms (inline [a, b] and block - a) unchanged (regression guard)
@@ -69,7 +69,7 @@ class TestBlockStyleListParsing:
 class TestWikilinkUnwrapSlugReduced:
     def test_block_wikilink_areas_prefix_stripped(self):
         """Block-style [[area/synth-alpha]] → synth-alpha for surfaces key.
-        Slice 7: singular vault dirs — area/ (not areas/)."""
+        Singular vault dirs — area/ (not areas/)."""
         result = _fm("surfaces:\n  - '[[area/synth-alpha]]'")
         assert result["surfaces"] == ["synth-alpha"]
 
@@ -80,7 +80,7 @@ class TestWikilinkUnwrapSlugReduced:
 
     def test_block_wikilink_plans_prefix_stripped(self):
         """Block-style [[plan/synth-plan]] → synth-plan for surfaces key.
-        Slice 7: singular vault dirs — plan/ (not plans/)."""
+        Singular vault dirs — plan/ (not plans/)."""
         result = _fm("surfaces:\n  - '[[plan/synth-plan]]'")
         assert result["surfaces"] == ["synth-plan"]
 
@@ -105,7 +105,7 @@ class TestWikilinkUnwrapSlugReduced:
         assert result["related-areas"] == ["synth-alpha"]
 
     def test_all_three_prefixes_for_each_overlap_key(self):
-        """area/, tools/, plan/ all strip for surfaces key (Slice 7: singular)."""
+        """area/, tools/, plan/ all strip for surfaces key (singular dirs)."""
         for prefix, slug in [
             ("area", "synth-alpha"),
             ("tools", "synth-tool"),

@@ -1,7 +1,4 @@
-"""Slice 1 tests: sessions are singular indexed records, born dirty.
-
-Covers the Slice 1 test contract (plan
-``lore-clean-dirty-sessions-flush-and-singular-dir-standardization.md``):
+"""Sessions are singular indexed records, born dirty.
 
   capture → singular indexed record:
     - first ``candidate`` materializes ``session/<key>.{md,json}`` born ``dirty``,
@@ -9,18 +6,18 @@ Covers the Slice 1 test contract (plan
     - two distinct ``--session-id``s in one worktree → two records.
     - a candidate on a ``clean`` session flips it back to ``dirty``.
 
-  referenced (KU2 contract):
+  referenced:
     - ``referenced`` never dirties an existing session (status stays ``clean``)
       and bumps ``last-referenced-at``.
     - ``referenced`` on a non-existent session creates NOTHING (no body, no
       sidecar, no index row).
 
-  flock critical section (KU1 — the load-bearing race test):
+  flock critical section (the load-bearing race test):
     - concurrent candidates for ONE id over many iterations → exactly ONE record
       with ALL body entries present AND an index FTS body consistent with the
       final body (no stale snapshot, no torn sidecar, no lost row).
 
-  confinement guard (council/Security Critical 3):
+  confinement guard:
     - a worktree-name key containing ``..`` / a path separator / a NUL byte is
       rejected non-zero and writes nothing (no escape from ``session/``).
 
@@ -202,7 +199,7 @@ class TestCleanToDirty:
 
 
 # ---------------------------------------------------------------------------
-# referenced — KU2 contract
+# referenced — never dirties an existing session
 # ---------------------------------------------------------------------------
 
 class TestReferenced:
@@ -251,7 +248,7 @@ class TestReferenced:
         # A legacy/migrated session can exist as a body-only ``session/<key>.md`` with
         # NO ``.json`` sidecar. ``referenced`` must append the body line but must NOT
         # fabricate a ``{}`` sidecar nor project an off-vocab ``status:""`` row into the
-        # index (it never materializes a record — KU2).
+        # index (it never materializes a record).
         vault, state = _make_vault(tmp_path)
         body_path = _record_md(vault, SID)
         body_path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,7 +273,7 @@ class TestReferenced:
 
 
 # ---------------------------------------------------------------------------
-# Confinement guard — worktree-name key (council/Security Critical 3)
+# Confinement guard — worktree-name key
 # ---------------------------------------------------------------------------
 
 class TestWorktreeConfinement:
@@ -315,7 +312,7 @@ class TestWorktreeConfinement:
 
 
 # ---------------------------------------------------------------------------
-# flock critical section — concurrent candidates (KU1, the race guard)
+# flock critical section — concurrent candidates (the race guard)
 # ---------------------------------------------------------------------------
 
 _RACE_WORKER = r"""
@@ -377,7 +374,7 @@ def _run_race(vault, state, session_id, n_workers=3):
 
 
 class TestConcurrentCandidates:
-    """KU1 proof: exactly one record, all entries present, index consistent."""
+    """Race proof: exactly one record, all entries present, index consistent."""
 
     ITERATIONS = 25
     WORKERS = 3

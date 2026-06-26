@@ -57,7 +57,7 @@ def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
     phrase — a silent omission must fail this test."""
     assert _BRAINSTORM_SKILL.exists(), (
         "brainstorm/SKILL.md does not exist — it should now live under the craft "
-        "plugin (S6 Slice 3 moved it from lore)"
+        "plugin (it moved here from lore)"
     )
     text = _BRAINSTORM_SKILL.read_text()
     assert phrase in text, (
@@ -109,7 +109,7 @@ class TestBrainstormSearchWiring:
         text = _BRAINSTORM_SKILL.read_text()
         assert "lore search 'area:" in text, (
             "brainstorm/SKILL.md must reference `lore search 'area:<name>'` as the "
-            "primary prior-art mechanism (Slice 5 cutover)."
+            "primary prior-art mechanism."
         )
 
     def test_brainstorm_no_lore_recall(self):

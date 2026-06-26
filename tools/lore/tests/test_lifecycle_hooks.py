@@ -25,10 +25,10 @@ SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 
 
 # ---------------------------------------------------------------------------
-# sessions.ensure_session_note + finalize_note were retired in Slice 2 (the
-# frontmatter-note CREATE/finalize lifecycle): capture moved to singular indexed
-# ``session/`` records (Slice 1) and ``lore flush`` (dirty -> clean) replaced
-# ``lore finish``. Their tests moved to test_session_records.py / test_flush.py.
+# sessions.ensure_session_note + finalize_note were retired (the frontmatter-note
+# CREATE/finalize lifecycle): capture moved to singular indexed ``session/``
+# records and ``lore flush`` (dirty -> clean) replaced ``lore finish``. Their
+# tests moved to test_session_records.py / test_flush.py.
 # ---------------------------------------------------------------------------
 
 
@@ -64,8 +64,7 @@ class TestHooksJson:
         data = json.loads((HOOKS_DIR / "hooks.json").read_text())
         hooks = data.get("hooks", {})
         assert "PostToolUse" not in hooks, (
-            "hooks.json must NOT register PostToolUse — harvest hook was deleted "
-            "(lore-agent-interface Slice 1)"
+            "hooks.json must NOT register PostToolUse — harvest hook was deleted"
         )
 
     def test_zero_push_hooks(self):
@@ -81,7 +80,7 @@ class TestHooksJson:
         assert not (HOOKS_DIR / "_shared_smoke.py").exists()
 
     def test_harvest_candidates_hook_file_deleted(self):
-        """harvest-candidates.py must not be present — it was deleted in Slice 1."""
+        """harvest-candidates.py must not be present — it was deleted."""
         assert not (HOOKS_DIR / "harvest-candidates.py").exists(), (
             "harvest-candidates.py must be removed — lore installs zero push hooks."
         )

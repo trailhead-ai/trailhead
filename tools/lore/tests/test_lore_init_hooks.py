@@ -295,7 +295,7 @@ class TestInitInstallsNoHooks:
 
 # ---------------------------------------------------------------------------
 # Structural retirement: the harvest module + starter protocol are gone
-# (relocated from the deleted test_finish.py when finish → flush, Slice 2).
+# (relocated from the deleted test_finish.py when finish → flush).
 # ---------------------------------------------------------------------------
 
 class TestHarvestModuleRetired:

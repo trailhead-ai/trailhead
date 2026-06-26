@@ -90,7 +90,7 @@ def test_blocked_message_names_file_line_escape(artist_text: str):
     """artist.md block rule must name the file:line citation escape hatch."""
     # The BLOCKED rule must mention the file:line citation path
     assert "file:line" in artist_text or "file : line" in artist_text.lower(), (
-        "artist.md must state the file:line citation as an escape hatch in the BLOCKED rule (A-3)"
+        "artist.md must state the file:line citation as an escape hatch in the BLOCKED rule"
     )
 
 
@@ -98,7 +98,7 @@ def test_blocked_message_names_greenfield_escape(artist_text: str):
     """artist.md block rule must name the 'new, no counterpart' greenfield escape hatch."""
     assert "new, no counterpart" in artist_text, (
         "artist.md must state 'new, no counterpart' as a greenfield escape hatch "
-        "in the BLOCKED rule (A-3)"
+        "in the BLOCKED rule"
     )
 
 
@@ -125,17 +125,17 @@ def test_blocked_message_names_both_escapes_in_block_rule(artist_text: str):
 
     assert citation_blocked_idx != -1, (
         "artist.md must contain a BLOCKED: message for the citation check — "
-        "one whose text references 'no anchor' or 'component-mapping row' (A-3)"
+        "one whose text references 'no anchor' or 'component-mapping row'"
     )
 
     # The citation block itself must name both escapes
     block_window = artist_text[citation_blocked_idx : citation_blocked_idx + 400]
     assert "file:line" in block_window, (
-        "The citation-block BLOCKED message must name 'file:line' as an escape hatch (A-3)"
+        "The citation-block BLOCKED message must name 'file:line' as an escape hatch"
     )
     assert "new, no counterpart" in block_window, (
         "The citation-block BLOCKED message must name 'new, no counterpart' "
-        "as a greenfield escape hatch (A-3)"
+        "as a greenfield escape hatch"
     )
 
 
@@ -156,7 +156,7 @@ def test_greenfield_aspirational_chrome_out_of_scope_note(artist_text: str):
 
     assert has_aspirational and has_out_of_scope, (
         "artist.md must carry an explicit note that full aspirational-chrome setup "
-        "is out of scope (A-4). "
+        "is out of scope. "
         f"Found 'aspirational': {has_aspirational}, found out-of-scope note: {has_out_of_scope}"
     )
 
@@ -169,21 +169,21 @@ def test_greenfield_aspirational_chrome_out_of_scope_note(artist_text: str):
 def test_artist_carries_create_mode(artist_text: str):
     """artist.md must describe a create mode."""
     assert "mode: create" in artist_text or "create" in artist_text, (
-        "artist.md must carry a create mode section (A-5)"
+        "artist.md must carry a create mode section"
     )
     # More specifically, must have a structured create section
     assert re.search(r"#+\s*.*create", artist_text, re.IGNORECASE), (
-        "artist.md must have a section header describing the create mode (A-5)"
+        "artist.md must have a section header describing the create mode"
     )
 
 
 def test_artist_carries_update_mode(artist_text: str):
     """artist.md must describe an update mode."""
     assert "mode: update" in artist_text or "update" in artist_text, (
-        "artist.md must carry an update mode section (A-5)"
+        "artist.md must carry an update mode section"
     )
     assert re.search(r"#+\s*.*update", artist_text, re.IGNORECASE), (
-        "artist.md must have a section header describing the update mode (A-5)"
+        "artist.md must have a section header describing the update mode"
     )
 
 
@@ -196,10 +196,10 @@ def test_both_modes_structurally_present(artist_text: str):
         r"#+\s+.*\bupdate\b.*mode|mode.*\bupdate\b", artist_text, re.IGNORECASE
     )
     assert create_match is not None, (
-        "artist.md must have a section heading for the create mode (A-5)"
+        "artist.md must have a section heading for the create mode"
     )
     assert update_match is not None, (
-        "artist.md must have a section heading for the update mode (A-5)"
+        "artist.md must have a section heading for the update mode"
     )
 
 

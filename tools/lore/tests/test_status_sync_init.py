@@ -141,7 +141,7 @@ def test_validator_cli_exits_zero_for_valid_files(tmp_path):
     good1 = tmp_path / "good1.md"
     good2 = tmp_path / "good2.md"
     _make_note(good1, "lesson", "active")
-    _make_note(good2, "session", "dirty")  # Slice 0: active → dirty
+    _make_note(good2, "session", "dirty")  # session vocab: dirty
     r = run_validator([str(good1), str(good2)])
     assert r.returncode == 0
 
@@ -161,7 +161,7 @@ def test_validator_cli_no_files_exits_zero():
 def test_validator_cli_mixed_valid_and_invalid(tmp_path):
     good = tmp_path / "good.md"
     bad = tmp_path / "bad.md"
-    _make_note(good, "session", "clean")  # Slice 0: active → clean
+    _make_note(good, "session", "clean")  # session vocab: clean
     # 'session' is tracked, so a non-canonical status is rejected. (follow-up /
     # deferred / dead-end are now retired → unconstrained, so they can't serve
     # as the invalid case.)

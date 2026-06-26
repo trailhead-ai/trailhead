@@ -53,7 +53,7 @@ def test_is_valid_status_rejects_noncanonical():
 
 
 def test_is_valid_status_keys_are_singular_only():
-    """Slice 7: CANONICAL keys are singular; the plural directory form no longer
+    """CANONICAL keys are singular; the plural directory form no longer
     resolves (vault dirs standardized on singular, so the singular→plural alias
     map was dropped).
 
@@ -142,10 +142,9 @@ def test_finalized_session_rejected_with_violation(tmp_path, capsys):
 
 
 def test_clean_session_passes_validation(tmp_path, capsys):
-    """A session note with status: clean validates successfully (Slice 0).
+    """A session note with status: clean validates successfully.
 
-    The old test checked `status: complete`; after Slice 0 the canonical
-    values are {dirty, clean} and complete is rejected.
+    The canonical session values are {dirty, clean}; complete is rejected.
     """
     sv = load_script("status_validator")
     note = tmp_path / "x.md"
@@ -172,37 +171,37 @@ def test_body_only_guid_session_note_passes_clean(tmp_path, capsys):
     assert "invalid" not in captured.err.lower()
 
 
-# ---- Slice 0: session vocab → {dirty, clean}; singular key; alias dropped ---
+# ---- session vocab → {dirty, clean}; singular key; alias dropped -----------
 
 
 def test_session_canonical_key_is_singular():
-    """CANONICAL uses the singular key 'session', not plural 'sessions' (Slice 0)."""
+    """CANONICAL uses the singular key 'session', not plural 'sessions'."""
     sv = load_script("status_validator")
     assert "session" in sv.CANONICAL
     assert "sessions" not in sv.CANONICAL
 
 
 def test_session_canonical_vocab_is_dirty_clean():
-    """session canonical set is exactly {dirty, clean} after Slice 0."""
+    """session canonical set is exactly {dirty, clean}."""
     sv = load_script("status_validator")
     assert sv.CANONICAL["session"] == frozenset({"dirty", "clean"})
 
 
 def test_session_alias_not_needed():
-    """The session→sessions alias is dropped; 'session' resolves directly (Slice 0)."""
+    """The session→sessions alias is dropped; 'session' resolves directly."""
     sv = load_script("status_validator")
     # permitted_statuses("session") must work — direct key, no alias redirect
     assert sv.permitted_statuses("session") == frozenset({"dirty", "clean"})
 
 
 def test_session_dirty_is_valid():
-    """dirty is canonical for session (Slice 0)."""
+    """dirty is canonical for session."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "dirty") is True
 
 
 def test_session_clean_is_valid():
-    """clean is canonical for session (Slice 0)."""
+    """clean is canonical for session."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "clean") is True
 
@@ -215,7 +214,7 @@ def test_session_active_rejected_behavioral():
 
 
 def test_session_active_rejected_cli(tmp_path, capsys):
-    """active session note is rejected by the CLI (exit 1) after Slice 0."""
+    """active session note is rejected by the CLI (exit 1)."""
     sv = load_script("status_validator")
     note = tmp_path / "active_session.md"
     note.write_text("---\ntype: session\nstatus: active\n---\n# s\n")
@@ -232,7 +231,7 @@ def test_session_complete_rejected_behavioral():
 
 
 def test_session_complete_rejected_cli(tmp_path, capsys):
-    """complete session note is rejected by the CLI (exit 1) after Slice 0."""
+    """complete session note is rejected by the CLI (exit 1)."""
     sv = load_script("status_validator")
     note = tmp_path / "complete_session.md"
     note.write_text("---\ntype: session\nstatus: complete\n---\n# s\n")
@@ -241,7 +240,7 @@ def test_session_complete_rejected_cli(tmp_path, capsys):
 
 
 def test_session_shelved_rejected_behavioral():
-    """shelved is not in the new session vocab — rejected (Slice 0)."""
+    """shelved is not in the session vocab — rejected."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "shelved") is False
 
@@ -256,7 +255,7 @@ def test_session_shelved_rejected_cli(tmp_path, capsys):
 
 
 def test_session_handoff_rejected_behavioral():
-    """handoff is not in the session vocab — rejected (Slice 0)."""
+    """handoff is not in the session vocab — rejected."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "handoff") is False
 
@@ -271,7 +270,7 @@ def test_session_handoff_rejected_cli(tmp_path, capsys):
 
 
 def test_session_finalized_rejected_behavioral():
-    """finalized is not in the session vocab — rejected (Slice 0)."""
+    """finalized is not in the session vocab — rejected."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "finalized") is False
 

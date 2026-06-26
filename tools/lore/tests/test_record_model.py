@@ -580,17 +580,17 @@ def test_annotations_same_key_rules_as_labels():
         assert any(bad_key in e for e in result.errors), msg
 
 
-# --- Slice 0: session status vocab → {dirty, clean} -------------------------
+# --- session status vocab → {dirty, clean} ---------------------------------
 
 
 def test_session_status_vocab_is_dirty_clean():
-    """Session vocab is exactly {dirty, clean} — not active/complete (Slice 0)."""
+    """Session vocab is exactly {dirty, clean} — not active/complete."""
     vocab = rm().STATUS_VOCAB
     assert set(vocab["session"]) == {"dirty", "clean"}
 
 
 def test_session_initial_status_is_dirty():
-    """Sessions are born dirty; first element of ordered tuple is 'dirty' (Slice 0)."""
+    """Sessions are born dirty; first element of ordered tuple is 'dirty'."""
     assert rm().initial_status("session") == "dirty"
 
 
@@ -600,7 +600,7 @@ def test_session_status_vocab_order_dirty_first():
 
 
 def test_session_clean_is_valid_status():
-    """clean is a valid session status post-Slice 0."""
+    """clean is a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="clean")
     result = m.validate(sidecar)
@@ -608,7 +608,7 @@ def test_session_clean_is_valid_status():
 
 
 def test_session_dirty_is_valid_status():
-    """dirty is a valid session status post-Slice 0."""
+    """dirty is a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="dirty")
     result = m.validate(sidecar)
@@ -616,7 +616,7 @@ def test_session_dirty_is_valid_status():
 
 
 def test_session_active_is_rejected():
-    """active is no longer a valid session status (Slice 0)."""
+    """active is no longer a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="active")
     result = m.validate(sidecar)
@@ -625,7 +625,7 @@ def test_session_active_is_rejected():
 
 
 def test_session_complete_is_rejected():
-    """complete is no longer a valid session status (Slice 0)."""
+    """complete is no longer a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="complete")
     result = m.validate(sidecar)
@@ -634,7 +634,7 @@ def test_session_complete_is_rejected():
 
 
 def test_session_shelved_is_rejected():
-    """shelved was never valid; still rejected post-Slice 0."""
+    """shelved was never valid; still rejected."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="shelved")
     result = m.validate(sidecar)
@@ -642,7 +642,7 @@ def test_session_shelved_is_rejected():
 
 
 def test_session_handoff_is_rejected():
-    """handoff is not in the session vocab; rejected (Slice 0)."""
+    """handoff is not in the session vocab; rejected."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="handoff")
     result = m.validate(sidecar)
@@ -650,7 +650,7 @@ def test_session_handoff_is_rejected():
 
 
 def test_session_finalized_is_rejected():
-    """finalized is not in the session vocab; rejected (Slice 0)."""
+    """finalized is not in the session vocab; rejected."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="finalized")
     result = m.validate(sidecar)

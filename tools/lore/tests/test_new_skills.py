@@ -71,7 +71,7 @@ def test_new_skill_present_with_registrable_frontmatter(name: str):
     """Each new skill exists with a closed frontmatter block + non-empty
     description (the field Claude Code uses to register `/lore:<name>`)."""
     skill_md = SKILLS_DIR / name / "SKILL.md"
-    assert skill_md.exists(), f"{name}/SKILL.md must exist (Slice 5)"
+    assert skill_md.exists(), f"{name}/SKILL.md must exist"
     assert _description(name), f"{name}/SKILL.md must carry a non-empty description:"
 
 
@@ -140,7 +140,7 @@ def test_record_references_only_record_and_session_surface():
 def test_record_and_flush_descriptions_are_scope_disjoint():
     """The `record` and `flush` trigger descriptions must carve non-overlapping scopes.
 
-    Plan Slice 4 deleted `checkpoint` and renamed `finish` → `flush`. The
+    `checkpoint` was deleted and `finish` was renamed → `flush`. The
     scope-disjointness concern now applies to `record` vs `flush`:
 
       - record = "log ONE specific item NOW" (a single deliberate capture)
@@ -263,7 +263,7 @@ def test_final_lockstep_gate_enumerates_expected_retained_set():
     the enumeration actually covers the five retained lore skills (so the gate
     above is not vacuously passing over a shrunken set).
 
-    Plan Slice 4 renamed 'finish' → 'flush' and deleted 'checkpoint'.
+    'finish' was renamed → 'flush' and 'checkpoint' was deleted.
     Retained set: flush, sync, search, record, research.
     """
     names = {p.parent.name for p in _all_retained_skill_files()}

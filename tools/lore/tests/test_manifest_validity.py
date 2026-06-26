@@ -48,11 +48,10 @@ def test_hooks_json_parses_and_has_no_push_hooks():
     data = json.loads(path.read_text())
     assert "hooks" in data, "hooks.json must have top-level 'hooks' key"
     hooks = data["hooks"]
-    assert "SessionStart" not in hooks, "hooks.json must NOT register SessionStart (F5)"
-    assert "WorktreeRemove" not in hooks, "hooks.json must NOT register WorktreeRemove (Slice 2)"
+    assert "SessionStart" not in hooks, "hooks.json must NOT register SessionStart"
+    assert "WorktreeRemove" not in hooks, "hooks.json must NOT register WorktreeRemove"
     assert "PostToolUse" not in hooks, (
-        "hooks.json must NOT register PostToolUse — harvest hook deleted "
-        "(lore-agent-interface Slice 1)"
+        "hooks.json must NOT register PostToolUse — harvest hook deleted"
     )
     assert hooks == {}, (
         "hooks.json must have empty hooks dict — lore installs zero push hooks, "
