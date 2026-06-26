@@ -1037,7 +1037,7 @@ class TestRootReadmeStructuralGuard:
             f"First fenced block at offset {first_fenced_offset}; "
             f"first multi-tool table row at offset {multi_tool_table_offset}. "
             "The lore use-case + first command must appear before the 'What's included' "
-            "table — lead with one use case, not the concept map (A-3)."
+            "table — lead with one use case, not the concept map."
         )
 
 

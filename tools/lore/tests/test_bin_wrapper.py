@@ -1,7 +1,6 @@
-"""P3B2-2b tests: bin/lore PATH wrapper — delegation correctness.
+"""bin/lore PATH wrapper — delegation correctness.
 
-TDD: tests written before implementation. All fixtures are SYNTHETIC
-(invented vocabulary, no real vault/session names).
+All fixtures are SYNTHETIC (invented vocabulary, no real vault/session names).
 
 Covers:
 - bin/lore exists and is executable

@@ -127,7 +127,7 @@ This allows all three OS branches to be exercised on a single dev machine withou
 mocking `os.environ` or `sys.platform` globally.
 
 
-## camp consumer paths (D6)
+## camp consumer paths
 
 On a standard Linux machine, camp's paths resolve to:
 

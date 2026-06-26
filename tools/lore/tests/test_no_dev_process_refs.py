@@ -14,6 +14,12 @@ Scope — the **whole lore tree**: both the shipped plugin (``plugins/lore``) an
 this test suite (``tests/``). lore has no legitimate vocabulary of this shape, so
 the denylist needs no allowlist.
 
+Both *content* and *filenames* are scanned. Filenames matter because test files
+were once named after plan phases (``test_p1a_...``, ``test_p3_...``): a
+content-only guard scrubbed their bodies but left the plan-phase prefix in the
+name. ``_NAME_DENYLIST`` closes that gap so a plan-phase-named file cannot creep
+back in.
+
 Why lore-only (craft is deliberately excluded): craft ships "Slice" and
 "Known Unknown" as *product* vocabulary — the plan template's ``### Slice N``
 headings, the plan/polish skills, the council panel — and craft tests legitimately
@@ -58,9 +64,19 @@ _DENYLIST: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\([A-Z]-?\d+\)"), "lettered invariant/spec tag (e.g. (D-1), (A-3), (F5))"),
 ]
 
+# Filename patterns. ``_p<digit>`` is the plan-phase test-file prefix
+# (``test_p1a_...``, ``test_p3_...``): an underscore immediately before the ``p``
+# avoids matching legitimate stems like ``test_step3`` or ``test_top3``.
+_NAME_DENYLIST: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"_p\d"), "plan-phase filename prefix (e.g. test_p3_...)"),
+]
+
 
 def _scan() -> list[str]:
-    """Return ``relpath:lineno: <label> — <line>`` for every dev-process ref found."""
+    """Return ``relpath:lineno: <label> — <line>`` for every dev-process ref found.
+
+    Filename offenders use lineno ``0`` and report the name itself in place of a line.
+    """
     offenders: list[str] = []
     for root in SCAN_ROOTS:
         if not root.exists():
@@ -74,11 +90,15 @@ def _scan() -> list[str]:
                 continue
             if path.suffix not in _SCANNED_SUFFIXES:
                 continue
+            rel = path.relative_to(LORE_ROOT)
+            for pattern, label in _NAME_DENYLIST:
+                if pattern.search(path.name):
+                    offenders.append(f"{rel}:0: {label} — {path.name}")
+                    break
             try:
                 text = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
-            rel = path.relative_to(LORE_ROOT)
             for lineno, line in enumerate(text.splitlines(), start=1):
                 for pattern, label in _DENYLIST:
                     if pattern.search(line):
