@@ -1,20 +1,16 @@
-"""Quarried worktree-spine for camp.
+"""Worktree-spine for camp.
 
 Contains slug handling, manifest/cwd resolution, git wrappers, and all
 worktree command handlers (cmd_status, cmd_sync,
 cmd_restock, cmd_ls, cmd_path, cmd_code, cmd_sweep, cmd_foreach,
 cmd_doctor, cmd_help).
 
-De-zenithed from zenith/bin/camp (quarry provenance):
-- _SIBLING_REPOS constant removed (becomes a group-config read).
-- _import_dev_env / _ensure_dev_env_on_path removed.
+Notable structure:
+- No _SIBLING_REPOS constant — the member set comes from the group config.
 - cmd_sweep: dev-env prune path raises NotImplementedError (deferred).
 - cmd_doctor: dev-env probes stripped; keeps asdf + consistency checks.
-- _canonical_zenith() renamed to _canonical_root() and sourced from
-  CAMP_CANONICAL_ROOT env var (will be wired to trailhead.paths).
+- _canonical_root() is sourced from the CAMP_CANONICAL_ROOT env var.
 - _check_trailhead_paths_importable() is the shared import guard.
-
-Source: zenith/bin/camp (quarry provenance).
 """
 
 from __future__ import annotations
@@ -33,7 +29,10 @@ from verb_taxonomy import (  # noqa: E402 — single source of truth
     DISABLED_VERBS,
     LEGACY_REDIRECTS,
     NEEDS_GROUP_VERBS,
+    VERB_ALIASES,
+    bare_slug_message,
     needs_group_message,
+    resolve_verb,
 )
 
 # ---------------------------------------------------------------------------
@@ -45,39 +44,45 @@ _SIBLING_MARKER = ".workspace-sibling"
 _VALID_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 _NORMALIZE_RE = re.compile(r"[^a-z0-9-]+")
 
-RESERVED = frozenset(
+# RESERVED — every token that must NOT be dispatched as a bare slug. It is a
+# SUPERSET of the verb taxonomy: the taxonomy-OWNED tokens are
+# DERIVED from verb_taxonomy so adding/renaming an alias, legacy redirect, disabled
+# verb, or needs-group verb is a single-place edit (no drift vs. the dispatchers).
+# The remainder — verbs the taxonomy tables do not model — stays an explicit
+# literal. The membership-parity test (test_verb_aliases) pins the full union, so
+# drift in EITHER half fails loudly rather than silently changing slug validation.
+_TAXONOMY_RESERVED = (
+    set(VERB_ALIASES)  # alias keys: rm, ls
+    | set(LEGACY_REDIRECTS)  # legacy keys: open, break, init, ai, enter
+    | set(DISABLED_VERBS)  # restock, sweep, code, fire
+    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup
+)
+
+_STATIC_RESERVED = frozenset(
     {
-        "ls",
+        # Canonical group-aware/fleet verbs the taxonomy tables do not model.
+        "group",
+        "list",
         "status",
-        "break",
+        "sync",
         "rebase",
         "path",
-        "open",
-        "fire",
         "foreach",
-        "code",
-        "sweep",
-        "sync",
-        "restock",
         "doctor",
+        # Meta verbs.
         "help",
         "version",
         "which",
-        "init",
+        # Hook-handler subcommands (dispatched pre-group-resolve in cli/camp).
         "session-bootstrap",
         "worktree-cleanup",
-        # New verb surface
-        "group",
-        "ai",
-        "rm",
-        "pwd",
-        "enter",
-        "setup",
     }
 )
 
+RESERVED = frozenset(_STATIC_RESERVED | _TAXONOMY_RESERVED)
+
 # ---------------------------------------------------------------------------
-# Import guard: single guard, hook-subprocess-proof
+# Single import guard, hook-subprocess-proof
 # ---------------------------------------------------------------------------
 
 
@@ -126,8 +131,7 @@ def _canonical_root() -> Path:
     """Return the canonical camp root.
 
     CAMP_CANONICAL_ROOT overrides the derived path for test isolation.
-    This will be wired to trailhead.paths.state_dir("camp").
-    Currently defaults to the parent of the plugin dir.
+    Defaults to the parent of the plugin dir.
     """
     override = os.environ.get("CAMP_CANONICAL_ROOT")
     if override:
@@ -386,40 +390,29 @@ def cmd_path(args: list[str], dry_run: bool = False) -> None:
 
 
 def cmd_ls(args: list[str]) -> None:
-    """camp ls [--json] — list all worktrees."""
+    """camp ls [--json] — list all worktrees (no-group fallback).
+
+    The standalone fallback used when no group resolves from cwd. It reads the
+    legacy worktree registry (.workspace-manifest.json), normalizes each entry to
+    the shared list shape, and renders via lifecycle_cmds.render_workspace_list —
+    the SAME renderer the group-aware `camp list` uses — so the human + --json
+    surface is identical regardless of cwd. `group` is None here (the
+    standalone registry is not group-scoped).
+    """
+    from lifecycle_cmds import render_workspace_list
+
     as_json = "--json" in args
     workspace_root = _workspace_root()
-    entries = _list_manifests(workspace_root)
-
-    if as_json:
-        rows = []
-        for wt_path, manifest in entries:
-            rows.append(
-                {
-                    "slug": manifest.get("name", wt_path.name),
-                    "branch": manifest.get("branch", ""),
-                    "dev_env_instance": manifest.get("dev_env_instance"),
-                    "worktree_path": str(wt_path),
-                }
-            )
-        print(json.dumps(rows))
-        return
-
-    if not entries:
-        print("camp: no camps — use 'camp <slug>' to create one")
-        return
-
-    header = f"{'SLUG':<24}  {'BRANCH':<36}  DEV-ENV"
-    print(header)
-    print("-" * len(header))
-    for wt_path, manifest in entries:
-        slug = manifest.get("name", wt_path.name)
-        branch = manifest.get("branch", "")
-        dev_env = manifest.get("dev_env_instance") or "none"
-        open_hint = ""
-        if slug in RESERVED:
-            open_hint = f"  (use: camp open {slug})"
-        print(f"{slug:<24}  {branch:<36}  {dev_env}{open_hint}")
+    entries = [
+        {
+            "slug": manifest.get("name", wt_path.name),
+            "branch": manifest.get("branch", ""),
+            "workspace_path": str(wt_path),
+            "group": None,
+        }
+        for wt_path, manifest in _list_manifests(workspace_root)
+    ]
+    render_workspace_list(entries, as_json=as_json)
 
 
 def cmd_help(_args: list[str]) -> None:
@@ -428,18 +421,18 @@ def cmd_help(_args: list[str]) -> None:
         "camp — group worktree orchestration\n"
         "\n"
         "Usage:\n"
-        "  camp ai <slug>                    Create or resume a workspace for a slug\n"
+        "  camp new <slug>                   Create or enter a workspace for a slug\n"
         "  camp pwd <slug>                   Print workspace path\n"
         "\n"
         "Setup:\n"
         "  camp group <name> [options]       Wire hooks and author a group config\n"
         "\n"
         "Workspace commands:\n"
-        "  camp ls [--json]                  List all worktrees\n"
+        "  camp list [--json]                List all worktrees (alias: ls)\n"
         "  camp status [--name <slug>]       Show worktree status (git + drift)\n"
-        "  camp enter <member>               Activate a member and print its CLAUDE.md\n"
+        "  camp activate <member>            Activate a member and print its CLAUDE.md\n"
         "  camp setup                        Provision or retry member worktrees\n"
-        "  camp rm [--force] [--name <slug>] Tear down a worktree\n"
+        "  camp remove [--force] [--name <slug>] Tear down a worktree (alias: rm)\n"
         "  camp sync [--force]               Fast-forward canonical siblings to origin/main\n"
         "  camp rebase [--onto <branch>]     Rebase worktree branches onto origin/main\n"
         "  camp foreach [--fail-fast] <cmd>  Run a command in each member worktree\n"
@@ -558,15 +551,14 @@ def cmd_code(args: list[str], dry_run: bool = False) -> None:
 
 
 def _import_dev_env() -> Any:
-    """Stub: dev-env engine not yet implemented.
+    """Stub: dev-env engine deferred.
 
     This is the single call-site guard for the dev-env prune path. The
     worktree-orphan half of cmd_sweep (orphan_worktrees) is CLEAN and remains.
     Only the instance teardown + dropdb path hits this stub.
     """
     raise NotImplementedError(
-        "camp sweep --prune: dev-env engine is deferred — "
-        "see deferred/2026-06/camp-dev-env-engine-half for the revive trigger."
+        "camp sweep --prune: dev-env engine is deferred."
     )
 
 
@@ -595,12 +587,12 @@ def _classify_orphan_worktree(wt_path: Path) -> str:
 def _collect_orphan_worktrees(workspace_root: Path, active: set[str]) -> dict[str, dict[str, str]]:
     """Return {"<repo>/<name>": {repo,name,path,class}} for orphan worktrees.
 
-    Quarried from zenith/bin/camp. The _SIBLING_REPOS constant is removed;
-    this function now accepts any group member repos. It will eventually
-    iterate over group-config members; currently it's wired to trailhead only.
+    The _SIBLING_REPOS constant is removed; this function now accepts any group
+    member repos. It currently checks trailhead only; expanding to group-config
+    members is future work.
     """
     orphans: dict[str, dict[str, str]] = {}
-    # Currently only trailhead itself; will expand to group members.
+    # Currently only trailhead itself; group members are a future expansion.
     repos_to_check = [("trailhead", workspace_root / "trailhead")]
     for repo, repo_root in repos_to_check:
         if not (repo_root / ".git").exists():
@@ -822,14 +814,14 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
     SAFE BY DEFAULT: dirty or off-main siblings are SKIPPED.
     --force reproduces the legacy reset behavior.
 
-    This will eventually operate on group-config members. Currently it
-    operates on the trailhead repo only.
+    Currently operates on the trailhead repo only; operating on group-config
+    members is future work.
     """
     as_json = "--json" in args
     force = "--force" in args
 
     workspace_root = _workspace_root()
-    # Currently trailhead only; will expand to group members.
+    # Currently trailhead only; group members are a future expansion.
     sibling_repos = [("trailhead", workspace_root / "trailhead")]
 
     siblings: dict[str, Any] = {}
@@ -938,9 +930,8 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
 def cmd_restock(args: list[str], dry_run: bool = False) -> None:
     """camp restock [--json] — refresh canonical sibling dep caches.
 
-    This will eventually operate on group-config members with configured
-    bootstrap commands. Currently it's a passthrough that reports the trailhead
-    repo.
+    Currently a passthrough that reports the trailhead repo; operating on
+    group-config members with configured bootstrap commands is future work.
     """
     as_json = "--json" in args
     workspace_root = _workspace_root()
@@ -948,7 +939,7 @@ def cmd_restock(args: list[str], dry_run: bool = False) -> None:
     errors = 0
     siblings: dict[str, Any] = {}
 
-    # Currently trailhead only; will expand to group members.
+    # Currently trailhead only; group members are a future expansion.
     repo, repo_root = "trailhead", workspace_root / "trailhead"
     if not (repo_root / ".git").exists():
         siblings[repo] = {"action": "absent"}
@@ -1377,8 +1368,7 @@ def cmd_rebase(args: list[str], dry_run: bool = False) -> None:
 
     if not rebase_script.is_file():
         _die(
-            f"camp rebase: rebase script not found at {rebase_script}\n"
-            "  The worktree rebase helper is missing from this installation."
+            f"camp rebase: rebase script not found at {rebase_script}"
         )
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -1489,12 +1479,12 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
-# New verb handlers
+# Canonical verb handlers
 # ---------------------------------------------------------------------------
 
 _DISABLED_MESSAGE = (
     "temporarily disabled while the worktree flow stabilizes.\n"
-    "  Use 'camp ai <slug>' to work with worktrees."
+    "  Use 'camp new <slug>' to work with worktrees."
 )
 
 
@@ -1513,13 +1503,13 @@ def cmd_group(args: list[str], dry_run: bool = False) -> None:
 
 
 def cmd_needs_group(verb: str) -> None:
-    """Spine fallback for a NEEDS_GROUP verb (ai/rm/cd/enter/setup).
+    """Spine fallback for a NEEDS_GROUP verb (new/remove/pwd/activate/setup).
 
     These verbs' real behavior lives on the group-aware path in cli/camp; reaching
     spine.main for one of them means no group resolved (no --group flag and cwd is
     outside any member dir). Emit the per-verb "needs a group" error and exit
     non-zero. The exact message text is owned by verb_taxonomy, collapsing
-    the five formerly-duplicated per-verb stubs into one helper.
+    the formerly-duplicated per-verb stubs into one helper.
     """
     _die(needs_group_message(verb))
 
@@ -1557,10 +1547,21 @@ def main() -> None:
         cmd_help([])
         return
 
-    first = argv[0]
+    # One resolver classifies alias→disabled→legacy in a single
+    # defined order, shared with cli/camp's group-aware router, so a token resolves
+    # identically at both entry points. Disabled/legacy are handled here up front;
+    # a "live" kind falls through to the verb dispatch on the canonical name.
+    first, kind = resolve_verb(argv[0])
     rest = argv[1:]
 
-    if first == "ls":
+    if kind == "disabled":
+        cmd_disabled(first)
+        return
+    if kind == "legacy":
+        cmd_legacy_redirect(first, LEGACY_REDIRECTS[first])
+        return
+
+    if first == "list":
         cmd_ls(rest)
     elif first == "foreach":
         cmd_foreach(rest, dry_run=dry_run)
@@ -1576,24 +1577,16 @@ def main() -> None:
         cmd_path(rest, dry_run=dry_run)
     elif first in ("help", "--help", "-h"):
         cmd_help(rest)
-    # New verb surface — these need a resolved group; reaching spine
+    # Canonical verb surface — these need a resolved group; reaching spine
     # means none resolved (single NEEDS_GROUP_VERBS source of truth).
     elif first in NEEDS_GROUP_VERBS:
         cmd_needs_group(first)
     elif first == "group":
         cmd_group(rest, dry_run=dry_run)
-    # Disabled verbs (hidden from help, legible error)
-    elif first in DISABLED_VERBS:
-        cmd_disabled(first)
-    # Legacy verb redirects
-    elif first in LEGACY_REDIRECTS:
-        cmd_legacy_redirect(first, LEGACY_REDIRECTS[first])
     else:
-        # Bare slug removed: print legible error pointing at camp ai.
-        _die(
-            f"camp: bare slug dispatch is no longer supported.\n"
-            f"  Use 'camp ai {first}' to create or resume a workspace."
-        )
+        # Bare slug removed: print legible error pointing at camp new
+        # (shared message, defined in verb_taxonomy).
+        _die(bare_slug_message(first))
 
 
 if __name__ == "__main__":

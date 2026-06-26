@@ -1,6 +1,6 @@
 """Tests for group_resolve.py — cwd/--group resolution.
 
-The resolver was reworked from marker-scan (old `<repo>/.claude/worktrees/<slug>`
+Resolution reworks from marker-scan (old `<repo>/.claude/worktrees/<slug>`
 layout) to state-dir path parsing for the unified workspace layout:
 
     central_state_dir(group)/worktrees/<slug>/<member>/
@@ -15,7 +15,7 @@ The resolver resolves BOTH cwd and camp_state_dir with .resolve() before the
 prefix check.  camp_state_dir is injectable (tests pass it directly; production
 derives it from trailhead.paths.state_dir("camp", env=...)).
 
-Tests cover:
+Test contract:
 - 8-position state-dir matrix (workspace root, each member subdir, deep path,
   canonical member repo → (group, None), non-member → error, renamed slug, nested).
 - --group override beats cwd.
@@ -373,7 +373,7 @@ def test_repo_in_two_groups_surfaces_on_cwd_resolve(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Group-name confinement
+# group-name confinement
 # ---------------------------------------------------------------------------
 
 

@@ -8,7 +8,7 @@ camp enter <member>:
       manifest; re-enter is a cheap no-op (hooks not re-run), doc re-printed.
   (c) Prints the member's CLAUDE.md to stdout so the calling agent ingests it.
 
-Hooks run shell=False (list-mode, author-trusted bootstrap posture).
+Hooks run shell=False (list-mode, bootstrap-trust posture).
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ def enter_member(
     from manifest import manifest_path_for, read_central_manifest
 
     if profile is None:
-        from harness_launch import resolve_harness_profile
+        from harness_profile import resolve_harness_profile
 
         profile = resolve_harness_profile(group)
 
@@ -148,19 +148,19 @@ def enter_member(
     entry = _find_member_entry(data, member_name)
     if entry is None:
         raise ValueError(
-            f"camp enter: member {member_name!r} not found in manifest for slug {slug!r}"
+            f"camp activate: member {member_name!r} not found in manifest for slug {slug!r}"
         )
 
     state = entry.get("provision_state", "pending")
     if state == "pending":
         raise MemberNotReadyError(
-            f"camp enter: member {member_name!r} is still provisioning — "
+            f"camp activate: member {member_name!r} is still provisioning — "
             f"run `camp status` to check progress or `camp setup` to retry."
         )
     if state == "failed":
         reason = entry.get("reason", "(no reason recorded)")
         raise MemberNotReadyError(
-            f"camp enter: member {member_name!r} provisioning failed: {reason}\n"
+            f"camp activate: member {member_name!r} provisioning failed: {reason}\n"
             f"  Run `camp setup` to retry provisioning."
         )
 

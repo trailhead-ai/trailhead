@@ -141,6 +141,59 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# camp() cd-wrapper (validated across bash, zsh, and fish)
+# ---------------------------------------------------------------------------
+#
+# shellenv emits a `camp()` shell function so `camp new <slug>` drops the parent
+# shell into the workspace dir with NO subshell. Design notes (binding):
+#   - `command camp` (not bare `camp`) avoids PATH recursion into this wrapper.
+#   - The function runs in the CURRENT shell (brace body, not a `( … )` subshell),
+#     so the `cd` reaches the user's interactive shell. Only the stdout capture
+#     `$( … )` runs in a subshell; the `cd` itself does not.
+#   - cd is quote-safe: bash/zsh `cd -- "$p"`; fish `cd -- $p` (fish cmd-sub splits
+#     on newlines, not spaces, so a one-line path-with-spaces is a single element).
+#   - The CAMP_SHELL_INTEGRATION marker is exported ONLY around the `camp new`
+#     invocation so the handler suppresses its bare-binary shellenv nudge; every
+#     other verb passes through with NO marker.
+#   - fish MUST use function-scoped `set -lx` — `env VAR=val command camp` breaks
+#     (env tries to exec a binary literally named `command`).
+#
+# These are LITERAL shell snippets: never let Python interpolate $ / {} here.
+
+_CAMP_WRAPPER_POSIX = """\
+camp() {
+    if [ "$1" = "new" ]; then
+        local p
+        p="$(CAMP_SHELL_INTEGRATION=1 command camp "$@")" || return $?
+        if [ -n "$p" ]; then
+            cd -- "$p" || return $?
+        fi
+    else
+        command camp "$@"
+    fi
+}
+"""
+
+_CAMP_WRAPPER_FISH = """\
+function camp
+    if test "$argv[1]" = new
+        set -lx CAMP_SHELL_INTEGRATION 1
+        set -l p (command camp $argv)
+        set -l rc $status
+        if test $rc -ne 0
+            return $rc
+        end
+        if test -n "$p"
+            cd -- $p
+        end
+    else
+        command camp $argv
+    end
+end
+"""
+
+
+# ---------------------------------------------------------------------------
 # shellenv (brew-style)
 # ---------------------------------------------------------------------------
 
@@ -184,9 +237,11 @@ def shellenv_lines(
             f'set -gx TRAILHEAD_ROOT "{root}";',
             f'fish_add_path "{shim_dir}";',
         ]
+        wrapper = _CAMP_WRAPPER_FISH
     else:
         lines = [
             f'export TRAILHEAD_ROOT="{root}";',
             f'export PATH="{shim_dir}:$PATH";',
         ]
-    return "\n".join(lines) + "\n"
+        wrapper = _CAMP_WRAPPER_POSIX
+    return "\n".join(lines) + "\n" + wrapper

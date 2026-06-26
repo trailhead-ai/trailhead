@@ -1,6 +1,6 @@
-"""Tests for camp pwd shell integration (previously 'camp cd', since renamed).
+"""Tests for camp pwd shell integration (previously 'camp cd', renamed per PR review).
 
-Covers:
+Test contract:
 - camp pwd <slug> prints exactly one line = the resolved absolute workspace path
   (under the state dir), no trailing whitespace; diagnostics go to stderr, never
   stdout.

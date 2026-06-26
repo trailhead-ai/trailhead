@@ -209,7 +209,7 @@ def load_group(path: Path) -> dict[str, Any]:
     if not isinstance(branch_pattern, str):
         raise GroupConfigError(f"{path}: field 'branch.pattern' must be a string")
 
-    # --- [harness] section (optional) — launch seam config ---
+    # --- [harness] section (optional) — harness profile config ---
     harness = _parse_harness(raw.get("harness"), path)
 
     # --- [dev_env] section — warn-and-continue (deferred) ---
@@ -260,7 +260,7 @@ def load_group(path: Path) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# [harness] launch-seam block
+# [harness] profile block
 # ---------------------------------------------------------------------------
 
 # Placeholders the launch templates / cwd may reference. Any other {token} is a
@@ -298,7 +298,7 @@ def _validate_string_list_field(
     Each token is checked for type (must be str) and stripped-and-rejected if
     empty or whitespace-only.  allow_empty_list=False rejects an empty list (e.g.
     argv templates); True would permit it — currently always False at call sites
-    but the flag exists so future callers can reuse the helper without kwargs surgery.
+    but the flag exists so the helper can be reused without kwargs surgery.
     """
     if not isinstance(value, list) or (not allow_empty_list and len(value) == 0):
         raise GroupConfigError(f"{path}: {where} must be a non-empty list of strings")
@@ -315,20 +315,11 @@ def _validate_string_list_field(
     return list(value)
 
 
-def _validate_argv_template(raw: Any, *, path: Path, where: str) -> list[str]:
-    """Validate a launch argv template: a non-empty list of strings, each
-    stripped-and-rejected if empty, each with only known placeholders."""
-    tokens = _validate_string_list_field(raw, path=path, where=where, allow_empty_list=False)
-    for i, token in enumerate(tokens):
-        _reject_unknown_placeholders(token, path=path, where=f"{where}[{i}]")
-    return tokens
-
-
 def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
     """Parse + validate the optional [harness] block. Returns None when absent.
 
     Every field is OPTIONAL — a [harness] block containing only doc_files (or
-    only cwd, or only new) is valid.  Fields that are absent are simply not
+    only cwd, or only binary) is valid.  Fields that are absent are simply not
     included in the returned dict; resolve_harness_profile merges per-field against
     _CLAUDE_DEFAULT at resolution time.
     """
@@ -339,11 +330,15 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
 
     result: dict[str, Any] = {}
 
-    if "new" in raw:
-        result["new"] = _validate_argv_template(raw["new"], path=path, where="harness.new")
-
-    if "resume" in raw:
-        result["resume"] = _validate_argv_template(raw["resume"], path=path, where="harness.resume")
+    # `binary` is a single harness binary NAME (e.g. "claude", "codex", or an
+    # absolute path). camp no longer launches an argv — only the basename is read,
+    # by is_claude_launch(), to scope the trust pre-seed. It is a plain string (no
+    # {slug}/{workspace} templating).
+    if "binary" in raw:
+        binary = raw["binary"]
+        if not isinstance(binary, str) or not binary.strip():
+            raise GroupConfigError(f"{path}: harness.binary must be a non-empty string")
+        result["binary"] = binary
 
     if "cwd" in raw:
         cwd = raw["cwd"]

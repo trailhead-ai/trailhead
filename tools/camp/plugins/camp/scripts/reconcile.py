@@ -21,8 +21,13 @@ reconcile_break(group, slug):
     - Dirty worktree blocks break unless force=True.
     - Break atomicity symmetry: manifest is not left listing a removed member.
 
-A slug-scoped file lock guards concurrent reconcile_worktree calls so two
-terminals racing camp <slug> don't both git-worktree-add the same path.
+A slug-scoped file lock guards concurrent reconcile_worktree AND reconcile_break
+calls so two terminals racing camp <slug> don't both git-worktree-add the same
+path, and two concurrent `camp remove <slug>` calls don't both pass the
+dirty-check and race the manifest write (there is no session lock serializing
+removal). The lockfile lives OUTSIDE the workspace dir at
+<worktrees-root>/<slug>.lock (manifest.lock_path_for) so reconcile_break's
+teardown rmtree of the workspace dir cannot delete the held lock inode.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from manifest import (
+    ManifestError,
     manifest_path_for,
     read_central_manifest,
     reconcile_lock,
@@ -171,7 +177,7 @@ def _worktree_registered(repo_root: Path, wt_path: Path) -> bool:
 
 
 def _fetch_base(repo_root: Path, base: str, *, timeout: float = FETCH_TIMEOUT_SECONDS) -> None:
-    """Fetch the member's base ref under a timeout (used by the async provisioner).
+    """Fetch the member's base ref under a timeout (async provisioner).
 
     The base looks like "origin/main"; the remote is the part before the first
     "/". A non-remote base (no "/") is a local ref and skips the fetch. A
@@ -330,7 +336,7 @@ def _run_bootstrap(member: dict[str, Any], wt_path: Path) -> None:
     """Run a member's bootstrap command in the worktree directory.
 
     bootstrap is a flat list of strings representing a single command +
-    its arguments (shell=False, author-trusted input). E.g.:
+    its arguments (shell=False trust boundary). E.g.:
         ["pip", "install", "-e", "."]
 
     An empty list means no bootstrap; a no-op.
@@ -343,7 +349,7 @@ def _run_bootstrap(member: dict[str, Any], wt_path: Path) -> None:
     if not all(isinstance(part, str) for part in bootstrap):
         raise ReconcileError(
             f"camp: bootstrap for member {member['name']!r} must be a list of strings "
-            f"(D-F: shell=False); got non-string elements"
+            f"(shell=False); got non-string elements"
         )
 
     result = subprocess.run(
@@ -418,7 +424,7 @@ def reconcile_worktree(
 
     For each member:
       1. Ensures <repo_root>/.claude/worktrees/<slug> exists on branch worktree-<slug>.
-      2. Runs each member's bootstrap commands (shell=False, author-trusted).
+      2. Runs each member's bootstrap commands (shell=False).
     Then writes the central manifest atomically.
 
     Concurrent-run guard: a per-slug lock (threading + file lock) prevents two
@@ -461,7 +467,7 @@ def reconcile_worktree(
                     }
                 )
 
-            # -- Phase 2: Bootstrap members in parallel (shell=False, author-trusted)
+            # -- Phase 2: Bootstrap members in parallel (shell=False)
             any_bootstrap_failure: Exception | None = None
             if any(bool(m.get("bootstrap")) for m in members):
                 with ThreadPoolExecutor(max_workers=len(members)) as executor:
@@ -510,15 +516,26 @@ def reconcile_break(
 ) -> dict[str, Any]:
     """Remove a worktree set for (group, slug).
 
+    Concurrency: with no session lock, two concurrent
+    `camp remove <same-slug>` calls could both pass the dirty-check and race the
+    manifest write. reconcile_break acquires the slug-scoped reconcile lock (the
+    SAME lock reconcile_worktree, seed_pending_workspace, and the provisioner
+    flips hold) so removal of a given slug serializes across processes/threads.
+    That lockfile lives OUTSIDE the workspace dir, so the teardown rmtree
+    below cannot delete the inode this call is holding. The lock is taken AFTER a
+    fail-fast manifest read so a nonexistent slug raises ManifestError without
+    even creating the stray lockfile.
+
     Algorithm:
       1. Read the central manifest to get member worktree paths.
-      2. Check all members for dirty trees (abort unless force=True).
-      3. Confinement pre-check (BEFORE any removal): each worktree_path must
-         resolve inside the resolved workspace dir
+      2. Confinement pre-check (BEFORE touching any path): each
+         worktree_path must resolve inside the resolved workspace dir
          (central_state_dir(group)/worktrees/<slug>). A symlink-escaping path is
          rejected (ConfinementError); an old-layout path under a repo_root is
-         rejected with a legible LegacyLayoutError. The pre-check aborts the whole
-         break — never a half-applied removal.
+         rejected with a legible LegacyLayoutError. This runs FIRST so the
+         dirty-check's `git -C <worktree_path>` never executes in an unconfined
+         cwd. The pre-check aborts the whole break — never a half-applied removal.
+      3. Check all (now-confined) members for dirty trees (abort unless force=True).
       4. Remove each member worktree via git worktree remove.
       5. Remove the central manifest ONLY if all removals succeeded (break
          atomicity symmetry — never leave a manifest listing a removed member).
@@ -536,105 +553,129 @@ def reconcile_break(
     ws_dir = workspace_dir(group_name, slug, env=env)
     ws_resolved = ws_dir.resolve()
 
-    # Read current manifest
-    manifest_data = read_central_manifest(mpath)
-    member_entries = manifest_data.get("members", [])
+    # Fail-fast on a nonexistent slug BEFORE taking the reconcile lock. The lock
+    # lives at <worktrees-root>/<slug>.lock (outside ws_dir), so acquiring
+    # it no longer pre-creates the workspace dir; but it WOULD create a stray
+    # <slug>.lock file for a slug that never existed. A bare existence check gates
+    # that — the full parse is wasted here since the authoritative read happens
+    # under the lock below.
+    if not mpath.exists():
+        raise ManifestError(f"camp: cannot read manifest at {mpath}: no such workspace")
 
-    # Dirty-check before removal
-    if not force:
-        dirty = []
+    # Serialize removal of this slug. The slug-scoped reconcile lock (the same
+    # .reconcile.lock reconcile_worktree holds) closes the TOCTOU window where
+    # two concurrent `camp remove <slug>` calls both pass the dirty-check and
+    # race the manifest write when there is no session lock.
+    lock = _slug_lock(f"{group_name}/{slug}")
+    with lock, reconcile_lock(mpath.parent):
+        # Authoritative read under the lock (a concurrent break may have already
+        # removed it — ManifestError then surfaces cleanly).
+        manifest_data = read_central_manifest(mpath)
+        member_entries = manifest_data.get("members", [])
+
+        # Confinement pre-check FIRST: validate all paths BEFORE touching any of
+        # them. This MUST precede the dirty-check — the dirty-check runs
+        # `git -C <worktree_path> status`, so a tampered/legacy manifest whose
+        # worktree_path escapes the workspace would otherwise exec git in an
+        # unconfined cwd before the guard refuses removal.
         for entry in member_entries:
             wt_path = Path(entry["worktree_path"])
-            if wt_path.is_dir() and _git_is_dirty(wt_path):
-                dirty.append(entry["name"])
-        if dirty:
-            raise ReconcileError(
-                f"camp: dirty worktrees in slug {slug!r}: {', '.join(dirty)} "
-                "(pass force=True to discard changes)"
-            )
-
-    # Confinement pre-check: validate all paths BEFORE removing anything.
-    for entry in member_entries:
-        wt_path = Path(entry["worktree_path"])
-        try:
-            wt_path.resolve().relative_to(ws_resolved)
-            continue  # inside the workspace dir — OK
-        except ValueError:
-            pass
-
-        # Outside the workspace dir. Distinguish a retired per-repo layout path
-        # (legible legacy error) from an arbitrary/symlink-escaping path.
-        if _is_old_layout_path(wt_path):
-            raise LegacyLayoutError(
-                f"camp: member {entry['name']!r} worktree_path {wt_path} uses the "
-                f"retired per-repo layout (outside the workspace dir {ws_dir}). "
-                f"camp will not remove it — run `git worktree remove {wt_path}` manually."
-            )
-        raise ConfinementError(
-            f"camp: worktree path {wt_path} resolves outside the workspace dir "
-            f"{ws_dir} for member {entry['name']!r} — refusing removal"
-        )
-
-    # Remove each member worktree; track removals for atomicity symmetry
-    removed: list[str] = []
-    errors: list[str] = []
-    member_for_entry: dict[str, dict[str, Any]] = {}
-
-    # Build a lookup from name to group config member
-    for m in group["members"]:
-        member_for_entry[m["name"]] = m
-
-    for entry in member_entries:
-        name = entry["name"]
-        wt_path = Path(entry["worktree_path"])
-        repo_root = Path(entry["repo_root"])
-        member = member_for_entry.get(name, {"name": name})
-
-        try:
-            _remove_worktree_for_member(member, wt_path, repo_root, ws_dir, force=force)
-            removed.append(name)
-        except (ConfinementError, LegacyLayoutError):
-            raise
-        except Exception as e:
-            errors.append(f"{name}: {e}")
-
-    # Break atomicity symmetry: only remove the manifest if all removals succeeded
-    # (or if the members that failed were already absent).
-    # Do NOT leave a manifest listing members whose worktrees are already removed.
-    if not errors:
-        remove_central_manifest(mpath)
-        # Remove the now-camp-owned workspace dir itself (.camp, .claude,
-        # setup.log, .session.lock, doc files). Leaving it behind makes the next
-        # `camp ai <slug>` see ws_dir.exists() True and wrongly resume a
-        # torn-down session. Confinement: the resolved workspace dir MUST sit
-        # under the resolved worktrees root (central_state_dir/worktrees) anchored
-        # independently of ws_dir — never rmtree an unconfined path (symlink
-        # escape, old layout, etc.).
-        if ws_dir.exists():
-            from group_resolve import central_state_dir
-
-            worktrees_root = (central_state_dir(group_name, env=env) / "worktrees").resolve()
             try:
-                ws_resolved.relative_to(worktrees_root)
+                wt_path.resolve().relative_to(ws_resolved)
+                continue  # inside the workspace dir — OK
             except ValueError:
-                raise ConfinementError(
-                    f"camp: workspace dir {ws_dir} resolves outside the worktrees "
-                    f"root {worktrees_root} — refusing removal"
+                pass
+
+            # Outside the workspace dir. Distinguish a retired per-repo layout
+            # path (legible legacy error) from an arbitrary/symlink-escaping path.
+            if _is_old_layout_path(wt_path):
+                raise LegacyLayoutError(
+                    f"camp: member {entry['name']!r} worktree_path {wt_path} uses the "
+                    f"retired per-repo layout (outside the workspace dir {ws_dir}). "
+                    f"camp will not remove it — run `git worktree remove {wt_path}` manually."
                 )
-            shutil.rmtree(ws_resolved)
-        status = "ok"
-    else:
-        # Some removals failed. Update the manifest to reflect reality:
-        # remove entries for members that were successfully removed so the
-        # manifest never lists a member whose worktree is gone.
-        remaining = [e for e in member_entries if e["name"] not in removed]
-        if remaining:
-            updated = dict(manifest_data)
-            updated["members"] = remaining
-            write_central_manifest(mpath, updated)
-        else:
+            raise ConfinementError(
+                f"camp: worktree path {wt_path} resolves outside the workspace dir "
+                f"{ws_dir} for member {entry['name']!r} — refusing removal"
+            )
+
+        # Dirty-check (only after every path is confined — see above).
+        if not force:
+            dirty = []
+            for entry in member_entries:
+                wt_path = Path(entry["worktree_path"])
+                if wt_path.is_dir() and _git_is_dirty(wt_path):
+                    dirty.append(entry["name"])
+            if dirty:
+                raise ReconcileError(
+                    f"camp: dirty worktrees in slug {slug!r}: {', '.join(dirty)} "
+                    "(pass force=True to discard changes)"
+                )
+
+        # Remove each member worktree; track removals for atomicity symmetry
+        removed: list[str] = []
+        errors: list[str] = []
+        member_for_entry: dict[str, dict[str, Any]] = {}
+
+        # Build a lookup from name to group config member
+        for m in group["members"]:
+            member_for_entry[m["name"]] = m
+
+        for entry in member_entries:
+            name = entry["name"]
+            wt_path = Path(entry["worktree_path"])
+            repo_root = Path(entry["repo_root"])
+            member = member_for_entry.get(name, {"name": name})
+
+            try:
+                _remove_worktree_for_member(member, wt_path, repo_root, ws_dir, force=force)
+                removed.append(name)
+            except (ConfinementError, LegacyLayoutError):
+                raise
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+
+        # Break atomicity symmetry: only remove the manifest if all removals
+        # succeeded (or if the members that failed were already absent).
+        # Do NOT leave a manifest listing members whose worktrees are removed.
+        if not errors:
             remove_central_manifest(mpath)
-        status = "ok_with_errors"
+            # Remove the now-camp-owned workspace dir itself (.camp, .claude,
+            # setup.log, doc files). Leaving it behind would make the next
+            # `camp new <slug>` re-enter a torn-down workspace; that re-enter
+            # decision now keys on MANIFEST presence (removed just above),
+            # so a stale ws_dir alone no longer triggers a wrong re-enter, but we
+            # still remove it to leave no orphan state. The slug lock lives
+            # OUTSIDE ws_dir, so this rmtree never deletes the held lock.
+            # Confinement: the resolved workspace dir MUST
+            # sit under the resolved worktrees root (central_state_dir/worktrees)
+            # anchored independently of ws_dir — never rmtree an unconfined path
+            # (symlink escape, old layout, etc.).
+            if ws_dir.exists():
+                from group_resolve import central_state_dir
+
+                worktrees_root = (central_state_dir(group_name, env=env) / "worktrees").resolve()
+                try:
+                    ws_resolved.relative_to(worktrees_root)
+                except ValueError:
+                    raise ConfinementError(
+                        f"camp: workspace dir {ws_dir} resolves outside the worktrees "
+                        f"root {worktrees_root} — refusing removal"
+                    )
+                shutil.rmtree(ws_resolved)
+            status = "ok"
+        else:
+            # Some removals failed. Update the manifest to reflect reality:
+            # remove entries for members that were successfully removed so the
+            # manifest never lists a member whose worktree is gone.
+            remaining = [e for e in member_entries if e["name"] not in removed]
+            if remaining:
+                updated = dict(manifest_data)
+                updated["members"] = remaining
+                write_central_manifest(mpath, updated)
+            else:
+                remove_central_manifest(mpath)
+            status = "ok_with_errors"
 
     return {
         "status": status,

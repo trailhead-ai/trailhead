@@ -19,7 +19,7 @@ A repo listed in two groups is an error at resolve time and at eager
 validate_no_overlap time: raises GroupResolutionError naming both groups + the repo.
 
 group names are validated with validate_group_name before use in any path
-construction (confinement).
+construction (path confinement).
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-# The trailhead.paths resolver is the canonical owner of camp's state/config paths.
+# The Step-1 resolver is the canonical owner of camp's state/config paths.
 # Imported lazily inside central_state_dir so that module-level import of
 # group_resolve.py succeeds even if trailhead is not installed (the import guard
 # in cli/camp catches that case before any command runs).
@@ -52,7 +52,7 @@ class GroupConfinementError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Group-name confinement
+# group-name confinement
 # ---------------------------------------------------------------------------
 
 _INVALID_GROUP_CHARS = frozenset(("/", "\\", ".."))
@@ -78,7 +78,7 @@ def validate_group_name(name: str) -> None:
     if "/" in name or "\\" in name or ".." in name or os.sep in name or "\x00" in name:
         raise GroupConfinementError(
             f"camp: group name {name!r} must not contain path separators, "
-            "backslashes, '..', or null bytes (D-E confinement)"
+            "backslashes, '..', or null bytes (path confinement)"
         )
 
 

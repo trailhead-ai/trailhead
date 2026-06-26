@@ -231,26 +231,10 @@ class TestBug2RmRemovesWorkspaceDir:
         reconcile_break(g["group"], "feat-rm", env=g["env"])
         assert not ws.exists(), "camp rm must remove the workspace dir itself"
 
-    def test_after_rm_next_ai_takes_new_path(self, two_member_group, camp_cli, monkeypatch):
-        """After camp rm, a subsequent camp ai chooses the `new` template
-        (is_resume False), not resume against a torn-down session."""
-        import harness_launch
-        from reconcile import reconcile_break
-
-        g = two_member_group
-        self._provision(g, "feat-cycle")
-        reconcile_break(g["group"], "feat-cycle", env=g["env"])
-
-        calls = []
-        monkeypatch.setattr(
-            harness_launch,
-            "launch",
-            lambda group, slug, ws, *, is_resume, session_id=None, profile=None: calls.append(
-                is_resume
-            ),
-        )
-        camp_cli._cmd_ai_group_cli(["feat-cycle"], g["group"], g["env"], dry_run=False)
-        assert calls == [False], "after rm, camp ai must take the `new` path"
+    # the new-vs-resume launch-template choice was stripped from the
+    # `camp new` handler (no session lock / no harness launch), so the former
+    # `test_after_rm_next_ai_takes_new_path` (which asserted is_resume==False via
+    # the removed harness_launch.launch seam) no longer has behavior to assert.
 
     def test_dirty_block_without_force_leaves_dir_intact(self, two_member_group):
         from reconcile import reconcile_break, ReconcileError

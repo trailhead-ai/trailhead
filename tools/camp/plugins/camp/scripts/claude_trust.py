@@ -23,7 +23,7 @@ Design notes:
 - HOME is resolved from the injected env dict (env["HOME"] or env["USERPROFILE"]),
   falling back to Path.home() — mirrors claude_code.py:detect().  Every test
   passes env={"HOME": str(tmp_path)} and never touches the real ~/.claude.json
-  (Axiom 6).
+  (Axiom 6 — the harness CLI is not isolated by the trailhead env).
 - Silent-miss limitation: a write that claude silently ignores (e.g. because
   Claude changed the file schema) produces no error signal here.  If the dialog
   reappears after bring-up, re-run the manual interactive check to validate the
@@ -148,7 +148,7 @@ def pretrust_workspace(
         # Parseable but structurally wrong (top-level or projects/entry not a
         # mapping) is treated like malformed: abort without overwriting so the
         # "never raises, never clobbers" contract holds on the build path too,
-        # not just the read path (guards against non-dict shapes).
+        # not just the read path (non-dict shapes).
         if not _is_mergeable(existing_data, str(launch_dir)):
             print(
                 f"camp: pretrust skipped — {claude_json_path} has an unexpected "
@@ -174,7 +174,7 @@ def pretrust_workspace(
     # The file lands 0o600 unconditionally — tempfile.mkstemp creates the tmp file
     # 0o600 by construction and we never widen it. This is deliberate: ~/.claude.json
     # holds OAuth secrets, so we always enforce owner-only perms rather than
-    # preserving a (possibly looser) pre-existing mode.
+    # preserving a (possibly looser) pre-existing mode (security).
     fd, tmp_path_str = tempfile.mkstemp(dir=str(home), prefix=".claude-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as fh:
