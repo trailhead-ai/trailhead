@@ -1,9 +1,10 @@
-"""Shared config resolver for the lore plugin.
+"""Shared stdlib helpers for the lore plugin.
 
-Every hook and CLI call resolves the vault location and the acting user
-through these two pure functions. Vault location comes from $LORE_VAULT
-(default ~/lore); the acting user from $LORE_USER, then git config, then
-a generic fallback. Neither function raises.
+Pure-stdlib utilities for resolving the acting user, committer email, the
+current project, and session notes, plus note-path iteration. Vault location
+is resolved separately (config-only) via ``vault_config.resolve_active_vault``.
+The acting user comes from $LORE_USER, then git config, then a generic
+fallback. No function here raises.
 """
 
 from __future__ import annotations
@@ -57,20 +58,6 @@ def iter_note_paths(directory: Path, recursive: bool = False) -> Iterator[Path]:
             for md in sub.glob("*.md"):
                 if not md.name.startswith("_"):
                     yield md
-
-
-def resolve_vault() -> str:
-    """Return the resolved vault path.
-
-    Priority: $LORE_VAULT (expanded + resolved), else ~/lore resolved.
-    Never raises.
-    """
-    raw = os.environ.get("LORE_VAULT", "").strip()
-    target = raw if raw else "~/lore"
-    try:
-        return str(Path(target).expanduser().resolve())
-    except Exception:
-        return str(Path(target).expanduser())
 
 
 def _sanitize(value: str) -> str:

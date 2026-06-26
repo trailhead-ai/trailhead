@@ -19,8 +19,9 @@ the cross-cutting endpoint tests that are independent of the storage model:
       shadowed by the ``session`` subcommand.
 
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern) and load the
-``session_store`` module directly for the sanitizer unit tests. Never writes to the
-real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
+``session_store`` module directly for the concurrent-race + sanitizer unit tests.
+Never writes to the real vault: the CLI resolves the test vault from a seeded
+config.json (isolated XDG_CONFIG_HOME) and XDG_STATE_HOME is fenced too.
 """
 from __future__ import annotations
 

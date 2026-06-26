@@ -85,15 +85,14 @@ development, `add` a filesystem path to the repo root instead of a URL — see t
 ### 2.2 Point lore at a vault
 
 ```bash
-export LORE_VAULT=~/lore        # add to ~/.bashrc or ~/.zshrc
 lore init ~/lore
 ```
 
 `lore init` scaffolds the vault taxonomy, copies the starter docs, initializes a
 git repo, and installs a pre-commit guard that enforces the canonical status
-vocabulary. `$LORE_VAULT` tells every hook and the `lore` CLI where the vault
-lives. If it is unset, lore defaults to `~/lore` and warns once at session
-start.
+vocabulary. It records the vault as the config default, so every hook and the
+`lore` CLI resolve it from `config.json` — there is no environment variable to
+set. With no config yet, lore falls back to a default vault under its state dir.
 
 ### 2.3 Add your app layer as a project-scoped `.claude/`
 
@@ -227,7 +226,7 @@ the providers your team uses and write the thin skills that bridge to them.
 ## 5. Checklist
 
 1. Install lore and craft from the marketplace.
-2. `export LORE_VAULT` and `lore init` a vault.
+2. Run `lore init` to bootstrap a vault (recorded as the config default).
 3. Create a project `.claude/` with `settings.json` registering any hooks via
    **`$CLAUDE_PROJECT_DIR`-anchored** command paths (never relative).
 4. For each extension point your workflow needs, add a project skill in

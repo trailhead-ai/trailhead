@@ -31,11 +31,11 @@ After install, set up your vault:
 
 ```
 lore init <path>   # scaffold the vault taxonomy and starter docs
-export LORE_VAULT=<path>   # add to ~/.bashrc, ~/.zshrc, or ~/.config/fish/config.fish
 ```
 
-`$LORE_VAULT` tells every hook and CLI call where the vault lives. If it is
-unset, lore defaults to `~/lore` and emits a one-time warning at session start.
+`lore init` records the vault as the config default, so every hook and CLI
+call resolves it from `config.json` — no environment variable to export. When
+no config exists yet, lore falls back to a default vault under its state dir.
 
 Open Claude Code in any project. lore is fully pull: there is no SessionStart
 hook — the `lore` CLI resolves the active session note for your worktree itself

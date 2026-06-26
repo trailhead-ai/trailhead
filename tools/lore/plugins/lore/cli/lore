@@ -192,9 +192,9 @@ def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     values) and re-resolves the destination via ``_resolve_destination_root``.
 
     NOTE (scoped fix, 2026-06-18): this reconciles the create-vs-update/delete
-    location split that the config-routing work introduced. The broader removal
-    of ``$LORE_VAULT`` in favor of config-only resolution across *every* lore
-    command (and the hooks) is tracked as a follow-up — see [[config-only-vault-resolution]].
+    location split that the config-routing work introduced. Vault resolution is
+    now config-only across *every* lore command (and the hooks) — see
+    [[config-only-vault-resolution]].
     """
     loaded = _load_vault_config()
     if loaded is None:
@@ -1109,8 +1109,8 @@ def cmd_vault(args: argparse.Namespace) -> int:
 def _cmd_vault_path(args: argparse.Namespace) -> int:
     """Print the config-resolved active (default-scope) vault root to stdout.
 
-    The agent-facing way to resolve the active vault now that ``$LORE_VAULT`` is
-    gone: ``cat "$(lore vault path)/$(lore session-note)"``. Mirrors the CLI's own
+    The agent-facing way to resolve the active vault from config:
+    ``cat "$(lore vault path)/$(lore session-note)"``. Mirrors the CLI's own
     resolution (``vault_config.resolve_active_vault`` → config default, silent
     floor fallback), so agents and the CLI never disagree about which vault is
     active.
@@ -2402,7 +2402,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_reindex.add_argument(
         "--vault",
         default=None,
-        help="Vault path (overrides $LORE_VAULT)",
+        help="Vault path (overrides the config-resolved active vault)",
     )
     p_reindex.set_defaults(func=cmd_reindex)
 

@@ -1,6 +1,5 @@
-"""Tests for the config resolver (vault.py).
+"""Tests for the stdlib helpers (vault.py).
 
-resolve_vault(): $LORE_VAULT (expanded+resolved) or ~/lore resolved. Never raises.
 resolve_user(): $LORE_USER → git config user.name → "you", sanitized.
 """
 
@@ -10,37 +9,6 @@ from pathlib import Path
 from unittest import mock
 
 from conftest import load_script
-
-
-def test_resolve_vault_uses_env_when_set(tmp_path):
-    target = tmp_path / "my-vault"
-    target.mkdir()
-    with mock.patch.dict(os.environ, {"LORE_VAULT": str(target)}, clear=False):
-        v = load_script("vault")
-        result = v.resolve_vault()
-    assert result == str(target.resolve())
-
-
-def test_resolve_vault_expands_tilde(tmp_path):
-    with mock.patch.dict(os.environ, {"LORE_VAULT": "~/some-vault"}, clear=False):
-        v = load_script("vault")
-        result = v.resolve_vault()
-    assert result == str((Path.home() / "some-vault").resolve())
-
-
-def test_resolve_vault_defaults_to_home_lore_when_unset():
-    env = {k: val for k, val in os.environ.items() if k != "LORE_VAULT"}
-    with mock.patch.dict(os.environ, env, clear=True):
-        v = load_script("vault")
-        result = v.resolve_vault()
-    assert result == str((Path.home() / "lore").resolve())
-
-
-def test_resolve_vault_never_raises_on_empty_env():
-    with mock.patch.dict(os.environ, {"LORE_VAULT": ""}, clear=False):
-        v = load_script("vault")
-        result = v.resolve_vault()
-    assert result == str((Path.home() / "lore").resolve())
 
 
 def test_resolve_user_honors_lore_user_env():
