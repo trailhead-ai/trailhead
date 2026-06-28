@@ -2,8 +2,8 @@
 """The `lore` CLI — vault scaffolding and section/status edit primitives.
 
 Subcommands:
-  lore init <path>          Scaffold a new vault (taxonomy + starter docs).
-  lore session-note         Print this session's note path (id-first resolve).
+  lore init                 Scaffold the default vault (taxonomy + starter docs).
+  lore record show <id>     Read a record's body (and sidecar with --json).
   lore flush                Flush the current session (dirty -> clean + commit).
   lore areas                List all vault areas (names, one-liners, keywords).
   lore sync                 Stage, commit, and push the vault.
@@ -191,10 +191,9 @@ def _resolve_record_op_vault(record_id: str, args: argparse.Namespace) -> str:
     ``_find_current_record_location`` (a config scan independent of the flag
     values) and re-resolves the destination via ``_resolve_destination_root``.
 
-    NOTE (scoped fix, 2026-06-18): this reconciles the create-vs-update/delete
-    location split that the config-routing work introduced. Vault resolution is
-    now config-only across *every* lore command (and the hooks) — see
-    [[config-only-vault-resolution]].
+    NOTE: this reconciles the create-vs-update/delete location split that the
+    config-routing work introduced. Vault resolution is now config-only across
+    *every* lore command (and the hooks).
     """
     loaded = _load_vault_config()
     if loaded is None:
@@ -858,7 +857,7 @@ def _flush_batch(args: argparse.Namespace, *, query: str, scope_label: str) -> i
     return 0
 
 
-# ---- session-note -----------------------------------------------------------
+# ---- session resolution helpers ---------------------------------------------
 
 def _session_id_from_args_or_env(args: argparse.Namespace) -> str:
     """Resolve the session id: explicit ``--session-id`` flag wins, else the
@@ -872,39 +871,6 @@ def _session_id_from_args_or_env(args: argparse.Namespace) -> str:
         or os.environ.get("CLAUDE_SESSION_ID")
         or ""
     )
-
-
-def cmd_session_note(args: argparse.Namespace) -> int:
-    """Print the vault-relative path of the session note for this session.
-
-    Resolution order (see `vault.resolve_session_note`): exact session-id
-    frontmatter match (cwd-independent) → worktree-name fallback (newest by
-    filename timestamp). On a miss, prints a diagnostic listing what was tried
-    to stderr and exits 1, so callers don't invent exploratory `ls`/`git`
-    commands to guess.
-    """
-    vault = Path(vault_config_mod.resolve_active_vault())
-    session_id = _session_id_from_args_or_env(args)
-    worktree_name = args.worktree or vault_mod.detect_worktree_name()
-
-    note = vault_mod.resolve_session_note(
-        vault, session_id=session_id, worktree_name=worktree_name
-    )
-    if note is not None:
-        try:
-            print(note.relative_to(vault))
-        except ValueError:
-            print(note)
-        return 0
-
-    print(
-        "lore session-note: no session note resolved.\n"
-        f"  session_id: {session_id or '<unset>'}\n"
-        f"  worktree:   {worktree_name or '<unknown>'}\n"
-        f"  searched:   {vault / 'session'}",
-        file=sys.stderr,
-    )
-    return 1
 
 
 # ---- areas ------------------------------------------------------------------
@@ -957,16 +923,16 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     rebuildable from the git-tracked text files.
 
     **Multi-vault + config-sourced ``shared``.** When a
-    ``config.json`` exists & loads (and no explicit ``--vault`` narrows the
-    scope), reindex spans **all** configured vault roots and derives each vault's
-    ``shared`` from its config flag (``shared_roots`` — the set of roots marked
-    ``shared: true``), then stamps the ``config.json`` mtime into the index meta
-    so ``search`` can warn when the index is older than the config. With NO config
-    (or an explicit ``--vault``) it keeps today's single-active-vault behavior with
-    the owned=first-vault heuristic (vanilla).
+    ``config.json`` exists & loads, reindex spans **all** configured vault roots
+    and derives each vault's ``shared`` from its config flag (``shared_roots`` —
+    the set of roots marked ``shared: true``), then stamps the ``config.json``
+    mtime into the index meta so ``search`` can warn when the index is older than
+    the config. With NO config it keeps today's single-active-vault behavior with
+    the owned=first-vault heuristic (vanilla). The target is always config-resolved
+    — there is no path override, since the active vault is fully determined by
+    scoping.
     """
-    vault_override = getattr(args, "vault", None)
-    loaded = None if vault_override else _load_vault_config()
+    loaded = _load_vault_config()
 
     if loaded is not None:
         config_path, vaults = loaded
@@ -976,11 +942,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         }
     else:
         config_path = None
-        single = (
-            Path(vault_override).expanduser().resolve()
-            if vault_override
-            else Path(vault_config_mod.resolve_active_vault())
-        )
+        single = Path(vault_config_mod.resolve_active_vault())
         vault_roots = [str(single)]
         shared_roots = None
 
@@ -1080,11 +1042,10 @@ def cmd_search(args: argparse.Namespace) -> int:
 # ---- vault ------------------------------------------------------------------
 
 def cmd_vault(args: argparse.Namespace) -> int:
-    """Dispatch ``lore vault <action>`` — add / delete / ls / config / path.
+    """Dispatch ``lore vault <action>`` — add / delete / ls / config.
 
     Thin shell over ``vault_config`` (the parse/validate/mutate boundary) and
     ``index_store`` (the per-vault scan/remove seam). Routes by ``vault_action``.
-    ``path`` prints the config-resolved active vault root.
     """
     action = getattr(args, "vault_action", None)
     if action == "add":
@@ -1095,28 +1056,13 @@ def cmd_vault(args: argparse.Namespace) -> int:
         return _cmd_vault_ls(args)
     if action == "config":
         return _cmd_vault_config(args)
-    if action == "path":
-        return _cmd_vault_path(args)
     print(
         f"lore vault: unknown action {action!r}. "
         f"Use 'lore vault add', 'lore vault delete', 'lore vault ls', "
-        f"'lore vault config', or 'lore vault path'.",
+        f"or 'lore vault config'.",
         file=sys.stderr,
     )
     return 1
-
-
-def _cmd_vault_path(args: argparse.Namespace) -> int:
-    """Print the config-resolved active (default-scope) vault root to stdout.
-
-    The agent-facing way to resolve the active vault from config:
-    ``cat "$(lore vault path)/$(lore session-note)"``. Mirrors the CLI's own
-    resolution (``vault_config.resolve_active_vault`` → config default, silent
-    floor fallback), so agents and the CLI never disagree about which vault is
-    active.
-    """
-    print(vault_config_mod.resolve_active_vault())
-    return 0
 
 
 def _read_raw_config(config_path: Path) -> dict:
@@ -1655,13 +1601,103 @@ def cmd_record(args: argparse.Namespace) -> int:
         return _cmd_record_update(args)
     if action == "delete":
         return _cmd_record_delete(args)
+    if action == "show":
+        return _cmd_record_show(args)
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"or 'lore record delete'.",
+        f"'lore record delete', or 'lore record show'.",
         file=sys.stderr,
     )
     return 1
+
+
+def _cmd_record_show(args: argparse.Namespace) -> int:
+    """``lore record show RECORD_ID [--json]`` — the canonical record reader.
+
+    The CLI-only way to read a record so agents and skills never poke at vault
+    files directly. Plain: prints the body (``.md``) to stdout. ``--json``: emits
+    ``{record_id, kind, name, sidecar, body}`` — the ``sidecar`` dict is how
+    callers read the un-indexed annotations (e.g. flush's ``flushed-at``
+    watermark, which is sidecar-only and never lands in the index).
+
+    Special case ``lore record show session`` (the bare kind, no name): resolves
+    THIS worktree's session record via :func:`vault.resolve_session_note`
+    (session-id first, worktree fallback) and shows it. This folds the one useful
+    behavior of the retired ``session-note`` command into the canonical reader.
+
+    RECORD_ID must be ``<kind>/<name>`` (or the bare ``session``). A malformed
+    ID, a nonexistent record, or an unresolvable session → non-zero + stderr.
+    """
+    record_id = getattr(args, "record_id", None)
+    as_json = bool(getattr(args, "json", False))
+
+    if record_id == "session":
+        vault = Path(vault_config_mod.resolve_active_vault())
+        session_id = _session_id_from_args_or_env(args)
+        worktree_name = (
+            getattr(args, "worktree", None) or vault_mod.detect_worktree_name()
+        )
+        note = vault_mod.resolve_session_note(
+            vault, session_id=session_id, worktree_name=worktree_name
+        )
+        if note is None:
+            print(
+                "lore record show: no session record resolved.\n"
+                f"  session_id: {session_id or '<unset>'}\n"
+                f"  worktree:   {worktree_name or '<unknown>'}\n"
+                f"  searched:   {vault / 'session'}",
+                file=sys.stderr,
+            )
+            return 1
+        record_id = f"session/{note.stem}"
+        vault_root = str(vault)
+    else:
+        if not record_id or "/" not in record_id:
+            print(
+                f"error: invalid RECORD_ID {record_id!r}; "
+                f"expected '<kind>/<name>' (or 'session')",
+                file=sys.stderr,
+            )
+            return 1
+        vault_root = _resolve_record_op_vault(record_id, args)
+
+    try:
+        loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record show failed: {exc}", file=sys.stderr)
+        return 1
+
+    body = (
+        loc.body_path.read_text(encoding="utf-8")
+        if loc.body_path.exists()
+        else ""
+    )
+
+    if as_json:
+        sidecar: dict[str, Any] = {}
+        if loc.sidecar_path.exists():
+            try:
+                sidecar = json.loads(loc.sidecar_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                sidecar = {}
+        payload = {
+            "record_id": record_id,
+            "kind": loc.kind,
+            "name": loc.name,
+            "sidecar": sidecar,
+            "body": body,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        sys.stdout.write(body)
+    return 0
 
 
 def _cmd_record_delete(args: argparse.Namespace) -> int:
@@ -2337,23 +2373,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_lore_status.set_defaults(func=cmd_status)
 
-    p_session_note = sub.add_parser(
-        "session-note",
-        help="Print the session note path for this session (id-first, worktree fallback)",
-    )
-    p_session_note.add_argument(
-        "--session-id",
-        dest="session_id",
-        default=None,
-        help="Session id to resolve (default: $CLAUDE_CODE_SESSION_ID)",
-    )
-    p_session_note.add_argument(
-        "--worktree",
-        default=None,
-        help="Worktree name for the fallback (default: auto-detected)",
-    )
-    p_session_note.set_defaults(func=cmd_session_note)
-
     p_sync = sub.add_parser("sync", help="Stage, commit, and push the vault")
     p_sync.add_argument(
         "--message", "-m", default=None,
@@ -2398,11 +2417,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_reindex = sub.add_parser(
         "reindex",
         help="Rebuild the derived SQLite index from the vault directory tree",
-    )
-    p_reindex.add_argument(
-        "--vault",
-        default=None,
-        help="Vault path (overrides the config-resolved active vault)",
     )
     p_reindex.set_defaults(func=cmd_reindex)
 
@@ -2580,10 +2594,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_record_delete.add_argument("--team", default=None, help=argparse.SUPPRESS)
     p_record_delete.set_defaults(func=cmd_record)
 
-    # vault subcommand: ``lore vault add|delete|ls|config|path``.
+    p_record_show = p_record_sub.add_parser(
+        "show",
+        help=(
+            "Read a record's body (and sidecar with --json). "
+            "Use 'session' to read this worktree's session record."
+        ),
+    )
+    p_record_show.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The record ID to read (<kind>/<name>), or the bare 'session'",
+    )
+    p_record_show.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit {record_id, kind, name, sidecar, body} as JSON",
+    )
+    # Routing flags (symmetric with delete): select which vault a scoped record
+    # lives in. Suppressed from help.
+    p_record_show.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    p_record_show.add_argument("--product", default=None, help=argparse.SUPPRESS)
+    p_record_show.add_argument("--suite", default=None, help=argparse.SUPPRESS)
+    p_record_show.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    # Session selectors apply only to the bare 'session' form.
+    _add_session_selectors(p_record_show)
+    p_record_show.set_defaults(func=cmd_record)
+
+    # vault subcommand: ``lore vault add|delete|ls|config``.
     p_vault = sub.add_parser(
         "vault",
-        help="Manage configured layered vaults (add/delete/ls/config/path)",
+        help="Manage configured layered vaults (add/delete/ls/config)",
     )
     p_vault_sub = p_vault.add_subparsers(dest="vault_action", required=True)
 
@@ -2623,18 +2665,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_vault_config = p_vault_sub.add_parser("config", help="Edit config.json in $EDITOR")
     p_vault_config.set_defaults(func=cmd_vault)
 
-    p_vault_path = p_vault_sub.add_parser(
-        "path", help="Print the config-resolved active vault root"
-    )
-    p_vault_path.set_defaults(func=cmd_vault)
-
     # session subcommand: ``lore session candidate|referenced``.
     # A SEPARATE endpoint from ``lore record`` — it does NOT route through the
     # record write path (endpoint isolation). Registered with EXPLICIT
-    # subcommand names; the action is required. The name is the exact string
-    # ``session`` — it does NOT clash with the existing flat ``session-note``
-    # command, because argparse prefers an exact subcommand match over an
-    # abbreviation (the no-prefix-abbrev-clash test pins this).
+    # subcommand names; the action is required.
     p_session = sub.add_parser(
         "session",
         help="Log record candidates / references for a session (race-safe)",

@@ -82,17 +82,18 @@ Substitute the published repository URL for your fork (or this repo). For local
 development, `add` a filesystem path to the repo root instead of a URL — see the
 [README](../README.md#install).
 
-### 2.2 Point lore at a vault
+### 2.2 Initialize the vault
 
 ```bash
-lore init ~/lore
+lore init
 ```
 
-`lore init` scaffolds the vault taxonomy, copies the starter docs, initializes a
-git repo, and installs a pre-commit guard that enforces the canonical status
-vocabulary. It records the vault as the config default, so every hook and the
-`lore` CLI resolve it from `config.json` — there is no environment variable to
-set. With no config yet, lore falls back to a default vault under its state dir.
+`lore init` scaffolds the default vault under lore's state dir, copies the starter
+docs, initializes a git repo, and installs a pre-commit guard that enforces the
+canonical status vocabulary. It records the vault as the config default, so every
+hook and the `lore` CLI resolve it from `config.json` — there is no path to pass
+and no environment variable to set. (To adopt an existing git repo as the vault
+instead, run `lore init --vault <path>`.)
 
 ### 2.3 Add your app layer as a project-scoped `.claude/`
 

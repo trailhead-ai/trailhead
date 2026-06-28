@@ -29,7 +29,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import CLI_PATH, load_script, write_default_config  # noqa: E402
+from conftest import CLI_PATH, load_script  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -550,28 +550,3 @@ def test_ls_tolerates_absent_config(tmp_path):
     assert "Traceback" not in res.stderr
 
 
-# ---------------------------------------------------------------------------
-# `lore vault path` — print the config-resolved active vault root
-# ---------------------------------------------------------------------------
-
-
-def test_vault_path_prints_config_default_vault(tmp_path):
-    """`lore vault path` prints the config default vault's path (config-only)."""
-    state, config = _dirs(tmp_path)
-    vault_dir = tmp_path / "my-vault"
-    vault_dir.mkdir()
-    write_default_config(config, vault_dir)
-
-    res = _run(["vault", "path"], state=state, config=config)
-    assert res.returncode == 0, res.stderr
-    assert res.stdout.strip() == str(vault_dir.resolve())
-
-
-def test_vault_path_prints_floor_when_no_config(tmp_path):
-    """With no config.json, `lore vault path` prints the state-dir floor vault."""
-    state, config = _dirs(tmp_path)
-
-    res = _run(["vault", "path"], state=state, config=config)
-    assert res.returncode == 0, res.stderr
-    expected = state / "lore" / "vaults" / "default"
-    assert res.stdout.strip() == str(expected)

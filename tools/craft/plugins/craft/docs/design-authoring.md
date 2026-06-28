@@ -1,7 +1,7 @@
 # Design Authoring — `combine_design.py`
 
-This document covers the combine contract, the filename-prefix convention (D-5), the
-docbar-variant convention (D-6), the `combine_design.py` CLI, and the `artist`
+This document covers the combine contract, the filename-prefix convention, the
+docbar-variant convention, the `combine_design.py` CLI, and the `artist`
 design agent. The `design_mockup` provider seam that previously wired `brainstorm`
 to the `artist` has been **removed** — the `artist` is now invoked directly (see
 "How to invoke the artist directly" below).
@@ -23,22 +23,6 @@ The phase runs in two steps:
 2. **Combine** — run `combine_design.py` over the design directory to produce
    one self-contained reference document (docbar + tokens swatch + numbered
    screen sections + TOC + spec link).
-
----
-
-## `design_mockup` provider seam (removed)
-
-**Removed.** `brainstorm` previously dispatched the `artist` agent through a
-`design_mockup` provider seam at its UI/UX step. That wiring has been removed:
-`brainstorm` now settles UI direction verbally and writes it into the spec, and
-no skill dispatches the `artist` automatically.
-
-The `artist` agent itself remains available for **direct invocation** — see "How
-to invoke the artist directly" below. Its brief shape is unchanged: the
-`artist.md` input fields `feature`, `surface`, `designs_root`, `chrome_root`, and
-`component_mapping` rows (each a `file:line` citation or `"new, no counterpart —
-<justification>"`). The agent produces per-screen HTML files that the combine
-step assembles into the reference document.
 
 ---
 

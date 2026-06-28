@@ -14,9 +14,9 @@ the cross-cutting endpoint tests that are independent of the storage model:
   fence neutralization:
     - a candidate body with ``<external-memory>`` tokens is stored neutralized.
 
-  no prefix-abbrev clash:
-    - ``lore session-note`` still resolves to ``cmd_session_note`` and is not
-      shadowed by the ``session`` subcommand.
+  session subcommand routing:
+    - a bare ``lore session`` errors from the subparser (required action),
+      proving it routes to ``cmd_session``.
 
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern) and load the
 ``session_store`` module directly for the concurrent-race + sanitizer unit tests.
@@ -132,25 +132,10 @@ class TestFenceNeutralization:
 
 
 # ---------------------------------------------------------------------------
-# no prefix-abbrev clash with the existing flat ``session-note`` command
+# ``session`` subcommand routing
 # ---------------------------------------------------------------------------
 
-class TestNoAbbrevClash:
-
-    def test_session_note_still_resolves(self, tmp_path):
-        vault, state = _make_vault(tmp_path)
-        (vault / "sessions").mkdir(parents=True, exist_ok=True)
-        # session-note exits 1 when no note resolves, but it must NOT be routed
-        # to cmd_session (which would error differently on the candidate args).
-        r = _run(
-            ["session-note", "--session-id", SID],
-            vault=vault, state_dir=state,
-        )
-        # It resolves to cmd_session_note: prints the no-note-resolved diagnostic.
-        assert "session-note" in r.stderr or r.returncode in (0, 1)
-        assert "candidate" not in r.stderr, (
-            "session-note must not be shadowed by the session subcommand"
-        )
+class TestSessionRouting:
 
     def test_session_routes_to_cmd_session(self, tmp_path):
         vault, state = _make_vault(tmp_path)

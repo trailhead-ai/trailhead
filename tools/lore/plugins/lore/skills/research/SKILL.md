@@ -20,8 +20,8 @@ cross-referenced synthesis before acting. This is the thorough, costly path —
 use it when a quick lookup won't do.
 
 Good fits:
-- "How does the session-note resolve→finalize chain actually work end-to-end?"
-- "What are the tradeoffs between approach A and B, given our prior dead-ends?"
+- "How does the session candidate → flush capture chain actually work end-to-end?"
+- "What are the tradeoffs between approach A and B, given what we've already tried and dropped?"
 - "Trace how a record flows from `lore record create` to the index."
 
 ## `researcher` — lighter, cheap

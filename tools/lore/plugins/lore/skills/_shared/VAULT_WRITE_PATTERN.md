@@ -39,4 +39,6 @@ from `$CLAUDE_CODE_SESSION_ID` — no note needs to exist beforehand.
 
 The vault is resolved automatically from `config.json` (the configured **default**
 vault, with a silent floor at `~/.local/state/lore/vaults/default`). You never pass
-`--vault` — resolution is automatic. To see the resolved root, run `lore vault path`.
+`--vault`, and you never need the path itself: every `lore` command resolves it for
+you. Read and write through the CLI (`lore record …`, `lore search …`,
+`lore session …`) rather than touching vault files directly.

@@ -257,13 +257,17 @@ FORBIDDEN_IN_FLUSH = (
     "lore resume",
     "shelved",
     "SessionStart",
+    # Retired in the CLI-only-vault-access cleanup: flush reads via the CLI,
+    # never by resolving a path or invoking the dropped session-note command.
+    "session-note",
+    "vault path",
 )
 
 # The new extant commands the flush skill may reference in fenced bash blocks.
 EXTANT_COMMANDS = frozenset({
     "session candidate",
     "session referenced",
-    "session-note",
+    "record show",
     "flush",
     "record create",
     "search",

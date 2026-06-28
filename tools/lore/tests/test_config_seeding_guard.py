@@ -14,7 +14,7 @@ Coverage guard (Council Critical #3):
   EXEMPT: files where config seeding is not applicable — either because lore
     init creates the config itself or the tests have no vault ops.
 
-  The accounting test asserts all 19 tracked files are in exactly one category.
+  The accounting test asserts all 20 tracked files are in exactly one category.
 
 Smoke assertions (≥3 structurally distinct helpers):
   Prove that config-based resolution actually reaches the test vault with
@@ -74,6 +74,7 @@ _USES_CONFTEST = [
     "test_record_cli_delete_blob.py",
     "test_record_cli_create.py",
     "test_record_cli_update.py",
+    "test_record_cli_show.py",
     "test_vault_routing.py",
 ]
 
@@ -110,6 +111,7 @@ _EXPECTED_TRACKED = {
     "test_record_cli_create.py",
     "test_index_store.py",
     "test_record_cli_update.py",
+    "test_record_cli_show.py",
     "test_vault_routing.py",
     "test_layers_model.py",
     "test_layer_discovery.py",
@@ -130,7 +132,7 @@ def test_all_tracked_files_accounted_for():
         f"  Expected but missing from categories: {_EXPECTED_TRACKED - _ALL_TRACKED}"
     )
     total = len(_MUST_CALL) + len(_USES_CONFTEST) + len(_EXEMPT)
-    assert total == 19, f"Expected 19 tracked files, got {total}"
+    assert total == 20, f"Expected 20 tracked files, got {total}"
 
 
 @pytest.mark.parametrize("filename", _MUST_CALL)
