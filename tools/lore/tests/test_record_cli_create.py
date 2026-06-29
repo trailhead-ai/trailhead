@@ -831,3 +831,384 @@ def test_scope_no_other_team_field_flag(tmp_path):
     sidecar = _find_sidecar(vault, r.stdout.strip())
     # No --team supplied → no team field in sidecar (no other write path exists).
     assert sidecar.get("team") is None
+
+
+# ---------------------------------------------------------------------------
+# Group-default scope routing: a record created inside a camp workspace whose
+# group declares a [[lore_scopes]] binding inherits that scope when no routing
+# flag is supplied. Explicit flags always win (setdefault, never assignment);
+# when the elected route came from the binding the confirmation line is
+# annotated ``(via group default)`` so a typo'd binding is diagnosable.
+# ---------------------------------------------------------------------------
+
+
+def _write_routing_config(config_home, *, default_vault, vaults):
+    """Write a config.json with a default-scope floor plus the given vaults.
+
+    ``vaults`` is a list of ``(name, scope, path)`` tuples. None of the scoped
+    vaults declare a ``records`` allowlist, so each is eligible for any kind.
+    """
+    entries = [{"name": "default", "scope": "default", "path": str(default_vault)}]
+    for name, scope, path in vaults:
+        entries.append({"name": name, "scope": scope, "path": str(path)})
+    return _write_config(config_home, entries)
+
+
+def _write_group_binding(groups_dir, *, member_repo, group_name="trailhead", lore_scopes=None):
+    """Write a camp group TOML binding ``member_repo`` to a [[lore_scopes]] map.
+
+    ``lore_scopes`` is a list of ``{"scope", "name"}`` dicts. ``member_repo`` is
+    declared as the group's only member repo_root, so a subprocess run with
+    ``cwd=member_repo`` resolves to this group via camp's canonical-member-repo
+    walk-up (which needs no camp_state_dir).
+    """
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f'[group]\nname = "{group_name}"\n',
+        f'\n[[members]]\nname = "repo"\nrepo_root = "{member_repo}"\n',
+    ]
+    for ls in lore_scopes or []:
+        lines.append(f'\n[[lore_scopes]]\nscope = "{ls["scope"]}"\nname = "{ls["name"]}"\n')
+    (groups_dir / f"{group_name}.toml").write_text("".join(lines), encoding="utf-8")
+
+
+def _routing_env(config_home, groups_dir):
+    return {"XDG_CONFIG_HOME": str(config_home), "LORE_GROUPS_DIR": str(groups_dir)}
+
+
+def test_group_default_routes_to_bound_vault_with_provenance(tmp_path):
+    """No routing flag + a group binding product=trailhead → the record lands in
+    the trailhead (product) vault and the confirmation line is annotated.
+
+    Mutation guard: the destination is asserted against the trailhead vault root
+    explicitly (not just the stderr string). With the group-default seeding
+    removed, ``participating_scopes`` is empty, resolution falls to the default
+    floor, and the body would land in the default vault — failing the
+    ``trailhead_vault`` existence assertion. The test therefore fails if the
+    seeding is deleted.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+
+    _write_routing_config(
+        config_home,
+        default_vault=vault,
+        vaults=[("trailhead", "product", trailhead_vault)],
+    )
+    _write_group_binding(
+        groups_dir,
+        member_repo=member_repo,
+        lore_scopes=[{"scope": "product", "name": "trailhead"}],
+    )
+
+    r = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo"],
+        vault=vault,
+        state_dir=state,
+        env_extra=_routing_env(config_home, groups_dir),
+        cwd=member_repo,
+    )
+    assert r.returncode == 0, r.stderr
+
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    # Destination asserted against the trailhead vault root, NOT the active vault.
+    assert (trailhead_vault / kind / f"{name}.md").exists()
+    assert not (vault / kind / f"{name}.md").exists()
+    # Provenance annotation present because the elected route came from the binding.
+    assert "Routed to vault: trailhead (product) (via group default)" in r.stderr
+
+
+def test_group_default_flush_path_routes_to_bound_vault(tmp_path):
+    """A session candidate captured to the default vault, then finalized via
+    ``lore record create`` from within the bound member repo, routes to the
+    group's vault — the flush/checkpoint capture lands in the bound vault.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+
+    _write_routing_config(
+        config_home,
+        default_vault=vault,
+        vaults=[("trailhead", "product", trailhead_vault)],
+    )
+    _write_group_binding(
+        groups_dir,
+        member_repo=member_repo,
+        lore_scopes=[{"scope": "product", "name": "trailhead"}],
+    )
+
+    env = _routing_env(config_home, groups_dir)
+
+    # Capture a candidate from within the group workspace (writes to the default
+    # vault — the candidate path is never routed).
+    cand = _run(
+        [
+            "session", "candidate",
+            "--session-id", "11111111-1111-1111-1111-111111111111",
+            "--kind", "decision",
+            "--phase", "Build",
+        ],
+        vault=vault,
+        state_dir=state,
+        env_extra=env,
+        cwd=member_repo,
+        stdin_text="a candidate proposal\n",
+    )
+    assert cand.returncode == 0, cand.stderr
+
+    # Finalize the candidate into a durable record from within the member repo.
+    r = _run(
+        ["record", "create", "--kind", "decision", "--title", "Flushed", "--keyword", "foo"],
+        vault=vault,
+        state_dir=state,
+        env_extra=env,
+        cwd=member_repo,
+        stdin_text="finalized body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (trailhead_vault / kind / f"{name}.md").exists()
+    assert "Routed to vault: trailhead (product) (via group default)" in r.stderr
+
+
+def test_explicit_product_flag_overrides_group_default(tmp_path):
+    """``--product other`` beats the binding product=trailhead: the record lands
+    in ``other``, the sidecar product field is ``other`` (the group default never
+    overwrites an explicit flag's sidecar value), and no provenance is shown.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+    other_vault = tmp_path / "other_vault"
+    other_vault.mkdir()
+
+    _write_routing_config(
+        config_home,
+        default_vault=vault,
+        vaults=[
+            ("trailhead", "product", trailhead_vault),
+            ("other", "product", other_vault),
+        ],
+    )
+    _write_group_binding(
+        groups_dir,
+        member_repo=member_repo,
+        lore_scopes=[{"scope": "product", "name": "trailhead"}],
+    )
+
+    r = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo",
+         "--product", "other"],
+        vault=vault,
+        state_dir=state,
+        env_extra=_routing_env(config_home, groups_dir),
+        cwd=member_repo,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (other_vault / kind / f"{name}.md").exists()
+    assert not (trailhead_vault / kind / f"{name}.md").exists()
+
+    # Sidecar product field matches the elected vault — no group default leak.
+    sidecar = _find_sidecar(other_vault, record_id)
+    assert sidecar["product"] == "other"
+    # No provenance suffix on an explicit-flag route.
+    assert "(via group default)" not in r.stderr
+
+
+def test_higher_precedence_repo_flag_overrides_group_default(tmp_path):
+    """``--repo somerepo`` (repo > product) routes to the repo vault even though
+    the binding seeds product=trailhead; the sidecar repo field matches the
+    elected vault and no provenance is shown (the elected route is a typed flag).
+
+    The seeded product field still lands in the sidecar: ``setdefault`` runs per
+    scope independent of which scope wins routing, so the record records that it
+    participates in the product scope even though the repo flag elects the repo
+    vault. The explicit repo flag is never overwritten — that is the integrity
+    the override guarantees, not suppression of the lower-precedence binding.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+    repo_vault = tmp_path / "repo_vault"
+    repo_vault.mkdir()
+
+    _write_routing_config(
+        config_home,
+        default_vault=vault,
+        vaults=[
+            ("trailhead", "product", trailhead_vault),
+            ("somerepo", "repo", repo_vault),
+        ],
+    )
+    _write_group_binding(
+        groups_dir,
+        member_repo=member_repo,
+        lore_scopes=[{"scope": "product", "name": "trailhead"}],
+    )
+
+    r = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo",
+         "--repo", "somerepo"],
+        vault=vault,
+        state_dir=state,
+        env_extra=_routing_env(config_home, groups_dir),
+        cwd=member_repo,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (repo_vault / kind / f"{name}.md").exists()
+    assert not (trailhead_vault / kind / f"{name}.md").exists()
+
+    sidecar = _find_sidecar(repo_vault, record_id)
+    assert sidecar["repo"] == "somerepo"
+    # The lower-precedence binding is still seeded (multi-scope participation);
+    # only the explicitly-typed scope's value is protected from being overwritten.
+    assert sidecar.get("product") == "trailhead"
+    assert "(via group default)" not in r.stderr
+
+
+def test_cwd_outside_any_group_routes_to_default(tmp_path):
+    """cwd outside any configured group → vanilla routing to the default vault;
+    the confirmation line carries no provenance suffix.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    _write_routing_config(
+        config_home,
+        default_vault=vault,
+        vaults=[("trailhead", "product", trailhead_vault)],
+    )
+    _write_group_binding(
+        groups_dir,
+        member_repo=member_repo,
+        lore_scopes=[{"scope": "product", "name": "trailhead"}],
+    )
+
+    r = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo"],
+        vault=vault,
+        state_dir=state,
+        env_extra=_routing_env(config_home, groups_dir),
+        cwd=outside,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (vault / kind / f"{name}.md").exists()
+    assert not (trailhead_vault / kind / f"{name}.md").exists()
+    assert "(via group default)" not in r.stderr
+
+
+def test_typed_flag_route_never_shows_group_default_provenance(tmp_path):
+    """A pure typed-flag route to trailhead (no binding involved) routes there but
+    never shows ``(via group default)`` — the suffix is tied to seeding, not to
+    the destination vault.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    _write_routing_config(
+        config_home,
+        default_vault=vault,
+        vaults=[("trailhead", "product", trailhead_vault)],
+    )
+    # A group exists but cwd is outside it, so no scope is ever seeded.
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    _write_group_binding(
+        groups_dir,
+        member_repo=member_repo,
+        lore_scopes=[{"scope": "product", "name": "trailhead"}],
+    )
+
+    r = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo",
+         "--product", "trailhead"],
+        vault=vault,
+        state_dir=state,
+        env_extra=_routing_env(config_home, groups_dir),
+        cwd=outside,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (trailhead_vault / kind / f"{name}.md").exists()
+    assert "Routed to vault: trailhead (product)" in r.stderr
+    assert "(via group default)" not in r.stderr
+
+
+def test_malformed_group_config_degrades_to_default(tmp_path):
+    """A malformed group binding (bad scope) degrades to default routing without
+    crashing — the record lands in the default vault and create still succeeds.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir()
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+
+    _write_routing_config(
+        config_home,
+        default_vault=vault,
+        vaults=[("trailhead", "product", trailhead_vault)],
+    )
+    # ``scope = "bogus"`` is outside {repo, product, suite, team} → GroupConfigError.
+    (groups_dir / "bad.toml").write_text(
+        '[group]\nname = "trailhead"\n\n'
+        f'[[members]]\nname = "repo"\nrepo_root = "{member_repo}"\n\n'
+        '[[lore_scopes]]\nscope = "bogus"\nname = "trailhead"\n',
+        encoding="utf-8",
+    )
+
+    r = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo"],
+        vault=vault,
+        state_dir=state,
+        env_extra=_routing_env(config_home, groups_dir),
+        cwd=member_repo,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (vault / kind / f"{name}.md").exists()
+    assert not (trailhead_vault / kind / f"{name}.md").exists()
+    assert "(via group default)" not in r.stderr

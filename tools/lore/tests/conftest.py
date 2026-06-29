@@ -43,7 +43,7 @@ def write_default_config(config_home: Path, vault_path: Path) -> None:
     )
 
 
-def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
+def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None, cwd=None):
     """Run the lore CLI as a subprocess; returns CompletedProcess.
 
     Shared harness for the record/session CLI tests — fences XDG_STATE_HOME +
@@ -57,6 +57,11 @@ def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
     runner) would otherwise reroute records away from the test vault.
     Callers that exercise layered vaults pass their own XDG_CONFIG_HOME via
     ``env_extra`` (applied last, so their config wins over the seeded default).
+
+    ``cwd`` sets the subprocess working directory. The group-default routing path
+    resolves the active camp group from ``Path.cwd()``, so a test that exercises
+    routing inside a bound member repo passes that repo as ``cwd`` (paired with a
+    ``LORE_GROUPS_DIR`` override via ``env_extra``).
     """
     full_env = dict(os.environ)
     full_env["XDG_STATE_HOME"] = str(state_dir)
@@ -72,6 +77,7 @@ def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
         text=True,
         env=full_env,
         input=stdin_text,
+        cwd=str(cwd) if cwd is not None else None,
     )
 
 

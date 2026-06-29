@@ -1881,6 +1881,25 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
             participating_scopes[flag] = val
             sidecar[flag] = val  # one input → both routing and field; field can never contradict vault
 
+    # Group-default seeding: a record created inside a camp workspace whose group
+    # declares a [[lore_scopes]] binding inherits that scope when no explicit flag
+    # selects one. ``setdefault`` is used on BOTH ``participating_scopes`` AND the
+    # namesake sidecar field — never plain assignment — so an explicit flag's value
+    # (in either dict) is never overwritten by a group default (explicit always
+    # wins). ``seeded_scopes`` records which scopes were newly inserted from the
+    # binding (not typed); the confirmation line is annotated ``(via group
+    # default)`` only when the *elected* scope is one of these, so a higher-
+    # precedence typed flag (e.g. --repo over a product binding) carries no
+    # provenance suffix even though a lower scope was seeded.
+    seeded_scopes: set[str] = set()
+    for seed_scope, seed_name in _resolve_group_scopes(
+        cwd=Path.cwd(), groups_dir=_resolve_groups_dir()
+    ).items():
+        if seed_scope not in participating_scopes:
+            participating_scopes[seed_scope] = seed_name
+            seeded_scopes.add(seed_scope)
+        sidecar.setdefault(seed_scope, seed_name)
+
     shared_flag = 0
     routing_line: str | None = None
     if loaded is not None:
@@ -1892,6 +1911,8 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         vault_root = Path(chosen.path)
         shared_flag = vault_config_mod.shared_flag(chosen)
         routing_line = f"Routed to vault: {chosen.name} ({chosen.scope})"
+        if chosen.scope in seeded_scopes:
+            routing_line += " (via group default)"
         if resolution.skipped is not None:
             routing_line += (
                 f"\n{resolution.skipped.name} excluded: {resolution.skipped_reason}"
@@ -2585,7 +2606,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ``lore record update RECORD_ID``.
     p_record_update = p_record_sub.add_parser(
-        "update", help="Update an existing vault record (full-body / --diff / metadata-only)"
+        "update", help="Update an existing vault record (full-body / --diff / metadata-only)",
+        epilog="Group-default scope routing applies to 'create' only; "
+               "update (and delete) are unaffected and never seed scopes from a camp group.",
     )
     p_record_update.add_argument(
         "record_id",
