@@ -13,14 +13,12 @@ from conftest import load_script
 def test_canonical_vocab_matches_source():
     """The canonical sets match the reconciled vocabulary.
 
-    The session vocab is {dirty, clean} under the singular key 'session'. The
-    `shelved` status and the legacy `finalized`/`handoff` session terminal
-    statuses were retired — none are canonical. The remaining CANONICAL keys
-    were singularized and the legacy plural-taxonomy kinds ("deferred",
-    "follow-up", "dead-end") retired: their living folders and one-shot
-    migrations are gone, and they now consolidate into `backlog`/`lesson`
-    sidecar records (validated by record_model), not inline frontmatter — so
-    they no longer appear here.
+    The session vocab is {dirty, clean} under the singular key 'session'.
+    `shelved` and the `finalized`/`handoff` session terminal statuses are not
+    canonical. CANONICAL keys are singular; the plural-taxonomy kinds
+    ("deferred", "follow-up", "dead-end") are absent — they consolidate into
+    `backlog`/`lesson` sidecar records (validated by record_model), not inline
+    frontmatter.
     """
     sv = load_script("status_validator")
     assert sv.CANONICAL["plan"] == frozenset(
@@ -31,10 +29,9 @@ def test_canonical_vocab_matches_source():
     )
     assert sv.CANONICAL["session"] == frozenset({"dirty", "clean"})
     assert sv.CANONICAL["lesson"] == frozenset({"active", "superseded"})
-    # The retired legacy kinds are gone — their types are now unconstrained.
-    assert "deferred" not in sv.CANONICAL
-    assert "follow-up" not in sv.CANONICAL
-    assert "dead-end" not in sv.CANONICAL
+    # Exactly these kinds are canonical; any other type (e.g. the plural-taxonomy
+    # kinds) is untracked → unconstrained.
+    assert set(sv.CANONICAL) == {"plan", "spec", "session", "lesson"}
 
 
 def test_is_valid_status_accepts_canonical():
@@ -53,26 +50,24 @@ def test_is_valid_status_rejects_noncanonical():
 
 
 def test_is_valid_status_keys_are_singular_only():
-    """CANONICAL keys are singular; the plural directory form no longer
-    resolves (vault dirs standardized on singular, so the singular→plural alias
-    map was dropped).
+    """CANONICAL keys are singular; the plural directory form does not resolve.
 
     The singular `type:` form is the only accepted key. An unrecognized type
-    (the old plural directory name) is treated as untracked → unconstrained →
+    (e.g. a plural directory name) is treated as untracked → unconstrained →
     always valid (the validator never constrains types outside its vocab).
     """
     sv = load_script("status_validator")
     # singular type form resolves to the real vocab
     assert sv.is_valid_status("lesson", "active") is True
     assert sv.is_valid_status("lesson", "bogus") is False
-    # plural directory form is no longer a tracked key → untracked → unconstrained
+    # plural directory form is not a tracked key → untracked → unconstrained
     assert sv.permitted_statuses("lessons") is None
     assert sv.is_valid_status("lessons", "anything") is True
 
 
 def test_retired_legacy_types_are_unconstrained():
-    """The retired legacy plural-taxonomy types are no longer tracked, so any
-    status passes (untracked → unconstrained), including a once-invalid value."""
+    """The plural-taxonomy types are not tracked, so any status passes
+    (untracked → unconstrained)."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("deferred", "open") is True
     assert sv.is_valid_status("deferred", "anything") is True
@@ -97,13 +92,12 @@ def test_permitted_statuses_lists_canonical():
     assert sv.permitted_statuses("nonexistent") is None
 
 
-# ---- shelved + legacy session terminal statuses are retired --------
+# ---- shelved + session terminal statuses are not canonical --------
 
 def test_shelved_rejected_for_plan_spec_session():
-    """`shelved` is no longer canonical for any note type — the shelve/pickup
-    feature it backed was retired. The canonical keys are singular; the
-    plural directory forms are untracked (unconstrained) so only the singular
-    `type:` forms are asserted as rejecting `shelved`."""
+    """`shelved` is not canonical for any note type. The canonical keys are
+    singular; the plural directory forms are untracked (unconstrained), so only
+    the singular `type:` forms are asserted as rejecting `shelved`."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("plan", "shelved") is False
     assert sv.is_valid_status("spec", "shelved") is False
@@ -111,25 +105,16 @@ def test_shelved_rejected_for_plan_spec_session():
 
 
 def test_legacy_session_statuses_rejected():
-    """`finalized`/`handoff` were the deprecated back-compat session terminal
-    statuses; the DEPRECATED accommodation is removed, so they reject.
-    The `sessions` plural key is gone; use the singular `session`."""
+    """`finalized`/`handoff` are not canonical session statuses, so they reject.
+    The canonical key is the singular `session`, not `sessions`."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "finalized") is False
     assert sv.is_valid_status("session", "handoff") is False
 
 
-def test_deprecated_status_machinery_removed():
-    """The DEPRECATED dict + helper machinery is gone — no status is `deprecated`."""
-    sv = load_script("status_validator")
-    assert not hasattr(sv, "DEPRECATED")
-    assert not hasattr(sv, "deprecated_statuses")
-    assert not hasattr(sv, "is_deprecated_status")
-
-
 def test_finalized_session_rejected_with_violation(tmp_path, capsys):
-    """A `finalized` session note now FAILS validation (exit 1) — no migration
-    notice, a hard rejection."""
+    """A `finalized` session note FAILS validation (exit 1) — a hard rejection,
+    no migration notice."""
     sv = load_script("status_validator")
     note = tmp_path / "x.md"
     note.write_text("---\ntype: session\nstatus: finalized\n---\n# x\n")
@@ -207,7 +192,7 @@ def test_session_clean_is_valid():
 
 
 def test_session_active_rejected_behavioral():
-    """active is no longer canonical for session — is_valid_status returns False
+    """active is not canonical for session — is_valid_status returns False
     AND the CLI exits non-zero (behavioral, not just a message check)."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "active") is False
@@ -225,7 +210,7 @@ def test_session_active_rejected_cli(tmp_path, capsys):
 
 
 def test_session_complete_rejected_behavioral():
-    """complete is no longer canonical for session — is_valid_status returns False."""
+    """complete is not canonical for session — is_valid_status returns False."""
     sv = load_script("status_validator")
     assert sv.is_valid_status("session", "complete") is False
 

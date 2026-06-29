@@ -1,9 +1,9 @@
-"""Session skills — /lore:flush replaces /lore:finish; /checkpoint is gone.
+"""Session skills — the `flush` skill finalizes a session.
 
 Asserts:
-  - The 'flush' skill directory exists; 'finish' and 'checkpoint' do not.
-  - The skill registry lists 'flush', NOT 'finish' or 'checkpoint'.
-  - No skill, agent, or rules file in the lore plugin tree references '/checkpoint'.
+  - The 'flush' skill directory exists and is in the registry.
+  - No skill, agent, or rules file in the lore plugin tree references '/checkpoint'
+    (no `/checkpoint` command exists — such a reference is a dead surface).
   - The flush skill invokes the REAL `lore flush` CLI (not a string grep).
   - The SKILL.md describes the candidate→record evaluation model and reads
     the flushed-at watermark from the sidecar directly (not via KQL).
@@ -75,23 +75,13 @@ def _flush(vault, state, sid=SID):
 
 
 # ---------------------------------------------------------------------------
-# Registry: flush present, finish/checkpoint absent
+# Registry: flush present
 # ---------------------------------------------------------------------------
 
-def test_registry_lists_flush_not_finish():
-    """The skill registry lists 'flush', not the old 'finish'."""
+def test_registry_lists_flush():
+    """The skill registry lists the 'flush' skill."""
     names = {p.parent.name for p in _skill_files()}
     assert "flush" in names, "flush skill must exist in the registry"
-    assert "finish" not in names, "finish skill must not exist — renamed to flush"
-
-
-def test_registry_does_not_list_checkpoint():
-    """The skill registry no longer lists 'checkpoint'."""
-    names = {p.parent.name for p in _skill_files()}
-    assert "checkpoint" not in names, (
-        "checkpoint skill must not exist — it was deleted "
-        "(continuous capture via `lore session candidate`; flush evaluates)"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +92,8 @@ def test_no_checkpoint_reference_in_any_lore_md_file():
     """`checkpoint` (in any slash-command form) must not appear in any skill, agent, or
     docs file under the lore plugin.
 
-    Checkpoint is deleted; the substitute is `lore session candidate` (continuous
-    capture) + `/lore:flush` (evaluation). Any remaining reference — whether
+    There is no `/checkpoint` command — mid-task capture is `lore session candidate`
+    (continuous) and `/lore:flush` (evaluation). Any `checkpoint` reference —
     `/checkpoint`, `/lore:checkpoint`, or bare `checkpoint` in a trigger context —
     drives a dead surface.
     """
@@ -113,7 +103,7 @@ def test_no_checkpoint_reference_in_any_lore_md_file():
     ]
     assert not offenders, (
         "Found checkpoint reference(s) in lore plugin — must be removed "
-        f"(checkpoint is deleted): {offenders}"
+        f"(no `/checkpoint` command exists): {offenders}"
     )
 
 

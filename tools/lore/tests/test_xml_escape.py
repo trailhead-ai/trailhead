@@ -1,8 +1,8 @@
 """Tests for the extracted xml_escape module.
 
 ``xml_escape.py`` is the single source of truth for the injection-defense
-helpers that used to live in ``recall.py``: ``xml_attr_escape``,
-``xml_body_escape``, and the ``wrap_shared`` fence helper. Pure, no I/O.
+helpers: ``xml_attr_escape``, ``xml_body_escape``, and the ``wrap_shared``
+fence helper. Pure, no I/O.
 """
 
 import sys

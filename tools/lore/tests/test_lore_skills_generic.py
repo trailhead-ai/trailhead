@@ -104,10 +104,10 @@ def test_template_has_no_private_tokens(template_md: Path):
 
 
 # ---------------------------------------------------------------------------
-# brainstorm — moved to the craft plugin.
+# brainstorm lives in the craft plugin (tested there).
 #
-# The brainstorm skill and its generic-hygiene / visible-skip assertions moved to
+# The brainstorm skill and its generic-hygiene / visible-skip assertions live in
 # craft (tools/craft/tests/test_brainstorm_generic.py). The structural-brain-seam
-# and private-token scans above still cover whatever lore skills remain.
+# and private-token scans above cover the lore skills.
 # ---------------------------------------------------------------------------
 

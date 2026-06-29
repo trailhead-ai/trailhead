@@ -98,18 +98,13 @@ class TestLoreInventory:
         }
 
     def test_session_skills_selectable(self):
-        # The 7 per-kind capture skills (area, check-in, dead-end, decision,
-        # defer, follow-up, seed) were deleted — replaced by the lore record/session CLI.
-        # 'brainstorm' moved to the craft plugin. 'finish' was renamed to
-        # 'flush' and 'checkpoint' deleted. The retained lore skills
-        # are flush, sync, search, record, research.
+        # The lore skills are exactly flush, sync, search, record, research.
+        # Per-kind capture is via the lore record/session CLI (not skills);
+        # brainstorm lives in the craft plugin; the finalization skill is flush.
         m = load_manifest(_LORE_MANIFEST)
-        for name in ("flush", "sync", "search", "record", "research"):
-            assert name in m.skills
+        assert set(m.skills) == {"flush", "sync", "search", "record", "research"}
+        for name in m.skills:
             assert m.skills[name] == f"skills/{name}"
-        assert "brainstorm" not in m.skills, "brainstorm moved to the craft plugin"
-        assert "checkpoint" not in m.skills, "checkpoint deleted"
-        assert "finish" not in m.skills, "finish renamed to flush"
 
     def test_sync_is_now_selectable(self):
         # sync was always-on (base) under the capability model; it has a SKILL.md
@@ -120,7 +115,7 @@ class TestLoreInventory:
         m = load_manifest(_LORE_MANIFEST)
         assert m.all_selectable() == set(m.subagents) | set(m.skills)
         assert "librarian" in m.all_selectable()
-        # 'checkpoint' deleted, 'finish' renamed to 'flush' — flush retained.
+        # flush is selectable.
         assert "flush" in m.all_selectable()
 
 
@@ -156,22 +151,12 @@ class TestCraftInventory:
         ):
             assert name in m.subagents
 
-    def test_lifecycle_skills_now_selectable(self):
-        # These skills each have a SKILL.md and are discovered as selectable.
-        # 'brainstorm' was moved into craft (discovery → frozen spec, runs
-        # before planning) — it is now a selectable craft skill. (shelve/pickup
-        # were retired — see test_lifecycle_skills_shelve_pickup_retired.)
+    def test_lifecycle_skills_selectable(self):
+        # The craft skills are exactly these — each has a SKILL.md and is
+        # discovered as selectable. brainstorm is a craft skill (discovery →
+        # frozen spec, runs before planning).
         m = load_manifest(_CRAFT_MANIFEST)
-        for name in ("polish", "plan", "execute", "review", "consult", "brainstorm"):
-            assert name in m.skills
-
-    def test_lifecycle_skills_shelve_pickup_retired(self):
-        # The shelve/pickup dev rituals were retired (the lore `handoff`/
-        # `shelved`/`resume` verbs + the `shelved` status they backed are gone;
-        # camp session-resume replaces them). They must no longer be selectable.
-        m = load_manifest(_CRAFT_MANIFEST)
-        assert "shelve" not in m.skills
-        assert "pickup" not in m.skills
+        assert set(m.skills) == {"polish", "plan", "execute", "review", "consult", "brainstorm"}
 
     def test_shared_not_selectable(self):
         assert "_shared" not in load_manifest(_CRAFT_MANIFEST).skills

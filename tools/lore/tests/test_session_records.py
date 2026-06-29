@@ -325,7 +325,7 @@ import sys, time
 from pathlib import Path
 sys.path.insert(0, {scripts!r})
 import os
-# Config-only resolution: LORE_VAULT is no longer read, so the active vault is
+# Config-only resolution: LORE_VAULT is not read, so the active vault is
 # resolved from the config.json seeded under XDG_CONFIG_HOME (arg 7).
 os.environ["XDG_CONFIG_HOME"] = sys.argv[7]
 os.environ["XDG_STATE_HOME"] = sys.argv[6]

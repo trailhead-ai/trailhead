@@ -235,7 +235,7 @@ def test_planner_has_no_observability_seam_tokens():
 
 @pytest.mark.parametrize("stem", _VISIBLE_SKIP_AGENTS)
 def test_visible_skip_notice_present(stem: str):
-    """Agents that formerly dispatched brain-librarian must carry a visible notice
+    """Agents that do not dispatch brain-librarian must carry a visible notice
     telling the caller when the prior-art synthesis pass was skipped — not a silent
     prose hedge.
 

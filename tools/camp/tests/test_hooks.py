@@ -2,8 +2,8 @@
 
 The WorktreeRemove hook wiring is dropped (camp owns teardown via `camp rm`);
 only the SessionStart hook is written into each member's .claude/settings.json.
-The `worktree-cleanup` handler itself is retained (still invocable) but no longer
-auto-wired. Member worktrees now live under the unified workspace layout
+The `worktree-cleanup` handler stays invocable but is not auto-wired.
+Member worktrees now live under the unified workspace layout
 central_state_dir(group)/worktrees/<slug>/<member>.
 
 Test contract (all must RED before implementation, GREEN after):
@@ -919,18 +919,18 @@ class TestHelpMenuInit:
             f"Expected exit 0 from --help, got {result.returncode}: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        # 'init' renamed to 'group'.
+        # The subcommand is `group`.
         assert "group" in combined, f"'group' not found in --help output:\n{combined}"
 
     def test_help_init_has_description(self):
-        """camp --help output describes what group (formerly init) does."""
+        """camp --help output describes what group does."""
         result = subprocess.run(
             [str(_BIN_CAMP), "--help"],
             capture_output=True,
             text=True,
         )
         combined = result.stdout + result.stderr
-        # 'init' renamed to 'group'.
+        # The subcommand is `group`.
         assert "group" in combined
         # Check for keywords that would appear in a one-liner description
         init_description_words = ["Wire", "wire", "hook", "Hook", "Setup", "setup", "config"]

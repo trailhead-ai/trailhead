@@ -237,7 +237,7 @@ class TestForwardCheckPositive:
     def test_real_skill_claim_passes(self):
         """A claim for a known skill resolves without error."""
         anchor_set = build_real_anchor_set()
-        # lore has skills/flush (finish was renamed to flush, checkpoint deleted)
+        # lore has skills/flush (not finish/checkpoint)
         claim = {"kind": "skill", "tool": "lore", "ref": "skills/flush", "source": "lore"}
         check_claim(claim, anchor_set)
 

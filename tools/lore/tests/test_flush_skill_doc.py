@@ -1,9 +1,8 @@
 """Doc-consistency checks for the session-finalization skill.
 
-The `finish` skill was renamed to `flush` and rewritten for the clean/dirty +
-candidate-evaluation model. These tests track the `flush` skill's structural
-invariants: `finish` must be gone, `flush` must be present, and its frontmatter
-must stay registrable.
+The `flush` skill finalizes a session under the clean/dirty + candidate-evaluation
+model. These tests track the `flush` skill's structural invariants: it must be
+present and its frontmatter must stay registrable.
 """
 from pathlib import Path
 
@@ -17,19 +16,7 @@ def _skill_text() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. finish skill is gone; flush skill is present
-# ---------------------------------------------------------------------------
-
-def test_finish_skill_absent_flush_skill_present():
-    """'finish' was renamed to 'flush'. Guard the rename is stable."""
-    assert not (SKILLS_DIR / "finish" / "SKILL.md").exists(), (
-        "finish/SKILL.md must not exist — it was renamed to flush"
-    )
-    assert FLUSH_SKILL.exists(), "flush/SKILL.md must exist after the rename"
-
-
-# ---------------------------------------------------------------------------
-# 2. Skill frontmatter is still registrable (non-regression)
+# Skill frontmatter is registrable
 # ---------------------------------------------------------------------------
 
 def test_flush_skill_frontmatter_still_registrable():

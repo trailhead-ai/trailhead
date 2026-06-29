@@ -81,7 +81,7 @@ def test_execute_dispatched_agents_resolve():
     text = skill_md.read_text()
     for agent in _EXECUTE_DISPATCHED_AGENTS:
         assert agent in text, (
-            f"execute/SKILL.md no longer dispatches "
+            f"execute/SKILL.md does not dispatch "
             f"{agent!r} — update _EXECUTE_DISPATCHED_AGENTS if the dispatch was "
             "intentionally removed, or restore the dispatch."
         )

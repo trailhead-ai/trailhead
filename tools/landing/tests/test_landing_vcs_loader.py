@@ -2,7 +2,7 @@
 
 This test locks that importability in as a permanent guard for the landing
 plugin. It fails if the on-disk layout shifts such that the four-tier
-``_bootstrap.py`` loader can no longer reach the repo root from a landing script.
+``_bootstrap.py`` loader cannot reach the repo root from a landing script.
 
 Two invariants are locked:
 

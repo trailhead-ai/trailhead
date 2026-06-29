@@ -252,8 +252,8 @@ def test_resolve_falls_back_to_worktree_when_id_unmatched(tmp_path):
 
 # ---------------------------------------------------------------------------
 # `lore session show` — resolve + read THIS worktree's session record. The
-# dedicated session subcommand folds the resolution the retired `session-note`
-# command used to carry into the `lore session` family; plain output is the body.
+# dedicated session subcommand folds session-note resolution into the
+# `lore session` family; plain output is the body.
 # ---------------------------------------------------------------------------
 
 def test_cli_resolves_via_claude_code_session_id_env(tmp_path):

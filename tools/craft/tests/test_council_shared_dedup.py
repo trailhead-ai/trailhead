@@ -6,7 +6,7 @@ single shared reference `_shared/council.md` (read-on-reference, same mechanism 
 the membership roster). This test pins three things so a future edit can't
 silently regress them:
 
-1. The shared scaffolding lives in `_shared/council.md` (positive) and is no longer
+1. The shared scaffolding lives in `_shared/council.md` (positive) and is not
    duplicated in the two skill bodies (negative).
 2. The four per-lens Critical bars appear in `_shared/council.md` BYTE-FOR-BYTE as
    they read before the hoist, and the four disposition option names survive

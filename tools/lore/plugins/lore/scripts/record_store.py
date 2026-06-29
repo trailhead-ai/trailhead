@@ -343,7 +343,7 @@ def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
 # the structural backstop tolerates no case variant).
 _FENCE_RE = re.compile(r"</?\s*(external)(-memory)\b[^>]*>", re.IGNORECASE)
 # Zero-width word joiner inserted between ``external`` and ``-memory`` so the token
-# is no longer a parseable fence but remains human-legible.
+# is not a parseable fence but remains human-legible.
 _JOINER = "⁠"
 
 
@@ -757,8 +757,7 @@ def move_record(
     :func:`_confine_record_id` (a direct caller cannot read/unlink ``.md``/``.json``
     outside the source vault), and *new_location*'s paths via
     :func:`_realpath_is_descendant` against the declared dest vault root, so a
-    destination that escapes its vault root is rejected before any write
-    (the destination was previously trusted from the caller).
+    destination that escapes its vault root is rejected before any write.
 
     ``shared`` is the destination vault's trust flag (0 = own/trusted, 1 =
     ``shared: true``), stamped on the repointed index row so a relocation into a

@@ -70,7 +70,7 @@ def test_brainstorm_does_not_dispatch_design_mockup_provider():
     assert _BRAINSTORM_SKILL.exists(), "brainstorm/SKILL.md does not exist"
     text = _BRAINSTORM_SKILL.read_text()
     assert "design_mockup" not in text, (
-        "brainstorm/SKILL.md should no longer reference the design_mockup extension point"
+        "brainstorm/SKILL.md must not reference the design_mockup extension point"
     )
     assert "design-mockup-writer" not in text, (
         "brainstorm/SKILL.md must not name the retired `design-mockup-writer`"

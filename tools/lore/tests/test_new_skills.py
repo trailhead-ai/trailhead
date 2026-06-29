@@ -27,7 +27,7 @@ PLUGIN_ROOT = Path(__file__).parent.parent / "plugins" / "lore"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
 AGENTS_DIR = PLUGIN_ROOT / "agents"
 
-# The three new skills introduced here.
+# The three skills under test.
 NEW_SKILLS = ("search", "record", "research")
 
 

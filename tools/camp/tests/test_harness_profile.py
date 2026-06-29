@@ -63,7 +63,7 @@ class TestHarnessConfigValidation:
     def test_harness_binary_must_be_string(self, tmp_path):
         from group_config import GroupConfigError
 
-        # A list (the old argv shape) is no longer accepted — binary is scalar.
+        # A list is not accepted — binary is scalar.
         with pytest.raises(GroupConfigError):
             self._load(tmp_path, '[harness]\nbinary = ["claude"]\n')
 

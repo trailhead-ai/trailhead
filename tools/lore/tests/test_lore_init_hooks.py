@@ -18,7 +18,6 @@ they NEVER touch real config, state, or vault data (Axiom 6).
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -294,35 +293,12 @@ class TestInitInstallsNoHooks:
 
 
 # ---------------------------------------------------------------------------
-# Structural retirement: the harvest module + starter protocol are gone
-# (relocated from the deleted test_finish.py when finish → flush).
-# ---------------------------------------------------------------------------
-
-class TestHarvestModuleRetired:
-    def test_harvest_script_no_longer_exists(self):
-        assert not (SCRIPTS_DIR / "harvest.py").exists()
-
-    def test_harvest_protocol_starter_no_longer_exists(self):
-        assert not (PLUGIN_ROOT / "starter" / "harvest-protocol.md").exists()
-
-    def test_importing_harvest_module_fails(self):
-        if str(SCRIPTS_DIR) not in sys.path:
-            sys.path.insert(0, str(SCRIPTS_DIR))
-        sys.modules.pop("harvest", None)
-        try:
-            mod = importlib.util.find_spec("harvest")
-        except ModuleNotFoundError:
-            mod = None
-        assert mod is None, "the harvest module must no longer be importable"
-
-
-# ---------------------------------------------------------------------------
-# install-vault-hooks.sh stops baking LORE_VAULT into the wrapper
+# install-vault-hooks.sh does not bake LORE_VAULT into the wrapper
 # ---------------------------------------------------------------------------
 
 
 class TestVaultHookWrapperHasNoLoreVaultExport:
-    """The generated pre-commit wrapper no longer exports LORE_VAULT — the regen hook
+    """The generated pre-commit wrapper does not export LORE_VAULT — the regen hook
     derives the committed vault from `git rev-parse --show-toplevel`. The wrapper
     must still wire LORE_PLUGIN_ROOT for the guard and regen steps.
     """
