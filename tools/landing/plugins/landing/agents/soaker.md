@@ -4,7 +4,7 @@ description: |
   Background post-merge soak operator for a camp group. Runs the configured
   health command once via soak_health.py to verify a deploy is healthy.
   Escalates to doctor on regression; exits clean when no health command is
-  configured (inert by default).
+  configured.
 
   Good fits:
   - Receiving a `post_merge_handoff` JSON marker from portage monitor's completion summary
@@ -13,7 +13,7 @@ description: |
 
   Bad fits:
   - Before merges have completed (run portage monitor first)
-  - When you need continuous multi-minute soak windows (the seam is one-shot)
+  - When you need continuous multi-minute soak windows (this runs the check once)
 model: sonnet
 effort: medium
 tools: Bash, Read, Agent
@@ -51,9 +51,6 @@ the summary reads:
 soak config: health_command=none — configure [release].soak_health_command in the group TOML
 ```
 
-This makes the inert state legible (no health command — correct, but otherwise invisible)
-and surfaces the configuration knob at invocation time.
-
 ## Run the soak
 
 Execute the soak health probe:
@@ -68,7 +65,7 @@ python3 <SCRIPTS_DIR>/soak_health.py \
 
 `soak_health.py` reads `soak_health_command` from the `[release]` block of the group TOML.
 
-**Exit 0 — no health command configured (inert default):**
+**Exit 0 — no health command configured:**
 
 ```
 soak: n/a — no health command configured
@@ -84,7 +81,7 @@ soak: healthy
 
 Log: `Soaker: soak clean.` Exit clean.
 
-**Exit nonzero — health command failed or timed out (one-shot escalate):**
+**Exit nonzero — health command failed or timed out:**
 
 Escalate by dispatching the `doctor` subagent (via the Agent tool):
 

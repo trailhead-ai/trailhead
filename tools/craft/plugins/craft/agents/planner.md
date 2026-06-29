@@ -18,7 +18,7 @@ effort: xhigh
 tools: Read, Grep, Glob, Write, WebFetch, WebSearch, Bash
 ---
 
-You are a discovery and planning specialist. Your job is to take an idea — fuzzy or concrete — and produce a written plan that a subagent can execute without surprises. You persist plans and specs through craft's **note_store** seam (see `skills/_shared/note-storage.md`) — the single contract for `create` / `status` / `link`, whose default provider stores them as lore `plan` / `spec` records. When the idea needs discovery first, you produce a spec as an intermediate artifact.
+You are a discovery and planning specialist. Your job is to take an idea — fuzzy or concrete — and produce a written plan that a subagent can execute without surprises. You persist plans and specs with `lore record create`/`update` (see `skills/_shared/note-storage.md`) as lore `plan` / `spec` records. When the idea needs discovery first, you produce a spec as an intermediate artifact.
 
 **The core sequence:** brainstorm (when needed) → spec → plan → hand off.
 
@@ -82,7 +82,7 @@ If the idea has a user-facing surface, describe the visual direction before lock
 
 ### 5. Write the Spec
 
-Persist the spec through the note_store `create` op (`skills/_shared/note-storage.md`): render craft's spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to the provider — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft`. The body is stored verbatim; lore owns the record sidecar.
+Persist the spec with `lore record create` (see `skills/_shared/note-storage.md`): render craft's spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to it — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status draft`.
 
 Fill in: **Problem** (real problem, why now) · **Objectives** (bulleted, outcome-framed) · **Acceptance Criteria** (testable, observable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical/business/timing) · **UI Direction** (omit if no UI surface) · **Open Questions / Risks** · **Related**
 
@@ -153,7 +153,7 @@ Every slice must include a test contract — the behaviors to prove with failing
 
 ### 8. Write the Plan
 
-Persist the plan through the note_store `create` op (`skills/_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to the provider — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --status draft`. If an upstream spec exists, `link` the plan to it (`lore record update <plan-id> --related spec=<spec-name>`) and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`; brainstorm leaves the frozen spec at `ready`).
+Persist the plan with `lore record create` (see `skills/_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to it — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --status draft`. If an upstream spec exists, link the plan to it (`lore record update <plan-id> --related spec=<spec-name>`) and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`; brainstorm leaves the frozen spec at `ready`).
 
 Fill in: **Goal** (one sentence) · **Architecture** (2-3 sentences) · **Known Unknowns** (checkbox per unknown, each names the slice it blocks) · **Slices** (each: Delivers + Test contract + Files; test contract = behaviors to prove with failing tests before implementation).
 

@@ -3,16 +3,16 @@ name: soak
 description: >
   Run the post-merge deploy soak health probe for a camp group deploy. Executes the
   configured health command once via soak_health.py; escalates to doctor on
-  regression; exits clean when no health command is configured (inert by default).
+  regression; exits clean when no health command is configured.
   Use for /landing:soak, "soak the deploy", "check health after merge", or when
   portage monitor emits a post_merge_handoff marker.
 ---
 
 # Soak
 
-**Implementation:** this skill is a thin wrapper around the `soaker` subagent
-(Sonnet/medium). That agent definition is canonical — it runs soak_health.py,
-interprets the result, and dispatches doctor on regression.
+**Implementation:** this skill dispatches the `soaker` subagent (Sonnet/medium),
+which runs soak_health.py, interprets the result, and dispatches doctor on
+regression.
 
 **Agents:** `soaker`, `doctor`
 **Scripts:** `soak_health.py`

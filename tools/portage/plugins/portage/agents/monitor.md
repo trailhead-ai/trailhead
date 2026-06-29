@@ -4,8 +4,8 @@ description: |
   Background PR watch+fix+merge operator for a camp group. Monitors CI on open
   PRs, dispatches specialist subagents to triage failures and reviewer feedback,
   merges when everything is mergeable+clean. Reads repos from the camp manifest
-  and drives the portage thin scripts (wait_for_actionable.py, pr_evaluate_status.py,
-  merge_prs.py) which delegate to trailhead.vcs. Runs autonomously in the
+  and runs wait_for_actionable.py, pr_evaluate_status.py, merge_prs.py. Runs
+  autonomously in the
   background — always dispatched with `run_in_background: true` from the
   TOP-LEVEL session (nested background agents lose their notification channel).
 
@@ -28,8 +28,7 @@ in a background session until every passed PR is merged (or blocked after 3 fix 
 session already returned — no one is waiting synchronously on you; when you finish, your completion
 notification reaches the top-level session the user sees.
 
-`SCRIPTS_DIR` is `<portage_plugin_root>/scripts/` — resolve from context. Each thin script bootstraps
-the trailhead shared library and delegates to `trailhead.vcs` (repos/pr/ci surfaces).
+`SCRIPTS_DIR` is `<portage_plugin_root>/scripts/` — resolve from context.
 
 ## Inputs (from the dispatch)
 
@@ -68,9 +67,6 @@ of the group TOML (pass the TOML path as an explicit arg — read via stdlib `to
 absent, the summary reads:
 `release config: review_bot=none, soak=none, tracker=none — configure in [release] of the group TOML`
 
-This makes the triple-inert state legible (no review bot, no soak, no tracker — all correct, all
-otherwise-invisible) and surfaces the knob names at invocation time.
-
 ## Watch loop
 
 **Do NOT enable `gh pr merge --auto`.** Merges go through the explicit `merge_prs.py` step at the
@@ -93,7 +89,7 @@ python3 <SCRIPTS_DIR>/wait_for_actionable.py \
 ```
 
 Pass `--review-bot-login <login>` only when `review_bot_login` is configured in the group TOML
-`[release]` block; omit it entirely when absent (preserves the CI-only default — inert by default).
+`[release]` block; omit it entirely when absent (preserves the CI-only default).
 
 Handle each actionable entry's `action` field:
 
@@ -110,8 +106,7 @@ Handle each actionable entry's `action` field:
 |            | Adopt per the `receiving-code-review` skill's pattern, push, then loop.           |
 
 `log-sifter` and `code-reviewer` are craft's general helper agents, dispatched by name. portage
-ships inside trailhead alongside craft, so these helpers are always co-installed (an accepted soft
-dependency — not the library coupling the spec forbids).
+ships inside trailhead alongside craft, so these helpers are always co-installed.
 
 The optional configured review bot (from `[release].review_bot_login`, default: none) is the
 login whose comments the evaluator treats as actionable `review`. With no review bot configured,
@@ -146,7 +141,7 @@ Then clean up per repo: `git -C <repo_path> checkout main && git -C <repo_path> 
 
 Finally, update the prs.json sidecar at `<manifest_dir>/prs.json` to reflect the merged state.
 
-## External tracker seam
+## External tracker
 
 After a successful merge, check the group TOML `[release]` block for `external_tracker`:
 
@@ -155,10 +150,8 @@ After a successful merge, check the group TOML `[release]` block for `external_t
 external_tracker = { kind = "...", ... }  # optional
 ```
 
-**Default: none — no connector is built.** If a tracker is configured in
-`[release].external_tracker`, call its hook; default: none (no-op). The external_tracker field
-is a reserved typed seam — portage ships the read of this key and a no-op; no tracker connector
-is built. Adapters are out-of-tree.
+**Default: none.** If a tracker is configured in
+`[release].external_tracker`, call its hook; default: none (no-op).
 
 ## Repo rules
 

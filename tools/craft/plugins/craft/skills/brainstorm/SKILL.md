@@ -173,10 +173,10 @@ only once the playback lands cleanly.
 
 ### 6. Write the Spec
 
-Persist the spec through the note_store `create` op (`../_shared/note-storage.md`): render craft's
-spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to the
-provider — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status
-draft`. lore stores the body verbatim and owns the record sidecar / status vocab.
+Persist the spec with `lore record create` (`../_shared/note-storage.md`): render craft's
+spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to it
+— `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status
+draft`.
 
 The spec body template (`templates/spec.md`) carries these canonical sections — fill each in: **Problem**
 (situation / gap, why now) · **Objectives** (measurable, outcome-framed) · **Acceptance Criteria**
@@ -212,8 +212,8 @@ within brainstorm — let the user invoke `/craft:plan` explicitly so it loads c
 ## Status Lifecycle
 
 The spec frontmatter `status` walks `draft` (brainstorming) → `ready` (frozen, planning-ready) →
-`planned` (a plan references it) → `complete` (work landed). The lore status guard enforces this
-vocab — off-vocab values like `shipped` are rejected by the pre-commit hook. Once `ready`, the spec
+`planned` (a plan references it) → `complete` (work landed). Only these values are valid —
+off-vocab values like `shipped` are rejected. Once `ready`, the spec
 is **frozen**: no more edits; new thinking on the same topic creates a new spec with a
 `Related → Prior specs` link back.
 

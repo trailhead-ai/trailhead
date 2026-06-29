@@ -12,8 +12,7 @@ description: >
 The remaining inline work is judgment over review feedback.
 
 **Agents:** `updater` (push orchestration), `monitor` (background watch + merge loop)
-**Scripts:** `detect_repos.py`, `merge_prs.py`, `release_prs_sidecar.py` (thin
-consumers of `trailhead.vcs`)
+**Scripts:** `detect_repos.py`, `merge_prs.py`, `release_prs_sidecar.py`
 
 ## Step 1 — Code simplification
 

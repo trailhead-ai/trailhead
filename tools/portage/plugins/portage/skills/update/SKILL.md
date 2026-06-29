@@ -9,14 +9,12 @@ description: >
 
 # PR Update
 
-**Implementation:** this skill is a thin wrapper around the `updater` subagent
-(Sonnet/medium), with a single follow-up step to launch `monitor` from the main
-session. All push orchestration happens inside the subagent. The main session sees
-a summary plus a `pr_pairs` line it uses to start the background watch.
+**Implementation:** this skill dispatches the `updater` subagent (Sonnet/medium) to
+push commits and update PRs, then launches `monitor` from the main session. The main
+session sees a summary plus a `pr_pairs` line it uses to start the background watch.
 
 **Agents:** `updater` (push orchestration), `monitor` (background watch + merge loop)
-**Scripts:** `detect_repos.py`, `merge_prs.py`, `release_prs_sidecar.py` (thin
-consumers of `trailhead.vcs`)
+**Scripts:** `detect_repos.py`, `merge_prs.py`, `release_prs_sidecar.py`
 
 ## Step 1 — Dispatch updater
 

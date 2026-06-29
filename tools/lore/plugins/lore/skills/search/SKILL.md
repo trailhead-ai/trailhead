@@ -1,6 +1,6 @@
 ---
 name: search
-description: Read the lore vault — run a KQL-subset query against the global lore index and return matching records. This is the READ/lookup path (replaces the old recall); it never writes. Use for /lore:search, "search the vault", "look up what we know about X", "find records where kind:Y and area:Z", "recall prior context on …".
+description: Read the lore vault — run a KQL-subset query against the global lore index and return matching records. This is the READ/lookup path; it never writes. Use for /lore:search, "search the vault", "look up what we know about X", "find records where kind:Y and area:Z", "recall prior context on …".
 ---
 
 # /lore:search — Read the lore vault
@@ -10,8 +10,7 @@ against the global lore index and returns the matching records. It is
 **read-only** — it never writes a record, never finalizes a session, never
 mutates the vault.
 
-This replaces the old recall flow: the way to pull prior context is now a
-`lore search` query.
+Pull prior context with a `lore search` query.
 
 ## Query shape (KQL subset)
 

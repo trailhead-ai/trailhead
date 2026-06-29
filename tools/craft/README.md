@@ -66,23 +66,20 @@ membership is single-sourced from `skills/_shared/council.md`.
 
 **Review:** `/craft:review`
 
-## Moved commands — shipping & deploy now live in portage / landing
+## Related plugins — PR lifecycle & deploy
 
-craft used to ship `release` commands for the PR-lifecycle and post-merge
-soak. That surface moved to the sibling [portage](../portage) (get it merged)
-and [landing](../landing) (get it deployed) plugins. If you reach for a removed
-`craft` command, use its replacement:
+PR lifecycle and post-merge soak live in the sibling [portage](../portage)
+(get it merged) and [landing](../landing) (get it deployed) plugins:
 
-| Removed | Replacement |
+| Task | Command |
 |---|---|
-| `/craft:create-pr` | `/portage:open` |
-| `/craft:update-pr` | `/portage:update` |
-| `/craft:merge-pr` | `/portage:merge` |
-| `/craft:watch-pr` | `/portage:monitor` |
-| `/craft:watch-preview` | `/landing:soak` |
-| `/craft:post-merge-decide` | `/landing:resolve` |
-| `/craft:shelve` | camp session-resume (`claude -r <slug>`) |
-| `/craft:pickup` | camp session-resume (`claude -r <slug>`) |
+| Open a PR | `/portage:open` |
+| Update a PR | `/portage:update` |
+| Merge a PR | `/portage:merge` |
+| Watch CI to green | `/portage:monitor` |
+| Soak a deploy | `/landing:soak` |
+| Resolve a post-merge incident | `/landing:resolve` |
+| Resume a shelved session | camp session-resume (`claude -r <slug>`) |
 
 ## Layout
 

@@ -706,7 +706,7 @@ Three modes (every non-default mode requires an explicit flag):
       .claude/settings.json for an already-configured group.
 
   camp group <name> --member NAME=PATH [--member NAME=PATH ...] [options]
-      Author a group config TOML from flags (atomic write), then wire hooks.
+      Author a group config TOML from flags, then wire hooks.
       Refuses to overwrite an existing config unless --force.
 
   camp group <name> --scaffold

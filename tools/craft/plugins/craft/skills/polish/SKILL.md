@@ -23,7 +23,7 @@ Take a batch of post-implementation code fix-ups, clarify ambiguities, hand off 
 
 Post-implementation iteration tends to come in batches: "the button needs to be larger, the empty state isn't handled, line 42 has a typo, and that helper should be extracted." Each item is small. The whole batch is mechanical. There is no reason to burn Opus tokens running the edits, the test re-runs, and the commits in the main session.
 
-This skill is the thin wrapper that turns the batch into a brief, dispatches `executor`, and reports back.
+This skill turns the batch into a brief, dispatches `executor`, and reports back.
 
 ## Skip Gate
 
@@ -86,7 +86,7 @@ If items span multiple working directories, group them by directory. You will di
 
 ### 4. Write the brief
 
-Write one brief per working directory, persisting it through the note_store `create` op (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind plan --title "<brief>" --status draft`:
+Write one brief per working directory, persisting it with `lore record create` (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind plan --title "<brief>" --status draft`:
 
 ```
 YYYY-MM-DD-<parent-slug-stripped>-followup-<n>
@@ -195,4 +195,4 @@ Do NOT try to write a single brief that asks the executor to operate on multiple
 
 ## Notes
 
-- Briefs are a useful artifact — they document what changed and why during the iteration phase. Persist them through the note_store seam (`../_shared/note-storage.md`) to write them into your vault.
+- Briefs are a useful artifact — they document what changed and why during the iteration phase. Persist them with `lore record create` (`../_shared/note-storage.md`) to write them into your vault.

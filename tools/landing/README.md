@@ -5,10 +5,9 @@ soak a freshly-merged deploy with a configurable health command, and diagnose a
 deploy-log regression when one surfaces.
 
 landing pairs two concerns. The soak probe is landing's own config-driven health
-gate — inert by default, no vendor baked in. The deploy-health diagnosis is a thin
-consumer of the `trailhead.vcs` provider library — the provider owns the GitHub
-Actions deploy-log interrogation (`deploy.logs`/`deploy.status`/`deploy.workflow_runs`),
-so the plugin's agents stay focused on the judgment calls.
+gate, with no vendor baked in. The deploy-health diagnosis interrogates the GitHub
+Actions deploy log (`deploy.logs`/`deploy.status`/`deploy.workflow_runs`) to surface
+the cause of a regression.
 
 ## What landing covers
 
@@ -43,15 +42,13 @@ subagents/skills below by name; the default installs them all.)
 
 Per-group behavior is read from the `[release]` block of the group TOML:
 
-- `soak_health_command` — the health command the soak runs (default: none — inert by
-  default; `soaker` prints `soak: n/a — no health command configured` and exits clean).
-- `external_tracker` — an optional reserved seam for an incident-tracker connector
-  (default: none — no connector is built).
+- `soak_health_command` — the health command the soak runs (default: none;
+  `soaker` prints `soak: n/a — no health command configured` and exits clean).
+- `external_tracker` — an optional incident-tracker connector (default: none).
 
 ## Relationship to the rest of trailhead
 
-landing ships inside the trailhead install layout and consumes the shared
-`trailhead.vcs` library; it is not independently adoptable. It sits alongside its
+landing ships inside the trailhead install layout. It sits alongside its
 sibling plugins — [lore](../lore) (knowledge management), [craft](../craft)
 (plan / execute / review), [camp](../camp) (group worktrees), and
 [portage](../portage) (PR lifecycle) — and reuses craft's general helper agents

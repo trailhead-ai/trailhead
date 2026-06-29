@@ -3,10 +3,9 @@
 Get the PR **merged**. portage is the PR-lifecycle plugin for Claude Code: open,
 update, watch CI, and merge a camp group's pull requests in dependency order.
 
-portage is a thin consumer of the `trailhead.vcs` provider library — the
-provider owns the deterministic plumbing (repo detection, PR status/evaluate/merge,
-CI poll-to-actionable, and the `prs.json` sidecar), so the plugin's agents and
-skills stay focused on the judgment calls.
+portage handles the PR plumbing for a camp group — repo detection, PR
+status/evaluate/merge, CI poll-to-actionable, and the `prs.json` sidecar — leaving
+its agents and skills to focus on the judgment calls.
 
 ## What portage covers
 
@@ -48,20 +47,11 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 - `merge_order` — the dependency order for a multi-PR merge (required for >1 PR).
 - `review_bot_login` — the login whose review comments count as actionable
   (default: none — CI-only).
-- `external_tracker` — an optional reserved seam for an issue-tracker connector
-  (default: none — no connector is built).
-
-## Parity smoke
-
-The manual end-to-end parity gate — open → CI watch → merge (portage) plus
-soak → doctor (landing) — is documented in
-[`MANUAL-SMOKE.md`](MANUAL-SMOKE.md). Run it on a real PR before any deletion
-of the preceding craft release-command cluster.
+- `external_tracker` — an optional issue-tracker connector (default: none).
 
 ## Relationship to the rest of trailhead
 
-portage ships inside the trailhead install layout and consumes the shared
-`trailhead.vcs` library; it is not independently adoptable. It sits alongside its
+portage ships inside the trailhead install layout. It sits alongside its
 sibling plugins — [lore](../lore) (knowledge management), [craft](../craft)
 (plan / execute / review), and [camp](../camp) (group worktrees) — and reuses
 craft's general helper agents (`log-sifter`, `code-reviewer`) at runtime.

@@ -1,31 +1,19 @@
-# note_store — plan/spec persistence seam (shared reference)
+# Persisting plans & specs via the lore CLI (shared reference)
 
-The **note_store** is the single indirection point through which craft persists and
-mutates plan/spec documents. The three planning skills (`brainstorm`, `plan`, `polish`)
-and the `planner` agent perform their plan/spec lifecycle operations **through this
-contract**, never by inlining a storage command. Centralizing here is deliberate: a
-future provider (repo-local markdown files, a `craft` CLI) slots in by editing this one
-file — the skills don't change.
-
-## Provider
-
-**lore is the sole, default provider.** Every operation below is documented with the
-concrete **lore-provider command** that implements it.
+Persist plans and specs through the `lore` CLI. The planning skills (`brainstorm`,
+`plan`, `polish`) and the `planner` agent use the commands below for their plan/spec
+lifecycle operations.
 
 - Craft owns the plan/spec template **bodies** at
   `${CLAUDE_PLUGIN_ROOT}/templates/plan.md` and `${CLAUDE_PLUGIN_ROOT}/templates/spec.md`
   (section skeleton only — Goal / Architecture / Slices …; Problem / Objectives /
-  Acceptance Criteria …). lore is **body-agnostic**: it stores the piped body verbatim and
-  owns only the record sidecar (frontmatter / `status` / index). So the body content is
-  craft's; the record container is lore's.
-- `plan` and `spec` are first-class lore **record kinds** with their own status vocabs
+  Acceptance Criteria …). Render the body, then pipe it to `lore record create`.
+- `plan` and `spec` are lore **record kinds** with their own status vocabs
   (plan: `draft → ready → in-progress → complete`; spec: `draft → ready → planned →
-  complete`). Persisting a plan/spec is therefore `lore record create --kind plan|spec`,
-  the general record surface — **not** `lore new` (a template-renderer craft no longer
-  uses).
+  complete`). Persisting a plan/spec is `lore record create --kind plan|spec` — **not**
+  `lore new`.
 - **Vault-write rule:** record bodies are authored **through the lore CLI** (`lore record
-  create` reads the body from stdin), never by direct file edits to a vault path. This
-  provider is exactly the compliant path (see CLAUDE.md / `[[trailhead-no-backwards-compat]]`).
+  create` reads the body from stdin), never by direct file edits to a vault path.
 
 ## Lifecycle operations
 
@@ -43,13 +31,9 @@ printf '%s' "$BODY" | lore record create \
   --status draft
 ```
 
-This **replaces** the old `lore new <kind>` + `Write`-the-body flow: there is no separate
-file write — body authoring goes through the lore CLI in one call.
-
 ### `status(handle, status)`
 
-Advance a record's status. A plan/spec record stores its status in a JSON **sidecar**, so
-the provider command is `lore record update` with the dedicated `--status <value>` flag (the
+Advance a record's status with `lore record update` and the `--status <value>` flag (the
 status is validated against the kind's vocab):
 
 ```sh
@@ -57,22 +41,13 @@ lore record update <kind>/<name> --status ready
 ```
 
 This covers brainstorm's `draft → ready`, planning's `ready → planned`, and execute's
-`in-progress → complete`. Records carry status in the sidecar, so `lore record update
---status` is the sole status path for plan/spec records.
+`in-progress → complete`.
 
 ### `link(plan → spec)`
 
 Point a plan at its upstream spec by adding the spec to the plan's `related` map under the
-`spec` kind (the dedicated `--related <kind>=<name>` flag, which appends to that kind's list):
+`spec` kind (the `--related <kind>=<name>` flag, which appends to that kind's list):
 
 ```sh
 lore record update <plan-kind>/<plan-name> --related spec=<spec-name>
 ```
-
-## Deferred (out of scope for this seam, by design)
-
-Per-repo **config resolution** and any **non-lore provider** (e.g. repo-local markdown
-files, a `craft` CLI) are **explicitly deferred** to forthcoming craft changes. This file
-builds only the indirection point + the lore default; it is shaped to *receive* a future
-provider without touching the skills, but neither the resolution logic nor an alternative
-provider is implemented here.
