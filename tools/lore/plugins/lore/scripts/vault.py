@@ -227,9 +227,11 @@ _WORKTREES_RE = re.compile(r"/\.claude/worktrees/([^/]+)")
 def detect_worktree_name(cwd: Path | None = None) -> str:
     """Best-effort worktree name for the current session.
 
-    Mirrors how the session-note filename is *created* (the SessionStart hook
-    names it from ``$CLAUDE_PROJECT_DIR`` basename), so resolution matches
-    creation. Order:
+    Mirrors how the session-note filename is *derived* at creation: the `lore`
+    CLI names the note from this same worktree identity (``$CLAUDE_PROJECT_DIR``
+    basename) when it lazy-creates it on first capture, so resolution matches
+    creation. There is no SessionStart hook — naming and resolution share this
+    one helper. Order:
 
       1. ``$CLAUDE_PROJECT_DIR`` basename — the tightest match.
       2. A ``.claude/worktrees/<name>/`` segment anywhere in the path → ``<name>``

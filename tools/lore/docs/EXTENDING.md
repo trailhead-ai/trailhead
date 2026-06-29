@@ -92,8 +92,7 @@ lore init
 docs, initializes a git repo, and installs a pre-commit guard that enforces the
 canonical status vocabulary. It records the vault as the config default, so every
 hook and the `lore` CLI resolve it from `config.json` — there is no path to pass
-and no environment variable to set. (To adopt an existing git repo as the vault
-instead, run `lore init --vault <path>`.)
+and no environment variable to set.
 
 ### 2.3 Add your app layer as a project-scoped `.claude/`
 
@@ -178,12 +177,11 @@ in a degraded state — these are about lore's own behavior, not your app
 integration. The canonical reference is [lore's DEGRADATION.md](DEGRADATION.md);
 in brief:
 
-- **Mid-conversation subsystem recall** (the UserPromptSubmit classifier) is
-  deferred. Branch/keyword recall still fires at SessionStart; a banner
-  announces that mid-conversation recall is off. Re-add path: port the
-  classifier hook and flip the capability flag.
-- **`/lore:check-in`** skips legacy `snoozed` follow-up notes (not in lore's
-  canonical status vocabulary) and flags them for manual cleanup.
+- **Automatic mid-conversation recall** — a UserPromptSubmit classifier that
+  would match the live prompt against vault records and surface them — is **not
+  yet built**. Recall today is pull-based: agents consult the vault on demand
+  with `lore areas` and `lore search`. Re-add path: port the classifier hook and
+  flip the capability flag.
 
 Follow the linked DEGRADATION.md for the exact turn-on steps; this guide does not
 duplicate them, so they cannot drift.

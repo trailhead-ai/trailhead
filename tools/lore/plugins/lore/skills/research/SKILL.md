@@ -32,9 +32,9 @@ short excerpt. It's the cheap path when you don't need the investigator's deep
 synthesis.
 
 It is also the agent for **polling `tracking`-status backlog items** — periodic
-status checks on the tracking backlog (has this follow-up moved? did this
-deferred item's revisit condition fire?), where each poll is a quick lookup, not
-an investigation.
+status checks on the tracking backlog (has a tracked item changed? did a backlog
+item's revisit condition fire?), where each poll is a quick lookup, not an
+investigation.
 
 Good fits:
 - "Where is the `lore search` query shape documented?"

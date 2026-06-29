@@ -2,25 +2,33 @@
 
 Agent-native project memory that works with your existing setup. Lore captures
 the durable, non-obvious things worth remembering across sessions — decisions,
-dead-ends, deferrals, follow-up items, area mental models, and a running session
-log — and loads what's relevant automatically when a session starts.
+lessons, backlog items (work to revisit, abandoned approaches, things to watch),
+area mental models, and a running session log — and surfaces what's relevant on
+demand.
 
-**No MCP required.** Lore uses only `Read`, `Write`, `Edit`, `Glob`, `Grep`,
-and `Bash(git)` — tools every Claude Code session already has.
+**No MCP required.** Agents read and write the vault only through the `lore`
+CLI (invoked over `Bash`) plus `Bash(git)` — no MCP server, no bespoke tools.
 
 ## What lore captures
 
-| Capture command | What it records |
-|---|---|
-| `/lore:defer` | Work chosen not to do now, with a trigger to revisit |
-| `/lore:dead-end` | Approaches tried that didn't work, with a revive condition |
-| `/lore:decision` | Non-obvious architectural choices and their reasoning |
-| `/lore:follow-up` | External things out of your control being watched |
-| `/lore:area` | Mental model of a codebase area (files, gotchas, conventions) |
+Capture is one skill — `/lore:record` (`lore record create --kind <kind>`) —
+over a **closed set of nine kinds**:
 
-Session lifecycle is automatic: `/lore:checkpoint` snapshots in-flight state;
-`/lore:finish` wraps the session. `/lore:sync` commits and pushes the vault at
-any point.
+| Kind | What it records |
+|---|---|
+| `decision` | Non-obvious architectural choices and their reasoning |
+| `lesson` | A mistake plus a concrete prevention check |
+| `backlog` | Work to revisit, an approach abandoned, or an external thing to watch — distinguished by `status` (`open` / `tracking` / `dropped`) |
+| `area` | Mental model of a codebase area (files, gotchas, conventions) |
+| `spec`, `plan` | Spec → plan artifacts |
+| `collaboration` | Working-style preferences and conventions |
+| `blob` | Freeform capture that doesn't fit another kind |
+| `session` | One note per working session — the running log |
+
+Session lifecycle is automatic: capture-worthy items are logged as session
+candidates mid-session, and `/lore:flush` evaluates them into durable records
+and wraps the session (`status: dirty → clean`). `/lore:sync` commits and pushes
+the vault at any point.
 
 ## Install
 
@@ -30,7 +38,7 @@ for `trailhead install` instructions.
 After install, set up your vault:
 
 ```
-lore init <path>   # scaffold the vault taxonomy and starter docs
+lore init   # scaffold the default vault (taxonomy + starter docs)
 ```
 
 `lore init` records the vault as the config default, so every hook and CLI
@@ -50,8 +58,7 @@ with `lore search`.
 | `/lore:record` | Log a single deliberate item now (`lore record` / `lore session`) |
 | `/lore:search` | Query the vault (KQL-subset) — the read path |
 | `/lore:research` | Dispatch the `investigator` (deep) or `researcher` (light) agent |
-| `/lore:checkpoint` | Mid-session sweep — catch capture-worthy items not yet logged; status stays active |
-| `/lore:finish` | Canonical end-of-session finish — finalize (`status: complete` + `ended:`) and commit |
+| `/lore:flush` | Evaluate outstanding session candidates into records and wrap the session (`dirty → clean`) |
 | `/lore:sync` | Commit and push the vault |
 
 ## The `lore` CLI
@@ -62,10 +69,11 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
      not a runnable snippet. A tagged sh/bash block here is scanned by the landing-claims
      inverse gate, which would require every line's subcommand to be registered. -->
 ```
-lore init <path>          Scaffold a new vault
-lore finish               Finalize the session note (status: complete + ended:) and commit
+lore init                 Scaffold the default vault
+lore flush                Evaluate session candidates and wrap the session (dirty → clean), then commit
 lore sync                 Stage, commit, and push the vault
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
+lore record show <id>     Read a record's body (add --json for the sidecar)
 lore areas                List the area profiles in the vault
 ```
 
@@ -76,68 +84,62 @@ Run `lore <subcommand> --help` for full options.
 Your next session loads what's relevant without you asking — explained, not
 guessed.
 
-At session start, the SessionStart hook builds an **area map**: a compact menu
-of every area profile in your vault, listing each area's name, one-line
-summary, and keywords. This area map is always loaded into context.
+Lore keeps an **area map**: a compact menu of every area profile in your vault,
+listing each area's name, one-line summary, and keywords. It is available on
+demand via `lore areas` and surfaced through lore's agent-rules orientation —
+there is no SessionStart hook.
 
 The agent reads the area map as part of its normal task analysis, matches the
 current task to one or more areas, and runs `lore search 'area:<name>'` to
-pull that area's accumulated memory — decisions, lessons, dead-ends, and open
-deferred items linked to that area — into the conversation. The search is
-**scoped and explainable**: the agent can say "I searched the auth-module area
-because the task touches login flows," not just "here is some context." Search
-also covers full-text and the other record facets (`kind:`, `status:`,
-`keyword:`, date ranges) — `lore search 'area:<name>'` is the area-membership
-case of the one general query interface.
+pull that area's accumulated memory — decisions, lessons, and backlog items
+linked to that area — into the conversation. The search is **scoped and
+explainable**: the agent can say "I searched the auth-module area because the
+task touches login flows," not just "here is some context." Search also covers
+full-text and the other record facets (`kind:`, `status:`, `keyword:`, date
+ranges) — `lore search 'area:<name>'` is the area-membership case of the one
+general query interface.
 
-**To register an area**, use `/lore:area`. Give it a name, a one-line summary,
-and a set of keywords. The profile feeds the area map; the agent uses keywords
-and the summary to decide when to pull the area's memory.
-
-```yaml
----
-type: area
-name: auth-module
-summary: OAuth login flow, token refresh, and session middleware
-keywords: [auth, login, oauth, token, session]
----
-```
+**To register an area**, create an `area` record with
+`lore record create --kind area` (or `/lore:record`). Give it a name, a
+one-line summary, and a set of keywords. The profile feeds the area map; the
+agent uses keywords and the summary to decide when to pull the area's memory.
 
 ## Status vocabulary
 
-Every note type has a canonical `status:` set. The pre-commit guard rejects
-non-canonical values. See the vault's `glossary.md` for the full list.
+Every kind has a canonical `status:` set (first value is the create default).
+The pre-commit guard rejects non-canonical values. See the vault's
+`glossary.md` for the full list.
 
 Key transitions:
 
-- **sessions:** `active` → `complete`
-- **deferred:** `open` → `resolved` / `dropped` / `graduated`
-- **follow-ups:** `active` → `resolved` / `dropped`
-- **dead-ends:** `active` → `archived`
+- **session:** `dirty` → `clean`
+- **backlog:** `open` → `tracking` / `dropped`
+- **decision:** `active` → `superseded` / `dropped`
+- **lesson:** `active` → `conditional`
+- **plan / spec:** `draft` → `ready` → … → `complete` (off-path: `superseded` / `dropped`)
 
 ## Vault layout
 
+The kind set is closed — one directory per kind:
+
 ```
 lore/
-  sessions/      One note per working session
-  areas/         Mental models of codebase areas
-  decisions/     Lightweight ADRs
-  dead-ends/     Failed approaches with revive conditions
-  lessons/       Mistakes plus prevention checks
-  deferred/      Work set aside with revisit triggers
-  follow-ups/    External things to watch
+  session/       One note per working session — the running log
+  area/          Mental models of codebase areas
+  decision/      Lightweight ADRs
+  lesson/        Mistakes plus prevention checks
+  backlog/       Work to revisit, abandoned approaches, things to watch (status: open/tracking/dropped)
   collaboration/ Working-style preferences
-  specs/         Specification artifacts
-  plans/         Implementation plans
-  designs/       Design artifacts
-  inbox/         Raw captures awaiting triage
+  spec/          Specification artifacts
+  plan/          Implementation plans
+  blob/          Freeform captures that don't fit another kind
 ```
 
 ## Searching the vault
 
 Use the `/lore:librarian` agent to search and synthesize across the vault.
-It uses `Glob`, `Grep`, and `Read` — no MCP — and returns a cited synthesis,
-not a raw dump.
+It works only through the `lore` CLI (`lore search` + `lore record show`) — no
+MCP, no direct vault reads — and returns a cited synthesis, not a raw dump.
 
 ## Development
 

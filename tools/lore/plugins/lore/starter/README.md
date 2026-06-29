@@ -2,8 +2,9 @@
 
 This is a **lore vault** — a plain-markdown-in-git knowledge layer for your
 work. It captures the durable, non-obvious things worth remembering across
-sessions: area mental models, decisions, dead-ends, deferred work,
-lessons, and a running session log.
+sessions: area mental models, decisions, lessons, backlog items (work to
+revisit, abandoned approaches, and external things to watch), and a running
+session log.
 
 The [lore](https://github.com) Claude Code plugin reads this vault at session
 start (recalling what's relevant to the branch you're on) and writes to it
@@ -11,21 +12,18 @@ through the `lore record` and `lore session` CLI commands.
 
 ## Layout
 
+The kind set is closed — exactly these nine. One directory per kind:
+
 | Directory | What lives here |
 |---|---|
-| `sessions/` | One note per working session; the running log. |
-| `areas/` | Mental models of the parts of your system. |
-| `decisions/` | Lightweight ADRs — why we chose X over Y. |
-| `dead-ends/` | Approaches that didn't work, with a revive condition. |
-| `lessons/` | Mistakes plus a concrete prevention check. |
-| `deferred/` | Work set aside, with a trigger to revisit. |
-| `follow-ups/` | External things to check on periodically. |
+| `session/` | One note per working session; the running log. |
+| `area/` | Mental models of the parts of your system. |
+| `decision/` | Lightweight ADRs — why we chose X over Y. |
+| `lesson/` | Mistakes plus a concrete prevention check. |
+| `backlog/` | Work to revisit, approaches abandoned, and external things to watch — distinguished by `status` (`open` / `tracking` / `dropped`). |
 | `collaboration/` | Working-style preferences and conventions. |
-| `specs/`, `plans/`, `designs/` | Spec → plan → design artifacts. |
-| `inbox/` | Raw, unprocessed captures awaiting triage. |
-| `briefings/`, `reviews/`, `audits/` | Periodic syntheses. |
-| `gotchas/`, `tools/` | Sharp edges and tool-specific notes. |
-| `.templates/` | Note-type templates the capture commands render. |
+| `spec/`, `plan/` | Spec → plan artifacts. |
+| `blob/` | Freeform captures that don't fit another kind. |
 
 ## Status vocabulary
 

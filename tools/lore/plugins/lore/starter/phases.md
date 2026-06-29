@@ -70,7 +70,10 @@ active phase.
 ### Capture
 
 Knowledge-graph writes. Fires mid-session from Build, Debug, Review, or Close.
-The capture commands: defer, decision, dead-end, follow-up, area.
+Capture is a single command — `lore record create --kind <kind>` — over the
+closed kind set (`area`, `backlog`, `blob`, `collaboration`, `decision`,
+`lesson`, `plan`, `spec`); deferred work, things to watch, and abandoned
+approaches are all `backlog` records distinguished by status.
 
 ### Maintain
 

@@ -33,9 +33,9 @@ Before anything else, determine where the idea sits on the spectrum:
 - **Fuzzy** — objectives unclear, scope ambiguous, UI undecided, or the real problem isn't stated yet → run the full brainstorming phase first
 - **Concrete** — the *what* and *why* are settled, just need the *how* → skip to Planning
 
-Check your vault's `specs/`, if present, for an existing `status: ready` spec on this topic. If one exists, read it fully — it defines the what and why. Skip brainstorming entirely and go straight to Planning.
+If your project uses lore, check for an existing `status: ready` spec on this topic — `lore search 'kind:spec status:ready'`. If one exists, read it fully (`lore record show spec/<name>`) — it defines the what and why. Skip brainstorming entirely and go straight to Planning.
 
-For cross-cutting topics with context spread across multiple specs, decisions, subsystems, and dead-ends, if a knowledge-synthesis subagent is available (such as `lore:librarian`), dispatch it first to get a synthesized prior-art summary — cheaper than reading each note yourself and produces a better unified view. **If none is configured, search the vault directly with Read/Grep, and note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
+For cross-cutting topics with context spread across multiple specs, decisions, subsystems, and backlog items, if a knowledge-synthesis subagent is available (such as `lore:librarian`), dispatch it first to get a synthesized prior-art summary — cheaper than reading each note yourself and produces a better unified view. **If none is configured, query the vault through the `lore` CLI directly (`lore search`, then `lore record show` — never raw file reads), and note in your report that the prior-art synthesis pass was skipped and results may be shallower.**
 
 If the idea is fuzzy and no spec exists, start with Brainstorming.
 
@@ -47,8 +47,8 @@ If the idea is fuzzy and no spec exists, start with Brainstorming.
 
 Restate the idea in one paragraph using your own words. Confirm with the user before proceeding.
 
-- Identify touched subsystems (cross-reference your vault's `subsystems/`, if present)
-- Pull related prior art for reference only: specs, decisions, dead-ends in your vault
+- Identify touched subsystems (cross-reference your vault's area profiles, if present — `lore search 'kind:area'`)
+- Pull related prior art for reference only: specs, decisions, and dropped backlog items in your vault
 - Never modify a prior spec — if this supersedes one, link it from the new spec's `Related` section
 
 ### 2. Poke at Edges
@@ -73,7 +73,7 @@ Don't ask all dimensions every time — pick the ones with genuine ambiguity. Pr
 For each open question, route it:
 
 - **Resolve now** — work through it with the user until there's a clear answer
-- **Defer** — note as a deferred item with a revisit condition; capture in spec under Open Questions
+- **Defer** — note as a `backlog` item (status `open`) with a revisit condition; capture in spec under Open Questions
 - **Accept as risk** — acknowledge in spec with mitigation if any
 
 ### 4. Iterate UI/UX (when applicable)

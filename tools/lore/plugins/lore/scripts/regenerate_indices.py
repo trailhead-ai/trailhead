@@ -384,8 +384,8 @@ def render_lessons_index(folder_name: str, folder: Path) -> str:
         "## What this is",
         "",
         "Lessons are mistakes (process, judgment, coordination, technical) with concrete "
-        "prevention checks. Surfaced at SessionStart for matched areas alongside dead-ends. "
-        "Consult during /planning, /brainstorm, /council-session.",
+        "prevention checks. Pull the relevant ones on demand with `lore search 'kind:lesson'` "
+        "(optionally `and area:<name>`). Consult during /planning, /brainstorm, /council-session.",
         "",
     ]
 

@@ -35,10 +35,11 @@ lore session referenced <kind>/<record-name>
 The session note is lazy-created on first capture, and the session id auto-resolves
 from `$CLAUDE_CODE_SESSION_ID` — no note needs to exist beforehand.
 
-## Vault path
+## Vault path — you never need it
 
-The vault is resolved automatically from `config.json` (the configured **default**
-vault, with a silent floor at `~/.local/state/lore/vaults/default`). You never pass
-`--vault`, and you never need the path itself: every `lore` command resolves it for
-you. Read and write through the CLI (`lore record …`, `lore search …`,
-`lore session …`) rather than touching vault files directly.
+The `lore` CLI resolves the vault for you on every command, so a skill never
+computes, passes, or even sees the vault path: there is no `--vault` flag and no
+path to look up. Interact with the vault **only** through the CLI — `lore search`
+and `lore record show` to read; `lore record …` and
+`lore session candidate|referenced` to write — never by touching vault files
+directly.

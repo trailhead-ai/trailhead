@@ -9,7 +9,7 @@ description: "Evaluate outstanding session candidates into vault records, then f
 at any time — not just at session end. The flow:
 
 1. Read the current session (candidate log + status + watermark) via
-   `lore record show session --json`.
+   `lore session show --json`.
 2. Identify **outstanding candidates** — those logged after the last `flushed-at`
    watermark (carried in the JSON's `sidecar.annotations`; not indexed, so it can
    only be read this way).
@@ -47,7 +47,7 @@ Read THIS worktree's session record through the canonical reader — never by
 poking at vault files directly:
 
 ```bash
-lore record show session --json
+lore session show --json
 ```
 
 This emits `{record_id, kind, name, sidecar, body}`:
@@ -82,8 +82,10 @@ treat ALL candidates as outstanding — never silently drop candidates.
 For each outstanding candidate, apply agent judgment:
 
 - **Promote to a vault record**: if the candidate describes a durable finding
-  (decision, lesson, dead-end, deferred item, follow-up, gotcha, spec) worth
-  finding later on its own, create a record:
+  worth finding later on its own — a `decision`, `lesson`, `spec`, `plan`,
+  `area` profile, `collaboration` convention, or a `backlog` item (work to
+  revisit, an approach dropped, or an external thing to watch) — create a
+  record:
 
   ```bash
   lore record create --kind <kind> --title "<title>"

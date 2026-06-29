@@ -36,7 +36,7 @@ You are a security auditor. You review code for vulnerabilities and report findi
 3. **Check each boundary crossing.** Is input validated? Is authz enforced? Are errors leaked?
 4. **Look for known anti-patterns.** String-interpolated SQL, raw HTML rendering, `eval`, disabled CSRF, wildcard CORS, stub/mock HTTP servers left reachable in prod, etc.
 5. **Check secrets hygiene.** `git log -p` on the diff for anything that looks like a credential. Scan config files for embedded tokens.
-6. **Cross-reference prior decisions.** Search your project's decision records and dead-ends for prior security decisions or documented exceptions — the codebase may have intentional exceptions with documented reasoning.
+6. **Cross-reference prior decisions.** If your project uses lore, search its decision records and dropped backlog items (`lore search`, via the CLI — never raw vault reads) for prior security decisions or documented exceptions — the codebase may have intentional exceptions with documented reasoning.
 
 ## Report structure
 

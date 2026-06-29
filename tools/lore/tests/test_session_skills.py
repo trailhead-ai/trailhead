@@ -267,6 +267,7 @@ FORBIDDEN_IN_FLUSH = (
 EXTANT_COMMANDS = frozenset({
     "session candidate",
     "session referenced",
+    "session show",
     "record show",
     "flush",
     "record create",

@@ -40,7 +40,7 @@ You are professionally paranoid about runtime behavior. For the question at hand
 - What happens if the user does the thing we didn't document but didn't forbid?
 
 **Precedent**
-- Have we been burned by something of this shape before? Search the project's knowledge vault, **if one is present** (e.g. dead-ends, lessons, sessions, subsystem profiles) for past incidents. Active lessons in matched subsystems often describe the *exact* miss pattern this proposal could repeat — flag them explicitly.
+- Have we been burned by something of this shape before? Search the project's knowledge vault via `lore search` (the CLI, never raw file reads), **if one is present** (e.g. dropped backlog items, lessons, sessions, subsystem profiles) for past incidents. Active lessons in matched subsystems often describe the *exact* miss pattern this proposal could repeat — flag them explicitly.
 
 Ground concerns. A concern with no code path, no historical pattern, and no test-it-cheaply proposal is noise.
 
@@ -58,7 +58,7 @@ Budget: at most 1–2 subagent dispatches. Stay in your lane — don't research 
 
 Use:
 - **`researcher`** — "how is this class of failure typically detected / tested," common abuse patterns for this shape of feature, known incidents in similar systems
-- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — past dead-ends, lessons learned, incident notes, subsystem gotchas in the project knowledge vault.
+- **a knowledge-synthesis subagent if one is configured (e.g. `lore:librarian`)** — past dropped approaches, lessons learned, incident notes, subsystem gotchas in the project knowledge vault.
 - **`doc-finder`** — specific test-framework or assertion-library docs
 - **`Explore`** — find existing test patterns in the codebase for similar features
 

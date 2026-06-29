@@ -338,16 +338,20 @@ def test_label_sqli_value_no_results_no_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# --vault scope
+# --vault is gone → unknown-flag usage error; default spans the resolved layers
 # ---------------------------------------------------------------------------
 
 
-def test_vault_narrows_to_one_vault(tmp_path):
+def test_vault_flag_is_unknown_flag_error(tmp_path):
+    """``--vault`` was removed: ``search`` always spans the resolved layers
+    (personal + any shared/group vaults) and never takes an arbitrary path —
+    vault access stays CLI-resolved. argparse rejects the unknown flag (exit 2)."""
     personal, shared, state = _make_fixture(tmp_path)
     r = _run(["area:penny", "--vault", str(shared)], vault=personal, state=state)
-    assert r.returncode == 0, r.stderr
-    assert "shared-penny-note" in r.stdout
-    assert "penny-architecture" not in r.stdout
+    assert r.returncode == 2, (
+        f"lore search --vault must be an argparse usage error (exit 2); "
+        f"got {r.returncode}; stderr={r.stderr!r}"
+    )
 
 
 def test_default_spans_all_vaults(tmp_path):
