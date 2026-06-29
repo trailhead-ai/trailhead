@@ -13,8 +13,8 @@ description: >
 Merges open PRs for a camp group in dependency order. Stops if any PR is not ready.
 Every camp group member is a peer — there is no privileged member.
 
-**Scripts:** `merge_prs.py`, `detect_repos.py`, `release_prs_sidecar.py` (thin
-consumers of `trailhead.vcs`). `SCRIPTS_DIR` is `<portage_plugin_root>/scripts/`.
+**Scripts:** `merge_prs.py`, `detect_repos.py`, `release_prs_sidecar.py`.
+`SCRIPTS_DIR` is `<portage_plugin_root>/scripts/`.
 
 ## Steps
 
@@ -52,7 +52,7 @@ consumers of `trailhead.vcs`). `SCRIPTS_DIR` is `<portage_plugin_root>/scripts/`
 
    for each merged repo.
 
-## External tracker seam
+## External tracker
 
 After successful merge, check `[release].external_tracker` in the group TOML.
 No issue tracker configured — status transitions skipped. Configure
@@ -61,6 +61,6 @@ No issue tracker configured — status transitions skipped. Configure
 ## Notes
 
 - `merge_prs.py` uses `gh pr merge --merge` (squash flag comes from group config, not
-  hardcoded — the provider does not impose a merge strategy).
+  hardcoded).
 - Merge order: configured in `[release].merge_order` of the group TOML; absent for
   single-PR groups (no order needed); required for >1 PR to avoid silent mis-merges.

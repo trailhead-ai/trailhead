@@ -5,10 +5,9 @@ Capture, search, session bookkeeping, status guarding, and vault scaffolding all
 live behind subcommands here. Run ``lore --help`` (or ``lore <cmd> --help``) for
 the authoritative, self-describing subcommand list — this docstring deliberately
 does not restate it, so the two can't drift.
-
-Finds its sibling ../scripts modules at import time so it works whether run
-from the repo or from an installed plugin (${CLAUDE_PLUGIN_ROOT}/cli/lore).
 """
+# Finds its sibling ../scripts modules at import time so it works whether run
+# from the repo or from an installed plugin (${CLAUDE_PLUGIN_ROOT}/cli/lore).
 from __future__ import annotations
 
 import argparse
@@ -2408,7 +2407,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_reindex = sub.add_parser(
         "reindex",
-        help="Rebuild the derived SQLite index from the vault directory tree",
+        help="Rebuild the lore search index",
     )
     p_reindex.set_defaults(func=cmd_reindex)
 

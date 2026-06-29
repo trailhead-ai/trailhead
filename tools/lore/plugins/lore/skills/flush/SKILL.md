@@ -19,7 +19,7 @@ at any time — not just at session end. The flow:
    `flushed-at` watermark, and commit.
 
 The **CLI** (`lore flush`) carries the mechanical flip; this **skill** carries the
-judgment (candidate evaluation). The two are separate by design.
+judgment (candidate evaluation).
 
 ## Scoping
 
@@ -114,7 +114,7 @@ lore flush
 ```
 
 This stamps `status: clean`, records the new `flushed-at` watermark in
-`annotations`, reindexes the session record, and commits the vault. Relay any
+`annotations`, and commits the vault. Relay any
 notices it prints (e.g. non-git vault, push failure).
 
 ### Step 5 — Report to the user

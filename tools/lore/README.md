@@ -41,13 +41,10 @@ After install, set up your vault:
 lore init   # scaffold the default vault (taxonomy + starter docs)
 ```
 
-`lore init` records the vault as the config default, so every hook and CLI
-call resolves it from `config.json` — no environment variable to export. When
-no config exists yet, lore falls back to a default vault under its state dir.
+`lore init` scaffolds the vault; subsequent commands find it automatically —
+nothing to export or configure.
 
-Open Claude Code in any project. lore is fully pull: there is no SessionStart
-hook — the `lore` CLI resolves the active session note for your worktree itself
-and lazy-creates it on first capture. Orientation (the area map and vault index)
+Open Claude Code in any project. Orientation (the area map and vault index)
 is loaded via the agent-rules surface, and agents pull prior context on demand
 with `lore search`.
 
@@ -65,9 +62,7 @@ with `lore search`.
 
 The `lore` CLI handles the deterministic operations skills delegate to it.
 
-<!-- Intentionally an untagged block (no sh/bash): this is a CLI reference listing,
-     not a runnable snippet. A tagged sh/bash block here is scanned by the landing-claims
-     inverse gate, which would require every line's subcommand to be registered. -->
+<!-- Intentionally untagged (no sh/bash): this is a reference listing, not a runnable snippet. -->
 ```
 lore init                 Scaffold the default vault
 lore flush                Evaluate session candidates and wrap the session (dirty → clean), then commit
@@ -86,8 +81,7 @@ guessed.
 
 Lore keeps an **area map**: a compact menu of every area profile in your vault,
 listing each area's name, one-line summary, and keywords. It is available on
-demand via `lore areas` and surfaced through lore's agent-rules orientation —
-there is no SessionStart hook.
+demand via `lore areas` and surfaced through lore's agent-rules orientation.
 
 The agent reads the area map as part of its normal task analysis, matches the
 current task to one or more areas, and runs `lore search 'area:<name>'` to
@@ -118,22 +112,19 @@ Key transitions:
 - **lesson:** `active` → `conditional`
 - **plan / spec:** `draft` → `ready` → … → `complete` (off-path: `superseded` / `dropped`)
 
-## Vault layout
+## Record kinds
 
-The kind set is closed — one directory per kind:
+The kind set is closed — nine kinds:
 
-```
-lore/
-  session/       One note per working session — the running log
-  area/          Mental models of codebase areas
-  decision/      Lightweight ADRs
-  lesson/        Mistakes plus prevention checks
-  backlog/       Work to revisit, abandoned approaches, things to watch (status: open/tracking/dropped)
-  collaboration/ Working-style preferences
-  spec/          Specification artifacts
-  plan/          Implementation plans
-  blob/          Freeform captures that don't fit another kind
-```
+- `session` — one note per working session (the running log)
+- `area` — mental models of codebase areas
+- `decision` — lightweight ADRs
+- `lesson` — mistakes plus prevention checks
+- `backlog` — work to revisit, abandoned approaches, things to watch (status: open/tracking/dropped)
+- `collaboration` — working-style preferences
+- `spec` — specification artifacts
+- `plan` — implementation plans
+- `blob` — freeform captures that don't fit another kind
 
 ## Searching the vault
 

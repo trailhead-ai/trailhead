@@ -94,13 +94,13 @@ Slices don't need step-by-step implementation detail. The subagent figures out h
 
 ### 8. Write the Plan
 
-Persist the plan through the note_store `create` op (`../_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to the provider — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --status draft`. The default provider stores it as a searchable lore `plan` record, which keeps it linkable from session notes and future planning.
+Persist the plan with `lore record create` (`../_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to it — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --status draft`. This stores it as a searchable lore `plan` record, which keeps it linkable from session notes and future planning.
 
 If the `lore` CLI is not on PATH, write the plan to a `plans/` directory in your vault manually, mirroring the template shape below.
 
-**Populate `related-subsystems:` frontmatter** from your vault's subsystem profiles, if present — this drives branch-based subsystem recall and links the plan to the areas it touches. List every subsystem the plan touches, not just the primary one.
+**Populate `related-subsystems:` frontmatter** from your vault's subsystem profiles, if present — so the plan is linked to the areas it touches. List every subsystem the plan touches, not just the primary one.
 
-If an upstream spec exists, `link` the plan to it via the note_store seam (`lore record update <plan-id> --related spec=<spec-name>`) and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
+If an upstream spec exists, link the plan to it with `lore record update <plan-id> --related spec=<spec-name>` and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
 
 The plan body template (`templates/plan.md`) carries these canonical sections — fill each in:
 

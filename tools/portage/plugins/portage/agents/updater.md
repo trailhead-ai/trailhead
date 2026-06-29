@@ -34,7 +34,6 @@ Every member of a camp group is a peer. There is no privileged member, no specia
 different push path. All members go through the same preflight → push → open/link → sidecar flow.
 
 `SCRIPTS_DIR` is `<portage_plugin_root>/scripts/` — resolve from context or pass as an env/input.
-Each thin script bootstraps the trailhead shared library and delegates to `trailhead.vcs`.
 
 ## Inputs (from the dispatch)
 
@@ -71,9 +70,7 @@ push-ready state:
   For `mode=update`: the branch already has a PR → push new commits to it.
 
 Then push and (for `create`) open the PR with `gh pr create` (title/body/links are judgment —
-compose them from the change shape). PR creation, the push, and sibling cross-linking stay in
-this agent's prose; the provider owns only the deterministic plumbing (detect / status / merge /
-sidecar), not the judgment-laden `gh pr create`.
+compose them from the change shape).
 
 - **1 repo**: execute the preflight + push inline with `mode=<mode>`.
 - **2+ repos**: dispatch one `general-purpose` subagent per repo in parallel (sonnet/medium),
@@ -104,7 +101,7 @@ python3 <SCRIPTS_DIR>/release_prs_sidecar.py write \
 Each `--pr` flag is repeatable: one per PR, in `<repo>:<pr_number>:<url>:<branch>` form.
 
 The sidecar shape: `{schema_version:1, prs:[{repo, pr_number, url, branch}], external_tracker:null}`.
-The `external_tracker` field is reserved and defaults to null — no connector is built.
+The `external_tracker` field defaults to null.
 
 ### Step 5 — Collect `pr_pairs` for the caller to launch monitor
 

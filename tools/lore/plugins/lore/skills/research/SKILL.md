@@ -38,7 +38,7 @@ investigation.
 
 Good fits:
 - "Where is the `lore search` query shape documented?"
-- "Find the area profile for the vault-resolution code."
+- "Find the area profile for the auth module."
 - "Poll the `tracking`-status backlog items and report any that changed state."
 
 ## Choosing — signal to yourself before dispatching

@@ -8,13 +8,12 @@ description: >
 
 # PR Monitor
 
-**Implementation:** this skill is a thin wrapper around the `monitor` subagent
-(Sonnet/medium). That agent definition is canonical — it owns the watch+fix+merge
-loop, the action table, blocker handling, and the merge/cleanup sequence.
+**Implementation:** this skill dispatches the `monitor` subagent (Sonnet/medium),
+which runs the watch+fix+merge loop, the action table, blocker handling, and the
+merge/cleanup sequence.
 
 **Agents:** `monitor`
-**Scripts:** `wait_for_actionable.py`, `pr_evaluate_status.py`, `merge_prs.py` (thin
-consumers of `trailhead.vcs`)
+**Scripts:** `wait_for_actionable.py`, `pr_evaluate_status.py`, `merge_prs.py`
 
 ## Dispatch
 
@@ -38,8 +37,8 @@ Agent({
 
 If `pr_pairs` is unknown, the agent will detect it via `detect_repos.py` +
 `gh pr list`. The review bot (if configured in `[release].review_bot_login`) and
-external tracker (if configured in `[release].external_tracker`) are inert by
-default when absent from the group TOML.
+external tracker (if configured in `[release].external_tracker`) take no action
+when absent from the group TOML.
 
 `<repo_path>` in `pr_pairs` is a LOCAL filesystem path. The downstream scripts use
 it as `cwd=` for `gh` calls. `pr_evaluate_status.py` fails fast with a clear error

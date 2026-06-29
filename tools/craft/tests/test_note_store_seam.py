@@ -120,13 +120,3 @@ def test_note_storage_documents_link_op():
     assert "lore record update" in text, (
         "the link op must name the concrete record-provider command `lore record update`."
     )
-
-
-def test_note_storage_defers_non_lore_provider():
-    """The seam names lore as the sole/default provider; per-repo config resolution and any
-    non-lore provider are explicitly deferred (out of scope)."""
-    text = NOTE_STORAGE_MD.read_text().lower()
-    assert "defer" in text, (
-        "note-storage.md must explicitly defer per-repo config resolution + any non-lore "
-        "provider (out of scope for this slice)."
-    )

@@ -78,8 +78,10 @@ class TestLoreInventory:
     def test_tool_name(self):
         assert load_manifest(_LORE_MANIFEST).tool_name == "lore"
 
-    def test_base_is_shared_only(self):
-        assert load_manifest(_LORE_MANIFEST).base == ["skills/_shared"]
+    def test_base_is_empty(self):
+        # lore ships no always-on base dirs; the CLI-only vault-write rule reaches
+        # agents via CLAUDE.md, so no shared reference doc needs shipping.
+        assert load_manifest(_LORE_MANIFEST).base == []
 
     def test_hooks_json(self):
         assert load_manifest(_LORE_MANIFEST).hooks_json is None
@@ -113,10 +115,6 @@ class TestLoreInventory:
         # sync was always-on (base) under the capability model; it has a SKILL.md
         # so it is now a selectable skill.
         assert "sync" in load_manifest(_LORE_MANIFEST).skills
-
-    def test_shared_not_selectable(self):
-        # skills/_shared has no SKILL.md and is base — never selectable.
-        assert "_shared" not in load_manifest(_LORE_MANIFEST).skills
 
     def test_all_selectable(self):
         m = load_manifest(_LORE_MANIFEST)
