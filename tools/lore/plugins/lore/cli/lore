@@ -60,6 +60,93 @@ def _resolve_groups_dir() -> "Path | None":
         return None
 
 
+def _resolve_group_scopes(
+    *,
+    cwd: "Path",
+    groups_dir: "Path | None",
+    camp_state_dir: "Path | None" = None,
+) -> "dict[str, str]":
+    """Return the active camp group's default scope routing, or ``{}``.
+
+    Resolves ``cwd`` to a camp group (via camp's ``resolve_from_cwd``) and
+    returns that group's declared ``[[lore_scopes]]`` binding as a
+    ``{scope: vault_name}`` map, with each name normalized so it matches the
+    elected vault for slashed repo names. The map seeds write routing so a
+    record created inside a bound workspace lands in the group's vault without
+    an explicit ``--repo/--product/--suite/--team`` flag.
+
+    Degradation contract: returns ``{}`` on every failure path — ``groups_dir``
+    unavailable, trailhead/camp not importable, no group matches ``cwd``, the
+    group declares no binding, or the group config is malformed. A clean
+    no-group match is silent; an overlap (one repo in multiple groups) or a
+    malformed config prints a warning to stderr before degrading, so a typo'd
+    binding never silently misroutes to the default vault.
+
+    The ``ensure_trailhead_importable()`` call before the camp import is
+    load-bearing: camp internally does ``import trailhead.paths``, so without
+    the guard a ``ModuleNotFoundError`` escapes the ``ImportError`` catch (and
+    the ``GroupResolutionError`` catch below) and crashes the caller instead of
+    degrading. ``camp_state_dir`` is forwarded to ``resolve_from_cwd`` so the
+    resolution stays isolated in tests.
+    """
+    if groups_dir is None:
+        return {}
+
+    camp_plugin_root = layers_mod._CAMP_PLUGIN_ROOT
+    if camp_plugin_root is not None and str(camp_plugin_root) not in sys.path:
+        sys.path.insert(0, str(camp_plugin_root))
+
+    try:
+        from _bootstrap import ensure_trailhead_importable
+
+        ensure_trailhead_importable()
+    except (ImportError, SystemExit):
+        return {}  # trailhead unavailable → default routing
+
+    try:
+        import camp.scripts.group_config as _gc
+        import camp.scripts.group_resolve as _gr
+        from camp.scripts.group_config import GroupConfigError
+        from camp.scripts.group_resolve import GroupResolutionError
+    except ImportError:
+        return {}  # camp absent → default routing
+
+    try:
+        group_configs = _gc.load_all_groups(groups_dir)  # [] if dir absent
+    except GroupConfigError as exc:
+        print(
+            f"lore: camp group config error; group scope routing unavailable: {exc}",
+            file=sys.stderr,
+        )
+        return {}  # malformed config → default routing
+
+    if not group_configs:
+        return {}
+
+    try:
+        group_name, _slug = _gr.resolve_from_cwd(
+            cwd, group_configs, camp_state_dir=camp_state_dir
+        )
+    except GroupResolutionError as exc:
+        # cwd not in any group → silent default routing (normal, not a warning)
+        # overlap → emit a named warning so a misconfig is diagnosable
+        exc_msg = str(exc)
+        if "multiple groups" in exc_msg or "overlap" in exc_msg.lower():
+            print(
+                f"lore: {exc_msg}; group scope routing degrading to default",
+                file=sys.stderr,
+            )
+        return {}
+
+    for cfg in group_configs:
+        if cfg["group"]["name"] == group_name:
+            return {
+                entry["scope"]: vault_config_mod.normalize_vault_name(entry["name"])
+                for entry in cfg.get("lore_scopes", [])
+            }
+    return {}
+
+
 #: The lore user-level ruleset name (namespaced under trailhead).
 _RULESET_NAME = "trailhead" "-lore"  # noqa: implicit-concat avoids marketplace-grep guard
 
