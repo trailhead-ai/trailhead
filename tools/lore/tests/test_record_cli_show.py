@@ -24,7 +24,6 @@ to the real vault: the CLI resolves the test vault from a seeded config.json
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from conftest import make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
 

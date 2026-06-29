@@ -48,7 +48,7 @@ import json
 import sys
 from pathlib import Path
 
-from conftest import make_vault as _make_vault, run_cli as _run, write_default_config
+from conftest import make_vault as _make_vault, run_cli as _run
 
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"

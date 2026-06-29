@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_vault as _make_vault, run_cli as _run, write_default_config
+from conftest import load_script, make_vault as _make_vault, run_cli as _run
 
 # A canonical UUID-shaped session_id (Claude Code session IDs are UUIDs).
 SID = "11111111-2222-4333-8444-555555555555"

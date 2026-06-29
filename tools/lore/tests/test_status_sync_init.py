@@ -54,7 +54,7 @@ def run_cli(args, env=None, input_text=None, *, seed_vault=None):
         full_env.update(env)
     if seed_vault is not None:
         _cfg = Path(seed_vault).parent / "_xdg_config"
-        full_env.setdefault("XDG_CONFIG_HOME", str(_cfg))
+        full_env["XDG_CONFIG_HOME"] = str(_cfg)
         write_default_config(_cfg, Path(seed_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
