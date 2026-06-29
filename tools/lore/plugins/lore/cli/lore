@@ -68,83 +68,25 @@ def _resolve_group_scopes(
 ) -> "dict[str, str]":
     """Return the active camp group's default scope routing, or ``{}``.
 
-    Resolves ``cwd`` to a camp group (via camp's ``resolve_from_cwd``) and
-    returns that group's declared ``[[lore_scopes]]`` binding as a
-    ``{scope: vault_name}`` map, with each name normalized so it matches the
-    elected vault for slashed repo names. The map seeds write routing so a
-    record created inside a bound workspace lands in the group's vault without
-    an explicit ``--repo/--product/--suite/--team`` flag.
+    Resolves ``cwd`` to a camp group (via the shared
+    :func:`layers.resolve_active_group_config`) and returns that group's declared
+    ``[[lore_scopes]]`` binding as a ``{scope: vault_name}`` map. The map seeds
+    write routing so a record created inside a bound workspace lands in the
+    group's vault without an explicit ``--repo/--product/--suite/--team`` flag.
 
-    Degradation contract: returns ``{}`` on every failure path — ``groups_dir``
-    unavailable, trailhead/camp not importable, no group matches ``cwd``, the
-    group declares no binding, or the group config is malformed. A clean
-    no-group match is silent; an overlap (one repo in multiple groups) or a
-    malformed config prints a warning to stderr before degrading, so a typo'd
-    binding never silently misroutes to the default vault.
-
-    The ``ensure_trailhead_importable()`` call before the camp import is
-    load-bearing: camp internally does ``import trailhead.paths``, so without
-    the guard a ``ModuleNotFoundError`` escapes the ``ImportError`` catch (and
-    the ``GroupResolutionError`` catch below) and crashes the caller instead of
-    degrading. ``camp_state_dir`` is forwarded to ``resolve_from_cwd`` so the
-    resolution stays isolated in tests.
+    Names are returned verbatim — exactly as an explicit routing flag would
+    store them — so flag-origin and group-default-origin sidecar fields agree;
+    vault election (``explain_resolution``) normalizes them at lookup. Returns
+    ``{}`` on every failure path; the shared resolver owns the degradation
+    contract (trailhead/camp unavailable, no group, overlap, malformed/unreadable
+    config). ``camp_state_dir`` is forwarded so resolution stays isolated in tests.
     """
-    if groups_dir is None:
+    cfg = layers_mod.resolve_active_group_config(
+        groups_dir, cwd, camp_state_dir=camp_state_dir, degrade_target="default routing"
+    )
+    if cfg is None:
         return {}
-
-    camp_plugin_root = layers_mod._CAMP_PLUGIN_ROOT
-    if camp_plugin_root is not None and str(camp_plugin_root) not in sys.path:
-        sys.path.insert(0, str(camp_plugin_root))
-
-    try:
-        from _bootstrap import ensure_trailhead_importable
-
-        ensure_trailhead_importable()
-    except (ImportError, SystemExit):
-        return {}  # trailhead unavailable → default routing
-
-    try:
-        import camp.scripts.group_config as _gc
-        import camp.scripts.group_resolve as _gr
-        from camp.scripts.group_config import GroupConfigError
-        from camp.scripts.group_resolve import GroupResolutionError
-    except ImportError:
-        return {}  # camp absent → default routing
-
-    try:
-        group_configs = _gc.load_all_groups(groups_dir)  # [] if dir absent
-    except GroupConfigError as exc:
-        print(
-            f"lore: camp group config error; group scope routing unavailable: {exc}",
-            file=sys.stderr,
-        )
-        return {}  # malformed config → default routing
-
-    if not group_configs:
-        return {}
-
-    try:
-        group_name, _slug = _gr.resolve_from_cwd(
-            cwd, group_configs, camp_state_dir=camp_state_dir
-        )
-    except GroupResolutionError as exc:
-        # cwd not in any group → silent default routing (normal, not a warning)
-        # overlap → emit a named warning so a misconfig is diagnosable
-        exc_msg = str(exc)
-        if "multiple groups" in exc_msg or "overlap" in exc_msg.lower():
-            print(
-                f"lore: {exc_msg}; group scope routing degrading to default",
-                file=sys.stderr,
-            )
-        return {}
-
-    for cfg in group_configs:
-        if cfg["group"]["name"] == group_name:
-            return {
-                entry["scope"]: vault_config_mod.normalize_vault_name(entry["name"])
-                for entry in cfg.get("lore_scopes", [])
-            }
-    return {}
+    return {entry["scope"]: entry["name"] for entry in cfg.get("lore_scopes", [])}
 
 
 #: The lore user-level ruleset name (namespaced under trailhead).
@@ -1829,15 +1771,6 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
         print("error: --title is required", file=sys.stderr)
         return 1
 
-    # Build the scope string from routing flags. These are routing hints
-    # passed to place_record; their sidecar-write semantics are the record-write layer's.
-    scope_parts: list[str] = []
-    for flag in ("repo", "product", "suite", "team"):
-        val = getattr(args, flag, None)
-        if val:
-            scope_parts.append(f"{flag}:{val}")
-    scope = ",".join(scope_parts) if scope_parts else None
-
     # Seed the sidecar with the required operator fields. ``keywords`` is optional
     # (optional) — it is populated only when --keyword is supplied.
     sidecar: dict = {
@@ -1868,11 +1801,14 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
     body = _read_stdin_body()
 
     # --- vault routing -----------------------------------------------------
-    # ``participating_scopes`` is built ONLY from the routing FLAGS
-    # (--repo/--product/--suite/--team). When a
-    # config.json exists & loads, resolution picks the destination vault; a
-    # confirmation line names the elected vault + scope (+ any fall-through
-    # reason). With NO config we keep vanilla behavior: the active vault, shared=0.
+    # ``participating_scopes`` is built from the routing FLAGS
+    # (--repo/--product/--suite/--team), then — only when a config.json exists and
+    # multi-vault routing is therefore active — augmented with the active camp
+    # group's [[lore_scopes]] binding. When a config loads, resolution picks the
+    # destination vault and a confirmation line names the elected vault + scope
+    # (+ any fall-through reason). With NO config we keep vanilla behavior: the
+    # active vault, shared=0, and NO group-default seeding — there is no vault to
+    # route to, so we never stamp implicit scope fields the user did not type.
     loaded = _load_vault_config()
     participating_scopes: dict = {}
     for flag in ("repo", "product", "suite", "team"):
@@ -1881,28 +1817,34 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
             participating_scopes[flag] = val
             sidecar[flag] = val  # one input → both routing and field; field can never contradict vault
 
-    # Group-default seeding: a record created inside a camp workspace whose group
-    # declares a [[lore_scopes]] binding inherits that scope when no explicit flag
-    # selects one. ``setdefault`` is used on BOTH ``participating_scopes`` AND the
-    # namesake sidecar field — never plain assignment — so an explicit flag's value
-    # (in either dict) is never overwritten by a group default (explicit always
-    # wins). ``seeded_scopes`` records which scopes were newly inserted from the
-    # binding (not typed); the confirmation line is annotated ``(via group
-    # default)`` only when the *elected* scope is one of these, so a higher-
-    # precedence typed flag (e.g. --repo over a product binding) carries no
-    # provenance suffix even though a lower scope was seeded.
-    seeded_scopes: set[str] = set()
-    for seed_scope, seed_name in _resolve_group_scopes(
-        cwd=Path.cwd(), groups_dir=_resolve_groups_dir()
-    ).items():
-        if seed_scope not in participating_scopes:
-            participating_scopes[seed_scope] = seed_name
-            seeded_scopes.add(seed_scope)
-        sidecar.setdefault(seed_scope, seed_name)
-
     shared_flag = 0
     routing_line: str | None = None
+    seeded_scopes: set[str] = set()
     if loaded is not None:
+        # Group-default seeding: a record created inside a camp workspace whose
+        # group declares a [[lore_scopes]] binding inherits that scope when no
+        # explicit flag selects it. ``setdefault`` on BOTH ``participating_scopes``
+        # and the namesake sidecar field (never plain assignment) keeps an
+        # explicit flag authoritative. ``seeded_scopes`` records which scopes were
+        # newly inserted from the binding; the confirmation line is annotated
+        # ``(via group default)`` only when the *elected* scope is one of these,
+        # so a higher-precedence typed flag carries no provenance suffix even when
+        # a lower scope was seeded. ``Path.cwd()`` is resolved defensively: a
+        # deleted cwd (e.g. a removed worktree) degrades to no seeding rather than
+        # crashing the capture.
+        try:
+            cwd = Path.cwd()
+        except OSError:
+            cwd = None
+        if cwd is not None:
+            for seed_scope, seed_name in _resolve_group_scopes(
+                cwd=cwd, groups_dir=_resolve_groups_dir()
+            ).items():
+                if seed_scope not in participating_scopes:
+                    participating_scopes[seed_scope] = seed_name
+                    seeded_scopes.add(seed_scope)
+                sidecar.setdefault(seed_scope, seed_name)
+
         _, vaults = loaded
         resolution = vault_resolve_mod.explain_resolution(
             participating_scopes, kind, vaults
@@ -1919,6 +1861,18 @@ def _cmd_record_create(args: argparse.Namespace) -> int:
             )
     else:
         vault_root = Path(vault_config_mod.resolve_active_vault())
+
+    # The scope string passed to place_record reflects the FINAL participating
+    # scopes — typed flags plus any group-default seeds — so the routing hint
+    # never disagrees with the vault the record actually lands in.
+    scope = (
+        ",".join(
+            f"{flag}:{participating_scopes[flag]}"
+            for flag in ("repo", "product", "suite", "team")
+            if flag in participating_scopes
+        )
+        or None
+    )
 
     try:
         conn = index_store_mod.open_index()

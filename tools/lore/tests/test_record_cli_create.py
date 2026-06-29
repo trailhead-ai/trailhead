@@ -1212,3 +1212,47 @@ def test_malformed_group_config_degrades_to_default(tmp_path):
     assert (vault / kind / f"{name}.md").exists()
     assert not (trailhead_vault / kind / f"{name}.md").exists()
     assert "(via group default)" not in r.stderr
+
+
+def test_vanilla_no_config_does_not_stamp_group_default(tmp_path):
+    """With NO vault config.json, multi-vault routing is inert: a record created
+    inside a workspace whose group binds product=trailhead lands in the floor
+    vault and its sidecar carries NO group-default scope field. Group defaults
+    are a routing feature — when there is no vault to route to, an implicit scope
+    the user never typed must not be silently stamped onto the record.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"  # left empty → _load_vault_config() is None
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+
+    # With an empty config_home, resolve_active_vault() finds no config and falls
+    # back to the floor vault, state_dir("lore")/vaults/default. The harness sets
+    # XDG_STATE_HOME=state, so that floor lands under ``state`` — NOT the passed-in
+    # ``vault`` (which only resolution-via-config would have used).
+    floor_vault = state / "lore" / "vaults" / "default"
+
+    _write_group_binding(
+        groups_dir,
+        member_repo=member_repo,
+        lore_scopes=[{"scope": "product", "name": "trailhead"}],
+    )
+
+    r = _run(
+        ["record", "create", "--kind", "decision", "--title", "T"],
+        vault=vault,
+        state_dir=state,
+        env_extra=_routing_env(config_home, groups_dir),
+        cwd=member_repo,
+    )
+    assert r.returncode == 0, r.stderr
+
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    # Vanilla routing: lands in the floor vault, no routing line.
+    assert (floor_vault / kind / f"{name}.md").exists()
+    # No implicit scope field stamped from the binding.
+    sidecar = _find_sidecar(floor_vault, record_id)
+    assert "product" not in sidecar
+    assert "(via group default)" not in r.stderr

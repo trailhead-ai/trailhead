@@ -317,6 +317,40 @@ def test_force_redefine_does_not_self_collide(author_env):
     assert {m["name"] for m in cfg["members"]} == {"alpha", "beta", "gamma"}
 
 
+def test_force_redefine_preserves_hand_added_lore_scopes(author_env):
+    """A hand-added [[lore_scopes]] binding survives a --force re-author instead
+    of being silently dropped by the renderer."""
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    # Hand-add a binding directly to the group TOML, as a user would.
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8")
+        + '\n[[lore_scopes]]\nscope = "product"\nname = "trailhead"\n',
+        encoding="utf-8",
+    )
+    assert _load_written_group(g["groups_dir"], "mygroup")["lore_scopes"] == [
+        {"scope": "product", "name": "trailhead"}
+    ]
+
+    # Re-author the same group with --force (here, adding a member).
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    cfg = _load_written_group(g["groups_dir"], "mygroup")
+    assert {m["name"] for m in cfg["members"]} == {"alpha", "beta"}
+    # The binding must survive the re-author rather than being dropped.
+    assert cfg["lore_scopes"] == [{"scope": "product", "name": "trailhead"}]
+
+
 def test_existing_config_without_force_errors_and_preserves_file(author_env):
     """Existing config + --member WITHOUT --force → non-zero, file unchanged."""
     g = author_env

@@ -287,6 +287,10 @@ def load_group(path: Path) -> dict[str, Any]:
             raise GroupConfigError(
                 f"{path}: lore_scopes[{i}].scope is required and must be a non-empty string"
             )
+        # Normalize surrounding whitespace before validating/storing so a padded
+        # value (e.g. "product ") is accepted as the scope the author meant rather
+        # than rejected as unknown.
+        ls_scope = ls_scope.strip()
         if ls_scope not in _VALID_LORE_SCOPES:
             raise GroupConfigError(
                 f"{path}: lore_scopes[{i}].scope {ls_scope!r} is not a valid routing scope — "
@@ -304,6 +308,9 @@ def load_group(path: Path) -> dict[str, Any]:
             raise GroupConfigError(
                 f"{path}: lore_scopes[{i}].name is required and must be a non-empty string"
             )
+        # Store the trimmed name so it matches the elected vault — a padded name
+        # ("trailhead ") would otherwise route nowhere despite passing validation.
+        ls_name = ls_name.strip()
 
         lore_scopes.append({"scope": ls_scope, "name": ls_name})
 

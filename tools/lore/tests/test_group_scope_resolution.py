@@ -283,15 +283,44 @@ class TestDegradation:
         captured = capsys.readouterr()
         assert captured.err  # warning must appear for malformed config
 
+    def test_unreadable_group_config_degrades_with_warning(
+        self, tmp_path: Path, capsys, monkeypatch
+    ) -> None:
+        """load_all_groups raising a non-GroupConfigError (e.g. OSError from an
+        unreadable TOML, or UnicodeDecodeError from non-UTF-8 bytes — neither of
+        which load_group wraps) degrades to {} with a warning rather than letting
+        the exception crash the caller."""
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+
+        camp_plugins = (
+            Path(__file__).resolve().parents[3] / "tools" / "camp" / "plugins"
+        )
+        if str(camp_plugins) not in sys.path:
+            sys.path.insert(0, str(camp_plugins))
+        import camp.scripts.group_config as camp_gc
+
+        def _raise_oserror(_groups_dir):
+            raise OSError("simulated unreadable group config")
+
+        monkeypatch.setattr(camp_gc, "load_all_groups", _raise_oserror)
+
+        result = _resolve_group_scopes(cwd=tmp_path / "cwd", groups_dir=groups_dir)
+        assert result == {}
+        captured = capsys.readouterr()
+        assert captured.err  # degradation warning must appear
+
 
 # ---------------------------------------------------------------------------
 # Name normalisation
 # ---------------------------------------------------------------------------
 
 
-class TestNameNormalisation:
-    def test_slashed_vault_name_is_normalised(self, tmp_path: Path) -> None:
-        """A vault name containing '/' is normalised (/ → _) before return."""
+class TestNameVerbatim:
+    def test_slashed_vault_name_returned_verbatim(self, tmp_path: Path) -> None:
+        """A slashed name is returned exactly as written — matching how an explicit
+        --repo flag stores its value — so flag-origin and group-default-origin
+        sidecar fields agree. Vault election normalizes (/ → _) at lookup."""
         groups_dir = tmp_path / "groups"
         groups_dir.mkdir()
         camp_state_dir = tmp_path / "camp_state"
@@ -309,4 +338,4 @@ class TestNameNormalisation:
         result = _resolve_group_scopes(
             cwd=cwd, groups_dir=groups_dir, camp_state_dir=camp_state_dir
         )
-        assert result == {"repo": "org_repo-name"}
+        assert result == {"repo": "org/repo-name"}

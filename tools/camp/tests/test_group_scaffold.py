@@ -79,6 +79,42 @@ def test_render_group_toml_round_trips_through_load_group(tmp_path: Path) -> Non
         assert m["bootstrap"] == []
 
 
+def test_render_group_toml_lore_scopes_round_trip(tmp_path: Path) -> None:
+    """A supplied [[lore_scopes]] binding is emitted and round-trips through
+    load_group in declared order — so re-authoring a group preserves it instead
+    of silently dropping it."""
+    from group_config import load_group
+    from group_scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    lore_scopes = [
+        {"scope": "product", "name": "trailhead"},
+        {"scope": "team", "name": "platform"},
+    ]
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", lore_scopes=lore_scopes
+    )
+
+    f = tmp_path / "mygroup.toml"
+    f.write_text(toml_str)
+
+    assert load_group(f)["lore_scopes"] == lore_scopes
+
+
+def test_render_group_toml_no_lore_scopes_when_absent(tmp_path: Path) -> None:
+    """Omitting lore_scopes emits no [[lore_scopes]] section (load_group → [])."""
+    from group_config import load_group
+    from group_scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    toml_str = render_group_toml("mygroup", members, "worktree-{slug}")
+    assert "[[lore_scopes]]" not in toml_str
+
+    f = tmp_path / "mygroup.toml"
+    f.write_text(toml_str)
+    assert load_group(f)["lore_scopes"] == []
+
+
 def test_render_group_toml_path_with_spaces_round_trips(tmp_path: Path) -> None:
     """A repo_root with spaces in the path is correctly escaped and round-trips."""
     from group_config import load_group

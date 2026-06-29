@@ -87,13 +87,16 @@ def render_group_toml(
     group_name: str,
     members: list[dict[str, Any]],
     branch_pattern: str,
+    lore_scopes: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render a deterministic TOML string for a group config.
 
-    Emits only the core schema:
+    Emits the core schema:
       [group].name
       [[members]] name, repo_root, bootstrap = []
       [branch].pattern
+    plus any [[lore_scopes]] (scope, name) entries supplied — so re-authoring a
+    group preserves a hand-added binding instead of silently dropping it.
 
     Never emits [[shared_vaults]] or [dev_env].
 
@@ -102,6 +105,8 @@ def render_group_toml(
         members:        List of dicts with "name" and "repo_root" keys.
                         repo_root values are passed through expanduser().resolve().
         branch_pattern: Value for [branch].pattern.
+        lore_scopes:    Optional list of {"scope", "name"} dicts to emit as
+                        [[lore_scopes]] entries (declared order preserved).
 
     Returns:
         A TOML string that round-trips through load_group.
@@ -124,6 +129,12 @@ def render_group_toml(
     lines.append("[branch]")
     lines.append(f"pattern = {_toml_string(branch_pattern)}")
     lines.append("")
+
+    for ls in lore_scopes or []:
+        lines.append("[[lore_scopes]]")
+        lines.append(f"scope = {_toml_string(ls['scope'])}")
+        lines.append(f"name = {_toml_string(ls['name'])}")
+        lines.append("")
 
     return "\n".join(lines)
 
