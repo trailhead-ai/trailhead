@@ -142,32 +142,27 @@ class TestSingularDirAudit:
             path = PLUGIN_ROOT / rel
             assert path.exists(), f"allowlisted file missing: {rel}"
             assert _plural_path_hits(path), (
-                f"allowlist entry {rel} no longer has a plural path literal — "
+                f"allowlist entry {rel} must not have a plural path literal — "
                 "remove the stale entry."
             )
-
-    def test_taxonomy_constant_is_deleted(self):
-        """The dead TAXONOMY plural list (cli/lore) is removed."""
-        text = CLI_PATH.read_text(encoding="utf-8")
-        assert "TAXONOMY" not in text, "dead TAXONOMY constant still present in cli/lore"
 
     def test_status_validator_keys_are_singular(self):
         """status_validator CANONICAL exposes singular kind keys.
 
         The live kinds (plan/spec/lesson/session) resolve as singular direct
-        keys. The legacy `deferred`/`follow-up`/`dead-end` kinds were retired
-        (consolidated into backlog/lesson sidecar records, validated by
-        record_model) so they no longer resolve here.
+        keys. The `deferred`/`follow-up`/`dead-end` kinds are not canonical
+        (they consolidate into backlog/lesson sidecar records, validated by
+        record_model), so they do not resolve here.
         """
         sv = load_script("status_validator")
         for kind in ("plan", "spec", "lesson", "session"):
             assert sv.permitted_statuses(kind) is not None, (
                 f"singular kind {kind!r} should resolve in status_validator"
             )
-        # The retired legacy kinds are unconstrained (no CANONICAL entry).
+        # These kinds are unconstrained (no CANONICAL entry).
         for retired in ("deferred", "follow-up", "dead-end"):
             assert sv.permitted_statuses(retired) is None, (
-                f"retired kind {retired!r} should no longer resolve"
+                f"retired kind {retired!r} must not resolve"
             )
         # No plural live key survives in CANONICAL.
         plural_live = {"plans", "specs", "follow-ups", "lessons", "dead-ends", "sessions"}

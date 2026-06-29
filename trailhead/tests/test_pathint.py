@@ -1,6 +1,6 @@
 """Tests for trailhead/pathint.py — shim dir + brew-style shellenv.
 
-trailhead no longer edits the shell rc; it builds a shim dir and `shellenv`
+trailhead does not edit the shell rc; it builds a shim dir and `shellenv`
 prints the export lines the user adds to their profile.
 """
 

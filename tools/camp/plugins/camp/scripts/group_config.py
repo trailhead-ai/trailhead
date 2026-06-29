@@ -331,7 +331,7 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
     result: dict[str, Any] = {}
 
     # `binary` is a single harness binary NAME (e.g. "claude", "codex", or an
-    # absolute path). camp no longer launches an argv — only the basename is read,
+    # absolute path). camp does not launch an argv — only the basename is read,
     # by is_claude_launch(), to scope the trust pre-seed. It is a plain string (no
     # {slug}/{workspace} templating).
     if "binary" in raw:

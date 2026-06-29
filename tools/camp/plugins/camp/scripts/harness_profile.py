@@ -14,15 +14,13 @@ claude default applies.
 
 resolve_harness_profile merges the [harness] block over the claude default ONCE
 into a frozen HarnessProfile (doc_files + inject + pretrust + cwd); callers read
-fields off it directly. The launch/resume/session surface that this module once
-carried (os.execvp launch, deterministic session ids, claude session lookup) is
-gone — camp no longer launches the harness; activation is a separate seam.
+fields off it directly. camp does not launch the harness; activation is a
+separate seam.
 
-`_CLAUDE_DEFAULT["binary"]` / HarnessProfile.binary is the one launch-era survivor:
+`_CLAUDE_DEFAULT["binary"]` / HarnessProfile.binary:
 should_pretrust() → is_claude_launch() reads its basename to detect a `claude`
 binary and scope the trust pre-seed. It is a single binary NAME (no argv: nothing
-is launched) — the former `new`/`resume` argv-template pair was collapsed to it
-once their list shape and the never-launched tail stopped being read.
+is launched).
 """
 
 from __future__ import annotations

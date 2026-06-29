@@ -12,12 +12,10 @@ canonical-inline dedup:
 (c) The injection-defense canonical wording is present in brainstorm/SKILL.md
     and is byte-identical to the pinned canonical block (drift-prevention).
 
-The brainstorm skill was moved from the lore plugin into craft. The injection-
-defense block was previously cross-checked byte-for-byte against lore's
-`librarian.md`; now that brainstorm lives in a different plugin, the canonical
-wording is pinned as a fixture (`fixtures/injection_defense_canonical.txt`,
-captured from librarian.md — the canonical source). The drift-prevention intent
-is preserved: brainstorm's block must still match the canonical wording exactly.
+The injection-defense block is cross-checked byte-for-byte against the canonical
+wording, pinned as a fixture (`fixtures/injection_defense_canonical.txt`,
+captured from lore's `librarian.md` — the canonical source). brainstorm's block
+must match the canonical wording exactly.
 """
 
 from __future__ import annotations
@@ -141,7 +139,7 @@ class TestInjectionDefenseByteIdentical:
         The canonical fixture was captured from lore's `librarian.md`, the
         authoritative source of the shared injection-defense wording. Pinning it
         as a fixture keeps the drift-prevention check intact now that brainstorm
-        lives in the craft plugin and can no longer reach librarian.md by path."""
+        lives in the craft plugin and cannot reach librarian.md by path."""
         brainstorm_block = _extract_injection_block(_BRAINSTORM_SKILL.read_text())
         canonical_block = _INJECTION_CANONICAL.read_text().strip()
         assert brainstorm_block == canonical_block, (

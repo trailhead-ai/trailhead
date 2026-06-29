@@ -202,10 +202,7 @@ def _run_init(
     state_dir: Path,
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run `camp group <args>` via cli/camp with config/state overrides.
-
-    'camp init' was renamed to 'camp group'; tests updated to match.
-    """
+    """Run `camp group <args>` via cli/camp with config/state overrides."""
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)

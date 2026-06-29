@@ -1508,8 +1508,8 @@ def cmd_needs_group(verb: str) -> None:
     These verbs' real behavior lives on the group-aware path in cli/camp; reaching
     spine.main for one of them means no group resolved (no --group flag and cwd is
     outside any member dir). Emit the per-verb "needs a group" error and exit
-    non-zero. The exact message text is owned by verb_taxonomy, collapsing
-    the formerly-duplicated per-verb stubs into one helper.
+    non-zero. The exact message text is owned by verb_taxonomy, the single
+    source for every per-verb "needs a group" message.
     """
     _die(needs_group_message(verb))
 

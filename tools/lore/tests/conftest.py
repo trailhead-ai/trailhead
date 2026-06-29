@@ -21,7 +21,7 @@ def write_default_config(config_home: Path, vault_path: Path) -> None:
     subprocess resolves the active vault from config.  Idempotent: overwrites any
     existing config.json.
 
-    Config is the only resolution path — ``LORE_VAULT`` is no longer injected by
+    Config is the only resolution path — ``LORE_VAULT`` is not injected by
     the harnesses, so this seeding is what points the CLI at the test vault.
     """
     lore_cfg = config_home / "lore"
@@ -50,8 +50,8 @@ def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None):
     XDG_CONFIG_HOME (+ a stable LORE_EMAIL) so tests never touch the real vault,
     state, or config dir. ``env_extra`` overlays extra env vars.
 
-    ``config.json`` pointing at ``vault`` so config-based resolution — now the
-    only resolution path, since ``LORE_VAULT`` is no longer injected — resolves to
+    ``config.json`` pointing at ``vault`` so config-based resolution — the
+    only resolution path, since ``LORE_VAULT`` is not injected — resolves to
     the test vault. Because ``record create``/``update``/``delete`` consult
     ``config_dir("lore")/config.json``, an inherited ambient config (e.g. on a CI
     runner) would otherwise reroute records away from the test vault.

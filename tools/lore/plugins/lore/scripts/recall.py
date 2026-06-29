@@ -1,15 +1,14 @@
 """Area-map menu + SessionStart pointer for the lore vault.
 
-The ``recall`` *command* was retired: ``lore search`` is now the
-single general query interface, and area-membered memory lookup is
-``lore search 'area:<name>'``. What survives here is the **area-map path** — the
-compact on-demand area menu and the always-injected SessionStart pointer that
-sends the agent to ``lore search``:
+This module provides the **area-map path** — the compact on-demand area menu and
+the always-injected SessionStart pointer that sends the agent to ``lore search``.
+``lore search`` is the general query interface; area-membered memory lookup is
+``lore search 'area:<name>'``:
 
   1. build_area_map(vault)          -> list[AreaEntry]
      Scans area/*.md, reads name/keywords/one-liner per area, returns the
-     on-demand area menu (alpha order, hard caps applied). Served by
-     `lore areas`; no longer always-loaded at session start.
+     on-demand area menu (alpha order, hard caps applied). Served on
+     demand by `lore areas`.
 
   2. render_area_menu(entries)      -> str
      Renders the full on-demand menu (called by `lore areas`).

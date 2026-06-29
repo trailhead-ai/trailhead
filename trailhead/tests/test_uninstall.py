@@ -1,7 +1,7 @@
 """Tests for trailhead/uninstall.py — nuke-everything teardown.
 
 Discovery is on-disk (per-harness composed markers). The harness-CLI runner is
-a recording stub. trailhead no longer edits the shell rc, so teardown only
+a recording stub. trailhead does not edit the shell rc, so teardown only
 removes the shim dir (under the tmp state dir) — nothing to patch there.
 """
 
@@ -40,7 +40,7 @@ def _recording():
     def runner(args, **kw):
         calls.append(list(args))
 
-    # trailhead no longer edits the shell rc, so there's nothing to patch there.
+    # trailhead does not edit the shell rc, so there's nothing to patch there.
     yield calls, runner, None
 
 

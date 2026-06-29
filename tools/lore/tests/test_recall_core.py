@@ -1,9 +1,7 @@
 """recall.py core: area-map build (the kept area-menu path).
 
 Covers ``build_area_map`` — the on-demand area menu served by ``lore areas`` and
-the SessionStart pointer. The ``recall_areas`` / ``render_recall_banner`` command
-path was retired; ``lore search`` is now the query interface, so
-the recall-command tests that used to live here were removed.
+the SessionStart pointer. ``lore search`` is the query interface.
 
   build_area_map:
     - reads name + keywords + one-liner from area/*.md

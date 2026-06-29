@@ -21,12 +21,10 @@ from __future__ import annotations
 # (vault directories and kinds standardize on singular). ``session``
 # carries ``{dirty, clean}``.
 #
-# The legacy plural-taxonomy kinds ("deferred", "follow-up", "dead-end") were
-# retired once their living folders were gone from every vault and the one-shot
-# migrations that produced them (migrate_vault / migrate_radar_to_follow_ups)
-# were removed. Those kinds now consolidate into `backlog`/`lesson` records,
-# which carry their status in the JSON sidecar (validated by record_model), not
-# inline frontmatter — so this guard no longer needs to know them.
+# The plural-taxonomy kinds ("deferred", "follow-up", "dead-end") are not
+# canonical here: they consolidate into `backlog`/`lesson` records, which carry
+# their status in the JSON sidecar (validated by record_model), not inline
+# frontmatter — so this guard does not validate them.
 CANONICAL: dict[str, frozenset[str]] = {
     "plan": frozenset({"draft", "ready", "in-progress", "complete", "superseded", "dropped"}),
     "spec": frozenset({"draft", "ready", "planned", "complete", "superseded", "dropped"}),
@@ -34,11 +32,10 @@ CANONICAL: dict[str, frozenset[str]] = {
     "lesson": frozenset({"active", "superseded"}),
 }
 
-# Note `type:` frontmatter is singular ("session", "plan", "lesson"), and the
-# CANONICAL keys are now singular too, so the singular form resolves directly as
-# a CANONICAL key. The old singular→plural ``_TYPE_ALIASES`` map is gone;
-# only a true alias (a name that differs from its key) belongs here,
-# of which there are currently none.
+# Note `type:` frontmatter is singular ("session", "plan", "lesson") and the
+# CANONICAL keys are singular too, so the singular form resolves directly as a
+# CANONICAL key. Only a true alias (a name that differs from its key) belongs
+# here, of which there are currently none.
 _TYPE_ALIASES: dict[str, str] = {}
 
 

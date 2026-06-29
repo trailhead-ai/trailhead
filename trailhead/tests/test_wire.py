@@ -58,10 +58,9 @@ _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 _FORGE_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 
 # All session skills for lore (the names a "minimal lore" picks).
-# The 7 obsolete per-kind capture skills (area, check-in, dead-end, decision,
-# defer, follow-up, seed) were deleted — replaced by the lore record/session CLI.
-# 'brainstorm' moved to the craft plugin. 'finish' was renamed to 'flush' and
-# 'checkpoint' deleted — retained lore skills: flush, sync, search, record, research.
+# The lore skills are flush, sync, search, record, research. Capture is via the
+# lore record/session CLI (not per-kind capture skills); brainstorm lives in the
+# craft plugin; the finalization skill is flush.
 _LORE_CAPTURE_SESSION_SKILLS = {
     "flush": None,
     "sync": None,

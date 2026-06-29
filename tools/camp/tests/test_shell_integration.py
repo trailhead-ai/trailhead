@@ -1,4 +1,4 @@
-"""Tests for camp pwd shell integration (previously 'camp cd', renamed per PR review).
+"""Tests for camp pwd shell integration.
 
 Test contract:
 - camp pwd <slug> prints exactly one line = the resolved absolute workspace path

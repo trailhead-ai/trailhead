@@ -1,18 +1,16 @@
-"""The launch/resume/session seam is deleted.
+"""camp carries no launch/resume/session seam.
 
-`harness_launch.py` is renamed `harness_profile.py` and stripped to its
-profile-config surface (resolve_harness_profile + HarnessProfile config fields);
-`session_lock.py` and `session_identity.py` are removed entirely. These guards
-lock the removal in place:
+The harness surface is `harness_profile.py` — its profile-config surface
+(resolve_harness_profile + HarnessProfile config fields). There is no
+`session_lock.py` or `session_identity.py`. These guards keep it that way:
 
-- import-lint: harness_profile + each consumer module import cleanly (a stale
+- import-lint: harness_profile + each consumer module import cleanly (a stray
   `harness_launch` import would ImportError at collection).
-- absence: no production module imports session_lock/session_identity or names
-  the old harness_launch module; no launch-seam literal (os.execvp / claude
-  --resume / --session-id) survives.
-- Regression guard: the default claude profile still pretrusts — should_pretrust()
-  reads the binary basename, which the retained _CLAUDE_DEFAULT / HarnessProfile.binary
-  field feeds.
+- no stray references: no production module imports session_lock/session_identity
+  or names a `harness_launch` module; no launch-seam literal (os.execvp / claude
+  --resume / --session-id) appears.
+- pretrust: the default claude profile pretrusts — should_pretrust() reads the
+  binary basename, which the _CLAUDE_DEFAULT / HarnessProfile.binary field feeds.
 """
 
 from __future__ import annotations
@@ -59,15 +57,11 @@ class TestImportLint:
 
 
 # ---------------------------------------------------------------------------
-# absence — session modules + launch seam are gone
+# no stray references — session modules + launch seam
 # ---------------------------------------------------------------------------
 
 
 class TestSeamAbsence:
-    def test_session_modules_deleted(self):
-        assert not (_SCRIPTS_DIR / "session_lock.py").exists()
-        assert not (_SCRIPTS_DIR / "session_identity.py").exists()
-
     def test_no_module_imports_session_lock_or_identity(self):
         offenders = [
             p.name
@@ -88,7 +82,7 @@ class TestSeamAbsence:
 
 
 # ---------------------------------------------------------------------------
-# Regression guard — the default claude profile still pretrusts
+# the default claude profile pretrusts
 # ---------------------------------------------------------------------------
 
 

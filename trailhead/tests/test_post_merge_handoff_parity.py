@@ -5,9 +5,8 @@ tools/portage/plugins/portage/agents/monitor.md (the producer) are a SUPERSET
 of the required inputs documented in
 tools/landing/plugins/landing/agents/soaker.md (the consumer).
 
-This guards the boundary introduced when the old craft
-test_handoff_field_parity.py was deleted: the contract survived the deletion because the
-producer/consumer moved to portage monitor → landing soaker.
+This guards the boundary between the producer (portage monitor) and the
+consumer (landing soaker).
 
 The original bug it prevents: consumer requires `group_toml_path` to locate
 [release].soak_health_command; producer forgets to emit it → auto-dispatched

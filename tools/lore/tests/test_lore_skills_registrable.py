@@ -1,9 +1,9 @@
 """Every shipped skill must be registrable by Claude Code.
 
 A SKILL.md only registers as an invocable `/lore:<name>` command if it opens
-with a YAML frontmatter block carrying at least a `description:`. Six capture
-skills originally shipped without frontmatter and silently never registered —
-this test locks the invariant so that can't regress.
+with a YAML frontmatter block carrying at least a `description:`. A skill
+without that frontmatter silently never registers — this test locks the
+invariant so that can't happen.
 
 `skills/_shared/` is a reference doc, not a skill, and is exempt.
 """
@@ -47,69 +47,17 @@ def test_skill_has_registrable_frontmatter(skill_md: Path):
 def test_all_capture_and_ritual_skills_present():
     """Guard against a skill dir silently disappearing.
 
-    Note: 'subsystem' was renamed to 'area'; 'vault-sync' was renamed to 'sync';
-    'finished' was renamed to 'finish'; the watchlist skill was renamed to
-    'follow-up'; its polling companion was renamed to 'check-in'. The 'reflect',
-    'tend'/'review', and 'ping' skills were deleted entirely. The 7 obsolete
-    per-kind capture skills were also deleted: 'area', 'check-in', 'dead-end',
-    'decision', 'defer', 'follow-up', 'seed'. These are replaced by the
-    `lore record` / `lore session` CLI surface.
-
-    'brainstorm' moved to the craft plugin. Three new skills were added:
-    'search' (read path / replaces recall), 'record' (single deliberate
-    capture), and 'research' (dispatch investigator/researcher).
-
-    'finish' was renamed to 'flush' and 'checkpoint' deleted. The retained
-    lore skills are: flush, sync, search, record, research (+ _shared, exempt).
+    The lore plugin ships exactly these invocable skills: flush, sync, search,
+    record, research (plus _shared, a reference doc that is exempt). Per-kind
+    capture lives on the `lore record` / `lore session` CLI surface, not as
+    skills; brainstorm lives in the craft plugin.
     """
     names = {p.parent.name for p in _skill_files()}
     expected = {
         "flush", "sync",
         "search", "record", "research",
     }
-    missing = expected - names
-    assert not missing, f"expected skills missing from the plugin: {sorted(missing)}"
-
-
-def test_finish_renamed_to_flush_checkpoint_deleted():
-    """'finish' was renamed to 'flush'; 'checkpoint' was deleted.
-
-    Guard that neither the old 'finish' nor the deleted 'checkpoint' exist.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    assert "finish" not in names, (
-        "finish skill must not exist — it was renamed to 'flush'"
-    )
-    assert "checkpoint" not in names, (
-        "checkpoint skill must not exist — it was deleted "
-        "(candidate capture is continuous via `lore session candidate`; "
-        "flush evaluates)"
-    )
-
-
-def test_brainstorm_moved_to_craft_absent_from_lore():
-    """The brainstorm skill moved out of lore into the craft plugin.
-
-    Guard against it being accidentally re-added under lore — its home is now
-    tools/craft/plugins/craft/skills/brainstorm/.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    assert "brainstorm" not in names, (
-        "brainstorm must not exist under the lore plugin — it moved to "
-        "the craft plugin (tools/craft/plugins/craft/skills/brainstorm/)"
-    )
-
-
-def test_obsolete_per_kind_capture_skills_absent():
-    """The 7 obsolete per-kind capture skills were deleted.
-
-    These skills are replaced by the `lore record` / `lore session` CLI surface.
-    Guard against them being accidentally re-added.
-    """
-    names = {p.parent.name for p in _skill_files()}
-    deleted = {"area", "check-in", "dead-end", "decision", "defer", "follow-up", "seed"}
-    present = deleted & names
-    assert not present, (
-        f"obsolete per-kind capture skills must not exist (they were deleted): "
-        f"{sorted(present)}"
+    assert names == expected, (
+        f"lore plugin skill set drifted: missing {sorted(expected - names)}, "
+        f"unexpected {sorted(names - expected)}"
     )

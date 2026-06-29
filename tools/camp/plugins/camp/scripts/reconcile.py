@@ -555,7 +555,7 @@ def reconcile_break(
 
     # Fail-fast on a nonexistent slug BEFORE taking the reconcile lock. The lock
     # lives at <worktrees-root>/<slug>.lock (outside ws_dir), so acquiring
-    # it no longer pre-creates the workspace dir; but it WOULD create a stray
+    # it does not pre-create the workspace dir; but it WOULD create a stray
     # <slug>.lock file for a slug that never existed. A bare existence check gates
     # that — the full parse is wasted here since the authoritative read happens
     # under the lock below.
@@ -640,11 +640,11 @@ def reconcile_break(
         # Do NOT leave a manifest listing members whose worktrees are removed.
         if not errors:
             remove_central_manifest(mpath)
-            # Remove the now-camp-owned workspace dir itself (.camp, .claude,
+            # Remove the camp-owned workspace dir itself (.camp, .claude,
             # setup.log, doc files). Leaving it behind would make the next
             # `camp new <slug>` re-enter a torn-down workspace; that re-enter
-            # decision now keys on MANIFEST presence (removed just above),
-            # so a stale ws_dir alone no longer triggers a wrong re-enter, but we
+            # decision keys on MANIFEST presence (removed just above),
+            # so a stale ws_dir alone does not trigger a wrong re-enter, but we
             # still remove it to leave no orphan state. The slug lock lives
             # OUTSIDE ws_dir, so this rmtree never deletes the held lock.
             # Confinement: the resolved workspace dir MUST

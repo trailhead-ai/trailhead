@@ -392,17 +392,13 @@ def _load_cli_module():
 
 class TestRemovePathHasNoLoreOrSessionPrecondition:
     """The remove handler + reconcile_break make no `lore` call and carry no
-    session-liveness precondition (the session lock is gone)."""
+    session-liveness precondition (there is no session lock)."""
 
-    def test_remove_handler_renamed_to_remove(self):
-        """The handler is `_cmd_remove_group_cli` (the old `_cmd_break_group_cli`
-        name is gone)."""
+    def test_remove_handler_is_named_remove(self):
+        """The remove handler is named `_cmd_remove_group_cli`."""
         mod = _load_cli_module()
         assert hasattr(mod, "_cmd_remove_group_cli"), (
             "the remove handler must be named _cmd_remove_group_cli"
-        )
-        assert not hasattr(mod, "_cmd_break_group_cli"), (
-            "the old _cmd_break_group_cli name must be gone after the rename"
         )
 
     def test_remove_handler_makes_no_lore_or_session_call(self):

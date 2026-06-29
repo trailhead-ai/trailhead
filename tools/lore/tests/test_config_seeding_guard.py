@@ -140,7 +140,7 @@ def test_must_call_file_has_write_default_config_call(filename):
     """MUST_CALL runners must contain write_default_config( (an actual call, not just import).
 
     The call must use an explicit vault variable — if the source derives the vault from
-    env.get("LORE_VAULT"), seeding silently fails once LORE_VAULT is no longer injected.
+    env.get("LORE_VAULT"), seeding silently fails when LORE_VAULT is not injected.
     """
     src = (TESTS_DIR / filename).read_text(encoding="utf-8")
     assert "write_default_config(" in src, (

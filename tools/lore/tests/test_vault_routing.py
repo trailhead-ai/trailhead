@@ -159,10 +159,9 @@ def test_routing_example_d_lands_in_team_vault(tmp_path):
     assert list((pe_path / "blob").glob("*.md")), "record body not in team vault"
 
 
-# NOTE: the former ``test_routing_set_team_does_not_route`` exercised the deleted
-# ``--set team=...`` frontmatter-only-without-routing path. The generic ``--set``
-# patch idiom was removed, and the scope flags were unified so a scope value can
-# no longer be set without routing. The test was removed with the flag it tested.
+# A scope value cannot be set without routing: the scope flags are unified so
+# setting a scope always relocates the record. There is no generic ``--set``
+# patch idiom and no frontmatter-only ``--set team=...`` path.
 
 
 def test_routing_no_scope_flags_lands_in_default(tmp_path):
@@ -590,7 +589,7 @@ def test_stale_config_index_surfaces_freshness_warning(tmp_path):
 # ``--move-to`` flag: relocation is now an automatic byproduct of a scope-flag
 # change and the destination is only ever a config-declared vault root (resolved
 # via the create-side resolver), so the explicit-unconfigured-destination path
-# the guard protected no longer exists.
+# the guard protected does not exist.
 # The ``delete`` orphan path below is unaffected and stays.
 
 
@@ -630,7 +629,7 @@ def test_delete_in_removed_vault_is_unreachable(tmp_path):
     record_id = r.stdout.strip()
 
     # Remove the team vault from config — the record's directory still exists on
-    # disk, but it is no longer a configured destination.
+    # disk, but it is not a configured destination.
     vaults = [v for v in vaults if v["name"] != "product-engineering"]
     cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
 
@@ -657,10 +656,9 @@ def test_default_record_updatable_and_deletable_with_config(tmp_path):
     config vault; update and delete must reach it THERE (config resolution),
     not in the active ``$LORE_VAULT`` directory (which is a different path).
 
-    This is the create-vs-update/delete location split the config-routing work
-    introduced: create routed no-scope records into ``state/vaults/default`` while
-    update/delete looked in ``$LORE_VAULT`` — so a just-created record was
-    unreachable. Update/delete now resolve via config, symmetric with create.
+    This is the create-vs-update/delete location split: create routes no-scope
+    records into ``state/vaults/default``, and update/delete resolve via config,
+    symmetric with create — so a just-created record is reachable.
     """
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "config"

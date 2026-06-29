@@ -178,7 +178,7 @@ def _git_vault(tmp_path: Path, *dirs: str) -> Path:
 def _run_main(vault: Path) -> int:
     """Run regenerate_indices.main() with the vault passed as sys.argv[1].
 
-    The script no longer reads LORE_VAULT — the vault is param-threaded
+    The script does not read LORE_VAULT — the vault is param-threaded
     as the sole CLI argument, so the helper passes an explicit argv list.
     """
     mod = load_regen()

@@ -395,7 +395,7 @@ def test_validate_kind_arg_overrides_sidecar_kind():
     """Kind passed explicitly is used when sidecar omits it."""
     sidecar = _worked_example_spec_sidecar()
     del sidecar["kind"]
-    # kind no longer in sidecar -> missing required 'kind' is reported, but the
+    # kind absent from sidecar -> missing required 'kind' is reported, but the
     # passed kind still drives status-vocab validation.
     result = rm().validate(sidecar, kind="spec")
     assert any("kind" in e for e in result.errors)  # operator-required 'kind'
@@ -616,7 +616,7 @@ def test_session_dirty_is_valid_status():
 
 
 def test_session_active_is_rejected():
-    """active is no longer a valid session status."""
+    """active is not a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="active")
     result = m.validate(sidecar)
@@ -625,7 +625,7 @@ def test_session_active_is_rejected():
 
 
 def test_session_complete_is_rejected():
-    """complete is no longer a valid session status."""
+    """complete is not a valid session status."""
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status="complete")
     result = m.validate(sidecar)
