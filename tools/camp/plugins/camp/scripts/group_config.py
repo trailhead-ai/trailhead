@@ -22,12 +22,20 @@ Schema:
   [dev_env]                              # optional; warn-and-continue (deferred)
   ...
 
+  [[lore_scopes]]                        # optional; repeatable; one entry per scope
+  scope = "product"                      # one of: repo, product, suite, team
+  name  = "<vault-name>"                 # non-empty; no duplicate scope in one group
+
 Bootstrap and hook commands are author-trusted local input. camp runs them
 list-mode (subprocess, shell=False). Sharing group configs from untrusted
 authors is explicitly out of scope.
 
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.
+
+lore_scopes invariants: scope in {repo, product, suite, team} ("default" is
+rejected — it is the unconditional floor in vault_resolve, not a routing target);
+name is a non-empty string; no duplicate scope within one group's list.
 """
 
 from __future__ import annotations
@@ -60,6 +68,15 @@ class GroupConfigNotFound(Exception):
 
 KNOWN_HOOK_KINDS = frozenset({"dep-install"})
 
+# ---------------------------------------------------------------------------
+# Valid lore routing scopes
+# ---------------------------------------------------------------------------
+
+# "default" is omitted: it is the unconditional floor in vault_resolve, not a
+# meaningful routing target.  Declaring a binding to default would route to
+# whatever vault happens to be the fallback — always wrong.
+_VALID_LORE_SCOPES = frozenset({"repo", "product", "suite", "team"})
+
 
 # ---------------------------------------------------------------------------
 # Loader
@@ -76,7 +93,12 @@ def load_group(path: Path) -> dict[str, Any]:
         "group": {"name": str},
         "members": [{"name": str, "repo_root": str, "bootstrap": list[str]}],
         "branch_pattern": str,
+        "shared_vaults": [{"name": str, "root": str}],
+        "lore_scopes": [{"scope": str, "name": str}],
       }
+
+    lore_scopes invariants: scope in {repo, product, suite, team}; name is a
+    non-empty string; no duplicate scope within one group's list.
 
     Raises:
         GroupConfigNotFound: If path does not exist.
@@ -247,11 +269,50 @@ def load_group(path: Path) -> dict[str, Any]:
 
         shared_vaults.append({"name": sv_name, "root": sv_root})
 
+    # --- [[lore_scopes]] section (optional) ---
+    lore_scopes_raw = raw.get("lore_scopes")
+    if lore_scopes_raw is None:
+        lore_scopes_raw = []
+    if not isinstance(lore_scopes_raw, list):
+        raise GroupConfigError(f"{path}: field 'lore_scopes' must be a list of tables")
+
+    lore_scopes: list[dict[str, Any]] = []
+    seen_scopes: set[str] = set()
+    for i, ls in enumerate(lore_scopes_raw):
+        if not isinstance(ls, dict):
+            raise GroupConfigError(f"{path}: lore_scopes[{i}] must be a table")
+
+        ls_scope = ls.get("scope")
+        if not isinstance(ls_scope, str) or not ls_scope.strip():
+            raise GroupConfigError(
+                f"{path}: lore_scopes[{i}].scope is required and must be a non-empty string"
+            )
+        if ls_scope not in _VALID_LORE_SCOPES:
+            raise GroupConfigError(
+                f"{path}: lore_scopes[{i}].scope {ls_scope!r} is not a valid routing scope — "
+                f"supported scopes: {sorted(_VALID_LORE_SCOPES)}"
+            )
+        if ls_scope in seen_scopes:
+            raise GroupConfigError(
+                f"{path}: lore_scopes[{i}].scope {ls_scope!r} is declared more than once — "
+                "each scope may appear at most once per group"
+            )
+        seen_scopes.add(ls_scope)
+
+        ls_name = ls.get("name")
+        if not isinstance(ls_name, str) or not ls_name.strip():
+            raise GroupConfigError(
+                f"{path}: lore_scopes[{i}].name is required and must be a non-empty string"
+            )
+
+        lore_scopes.append({"scope": ls_scope, "name": ls_name})
+
     result: dict[str, Any] = {
         "group": {"name": group_name},
         "members": members,
         "branch_pattern": branch_pattern,
         "shared_vaults": shared_vaults,
+        "lore_scopes": lore_scopes,
         "_toml_path": str(path),
     }
     if harness is not None:

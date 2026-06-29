@@ -564,6 +564,282 @@ def test_harness_binary_only_loads(tmp_path: Path) -> None:
     assert cfg["harness"]["binary"] == "myharness"
 
 
+# ---------------------------------------------------------------------------
+# [[lore_scopes]] block — parse + validate lore routing scope bindings
+# ---------------------------------------------------------------------------
+
+_VALID_TOML_WITH_ONE_LORE_SCOPE = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+scope = "product"
+name = "trailhead"
+"""
+
+_VALID_TOML_WITH_MULTIPLE_LORE_SCOPES = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+scope = "product"
+name = "trailhead"
+
+[[lore_scopes]]
+scope = "repo"
+name = "myrepo-vault"
+"""
+
+_LORE_SCOPES_NOT_LIST = """\
+[group]
+name = "testgroup"
+
+[lore_scopes]
+scope = "product"
+name = "trailhead"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+"""
+
+_LORE_SCOPES_ENTRY_NOT_TABLE = """\
+lore_scopes = ["product"]
+
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+"""
+
+_LORE_SCOPES_MISSING_NAME = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+scope = "product"
+"""
+
+_LORE_SCOPES_MISSING_SCOPE = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+name = "trailhead"
+"""
+
+_LORE_SCOPES_INVALID_SCOPE = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+scope = "workspace"
+name = "trailhead"
+"""
+
+_LORE_SCOPES_DEFAULT_SCOPE = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+scope = "default"
+name = "trailhead"
+"""
+
+_LORE_SCOPES_EMPTY_NAME = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+scope = "product"
+name = ""
+"""
+
+_LORE_SCOPES_DUPLICATE_SCOPE = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[lore_scopes]]
+scope = "product"
+name = "trailhead"
+
+[[lore_scopes]]
+scope = "product"
+name = "other-vault"
+"""
+
+
+def test_no_lore_scopes_defaults_to_empty_list(tmp_path: Path) -> None:
+    """A config without [[lore_scopes]] returns lore_scopes=[]."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_NO_BOOTSTRAP)
+    cfg = load_group(f)
+    assert cfg.get("lore_scopes") == []
+
+
+def test_lore_scopes_one_valid_entry(tmp_path: Path) -> None:
+    """A single valid [[lore_scopes]] entry is returned as a list with one dict."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_WITH_ONE_LORE_SCOPE)
+    cfg = load_group(f)
+    assert cfg.get("lore_scopes") == [{"scope": "product", "name": "trailhead"}]
+
+
+def test_lore_scopes_multiple_entries_order_preserved(tmp_path: Path) -> None:
+    """Multiple [[lore_scopes]] entries are returned in declared order."""
+    from group_config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_WITH_MULTIPLE_LORE_SCOPES)
+    cfg = load_group(f)
+    scopes = cfg.get("lore_scopes")
+    assert len(scopes) == 2
+    assert scopes[0] == {"scope": "product", "name": "trailhead"}
+    assert scopes[1] == {"scope": "repo", "name": "myrepo-vault"}
+
+
+def test_lore_scopes_not_list_raises(tmp_path: Path) -> None:
+    """lore_scopes as a non-list value → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_NOT_LIST)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "lore_scopes" in msg
+
+
+def test_lore_scopes_entry_not_table_raises(tmp_path: Path) -> None:
+    """A lore_scopes entry that is not a table → GroupConfigError naming file + position."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_ENTRY_NOT_TABLE)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "lore_scopes" in msg
+
+
+def test_lore_scopes_missing_name_raises(tmp_path: Path) -> None:
+    """Missing lore_scopes[i].name → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_MISSING_NAME)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "name" in msg
+
+
+def test_lore_scopes_missing_scope_raises(tmp_path: Path) -> None:
+    """Missing lore_scopes[i].scope → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_MISSING_SCOPE)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "scope" in msg
+
+
+def test_lore_scopes_invalid_scope_raises(tmp_path: Path) -> None:
+    """A lore_scopes scope not in {repo, product, suite, team} → GroupConfigError."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_INVALID_SCOPE)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "scope" in msg
+
+
+def test_lore_scopes_default_scope_raises(tmp_path: Path) -> None:
+    """scope='default' is explicitly rejected — it is not a meaningful routing scope."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_DEFAULT_SCOPE)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "scope" in msg
+
+
+def test_lore_scopes_empty_name_raises(tmp_path: Path) -> None:
+    """Empty lore_scopes[i].name → GroupConfigError naming file + field."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_EMPTY_NAME)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "name" in msg
+
+
+def test_lore_scopes_duplicate_scope_raises(tmp_path: Path) -> None:
+    """Two [[lore_scopes]] entries with the same scope → GroupConfigError."""
+    from group_config import GroupConfigError, load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_LORE_SCOPES_DUPLICATE_SCOPE)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "scope" in msg or "duplicate" in msg.lower()
+
+
 def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> None:
     """Round-trip the groups.example commented [harness] block.
 
