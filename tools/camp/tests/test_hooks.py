@@ -2,7 +2,8 @@
 
 The WorktreeRemove hook wiring is dropped (camp owns teardown via `camp rm`);
 only the SessionStart hook is written into each member's .claude/settings.json.
-The `worktree-cleanup` handler stays invocable but is not auto-wired. Member worktrees now live under the unified workspace layout
+The `worktree-cleanup` handler stays invocable but is not auto-wired.
+Member worktrees now live under the unified workspace layout
 central_state_dir(group)/worktrees/<slug>/<member>.
 
 Test contract (all must RED before implementation, GREEN after):
