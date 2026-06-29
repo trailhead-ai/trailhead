@@ -91,22 +91,35 @@ def _write_area(
 # ---------------------------------------------------------------------------
 
 
-def _run_areas(vault_path: str | None) -> tuple[str, str, int]:
+def _config_env(vault_path: str):
+    """Seed config.json (default vault = ``vault_path``) and return an os.environ
+    patch fencing XDG_CONFIG_HOME/XDG_STATE_HOME at hermetic tmp dirs.
+
+    Config-only resolution: cmd_areas resolves the vault via
+    ``resolve_active_vault`` (no LORE_VAULT). ``vault_path`` may be a nonexistent
+    absolute path — config honors it and cmd_areas degrades when missing.
+    XDG_STATE_HOME is fenced so config validation never touches the real state
+    dir (Axiom 6).
+    """
+    from conftest import write_default_config
+    config_home = Path(vault_path).parent / "_xdg_config"
+    state_home = Path(vault_path).parent / "_xdg_state"
+    write_default_config(config_home, Path(vault_path))
+    return mock.patch.dict(
+        os.environ,
+        {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+        clear=False,
+    )
+
+
+def _run_areas(vault_path: str) -> tuple[str, str, int]:
     """Invoke cmd_areas in-process; returns (stdout, stderr, returncode)."""
     cli = _load_cli()
     out = io.StringIO()
     err = io.StringIO()
-
-    env_patch: dict[str, str] = {}
-    if vault_path is not None:
-        env_patch["LORE_VAULT"] = vault_path
-    else:
-        # Ensure LORE_VAULT is absent so vault resolution fails predictably.
-        env_patch = {k: v for k, v in os.environ.items() if k != "LORE_VAULT"}
-
     args = SimpleNamespace()
 
-    with mock.patch.dict(os.environ, env_patch, clear=(vault_path is None)):
+    with _config_env(vault_path):
         with mock.patch("sys.stdout", out):
             with mock.patch("sys.stderr", err):
                 rc = cli.cmd_areas(args)
@@ -306,7 +319,7 @@ class TestAreasBuildAreaMapRaises:
         err = io.StringIO()
         args = SimpleNamespace()
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault)}):
+        with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch.object(
@@ -330,7 +343,7 @@ class TestAreasBuildAreaMapRaises:
         err = io.StringIO()
         args = SimpleNamespace()
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault)}):
+        with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch.object(
@@ -354,7 +367,7 @@ class TestAreasBuildAreaMapRaises:
         err = io.StringIO()
         args = SimpleNamespace()
 
-        with mock.patch.dict(os.environ, {"LORE_VAULT": str(vault)}):
+        with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch.object(

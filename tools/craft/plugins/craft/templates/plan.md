@@ -9,16 +9,6 @@ Keep it brief — the slices below carry the detail. -->
 <!-- List the facts this plan depends on — verified API behavior, confirmed
 library capabilities, proven assumptions from research or spike work. -->
 
-**Rollout & Gating:**
-<!-- Does this ship behind a feature flag or gating mechanism?
-If yes: describe the flag strategy and kill-switch path.
-If no: explain why gating is unnecessary (n/a — <reason>). -->
-
-**Observability & Failure Visibility:**
-<!-- What signal appears when this breaks?
-Describe the observable symptom and where it appears. If no production runtime
-is involved, note n/a — <reason>. -->
-
 **Known Unknowns:**
 <!-- Open questions that must be resolved before or during implementation.
 Each item should be a checkbox so it can be ticked off as resolved. -->

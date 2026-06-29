@@ -34,10 +34,9 @@ _INJECTION_CANONICAL = FIXTURES_DIR / "injection_defense_canonical.txt"
 
 # The three provider seams that must still appear individually (visible-skip
 # contract — each extension point must still announce its identity).
-_PROVIDER_SEAMS = [
-    "no feature-flag provider configured",
-    "no observability provider configured",
-    "no issue tracker configured",
+_PROVIDER_SEAMS: list[str] = [
+    # feature_flags, issue_tracker, and observability extension points were all
+    # removed from brainstorm; no provider visible-skip seam remains.
 ]
 
 # The injection-defense anchor: a distinctive substring that appears in the

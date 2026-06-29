@@ -55,9 +55,9 @@ makes them vault-generic.
   handled by **camp session-resume** (`claude -r <slug>`), which preserves the
   session id so the same session note is reused on restart.)*
 - **`/lore:morning-briefing`** — synthesize what changed in the vault since the
-  last session; surface open deferred items and active follow-up entries.
-- **`/lore:monthly-reflection`** — periodic review: what shipped, what's been
-  deferred the longest, what patterns recur in lessons/dead-ends.
+  last session; surface `open` and `tracking` backlog items.
+- **`/lore:monthly-reflection`** — periodic review: what shipped, which backlog
+  items have sat the longest, what patterns recur in lessons and dropped approaches.
 - **`/lore:brain-review`** — quality review of a harvest candidate before
   promoting it from `harvest-pending.md` into its permanent directory.
 

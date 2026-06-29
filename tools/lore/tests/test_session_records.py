@@ -33,7 +33,12 @@ from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_vault as _make_vault, run_cli as _run
+from conftest import (
+    load_script,
+    make_vault as _make_vault,
+    run_cli as _run,
+    write_default_config,
+)
 
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
@@ -320,7 +325,9 @@ import sys, time
 from pathlib import Path
 sys.path.insert(0, {scripts!r})
 import os
-os.environ["LORE_VAULT"] = sys.argv[3]
+# Config-only resolution: LORE_VAULT is no longer read, so the active vault is
+# resolved from the config.json seeded under XDG_CONFIG_HOME (arg 7).
+os.environ["XDG_CONFIG_HOME"] = sys.argv[7]
 os.environ["XDG_STATE_HOME"] = sys.argv[6]
 os.environ["LORE_EMAIL"] = "tester@example.com"
 
@@ -357,10 +364,14 @@ def _run_race(vault, state, session_id, n_workers=3):
     barrier_file = vault / "_barrier"
     cli = REPO_ROOT / "plugins" / "lore" / "cli" / "lore"
     code = _RACE_WORKER.format(scripts=str(SCRIPTS_DIR), cli=str(cli))
+    # Seed config.json ONCE (before spawning) so every worker resolves the same
+    # test vault via config — no LORE_VAULT, no write race on the config file.
+    config_home = state / "_xdg_config"
+    write_default_config(config_home, vault)
     procs = [
         subprocess.Popen(
             [sys.executable, "-c", code, session_id, f"w{i}", str(vault),
-             str(barrier_file), str(n_workers), str(state)],
+             str(barrier_file), str(n_workers), str(state), str(config_home)],
             stderr=subprocess.PIPE, text=True,
         )
         for i in range(n_workers)

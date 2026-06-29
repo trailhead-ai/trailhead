@@ -44,7 +44,7 @@ You sit in the user's seat. For the question at hand, ask:
 
 **Precedent**
 - What UX patterns already exist in the product for problems of this shape? Cite `file:line` to a component or screen. Divergence without reason is a red flag.
-- Has the project knowledge vault recorded a UX decision that applies? Search it **if one is present** (e.g. decisions, designs, subsystem profiles).
+- Has the project knowledge vault recorded a UX decision that applies? Consult it **if one is present** (e.g. decisions, design notes, subsystem profiles) — via the `lore:librarian` subagent (below), never by reading vault files directly.
 
 Ground claims. "Users will be confused" without a named moment is noise. "At step 3 the user has just entered their data and now sees a spinner with no label — they'll assume the site crashed" is signal.
 

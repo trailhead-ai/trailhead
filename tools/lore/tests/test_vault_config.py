@@ -455,3 +455,100 @@ def test_is_configured_vault_true_for_default(tmp_path, monkeypatch):
     config_path = _write_config(tmp_path, _minimal_config())
     vaults = cfg.load_config(config_path)
     assert cfg.is_configured_vault("default", vaults) is True
+
+
+# ---------------------------------------------------------------------------
+# 6. resolve_active_vault
+# ---------------------------------------------------------------------------
+
+
+def _make_env(tmp_path) -> dict:
+    """Build an injected env dict pointing config+state at tmp subdirs."""
+    return {
+        "XDG_CONFIG_HOME": str(tmp_path / "config"),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        "HOME": str(tmp_path),
+    }
+
+
+def _write_lore_config(tmp_path, data: dict) -> None:
+    """Write data as config.json in the lore config dir under tmp_path."""
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text(json.dumps(data))
+
+
+def test_resolve_active_vault_derived_default_path(tmp_path):
+    """Config with default vault (no explicit path) → state/lore/vaults/default."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(tmp_path, {"vaults": [{"name": "default", "scope": "default"}]})
+    result = cfg.resolve_active_vault(env=env)
+    expected = tmp_path / "state" / "lore" / "vaults" / "default"
+    assert result == expected
+
+
+def test_resolve_active_vault_explicit_absolute_path(tmp_path):
+    """Config with explicit absolute path for default vault → that path."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    explicit = tmp_path / "my-custom-vault"
+    explicit.mkdir(parents=True)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default", "path": str(explicit)}]},
+    )
+    result = cfg.resolve_active_vault(env=env)
+    assert result == explicit.resolve()
+
+
+def test_resolve_active_vault_no_config_file_returns_floor(tmp_path):
+    """No config.json present → floor at state/lore/vaults/default."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    result = cfg.resolve_active_vault(env=env)
+    expected = tmp_path / "state" / "lore" / "vaults" / "default"
+    assert result == expected
+
+
+def test_resolve_active_vault_malformed_json_returns_floor(tmp_path):
+    """Malformed JSON in config.json → floor (silent fallback)."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text("{ not valid json }")
+    result = cfg.resolve_active_vault(env=env)
+    expected = tmp_path / "state" / "lore" / "vaults" / "default"
+    assert result == expected
+
+
+def test_resolve_active_vault_invalid_config_two_defaults_returns_floor(tmp_path):
+    """Config with two default-scope vaults (invalid) → floor (silent fallback)."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {
+            "vaults": [
+                {"name": "default", "scope": "default"},
+                {"name": "default2", "scope": "default"},
+            ]
+        },
+    )
+    result = cfg.resolve_active_vault(env=env)
+    expected = tmp_path / "state" / "lore" / "vaults" / "default"
+    assert result == expected
+
+
+def test_resolve_active_vault_no_default_scope_returns_floor(tmp_path):
+    """Config present but no default-scope vault → floor (silent fallback)."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "team-vault", "scope": "team"}]},
+    )
+    result = cfg.resolve_active_vault(env=env)
+    expected = tmp_path / "state" / "lore" / "vaults" / "default"
+    assert result == expected

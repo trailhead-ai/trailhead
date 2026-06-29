@@ -47,10 +47,15 @@ GUARD_SH = HOOKS_DIR / "pre-commit-status-guard.sh"
 INSTALLER_SH = HOOKS_DIR / "install-vault-hooks.sh"
 
 
-def run_cli(args, env=None, input_text=None):
+def run_cli(args, env=None, input_text=None, *, seed_vault=None):
+    from conftest import write_default_config
     full_env = dict(os.environ)
     if env:
         full_env.update(env)
+    if seed_vault is not None:
+        _cfg = Path(seed_vault).parent / "_xdg_config"
+        full_env["XDG_CONFIG_HOME"] = str(_cfg)
+        write_default_config(_cfg, Path(seed_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
         capture_output=True,
@@ -372,7 +377,7 @@ def test_sync_commits_dirty_vault(tmp_path):
     (vault / "sessions" / "note.md").write_text(
         "---\ntype: session\nstatus: active\n---\n\n# Session\n"
     )
-    r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
+    r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode == 0, r.stderr
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
@@ -384,7 +389,7 @@ def test_sync_commits_dirty_vault(tmp_path):
 
 def test_sync_noop_on_clean_tree(tmp_path):
     vault = _make_sync_vault(tmp_path)
-    r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
+    r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode == 0, r.stderr
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
@@ -400,7 +405,7 @@ def test_sync_respects_gpgsign_false(tmp_path):
     (vault / "sessions" / "note.md").write_text(
         "---\ntype: session\nstatus: active\n---\n\n# Session\n"
     )
-    r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
+    r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode == 0, r.stderr + r.stdout
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
@@ -422,7 +427,7 @@ def test_sync_aborts_on_toplevel_mismatch(tmp_path):
     vault.mkdir()
     (vault / "sessions").mkdir()
 
-    r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
+    r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode != 0
     # Parent repo should be unmodified
     log = subprocess.run(
@@ -437,7 +442,7 @@ def test_sync_skips_push_without_origin(tmp_path):
     """No origin remote → commit is made, push is skipped with a notice."""
     vault = _make_sync_vault(tmp_path)
     (vault / "README.md").write_text("vault updated\n")
-    r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
+    r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode == 0, r.stderr
     combined = r.stdout + r.stderr
     assert (
@@ -448,7 +453,7 @@ def test_sync_skips_push_without_origin(tmp_path):
 def test_sync_accepts_custom_message(tmp_path):
     vault = _make_sync_vault(tmp_path)
     (vault / "README.md").write_text("vault updated\n")
-    r = run_cli(["sync", "--message", "my custom commit"], env={"LORE_VAULT": str(vault)})
+    r = run_cli(["sync", "--message", "my custom commit"], seed_vault=vault)
     assert r.returncode == 0, r.stderr
     log = subprocess.run(
         ["git", "-C", str(vault), "log", "--oneline"],
@@ -683,7 +688,7 @@ def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
     vault = _make_sync_vault_with_failing_remote(tmp_path)
     (vault / "README.md").write_text("vault updated\n")
 
-    r = run_cli(["sync"], env={"LORE_VAULT": str(vault)})
+    r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode == 0, (
         f"sync must exit 0 when commit succeeded but push failed; "
         f"stdout={r.stdout!r} stderr={r.stderr!r}"

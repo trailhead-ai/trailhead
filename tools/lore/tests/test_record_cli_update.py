@@ -21,7 +21,8 @@ adversarial cases (CRLF, trailing-newline, adjacent hunks) with byte-for-byte
 ``==`` assertions on every reject path.
 
 CLI tests run the lore CLI as a subprocess via CLI_PATH (conftest pattern). Never
-writes to the real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
+writes to the real vault: the CLI resolves the test vault from a seeded
+config.json (isolated XDG_CONFIG_HOME) and XDG_STATE_HOME is fenced too.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_vault as _make_vault, run_cli as _run
+from conftest import load_script, make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
 
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"

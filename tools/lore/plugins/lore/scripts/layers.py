@@ -252,10 +252,11 @@ def resolve_layers(
     Returns:
         Ordered list of VaultLayer, personal first.
     """
-    from vault import resolve_vault
+    # Function-local import keeps this module free of the vault ↔ vault_config
+    # module-load cycle (vault_config imports layers + record_model; Axiom 6).
+    from vault_config import resolve_active_vault
 
-    root_str = resolve_vault()
-    personal_root = Path(root_str)
+    personal_root = resolve_active_vault()
     personal_layer = VaultLayer(
         name="personal",
         root=personal_root,

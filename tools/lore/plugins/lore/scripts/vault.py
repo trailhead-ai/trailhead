@@ -1,9 +1,10 @@
-"""Shared config resolver for the lore plugin.
+"""Shared stdlib helpers for the lore plugin.
 
-Every hook and CLI call resolves the vault location and the acting user
-through these two pure functions. Vault location comes from $LORE_VAULT
-(default ~/lore); the acting user from $LORE_USER, then git config, then
-a generic fallback. Neither function raises.
+Pure-stdlib utilities for resolving the acting user, committer email, the
+current project, and session notes, plus note-path iteration. Vault location
+is resolved separately (config-only) via ``vault_config.resolve_active_vault``.
+The acting user comes from $LORE_USER, then git config, then a generic
+fallback. No function here raises.
 """
 
 from __future__ import annotations
@@ -57,20 +58,6 @@ def iter_note_paths(directory: Path, recursive: bool = False) -> Iterator[Path]:
             for md in sub.glob("*.md"):
                 if not md.name.startswith("_"):
                     yield md
-
-
-def resolve_vault() -> str:
-    """Return the resolved vault path.
-
-    Priority: $LORE_VAULT (expanded + resolved), else ~/lore resolved.
-    Never raises.
-    """
-    raw = os.environ.get("LORE_VAULT", "").strip()
-    target = raw if raw else "~/lore"
-    try:
-        return str(Path(target).expanduser().resolve())
-    except Exception:
-        return str(Path(target).expanduser())
 
 
 def _sanitize(value: str) -> str:
@@ -240,9 +227,11 @@ _WORKTREES_RE = re.compile(r"/\.claude/worktrees/([^/]+)")
 def detect_worktree_name(cwd: Path | None = None) -> str:
     """Best-effort worktree name for the current session.
 
-    Mirrors how the session-note filename is *created* (the SessionStart hook
-    names it from ``$CLAUDE_PROJECT_DIR`` basename), so resolution matches
-    creation. Order:
+    Mirrors how the session-note filename is *derived* at creation: the `lore`
+    CLI names the note from this same worktree identity (``$CLAUDE_PROJECT_DIR``
+    basename) when it lazy-creates it on first capture, so resolution matches
+    creation. There is no SessionStart hook — naming and resolution share this
+    one helper. Order:
 
       1. ``$CLAUDE_PROJECT_DIR`` basename — the tightest match.
       2. A ``.claude/worktrees/<name>/`` segment anywhere in the path → ``<name>``

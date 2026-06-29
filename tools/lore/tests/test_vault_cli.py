@@ -37,14 +37,12 @@ from conftest import CLI_PATH, load_script  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _run(args, *, state, config, vault=None, stdin_text=None, extra=None):
+def _run(args, *, state, config, stdin_text=None, extra=None):
     """Run the lore CLI with isolated XDG state/config dirs."""
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CONFIG_HOME"] = str(config)
     env["LORE_EMAIL"] = "tester@example.com"
-    if vault is not None:
-        env["LORE_VAULT"] = str(vault)
     if extra:
         env.update(extra)
     return subprocess.run(
@@ -550,3 +548,5 @@ def test_ls_tolerates_absent_config(tmp_path):
     assert res.returncode == 0, res.stderr
     # No traceback.
     assert "Traceback" not in res.stderr
+
+

@@ -92,7 +92,7 @@ export LORE_PLUGIN_ROOT="$LORE_PLUGIN_ROOT"
 "$GUARD_SH" "\$@" || exit \$?
 
 # Regenerate _index.md files and stage them into the current commit.
-export LORE_VAULT="$VAULT"
+# The regen hook derives the vault from \`git rev-parse --show-toplevel\` — no env var needed.
 "$REGEN_SH" "\$@"
 EOF
 else
@@ -110,7 +110,7 @@ export LORE_PLUGIN_ROOT="$LORE_PLUGIN_ROOT"
 "$GUARD_SH" "\$@" || exit \$?
 
 # Step 2: index regen — regenerates _index.md files and stages them.
-export LORE_VAULT="$VAULT"
+# The regen hook derives the vault from \`git rev-parse --show-toplevel\` — no env var needed.
 "$REGEN_SH" "\$@"
 EOF
 fi

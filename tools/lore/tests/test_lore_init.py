@@ -6,7 +6,7 @@ Covers the test contract:
   - Re-run is a pure no-op: no second git-init, no duplicate config, existing vault untouched.
   - No ``harvest-pending.md`` created; ``install-vault-hooks.sh`` never invoked.
   - ``--local`` vs global: resolve_targets returns project paths vs user-global paths.
-  - ``--vault <path>`` creates vaults/default as a symlink; does NOT re-git-init the target.
+  - ``--vault`` is gone: ``init`` only scaffolds the default vault → unknown-flag error.
   - Existing vaults/default is left untouched on re-run.
   - ``--local`` outside a git repo → clean non-zero error, no traceback.
   - Config seed-if-absent: missing config → seeded with one default vault.
@@ -208,58 +208,25 @@ def test_resolve_targets_returns_user_global_settings(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 6. --vault <path> → symlink; does NOT re-git-init the target
+# 6. --vault is gone → argparse unknown-flag usage error (SystemExit 2)
 # ---------------------------------------------------------------------------
 
 
-def test_vault_flag_creates_symlink(tmp_path):
+def test_vault_flag_is_unknown_flag_error(tmp_path):
+    """``--vault`` was removed: ``lore init`` only ever scaffolds the default
+    vault under the state dir — vault access is CLI-resolved, never path-steered.
+    argparse rejects the unknown flag with a usage error (exit 2), writing
+    nothing."""
     state, config = _dirs(tmp_path)
     target_repo = tmp_path / "existing-repo"
     target_repo.mkdir()
     subprocess.run(["git", "init", str(target_repo)], check=True, capture_output=True)
 
     res = _run(["init", "--vault", str(target_repo)], state=state, config=config)
-    assert res.returncode == 0, res.stderr
-
-    default_link = _default_vault(state)
-    assert default_link.is_symlink()
-    assert os.path.realpath(default_link) == os.path.realpath(target_repo)
-
-
-def test_vault_flag_does_not_regit_init_target(tmp_path):
-    """--vault must symlink, never re-git-init the target repo."""
-    state, config = _dirs(tmp_path)
-    target_repo = tmp_path / "existing-repo"
-    target_repo.mkdir()
-    subprocess.run(["git", "init", str(target_repo)], check=True, capture_output=True, text=True)
-
-    # Record HEAD commit (or just check .git exists with no re-init text)
-    initial_git_head = (target_repo / ".git" / "HEAD").read_text()
-
-    res = _run(["init", "--vault", str(target_repo)], state=state, config=config)
-    assert res.returncode == 0, res.stderr
-
-    # Target's .git/HEAD must be byte-for-byte unchanged
-    assert (target_repo / ".git" / "HEAD").read_text() == initial_git_head
-    # No "Reinitialized" or "Initialized" for the target
-    combined = res.stdout + res.stderr
-    assert "Reinitialized" not in combined
-
-
-def test_vault_flag_existing_symlink_is_noop(tmp_path):
-    """Re-run with --vault on an existing symlink must be a no-op (not fail)."""
-    state, config = _dirs(tmp_path)
-    target_repo = tmp_path / "existing-repo"
-    target_repo.mkdir()
-    subprocess.run(["git", "init", str(target_repo)], check=True, capture_output=True)
-
-    _run(["init", "--vault", str(target_repo)], state=state, config=config)
-    res = _run(["init", "--vault", str(target_repo)], state=state, config=config)
-    assert res.returncode == 0, res.stderr
-
-    default_link = _default_vault(state)
-    assert default_link.is_symlink()
-    assert os.path.realpath(default_link) == os.path.realpath(target_repo)
+    assert res.returncode == 2, (
+        f"lore init --vault must be an argparse usage error (exit 2); "
+        f"got {res.returncode}; stderr={res.stderr!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

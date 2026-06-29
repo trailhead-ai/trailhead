@@ -183,16 +183,9 @@ def test_skill_has_no_app_seam_tokens(skill_md: Path):
 
 # skill stem -> list of contiguous visible-skip phrases that MUST be present
 _VISIBLE_SKIP_PHRASES: dict[str, list[str]] = {
-    # planning skill renamed to plan.
-    "plan": [
-        "no feature-flag provider configured",
-        "no observability provider configured",
-        "no issue tracker configured",
-    ],
-    "execute": [
-        "no feature-flag provider configured — flag setup skipped",
-        "no issue tracker configured — status transitions skipped",
-    ],
+    # The feature_flags, issue_tracker, and observability extension points were
+    # all removed from the craft skills, so no skill carries a visible-skip
+    # phrase anymore. Entries are re-added here if a degrading seam returns.
 }
 
 

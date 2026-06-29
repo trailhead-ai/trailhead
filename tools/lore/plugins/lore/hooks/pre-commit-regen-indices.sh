@@ -4,7 +4,9 @@
 #
 # Shipped as part of the lore plugin. NOT installed directly into a vault's
 # .git/hooks/ — install-vault-hooks.sh generates a wrapper there that sets
-# LORE_PLUGIN_ROOT and LORE_VAULT, then delegates here.
+# LORE_PLUGIN_ROOT, then delegates here. The vault being committed is derived
+# from `git rev-parse --show-toplevel` (git invokes pre-commit with cwd at the
+# repo top level), not from any baked-in environment variable.
 #
 # After regeneration, any _index.md files that changed are git-added with a
 # scoped `git add --` so only the known index paths are staged (not `git add -A`).
@@ -35,16 +37,16 @@ if [ ! -f "$REGEN_SCRIPT" ]; then
     exit 0
 fi
 
-# LORE_VAULT is set by the installer wrapper to the vault path.
-VAULT="${LORE_VAULT:-}"
-if [ -z "$VAULT" ]; then
-    echo "lore regen-indices: LORE_VAULT not set — skipping index regen" >&2
-    exit 0
-fi
+# Derive the vault being committed from git. Git invokes pre-commit with cwd at
+# the repository top level, so this yields the committed vault's root. A git
+# failure (not a repo) must NEVER block the commit: the `|| { …; exit 0; }` rescue
+# arm stops `set -e` from propagating a non-zero exit.
+VAULT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "lore regen-indices: not a git repo — skipping" >&2; exit 0; }
 
-# Run the regenerator. Capture output: one vault-relative path per changed index.
+# Run the regenerator, passing the vault as the sole argument. Capture output:
+# one vault-relative path per changed index.
 regen_out=""
-if ! regen_out="$(LORE_VAULT="$VAULT" python3 "$REGEN_SCRIPT" 2>&1)"; then
+if ! regen_out="$(python3 "$REGEN_SCRIPT" "$VAULT" 2>&1)"; then
     echo "lore regen-indices: regenerate_indices.py failed:" >&2
     echo "$regen_out" | sed 's/^/  /' >&2
     exit 0

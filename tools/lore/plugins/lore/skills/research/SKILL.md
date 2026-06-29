@@ -20,8 +20,8 @@ cross-referenced synthesis before acting. This is the thorough, costly path —
 use it when a quick lookup won't do.
 
 Good fits:
-- "How does the session-note resolve→finalize chain actually work end-to-end?"
-- "What are the tradeoffs between approach A and B, given our prior dead-ends?"
+- "How does the session candidate → flush capture chain actually work end-to-end?"
+- "What are the tradeoffs between approach A and B, given what we've already tried and dropped?"
 - "Trace how a record flows from `lore record create` to the index."
 
 ## `researcher` — lighter, cheap
@@ -32,9 +32,9 @@ short excerpt. It's the cheap path when you don't need the investigator's deep
 synthesis.
 
 It is also the agent for **polling `tracking`-status backlog items** — periodic
-status checks on the tracking backlog (has this follow-up moved? did this
-deferred item's revisit condition fire?), where each poll is a quick lookup, not
-an investigation.
+status checks on the tracking backlog (has a tracked item changed? did a backlog
+item's revisit condition fire?), where each poll is a quick lookup, not an
+investigation.
 
 Good fits:
 - "Where is the `lore search` query shape documented?"

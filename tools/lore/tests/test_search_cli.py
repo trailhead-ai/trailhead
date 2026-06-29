@@ -16,7 +16,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import CLI_PATH, load_script  # noqa: E402
+from conftest import CLI_PATH, load_script, write_default_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +117,11 @@ def _make_fixture(tmp_path: Path):
 
 def _run(args, *, vault, state, env_extra=None):
     full_env = dict(os.environ)
-    full_env["LORE_VAULT"] = str(vault)
     full_env["XDG_STATE_HOME"] = str(state)
     full_env["LORE_EMAIL"] = "tester@example.com"
+    _cfg = Path(state) / "_xdg_config"
+    full_env["XDG_CONFIG_HOME"] = str(_cfg)
+    write_default_config(_cfg, Path(vault))
     if env_extra:
         full_env.update(env_extra)
     return subprocess.run(
@@ -192,7 +194,6 @@ def test_empty_query_nonzero(tmp_path):
 def test_no_args_nonzero(tmp_path):
     personal, shared, state = _make_fixture(tmp_path)
     full_env = dict(os.environ)
-    full_env["LORE_VAULT"] = str(personal)
     full_env["XDG_STATE_HOME"] = str(state)
     full_env["LORE_EMAIL"] = "tester@example.com"
     r = subprocess.run(
@@ -337,16 +338,20 @@ def test_label_sqli_value_no_results_no_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# --vault scope
+# --vault is gone → unknown-flag usage error; default spans the resolved layers
 # ---------------------------------------------------------------------------
 
 
-def test_vault_narrows_to_one_vault(tmp_path):
+def test_vault_flag_is_unknown_flag_error(tmp_path):
+    """``--vault`` was removed: ``search`` always spans the resolved layers
+    (personal + any shared/group vaults) and never takes an arbitrary path —
+    vault access stays CLI-resolved. argparse rejects the unknown flag (exit 2)."""
     personal, shared, state = _make_fixture(tmp_path)
     r = _run(["area:penny", "--vault", str(shared)], vault=personal, state=state)
-    assert r.returncode == 0, r.stderr
-    assert "shared-penny-note" in r.stdout
-    assert "penny-architecture" not in r.stdout
+    assert r.returncode == 2, (
+        f"lore search --vault must be an argparse usage error (exit 2); "
+        f"got {r.returncode}; stderr={r.stderr!r}"
+    )
 
 
 def test_default_spans_all_vaults(tmp_path):

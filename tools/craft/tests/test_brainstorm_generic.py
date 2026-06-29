@@ -40,10 +40,7 @@ _PRIVATE_TOKENS: list[str] = [
 # ---------------------------------------------------------------------------
 
 _BRAINSTORM_SKIP_PHRASES: list[tuple[str, str]] = [
-    ("feature_flags_skip", "no feature-flag provider configured"),
-    ("observability_skip", "no observability provider configured"),
-    ("issue_tracker_skip", "no issue tracker configured"),
-    ("craft_planning_handoff", "skill lives in the craft plugin"),
+    ("planning_handoff", "Handoff to planning"),
 ]
 
 
@@ -66,19 +63,14 @@ def test_brainstorm_visible_skip_phrase_present(test_id: str, phrase: str):
     )
 
 
-def test_brainstorm_dispatches_artist_as_design_mockup_provider():
-    """The design_mockup seam is LIVE: brainstorm names the craft `artist` as its
-    default provider. The genericized skill may name `artist`
-    (a craft agent stem, not a private app token) but never the retired
-    `design-mockup-writer`."""
+def test_brainstorm_does_not_dispatch_design_mockup_provider():
+    """The design_mockup seam was removed from brainstorm: the UI/UX step settles
+    direction verbally and writes it into the spec, rather than dispatching the
+    `artist`. (The `artist` agent itself is retained for direct invocation.)"""
     assert _BRAINSTORM_SKILL.exists(), "brainstorm/SKILL.md does not exist"
     text = _BRAINSTORM_SKILL.read_text()
-    assert "design_mockup" in text, (
-        "brainstorm/SKILL.md no longer documents the design_mockup extension point"
-    )
-    assert "artist" in text, (
-        "brainstorm/SKILL.md must name the craft `artist` as the design_mockup "
-        "provider — the cutover dispatches it by default"
+    assert "design_mockup" not in text, (
+        "brainstorm/SKILL.md should no longer reference the design_mockup extension point"
     )
     assert "design-mockup-writer" not in text, (
         "brainstorm/SKILL.md must not name the retired `design-mockup-writer`"

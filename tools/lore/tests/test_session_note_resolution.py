@@ -1,9 +1,9 @@
 """Session-note resolution: by session-id (exact, cwd-independent) and by a
 robust worktree-name detection that matches how the note filename is created.
 
-These cover the resolver in `vault.py` plus the `lore session-note` CLI
-subcommand that fronts it. The motivating bug: callers degraded to a fuzzy
-worktree+mtime guess because the session-id was never consulted.
+These cover the resolver in `vault.py` plus the `lore session show` CLI form
+that fronts it. The motivating bug: callers degraded to a fuzzy worktree+mtime
+guess because the session-id was never consulted.
 """
 
 import importlib.util
@@ -29,13 +29,18 @@ def load_script(name: str):
     return mod
 
 
-def run_cli(args, env=None, cwd=None):
+def run_cli(args, env=None, cwd=None, *, seed_vault=None):
+    from conftest import write_default_config
     full_env = dict(os.environ)
     # Drop session-id env that the host shell may carry, so tests are hermetic.
     for k in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
         full_env.pop(k, None)
     if env:
         full_env.update(env)
+    if seed_vault is not None:
+        _cfg = Path(seed_vault).parent / "_xdg_config"
+        full_env["XDG_CONFIG_HOME"] = str(_cfg)
+        write_default_config(_cfg, Path(seed_vault))
     return subprocess.run(
         [sys.executable, str(CLI_PATH), *args],
         capture_output=True, text=True, env=full_env, cwd=cwd,
@@ -246,7 +251,9 @@ def test_resolve_falls_back_to_worktree_when_id_unmatched(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# `lore session-note` CLI
+# `lore session show` — resolve + read THIS worktree's session record. The
+# dedicated session subcommand folds the resolution the retired `session-note`
+# command used to carry into the `lore session` family; plain output is the body.
 # ---------------------------------------------------------------------------
 
 def test_cli_resolves_via_claude_code_session_id_env(tmp_path):
@@ -254,29 +261,31 @@ def test_cli_resolves_via_claude_code_session_id_env(tmp_path):
     sd = vault / "session"
     sd.mkdir(parents=True)
     _write_session_record(sd, "old")
-    want = _write_session_record(sd, "live")
+    _write_session_record(sd, "live")
 
     r = run_cli(
-        ["session-note"],
-        env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "live"},
+        ["session", "show"],
+        env={"CLAUDE_CODE_SESSION_ID": "live"},
+        seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == f"session/{want.name}"
+    assert "# session: live" in r.stdout
 
 
 def test_cli_session_id_flag_overrides_env(tmp_path):
     vault = tmp_path / "v"
     sd = vault / "session"
     sd.mkdir(parents=True)
-    want = _write_session_record(sd, "flagged")
+    _write_session_record(sd, "flagged")
     _write_session_record(sd, "envid")
 
     r = run_cli(
-        ["session-note", "--session-id", "flagged"],
-        env={"LORE_VAULT": str(vault), "CLAUDE_CODE_SESSION_ID": "envid"},
+        ["session", "show", "--session-id", "flagged"],
+        env={"CLAUDE_CODE_SESSION_ID": "envid"},
+        seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == f"session/{want.name}"
+    assert "# session: flagged" in r.stdout
 
 
 def test_cli_worktree_flag_fallback(tmp_path):
@@ -284,15 +293,15 @@ def test_cli_worktree_flag_fallback(tmp_path):
     sd = vault / "session"
     sd.mkdir(parents=True)
     _write_session_record(sd, "alpha")
-    want = _write_session_record(sd, "beta")
+    _write_session_record(sd, "beta")
 
     # No session id at all → resolve by explicit --worktree.
     r = run_cli(
-        ["session-note", "--worktree", "beta"],
-        env={"LORE_VAULT": str(vault)},
+        ["session", "show", "--worktree", "beta"],
+        seed_vault=vault,
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == f"session/{want.name}"
+    assert "# session: beta" in r.stdout
 
 
 def test_cli_miss_exits_1_with_diagnostic(tmp_path):
@@ -300,13 +309,13 @@ def test_cli_miss_exits_1_with_diagnostic(tmp_path):
     (vault / "session").mkdir(parents=True)
 
     r = run_cli(
-        ["session-note", "--session-id", "nope", "--worktree", "ghost"],
-        env={"LORE_VAULT": str(vault)},
+        ["session", "show", "--session-id", "nope", "--worktree", "ghost"],
+        seed_vault=vault,
     )
     assert r.returncode == 1
     assert not r.stdout.strip()
     # Diagnostic explains what was tried, so callers don't run exploratory ls.
-    assert "session-note" in r.stderr
+    assert "session" in r.stderr
     assert "nope" in r.stderr
     assert "ghost" in r.stderr
 

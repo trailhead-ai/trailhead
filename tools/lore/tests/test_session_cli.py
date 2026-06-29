@@ -14,21 +14,28 @@ the cross-cutting endpoint tests that are independent of the storage model:
   fence neutralization:
     - a candidate body with ``<external-memory>`` tokens is stored neutralized.
 
-  no prefix-abbrev clash:
-    - ``lore session-note`` still resolves to ``cmd_session_note`` and is not
-      shadowed by the ``session`` subcommand.
+  session subcommand routing:
+    - a bare ``lore session`` errors from the subparser (required action),
+      proving it routes to ``cmd_session``.
+
+  ``lore session show`` (read THIS worktree's session record):
+    - ``--json`` emits {record_id, kind, name, sidecar (dict), body} — the
+      sidecar is how flush reads status / the ``flushed-at`` watermark.
+    - plain prints the body; an unresolvable session → non-zero + a diagnostic.
 
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern) and load the
-``session_store`` module directly for the sanitizer unit tests. Never writes to the
-real $LORE_VAULT; always injects LORE_VAULT + XDG_STATE_HOME.
+``session_store`` module directly for the concurrent-race + sanitizer unit tests.
+Never writes to the real vault: the CLI resolves the test vault from a seeded
+config.json (isolated XDG_CONFIG_HOME) and XDG_STATE_HOME is fenced too.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_vault as _make_vault, run_cli as _run
+from conftest import load_script, make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
 
 # A canonical UUID-shaped session_id (Claude Code session IDs are UUIDs).
 SID = "11111111-2222-4333-8444-555555555555"
@@ -131,25 +138,10 @@ class TestFenceNeutralization:
 
 
 # ---------------------------------------------------------------------------
-# no prefix-abbrev clash with the existing flat ``session-note`` command
+# ``session`` subcommand routing
 # ---------------------------------------------------------------------------
 
-class TestNoAbbrevClash:
-
-    def test_session_note_still_resolves(self, tmp_path):
-        vault, state = _make_vault(tmp_path)
-        (vault / "sessions").mkdir(parents=True, exist_ok=True)
-        # session-note exits 1 when no note resolves, but it must NOT be routed
-        # to cmd_session (which would error differently on the candidate args).
-        r = _run(
-            ["session-note", "--session-id", SID],
-            vault=vault, state_dir=state,
-        )
-        # It resolves to cmd_session_note: prints the no-note-resolved diagnostic.
-        assert "session-note" in r.stderr or r.returncode in (0, 1)
-        assert "candidate" not in r.stderr, (
-            "session-note must not be shadowed by the session subcommand"
-        )
+class TestSessionRouting:
 
     def test_session_routes_to_cmd_session(self, tmp_path):
         vault, state = _make_vault(tmp_path)
@@ -158,7 +150,61 @@ class TestNoAbbrevClash:
         # session-note.
         r = _run(["session"], vault=vault, state_dir=state)
         assert r.returncode != 0
-        # The session subparser requires an action (candidate/referenced).
+        # The session subparser requires an action (candidate/referenced/show).
         assert "candidate" in (r.stderr + r.stdout) or "referenced" in (
             r.stderr + r.stdout
         )
+
+
+# ---------------------------------------------------------------------------
+# ``lore session show`` — read THIS worktree's session record
+# ---------------------------------------------------------------------------
+
+class TestSessionShow:
+
+    def test_show_json_emits_sidecar_and_body(self, tmp_path):
+        vault, state = _make_vault(tmp_path)
+        # Born-dirty session via a candidate, keyed by session-id.
+        c = _run(
+            ["session", "candidate", "--session-id", SID, "--kind", "spec",
+             "--phase", "Plan"],
+            vault=vault, state_dir=state, stdin_text="a candidate finding\n",
+        )
+        assert c.returncode == 0, f"candidate failed: {c.stderr}"
+
+        r = _run(
+            ["session", "show", "--session-id", SID, "--json"],
+            vault=vault, state_dir=state,
+        )
+        assert r.returncode == 0, f"session show failed: {r.stderr}"
+        payload = json.loads(r.stdout)
+        assert payload["record_id"] == f"session/{SID}"
+        assert payload["kind"] == "session"
+        assert "a candidate finding" in payload["body"]
+        # The sidecar is how flush reads status / the flushed-at watermark.
+        assert isinstance(payload["sidecar"], dict)
+        assert payload["sidecar"]
+
+    def test_show_plain_prints_body(self, tmp_path):
+        vault, state = _make_vault(tmp_path)
+        _run(
+            ["session", "candidate", "--session-id", SID, "--kind", "spec",
+             "--phase", "Plan"],
+            vault=vault, state_dir=state, stdin_text="candidate body here\n",
+        )
+        r = _run(
+            ["session", "show", "--session-id", SID],
+            vault=vault, state_dir=state,
+        )
+        assert r.returncode == 0, f"session show failed: {r.stderr}"
+        assert "candidate body here" in r.stdout
+
+    def test_show_no_session_is_diagnostic_miss(self, tmp_path):
+        vault, state = _make_vault(tmp_path)
+        r = _run(
+            ["session", "show", "--session-id", SID],
+            vault=vault, state_dir=state,
+        )
+        assert r.returncode != 0
+        # The diagnostic names what was tried so callers don't go spelunking.
+        assert "no session record resolved" in r.stderr

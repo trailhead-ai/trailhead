@@ -3,8 +3,10 @@
 This module is the **single parse+validate boundary** for ``config.json`` —
 the ``$XDG_CONFIG_HOME/lore/config.json`` file that declares all configured
 vaults. It exposes a ``Vault`` NamedTuple, ``load_config`` for parse+validate,
-the lightweight query helpers ``is_shared`` / ``is_configured_vault``, and the
-**config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
+the lightweight query helpers ``is_shared`` / ``is_configured_vault``, the
+**config-based active-vault resolver** ``resolve_active_vault`` (returns the
+``default``-scope vault path, or the floor ``state_dir("lore")/vaults/default``),
+and the **config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
 ``write_config_atomic``.
 
 **Mutation API:**
@@ -226,6 +228,70 @@ def _resolve_vaults_root(env: dict | None = None) -> Path:
         if base and os.path.isabs(base):
             return Path(base) / "lore" / "vaults"
         return Path.home() / ".local" / "state" / "lore" / "vaults"
+
+
+def _resolve_config_path(env: dict | None = None) -> Path:
+    """Return ``config_dir("lore")/config.json`` honoring XDG overrides.
+
+    Mirrors ``_resolve_vaults_root``: lazy-import ``_bootstrap`` +
+    ``trailhead.paths``, catch ``(ImportError, SystemExit)`` and fall back
+    to the XDG default.
+
+    Args:
+        env: Optional environment dict for test isolation
+             (``XDG_CONFIG_HOME``).  When ``None``, ``os.environ`` is used.
+    """
+    try:
+        import _bootstrap
+
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+
+        if env is not None:
+            return _paths.config_dir("lore", env=env) / "config.json"
+        return _paths.config_dir("lore") / "config.json"
+    except (ImportError, SystemExit):
+        base = env.get("XDG_CONFIG_HOME", "") if env else ""
+        if base and os.path.isabs(base):
+            return Path(base) / "lore" / "config.json"
+        return Path.home() / ".config" / "lore" / "config.json"
+
+
+def resolve_active_vault(env: dict | None = None) -> Path:
+    """Return the active vault's ``Path`` from config, or the floor.
+
+    Resolves ``config_dir("lore")/config.json`` → :func:`load_config` →
+    returns the ``scope=="default"`` vault's ``path``.  Falls back silently
+    to ``state_dir("lore")/vaults/default`` when:
+
+    - ``config.json`` is absent (no ``lore init`` yet),
+    - the file contains malformed JSON,
+    - the config fails validation (e.g. two ``default``-scope vaults), or
+    - the config contains no ``default``-scope vault.
+
+    The fallback is **silent** — no stderr diagnostic.  This is the intended
+    behavior under the no-backwards-compat axiom (Council Critical #4,
+    accepted-as-risk).  A corrupt ``config.json`` is surfaced only by
+    ``lore vault ls``, not by an inline notice.
+
+    Args:
+        env: Optional ``{str: str}`` environment override for XDG path
+             resolution and test isolation.  Mirrors the ``_resolve_vaults_root``
+             injectable pattern — pass
+             ``{"XDG_CONFIG_HOME": ..., "XDG_STATE_HOME": ..., "HOME": ...}``
+             in tests so the real config/state dirs are never touched (Axiom 6).
+
+    Returns:
+        Absolute ``Path`` to the active vault directory.
+    """
+    floor = _resolve_vaults_root(env=env) / "default"
+    try:
+        config_path = _resolve_config_path(env=env)
+        vaults = load_config(str(config_path), env=env)
+        # load_config guarantees exactly one default-scope vault exists
+        return next(v.path for v in vaults if v.scope == "default")
+    except Exception:
+        return floor
 
 
 # ---------------------------------------------------------------------------

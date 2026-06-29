@@ -1,12 +1,12 @@
 ---
 name: record
-description: Log ONE specific item to the vault right now — a single deliberate capture you already have in mind (this decision, this lesson, this dead-end). Orients you to the `lore record` capture surface for one item. Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson". For a batch promotion of the session's pending items, use /lore:flush.
+description: Log ONE specific item to the vault right now — a single deliberate capture you already have in mind (this decision, this lesson, this backlog item). Orients you to the `lore record` capture surface for one item. Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson". For a batch promotion of the session's pending items, use /lore:flush.
 ---
 
 # /lore:record — Capture one deliberate item now
 
 `lore:record` is for the moment where you have **one specific thing** in mind and
-want it in the vault **now** — this decision, this lesson, this dead-end. It is a
+want it in the vault **now** — this decision, this lesson, this backlog item. It is a
 *single deliberate capture*, not a review of the session.
 
 This is the complement of `/lore:flush`: flush *evaluates all outstanding session

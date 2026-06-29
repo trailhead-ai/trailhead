@@ -28,7 +28,7 @@ import sys
 import time
 from pathlib import Path
 
-from conftest import make_vault as _make_vault, run_cli as _run
+from conftest import make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
 
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
@@ -758,11 +758,13 @@ def test_scoped_record_updatable_and_deletable_with_same_flags(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_vanilla_no_config_create_uses_active_vault(tmp_path):
-    """With NO config.json, create lands in the active vault (vanilla)."""
+def test_vanilla_no_config_create_uses_floor_vault(tmp_path):
+    """With NO config.json, create lands in the floor vault (config-only
+    resolution, no $LORE_VAULT — the silent floor is state/lore/vaults/default)."""
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "empty_config"  # no config.json here
     config_home.mkdir()
+    floor = Path(_vault_path(state, "default"))
 
     r = _run_with_config(
         [
@@ -785,10 +787,10 @@ def test_vanilla_no_config_create_uses_active_vault(tmp_path):
     assert r.returncode == 0, r.stderr
     record_id = r.stdout.strip()
     kind, name = record_id.split("/", 1)
-    # Body is in the active vault.
-    assert (vault / kind / f"{name}.md").exists()
-    # Index row under the active vault, shared=0.
-    assert _row_shared(state, str(vault), kind, name) == 0
+    # Body is in the floor vault (the no-config resolution target).
+    assert (floor / kind / f"{name}.md").exists()
+    # Index row under the floor vault, shared=0.
+    assert _row_shared(state, str(floor), kind, name) == 0
 
 
 def test_vanilla_no_config_update_delete_no_orphan_guard(tmp_path):
@@ -826,10 +828,12 @@ def test_vanilla_no_config_update_delete_no_orphan_guard(tmp_path):
 
 
 def test_vanilla_no_config_reindex_single_vault(tmp_path):
-    """With NO config.json, reindex uses the single active vault (vanilla)."""
+    """With NO config.json, reindex uses the single floor vault (config-only
+    resolution resolves to state/lore/vaults/default)."""
     vault, state = _make_vault(tmp_path)
     config_home = tmp_path / "empty_config"
     config_home.mkdir()
+    floor = Path(_vault_path(state, "default"))
 
     r = _run_with_config(
         ["record", "create", "--kind", "blob", "--title", "Plain", "--keyword", "foo"],
@@ -843,4 +847,4 @@ def test_vanilla_no_config_reindex_single_vault(tmp_path):
     r2 = _run_with_config(["reindex"], vault=vault, state=state, config_home=config_home)
     assert r2.returncode == 0, r2.stderr
     rows = _all_rows(state)
-    assert {row[0] for row in rows} == {str(vault)}
+    assert {row[0] for row in rows} == {str(floor)}

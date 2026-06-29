@@ -19,16 +19,6 @@
 <!-- If this touches a user-facing surface: wireframe sketch, interaction notes.
 n/a — describe here if there is no UI surface involved. -->
 
-## Rollout & Gating
-<!-- Does this ship behind a feature flag or gating mechanism?
-If yes: describe the flag strategy, gradual rollout plan, and kill-switch path.
-If no: explain why gating is unnecessary for this change. -->
-
-## Observability & Failure Visibility
-<!-- What signal appears when this breaks in production?
-Describe the observable symptom (log line, error rate, metric spike) and where
-it appears. If no production runtime is involved, note n/a and the reason. -->
-
 ## Open Questions / Risks
 <!-- Unresolved decisions, unknowns, or risks that could affect the design.
 Each item should include a proposed resolution or an owner. -->

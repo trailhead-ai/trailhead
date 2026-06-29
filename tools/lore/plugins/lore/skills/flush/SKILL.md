@@ -8,9 +8,11 @@ description: "Evaluate outstanding session candidates into vault records, then f
 `lore:flush` is the **judgment skill** for session finalization. It is runnable
 at any time — not just at session end. The flow:
 
-1. Read the current session's candidate log.
+1. Read the current session (candidate log + status + watermark) via
+   `lore session show --json`.
 2. Identify **outstanding candidates** — those logged after the last `flushed-at`
-   watermark (read directly from the sidecar `.json`; `annotations` is not indexed).
+   watermark (carried in the JSON's `sidecar.annotations`; not indexed, so it can
+   only be read this way).
 3. Apply agent judgment to evaluate each outstanding candidate into a durable vault
    record via `lore record create`.
 4. Call `lore flush` (the CLI verb) to flip the session `clean`, stamp the new
@@ -39,29 +41,31 @@ lore flush 'updated-at:>=2026-06-17'
 
 ## Process
 
-### Step 1 — Check session status
+### Step 1 — Read the session via the CLI
 
-Read the current session record's sidecar `.json` directly to determine its
-status and the last `flushed-at` watermark. The sidecar is at
-`$LORE_VAULT/session/<key>.json`. `annotations` is sidecar-only and NOT indexed —
-read the `.json` file directly, NOT via KQL:
+Read THIS worktree's session record through the canonical reader — never by
+poking at vault files directly:
 
 ```bash
-lore session-note
+lore session show --json
 ```
 
-Use the key it prints to locate the sidecar and body:
-- `$LORE_VAULT/session/<key>.json` — sidecar (status + annotations)
-- `$LORE_VAULT/session/<key>.md` — body (candidate log)
+This emits `{record_id, kind, name, sidecar, body}`:
+- `sidecar` — the session's status and the un-indexed `annotations` (incl. the
+  last `flushed-at` watermark). `annotations` is sidecar-only and never lands in
+  the index, so this JSON is the only way to read it; do NOT try a KQL search.
+- `body` — the candidate log.
 
 **Outcomes:**
-- **Clean session** (`status: clean`): nothing to flush — report this and stop.
-- **No session**: report that no session exists for this worktree — nothing to do.
-- **Dirty session** (`status: dirty`): proceed to Step 2.
+- **Clean session** (`sidecar.status == "clean"`): nothing to flush — report this
+  and stop.
+- **No session** (the command exits non-zero with a "no session record resolved"
+  diagnostic): report that no session exists for this worktree — nothing to do.
+- **Dirty session** (`sidecar.status == "dirty"`): proceed to Step 2.
 
 ### Step 2 — Read the candidate log and identify outstanding candidates
 
-Read the session body. Candidate lines have the form:
+Read the `body` from the JSON above. Candidate lines have the form:
 ```
 - candidate <ts> kind=<kind> phase=<phase>
 ```
@@ -69,7 +73,7 @@ Read the session body. Candidate lines have the form:
 The body text for each candidate follows its header line.
 
 Identify **outstanding candidates**: those with a `<ts>` timestamp strictly
-**after** `annotations["flushed-at"]` in the sidecar. Parse the watermark as
+**after** `sidecar.annotations["flushed-at"]`. Parse the watermark as
 ISO-8601 UTC (`%Y-%m-%dT%H:%M:%SZ`). If the key is missing or unparseable,
 treat ALL candidates as outstanding — never silently drop candidates.
 
@@ -78,8 +82,10 @@ treat ALL candidates as outstanding — never silently drop candidates.
 For each outstanding candidate, apply agent judgment:
 
 - **Promote to a vault record**: if the candidate describes a durable finding
-  (decision, lesson, dead-end, deferred item, follow-up, gotcha, spec) worth
-  finding later on its own, create a record:
+  worth finding later on its own — a `decision`, `lesson`, `spec`, `plan`,
+  `area` profile, `collaboration` convention, or a `backlog` item (work to
+  revisit, an approach dropped, or an external thing to watch) — create a
+  record:
 
   ```bash
   lore record create --kind <kind> --title "<title>"

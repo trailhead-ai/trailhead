@@ -314,3 +314,40 @@ class TestHarvestModuleRetired:
         except ModuleNotFoundError:
             mod = None
         assert mod is None, "the harvest module must no longer be importable"
+
+
+# ---------------------------------------------------------------------------
+# install-vault-hooks.sh stops baking LORE_VAULT into the wrapper
+# ---------------------------------------------------------------------------
+
+
+class TestVaultHookWrapperHasNoLoreVaultExport:
+    """The generated pre-commit wrapper no longer exports LORE_VAULT — the regen hook
+    derives the committed vault from `git rev-parse --show-toplevel`. The wrapper
+    must still wire LORE_PLUGIN_ROOT for the guard and regen steps.
+    """
+
+    def test_generated_wrapper_does_not_export_lore_vault(self, tmp_path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
+
+        result = subprocess.run(
+            [str(PLUGIN_ROOT / "hooks" / "install-vault-hooks.sh"), str(vault)],
+            env={
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "LORE_PLUGIN_ROOT": str(PLUGIN_ROOT),
+                "HOME": str(tmp_path),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"install-vault-hooks.sh failed: {result.stderr}"
+
+        wrapper = (vault / ".git" / "hooks" / "pre-commit").read_text()
+        assert "export LORE_VAULT" not in wrapper, (
+            "generated wrapper must not export LORE_VAULT (vault derived from git)"
+        )
+        assert "LORE_PLUGIN_ROOT" in wrapper, (
+            "wrapper must still wire LORE_PLUGIN_ROOT for the guard and regen steps"
+        )
