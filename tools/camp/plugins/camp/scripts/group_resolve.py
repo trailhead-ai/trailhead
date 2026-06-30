@@ -19,12 +19,15 @@ A repo listed in two groups is an error at resolve time and at eager
 validate_no_overlap time: raises GroupResolutionError naming both groups + the repo.
 
 group names are validated with validate_group_name before use in any path
-construction (path confinement).
+construction. Group names are constrained to the same charset as slugs
+(``^[a-z0-9-]+$``): this both path-confines them (no separators / '..' / null
+bytes) and rules out shell metacharacters, whitespace, and control characters as
+a defense-in-depth second layer behind the shellenv ``cd`` wrapper's quoting.
 """
 
 from __future__ import annotations
 
-import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -55,30 +58,34 @@ class GroupConfinementError(Exception):
 # group-name confinement
 # ---------------------------------------------------------------------------
 
-_INVALID_GROUP_CHARS = frozenset(("/", "\\", ".."))
+# Group names share the slug charset (spine._VALID_SLUG_RE). Replicated rather
+# than imported because spine is a sibling script, not an importable package, and
+# the rule is a one-liner: lowercase letters, digits, and hyphens only.
+# `\Z` (not `$`) anchors the END OF STRING: `$` also matches just before a
+# trailing newline, which would let a group name like "valid\n" slip through and
+# defeat the control-character guarantee.
+_VALID_GROUP_RE = re.compile(r"^[a-z0-9-]+\Z")
 
 
 def validate_group_name(name: str) -> None:
     """Validate that `name` is safe to use as a single path segment.
 
-    Rejects names containing:
-      - path separators (/ or \\)
-      - '..' components
-      - null bytes or other control characters
+    Group names are constrained to the slug charset ``^[a-z0-9-]+$``. This
+    path-confines them (no separators / '..' / null bytes) AND rules out shell
+    metacharacters, whitespace, and control characters, so a group name can never
+    carry a payload into the shellenv ``cd`` wrapper that captures the workspace
+    path camp prints — a defense-in-depth second layer behind that wrapper's
+    quoting. It also keeps group names symmetric with slugs.
 
     Raises:
         GroupConfinementError: with the bad name in the message.
-
-    This mirrors the paths._validate_app rule for the <group> segment camp
-    appends to state_dir("camp")/<group>/. We replicate rather than import
-    _validate_app because that is a private helper; the rule is identical.
     """
     if not name:
         raise GroupConfinementError("camp: group name must not be empty")
-    if "/" in name or "\\" in name or ".." in name or os.sep in name or "\x00" in name:
+    if not _VALID_GROUP_RE.match(name):
         raise GroupConfinementError(
-            f"camp: group name {name!r} must not contain path separators, "
-            "backslashes, '..', or null bytes (path confinement)"
+            f"camp: group name {name!r} must contain only lowercase letters, "
+            "digits, and hyphens (^[a-z0-9-]+$)"
         )
 
 
