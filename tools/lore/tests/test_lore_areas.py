@@ -44,8 +44,6 @@ def _load_cli():
             "frontmatter",
             "sessions",
             "layers",
-            "status_validator",
-            "regenerate_indices",
             "promote",
             "review",
         ):

@@ -146,30 +146,6 @@ class TestSingularDirAudit:
                 "remove the stale entry."
             )
 
-    def test_status_validator_keys_are_singular(self):
-        """status_validator CANONICAL exposes singular kind keys.
-
-        The live kinds (plan/spec/lesson/session) resolve as singular direct
-        keys. The `deferred`/`follow-up`/`dead-end` kinds are not canonical
-        (they consolidate into backlog/lesson sidecar records, validated by
-        record_model), so they do not resolve here.
-        """
-        sv = load_script("status_validator")
-        for kind in ("plan", "spec", "lesson", "session"):
-            assert sv.permitted_statuses(kind) is not None, (
-                f"singular kind {kind!r} should resolve in status_validator"
-            )
-        # These kinds are unconstrained (no CANONICAL entry).
-        for retired in ("deferred", "follow-up", "dead-end"):
-            assert sv.permitted_statuses(retired) is None, (
-                f"retired kind {retired!r} must not resolve"
-            )
-        # No plural live key survives in CANONICAL.
-        plural_live = {"plans", "specs", "follow-ups", "lessons", "dead-ends", "sessions"}
-        assert not (plural_live & set(sv.CANONICAL)), (
-            f"plural CANONICAL keys still present: {plural_live & set(sv.CANONICAL)}"
-        )
-
     def test_frontmatter_slug_prefixes_are_singular(self):
         """frontmatter._SLUG_PREFIXES is singularized."""
         fm = load_script("frontmatter")

@@ -1,33 +1,21 @@
-"""Status guard, lore sync, and init git-init wiring tests.
+"""lore init git-init wiring and lore sync tests.
 
-Covers (TDD — written before implementation):
-
-status_validator.py CLI main():
-  - exits non-zero naming the file for a bad status
-  - exits 0 for all-valid files
-  - exits 0 when a note has an untracked type (unconstrained)
-  - exits 0 with no files given
-
-pre-commit-status-guard.sh installed hook:
-  - staging + committing a note with an off-vocabulary status: rejected (non-zero,
-    commit aborted)
-  - staging + committing a note with a canonical status: passes
-  - staging a non-.md file alone: no-op pass
-
-install-vault-hooks.sh:
-  - installs pre-commit hook into vault's .git/hooks/pre-commit
-  - idempotent: re-running on an already-installed vault is a no-op
-  - chain-safe: warns and exits non-zero when a pre-commit already exists (not ours)
+Covers:
 
 lore init git-init wiring:
   - fresh dir produces a git repo (.git/ exists)
-  - fresh dir has the pre-commit hook installed and executable
+  - init installs NO pre-commit hook (the old vault-integrity hook subsystem was
+    retired; record validation now lives in the `lore record` CLI via
+    record_model.py)
+  - re-running init does not re-initialize an existing repo
 
 lore sync:
   - stages + commits a dirty vault; clean tree → no commit created
   - commit.gpgsign=false: commit succeeds (no signing error)
   - toplevel mismatch (vault is a subdir of a larger repo) → aborts without committing
   - no origin remote → commits but prints a notice about skipping push
+  - push failure (offline/auth) → exit 0 with a soft-failure notice; commit is durable
+  - custom --message is honored
 """
 
 from __future__ import annotations
@@ -40,11 +28,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-HOOKS_DIR = PLUGIN_ROOT / "hooks"
-GUARD_SH = HOOKS_DIR / "pre-commit-status-guard.sh"
-INSTALLER_SH = HOOKS_DIR / "install-vault-hooks.sh"
 
 
 def run_cli(args, env=None, input_text=None, *, seed_vault=None):
@@ -65,31 +49,6 @@ def run_cli(args, env=None, input_text=None, *, seed_vault=None):
     )
 
 
-def run_validator(args, env=None):
-    """Run status_validator.py as a CLI."""
-    full_env = dict(os.environ)
-    if env:
-        full_env.update(env)
-    return subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / "status_validator.py"), *args],
-        capture_output=True,
-        text=True,
-        env=full_env,
-    )
-
-
-def run_sh(script: Path, args=None, env=None):
-    full_env = dict(os.environ)
-    if env:
-        full_env.update(env)
-    cmd = ["bash", str(script)] + (args or [])
-    return subprocess.run(cmd, capture_output=True, text=True, env=full_env)
-
-
-def home(tmp_path):
-    return {"HOME": str(tmp_path)}
-
-
 def _git_init(path: Path, gpg_sign: bool = False) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
@@ -107,14 +66,6 @@ def _git_init(path: Path, gpg_sign: bool = False) -> None:
         )
 
 
-def _install_guard(vault: Path) -> subprocess.CompletedProcess:
-    return run_sh(INSTALLER_SH, args=[str(vault)], env={"LORE_PLUGIN_ROOT": str(PLUGIN_ROOT)})
-
-
-def _make_note(path: Path, note_type: str, status: str) -> None:
-    path.write_text(f"---\ntype: {note_type}\nstatus: {status}\n---\n\n# Note\n")
-
-
 def _git_commit_all(vault: Path, msg: str = "init") -> subprocess.CompletedProcess:
     subprocess.run(["git", "-C", str(vault), "add", "-A"], capture_output=True)
     return subprocess.run(
@@ -122,183 +73,6 @@ def _git_commit_all(vault: Path, msg: str = "init") -> subprocess.CompletedProce
         capture_output=True,
         text=True,
     )
-
-
-# ── status_validator.py CLI main() ────────────────────────────────────────────
-
-
-def test_validator_cli_exits_nonzero_for_bad_status(tmp_path):
-    note = tmp_path / "bad.md"
-    _make_note(note, "session", "bogus-status")
-    r = run_validator([str(note)])
-    assert r.returncode != 0
-    assert "bad.md" in r.stderr or "bad.md" in r.stdout
-
-
-def test_validator_cli_names_bad_status_in_output(tmp_path):
-    note = tmp_path / "bad.md"
-    _make_note(note, "session", "bogus-status")
-    r = run_validator([str(note)])
-    assert "bogus-status" in r.stderr or "bogus-status" in r.stdout
-
-
-def test_validator_cli_exits_zero_for_valid_files(tmp_path):
-    good1 = tmp_path / "good1.md"
-    good2 = tmp_path / "good2.md"
-    _make_note(good1, "lesson", "active")
-    _make_note(good2, "session", "dirty")  # session vocab: dirty
-    r = run_validator([str(good1), str(good2)])
-    assert r.returncode == 0
-
-
-def test_validator_cli_untracked_type_passes(tmp_path):
-    note = tmp_path / "briefing.md"
-    _make_note(note, "briefing", "anything-at-all")
-    r = run_validator([str(note)])
-    assert r.returncode == 0
-
-
-def test_validator_cli_no_files_exits_zero():
-    r = run_validator([])
-    assert r.returncode == 0
-
-
-def test_validator_cli_mixed_valid_and_invalid(tmp_path):
-    good = tmp_path / "good.md"
-    bad = tmp_path / "bad.md"
-    _make_note(good, "session", "clean")  # session vocab: clean
-    # 'session' is tracked, so a non-canonical status is rejected. (follow-up /
-    # deferred / dead-end are now retired → unconstrained, so they can't serve
-    # as the invalid case.)
-    _make_note(bad, "session", "nonexistent-status")
-    r = run_validator([str(good), str(bad)])
-    assert r.returncode != 0
-    assert "bad.md" in r.stderr or "bad.md" in r.stdout
-
-
-# ── install-vault-hooks.sh ────────────────────────────────────────────────────
-
-
-def test_installer_creates_pre_commit_hook(tmp_path):
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    r = _install_guard(vault)
-    assert r.returncode == 0, r.stderr
-    hook = vault / ".git" / "hooks" / "pre-commit"
-    assert hook.exists()
-
-
-def test_installer_hook_is_executable(tmp_path):
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    _install_guard(vault)
-    hook = vault / ".git" / "hooks" / "pre-commit"
-    assert os.access(hook, os.X_OK)
-
-
-def test_installer_idempotent(tmp_path):
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    r1 = _install_guard(vault)
-    assert r1.returncode == 0, r1.stderr
-    r2 = _install_guard(vault)
-    assert r2.returncode == 0, r2.stderr
-    hook = vault / ".git" / "hooks" / "pre-commit"
-    assert hook.exists()
-
-
-def test_installer_chain_safe_with_existing_hook(tmp_path):
-    """When a pre-commit hook already exists (not ours), installer should not
-    silently clobber it — it should either chain or warn+fail.
-
-    Chain mode: installer saves original to pre-commit-before-lore and writes a
-    wrapper that calls the original then our guard. The original content survives.
-    Warn-and-refuse mode: installer exits non-zero and original hook is untouched.
-    """
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    hook = vault / ".git" / "hooks" / "pre-commit"
-    original_content = "#!/bin/bash\necho 'existing hook'\n"
-    hook.write_text(original_content)
-    hook.chmod(0o755)
-    r = _install_guard(vault)
-    hooks_dir = vault / ".git" / "hooks"
-    if r.returncode == 0:
-        # chain mode: the original content must be preserved somewhere in .git/hooks/
-        all_contents = " ".join(f.read_text() for f in hooks_dir.iterdir() if f.is_file())
-        assert "existing hook" in all_contents, "installer silently clobbered existing hook"
-    else:
-        # warn-and-refuse mode: original hook must be byte-identical
-        assert hook.read_text() == original_content
-
-
-def test_installer_requires_git_repo(tmp_path):
-    vault = tmp_path / "not-a-repo"
-    vault.mkdir()
-    r = _install_guard(vault)
-    assert r.returncode != 0
-
-
-# ── pre-commit-status-guard.sh (installed hook end-to-end) ───────────────────
-
-
-def _setup_guarded_vault(tmp_path: Path) -> Path:
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    (vault / "sessions").mkdir()
-    # install guard
-    r = _install_guard(vault)
-    assert r.returncode == 0, f"guard install failed: {r.stderr}"
-    # initial commit so HEAD exists
-    (vault / "README.md").write_text("vault\n")
-    _git_commit_all(vault, "init vault")
-    return vault
-
-
-def test_guard_rejects_bad_status_at_commit(tmp_path):
-    vault = _setup_guarded_vault(tmp_path)
-    note = vault / "sessions" / "bad.md"
-    _make_note(note, "session", "totally-wrong")
-    subprocess.run(["git", "-C", str(vault), "add", str(note)], check=True, capture_output=True)
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "should be rejected"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode != 0
-    # The bad note must NOT have been committed
-    log = subprocess.run(
-        ["git", "-C", str(vault), "log", "--oneline"],
-        capture_output=True,
-        text=True,
-    )
-    assert "should be rejected" not in log.stdout
-
-
-def test_guard_passes_canonical_status(tmp_path):
-    vault = _setup_guarded_vault(tmp_path)
-    note = vault / "sessions" / "good.md"
-    _make_note(note, "session", "dirty")
-    subprocess.run(["git", "-C", str(vault), "add", str(note)], check=True, capture_output=True)
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "good note"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode == 0, r.stderr + r.stdout
-
-
-def test_guard_noop_for_non_md_file(tmp_path):
-    vault = _setup_guarded_vault(tmp_path)
-    txt = vault / "data.txt"
-    txt.write_text("hello\n")
-    subprocess.run(["git", "-C", str(vault), "add", str(txt)], check=True, capture_output=True)
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "text only"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode == 0, r.stderr + r.stdout
 
 
 # ── lore init git-init wiring (non-interactive installer) ──────
@@ -363,7 +137,7 @@ def test_init_skips_git_init_if_already_a_repo(tmp_path):
 
 
 def _make_sync_vault(tmp_path: Path) -> Path:
-    """Create a git-initialized vault with initial commit and guard installed."""
+    """Create a git-initialized vault with an initial commit."""
     vault = tmp_path / "vault"
     _git_init(vault)
     (vault / "sessions").mkdir()
@@ -463,201 +237,10 @@ def test_sync_accepts_custom_message(tmp_path):
     assert "my custom commit" in log.stdout
 
 
-# ── guard fails CLOSED when plugin has moved (LORE_GUARD_STRICT) ─────────
-
-
-def test_guard_strict_blocks_when_plugin_root_missing(tmp_path):
-    """With LORE_GUARD_STRICT=1 and a non-existent LORE_PLUGIN_ROOT,
-    running the guard exits non-zero (fail closed), not silently 0."""
-    r = subprocess.run(
-        ["bash", str(GUARD_SH)],
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "LORE_GUARD_STRICT": "1",
-            "LORE_PLUGIN_ROOT": "/nonexistent/path/that/does/not/exist",
-        },
-    )
-    assert r.returncode != 0, "guard must fail closed when STRICT and plugin root missing"
-    combined = r.stdout + r.stderr
-    assert "lore init" in combined or "reinstall" in combined or "not found" in combined
-
-
-def test_guard_strict_blocks_commit_when_plugin_moved(tmp_path):
-    """End-to-end: install the hook, bake a bad LORE_PLUGIN_ROOT, then verify
-    ANY commit (even clean notes) is blocked (non-zero)."""
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    (vault / "sessions").mkdir()
-    r = _install_guard(vault)
-    assert r.returncode == 0, r.stderr
-
-    # Rewrite the hook to simulate a moved plugin (point at a non-existent dir)
-    hook = vault / ".git" / "hooks" / "pre-commit"
-    hook_text = hook.read_text()
-    # Replace the LORE_PLUGIN_ROOT path with a non-existent one
-    broken_text = hook_text.replace(
-        str(PLUGIN_ROOT),
-        str(tmp_path / "moved-plugin-that-does-not-exist"),
-    )
-    # The hook must also carry LORE_GUARD_STRICT=1 (from the installer fix)
-    # We verify: if STRICT is set and root is gone → fail closed
-    # For test, we inject STRICT manually since the installer may not set it yet
-    # Once the fix is complete, the installer will bake it automatically
-    hook.write_text(
-        broken_text.replace(
-            "export LORE_PLUGIN_ROOT=",
-            "export LORE_GUARD_STRICT=1\nexport LORE_PLUGIN_ROOT=",
-            1,
-        )
-    )
-    hook.chmod(0o755)
-
-    # Initial commit to establish HEAD
-    (vault / "README.md").write_text("vault\n")
-    subprocess.run(["git", "-C", str(vault), "add", "-A"], capture_output=True)
-    subprocess.run(["git", "-C", str(vault), "commit", "-m", "init"], capture_output=True)
-
-    # Now try to commit a good note — must be BLOCKED because validator is gone
-    note = vault / "sessions" / "fine.md"
-    _make_note(note, "session", "dirty")
-    subprocess.run(["git", "-C", str(vault), "add", str(note)], capture_output=True)
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "should be blocked"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode != 0, (
-        "guard must fail closed when STRICT=1 and plugin has moved; "
-        f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    )
-
-
-def test_installer_bakes_strict_flag(tmp_path):
-    """The generated wrapper must contain LORE_GUARD_STRICT=1."""
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    r = _install_guard(vault)
-    assert r.returncode == 0, r.stderr
-    hook = vault / ".git" / "hooks" / "pre-commit"
-    assert "LORE_GUARD_STRICT=1" in hook.read_text(), (
-        "installer must bake LORE_GUARD_STRICT=1 into the generated wrapper"
-    )
-
-
-def test_guard_lenient_without_strict_when_plugin_missing(tmp_path):
-    """Standalone invocation without STRICT stays lenient (exit 0) — existing
-    behavior for development / direct invocation use-cases."""
-    r = subprocess.run(
-        ["bash", str(GUARD_SH)],
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "LORE_PLUGIN_ROOT": "/nonexistent/path",
-            # No LORE_GUARD_STRICT
-        },
-    )
-    assert r.returncode == 0, "standalone (no STRICT) may stay lenient"
-
-
-# ── non-ASCII filenames bypass the guard ──────────────────────────────────
-
-
-def test_guard_rejects_bad_status_non_ascii_filename(tmp_path):
-    """A note with a non-ASCII filename carrying a bad status must be rejected."""
-    vault = _setup_guarded_vault(tmp_path)
-    non_ascii_note = vault / "sessions" / "café-redesign.md"
-    _make_note(non_ascii_note, "session", "bad-nonascii-status")
-    subprocess.run(
-        ["git", "-C", str(vault), "add", str(non_ascii_note)],
-        capture_output=True,
-    )
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "non-ascii bad status"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode != 0, "guard must reject a bad-status note with a non-ASCII filename"
-
-
-def test_guard_passes_good_status_non_ascii_filename(tmp_path):
-    """A note with a non-ASCII filename carrying a valid status must pass."""
-    vault = _setup_guarded_vault(tmp_path)
-    non_ascii_note = vault / "sessions" / "café-redesign.md"
-    _make_note(non_ascii_note, "session", "dirty")
-    subprocess.run(
-        ["git", "-C", str(vault), "add", str(non_ascii_note)],
-        capture_output=True,
-    )
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "non-ascii good status"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode == 0, f"good non-ASCII note must pass: {r.stderr} {r.stdout}"
-
-
-# ── validator silently skips unreadable files → must fail closed ──────────
-
-
-def test_validator_cli_exits_nonzero_for_nonexistent_file(tmp_path):
-    """Passing a non-existent path to the validator must produce non-zero exit."""
-    r = run_validator(["/nonexistent/path/that/does/not/exist.md"])
-    assert r.returncode != 0, "validator must fail closed for a missing argv path"
-    combined = r.stdout + r.stderr
-    assert "nonexistent" in combined or "not found" in combined or "missing" in combined
-
-
-# ── guard reads working tree, not staged blob ─────────────────────────────
-
-
-def test_guard_validates_staged_blob_not_working_copy(tmp_path):
-    """Stage a BAD-status note, then fix working copy without re-staging.
-    Guard must reject (staged blob is bad) even though working copy is good."""
-    vault = _setup_guarded_vault(tmp_path)
-    note = vault / "sessions" / "tricky.md"
-    # Stage a bad-status note
-    _make_note(note, "session", "totally-bad-status")
-    subprocess.run(["git", "-C", str(vault), "add", str(note)], capture_output=True)
-    # Fix working copy WITHOUT re-staging
-    _make_note(note, "session", "dirty")
-    # Guard should read the staged blob (bad) and reject
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "should be rejected"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode != 0, "guard must read staged blob; working-copy fix must not fool it"
-
-
-def test_guard_passes_good_staged_blob_even_if_working_copy_bad(tmp_path):
-    """Stage a GOOD-status note, then corrupt working copy without re-staging.
-    Guard must allow the commit (staged blob is good)."""
-    vault = _setup_guarded_vault(tmp_path)
-    note = vault / "sessions" / "sneaky.md"
-    # Stage a good-status note
-    _make_note(note, "session", "dirty")
-    subprocess.run(["git", "-C", str(vault), "add", str(note)], capture_output=True)
-    # Corrupt working copy WITHOUT re-staging
-    _make_note(note, "session", "totally-bad-status")
-    # Guard reads staged blob (good) → commit allowed
-    r = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", "staged blob is good"],
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode == 0, (
-        f"guard must allow commit when staged blob is good, even if working copy is bad: "
-        f"{r.stderr} {r.stdout}"
-    )
-
-
 # ── lore sync exit code after push failure ────────────────────────────────
 
 
-def _make_sync_vault_with_failing_remote(tmp_path: Path) -> tuple[Path, Path]:
+def _make_sync_vault_with_failing_remote(tmp_path: Path) -> Path:
     """Create a vault with an origin that will fail to push."""
     vault = tmp_path / "vault"
     _git_init(vault)
@@ -710,26 +293,6 @@ def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
     )
     assert len(log.stdout.strip().splitlines()) == 2, (
         "commit must have been made before push was attempted"
-    )
-
-
-# ── pass "$@" to the guard in chained wrapper ────────────────────────────
-
-
-def test_installer_chained_wrapper_passes_args(tmp_path):
-    """When chaining over an existing hook, the wrapper passes $@ to the guard."""
-    vault = tmp_path / "vault"
-    _git_init(vault)
-    hook_path = vault / ".git" / "hooks" / "pre-commit"
-    # Install a dummy existing hook
-    hook_path.write_text("#!/bin/bash\n# dummy existing hook\nexit 0\n")
-    hook_path.chmod(0o755)
-    r = _install_guard(vault)
-    assert r.returncode == 0, r.stderr
-    hook_text = hook_path.read_text()
-    # The chained guard invocation must pass "$@"
-    assert '"$@"' in hook_text, (
-        f'chained wrapper must pass "$@" to the guard; hook content:\n{hook_text}'
     )
 
 
