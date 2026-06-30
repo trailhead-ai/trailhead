@@ -88,9 +88,8 @@ development, `add` a filesystem path to the repo root instead of a URL — see t
 lore init
 ```
 
-`lore init` scaffolds the default vault under lore's state dir, copies the starter
-docs, initializes a git repo, and installs a pre-commit guard that enforces the
-canonical status vocabulary. It records the vault as the config default, so every
+`lore init` scaffolds the default vault under lore's state dir, initializes a git
+repo, and installs the vault write-protection guardrail. It records the vault as the config default, so every
 hook and the `lore` CLI resolve it from `config.json` — there is no path to pass
 and no environment variable to set.
 
