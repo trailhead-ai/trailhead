@@ -146,82 +146,130 @@ _CAMP_PLUGIN_ROOT: Path | None = (
 )
 
 
+def resolve_active_group_config(
+    groups_dir: "Path | None",
+    cwd: Path,
+    *,
+    camp_state_dir: "Path | None" = None,
+    degrade_target: str = "personal-only recall",
+) -> "dict | None":
+    """Resolve ``cwd`` to the active camp group's config dict, or ``None``.
+
+    Shared by the read path (shared-vault discovery) and the write path
+    (group-default scope routing): performs the lazy, guarded camp import and
+    the cwd->group resolution once, returning the matching group's raw config
+    dict (as produced by ``load_group``, including the ``_toml_path`` key) or
+    ``None`` so callers can project their own slice.
+
+    Returns ``None`` on every degradation: ``groups_dir`` absent, trailhead or
+    camp unimportable, the group config unreadable/malformed, an invalid
+    configured group name, an overlap, or no group matching ``cwd``. A clean
+    no-match is silent; an overlap, an unreadable/malformed config, or an
+    invalid group name prints a warning naming ``degrade_target`` first.
+
+    ``ModuleNotFoundError`` from the lazy ``import trailhead.paths`` inside
+    ``resolve_from_cwd`` is deliberately NOT caught: it can occur only if the
+    bootstrap guard below failed to run, which is a programming error to fix,
+    not a runtime condition to swallow (swallowing it would silently disable all
+    group resolution). The guard runs BEFORE the camp import because camp
+    internally does ``import trailhead.paths``. ``camp_state_dir`` is forwarded
+    to ``resolve_from_cwd`` so resolution stays isolated in tests.
+    """
+    if groups_dir is None:
+        return None
+
+    if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
+        sys.path.insert(0, str(_CAMP_PLUGIN_ROOT))
+
+    try:
+        from _bootstrap import ensure_trailhead_importable
+
+        ensure_trailhead_importable()
+    except (ImportError, SystemExit):
+        return None  # trailhead unavailable
+
+    try:
+        import camp.scripts.group_config as _gc
+        import camp.scripts.group_resolve as _gr
+        from camp.scripts.group_config import GroupConfigError
+        from camp.scripts.group_resolve import (
+            GroupConfinementError,
+            GroupResolutionError,
+        )
+    except ImportError:
+        return None  # camp absent
+
+    try:
+        group_configs = _gc.load_all_groups(groups_dir)  # [] if dir absent
+    except GroupConfigError as exc:
+        print(
+            f"lore: camp group config error; degrading to {degrade_target}: {exc}",
+            file=sys.stderr,
+        )
+        return None  # malformed config
+    except (OSError, UnicodeDecodeError) as exc:
+        # load_group only wraps TOMLDecodeError; an unreadable (permission) or
+        # non-UTF-8 group TOML would otherwise crash the caller. Degrade instead.
+        print(
+            f"lore: cannot read camp group config; degrading to {degrade_target}: {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    if not group_configs:
+        return None
+
+    try:
+        group_name, _slug = _gr.resolve_from_cwd(
+            cwd, group_configs, camp_state_dir=camp_state_dir
+        )
+    except GroupResolutionError as exc:
+        # cwd not in any group → silent (normal, not a warning)
+        # overlap (one repo in multiple groups) → emit a named warning
+        exc_msg = str(exc)
+        if "multiple groups" in exc_msg:
+            print(
+                f"lore: {exc_msg}; degrading to {degrade_target}",
+                file=sys.stderr,
+            )
+        return None
+    except GroupConfinementError as exc:
+        # A configured group whose name is not a safe path segment.
+        print(
+            f"lore: invalid camp group name; degrading to {degrade_target}: {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    return next(
+        (cfg for cfg in group_configs if cfg["group"]["name"] == group_name),
+        None,
+    )
+
+
 def _discover_shared_vaults(groups_dir: Path, cwd: Path) -> list[dict]:
     """Discover shared vaults from the active group's camp config.
 
-    Performs a lazy, guarded import of camp's resolver. Returns an empty
-    list on any failure, so every degradation path preserves the personal layer.
-
-    The returned dicts carry the raw [[shared_vaults]] entries plus a
-    "_toml_path" key (from load_group) for relative-root resolution.
+    Returns the raw [[shared_vaults]] entries from the active group, each with a
+    "_toml_path" key (from load_group) for relative-root resolution, or [] on any
+    degradation — so every failure path preserves the personal layer. Delegates
+    the cwd->group resolution to :func:`resolve_active_group_config`.
 
     Args:
         groups_dir: The camp groups directory (trailhead.paths.config_dir("camp")/groups).
         cwd:        The current working directory for group resolution.
 
     Returns:
-        List of raw shared_vault dicts from the active group's config,
-        each with {"name": str, "root": str, "_toml_path": str}.
-        Returns [] on any error (camp absent, malformed config, no group, overlap).
+        List of raw shared_vault dicts, each {"name": str, "root": str, "_toml_path": str}.
     """
-    if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
-        sys.path.insert(0, str(_CAMP_PLUGIN_ROOT))
-
-    # camp.group_resolve.resolve_from_cwd lazily does `import trailhead.paths`,
-    # assuming the entry-point bootstrap guard already ran. When lore reaches into
-    # camp as a *library* (not via camp's own CLI) that guarantee doesn't hold, so
-    # we run the guard here. Without it, the lazy import raises ModuleNotFoundError
-    # which escapes the GroupResolutionError catch below and degrades recall to
-    # personal-only — silently dropping every shared layer.
-    try:
-        from _bootstrap import ensure_trailhead_importable
-
-        ensure_trailhead_importable()
-    except (ImportError, SystemExit):
-        return []  # trailhead unavailable → personal-only
-
-    try:
-        import camp.scripts.group_config as _gc
-        import camp.scripts.group_resolve as _gr
-        from camp.scripts.group_config import GroupConfigError
-        from camp.scripts.group_resolve import GroupResolutionError
-    except ImportError:
-        return []  # camp absent → personal-only
-
-    try:
-        group_configs = _gc.load_all_groups(groups_dir)  # [] if dir absent
-    except GroupConfigError as exc:
-        print(
-            f"lore: camp group config error; shared vaults unavailable: {exc}",
-            file=sys.stderr,
-        )
-        return []  # malformed config → personal-only
-
-    if not group_configs:
+    cfg = resolve_active_group_config(groups_dir, cwd)
+    if cfg is None:
         return []
-
-    try:
-        group_name, _slug = _gr.resolve_from_cwd(cwd, group_configs)
-    except GroupResolutionError as exc:
-        # cwd not in any group → silent personal-only (normal, not a warning)
-        # overlap → emit a named warning
-        exc_msg = str(exc)
-        if "multiple groups" in exc_msg or "overlap" in exc_msg.lower():
-            print(
-                f"lore: {exc_msg}; recall degrading to personal-only",
-                file=sys.stderr,
-            )
-        return []  # personal-only for recall
-
-    for cfg in group_configs:
-        if cfg["group"]["name"] == group_name:
-            shared_vaults = cfg.get("shared_vaults", [])
-            toml_path = cfg.get("_toml_path", "")
-            return [
-                {"name": sv["name"], "root": sv["root"], "_toml_path": toml_path}
-                for sv in shared_vaults
-            ]
-    return []
+    toml_path = cfg.get("_toml_path", "")
+    return [
+        {"name": sv["name"], "root": sv["root"], "_toml_path": toml_path}
+        for sv in cfg.get("shared_vaults", [])
+    ]
 
 
 # ---------------------------------------------------------------------------

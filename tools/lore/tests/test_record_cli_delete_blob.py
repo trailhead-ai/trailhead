@@ -13,6 +13,7 @@ to the real vault: the CLI resolves the test vault from a seeded config.json
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -189,3 +190,74 @@ def test_update_rejects_record_id_escaping_vault(tmp_path, evil_id):
     assert r.returncode != 0, f"escape ID {evil_id!r} was not rejected: {r.stdout!r}"
     # The outside victim body must be byte-for-byte unchanged.
     assert (victim / "victim.md").read_text(encoding="utf-8") == before
+
+
+# ---------------------------------------------------------------------------
+# Group-default scope routing is create-only: delete must still locate and
+# remove a record when run from inside a bound workspace — the group binding
+# must not interfere with record resolution on delete.
+# ---------------------------------------------------------------------------
+
+
+def test_delete_inside_group_still_locates_and_removes_record(tmp_path):
+    """delete run from inside a bound workspace removes a default-vault record
+    normally — group-default seeding is create-only and never re-routes the
+    delete's record lookup.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    (lore_cfg / "config.json").write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default", "path": str(vault)},
+                    {"name": "trailhead", "scope": "product", "path": str(trailhead_vault)},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    (groups_dir / "trailhead.toml").write_text(
+        '[group]\nname = "trailhead"\n\n'
+        f'[[members]]\nname = "repo"\nrepo_root = "{member_repo}"\n\n'
+        '[[lore_scopes]]\nscope = "product"\nname = "trailhead"\n',
+        encoding="utf-8",
+    )
+    env = {"XDG_CONFIG_HOME": str(config_home), "LORE_GROUPS_DIR": str(groups_dir)}
+
+    # Create from outside any group → record lands in the default vault.
+    c = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo"],
+        vault=vault,
+        state_dir=state,
+        env_extra=env,
+        cwd=outside,
+        stdin_text="body\n",
+    )
+    assert c.returncode == 0, c.stderr
+    record_id = c.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (vault / kind / f"{name}.md").exists()
+
+    # Delete from inside the bound workspace still finds and removes the record.
+    d = _run(
+        ["record", "delete", record_id],
+        vault=vault,
+        state_dir=state,
+        env_extra=env,
+        cwd=member_repo,
+    )
+    assert d.returncode == 0, d.stderr
+    assert not (vault / kind / f"{name}.md").exists()
+    assert not (vault / kind / f"{name}.json").exists()

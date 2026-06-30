@@ -942,3 +942,85 @@ def test_update_label_bad_key_nonzero(tmp_path):
     )
     assert r.returncode != 0
     assert "BadKey" in r.stderr
+
+
+# ===========================================================================
+# Group-default scope routing is create-only: update must NOT seed scopes from
+# a camp group, so an unscoped update inside a bound workspace never relocates a
+# record to the group's vault.
+# ===========================================================================
+
+
+def _write_routing_config(config_home, *, default_vault, trailhead_vault):
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    (lore_cfg / "config.json").write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default", "path": str(default_vault)},
+                    {"name": "trailhead", "scope": "product", "path": str(trailhead_vault)},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_group_binding(groups_dir, *, member_repo):
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    (groups_dir / "trailhead.toml").write_text(
+        '[group]\nname = "trailhead"\n\n'
+        f'[[members]]\nname = "repo"\nrepo_root = "{member_repo}"\n\n'
+        '[[lore_scopes]]\nscope = "product"\nname = "trailhead"\n',
+        encoding="utf-8",
+    )
+
+
+def test_update_inside_group_does_not_relocate_record(tmp_path):
+    """An unscoped update run from inside a bound workspace leaves a default-vault
+    record in the default vault — group-default seeding is create-only, so update
+    never re-routes the record to the group's vault.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    groups_dir = tmp_path / "groups"
+    member_repo = tmp_path / "repo"
+    member_repo.mkdir()
+    trailhead_vault = tmp_path / "trailhead_vault"
+    trailhead_vault.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    _write_routing_config(config_home, default_vault=vault, trailhead_vault=trailhead_vault)
+    _write_group_binding(groups_dir, member_repo=member_repo)
+    env = {"XDG_CONFIG_HOME": str(config_home), "LORE_GROUPS_DIR": str(groups_dir)}
+
+    # Create from outside any group → record lands in the default vault.
+    c = _run(
+        ["record", "create", "--kind", "spec", "--title", "T", "--keyword", "foo"],
+        vault=vault,
+        state_dir=state,
+        env_extra=env,
+        cwd=outside,
+        stdin_text="original\n",
+    )
+    assert c.returncode == 0, c.stderr
+    record_id = c.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (vault / kind / f"{name}.md").exists()
+
+    # Update with NO scope flags, from inside the bound workspace.
+    u = _run(
+        ["record", "update", record_id],
+        vault=vault,
+        state_dir=state,
+        env_extra=env,
+        cwd=member_repo,
+        stdin_text="updated body\n",
+    )
+    assert u.returncode == 0, u.stderr
+    # The record stays in the default vault — it was NOT relocated to trailhead.
+    assert (vault / kind / f"{name}.md").exists()
+    assert not (trailhead_vault / kind / f"{name}.md").exists()
+    assert _find_body(vault, record_id) == "updated body\n"

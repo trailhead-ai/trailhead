@@ -1129,6 +1129,14 @@ def _author_group(
         sys.exit(1)
     other_configs = [c for c in all_configs if c["group"]["name"] != group_name]
 
+    # render_group_toml knows only the core schema, so a --force re-author would
+    # otherwise drop a hand-added [[lore_scopes]] binding. Carry the existing
+    # group's binding (if any) through so it round-trips instead of being lost.
+    existing_group = next(
+        (c for c in all_configs if c["group"]["name"] == group_name), None
+    )
+    existing_lore_scopes = existing_group.get("lore_scopes", []) if existing_group else []
+
     try:
         group_scaffold.validate_scaffold(
             group_name,
@@ -1140,7 +1148,9 @@ def _author_group(
         print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
-    rendered = group_scaffold.render_group_toml(group_name, members, branch_pattern)
+    rendered = group_scaffold.render_group_toml(
+        group_name, members, branch_pattern, lore_scopes=existing_lore_scopes
+    )
 
     # Atomic write: tmp → round-trip gate via load_group → os.replace.
     config_dir.mkdir(parents=True, exist_ok=True)
