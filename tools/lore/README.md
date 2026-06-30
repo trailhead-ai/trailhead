@@ -38,7 +38,7 @@ for `trailhead install` instructions.
 After install, set up your vault:
 
 ```
-lore init   # scaffold the default vault (taxonomy + starter docs)
+lore init   # scaffold the default vault
 ```
 
 `lore init` scaffolds the vault; subsequent commands find it automatically —
