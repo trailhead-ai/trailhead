@@ -5,12 +5,11 @@ is*: the closed set of 9 kinds, the per-record JSON sidecar field schema (`v1`),
 the per-kind status vocabularies and their initial/default value, the phases
 taxonomy, and a **pure** `validate(sidecar, kind)` function.
 
-It mirrors the shape of the legacy `status_validator.py` (canonical module-level
-data + pure predicate/accessor functions) but is a **new** module: the legacy
-validator keeps guarding old-vocabulary notes until the migration cuts over.
-Nothing here reads files or touches the search index — the validator operates on
-an already-parsed dict and is shared verbatim by the `lore record` CLI and the
-migration.
+This is the single source of truth for record status vocabularies (canonical
+module-level data + pure predicate/accessor functions). It superseded an earlier
+pre-commit `status_validator.py` that has since been retired. Nothing here reads
+files or touches the search index — the validator operates on an already-parsed
+dict and is shared verbatim by the `lore record` CLI and the migration.
 
 Invariants:
 - The kind set is closed: exactly the 9 kinds in ``KINDS``; any other ``kind`` is
@@ -171,9 +170,8 @@ def is_valid_kind(kind: str | None) -> bool:
 def permitted_statuses(kind: str | None) -> tuple[str, ...] | None:
     """Return the ordered status vocab for ``kind``, or ``None`` if unknown.
 
-    Returns ``None`` (never raises) for an unknown kind, matching
-    ``status_validator.permitted_statuses`` — so ``validate()`` can branch on
-    ``None`` rather than guarding an exception.
+    Returns ``None`` (never raises) for an unknown kind so ``validate()`` can
+    branch on ``None`` rather than guarding an exception.
     """
     # Guard against a non-str ``kind`` (e.g. a malformed sidecar carrying a
     # dict/list) so the accessor — and thus ``validate`` — never raises

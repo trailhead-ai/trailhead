@@ -4,7 +4,7 @@ Covers the test contract:
   - Fresh ``lore init`` creates vaults/default as a git repo + index parent; exits 0.
   - Resolved index path is NOT under any vault root.
   - Re-run is a pure no-op: no second git-init, no duplicate config, existing vault untouched.
-  - No ``harvest-pending.md`` created; ``install-vault-hooks.sh`` never invoked.
+  - No ``harvest-pending.md`` created; no pre-commit hook installed.
   - ``--local`` vs global: resolve_targets returns project paths vs user-global paths.
   - ``--vault`` is gone: ``init`` only scaffolds the default vault → unknown-flag error.
   - Existing vaults/default is left untouched on re-run.
@@ -162,7 +162,7 @@ def test_rerun_does_not_regit_init(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 4. No harvest-pending.md; no pre-commit hook from install-vault-hooks.sh
+# 4. No harvest-pending.md; no pre-commit hook installed
 # ---------------------------------------------------------------------------
 
 

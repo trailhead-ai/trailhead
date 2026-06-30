@@ -21,7 +21,7 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 def load_script(name: str):
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in (name, "vault", "frontmatter", "status_validator", "sessions", "config"):
+    for cached in (name, "vault", "frontmatter", "sessions", "config"):
         sys.modules.pop(cached, None)
     spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)

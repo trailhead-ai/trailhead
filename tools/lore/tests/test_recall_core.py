@@ -34,8 +34,6 @@ def load_recall():
         "recall",
         "vault",
         "frontmatter",
-        "status_validator",
-        "regenerate_indices",
         "sessions",
     ):
         sys.modules.pop(cached, None)
