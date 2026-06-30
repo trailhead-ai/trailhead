@@ -274,7 +274,7 @@ class TestMidBatchFaultInjection:
     """Named fault-injection: monkeypatch the per-session commit to raise AFTER
     the first session, proving earlier sessions stay clean + retry-safe guidance."""
 
-    def _run_with_fault(self, vault, state):
+    def _run_with_fault(self, state):
         """Run `lore flush all` with `_flush_commit` patched to raise on the 2nd call.
 
         Drives the CLI in-process (not subprocess) so the monkeypatch reaches the
@@ -287,7 +287,6 @@ class TestMidBatchFaultInjection:
         from importlib.machinery import SourceFileLoader
 
         env = {
-            "LORE_VAULT": str(vault),
             "XDG_STATE_HOME": str(state),
             "XDG_CONFIG_HOME": str(Path(state) / "_xdg_config"),
             "LORE_EMAIL": "tester@example.com",
@@ -335,7 +334,7 @@ class TestMidBatchFaultInjection:
         assert _candidate(vault, state, SID_C).returncode == 0
         _commit_baseline(vault)
 
-        code, out, err = self._run_with_fault(vault, state)
+        code, out, err = self._run_with_fault(state)
         combined = (out + err)
 
         # Non-zero exit on a mid-batch failure.
@@ -377,7 +376,7 @@ class TestBatchPushesOnce:
     run for real, proving N commits but exactly one push.
     """
 
-    def _run_counting_pushes(self, vault, state):
+    def _run_counting_pushes(self, state):
         import contextlib
         import importlib.util
         import io
@@ -385,7 +384,6 @@ class TestBatchPushesOnce:
         from importlib.machinery import SourceFileLoader
 
         env = {
-            "LORE_VAULT": str(vault),
             "XDG_STATE_HOME": str(state),
             "XDG_CONFIG_HOME": str(Path(state) / "_xdg_config"),
             "LORE_EMAIL": "tester@example.com",
@@ -435,7 +433,7 @@ class TestBatchPushesOnce:
         _commit_baseline(vault)
         before = _commit_count(vault)
 
-        code, pushes, out, err = self._run_counting_pushes(vault, state)
+        code, pushes, out, err = self._run_counting_pushes(state)
         assert code == 0, err
 
         # Every session was flushed + committed as its own unit …
@@ -459,7 +457,7 @@ class TestBatchPushesOnce:
         _commit_baseline(vault)
         assert _flush_current(vault, state, SID_A).returncode == 0
 
-        code, pushes, out, err = self._run_counting_pushes(vault, state)
+        code, pushes, out, err = self._run_counting_pushes(state)
         assert code == 0, err
         assert pushes == 0, f"nothing dirty to flush → no push, got {pushes}"
 
