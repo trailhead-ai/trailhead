@@ -331,12 +331,12 @@ class TestInputCharset:
     """Confirm the inputs that flow into the emitted
     `camp` call cannot introduce shell metacharacters.
 
-    Slugs ARE constrained to the slug charset ^[a-z0-9-]+$. Group names are only
-    path-confined (no separators / '..' / null bytes) — NOT constrained to the slug
-    charset — so a group name CAN still contain spaces or shell metacharacters. The
-    emitted wrapper does not interpolate either value (it is static text; slug and
-    group flow only as runtime argv), and the cd is quote-safe, so a metacharacter
-    in the resulting path is handled — but the asymmetry is recorded here.
+    Both slugs AND group names are constrained to the slug charset ^[a-z0-9-]+$.
+    The emitted wrapper does not interpolate either value (it is static text; slug
+    and group flow only as runtime argv) and the cd is quote-safe; constraining the
+    group name to the slug charset adds a defense-in-depth second layer at the
+    input so a group name can never carry a space or shell metacharacter into the
+    workspace path at all.
     """
 
     def test_slug_is_constrained_to_safe_charset(self):
@@ -347,18 +347,17 @@ class TestInputCharset:
         assert not _VALID_SLUG_RE.match("feat x")
         assert not _VALID_SLUG_RE.match("feat;rm")
 
-    def test_group_name_is_path_confined_but_not_slug_charset(self):
+    def test_group_name_is_constrained_to_slug_charset(self):
         from group_resolve import validate_group_name, GroupConfinementError
 
-        # Path-separator confinement is enforced.
-        for bad in ("a/b", "a\\b", "..", "a\x00b"):
+        # Path-separator confinement and slug-charset confinement are both enforced:
+        # a group name now rejects the same characters a slug does.
+        for bad in ("a/b", "a\\b", "..", "a\x00b", "a group", "a;b", "a$b", "AB", "ab\n"):
             with pytest.raises(GroupConfinementError):
                 validate_group_name(bad)
-        # But the slug charset is NOT enforced: a space or shell metacharacter in a
-        # group name passes validate_group_name (documented asymmetry; the emitted
-        # wrapper never interpolates it and cd is quote-safe).
-        validate_group_name("a group")  # does not raise
-        validate_group_name("a;b")  # does not raise
+        # A slug-charset group name still passes.
+        validate_group_name("a-group")
+        validate_group_name("trailhead")
 
 
 class TestNoSlug:

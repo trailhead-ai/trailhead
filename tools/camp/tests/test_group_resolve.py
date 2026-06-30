@@ -380,15 +380,32 @@ def test_repo_in_two_groups_surfaces_on_cwd_resolve(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "bad_name",
     [
+        # path-traversal / separator confinement
         "../traversal",
         "foo/bar",
         "foo\\bar",
         "a/b/../c",
         "foo\x00bar",
+        # slug-charset confinement (defense-in-depth): metacharacters, whitespace,
+        # control chars, underscores, and uppercase are all rejected
+        "a group",
+        "a;b",
+        "a$b",
+        "a&b",
+        "foo\nbar",
+        "valid\n",  # trailing newline must not slip past the end anchor (\Z, not $)
+        "foo\tbar",
+        "ai_tooling",
+        "MyGroup",
     ],
 )
 def test_group_name_confinement_rejects_path_traversal(tmp_path: Path, bad_name: str) -> None:
-    """Group names with path separators / '..' / null → named confinement error."""
+    """Group names outside the slug charset ^[a-z0-9-]+$ → named confinement error.
+
+    Covers both path-separator confinement and the defense-in-depth charset
+    tightening that rules out shell metacharacters, whitespace, control chars,
+    underscores, and uppercase.
+    """
     from group_resolve import GroupConfinementError, validate_group_name
 
     with pytest.raises(GroupConfinementError):
@@ -396,12 +413,12 @@ def test_group_name_confinement_rejects_path_traversal(tmp_path: Path, bad_name:
 
 
 def test_group_name_valid(tmp_path: Path) -> None:
-    """A valid group name passes confinement validation."""
+    """A slug-charset group name passes confinement validation."""
     from group_resolve import validate_group_name
 
     validate_group_name("my-group")
     validate_group_name("trailhead")
-    validate_group_name("ai_tooling")
+    validate_group_name("group2")
 
 
 # ---------------------------------------------------------------------------

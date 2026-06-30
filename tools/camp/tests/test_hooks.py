@@ -630,7 +630,7 @@ class TestWorktreeCleanup:
         }
 
         group = _make_group_config(
-            "cleanup_group",
+            "cleanup-group",
             [
                 {"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []},
                 {"name": "repo_b", "repo_root": str(repo_b), "bootstrap": []},
@@ -641,15 +641,15 @@ class TestWorktreeCleanup:
         state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
         reconcile_worktree(group, "feat-y", env=state_env)
 
-        wt_a = _member_wt("cleanup_group", "feat-y", "repo_a", state_env)
-        wt_b = _member_wt("cleanup_group", "feat-y", "repo_b", state_env)
+        wt_a = _member_wt("cleanup-group", "feat-y", "repo_a", state_env)
+        wt_b = _member_wt("cleanup-group", "feat-y", "repo_b", state_env)
         assert wt_a.is_dir()
         assert wt_b.is_dir()
 
         # Write the TOML config so the CLI can find the group
         toml_content = f"""
 [group]
-name = "cleanup_group"
+name = "cleanup-group"
 
 [[members]]
 name = "repo_a"
@@ -661,7 +661,7 @@ name = "repo_b"
 repo_root = "{repo_b!s}"
 bootstrap = []
 """
-        (groups_dir / "cleanup_group.toml").write_text(toml_content)
+        (groups_dir / "cleanup-group.toml").write_text(toml_content)
 
         # Run worktree-cleanup from inside wt_a (so resolution finds the group + slug)
         result = _run_worktree_cleanup(
@@ -676,7 +676,7 @@ bootstrap = []
 
         # Central manifest should be gone
         mpath = manifest_path_for(
-            "cleanup_group",
+            "cleanup-group",
             "feat-y",
             env={"CAMP_STATE_DIR": str(tmp_path / "camp-state")},
         )
@@ -699,14 +699,14 @@ bootstrap = []
         }
 
         group = _make_group_config(
-            "dirty_group",
+            "dirty-group",
             [{"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []}],
         )
 
         state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
         reconcile_worktree(group, "feat-dirty", env=state_env)
 
-        wt_a = _member_wt("dirty_group", "feat-dirty", "repo_a", state_env)
+        wt_a = _member_wt("dirty-group", "feat-dirty", "repo_a", state_env)
         assert wt_a.is_dir()
 
         # Make the worktree dirty
@@ -715,14 +715,14 @@ bootstrap = []
 
         toml_content = f"""
 [group]
-name = "dirty_group"
+name = "dirty-group"
 
 [[members]]
 name = "repo_a"
 repo_root = "{repo_a!s}"
 bootstrap = []
 """
-        (groups_dir / "dirty_group.toml").write_text(toml_content)
+        (groups_dir / "dirty-group.toml").write_text(toml_content)
 
         # Without --force, should fail (non-zero exit) with a meaningful error
         result = _run_worktree_cleanup(
@@ -751,14 +751,14 @@ bootstrap = []
         }
 
         group = _make_group_config(
-            "force_group",
+            "force-group",
             [{"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []}],
         )
 
         state_env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
         reconcile_worktree(group, "feat-force", env=state_env)
 
-        wt_a = _member_wt("force_group", "feat-force", "repo_a", state_env)
+        wt_a = _member_wt("force-group", "feat-force", "repo_a", state_env)
         assert wt_a.is_dir()
 
         # Make it dirty
@@ -766,14 +766,14 @@ bootstrap = []
 
         toml_content = f"""
 [group]
-name = "force_group"
+name = "force-group"
 
 [[members]]
 name = "repo_a"
 repo_root = "{repo_a!s}"
 bootstrap = []
 """
-        (groups_dir / "force_group.toml").write_text(toml_content)
+        (groups_dir / "force-group.toml").write_text(toml_content)
 
         result = _run_worktree_cleanup(
             cwd=str(wt_a),
