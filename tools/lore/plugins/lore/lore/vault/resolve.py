@@ -32,15 +32,14 @@ module's.
 
 Pure stdlib: no I/O.
 """
-# NOTE: deliberately no ``from __future__ import annotations``. The lore test
-# harness loads scripts via ``conftest.load_script`` (importlib without
-# registering in sys.modules); under string annotations the stdlib dataclass
-# machinery on 3.12+ looks the module up in sys.modules to resolve field
-# annotations — same caution as vault_config.py.
+# NOTE: deliberately no ``from __future__ import annotations``. Under string
+# annotations, the stdlib dataclass/NamedTuple machinery looks the defining
+# module up in ``sys.modules`` to resolve field annotations — same caution as
+# config.py.
 
 from typing import NamedTuple
 
-import vault_config as _vc
+from . import config as _vc
 
 # ---------------------------------------------------------------------------
 # Precedence table

@@ -12,6 +12,11 @@ PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
 SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
+# Makes the `lore` package (plugins/lore/lore/) importable by its dotted name,
+# for modules already migrated off the flat scripts/ bag — see load_script().
+if str(PLUGIN_ROOT) not in sys.path:
+    sys.path.insert(0, str(PLUGIN_ROOT))
+
 
 def write_default_config(config_home: Path, vault_path: Path) -> None:
     """Seed config.json under config_home with a single default-scope vault.
@@ -91,7 +96,25 @@ def make_vault(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def load_script(name: str):
-    """Load a module from plugins/lore/scripts/ by stem, freshly each call."""
+    """Load a lore module freshly each call, isolating state across tests.
+
+    ``name`` is either a bare stem of a still-flat ``scripts/`` module (e.g.
+    ``"frontmatter"``) or a dotted path into the ``lore`` package (e.g.
+    ``"lore.vault.vault"``) for a module that has already migrated there.
+
+    Bare stems load via ``spec_from_file_location`` + ``exec_module``,
+    bypassing the import system entirely — each call gets a brand-new module
+    object, deliberately never registered in ``sys.modules``.
+
+    Dotted paths load via ``importlib.import_module`` once, then
+    ``importlib.reload`` per call: relative imports (``from . import x``)
+    only resolve under the real import system, so the fresh-module-per-test
+    isolation the bare-stem path gets from ``exec_module`` comes from
+    ``reload`` instead.
+    """
+    if "." in name:
+        mod = importlib.import_module(name)
+        return importlib.reload(mod)
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
     if name in sys.modules:

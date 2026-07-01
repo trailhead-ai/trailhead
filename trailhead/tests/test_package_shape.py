@@ -11,7 +11,10 @@ Invariants:
   on sys.path (the git-clone scenario).
 - `bin/trailhead --version` works from a fresh clone with no pip install.
 - `tools/camp/plugins/camp/bin/camp --version` works the same way.
-- tools/ data dirs are NOT importable top-level packages (Option B invariant).
+- tools/craft is a data dir — NOT an importable top-level package (Option B
+  invariant). tools/lore and tools/camp are exempt from this invariant: each
+  ships a real `lore`/`camp` package (plugins/<tool>/<tool>/) so their own
+  test suites can use real relative imports; see each tool's refactor plan.
 - bare editable install does NOT pull in lore/craft/camp dists.
 """
 
@@ -114,15 +117,6 @@ def test_bin_camp_version_no_pip():
         f"bin/camp --version failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert "0.1.0" in result.stdout, f"expected '0.1.0' in output, got: {result.stdout!r}"
-
-
-def test_lore_not_importable():
-    """tools/lore is a data dir — NOT an importable top-level package (Option B invariant)."""
-    spec = importlib.util.find_spec("lore")
-    assert spec is None, (
-        f"'lore' should not be importable as a top-level package; got spec={spec}. "
-        "tools/ must not be auto-discovered by setuptools."
-    )
 
 
 def test_craft_not_importable():

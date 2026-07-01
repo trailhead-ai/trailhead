@@ -142,7 +142,7 @@ for _p in (Path(__file__).resolve(), *Path(__file__).resolve().parents):
         break
 
 _CAMP_PLUGIN_ROOT: Path | None = (
-    _TRAILHEAD_ROOT / "tools" / "camp" / "plugins" if _TRAILHEAD_ROOT else None
+    _TRAILHEAD_ROOT / "tools" / "camp" / "plugins" / "camp" if _TRAILHEAD_ROOT else None
 )
 
 
@@ -189,10 +189,10 @@ def resolve_active_group_config(
         return None  # trailhead unavailable
 
     try:
-        import camp.scripts.group_config as _gc
-        import camp.scripts.group_resolve as _gr
-        from camp.scripts.group_config import GroupConfigError
-        from camp.scripts.group_resolve import (
+        import camp.group.config as _gc
+        import camp.group.resolve as _gr
+        from camp.group.config import GroupConfigError
+        from camp.group.resolve import (
             GroupConfinementError,
             GroupResolutionError,
         )
@@ -301,8 +301,8 @@ def resolve_layers(
         Ordered list of VaultLayer, personal first.
     """
     # Function-local import keeps this module free of the vault ↔ vault_config
-    # module-load cycle (vault_config imports layers + record_model; Axiom 6).
-    from vault_config import resolve_active_vault
+    # module-load cycle (config.py imports layers + record_model; Axiom 6).
+    from .config import resolve_active_vault
 
     personal_root = resolve_active_vault()
     personal_layer = VaultLayer(

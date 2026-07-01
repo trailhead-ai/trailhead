@@ -206,9 +206,9 @@ class TestDegradation:
             sys.modules,
             {
                 "camp": None,
-                "camp.scripts": None,
-                "camp.scripts.group_config": None,
-                "camp.scripts.group_resolve": None,
+                "camp.group": None,
+                "camp.group.config": None,
+                "camp.group.resolve": None,
             },
         ):
             result = _resolve_group_scopes(cwd=tmp_path, groups_dir=groups_dir)
@@ -294,11 +294,11 @@ class TestDegradation:
         groups_dir.mkdir()
 
         camp_plugins = (
-            Path(__file__).resolve().parents[3] / "tools" / "camp" / "plugins"
+            Path(__file__).resolve().parents[3] / "tools" / "camp" / "plugins" / "camp"
         )
         if str(camp_plugins) not in sys.path:
             sys.path.insert(0, str(camp_plugins))
-        import camp.scripts.group_config as camp_gc
+        import camp.group.config as camp_gc
 
         def _raise_oserror(_groups_dir):
             raise OSError("simulated unreadable group config")

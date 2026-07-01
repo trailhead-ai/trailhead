@@ -33,7 +33,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 # The camp plugin root must be on sys.path for the lazy import to succeed.
-_CAMP_PLUGIN_ROOT = str(Path(__file__).resolve().parents[4] / "camp" / "plugins")
+_CAMP_PLUGIN_ROOT = str(Path(__file__).resolve().parents[3] / "tools" / "camp" / "plugins" / "camp")
 if _CAMP_PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, _CAMP_PLUGIN_ROOT)
 
@@ -73,7 +73,7 @@ def _write_group_config(
 
 
 def _layers():
-    return load_script("layers")
+    return load_script("lore.vault.layers")
 
 
 def _seed_personal(tmp_path: Path, personal_root: Path):
@@ -262,9 +262,9 @@ class TestCampAbsent:
             sys.modules,
             {
                 "camp": None,
-                "camp.scripts": None,
-                "camp.scripts.group_config": None,
-                "camp.scripts.group_resolve": None,
+                "camp.group": None,
+                "camp.group.config": None,
+                "camp.group.resolve": None,
             },
         ):
             with _seed_personal(tmp_path, personal_root):

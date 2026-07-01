@@ -71,18 +71,17 @@ converts it to ``trailhead-ai_trailhead`` first; the validator then passes.
 
 Pure stdlib: ``json``, ``os``, ``pathlib``.
 """
-# NOTE: deliberately no ``from __future__ import annotations``. The lore test
-# harness loads scripts via ``conftest.load_script`` (importlib without
-# registering in sys.modules); under string annotations the stdlib dataclass
-# machinery on 3.12+ looks the module up in sys.modules to resolve field
-# annotations — same caution as record_model.py.
+# NOTE: deliberately no ``from __future__ import annotations``. Under string
+# annotations, the stdlib dataclass/NamedTuple machinery looks the defining
+# module up in ``sys.modules`` to resolve field annotations — same caution as
+# record_model.py.
 
 import json
 import os
 from pathlib import Path
 from typing import NamedTuple
 
-import layers
+from . import layers
 import record_model
 
 # ---------------------------------------------------------------------------

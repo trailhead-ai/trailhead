@@ -186,7 +186,7 @@ def test_smoke_direct_import_resolve_active_vault_no_lore_vault(tmp_path, monkey
     monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
     monkeypatch.delenv("LORE_VAULT", raising=False)
 
-    vc = load_script("vault_config")
+    vc = load_script("lore.vault.config")
     resolved = vc.resolve_active_vault(env=None)  # env=None → reads os.environ
 
     assert resolved == vault_dir.resolve(), (

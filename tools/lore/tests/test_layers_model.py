@@ -42,7 +42,7 @@ _CLI_LORE = REPO_ROOT / "plugins" / "lore" / "cli" / "lore"
 
 
 def _layers():
-    return load_script("layers")
+    return load_script("lore.vault.layers")
 
 
 def _bootstrap():

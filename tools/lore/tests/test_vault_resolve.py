@@ -22,7 +22,7 @@ from conftest import load_script
 
 
 def vr():
-    return load_script("vault_resolve")
+    return load_script("lore.vault.resolve")
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ def vr():
 
 def _make_vault(name, scope, records=None, shared=False):
     """Build a lightweight Vault-like namedtuple via vault_config for these tests."""
-    vc = load_script("vault_config")
+    vc = load_script("lore.vault.config")
     from pathlib import Path
 
     return vc.Vault(

@@ -64,7 +64,7 @@ from typing import Any, NamedTuple, Optional
 
 import index_store
 import record_model
-import vault as vault_mod
+from lore.vault import vault as vault_mod
 
 # ---------------------------------------------------------------------------
 # Types
@@ -365,7 +365,7 @@ def _active_vault_root() -> str:
     ``record_model``) keeps this module free of the ``vault ↔ vault_config``
     module-load cycle — ``vault.py`` stays pure-stdlib (Axiom 6).
     """
-    import vault_config
+    from lore.vault import config as vault_config
     return str(vault_config.resolve_active_vault())
 
 
