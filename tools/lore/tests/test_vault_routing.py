@@ -21,17 +21,17 @@ Covers the test contract:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
-from conftest import make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
-
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
+from conftest import (  # noqa: F401
+    load_script,
+    make_vault as _make_vault,
+    run_cli as _run,
+    write_default_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -40,14 +40,7 @@ SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 
 
 def _load_index_store():
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    spec = importlib.util.spec_from_file_location(
-        "index_store_routing", SCRIPTS_DIR / "index_store.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script("lore.search.index")
 
 
 def _row_shared(state: Path, vault_path: str, kind: str, name: str):

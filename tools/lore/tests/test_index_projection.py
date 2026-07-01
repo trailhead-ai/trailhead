@@ -28,28 +28,15 @@ All assertions run against a tmp ``$XDG_STATE_HOME`` index — never the real va
 import json
 import os
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
+from conftest import load_script
 
 
 def load_index_store():
     """Load index_store freshly each call."""
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    name = "index_store"
-    if name in sys.modules:
-        del sys.modules[name]
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script("lore.search.index")
 
 
 # ---------------------------------------------------------------------------

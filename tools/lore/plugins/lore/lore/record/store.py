@@ -62,7 +62,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-import index_store
+from ..search import index as index_store
 from ..vault import vault as vault_mod
 from . import model as record_model
 

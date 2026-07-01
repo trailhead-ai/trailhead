@@ -95,7 +95,7 @@ def _flush(vault, state, sid=SID):
 
 
 def _index_status(state: Path, key: str = SID):
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
     try:
         row = conn.execute(

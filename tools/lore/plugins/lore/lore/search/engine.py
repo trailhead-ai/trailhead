@@ -59,18 +59,12 @@ happens at render time when wired — never at import time.
 from __future__ import annotations
 
 import json as _json
-import sys
 from pathlib import Path
 
-# Ensure sibling scripts resolve when loaded standalone.
-_SCRIPTS_DIR = Path(__file__).parent
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
-
-import index_store as _index_store  # noqa: E402
-import kql as _kql  # noqa: E402
-import kql_compile as _kql_compile  # noqa: E402
-from xml_escape import wrap_shared, xml_body_escape  # noqa: E402
+from . import index as _index_store
+from . import kql as _kql
+from . import kql_compile as _kql_compile
+from .xml_escape import wrap_shared, xml_body_escape
 
 # Reverse-edge alias surface names (the facets whose membership is materialized in
 # reindex pass 2; a query using them gets the "run lore reindex" completeness note).

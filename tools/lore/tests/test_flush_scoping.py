@@ -493,7 +493,7 @@ class TestKqlInjectionSafety:
         assert _sidecar(vault, SID_A)["status"] == "dirty", "no injection side effect"
 
         # The records table still exists + still holds the session row (not dropped).
-        index_store = load_script("index_store")
+        index_store = load_script("lore.search.index")
         conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
         try:
             row = conn.execute(
@@ -511,8 +511,8 @@ class TestKqlInjectionSafety:
         Directly exercises the named guard — ``kql_compile.compile`` — proving the
         dangerous string lands in ``params`` (bound), never in the SQL text.
         """
-        kql = load_script("kql")
-        kql_compile = load_script("kql_compile")
+        kql = load_script("lore.search.kql")
+        kql_compile = load_script("lore.search.kql_compile")
         evil = "x; DROP TABLE records; --"
         ast = kql.parse(f'status:"{evil}"')
         cq = kql_compile.compile(ast)

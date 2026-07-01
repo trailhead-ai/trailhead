@@ -205,7 +205,7 @@ def is_configured_vault(name: str, vaults: list) -> bool:
 def _resolve_vaults_root(env: dict | None = None) -> Path:
     """Return ``state_dir("lore")/vaults`` honoring XDG overrides.
 
-    Mirrors the ``_resolve_index_path`` pattern in ``index_store.py``:
+    Mirrors the ``_resolve_index_path`` pattern in ``lore/search/index.py``:
     lazy-import ``_bootstrap`` + ``trailhead.paths``, catch
     ``(ImportError, SystemExit)`` and fall back to the XDG default.
 

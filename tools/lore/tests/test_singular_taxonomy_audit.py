@@ -148,7 +148,7 @@ class TestSingularDirAudit:
 
     def test_frontmatter_slug_prefixes_are_singular(self):
         """frontmatter._SLUG_PREFIXES is singularized."""
-        fm = load_script("frontmatter")
+        fm = load_script("lore.search.frontmatter")
         assert "area/" in fm._SLUG_PREFIXES
         assert "plan/" in fm._SLUG_PREFIXES
         assert "areas/" not in fm._SLUG_PREFIXES

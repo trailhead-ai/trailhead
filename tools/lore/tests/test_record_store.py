@@ -54,7 +54,7 @@ def rs():
 
 @pytest.fixture()
 def index():
-    return load_script("index_store")
+    return load_script("lore.search.index")
 
 
 @pytest.fixture()

@@ -26,42 +26,25 @@ then the ranking-subquery MATCH param (only when full-text present), then LIMIT.
 import json
 import os
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
-
-
-def load_script(name: str):
-    """Load a module from plugins/lore/scripts/ by stem, freshly each call."""
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    if name in sys.modules:
-        del sys.modules[name]
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from conftest import load_script
 
 
 @pytest.fixture()
 def kql():
-    return load_script("kql")
+    return load_script("lore.search.kql")
 
 
 @pytest.fixture()
 def compiler():
-    return load_script("kql_compile")
+    return load_script("lore.search.kql_compile")
 
 
 @pytest.fixture()
 def index_store():
-    return load_script("index_store")
+    return load_script("lore.search.index")
 
 
 # ---------------------------------------------------------------------------
@@ -592,7 +575,7 @@ class TestParamAlignment:
 
 class TestInjectionSafety:
     def test_scalar_value_is_bound_not_interpolated(self, kql, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         inject_ast = kql_mod.FieldEq(field="kind", value="penny' OR '1'='1")
         cq = compiler.compile(inject_ast)
         assert "penny' OR '1'='1" not in cq.where
@@ -600,14 +583,14 @@ class TestInjectionSafety:
 
     def test_injection_value_returns_no_spurious_rows(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         inject_ast = kql_mod.FieldEq(field="kind", value="penny' OR '1'='1")
         cq = compiler.compile(inject_ast)
         rows = conn.execute(cq.full_query(), cq.params).fetchall()
         assert rows == [], f"injection payload returned {len(rows)} spurious rows"
 
     def test_facet_injection_in_value_is_bound(self, kql, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         inject_ast = kql_mod.FacetMembership(facet="area", value="foo' OR '1'='1")
         cq = compiler.compile(inject_ast)
         assert "foo' OR '1'='1" not in cq.where
@@ -621,7 +604,7 @@ class TestInjectionSafety:
 
 class TestCompareOpGuard:
     def test_invalid_op_raises_value_error(self, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         bad = kql_mod.Compare(field="created-at", op="; DROP TABLE records;--", value="x")
         with pytest.raises(ValueError) as exc:
             compiler.compile(bad)
@@ -640,14 +623,14 @@ class TestCompareOpGuard:
 
 class TestUnknownColumnGuard:
     def test_unknown_field_eq_column_raises(self, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         node = kql_mod.FieldEq(field="evil_col", value="x")
         with pytest.raises(ValueError) as exc:
             compiler.compile(node)
         assert "evil_col" not in str(exc.value)
 
     def test_unknown_compare_column_raises(self, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         node = kql_mod.Compare(field="evil_col", op=">=", value="x")
         with pytest.raises(ValueError) as exc:
             compiler.compile(node)
@@ -679,7 +662,7 @@ class TestFtsSanitizer:
         self, kql, compiler, fixture_index, term
     ):
         conn, vault, env = fixture_index
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         ast = kql_mod.FullText(term=term)
         cq = compiler.compile(ast)
         try:
@@ -694,19 +677,19 @@ class TestFtsSanitizer:
         assert "zephyr" in cq.params  # emitted bare, not '"zephyr"'
 
     def test_reserved_op_term_is_quoted(self, kql, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         cq = compiler.compile(kql_mod.FullText(term="AND"))
         assert '"AND"' in cq.params
 
     def test_dotted_term_stays_unquoted(self, kql, compiler):
         """A token matching the allowlist (dot/hyphen/underscore) stays bare."""
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         cq = compiler.compile(kql_mod.FullText(term="phi-scrubber.v2"))
         assert "phi-scrubber.v2" in cq.params
 
     def test_single_quote_term_becomes_quoted_literal(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         cq = compiler.compile(kql_mod.FullText(term="foo'bar"))
         try:
             rows = conn.execute(cq.full_query(), cq.params).fetchall()
@@ -715,13 +698,13 @@ class TestFtsSanitizer:
         assert rows == []
 
     def test_phrase_always_wrapped(self, kql, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         cq = compiler.compile(kql_mod.Phrase(text="penny worker"))
         assert '"penny worker"' in cq.params
 
     def test_phrase_with_stray_quotes_sanitized(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         cq = compiler.compile(kql_mod.Phrase(text='penny" OR "1"="1'))
         try:
             rows = conn.execute(cq.full_query(), cq.params).fetchall()
@@ -738,7 +721,7 @@ class TestFtsSanitizer:
 class TestEmptyAfterStrip:
     @pytest.mark.parametrize("term", ['"', "\\", '""'])
     def test_empty_after_strip_raises(self, compiler, term):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         node = kql_mod.FullText(term=term)
         with pytest.raises(ValueError) as exc:
             compiler.compile(node)
@@ -746,7 +729,7 @@ class TestEmptyAfterStrip:
         assert term not in str(exc.value) or term == ""
 
     def test_empty_phrase_raises(self, compiler):
-        kql_mod = load_script("kql")
+        kql_mod = load_script("lore.search.kql")
         node = kql_mod.Phrase(text='""')
         with pytest.raises(ValueError):
             compiler.compile(node)

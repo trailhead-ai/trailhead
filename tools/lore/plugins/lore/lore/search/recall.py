@@ -29,16 +29,10 @@ Interpreter gotcha: ``@dataclass`` + ``importlib``-loaded module +
 field resolution — this module OMITS that future import for that reason.
 """
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# Ensure the scripts directory is on the path so sibling modules resolve.
-_SCRIPTS_DIR = Path(__file__).parent
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
-
-import frontmatter as _fm_mod  # noqa: E402
+from . import frontmatter as _fm_mod
 
 # Hard caps
 _ONE_LINER_MAX = 120

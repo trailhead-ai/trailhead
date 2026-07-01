@@ -2,7 +2,7 @@
 
 The single source of truth for the shared-content wrapping that guards against
 prompt-injection from untrusted (shared-vault) note content. Extracted out of
-``recall.py`` so the consumer — ``search.py`` — does not depend on
+``recall.py`` so the consumer — ``engine.py`` — does not depend on
 ``recall.py``. ``recall.py`` imports these helpers; there is
 one implementation of the wrapper logic.
 

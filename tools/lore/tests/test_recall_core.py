@@ -16,33 +16,14 @@ the SessionStart pointer. ``lore search`` is the query interface.
     - area with no summary and no usable Overview: appears with empty one-liner
 """
 
-import importlib.util
-import sys
 from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).parent.parent
-PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
+from conftest import load_script
 
 
 def load_recall():
     """Load recall module freshly each call to avoid state pollution."""
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in (
-        "recall",
-        "vault",
-        "frontmatter",
-        "sessions",
-    ):
-        sys.modules.pop(cached, None)
-    spec = importlib.util.spec_from_file_location("recall", SCRIPTS_DIR / "recall.py")
-    mod = importlib.util.module_from_spec(spec)
-    # Register in sys.modules before exec so @dataclass can resolve cls.__module__
-    sys.modules["recall"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script("lore.search.recall")
 
 
 # ---------------------------------------------------------------------------

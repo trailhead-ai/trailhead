@@ -28,16 +28,12 @@ config.json (isolated XDG_CONFIG_HOME) and XDG_STATE_HOME is fenced too.
 from __future__ import annotations
 
 import difflib
-import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
 from conftest import load_script, make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
-
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 
 
 # ---------------------------------------------------------------------------
@@ -57,11 +53,7 @@ def _find_body(vault: Path, record_id: str) -> str:
 
 def _open_index(state: Path):
     """Open the derived index for assertions (matches the create-test pattern)."""
-    spec = importlib.util.spec_from_file_location(
-        "index_store_test", SCRIPTS_DIR / "index_store.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = load_script("lore.search.index")
     return mod.open_index(env={"XDG_STATE_HOME": str(state)})
 
 

@@ -63,7 +63,7 @@ class TestAreaPointerCallSite:
         """The area-pointer (serve `lore areas` / recall flows) must point at
         `lore search`, not the removed `lore recall`.
         Area profiles live under area/ (singular), not areas/."""
-        recall = load_script("recall")
+        recall = load_script("lore.search.recall")
         vault = tmp_path / "vault"
         (vault / "area").mkdir(parents=True)
         (vault / "area" / "penny.md").write_text(

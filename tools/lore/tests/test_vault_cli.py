@@ -109,7 +109,7 @@ def _sidecar(kind, name, title):
 
 
 def _open_index(state):
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     return index_store.open_index(env={"XDG_STATE_HOME": str(state)})
 
 

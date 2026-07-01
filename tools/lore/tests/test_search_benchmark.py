@@ -90,7 +90,7 @@ def _build_corpus(vault: Path, n: int) -> None:
 
 
 def _build_index(state_dir: Path, vault: Path):
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     env = {"XDG_STATE_HOME": str(state_dir)}
     conn = index_store.open_index(env=env)
     try:
@@ -116,9 +116,9 @@ def _measure_query_p95(state_dir: Path, *, runs: int = 30) -> float:
     parses + compiles the representative query, executes the single SQL query, and
     drains the rows. Returns the p95 in milliseconds.
     """
-    index_store = load_script("index_store")
-    kql = load_script("kql")
-    kql_compile = load_script("kql_compile")
+    index_store = load_script("lore.search.index")
+    kql = load_script("lore.search.kql")
+    kql_compile = load_script("lore.search.kql_compile")
     env = {"XDG_STATE_HOME": str(state_dir)}
 
     samples_ms: list[float] = []

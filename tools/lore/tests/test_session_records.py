@@ -64,7 +64,7 @@ def _sidecar(vault: Path, key: str) -> dict:
 
 
 def _index_rows(state: Path, name: str | None = None):
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
     try:
         if name is None:
@@ -81,7 +81,7 @@ def _index_rows(state: Path, name: str | None = None):
 
 
 def _fts_body(state: Path, name: str) -> str | None:
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
     try:
         row = conn.execute(

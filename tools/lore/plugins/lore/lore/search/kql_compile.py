@@ -1,7 +1,7 @@
 """KQL AST → SQL compiler.
 
 Compiles a backend-agnostic KQL AST (produced by ``kql.py``) into a parameterized
-SQL fragment set for execution against the realized index schema (``index_store.py``).
+SQL fragment set for execution against the realized index schema (``lore/search/index.py``).
 
 No I/O, no sqlite execution, no imports from kql.py — takes AST node objects and
 returns a :class:`CompiledQuery`. The caller executes the query.

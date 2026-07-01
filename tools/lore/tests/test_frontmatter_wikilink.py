@@ -29,7 +29,7 @@ from conftest import load_script
 
 def _fm(text: str) -> dict:
     """Parse frontmatter from a raw YAML string (between the ---s)."""
-    fm_mod = load_script("frontmatter")
+    fm_mod = load_script("lore.search.frontmatter")
     full = f"---\n{text}\n---\n\nbody\n"
     return fm_mod._parse_fm_text(full)
 

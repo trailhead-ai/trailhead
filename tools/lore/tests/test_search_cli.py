@@ -33,7 +33,7 @@ def _write_record(vault: Path, kind: str, name: str, sidecar: dict, body: str):
 
 def _build_index(state_dir: Path, vaults: list[Path], owned: Path | None = None):
     """Build a fixture index at ``state_dir`` over the given vault roots."""
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     env = {"XDG_STATE_HOME": str(state_dir)}
     conn = index_store.open_index(env=env)
     try:
@@ -537,7 +537,7 @@ def test_is_shared_pure_function(tmp_path):
     ANY other value — 1, None, "", a string, 2, "0" — → shared (fenced).
     This verifies the fail-safe default without needing a DB at all.
     """
-    search = load_script("search")
+    search = load_script("lore.search.engine")
     is_shared = search._is_shared
 
     # Only the integer 0 is trusted (unfenced).
@@ -558,7 +558,7 @@ def test_nonstandard_shared_value_rendered_as_shared(tmp_path):
     NOT silently dropped. Proves the fail-safe classification: any value that is
     not integer 0 → shared (fenced), never leaked as trusted.
     """
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     personal = tmp_path / "personal"
     shared_vault = tmp_path / "shared"
     state = tmp_path / "state"
@@ -735,7 +735,7 @@ def test_search_does_not_mutate_index(tmp_path):
 
 def test_search_does_not_bump_last_referenced_at(tmp_path):
     personal, shared, state = _make_fixture(tmp_path)
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     env = {"XDG_STATE_HOME": str(state)}
 
     def _lref():
