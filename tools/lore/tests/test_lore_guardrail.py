@@ -536,6 +536,33 @@ class TestInitInstallsGuardrail:
             f"guard matcher must be Edit|Write, got {matchers!r}"
         )
 
+    def test_guard_command_is_an_absolute_resolved_path_not_a_placeholder(self, tmp_path):
+        """The installed command must NOT rely on ``${CLAUDE_PLUGIN_ROOT}``.
+
+        This hook is wired into user-global settings.json, not declared via a
+        plugin manifest, so Claude Code never expands that variable here — it
+        would degrade to a literal, nonexistent ``/hooks/vault-guard.py`` path.
+        The command must instead carry an absolute path that actually resolves
+        to the real ``hooks/vault-guard.py`` file on disk.
+        """
+        state, config, home = _dirs(tmp_path)
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+
+        _, data = self._read_user_settings(home)
+        cmds = [c for c in self._pretooluse_commands(data) if "vault-guard" in c]
+        assert cmds, "no vault-guard PreToolUse command installed"
+        for cmd in cmds:
+            assert "${CLAUDE_PLUGIN_ROOT}" not in cmd, (
+                f"guard command must not depend on the unexpanded "
+                f"${{CLAUDE_PLUGIN_ROOT}} placeholder: {cmd!r}"
+            )
+            assert str(GUARD_SCRIPT) in cmd, (
+                f"guard command must carry the resolved absolute path to "
+                f"{GUARD_SCRIPT}, got: {cmd!r}"
+            )
+            assert Path(GUARD_SCRIPT).is_absolute()
+
     def test_init_sets_guard_root_env(self, tmp_path):
         """The settings must give the hook the vault root via LORE_VAULT_GUARD_ROOT,
         pointing at the absolute vaults dir under XDG_STATE_HOME."""

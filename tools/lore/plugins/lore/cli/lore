@@ -6,8 +6,9 @@ live behind subcommands here. Run ``lore --help`` (or ``lore <cmd> --help``) for
 the authoritative, self-describing subcommand list — this docstring deliberately
 does not restate it, so the two can't drift.
 """
-# Finds its sibling ../scripts modules at import time so it works whether run
-# from the repo or from an installed plugin (${CLAUDE_PLUGIN_ROOT}/cli/lore).
+# Finds its sibling ../scripts modules and the ../lore package at import time
+# so it works whether run from the repo or from an installed plugin
+# (${CLAUDE_PLUGIN_ROOT}/cli/lore).
 from __future__ import annotations
 
 import argparse
@@ -23,20 +24,21 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import agent_ruleset as agent_ruleset_mod  # noqa: E402
 import index_store as index_store_mod  # noqa: E402
 import installer as installer_mod  # noqa: E402
-import layers as layers_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
 import record_model as record_model_mod  # noqa: E402
 import record_store as record_store_mod  # noqa: E402
 import search as search_mod  # noqa: E402
 import session_store as session_store_mod  # noqa: E402
 import settings_writer as settings_writer_mod  # noqa: E402
-import vault as vault_mod  # noqa: E402
-import vault_config as vault_config_mod  # noqa: E402
-import vault_resolve as vault_resolve_mod  # noqa: E402
+from lore.vault import config as vault_config_mod  # noqa: E402
+from lore.vault import layers as layers_mod  # noqa: E402
+from lore.vault import resolve as vault_resolve_mod  # noqa: E402
+from lore.vault import vault as vault_mod  # noqa: E402
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
@@ -287,12 +289,19 @@ def _seed_or_merge_config(config_path: Path) -> None:
         print(f"Merged default vault entry into config at {config_path}")
 
 
-# The PreToolUse guard command. ``${CLAUDE_PLUGIN_ROOT}`` is expanded by Claude
-# Code at hook-run time, so the wired command stays valid wherever the plugin is
-# installed (and the hook canonicalizes paths on every invocation).
-_GUARD_COMMAND = (
-    'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/vault-guard.py"'
-)
+# The PreToolUse guard command. This hook is wired into user-GLOBAL
+# settings.json, not declared via a plugin manifest — Claude Code only expands
+# ``${CLAUDE_PLUGIN_ROOT}`` for hooks an installed plugin declares in its OWN
+# manifest, never for a hook hand-written into settings.json. So the command
+# below carries an absolute path resolved from this CLI's own location
+# (``PLUGIN_ROOT``, above) rather than the placeholder, which would otherwise
+# expand to nothing and silently disable the guard. Valid whether ``lore init``
+# runs from the source tree (dev) or a composed/installed plugin, since
+# ``hooks/`` is always a sibling of ``cli/`` under the plugin root (and the
+# hook itself canonicalizes paths on every invocation).
+def _guard_command() -> str:
+    guard_script = PLUGIN_ROOT / "hooks" / "vault-guard.py"
+    return f'python3 "{guard_script}"'
 # The matcher covers every file-mutating tool that carries a target path:
 # Edit/Write/MultiEdit use ``file_path``; NotebookEdit uses ``notebook_path``.
 # Bash is intentionally absent — its writes are opaque at PreToolUse time and are
@@ -333,7 +342,7 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     guard_root_value = _GUARD_ROOT_DELIM.join([str(vaults_root), str(default_link)])
 
     settings_writer_mod.upsert_hook(
-        settings_path, "PreToolUse", _GUARD_COMMAND, matcher=_GUARD_MATCHER
+        settings_path, "PreToolUse", _guard_command(), matcher=_GUARD_MATCHER
     )
     settings_writer_mod.set_env_var(
         settings_path, "LORE_VAULT_GUARD_ROOT", guard_root_value
