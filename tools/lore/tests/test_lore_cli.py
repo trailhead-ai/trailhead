@@ -44,6 +44,9 @@ def _run_init(tmp_path, extra_args=None, cwd=None):
     env = {
         "XDG_STATE_HOME": str(state),
         "XDG_CONFIG_HOME": str(config),
+        # init installs the vault-guard into ~/.claude/settings.json (resolved via
+        # Path.home()); isolate HOME so it lands in tmp, never the real file.
+        "HOME": str(tmp_path / "home"),
     }
     return run_cli(args, env=env, cwd=cwd), state, config
 
