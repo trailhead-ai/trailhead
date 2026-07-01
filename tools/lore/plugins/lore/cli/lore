@@ -30,11 +30,11 @@ import agent_ruleset as agent_ruleset_mod  # noqa: E402
 import index_store as index_store_mod  # noqa: E402
 import installer as installer_mod  # noqa: E402
 import recall as recall_mod  # noqa: E402
-import record_model as record_model_mod  # noqa: E402
-import record_store as record_store_mod  # noqa: E402
 import search as search_mod  # noqa: E402
 import session_store as session_store_mod  # noqa: E402
 import settings_writer as settings_writer_mod  # noqa: E402
+from lore.record import model as record_model_mod  # noqa: E402
+from lore.record import store as record_store_mod  # noqa: E402
 from lore.vault import config as vault_config_mod  # noqa: E402
 from lore.vault import layers as layers_mod  # noqa: E402
 from lore.vault import resolve as vault_resolve_mod  # noqa: E402

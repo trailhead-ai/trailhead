@@ -2,15 +2,14 @@
 
 Pins the declarative model (kinds, per-kind status vocab, phases, the
 v1 field schema) and the pure accessors, plus the pure ``validate``
-contract. Loaded via ``conftest.load_script("record_model")`` like every other
-lore script.
+contract. Loaded via ``conftest.load_script("lore.record.model")``.
 """
 
 from conftest import load_script
 
 
 def rm():
-    return load_script("record_model")
+    return load_script("lore.record.model")
 
 
 # --- declarative model + accessors ---------------------------------

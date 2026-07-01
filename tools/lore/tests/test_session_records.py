@@ -186,7 +186,7 @@ class TestCleanToDirty:
         # Re-run the index to reflect the clean state first (use a fresh candidate
         # would re-dirty; instead assert via the next candidate). Write the clean
         # sidecar atomically through the record store helper to mirror real writes.
-        record_store = load_script("record_store")
+        record_store = load_script("lore.record.store")
         record_store.write_temp_then_rename(
             js, json.dumps(side, sort_keys=True, separators=(",", ":"))
         )
@@ -230,7 +230,7 @@ class TestReferenced:
         side = json.loads(js.read_text())
         side["status"] = "clean"
         side.pop("last-referenced-at", None)
-        record_store = load_script("record_store")
+        record_store = load_script("lore.record.store")
         record_store.write_temp_then_rename(
             js, json.dumps(side, sort_keys=True, separators=(",", ":"))
         )

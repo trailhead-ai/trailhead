@@ -28,13 +28,12 @@ Invariants:
   classification/retention for them is owned by the CLI (which writes them); this
   module only fixes the keys' shape.
 """
-# NOTE: deliberately no ``from __future__ import annotations``. The lore test
-# harness loads scripts via ``conftest.load_script`` (importlib without
-# registering in ``sys.modules``); under string annotations the stdlib
-# ``@dataclass`` machinery on 3.12+ looks the module up in ``sys.modules`` to
-# resolve field annotations and crashes when it is absent. Evaluating
-# annotations eagerly (no future import) sidesteps that — every annotation here
-# is a valid runtime expression on 3.11+ and there are no forward references.
+# NOTE: deliberately no ``from __future__ import annotations``. Under string
+# annotations, the stdlib ``@dataclass`` machinery on 3.12+ looks the defining
+# module up in ``sys.modules`` to resolve field annotations and crashes when it
+# is absent. Evaluating annotations eagerly (no future import) sidesteps that —
+# every annotation here is a valid runtime expression on 3.11+ and there are no
+# forward references.
 
 import re
 from dataclasses import dataclass

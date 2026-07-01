@@ -82,7 +82,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import layers
-import record_model
+from ..record import model as record_model
 
 # ---------------------------------------------------------------------------
 # Constants

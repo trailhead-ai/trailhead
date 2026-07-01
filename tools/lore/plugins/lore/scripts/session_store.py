@@ -73,7 +73,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import index_store as index_store_mod
-import record_store as record_store_mod
+from lore.record import store as record_store_mod
 
 # Canonical UUID shape (Claude Code session ids are UUIDs, e.g. v4). We accept the
 # standard 8-4-4-4-12 hex form, case-insensitive. This is intentionally strict: it

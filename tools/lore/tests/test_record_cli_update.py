@@ -723,7 +723,7 @@ def test_update_move_to_flag_is_removed(tmp_path):
 
 @pytest.fixture
 def rs():
-    return load_script("record_store")
+    return load_script("lore.record.store")
 
 
 class TestApplierCleanApply:

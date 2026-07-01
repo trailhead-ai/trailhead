@@ -14,8 +14,15 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
 # Makes the `lore` package (plugins/lore/lore/) importable by its dotted name,
 # for modules already migrated off the flat scripts/ bag — see load_script().
+# scripts/ itself is also inserted unconditionally (not just lazily inside
+# load_script's bare-stem branch): a migrated package module can still reach a
+# not-yet-migrated scripts/ module by bare name (e.g. lore.record.store imports
+# index_store), and that import must resolve regardless of which test happens
+# to run first in the session.
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 
 def write_default_config(config_home: Path, vault_path: Path) -> None:
