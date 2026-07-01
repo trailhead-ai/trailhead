@@ -76,18 +76,18 @@ class TestSessionIdSanitization:
 
     def test_sanitizer_rejects_nul_byte_at_library_level(self):
         """NUL cannot traverse argv (execve rejects it) — assert at the lib level."""
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         with pytest.raises(store.InvalidSessionIdError):
             store.sanitize_session_id("11111111-2222-4333-8444-55555555\x005")
 
     @pytest.mark.parametrize("bad", ["", "not-a-guid", "../x", "a/b", "..", "."])
     def test_sanitizer_rejects_non_guid(self, bad):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         with pytest.raises(store.InvalidSessionIdError):
             store.sanitize_session_id(bad)
 
     def test_sanitizer_accepts_canonical_guid(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         assert store.sanitize_session_id(SID) == SID
 
 

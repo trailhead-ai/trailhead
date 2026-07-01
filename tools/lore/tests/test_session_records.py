@@ -298,7 +298,7 @@ class TestWorktreeConfinement:
             assert not any(sdir.iterdir()), "no partial write on rejection"
 
     def test_sanitize_worktree_name_unit(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         # Accepts a plain allowlist name.
         assert store.sanitize_worktree_name("lore-flush") == "lore-flush"
         assert store.sanitize_worktree_name("Feat_123") == "Feat_123"
