@@ -74,7 +74,7 @@ Pure stdlib: ``json``, ``os``, ``pathlib``.
 # NOTE: deliberately no ``from __future__ import annotations``. Under string
 # annotations, the stdlib dataclass/NamedTuple machinery looks the defining
 # module up in ``sys.modules`` to resolve field annotations — same caution as
-# record_model.py.
+# ``lore/record/model.py``.
 
 import json
 import os

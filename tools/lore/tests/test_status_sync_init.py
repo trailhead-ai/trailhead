@@ -6,7 +6,7 @@ lore init git-init wiring:
   - fresh dir produces a git repo (.git/ exists)
   - init installs NO pre-commit hook (the old vault-integrity hook subsystem was
     retired; record validation now lives in the `lore record` CLI via
-    record_model.py)
+    lore/record/model.py)
   - re-running init does not re-initialize an existing repo
 
 lore sync:
