@@ -7,7 +7,7 @@ This test verifies:
   2. No tools/*/.claude-plugin/marketplace.json remains.
   3. Repo-wide grep guard: no trailhead-{lore,camp,craft,portage,landing} marketplace
      names and no @trailhead-<tool> / <tool>-local install refs remain in source/docs
-     (excluding bin/migrate-marketplaces.sh and trailhead/tests/).
+     (excluding trailhead/tests/).
 
 Write BEFORE implementation — these tests must fail RED first, then pass GREEN after.
 """
