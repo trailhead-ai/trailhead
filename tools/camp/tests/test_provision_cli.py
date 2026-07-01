@@ -31,6 +31,8 @@ _SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _init_git_repo(path: Path) -> None:
@@ -184,10 +186,10 @@ class TestCampSetup:
 
 class TestCampStatusExitCodes:
     def _seed_states(self, cli_env, slug, states):
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
         from provision import seed_pending_workspace
-        from manifest import flip_member_state_unlocked, reconcile_lock
-        from group_config import load_group
+        from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
+        from camp.group.config import load_group
 
         group = load_group(cli_env["config_dir"] / "groups" / "mygroup.toml")
         env = {"CAMP_STATE_DIR": str(cli_env["state_dir"])}

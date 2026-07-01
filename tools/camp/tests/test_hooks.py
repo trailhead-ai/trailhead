@@ -56,11 +56,14 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 _BIN_CAMP = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "bin" / "camp"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +117,7 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> Path:
     """Return the unified-layout worktree path:
     central_state_dir(group)/worktrees/<slug>/<member>."""
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     return central_state_dir(group_name, env=env) / "worktrees" / slug / member
 
@@ -611,7 +614,7 @@ class TestWorktreeCleanup:
     def test_removes_member_worktrees_and_manifest(self, tmp_path: Path):
         """worktree-cleanup removes member worktrees + central manifest."""
         from reconcile import reconcile_worktree
-        from manifest import manifest_path_for
+        from camp.group.manifest import manifest_path_for
 
         # CAMP_CONFIG_DIR override: config_dir("camp") returns the override directly.
         # groups/ lives at <camp_config_dir>/groups, not <camp_config_dir>/camp/groups.

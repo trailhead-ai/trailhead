@@ -39,7 +39,7 @@ def _find_member_config(group: dict[str, Any], member_name: str) -> dict[str, An
 
 def _mark_activated(mpath: Path, member_name: str) -> None:
     """Atomically set activated=True for the named member in the manifest."""
-    from manifest import read_central_manifest, write_central_manifest, reconcile_lock
+    from camp.group.manifest import read_central_manifest, write_central_manifest, reconcile_lock
 
     with reconcile_lock(mpath.parent):
         data = read_central_manifest(mpath)
@@ -135,7 +135,7 @@ def enter_member(
         MemberNotReadyError: If the member is not in the 'ready' state.
         ValueError: If the member name is not found in the manifest.
     """
-    from manifest import manifest_path_for, read_central_manifest
+    from camp.group.manifest import manifest_path_for, read_central_manifest
 
     if profile is None:
         from harness_profile import resolve_harness_profile

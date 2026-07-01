@@ -36,6 +36,8 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _init_git_repo(path: Path) -> None:
@@ -77,7 +79,7 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 
 
 def _workspace_dir(group_name, slug, env):
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     return central_state_dir(group_name, env=env) / "worktrees" / slug
 
@@ -168,7 +170,7 @@ class TestBug1SetupStatus:
         self, camp_cli, two_member_group, monkeypatch, capsys
     ):
         from provision import seed_pending_workspace
-        from manifest import flip_member_state_unlocked, reconcile_lock
+        from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
 
         g = two_member_group
         seed_pending_workspace(g["group"], "feat-pf", env=g["env"])
@@ -222,7 +224,7 @@ class TestBug2RmRemovesWorkspaceDir:
 
     def test_rm_removes_workspace_dir(self, two_member_group):
         from reconcile import reconcile_break
-        from manifest import workspace_dir
+        from camp.group.manifest import workspace_dir
 
         g = two_member_group
         self._provision(g, "feat-rm")
@@ -237,7 +239,7 @@ class TestBug2RmRemovesWorkspaceDir:
 
     def test_dirty_block_without_force_leaves_dir_intact(self, two_member_group):
         from reconcile import reconcile_break, ReconcileError
-        from manifest import workspace_dir
+        from camp.group.manifest import workspace_dir
 
         g = two_member_group
         self._provision(g, "feat-dirty")
@@ -254,7 +256,7 @@ class TestBug2RmRemovesWorkspaceDir:
         out-of-tree resolved workspace dir is rejected, not rmtree'd."""
         from reconcile import reconcile_break, ConfinementError
         import reconcile
-        from manifest import workspace_dir
+        from camp.group.manifest import workspace_dir
 
         g = two_member_group
         self._provision(g, "feat-conf")
@@ -343,7 +345,7 @@ class TestBug4FetchFailureFailsMember:
         import reconcile
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         g = two_member_group
         fake = _FetchFailGit(base_resolves=False)

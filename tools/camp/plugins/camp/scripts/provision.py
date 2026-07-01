@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from manifest import (
+from camp.group.manifest import (
     manifest_path_for,
     workspace_dir,
     write_central_manifest,
@@ -107,7 +107,7 @@ def seed_pending_workspace(
     re-run of camp ai does not reset a ready member back to pending.
     """
     import reconcile
-    from manifest import read_central_manifest, reconcile_lock
+    from camp.group.manifest import read_central_manifest, reconcile_lock
 
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")

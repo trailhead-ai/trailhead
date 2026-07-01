@@ -29,7 +29,7 @@ def _load_groups_silently() -> list | None:
     """
     try:
         import trailhead.paths as _paths
-        from group_config import load_all_groups, GroupConfigError, GroupConfigNotFound
+        from camp.group.config import load_all_groups, GroupConfigError, GroupConfigNotFound
     except ImportError:
         # trailhead not importable — cold start / bare clone.  Silent no-op.
         return None
@@ -59,7 +59,7 @@ def _resolve_group_slug_silently(cwd: Path, group_configs: list) -> tuple[dict |
       - resolution error of any kind
     """
     try:
-        from group_resolve import resolve_from_cwd
+        from camp.group.resolve import resolve_from_cwd
     except ImportError:
         return None, None
 
@@ -142,7 +142,7 @@ def cmd_worktree_cleanup(*, force: bool = False) -> None:
 
     try:
         from reconcile import reconcile_break, ReconcileError
-        from manifest import ManifestError
+        from camp.group.manifest import ManifestError
     except ImportError:
         sys.exit(0)
 

@@ -17,11 +17,14 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 _GROUPS_EXAMPLE_DIR = _REPO_ROOT / "tools" / "camp" / "groups.example"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +56,7 @@ repo_root = "/tmp/myrepo"
 
 def test_load_valid_config(tmp_path: Path) -> None:
     """Loads a valid TOML config and returns a structured dict."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML)
@@ -66,7 +69,7 @@ def test_load_valid_config(tmp_path: Path) -> None:
 
 def test_load_bootstrap_is_list(tmp_path: Path) -> None:
     """bootstrap is parsed as a list (for subprocess shell=False), not a shell string."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML)
@@ -78,7 +81,7 @@ def test_load_bootstrap_is_list(tmp_path: Path) -> None:
 
 def test_load_bootstrap_defaults_to_empty_list(tmp_path: Path) -> None:
     """When bootstrap is absent, it defaults to []."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_NO_BOOTSTRAP)
@@ -88,7 +91,7 @@ def test_load_bootstrap_defaults_to_empty_list(tmp_path: Path) -> None:
 
 def test_load_branch_pattern_defaults(tmp_path: Path) -> None:
     """When [branch] is absent, branch_pattern defaults to 'worktree-{slug}'."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_NO_BOOTSTRAP)
@@ -103,7 +106,7 @@ def test_load_branch_pattern_defaults(tmp_path: Path) -> None:
 
 def test_member_base_defaults_to_origin_main(tmp_path: Path) -> None:
     """When a member omits `base`, it defaults to 'origin/main'."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_NO_BOOTSTRAP)
@@ -113,7 +116,7 @@ def test_member_base_defaults_to_origin_main(tmp_path: Path) -> None:
 
 def test_member_base_override_honored(tmp_path: Path) -> None:
     """A per-member `base` string overrides the default."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     toml = """\
 [group]
@@ -132,7 +135,7 @@ base = "origin/trunk"
 
 def test_member_base_non_string_errors(tmp_path: Path) -> None:
     """A non-string `base` → error naming the file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     toml = """\
 [group]
@@ -193,7 +196,7 @@ bootstrap = "pip install -e ."
 
 def test_missing_group_name_errors_with_field(tmp_path: Path) -> None:
     """Missing group.name → error naming file + failing field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_MISSING_GROUP_NAME)
@@ -206,7 +209,7 @@ def test_missing_group_name_errors_with_field(tmp_path: Path) -> None:
 
 def test_missing_member_repo_root_errors_with_field(tmp_path: Path) -> None:
     """Missing member repo_root → error naming file + failing field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_MISSING_MEMBER_REPO_ROOT)
@@ -219,7 +222,7 @@ def test_missing_member_repo_root_errors_with_field(tmp_path: Path) -> None:
 
 def test_missing_member_name_errors_with_field(tmp_path: Path) -> None:
     """Missing member name → error naming file + failing field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_MISSING_MEMBER_NAME)
@@ -232,7 +235,7 @@ def test_missing_member_name_errors_with_field(tmp_path: Path) -> None:
 
 def test_bootstrap_not_list_errors_with_field(tmp_path: Path) -> None:
     """bootstrap as a string (not a list) → error naming file + failing field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_BOOTSTRAP_NOT_LIST)
@@ -262,7 +265,7 @@ port_base = 4100
 
 def test_dev_env_block_warns_and_continues(tmp_path: Path, capsys) -> None:
     """[dev_env] block present → prints deferred note, does NOT raise."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_CONFIG_WITH_DEV_ENV)
@@ -283,7 +286,7 @@ def test_dev_env_block_warns_and_continues(tmp_path: Path, capsys) -> None:
 
 def test_no_config_file_first_run_message(tmp_path: Path) -> None:
     """When no group config file exists, a legible first-run message is returned."""
-    from group_config import GroupConfigNotFound, load_group
+    from camp.group.config import GroupConfigNotFound, load_group
 
     missing = tmp_path / "nonexistent.toml"
     with pytest.raises(GroupConfigNotFound) as exc_info:
@@ -302,7 +305,7 @@ def test_no_config_file_first_run_message(tmp_path: Path) -> None:
 
 def test_load_all_groups_empty_dir(tmp_path: Path) -> None:
     """load_all_groups on an empty dir returns empty list."""
-    from group_config import load_all_groups
+    from camp.group.config import load_all_groups
 
     groups_dir = tmp_path / "groups"
     groups_dir.mkdir()
@@ -312,7 +315,7 @@ def test_load_all_groups_empty_dir(tmp_path: Path) -> None:
 
 def test_load_all_groups_loads_files(tmp_path: Path) -> None:
     """load_all_groups loads all .toml files in the directory."""
-    from group_config import load_all_groups
+    from camp.group.config import load_all_groups
 
     groups_dir = tmp_path / "groups"
     groups_dir.mkdir()
@@ -341,7 +344,7 @@ def test_groups_example_trailhead_toml_exists() -> None:
 
 def test_groups_example_trailhead_toml_loads() -> None:
     """The groups.example/trailhead.toml example loads as the 3-member fleet group."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = _GROUPS_EXAMPLE_DIR / "trailhead.toml"
     if not f.is_file():
@@ -443,7 +446,7 @@ root = ""
 
 def test_shared_vaults_round_trips_into_dict(tmp_path: Path) -> None:
     """B-2/B-3: a valid [[shared_vaults]] block is returned in the dict."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_WITH_SHARED_VAULTS)
@@ -459,7 +462,7 @@ def test_shared_vaults_round_trips_into_dict(tmp_path: Path) -> None:
 
 def test_no_shared_vaults_defaults_to_empty_list(tmp_path: Path) -> None:
     """Back-compat: a config with no [[shared_vaults]] returns shared_vaults=[]."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_NO_SHARED_VAULTS)
@@ -469,7 +472,7 @@ def test_no_shared_vaults_defaults_to_empty_list(tmp_path: Path) -> None:
 
 def test_shared_vaults_missing_name_raises(tmp_path: Path) -> None:
     """Missing shared_vaults[i].name → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_SHARED_VAULTS_MISSING_NAME)
@@ -482,7 +485,7 @@ def test_shared_vaults_missing_name_raises(tmp_path: Path) -> None:
 
 def test_shared_vaults_empty_name_raises(tmp_path: Path) -> None:
     """Empty shared_vaults[i].name → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_SHARED_VAULTS_EMPTY_NAME)
@@ -495,7 +498,7 @@ def test_shared_vaults_empty_name_raises(tmp_path: Path) -> None:
 
 def test_shared_vaults_missing_root_raises(tmp_path: Path) -> None:
     """Missing shared_vaults[i].root → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_SHARED_VAULTS_MISSING_ROOT)
@@ -508,7 +511,7 @@ def test_shared_vaults_missing_root_raises(tmp_path: Path) -> None:
 
 def test_shared_vaults_empty_root_raises(tmp_path: Path) -> None:
     """Empty shared_vaults[i].root → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_SHARED_VAULTS_EMPTY_ROOT)
@@ -525,7 +528,7 @@ def test_shared_vaults_empty_root_raises(tmp_path: Path) -> None:
 
 
 def _write_and_load(tmp_path: Path, toml_body: str):
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(
@@ -705,7 +708,7 @@ name = "other-vault"
 
 def test_no_lore_scopes_defaults_to_empty_list(tmp_path: Path) -> None:
     """A config without [[lore_scopes]] returns lore_scopes=[]."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_NO_BOOTSTRAP)
@@ -715,7 +718,7 @@ def test_no_lore_scopes_defaults_to_empty_list(tmp_path: Path) -> None:
 
 def test_lore_scopes_one_valid_entry(tmp_path: Path) -> None:
     """A single valid [[lore_scopes]] entry is returned as a list with one dict."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_WITH_ONE_LORE_SCOPE)
@@ -725,7 +728,7 @@ def test_lore_scopes_one_valid_entry(tmp_path: Path) -> None:
 
 def test_lore_scopes_multiple_entries_order_preserved(tmp_path: Path) -> None:
     """Multiple [[lore_scopes]] entries are returned in declared order."""
-    from group_config import load_group
+    from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_WITH_MULTIPLE_LORE_SCOPES)
@@ -738,7 +741,7 @@ def test_lore_scopes_multiple_entries_order_preserved(tmp_path: Path) -> None:
 
 def test_lore_scopes_not_list_raises(tmp_path: Path) -> None:
     """lore_scopes as a non-list value → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_NOT_LIST)
@@ -751,7 +754,7 @@ def test_lore_scopes_not_list_raises(tmp_path: Path) -> None:
 
 def test_lore_scopes_entry_not_table_raises(tmp_path: Path) -> None:
     """A lore_scopes entry that is not a table → GroupConfigError naming file + position."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_ENTRY_NOT_TABLE)
@@ -764,7 +767,7 @@ def test_lore_scopes_entry_not_table_raises(tmp_path: Path) -> None:
 
 def test_lore_scopes_missing_name_raises(tmp_path: Path) -> None:
     """Missing lore_scopes[i].name → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_MISSING_NAME)
@@ -777,7 +780,7 @@ def test_lore_scopes_missing_name_raises(tmp_path: Path) -> None:
 
 def test_lore_scopes_missing_scope_raises(tmp_path: Path) -> None:
     """Missing lore_scopes[i].scope → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_MISSING_SCOPE)
@@ -790,7 +793,7 @@ def test_lore_scopes_missing_scope_raises(tmp_path: Path) -> None:
 
 def test_lore_scopes_invalid_scope_raises(tmp_path: Path) -> None:
     """A lore_scopes scope not in {repo, product, suite, team} → GroupConfigError."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_INVALID_SCOPE)
@@ -803,7 +806,7 @@ def test_lore_scopes_invalid_scope_raises(tmp_path: Path) -> None:
 
 def test_lore_scopes_default_scope_raises(tmp_path: Path) -> None:
     """scope='default' is explicitly rejected — it is not a meaningful routing scope."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_DEFAULT_SCOPE)
@@ -816,7 +819,7 @@ def test_lore_scopes_default_scope_raises(tmp_path: Path) -> None:
 
 def test_lore_scopes_empty_name_raises(tmp_path: Path) -> None:
     """Empty lore_scopes[i].name → GroupConfigError naming file + field."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_EMPTY_NAME)
@@ -829,7 +832,7 @@ def test_lore_scopes_empty_name_raises(tmp_path: Path) -> None:
 
 def test_lore_scopes_duplicate_scope_raises(tmp_path: Path) -> None:
     """Two [[lore_scopes]] entries with the same scope → GroupConfigError."""
-    from group_config import GroupConfigError, load_group
+    from camp.group.config import GroupConfigError, load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_LORE_SCOPES_DUPLICATE_SCOPE)
@@ -848,7 +851,7 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
     doc_files must be ["AGENTS.md"] while the binary still falls back to the claude
     default (the launch surface was removed).
     """
-    from group_config import load_group
+    from camp.group.config import load_group
     from harness_profile import resolve_harness_profile
 
     f = tmp_path / "trailhead.toml"

@@ -4,7 +4,8 @@
 Two orthogonal import chains, kept distinct:
   (a) self-relative sys.path insert toward scripts/ (like cli/lore:37) so
       camp's own scripts/ modules (repos.py, spine.py) are importable
-      whether run from the repo or from an installed plugin.
+      whether run from the repo or from an installed plugin. plugins/camp/
+      itself is also inserted so the camp.group package resolves the same way.
   (b) trailhead.paths import guarded by _check_trailhead_paths_importable()
       (single guard, hook-subprocess-proof). cli/camp serves
       --help / --version / --which without calling trailhead.paths, but the
@@ -25,7 +26,12 @@ from pathlib import Path
 
 # (a) Self-relative sys.path insert so scripts/ modules resolve.
 # cli/camp → parent is cli/ → parent is plugins/camp/ → scripts/ is a sibling.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PLUGIN_ROOT / "scripts"))
+# Also put plugins/camp/ itself on sys.path so the camp.group package
+# (plugins/camp/camp/) resolves as a real import, alongside the still-flat
+# scripts/ modules above during the scripts/-to-package migration.
+sys.path.insert(0, str(_PLUGIN_ROOT))
 
 # The hidden `camp inject --drain` PostToolUse hook fires on EVERY Bash
 # tool call. It resolves the workspace from cwd and never touches spine or
@@ -85,8 +91,8 @@ def _cmd_version() -> None:
 
 def _print_active_group() -> None:
     """Print active group if resolvable from cwd."""
-    from group_config import load_all_groups, GroupConfigError
-    from group_resolve import (
+    from camp.group.config import load_all_groups, GroupConfigError
+    from camp.group.resolve import (
         resolve_from_cwd,
         GroupResolutionError,
         central_state_dir,
@@ -120,8 +126,8 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
         return None, None
 
     try:
-        from group_config import load_all_groups, load_group, GroupConfigError, GroupConfigNotFound
-        from group_resolve import (
+        from camp.group.config import load_all_groups, load_group, GroupConfigError, GroupConfigNotFound
+        from camp.group.resolve import (
             resolve_from_cwd,
             resolve_group_override,
             GroupResolutionError,
@@ -328,7 +334,7 @@ def _slug_from_args_or_cwd(
     caller falls back, e.g. status's fleet view).
     """
     from spine import _consume_flag_value, _resolve_slug, _die
-    from group_resolve import resolve_from_cwd
+    from camp.group.resolve import resolve_from_cwd
 
     name = _consume_flag_value(args, "--name")
     if name is not None:
@@ -656,7 +662,7 @@ def _cmd_rebase_group_cli(
     """camp rebase [--onto <branch>] [--name <slug>]"""
     import subprocess
     from spine import _consume_flag_value, _die
-    from manifest import manifest_path_for, read_central_manifest
+    from camp.group.manifest import manifest_path_for, read_central_manifest
 
     filtered = list(args)
     onto = _consume_flag_value(filtered, "--onto") or "origin/main"
@@ -815,10 +821,10 @@ def _parse_member(raw: str) -> dict[str, str]:
 
 def _cmd_group_cli(args: list[str]) -> None:
     """camp group <name> — wire hooks, author a config from flags, or write a stub."""
-    from group_config import load_all_groups, GroupConfigError
-    from group_resolve import resolve_group_override, GroupResolutionError
+    from camp.group.config import load_all_groups, GroupConfigError
+    from camp.group.resolve import resolve_group_override, GroupResolutionError
     from init_cmd import run_init
-    import group_scaffold
+    from camp.group import scaffold as group_scaffold
     import trailhead.paths as _paths
 
     if not args or args[0] in ("--help", "-h"):
@@ -917,7 +923,7 @@ def _cmd_new_group_cli(
     """
     from spine import _resolve_slug, _consume_flag_value, _die
     from provision import bring_up_workspace
-    from manifest import workspace_dir, manifest_path_for
+    from camp.group.manifest import workspace_dir, manifest_path_for
 
     rest = list(args)
     _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
@@ -996,7 +1002,7 @@ def _cmd_enter_group_cli(
     """
     from spine import _die
     from activation import enter_member, MemberNotReadyError
-    from group_config import GroupConfigError
+    from camp.group.config import GroupConfigError
     from harness_profile import resolve_harness_profile
 
     filtered = list(args)
@@ -1109,9 +1115,9 @@ def _author_group(
     config_path,
 ) -> None:
     """Validate + atomically write a group config TOML. Exits non-zero on failure."""
-    from group_config import load_all_groups, load_group, GroupConfigError
-    from group_resolve import GroupConfinementError
-    import group_scaffold
+    from camp.group.config import load_all_groups, load_group, GroupConfigError
+    from camp.group.resolve import GroupConfinementError
+    from camp.group import scaffold as group_scaffold
 
     if config_path.exists() and not force:
         print(

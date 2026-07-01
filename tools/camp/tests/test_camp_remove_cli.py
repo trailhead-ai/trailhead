@@ -46,6 +46,8 @@ _SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
@@ -351,7 +353,7 @@ class TestCampRemoveInvokesReconcileBreak:
         triggers a legible error, confirming the real reconcile_break is called
         (not the stub).
         """
-        from manifest import write_central_manifest, manifest_path_for
+        from camp.group.manifest import write_central_manifest, manifest_path_for
 
         env = {"CAMP_STATE_DIR": str(remove_env["state_dir"])}
         mpath = manifest_path_for("rmgroup", "ws-slug", env=env)
@@ -498,7 +500,7 @@ class TestReconcileBreakHoldsLock:
         import fcntl
 
         import reconcile
-        from manifest import manifest_path_for, lock_path_for
+        from camp.group.manifest import manifest_path_for, lock_path_for
         from reconcile import reconcile_break
 
         g = inproc_group
@@ -546,7 +548,7 @@ class TestReconcileBreakHoldsLock:
         import shutil
 
         import reconcile
-        from manifest import manifest_path_for, lock_path_for
+        from camp.group.manifest import manifest_path_for, lock_path_for
         from reconcile import reconcile_break
 
         g = inproc_group
@@ -585,7 +587,7 @@ class TestReconcileBreakHoldsLock:
         its workspace dir — the reconcile lock's mkdir must be guarded by a
         fail-fast manifest read (else a later `camp new <slug>` wrongly resumes a
         ghost workspace)."""
-        from manifest import ManifestError, workspace_dir
+        from camp.group.manifest import ManifestError, workspace_dir
         from reconcile import reconcile_break
 
         g = inproc_group
@@ -694,7 +696,7 @@ class TestConfinementAdversarial:
         """A manifest whose member worktree_path is a symlink that resolves
         outside the workspace dir triggers ConfinementError BEFORE any removal
         — the symlink target outside the state dir is not touched."""
-        from manifest import manifest_path_for, write_central_manifest, workspace_dir
+        from camp.group.manifest import manifest_path_for, write_central_manifest, workspace_dir
         from reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
@@ -740,7 +742,7 @@ class TestConfinementAdversarial:
         on _git_is_dirty, and assert ConfinementError is raised WITHOUT it firing
         (force defaults False, so the dirty-check would otherwise run)."""
         import reconcile
-        from manifest import manifest_path_for, write_central_manifest, workspace_dir
+        from camp.group.manifest import manifest_path_for, write_central_manifest, workspace_dir
         from reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
@@ -786,7 +788,7 @@ class TestConfinementAdversarial:
         the pre-rmtree guard then sees the outside dir is not under worktrees_root.
         """
         import reconcile
-        from manifest import manifest_path_for, write_central_manifest
+        from camp.group.manifest import manifest_path_for, write_central_manifest
         from reconcile import ConfinementError, reconcile_break
 
         g = inproc_group

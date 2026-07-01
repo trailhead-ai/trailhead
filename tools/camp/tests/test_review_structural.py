@@ -39,6 +39,8 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
@@ -130,7 +132,7 @@ class TestFix7SlugFromCwdThreadsEnv:
         dir — matching the downstream manifest/workspace ops. If env is dropped,
         resolve_from_cwd derives state_dir from os.environ instead and the slug
         won't resolve from inside the env's workspace dir."""
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         camp_cli = _load_cli_module()
 
@@ -225,7 +227,7 @@ class TestC1RmtreeGuard:
         from reconcile import reconcile_break, ConfinementError
         from provision import bring_up_workspace
         from lifecycle_cmds import cmd_setup_group
-        from manifest import workspace_dir, read_central_manifest
+        from camp.group.manifest import workspace_dir, read_central_manifest
 
         repo = tmp_path / "repo_a"
         _init_git_repo(repo)

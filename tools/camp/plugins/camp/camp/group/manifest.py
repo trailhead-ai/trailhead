@@ -213,7 +213,7 @@ def workspace_dir(group: str, slug: str, *, env: dict[str, str] | None = None) -
     Returns:
         Absolute path to the workspace dir (directory may not exist yet).
     """
-    from group_resolve import central_state_dir
+    from .resolve import central_state_dir
 
     return central_state_dir(group, env=env) / "worktrees" / slug
 

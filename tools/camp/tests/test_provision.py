@@ -41,10 +41,13 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 _VENV_PYTHON = sys.executable
 
@@ -96,13 +99,13 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 
 
 def _member_wt(group_name, slug, member, env):
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     return central_state_dir(group_name, env=env) / "worktrees" / slug / member
 
 
 def _workspace_dir(group_name, slug, env):
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     return central_state_dir(group_name, env=env) / "worktrees" / slug
 
@@ -160,6 +163,7 @@ class TestU1RealSurvival:
             textwrap.dedent(f"""\
             import sys, os
             sys.path.insert(0, {str(_SCRIPTS_DIR)!r})
+            sys.path.insert(0, {str(_PLUGIN_DIR)!r})
             from provision import spawn_detached_provisioner
 
             spawn_detached_provisioner(
@@ -210,6 +214,7 @@ class TestU1RealSurvival:
             textwrap.dedent(f"""\
             import sys, os
             sys.path.insert(0, {str(_SCRIPTS_DIR)!r})
+            sys.path.insert(0, {str(_PLUGIN_DIR)!r})
             from provision import spawn_detached_provisioner
             spawn_detached_provisioner(
                 logfile_path={str(logfile)!r},
@@ -330,7 +335,7 @@ class TestAiSeedAndSpawn:
 
         bring_up_workspace(g["group"], "feat-x", env=g["env"])
 
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         mpath = _workspace_dir("testgroup", "feat-x", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
@@ -440,7 +445,7 @@ class TestPretrustWiring:
 
         assert _read_trust(Path(env["HOME"])) == {}
         # Bring-up otherwise unchanged: manifest seeded.
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         mpath = _workspace_dir("testgroup", "feat-off", env) / "manifest.json"
         assert read_central_manifest(mpath)["members"]
@@ -481,7 +486,7 @@ class TestPretrustWiring:
         bring_up_workspace(g["group"], "feat-boom", env=env)
 
         # Best-effort invariant: manifest still seeded AND provisioner still spawned.
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         mpath = _workspace_dir("testgroup", "feat-boom", env) / "manifest.json"
         assert read_central_manifest(mpath)["members"]
@@ -525,7 +530,7 @@ class TestForegroundSetup:
 
         cmd_setup_group(g["group"], "feat-s", env=g["env"])
 
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         mpath = _workspace_dir("testgroup", "feat-s", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
@@ -569,8 +574,8 @@ class TestForegroundSetup:
         bring_up_workspace(group, "feat-f", env=env)
         cmd_setup_group(group, "feat-f", env=env)
 
-        from manifest import read_central_manifest
-        from group_resolve import central_state_dir
+        from camp.group.manifest import read_central_manifest
+        from camp.group.resolve import central_state_dir
 
         mpath = central_state_dir("failg", env=env) / "worktrees" / "feat-f" / "manifest.json"
         data = read_central_manifest(mpath)
@@ -602,7 +607,7 @@ class TestForegroundSetup:
         bring_up_workspace(g["group"], "feat-to", env=g["env"])
         cmd_setup_group(g["group"], "feat-to", env=g["env"])
 
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         mpath = _workspace_dir("testgroup", "feat-to", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
@@ -653,7 +658,7 @@ class TestForegroundSetup:
         cmd_setup_group(g["group"], "feat-i", env=g["env"])
         cmd_setup_group(g["group"], "feat-i", env=g["env"])
 
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         mpath = _workspace_dir("testgroup", "feat-i", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
@@ -671,7 +676,7 @@ class TestConcurrency:
         `camp new` seed cannot race a `camp remove` teardown into a ghost
         workspace. Proof: while the test holds the slug reconcile lock, a seed
         running in another thread blocks — it writes no manifest until released."""
-        from manifest import reconcile_lock, workspace_dir
+        from camp.group.manifest import reconcile_lock, workspace_dir
         import provision
 
         g = two_member_group
@@ -733,7 +738,7 @@ class TestConcurrency:
 
         assert not errors, f"concurrent setup raised: {errors}"
 
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         mpath = _workspace_dir("testgroup", "feat-c", g["env"]) / "manifest.json"
         data = read_central_manifest(mpath)
@@ -749,7 +754,7 @@ class TestConcurrency:
 
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         from provision import bring_up_workspace
-        from manifest import (
+        from camp.group.manifest import (
             flip_member_state_unlocked,
             read_central_manifest,
             reconcile_lock,
@@ -798,7 +803,7 @@ class TestStatusExitCodes:
         import provision
 
         # Seed pending then flip to target states directly.
-        from manifest import flip_member_state_unlocked, reconcile_lock
+        from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
 
         provision.seed_pending_workspace(group, slug, env=env)
         mpath = provision.workspace_dir(group["group"]["name"], slug, env=env) / "manifest.json"

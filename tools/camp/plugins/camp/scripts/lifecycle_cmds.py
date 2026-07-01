@@ -20,8 +20,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from group_resolve import central_state_dir
-from manifest import (
+from camp.group.resolve import central_state_dir
+from camp.group.manifest import (
     ManifestError,
     manifest_path_for,
     read_central_manifest,
@@ -130,7 +130,7 @@ def cmd_status_group(
     if slug is not None:
         # Scoped: one worktree
         group_name = group["group"]["name"]
-        from manifest import manifest_path_for
+        from camp.group.manifest import manifest_path_for
 
         mpath = manifest_path_for(group_name, slug, env=env)
         try:
@@ -267,7 +267,7 @@ def cmd_setup_group(
 
     Returns {"slug", "members": {name: {"provision_state", "reason"?}}}.
     """
-    from manifest import flip_member_state_unlocked
+    from camp.group.manifest import flip_member_state_unlocked
     import provision
 
     group_name = group["group"]["name"]

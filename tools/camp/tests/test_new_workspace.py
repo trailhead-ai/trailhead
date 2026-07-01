@@ -31,6 +31,8 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
@@ -82,13 +84,13 @@ def group_env(tmp_path):
 
 
 def _workspace_dir(env, slug):
-    from manifest import workspace_dir
+    from camp.group.manifest import workspace_dir
 
     return workspace_dir("g", slug, env=env)
 
 
 def _manifest_path(env, slug):
-    from manifest import manifest_path_for
+    from camp.group.manifest import manifest_path_for
 
     return manifest_path_for("g", slug, env=env)
 
@@ -348,7 +350,7 @@ class TestInputCharset:
         assert not _VALID_SLUG_RE.match("feat;rm")
 
     def test_group_name_is_constrained_to_slug_charset(self):
-        from group_resolve import validate_group_name, GroupConfinementError
+        from camp.group.resolve import validate_group_name, GroupConfinementError
 
         # Path-separator confinement and slug-charset confinement are both enforced:
         # a group name now rejects the same characters a slug does.

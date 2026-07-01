@@ -42,10 +42,13 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +581,7 @@ class TestBringUpWorkspaceIntegration:
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc"
         assert (ws_dir / "CLAUDE.md").is_file(), "CLAUDE.md missing after bring_up_workspace"
@@ -598,7 +601,7 @@ class TestBringUpWorkspaceIntegration:
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc2", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc2"
         assert not (ws_dir / "AGENT.md").exists(), (
@@ -620,7 +623,7 @@ class TestBringUpWorkspaceIntegration:
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc3", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc3"
         settings_path = ws_dir / ".claude" / "settings.json"
@@ -652,7 +655,7 @@ class TestBringUpWorkspaceIntegration:
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc4", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc4"
         content = (ws_dir / "CLAUDE.md").read_text()
@@ -673,7 +676,7 @@ class TestBringUpWorkspaceIntegration:
         with mock.patch("provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-idem", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-idem"
         first_claude = (ws_dir / "CLAUDE.md").read_text()
@@ -864,7 +867,7 @@ doc_files = {doc_files_toml}
 
     def test_valid_doc_files_loads(self, tmp_path: Path):
         """A valid doc_files list is accepted and returned."""
-        from group_config import load_group
+        from camp.group.config import load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('["AGENTS.md"]'))
@@ -873,7 +876,7 @@ doc_files = {doc_files_toml}
 
     def test_doc_files_multiple_accepted(self, tmp_path: Path):
         """Multiple doc_files entries are accepted."""
-        from group_config import load_group
+        from camp.group.config import load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('["AGENTS.md", "CLAUDE.md"]'))
@@ -882,7 +885,7 @@ doc_files = {doc_files_toml}
 
     def test_empty_list_raises(self, tmp_path: Path):
         """An empty doc_files list → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files("[]"))
@@ -892,7 +895,7 @@ doc_files = {doc_files_toml}
 
     def test_whitespace_token_raises(self, tmp_path: Path):
         """A whitespace-only token in doc_files → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('["  "]'))
@@ -902,7 +905,7 @@ doc_files = {doc_files_toml}
 
     def test_non_string_token_raises(self, tmp_path: Path):
         """A non-string token in doc_files → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files("[42]"))
@@ -912,7 +915,7 @@ doc_files = {doc_files_toml}
 
     def test_not_a_list_raises(self, tmp_path: Path):
         """doc_files as a string (not a list) → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('"AGENTS.md"'))
@@ -922,7 +925,7 @@ doc_files = {doc_files_toml}
 
     def test_absent_doc_files_returns_none(self, tmp_path: Path):
         """When doc_files is absent from [harness], it's not present in the parsed harness."""
-        from group_config import load_group
+        from camp.group.config import load_group
 
         toml = """\
 [group]

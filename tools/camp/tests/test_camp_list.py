@@ -30,6 +30,8 @@ _SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
@@ -67,7 +69,7 @@ def _seed_manifest(group_name: str, slug: str, *, env: dict) -> Path:
 
     Returns the workspace dir path.
     """
-    from manifest import manifest_path_for, workspace_dir, write_central_manifest
+    from camp.group.manifest import manifest_path_for, workspace_dir, write_central_manifest
 
     ws = workspace_dir(group_name, slug, env=env)
     ws.mkdir(parents=True, exist_ok=True)
@@ -130,7 +132,7 @@ class TestCmdLsGroupWorkspacePath:
 
     def test_workspace_path_agrees_with_workspace_dir(self, tmp_path):
         from lifecycle_cmds import cmd_ls_group
-        from manifest import workspace_dir
+        from camp.group.manifest import workspace_dir
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -350,7 +352,7 @@ class TestListPureRead:
 
     def test_list_does_not_call_write_manifest(self, camp_cli, tmp_path, monkeypatch):
         """camp list must not call write_central_manifest (pure read)."""
-        import manifest as _manifest
+        import camp.group.manifest as _manifest
 
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}

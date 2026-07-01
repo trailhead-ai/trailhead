@@ -21,9 +21,12 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _group(harness=None):
@@ -40,7 +43,7 @@ def _group(harness=None):
 
 class TestHarnessConfigValidation:
     def _load(self, tmp_path, body):
-        from group_config import load_group
+        from camp.group.config import load_group
 
         f = tmp_path / "g.toml"
         f.write_text("[group]\nname='g'\n[[members]]\nname='r'\nrepo_root='/tmp/r'\n" + body)
@@ -61,21 +64,21 @@ class TestHarnessConfigValidation:
         assert "harness" not in cfg or cfg.get("harness") is None
 
     def test_harness_binary_must_be_string(self, tmp_path):
-        from group_config import GroupConfigError
+        from camp.group.config import GroupConfigError
 
         # A list is not accepted — binary is scalar.
         with pytest.raises(GroupConfigError):
             self._load(tmp_path, '[harness]\nbinary = ["claude"]\n')
 
     def test_harness_empty_binary_rejected(self, tmp_path):
-        from group_config import GroupConfigError
+        from camp.group.config import GroupConfigError
 
         with pytest.raises(GroupConfigError) as exc:
             self._load(tmp_path, '[harness]\nbinary = "  "\n')
         assert "non-empty" in str(exc.value).lower() or "empty" in str(exc.value).lower()
 
     def test_harness_cwd_unknown_placeholder_rejected(self, tmp_path):
-        from group_config import GroupConfigError
+        from camp.group.config import GroupConfigError
 
         with pytest.raises(GroupConfigError) as exc:
             self._load(
@@ -97,14 +100,14 @@ class TestHarnessConfigValidation:
         assert "inject" not in cfg["harness"]
 
     def test_harness_inject_unknown_value_rejected(self, tmp_path):
-        from group_config import GroupConfigError
+        from camp.group.config import GroupConfigError
 
         with pytest.raises(GroupConfigError) as exc:
             self._load(tmp_path, '[harness]\ninject = "telepathy"\n')
         assert "telepathy" in str(exc.value)
 
     def test_harness_inject_non_string_rejected(self, tmp_path):
-        from group_config import GroupConfigError
+        from camp.group.config import GroupConfigError
 
         with pytest.raises(GroupConfigError):
             self._load(tmp_path, "[harness]\ninject = 42\n")
@@ -122,7 +125,7 @@ class TestHarnessConfigValidation:
         assert "pretrust" not in cfg["harness"]
 
     def test_harness_pretrust_non_bool_rejected(self, tmp_path):
-        from group_config import GroupConfigError
+        from camp.group.config import GroupConfigError
 
         with pytest.raises(GroupConfigError) as exc:
             self._load(tmp_path, '[harness]\npretrust = "yes"\n')

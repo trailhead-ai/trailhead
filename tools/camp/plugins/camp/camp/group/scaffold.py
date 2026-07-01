@@ -207,7 +207,7 @@ def validate_scaffold(
         GroupConfinementError: If group_name is invalid (from validate_group_name).
         ScaffoldError:         If any other validation check fails.
     """
-    from group_resolve import validate_group_name, validate_no_overlap
+    from .resolve import validate_group_name, validate_no_overlap
 
     # 1. Group name confinement (raises GroupConfinementError on failure)
     validate_group_name(group_name)
@@ -250,7 +250,7 @@ def validate_scaffold(
         "shared_vaults": [],
         "_toml_path": f"<candidate:{group_name}>",
     }
-    from group_resolve import GroupResolutionError
+    from .resolve import GroupResolutionError
 
     try:
         validate_no_overlap(other_configs + [candidate])

@@ -39,7 +39,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from manifest import (
+from camp.group.manifest import (
     ManifestError,
     manifest_path_for,
     read_central_manifest,
@@ -652,7 +652,7 @@ def reconcile_break(
             # anchored independently of ws_dir — never rmtree an unconfined path
             # (symlink escape, old layout, etc.).
             if ws_dir.exists():
-                from group_resolve import central_state_dir
+                from camp.group.resolve import central_state_dir
 
                 worktrees_root = (central_state_dir(group_name, env=env) / "worktrees").resolve()
                 try:

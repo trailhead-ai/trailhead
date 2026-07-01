@@ -220,7 +220,9 @@ def _load_written_group(groups_dir: Path, name: str) -> dict:
     scripts_dir = _PLUGIN_DIR / "scripts"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
-    from group_config import load_group  # noqa: E402
+    if str(_PLUGIN_DIR) not in sys.path:
+        sys.path.insert(0, str(_PLUGIN_DIR))
+    from camp.group.config import load_group  # noqa: E402
 
     return load_group(groups_dir / f"{name}.toml")
 

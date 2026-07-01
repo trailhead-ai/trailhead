@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from hooks_writer import write_hooks_for_member
-from group_resolve import validate_no_overlap
+from camp.group.resolve import validate_no_overlap
 
 
 def run_init(
