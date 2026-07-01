@@ -31,7 +31,6 @@ import pytest
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 
 sys.path.insert(0, str(TESTS_DIR))
 from conftest import load_script  # noqa: E402
@@ -200,7 +199,7 @@ def test_bootstrap_vault_raises_on_git_init_failure(tmp_path):
     silently non-repo vault."""
     from unittest import mock
 
-    installer = load_script("installer")
+    installer = load_script("lore.config.installer")
     vaults_root = tmp_path / "state" / "vaults"
     fail = mock.Mock(returncode=1, stderr="fatal: simulated git init failure")
     with mock.patch.object(installer.subprocess, "run", return_value=fail):
@@ -209,7 +208,7 @@ def test_bootstrap_vault_raises_on_git_init_failure(tmp_path):
 
 
 def test_resolve_targets_returns_user_global_settings(tmp_path):
-    installer = load_script("installer")
+    installer = load_script("lore.config.installer")
     settings = installer.resolve_targets()
     # User-global only: ~/.claude/settings.json (no --local project mode).
     assert settings.name == "settings.json"

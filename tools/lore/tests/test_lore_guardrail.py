@@ -38,7 +38,6 @@ import pytest
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 HOOKS_DIR = PLUGIN_ROOT / "hooks"
 GUARD_SCRIPT = HOOKS_DIR / "vault-guard.py"
 
@@ -433,7 +432,7 @@ class TestGuardDocstringScope:
 
 class TestSettingsWriterPermissionDeny:
     def _sw(self):
-        return load_script("settings_writer")
+        return load_script("lore.config.settings_writer")
 
     def test_upsert_permission_deny_adds_rule(self, tmp_path):
         sw = self._sw()

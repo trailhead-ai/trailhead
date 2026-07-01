@@ -9,20 +9,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
-# Makes the `lore` package (plugins/lore/lore/) importable by its dotted name,
-# for modules already migrated off the flat scripts/ bag — see load_script().
-# scripts/ itself is also inserted unconditionally (not just lazily inside
-# load_script's bare-stem branch): a migrated package module can still reach a
-# not-yet-migrated scripts/ module by bare name (e.g. lore.record.store imports
-# index_store), and that import must resolve regardless of which test happens
-# to run first in the session.
+# Makes the `lore` package (plugins/lore/lore/) importable by its dotted name
+# — see load_script() — and makes the plugin-root-level `_bootstrap` module
+# (the sole remaining bare-stem load target) importable too.
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
 
 
 def write_default_config(config_home: Path, vault_path: Path) -> None:
@@ -105,11 +98,12 @@ def make_vault(tmp_path: Path) -> tuple[Path, Path]:
 def load_script(name: str):
     """Load a lore module freshly each call, isolating state across tests.
 
-    ``name`` is either a bare stem of a still-flat ``scripts/`` module (e.g.
-    ``"frontmatter"``) or a dotted path into the ``lore`` package (e.g.
-    ``"lore.vault.vault"``) for a module that has already migrated there.
+    ``name`` is either the bare stem ``"_bootstrap"`` (the one plugin-root-level
+    module that deliberately sits outside the ``lore`` package — it bootstraps
+    that package's own importability) or a dotted path into the ``lore``
+    package (e.g. ``"lore.vault.vault"``) for a module that lives there.
 
-    Bare stems load via ``spec_from_file_location`` + ``exec_module``,
+    The bare stem loads via ``spec_from_file_location`` + ``exec_module``,
     bypassing the import system entirely — each call gets a brand-new module
     object, deliberately never registered in ``sys.modules``.
 
@@ -122,11 +116,9 @@ def load_script(name: str):
     if "." in name:
         mod = importlib.import_module(name)
         return importlib.reload(mod)
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
     if name in sys.modules:
         del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, PLUGIN_ROOT / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

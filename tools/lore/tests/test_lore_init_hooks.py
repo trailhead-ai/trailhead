@@ -29,7 +29,6 @@ import pytest
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 
 sys.path.insert(0, str(TESTS_DIR))
 from conftest import load_script  # noqa: E402
@@ -74,7 +73,7 @@ def _dirs(tmp_path):
 
 class TestSettingsWriter:
     def _sw(self):
-        return load_script("settings_writer")
+        return load_script("lore.config.settings_writer")
 
     def test_write_to_new_file_creates_it(self, tmp_path):
         """Writing to an absent settings file creates it."""

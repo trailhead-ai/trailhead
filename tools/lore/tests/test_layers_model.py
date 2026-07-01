@@ -21,17 +21,12 @@ from __future__ import annotations
 import dataclasses
 import os
 import subprocess
-import sys
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from conftest import REPO_ROOT, SCRIPTS_DIR, load_script, write_default_config
-
-# Ensure scripts dir is on path for direct imports in subprocess helpers
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+from conftest import PLUGIN_ROOT, REPO_ROOT, load_script, write_default_config
 
 _CLI_LORE = REPO_ROOT / "plugins" / "lore" / "cli" / "lore"
 
@@ -224,7 +219,7 @@ class TestBootstrapImportable:
     def test_bare_python3_no_raw_module_not_found_error(self, tmp_path: Path) -> None:
         """Running with no TRAILHEAD_ROOT, bare python3 — emits legible
         error (not raw ModuleNotFoundError traceback) or succeeds via walk-up."""
-        bootstrap_path = SCRIPTS_DIR / "_bootstrap.py"
+        bootstrap_path = PLUGIN_ROOT / "_bootstrap.py"
 
         # Script that calls ensure_trailhead_importable() with a forced-missing setup
         # by removing trailhead from sys.path and unsetting TRAILHEAD_ROOT
@@ -271,7 +266,7 @@ mod.ensure_trailhead_importable()
     def test_forced_missing_emits_legible_error(self, tmp_path: Path) -> None:
         """ensure_trailhead_importable() with a forged __file__ pointing nowhere
         emits the legible tier-4 error, not a raw ModuleNotFoundError."""
-        bootstrap_path = SCRIPTS_DIR / "_bootstrap.py"
+        bootstrap_path = PLUGIN_ROOT / "_bootstrap.py"
 
         # Probe: craft __file__ to a path deep in tmp_path so walk-up never finds marker
         # Then also clear TRAILHEAD_ROOT so tier-2 doesn't help

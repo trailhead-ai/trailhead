@@ -24,11 +24,6 @@ _CAMP_SCRIPTS = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
 if str(_CAMP_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_CAMP_SCRIPTS))
 
-from conftest import SCRIPTS_DIR  # noqa: E402
-
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
 _CLI_PATH = Path(__file__).parent.parent / "plugins" / "lore" / "cli" / "lore"
 
 

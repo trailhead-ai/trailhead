@@ -26,11 +26,7 @@ from pathlib import Path
 from unittest import mock
 
 
-from conftest import SCRIPTS_DIR, load_script, write_default_config
-
-# Ensure scripts dir is on path for direct imports
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+from conftest import load_script, write_default_config
 
 # The camp plugin root must be on sys.path for the lazy import to succeed.
 _CAMP_PLUGIN_ROOT = str(Path(__file__).resolve().parents[3] / "tools" / "camp" / "plugins" / "camp")

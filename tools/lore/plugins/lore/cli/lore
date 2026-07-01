@@ -6,9 +6,9 @@ live behind subcommands here. Run ``lore --help`` (or ``lore <cmd> --help``) for
 the authoritative, self-describing subcommand list — this docstring deliberately
 does not restate it, so the two can't drift.
 """
-# Finds its sibling ../scripts modules and the ../lore package at import time
-# so it works whether run from the repo or from an installed plugin
-# (${CLAUDE_PLUGIN_ROOT}/cli/lore).
+# Finds its sibling ../lore package (and the plugin-root-level _bootstrap
+# module) at import time so it works whether run from the repo or from an
+# installed plugin (${CLAUDE_PLUGIN_ROOT}/cli/lore).
 from __future__ import annotations
 
 import argparse
@@ -23,12 +23,11 @@ import sys
 from datetime import date
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import agent_ruleset as agent_ruleset_mod  # noqa: E402
-import installer as installer_mod  # noqa: E402
-import settings_writer as settings_writer_mod  # noqa: E402
+from lore.config import agent_ruleset as agent_ruleset_mod  # noqa: E402
+from lore.config import installer as installer_mod  # noqa: E402
+from lore.config import settings_writer as settings_writer_mod  # noqa: E402
 from lore.record import model as record_model_mod  # noqa: E402
 from lore.record import store as record_store_mod  # noqa: E402
 from lore.search import engine as search_mod  # noqa: E402
