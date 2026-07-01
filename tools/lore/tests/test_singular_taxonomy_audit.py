@@ -92,6 +92,14 @@ def _code_files():
         if "__pycache__" in p.parts:
             continue
         yield p
+    # The lore/lore/ package tree — modules migrated off scripts/ by the
+    # ongoing lore/camp packaging refactor. Without this, every migrated
+    # module silently drops out of the audit instead of being re-verified
+    # under its new path.
+    for p in (PLUGIN_ROOT / "lore").rglob("*.py"):
+        if "__pycache__" in p.parts:
+            continue
+        yield p
     yield CLI_PATH
     for p in HOOKS_DIR.rglob("*"):
         if p.is_file() and p.suffix in (".sh", ".py"):
