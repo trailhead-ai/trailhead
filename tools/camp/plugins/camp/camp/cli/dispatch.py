@@ -76,7 +76,6 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
         from ..group.resolve import (
             resolve_from_cwd,
             resolve_group_override,
-            GroupResolutionError,
         )
         from .common import _groups_dir
     except ImportError:

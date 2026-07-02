@@ -26,6 +26,7 @@ then the ranking-subquery MATCH param (only when full-text present), then LIMIT.
 import json
 import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 

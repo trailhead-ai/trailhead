@@ -88,7 +88,7 @@ def _cmd_pwd_group_cli(
 
     Security contract: stdout carries ONLY the path; diagnostics go to stderr.
     """
-    from ..spine import _resolve_slug, _consume_flag_value, _die
+    from ..spine import _resolve_slug, _consume_flag_value
     from ..harness.shell_integration import cmd_pwd, WorkspaceNotFoundError
 
     filtered = list(args)

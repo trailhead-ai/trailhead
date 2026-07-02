@@ -57,7 +57,7 @@ def cmd_sync(args) -> int:
     rc_push, _, stderr_push = _git(vault, "push", "origin")
     if rc_push != 0:
         print(
-            f"notice: committed locally; push failed — re-run `lore sync` when online",
+            "notice: committed locally; push failed — re-run `lore sync` when online",
             file=sys.stderr,
         )
         print(f"  push error: {stderr_push}", file=sys.stderr)

@@ -28,6 +28,7 @@ All assertions run against a tmp ``$XDG_STATE_HOME`` index — never the real va
 import json
 import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 

@@ -15,7 +15,6 @@ import importlib
 import importlib.util
 import io
 import os
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock

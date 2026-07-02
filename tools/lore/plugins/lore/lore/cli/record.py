@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from .common import _load_vault_config, _read_stdin_body, _resolve_groups_dir
 
