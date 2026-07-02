@@ -35,10 +35,6 @@ from pathlib import Path
 
 from conftest import load_script, make_vault as _make_vault, run_cli as _run
 
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
-CLI_PATH = REPO_ROOT / "plugins" / "lore" / "cli" / "lore"
-
 # Distinct synthetic session GUIDs.
 SID_A = "aaaaaaaa-1111-4111-8111-111111111111"
 SID_B = "bbbbbbbb-2222-4222-8222-222222222222"

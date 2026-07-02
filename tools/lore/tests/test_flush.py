@@ -32,9 +32,6 @@ import pytest
 
 from conftest import load_script, make_vault as _make_vault, run_cli as _run
 
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
-
 SID = "11111111-2222-4333-8444-555555555555"
 
 

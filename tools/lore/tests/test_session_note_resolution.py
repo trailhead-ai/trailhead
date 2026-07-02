@@ -6,7 +6,7 @@ that fronts it. The motivating bug: callers degraded to a fuzzy worktree+mtime
 guess because the session-id was never consulted.
 """
 
-import importlib.util
+import importlib
 import os
 import subprocess
 import sys
@@ -14,22 +14,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
 
 def load_script(name: str):
-    if "." in name:
-        mod = importlib.import_module(name)
-        return importlib.reload(mod)
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in (name, "vault", "frontmatter", "sessions", "config"):
-        sys.modules.pop(cached, None)
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    mod = importlib.import_module(name)
+    return importlib.reload(mod)
 
 
 def run_cli(args, env=None, cwd=None, *, seed_vault=None):

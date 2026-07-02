@@ -20,12 +20,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-REPO_ROOT = Path(__file__).parent.parent
-PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
-CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-
-
 # ---------------------------------------------------------------------------
 # Module loader
 # ---------------------------------------------------------------------------
