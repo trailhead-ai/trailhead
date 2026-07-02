@@ -9,7 +9,7 @@ camp ai brings a workspace up in two phases:
   2. Detached provision (spawn_detached_provisioner): spawn `camp setup --background`
      in its own session (start_new_session=True, stdin=DEVNULL, std streams →
      setup.log 0o600) that survives the parent's os.execvp into the harness. The
-     The assumption (validated) is that this detached child runs to completion after
+     assumption (validated) is that this detached child runs to completion after
      the parent process image is replaced — no double-fork needed.
 
 bring_up_workspace ties the two together: seed, then spawn.
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from camp.group.manifest import (
+from ..group.manifest import (
     manifest_path_for,
     workspace_dir,
     write_central_manifest,
@@ -108,7 +108,7 @@ def seed_pending_workspace(
     re-run of camp ai does not reset a ready member back to pending.
     """
     from . import reconcile
-    from camp.group.manifest import read_central_manifest, reconcile_lock
+    from ..group.manifest import read_central_manifest, reconcile_lock
 
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")

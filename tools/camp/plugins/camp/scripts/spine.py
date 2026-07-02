@@ -394,7 +394,7 @@ def cmd_ls(args: list[str]) -> None:
 
     The standalone fallback used when no group resolves from cwd. It reads the
     legacy worktree registry (.workspace-manifest.json), normalizes each entry to
-    the shared list shape, and renders via lifecycle_cmds.render_workspace_list —
+    the shared list shape, and renders via lifecycle.render_workspace_list —
     the SAME renderer the group-aware `camp list` uses — so the human + --json
     surface is identical regardless of cwd. `group` is None here (the
     standalone registry is not group-scoped).
