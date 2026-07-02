@@ -42,10 +42,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
@@ -162,7 +159,6 @@ class TestU1RealSurvival:
         parent.write_text(
             textwrap.dedent(f"""\
             import sys, os
-            sys.path.insert(0, {str(_SCRIPTS_DIR)!r})
             sys.path.insert(0, {str(_PLUGIN_DIR)!r})
             from camp.provision.provision import spawn_detached_provisioner
 
@@ -213,7 +209,6 @@ class TestU1RealSurvival:
         parent.write_text(
             textwrap.dedent(f"""\
             import sys, os
-            sys.path.insert(0, {str(_SCRIPTS_DIR)!r})
             sys.path.insert(0, {str(_PLUGIN_DIR)!r})
             from camp.provision.provision import spawn_detached_provisioner
             spawn_detached_provisioner(

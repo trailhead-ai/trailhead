@@ -41,10 +41,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 

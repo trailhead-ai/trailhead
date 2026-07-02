@@ -20,17 +20,15 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
+_CAMP_PKG_DIR = _PLUGIN_DIR / "camp"
 _CLI_CAMP = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "cli" / "camp"
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _production_sources() -> list[Path]:
-    """Every production source in the camp plugin (scripts/*.py + the cli/camp script)."""
-    sources = sorted(_SCRIPTS_DIR.glob("*.py"))
+    """Every production source in the camp plugin (camp/**/*.py + the cli/camp script)."""
+    sources = sorted(_CAMP_PKG_DIR.rglob("*.py"))
     sources.append(_CLI_CAMP)
     return sources
 
