@@ -95,7 +95,7 @@ class TestFix6InjectIsLight:
 
     def test_inject_drain_still_drains(self, tmp_path: Path, monkeypatch, capsys):
         """The drain still emits the queued additionalContext and clears the queue."""
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         (ws / ".camp").mkdir(parents=True)

@@ -23,9 +23,12 @@ from pathlib import Path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +38,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 class TestEnqueue:
     def test_enqueue_writes_a_queue_file(self, tmp_path: Path):
-        from inject import enqueue_doc, queue_dir_for
+        from camp.harness.inject import enqueue_doc, queue_dir_for
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -46,7 +49,7 @@ class TestEnqueue:
         assert files[0].read_text() == "# member doc\n"
 
     def test_multiple_enqueues_do_not_overwrite(self, tmp_path: Path):
-        from inject import enqueue_doc, queue_dir_for
+        from camp.harness.inject import enqueue_doc, queue_dir_for
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -60,11 +63,11 @@ class TestEnqueue:
         """BUG 8: if two enqueues collide on the same time_ns, the uuid suffix
         still keeps filenames unique — no overwrite."""
         import unittest.mock as mock
-        from inject import enqueue_doc, queue_dir_for
+        from camp.harness.inject import enqueue_doc, queue_dir_for
 
         ws = tmp_path / "ws"
         ws.mkdir()
-        with mock.patch("inject.time.time_ns", return_value=42):
+        with mock.patch("camp.harness.inject.time.time_ns", return_value=42):
             enqueue_doc(ws, "doc-one")
             enqueue_doc(ws, "doc-two")
 
@@ -81,7 +84,7 @@ class TestEnqueue:
 
 def _drain(ws: Path) -> tuple[str, int]:
     """Run drain_queue capturing stdout; return (stdout, exit_code)."""
-    from inject import drain_queue
+    from camp.harness.inject import drain_queue
 
     out = io.StringIO()
     import contextlib
@@ -94,7 +97,7 @@ def _drain(ws: Path) -> tuple[str, int]:
 
 class TestDrain:
     def test_drain_emits_posttooluse_additional_context_json(self, tmp_path: Path):
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -108,7 +111,7 @@ class TestDrain:
         assert doc in parsed["hookSpecificOutput"]["additionalContext"]
 
     def test_drain_clears_queue(self, tmp_path: Path):
-        from inject import enqueue_doc, queue_dir_for
+        from camp.harness.inject import enqueue_doc, queue_dir_for
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -121,7 +124,7 @@ class TestDrain:
         assert list(qdir.iterdir()) == []
 
     def test_drain_second_call_is_empty(self, tmp_path: Path):
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -133,7 +136,7 @@ class TestDrain:
         assert code == 0
 
     def test_drain_includes_all_queued_docs(self, tmp_path: Path):
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -148,7 +151,7 @@ class TestDrain:
 
     def test_drain_emits_docs_in_enqueue_order(self, tmp_path: Path):
         """BUG 8: docs must surface in enqueue order A, B, C — not uuid-sorted order."""
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -185,7 +188,6 @@ class TestDrain:
 import os  # noqa: E402
 import subprocess  # noqa: E402
 
-_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 
@@ -208,7 +210,7 @@ def _run_cli(args: list[str], *, env: dict[str, str], cwd: Path) -> subprocess.C
 
 class TestFindWorkspaceRoot:
     def test_finds_nearest_ancestor_with_camp_dir(self, tmp_path: Path):
-        from inject import find_workspace_root
+        from camp.harness.inject import find_workspace_root
 
         ws = tmp_path / "ws"
         (ws / ".camp").mkdir(parents=True)
@@ -218,7 +220,7 @@ class TestFindWorkspaceRoot:
         assert find_workspace_root(member_subdir) == ws
 
     def test_returns_start_when_no_camp_ancestor(self, tmp_path: Path):
-        from inject import find_workspace_root
+        from camp.harness.inject import find_workspace_root
 
         nowhere = tmp_path / "nowhere" / "deep"
         nowhere.mkdir(parents=True)
@@ -226,7 +228,7 @@ class TestFindWorkspaceRoot:
         assert find_workspace_root(nowhere) == nowhere
 
     def test_returns_self_when_start_is_workspace_root(self, tmp_path: Path):
-        from inject import find_workspace_root
+        from camp.harness.inject import find_workspace_root
 
         ws = tmp_path / "ws"
         (ws / ".camp").mkdir(parents=True)
@@ -237,7 +239,7 @@ class TestFindWorkspaceRoot:
 class TestInjectCliWalkUp:
     def test_drain_from_member_subdir_finds_workspace_queue(self, tmp_path: Path):
         """BUG 3: cwd = <workspace>/<member> still drains <workspace>/.camp queue."""
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -252,7 +254,7 @@ class TestInjectCliWalkUp:
 
     def test_drain_from_deep_member_subdir_finds_workspace_queue(self, tmp_path: Path):
         """BUG 3: cwd = <workspace>/<member>/sub/dir still drains the workspace queue."""
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -267,7 +269,7 @@ class TestInjectCliWalkUp:
 
     def test_drain_from_workspace_root_still_works(self, tmp_path: Path):
         """BUG 3: cwd = workspace root still drains its own queue."""
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -289,7 +291,7 @@ class TestInjectCliWalkUp:
 
     def test_drain_walkup_clears_workspace_queue(self, tmp_path: Path):
         """BUG 3: draining from a member subdir clears the workspace queue."""
-        from inject import enqueue_doc, queue_dir_for
+        from camp.harness.inject import enqueue_doc, queue_dir_for
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -312,7 +314,7 @@ class TestInjectCli:
 
     def test_cli_drain_with_doc_emits_json(self, tmp_path: Path):
         """camp inject --drain emits the PostToolUse JSON when the queue has a doc."""
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -340,7 +342,7 @@ class TestDrainResilience:
         exception and the test would error.
         """
         import unittest.mock as mock
-        from inject import enqueue_doc, queue_dir_for
+        from camp.harness.inject import enqueue_doc, queue_dir_for
 
         ws = tmp_path / "ws"
         ws.mkdir()
@@ -363,7 +365,7 @@ class TestDrainResilience:
         """camp inject --drain exits 0 with no stdout when the queue only has
         subdirectories (is_file() filters them; the queue appears empty to drain).
         Verifies the CLI route's resilience contract end-to-end."""
-        from inject import queue_dir_for
+        from camp.harness.inject import queue_dir_for
 
         ws = tmp_path / "ws"
         ws.mkdir()

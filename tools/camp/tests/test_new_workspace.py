@@ -218,7 +218,7 @@ class TestBringUpInjectHook:
 
     def test_claude_hook_strategy_installs_posttooluse_hook(self, camp_cli, group_env):
         """Default (no [harness] block) → inject='claude-hook' → hook IS wired."""
-        from hooks_writer import has_inject_drain_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook
 
         g = group_env
         # No [harness] block: resolve_harness_profile returns inject='claude-hook' (the default).
@@ -231,7 +231,7 @@ class TestBringUpInjectHook:
 
     def test_stdout_strategy_does_not_install_posttooluse_hook(self, camp_cli, group_env):
         """Explicit inject='stdout' → hook must NOT be installed (negative guard)."""
-        from hooks_writer import has_inject_drain_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook
 
         g = group_env
         g["group"]["harness"] = {"inject": "stdout"}
@@ -244,7 +244,7 @@ class TestBringUpInjectHook:
 
     def test_inject_hook_idempotent_on_reentry(self, camp_cli, group_env):
         """Re-entering an existing workspace must not duplicate the inject hook."""
-        from hooks_writer import has_inject_drain_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook
         import json
 
         g = group_env

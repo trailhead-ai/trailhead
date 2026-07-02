@@ -24,7 +24,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from harness_profile import resolve_harness_profile
+from camp.harness.profile import resolve_harness_profile
 
 
 def _render_doc(

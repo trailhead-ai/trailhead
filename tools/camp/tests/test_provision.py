@@ -466,7 +466,7 @@ class TestPretrustWiring:
 
     def test_pretrust_exception_does_not_abort_bringup(self, two_member_group, monkeypatch):
         import camp.provision.provision as provision
-        import claude_trust
+        import camp.harness.claude_trust as claude_trust
         from camp.provision.provision import bring_up_workspace
 
         g = two_member_group

@@ -41,7 +41,7 @@ def cmd_pwd(
     Raises:
         WorkspaceNotFoundError: If the workspace directory does not exist.
     """
-    from camp.group.resolve import central_state_dir
+    from ..group.resolve import central_state_dir
 
     group_name = group["group"]["name"]
     ws_dir = central_state_dir(group_name, env=env) / "worktrees" / slug

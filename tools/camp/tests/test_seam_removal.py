@@ -42,7 +42,7 @@ def _production_sources() -> list[Path]:
 
 class TestImportLint:
     def test_harness_profile_imports(self):
-        import harness_profile
+        import camp.harness.profile as harness_profile
 
         assert hasattr(harness_profile, "resolve_harness_profile")
         assert hasattr(harness_profile, "HarnessProfile")
@@ -91,7 +91,7 @@ class TestSeamAbsence:
 
 class TestPretrustSurvivesStrip:
     def test_default_profile_should_pretrust(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         group = {"group": {"name": "g"}, "members": [{"name": "r", "repo_root": "/tmp/r"}]}
         profile = resolve_harness_profile(group)

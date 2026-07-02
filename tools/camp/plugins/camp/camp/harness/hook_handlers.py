@@ -29,7 +29,7 @@ def _load_groups_silently() -> list | None:
     """
     try:
         import trailhead.paths as _paths
-        from camp.group.config import load_all_groups, GroupConfigError, GroupConfigNotFound
+        from ..group.config import load_all_groups, GroupConfigError, GroupConfigNotFound
     except ImportError:
         # trailhead not importable — cold start / bare clone.  Silent no-op.
         return None
@@ -59,7 +59,7 @@ def _resolve_group_slug_silently(cwd: Path, group_configs: list) -> tuple[dict |
       - resolution error of any kind
     """
     try:
-        from camp.group.resolve import resolve_from_cwd
+        from ..group.resolve import resolve_from_cwd
     except ImportError:
         return None, None
 
@@ -103,7 +103,7 @@ def cmd_session_bootstrap() -> None:
 
     # Reconcile (idempotent create-or-complete).
     try:
-        from camp.provision.reconcile import reconcile_worktree
+        from ..provision.reconcile import reconcile_worktree
 
         reconcile_worktree(group, slug)
     except Exception as e:
@@ -141,8 +141,8 @@ def cmd_worktree_cleanup(*, force: bool = False) -> None:
         sys.exit(0)
 
     try:
-        from camp.provision.reconcile import reconcile_break, ReconcileError
-        from camp.group.manifest import ManifestError
+        from ..provision.reconcile import reconcile_break, ReconcileError
+        from ..group.manifest import ManifestError
     except ImportError:
         sys.exit(0)
 

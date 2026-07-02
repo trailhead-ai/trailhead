@@ -930,8 +930,8 @@ def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> No
     """Under claude-hook WITH the drain hook installed, the full doc is enqueued,
     NOT dumped to stdout."""
     from camp.provision.activation import enter_member
-    from inject import queue_dir_for
-    from hooks_writer import write_workspace_inject_hook
+    from camp.harness.inject import queue_dir_for
+    from camp.harness.hooks_writer import write_workspace_inject_hook
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
@@ -959,7 +959,7 @@ def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -
     """Under claude-hook WITH the drain hook installed, a concise confirmation
     naming the member is printed to stdout."""
     from camp.provision.activation import enter_member
-    from hooks_writer import write_workspace_inject_hook
+    from camp.harness.hooks_writer import write_workspace_inject_hook
 
     doc = "# Member doc\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
@@ -981,7 +981,7 @@ def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Pat
     """BUG 5: claude-hook strategy but NO drain hook installed → fall back to
     printing the full doc to stdout; no false 'will load via hook' claim."""
     from camp.provision.activation import enter_member
-    from inject import queue_dir_for
+    from camp.harness.inject import queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)
@@ -1005,7 +1005,7 @@ def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Pat
 def test_enter_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:
     """Under the stdout strategy, the full doc is printed to stdout (unchanged)."""
     from camp.provision.activation import enter_member
-    from inject import queue_dir_for
+    from camp.harness.inject import queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
     group_name, member_name, slug, ws_dir = _ready_member_setup(tmp_path, doc)

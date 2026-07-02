@@ -198,12 +198,12 @@ def main() -> None:
     # These run before group resolution — they handle their own silent no-op logic.
     # ---------------------------------------------------------------------------
     if first == "session-bootstrap":
-        from hook_handlers import cmd_session_bootstrap
+        from camp.harness.hook_handlers import cmd_session_bootstrap
         cmd_session_bootstrap()
         return
 
     if first == "worktree-cleanup":
-        from hook_handlers import cmd_worktree_cleanup
+        from camp.harness.hook_handlers import cmd_worktree_cleanup
         force = "--force" in argv[1:]
         cmd_worktree_cleanup(force=force)
         return
@@ -1003,7 +1003,7 @@ def _cmd_enter_group_cli(
     from spine import _die
     from camp.provision.activation import enter_member, MemberNotReadyError
     from camp.group.config import GroupConfigError
-    from harness_profile import resolve_harness_profile
+    from camp.harness.profile import resolve_harness_profile
 
     filtered = list(args)
     slug = _slug_from_args_or_cwd(filtered, group, verb="activate", env=env)
@@ -1047,7 +1047,7 @@ def _cmd_pwd_group_cli(
     Security contract: stdout carries ONLY the path; diagnostics go to stderr.
     """
     from spine import _resolve_slug, _consume_flag_value, _die
-    from shell_integration import cmd_pwd, WorkspaceNotFoundError
+    from camp.harness.shell_integration import cmd_pwd, WorkspaceNotFoundError
 
     filtered = list(args)
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
@@ -1095,7 +1095,7 @@ def _cmd_inject_cli(args: list[str]) -> None:
             break
 
     try:
-        from inject import drain_queue, find_workspace_root
+        from camp.harness.inject import drain_queue, find_workspace_root
         ws_dir = Path(workspace) if workspace else find_workspace_root(Path.cwd())
         code = drain_queue(ws_dir)
     except Exception:

@@ -74,7 +74,7 @@ def _run_cli(
 class TestCmdPwd:
     def test_cmd_pwd_returns_workspace_dir(self, tmp_path: Path) -> None:
         """cmd_pwd returns the resolved workspace dir for a known slug."""
-        from shell_integration import cmd_pwd
+        from camp.harness.shell_integration import cmd_pwd
 
         group_name = "mygroup"
         member_name = "myrepo"
@@ -98,7 +98,7 @@ class TestCmdPwd:
 
     def test_cmd_pwd_is_absolute(self, tmp_path: Path) -> None:
         """The path returned by cmd_pwd is absolute."""
-        from shell_integration import cmd_pwd
+        from camp.harness.shell_integration import cmd_pwd
 
         group_name = "mygroup"
         member_name = "myrepo"
