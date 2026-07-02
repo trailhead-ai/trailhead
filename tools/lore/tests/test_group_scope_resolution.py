@@ -15,13 +15,6 @@ import sys
 from pathlib import Path
 from unittest import mock
 
-# Camp scripts must be on sys.path so the lazy camp imports inside
-# _resolve_group_scopes can succeed when tests exercise the happy path.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_CAMP_SCRIPTS = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
-if str(_CAMP_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_CAMP_SCRIPTS))
-
 # The group-default scope routing helper now lives in the record command module
 # (``lore.cli.record``); conftest puts the ``lore`` package's plugin root on
 # sys.path so it imports by its dotted name.

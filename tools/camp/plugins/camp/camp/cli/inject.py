@@ -38,7 +38,7 @@ def _cmd_inject_cli(args: list[str]) -> None:
             break
 
     try:
-        from camp.harness.inject import drain_queue, find_workspace_root
+        from ..harness.inject import drain_queue, find_workspace_root
         ws_dir = Path(workspace) if workspace else find_workspace_root(Path.cwd())
         code = drain_queue(ws_dir)
     except Exception:

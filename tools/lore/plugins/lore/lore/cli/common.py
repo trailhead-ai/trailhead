@@ -35,22 +35,36 @@ def _read_stdin_body() -> str:
     return "" if sys.stdin.isatty() else sys.stdin.read()
 
 
-def _resolve_config_path() -> Path:
-    """Return ``config_dir("lore")/config.json``, honoring XDG overrides.
+def _resolve_xdg_dir(
+    *, kind: str, xdg_var: str, fallback_base: tuple[str, ...], suffix: tuple[str, ...] = ()
+) -> Path:
+    """Return trailhead's ``<kind>_dir("lore")`` plus ``suffix``, honoring XDG overrides.
 
-    Lazy-imports ``_bootstrap`` + ``trailhead.paths`` and falls back to the XDG
-    default on any import failure so the CLI works in a vanilla checkout.
+    Shared by ``_resolve_config_path`` / ``_resolve_vaults_root`` /
+    ``_resolve_lore_state_dir``: lazy-imports ``_bootstrap`` + ``trailhead.paths``
+    and falls back to the XDG env var (or its plain-POSIX default under
+    ``$HOME``) on any import failure, so the CLI works in a vanilla checkout with
+    no trailhead install.
     """
     try:
         import _bootstrap
         _bootstrap.ensure_trailhead_importable()
         import trailhead.paths as _paths
-        return _paths.config_dir("lore") / "config.json"
+        root = getattr(_paths, f"{kind}_dir")("lore")
     except (ImportError, SystemExit):
-        base = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        base = os.environ.get(xdg_var, "").strip()
         if base and os.path.isabs(base):
-            return Path(base) / "lore" / "config.json"
-        return Path.home() / ".config" / "lore" / "config.json"
+            root = Path(base) / "lore"
+        else:
+            root = Path.home().joinpath(*fallback_base) / "lore"
+    return root.joinpath(*suffix) if suffix else root
+
+
+def _resolve_config_path() -> Path:
+    """Return ``config_dir("lore")/config.json``, honoring XDG overrides."""
+    return _resolve_xdg_dir(
+        kind="config", xdg_var="XDG_CONFIG_HOME", fallback_base=(".config",), suffix=("config.json",)
+    )
 
 
 def _resolve_vaults_root() -> Path:
@@ -59,33 +73,14 @@ def _resolve_vaults_root() -> Path:
     The confinement root for ``vault delete --remove-from-disk``: a vault whose
     resolved path is not within this root (or reaches it via a symlink) is refused.
     """
-    try:
-        import _bootstrap
-        _bootstrap.ensure_trailhead_importable()
-        import trailhead.paths as _paths
-        return _paths.state_dir("lore") / "vaults"
-    except (ImportError, SystemExit):
-        base = os.environ.get("XDG_STATE_HOME", "").strip()
-        if base and os.path.isabs(base):
-            return Path(base) / "lore" / "vaults"
-        return Path.home() / ".local" / "state" / "lore" / "vaults"
+    return _resolve_xdg_dir(
+        kind="state", xdg_var="XDG_STATE_HOME", fallback_base=(".local", "state"), suffix=("vaults",)
+    )
 
 
 def _resolve_lore_state_dir() -> Path:
-    """Return ``state_dir("lore")``, honoring XDG overrides.
-
-    Mirrors the other lazy-import resolver patterns in this file.
-    """
-    try:
-        import _bootstrap
-        _bootstrap.ensure_trailhead_importable()
-        import trailhead.paths as _paths
-        return _paths.state_dir("lore")
-    except (ImportError, SystemExit):
-        base = os.environ.get("XDG_STATE_HOME", "").strip()
-        if base and os.path.isabs(base):
-            return Path(base) / "lore"
-        return Path.home() / ".local" / "state" / "lore"
+    """Return ``state_dir("lore")``, honoring XDG overrides."""
+    return _resolve_xdg_dir(kind="state", xdg_var="XDG_STATE_HOME", fallback_base=(".local", "state"))
 
 
 def _resolve_groups_dir() -> "Path | None":

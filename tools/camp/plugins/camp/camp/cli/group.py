@@ -134,11 +134,11 @@ def _parse_member(raw: str) -> dict[str, str]:
 
 def _cmd_group_cli(args: list[str]) -> None:
     """camp group <name> — wire hooks, author a config from flags, or write a stub."""
-    from camp.group.config import load_all_groups, GroupConfigError
-    from camp.group.resolve import resolve_group_override, GroupResolutionError
-    from camp.workspace.init import run_init
-    from camp.group import scaffold as group_scaffold
-    import trailhead.paths as _paths
+    from ..group.config import load_all_groups, GroupConfigError
+    from ..group.resolve import resolve_group_override, GroupResolutionError
+    from ..workspace.init import run_init
+    from ..group import scaffold as group_scaffold
+    from .common import _groups_dir
 
     if not args or args[0] in ("--help", "-h"):
         print(_GROUP_HELP)
@@ -146,7 +146,7 @@ def _cmd_group_cli(args: list[str]) -> None:
 
     parsed = _parse_init_args(args)
     group_name = parsed["group_name"]
-    config_dir = _paths.config_dir("camp") / "groups"
+    config_dir = _groups_dir()
     config_path = config_dir / f"{group_name}.toml"
 
     # --- Mode (c): --scaffold (and no --member) → write a stub, stop ---
@@ -234,9 +234,9 @@ def _cmd_new_group_cli(
     workspace activates when ready / via `camp activate <slug>`. That next-step
     guidance is part of the stderr confirmation so the user is not stranded.
     """
-    from camp.spine import _resolve_slug, _consume_flag_value, _die
-    from camp.provision.provision import bring_up_workspace
-    from camp.group.manifest import workspace_dir, manifest_path_for
+    from ..spine import _resolve_slug, _consume_flag_value, _die
+    from ..provision.provision import bring_up_workspace
+    from ..group.manifest import workspace_dir, manifest_path_for
 
     rest = list(args)
     _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
@@ -314,9 +314,9 @@ def _author_group(
     config_path,
 ) -> None:
     """Validate + atomically write a group config TOML. Exits non-zero on failure."""
-    from camp.group.config import load_all_groups, load_group, GroupConfigError
-    from camp.group.resolve import GroupConfinementError
-    from camp.group import scaffold as group_scaffold
+    from ..group.config import load_all_groups, load_group, GroupConfigError
+    from ..group.resolve import GroupConfinementError
+    from ..group import scaffold as group_scaffold
 
     if config_path.exists() and not force:
         print(

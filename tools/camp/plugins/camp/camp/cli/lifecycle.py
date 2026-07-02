@@ -28,8 +28,8 @@ def _cmd_setup_group_cli(
     The slug is resolved from the positional arg, --name, or cwd.
     """
     import json as _json
-    from camp.provision.lifecycle import cmd_setup_group
-    from camp.spine import _consume_flag_value, _die
+    from ..provision.lifecycle import cmd_setup_group
+    from ..spine import _consume_flag_value, _die
 
     # Read-only status mode (the SessionStart hook runs `camp setup --status`).
     # Parsed BEFORE slug resolution so `--status` is never normalized into a slug.
@@ -90,10 +90,10 @@ def _cmd_setup_status_cli(
     worktree add, no manifest write, no junk dir. The structured 0/2/3 exit codes
     stay on `camp status` for direct agent use, NOT on `--status`.
     """
-    from camp.provision.lifecycle import provision_status_code
+    from ..provision.lifecycle import provision_status_code
 
     filtered = [a for a in args if a not in ("--status", "--background", "--json")]
-    from camp.spine import _consume_flag_value
+    from ..spine import _consume_flag_value
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
 
     slug = _slug_from_args_or_cwd(
@@ -129,7 +129,7 @@ def _cmd_sync_group_cli(
 ) -> None:
     """camp sync [--force] [--json]"""
     import json as _json
-    from camp.provision.lifecycle import cmd_sync_group
+    from ..provision.lifecycle import cmd_sync_group
 
     as_json = "--json" in args
     force = "--force" in args
@@ -164,8 +164,8 @@ def _cmd_remove_group_cli(
     block live in reconcile_break, which also serializes concurrent same-slug
     removals on the slug reconcile lock.
     """
-    from camp.provision.reconcile import reconcile_break
-    from camp.spine import _die
+    from ..provision.reconcile import reconcile_break
+    from ..spine import _die
 
     force = "--force" in args
     filtered = [a for a in args if a != "--force"]
@@ -215,8 +215,8 @@ def _cmd_rebase_group_cli(
 ) -> None:
     """camp rebase [--onto <branch>] [--name <slug>]"""
     import subprocess
-    from camp.spine import _consume_flag_value, _die
-    from camp.group.manifest import manifest_path_for, read_central_manifest
+    from ..spine import _consume_flag_value, _die
+    from ..group.manifest import manifest_path_for, read_central_manifest
 
     filtered = list(args)
     onto = _consume_flag_value(filtered, "--onto") or "origin/main"

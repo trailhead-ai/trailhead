@@ -25,7 +25,7 @@ from pathlib import Path
 # Single source of truth for the verb dispatch tables. verb_taxonomy is a
 # tiny pure-data module (no regex/subprocess/spine), so importing it at module
 # load keeps the inject route light while letting the router share the tables.
-from camp.workspace.verb_taxonomy import (
+from ..workspace.verb_taxonomy import (
     LEGACY_REDIRECTS as _LEGACY_REDIRECTS,
     bare_slug_message as _bare_slug_message,
     resolve_verb as _resolve_verb,
@@ -72,13 +72,13 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
         return None, None
 
     try:
-        from camp.group.config import load_all_groups, load_group, GroupConfigError, GroupConfigNotFound
-        from camp.group.resolve import (
+        from ..group.config import load_all_groups, GroupConfigError
+        from ..group.resolve import (
             resolve_from_cwd,
             resolve_group_override,
             GroupResolutionError,
         )
-        import trailhead.paths as _paths
+        from .common import _groups_dir
     except ImportError:
         return None, None
 
@@ -92,7 +92,7 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
             group_override = arg[len("--group="):]
             break
 
-    config_dir = _paths.config_dir("camp") / "groups"
+    config_dir = _groups_dir()
 
     try:
         configs = load_all_groups(config_dir)
@@ -135,8 +135,8 @@ def _slug_from_args_or_cwd(
     a uniform message — unless allow_none, in which case None is returned (the
     caller falls back, e.g. status's fleet view).
     """
-    from camp.spine import _consume_flag_value, _resolve_slug, _die
-    from camp.group.resolve import resolve_from_cwd
+    from ..spine import _consume_flag_value, _resolve_slug, _die
+    from ..group.resolve import resolve_from_cwd
 
     name = _consume_flag_value(args, "--name")
     if name is not None:
@@ -204,12 +204,12 @@ def main() -> None:
     # These run before group resolution — they handle their own silent no-op logic.
     # ---------------------------------------------------------------------------
     if first == "session-bootstrap":
-        from camp.harness.hook_handlers import cmd_session_bootstrap
+        from ..harness.hook_handlers import cmd_session_bootstrap
         cmd_session_bootstrap()
         return
 
     if first == "worktree-cleanup":
-        from camp.harness.hook_handlers import cmd_worktree_cleanup
+        from ..harness.hook_handlers import cmd_worktree_cleanup
         force = "--force" in argv[1:]
         cmd_worktree_cleanup(force=force)
         return
@@ -228,7 +228,7 @@ def main() -> None:
         return
 
     if first == "init":
-        from camp.spine import cmd_legacy_redirect
+        from ..spine import cmd_legacy_redirect
         cmd_legacy_redirect("init", "group")
         return
 
@@ -254,7 +254,7 @@ def main() -> None:
     # Delegate everything else to the spine dispatcher (fallback / non-group cmds).
     # Imported lazily so the early-returning inject route never pays the
     # spine module-load cost.
-    from camp.spine import main as _spine_main
+    from ..spine import main as _spine_main
     _spine_main()
 
 
@@ -266,7 +266,7 @@ def _dispatch_group_command(
     dry_run: bool,
 ) -> None:
     """Dispatch a group-aware command."""
-    from camp.spine import (
+    from ..spine import (
         _die,
         cmd_disabled,
         cmd_legacy_redirect,
@@ -333,5 +333,5 @@ def _dispatch_group_command(
         _cmd_rebase_group_cli(rest, group, group_env, dry_run)
     else:
         # Fall through to spine for non-group commands
-        from camp.spine import main as _spine_main
+        from ..spine import main as _spine_main
         _spine_main()

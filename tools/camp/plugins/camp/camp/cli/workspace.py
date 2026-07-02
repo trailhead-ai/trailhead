@@ -25,7 +25,7 @@ def _cmd_ls_group_cli(
     the same renderer spine.main's no-group `cmd_ls` uses, so the surface is
     identical regardless of cwd.
     """
-    from camp.provision.lifecycle import cmd_ls_group, render_workspace_list
+    from ..provision.lifecycle import cmd_ls_group, render_workspace_list
 
     as_json = "--json" in args
     entries = cmd_ls_group(group, env=env)
@@ -42,10 +42,10 @@ def _cmd_enter_group_cli(
     Fires the member's activation hooks idempotently, then prints the member's
     CLAUDE.md to stdout so the calling agent ingests it as context.
     """
-    from camp.spine import _die
-    from camp.provision.activation import enter_member, MemberNotReadyError
-    from camp.group.config import GroupConfigError
-    from camp.harness.profile import resolve_harness_profile
+    from ..spine import _die
+    from ..provision.activation import enter_member, MemberNotReadyError
+    from ..group.config import GroupConfigError
+    from ..harness.profile import resolve_harness_profile
 
     filtered = list(args)
     slug = _slug_from_args_or_cwd(filtered, group, verb="activate", env=env)
@@ -88,8 +88,8 @@ def _cmd_pwd_group_cli(
 
     Security contract: stdout carries ONLY the path; diagnostics go to stderr.
     """
-    from camp.spine import _resolve_slug, _consume_flag_value, _die
-    from camp.harness.shell_integration import cmd_pwd, WorkspaceNotFoundError
+    from ..spine import _resolve_slug, _consume_flag_value, _die
+    from ..harness.shell_integration import cmd_pwd, WorkspaceNotFoundError
 
     filtered = list(args)
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it

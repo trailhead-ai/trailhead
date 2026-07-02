@@ -16,30 +16,39 @@ from .dispatch import _SELF, _VERSION, _slug_from_args_or_cwd
 def _cmd_version() -> None:
     print(f"camp {_VERSION}")
     print(f"binary: {_SELF}")
-    # Attempt group resolution for --version header
-    try:
-        _print_active_group()
-    except Exception:
-        print("group: (not resolved)")
+    _print_active_group()
 
 
 def _print_active_group() -> None:
-    """Print active group if resolvable from cwd."""
-    from camp.group.config import load_all_groups, GroupConfigError
-    from camp.group.resolve import (
-        resolve_from_cwd,
-        GroupResolutionError,
-        central_state_dir,
-    )
-    import trailhead.paths as _paths
+    """Print the active group (and slug, if any) for the --version header.
+
+    Delegates to `_resolve_group_for_command` — the same resolver group-aware
+    commands use — instead of reimplementing config loading and --group
+    override parsing. That resolver raises GroupConfigError for a malformed
+    config; --version reports it without exiting non-zero (printing the
+    version must never hard-fail), unlike `camp status` and other group
+    commands, which surface a config error as a hard failure.
+    """
+    import sys as _sys
     from pathlib import Path
 
-    config_dir = _paths.config_dir("camp") / "groups"
+    from .dispatch import _resolve_group_for_command
+
     try:
-        configs = load_all_groups(config_dir)
-        group_name, slug = resolve_from_cwd(Path.cwd(), configs)
+        group, _env = _resolve_group_for_command(_sys.argv[1:])
+    except Exception as e:
+        print(f"group: (config error: {e})")
+        return
+    if group is None:
+        print("group: (not resolved from cwd)")
+        return
+
+    from ..group.resolve import resolve_from_cwd
+
+    try:
+        group_name, slug = resolve_from_cwd(Path.cwd(), [group])
         print(f"group: {group_name}" + (f" (slug: {slug})" if slug else " (fleet view)"))
-    except (GroupResolutionError, GroupConfigError, Exception):
+    except Exception:
         print("group: (not resolved from cwd)")
 
 
@@ -63,7 +72,7 @@ def _cmd_status_group_cli(
     Fleet view (no slug): the git-status table across all worktrees (exit 0).
     """
     import json as _json
-    from camp.provision.lifecycle import cmd_status_group, provision_status_code
+    from ..provision.lifecycle import cmd_status_group, provision_status_code
 
     as_json = "--json" in args
     filtered = [a for a in args if a != "--json"]
