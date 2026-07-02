@@ -52,7 +52,7 @@ class TestImportLint:
         # ImportError here (workspace_doc imports it at module scope).
         import camp.provision.activation as activation  # noqa: F401
         import camp.provision.provision as provision  # noqa: F401
-        import workspace_doc  # noqa: F401
+        import camp.workspace.doc as workspace_doc  # noqa: F401
 
     def test_no_module_names_old_harness_launch(self):
         offenders = [p.name for p in _production_sources() if "harness_launch" in p.read_text()]

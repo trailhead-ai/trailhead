@@ -2,10 +2,10 @@
 """camp CLI entry point.
 
 Two orthogonal import chains, kept distinct:
-  (a) self-relative sys.path insert toward scripts/ (like cli/lore:37) so
-      camp's own scripts/ modules (repos.py, spine.py) are importable
-      whether run from the repo or from an installed plugin. plugins/camp/
-      itself is also inserted so the camp.group package resolves the same way.
+  (a) self-relative sys.path insert toward plugins/camp/ (like cli/lore:37) so
+      the camp package (plugins/camp/camp/, holding spine, verb_taxonomy, the
+      workspace/ and provision/ domains, etc.) is importable whether run from
+      the repo or from an installed plugin.
   (b) trailhead.paths import guarded by _check_trailhead_paths_importable()
       (single guard, hook-subprocess-proof). cli/camp serves
       --help / --version / --which without calling trailhead.paths, but the
@@ -24,13 +24,11 @@ import os
 import sys
 from pathlib import Path
 
-# (a) Self-relative sys.path insert so scripts/ modules resolve.
-# cli/camp → parent is cli/ → parent is plugins/camp/ → scripts/ is a sibling.
+# (a) Self-relative sys.path insert so the camp package (plugins/camp/camp/)
+# resolves as a real import, and _bootstrap (a plain sibling of cli/ and camp/)
+# is importable too.
+# cli/camp → parent is cli/ → parent is plugins/camp/.
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_PLUGIN_ROOT / "scripts"))
-# Also put plugins/camp/ itself on sys.path so the camp.group package
-# (plugins/camp/camp/) resolves as a real import, alongside the still-flat
-# scripts/ modules above during the scripts/-to-package migration.
 sys.path.insert(0, str(_PLUGIN_ROOT))
 
 # The hidden `camp inject --drain` PostToolUse hook fires on EVERY Bash
@@ -56,7 +54,7 @@ _TRAILHEAD_PATHS_OK = not _INJECT_ROUTE
 # Single source of truth for the verb dispatch tables. verb_taxonomy is a
 # tiny pure-data module (no regex/subprocess/spine), so importing it here keeps
 # the inject route light while letting both entry points share the same tables.
-from verb_taxonomy import (  # noqa: E402
+from camp.workspace.verb_taxonomy import (  # noqa: E402
     LEGACY_REDIRECTS as _LEGACY_REDIRECTS,
     bare_slug_message as _bare_slug_message,
     resolve_verb as _resolve_verb,
@@ -220,7 +218,7 @@ def main() -> None:
         return
 
     if first == "init":
-        from spine import cmd_legacy_redirect
+        from camp.spine import cmd_legacy_redirect
         cmd_legacy_redirect("init", "group")
         return
 
@@ -246,7 +244,7 @@ def main() -> None:
     # Delegate everything else to the spine dispatcher (fallback / non-group cmds).
     # Imported lazily so the early-returning inject route never pays the
     # spine module-load cost.
-    from spine import main as _spine_main
+    from camp.spine import main as _spine_main
     _spine_main()
 
 
@@ -258,7 +256,7 @@ def _dispatch_group_command(
     dry_run: bool,
 ) -> None:
     """Dispatch a group-aware command."""
-    from spine import (
+    from camp.spine import (
         _die,
         cmd_disabled,
         cmd_legacy_redirect,
@@ -312,7 +310,7 @@ def _dispatch_group_command(
         _cmd_rebase_group_cli(rest, group, group_env, dry_run)
     else:
         # Fall through to spine for non-group commands
-        from spine import main as _spine_main
+        from camp.spine import main as _spine_main
         _spine_main()
 
 
@@ -333,7 +331,7 @@ def _slug_from_args_or_cwd(
     a uniform message — unless allow_none, in which case None is returned (the
     caller falls back, e.g. status's fleet view).
     """
-    from spine import _consume_flag_value, _resolve_slug, _die
+    from camp.spine import _consume_flag_value, _resolve_slug, _die
     from camp.group.resolve import resolve_from_cwd
 
     name = _consume_flag_value(args, "--name")
@@ -475,7 +473,7 @@ def _cmd_setup_group_cli(
     """
     import json as _json
     from camp.provision.lifecycle import cmd_setup_group
-    from spine import _consume_flag_value, _die
+    from camp.spine import _consume_flag_value, _die
 
     # Read-only status mode (the SessionStart hook runs `camp setup --status`).
     # Parsed BEFORE slug resolution so `--status` is never normalized into a slug.
@@ -539,7 +537,7 @@ def _cmd_setup_status_cli(
     from camp.provision.lifecycle import provision_status_code
 
     filtered = [a for a in args if a not in ("--status", "--background", "--json")]
-    from spine import _consume_flag_value
+    from camp.spine import _consume_flag_value
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
 
     slug = _slug_from_args_or_cwd(
@@ -611,7 +609,7 @@ def _cmd_remove_group_cli(
     removals on the slug reconcile lock.
     """
     from camp.provision.reconcile import reconcile_break
-    from spine import _die
+    from camp.spine import _die
 
     force = "--force" in args
     filtered = [a for a in args if a != "--force"]
@@ -661,7 +659,7 @@ def _cmd_rebase_group_cli(
 ) -> None:
     """camp rebase [--onto <branch>] [--name <slug>]"""
     import subprocess
-    from spine import _consume_flag_value, _die
+    from camp.spine import _consume_flag_value, _die
     from camp.group.manifest import manifest_path_for, read_central_manifest
 
     filtered = list(args)
@@ -823,7 +821,7 @@ def _cmd_group_cli(args: list[str]) -> None:
     """camp group <name> — wire hooks, author a config from flags, or write a stub."""
     from camp.group.config import load_all_groups, GroupConfigError
     from camp.group.resolve import resolve_group_override, GroupResolutionError
-    from init_cmd import run_init
+    from camp.workspace.init import run_init
     from camp.group import scaffold as group_scaffold
     import trailhead.paths as _paths
 
@@ -921,7 +919,7 @@ def _cmd_new_group_cli(
     workspace activates when ready / via `camp activate <slug>`. That next-step
     guidance is part of the stderr confirmation so the user is not stranded.
     """
-    from spine import _resolve_slug, _consume_flag_value, _die
+    from camp.spine import _resolve_slug, _consume_flag_value, _die
     from camp.provision.provision import bring_up_workspace
     from camp.group.manifest import workspace_dir, manifest_path_for
 
@@ -1000,7 +998,7 @@ def _cmd_enter_group_cli(
     Fires the member's activation hooks idempotently, then prints the member's
     CLAUDE.md to stdout so the calling agent ingests it as context.
     """
-    from spine import _die
+    from camp.spine import _die
     from camp.provision.activation import enter_member, MemberNotReadyError
     from camp.group.config import GroupConfigError
     from camp.harness.profile import resolve_harness_profile
@@ -1046,7 +1044,7 @@ def _cmd_pwd_group_cli(
 
     Security contract: stdout carries ONLY the path; diagnostics go to stderr.
     """
-    from spine import _resolve_slug, _consume_flag_value, _die
+    from camp.spine import _resolve_slug, _consume_flag_value, _die
     from camp.harness.shell_integration import cmd_pwd, WorkspaceNotFoundError
 
     filtered = list(args)

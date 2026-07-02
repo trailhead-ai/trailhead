@@ -12,8 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from camp.harness.hooks_writer import write_hooks_for_member
-from camp.group.resolve import validate_no_overlap
+from ..harness.hooks_writer import write_hooks_for_member
+from ..group.resolve import validate_no_overlap
 
 
 def run_init(

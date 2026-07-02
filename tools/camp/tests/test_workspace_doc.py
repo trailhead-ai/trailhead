@@ -43,10 +43,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
@@ -77,7 +74,7 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 class TestWorkspaceDocFiles:
     def test_claude_md_written(self, tmp_path: Path):
         """write_workspace_doc writes CLAUDE.md at the workspace root."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -94,7 +91,7 @@ class TestWorkspaceDocFiles:
 
     def test_agent_md_not_written_by_default(self, tmp_path: Path):
         """write_workspace_doc (claude default, no [harness]) does NOT write AGENT.md."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -118,7 +115,7 @@ class TestWorkspaceDocFiles:
 
 class TestWorkspaceDocCommandTable:
     def _get_claude_md(self, tmp_path: Path) -> str:
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -162,7 +159,7 @@ class TestWorkspaceDocCommandTable:
 
     def test_configured_agents_md_contains_camp_activate_exact(self, tmp_path: Path):
         """When doc_files=[AGENTS.md], that file contains 'camp activate <member>'."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -199,7 +196,7 @@ class TestWorkspaceDocCommandTable:
 class TestWorkspaceDocMemberList:
     def test_claude_md_contains_all_member_names(self, tmp_path: Path):
         """CLAUDE.md lists all member names."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -219,7 +216,7 @@ class TestWorkspaceDocMemberList:
 
     def test_configured_agents_md_contains_all_member_names(self, tmp_path: Path):
         """When doc_files=[AGENTS.md], that file lists all member names."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -245,7 +242,7 @@ class TestWorkspaceDocMemberList:
 
 class TestWorkspaceDocGuidance:
     def _write_and_read(self, tmp_path: Path):
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -289,7 +286,7 @@ class TestWorkspaceDocGuidance:
 class TestWorkspaceDocIdempotent:
     def test_no_duplication_on_second_write(self, tmp_path: Path):
         """Writing twice produces identical CLAUDE.md — no duplication."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -310,7 +307,7 @@ class TestWorkspaceDocIdempotent:
 
     def test_configured_agents_md_no_duplication_on_second_write(self, tmp_path: Path):
         """Writing twice with doc_files=[AGENTS.md] produces identical AGENTS.md."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -329,7 +326,7 @@ class TestWorkspaceDocIdempotent:
 
     def test_stable_content_for_same_inputs(self, tmp_path: Path):
         """Same group + slug always produces the same content."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         group = _make_group_config(
             "mygroup",
@@ -745,7 +742,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_default_writes_only_claude_md(self, tmp_path: Path):
         """No [harness] config → only CLAUDE.md written, AGENT.md not written."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -761,7 +758,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_configured_agents_md_writes_agents_md_only(self, tmp_path: Path):
         """doc_files=['AGENTS.md'] → AGENTS.md written, CLAUDE.md not written."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -777,7 +774,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_configured_both_writes_both(self, tmp_path: Path):
         """doc_files=['AGENTS.md','CLAUDE.md'] → both files written."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -793,7 +790,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_each_doc_has_same_content(self, tmp_path: Path):
         """All written doc files have identical rendered content."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -813,7 +810,7 @@ class TestRenderedDocMembersLine:
     """The trailing 'Members: ...' line must be removed."""
 
     def _get_content(self, tmp_path: Path, member_names=None) -> str:
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()

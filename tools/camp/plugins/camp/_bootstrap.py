@@ -7,7 +7,7 @@ Four-tier fallback (cold-start hardening: the `__file__` walk has
 precedence over the env var):
   1. Already importable (pytest run from repo root, or homebrew-installed future).
   2. Walk upward from this file looking for a dir that contains trailhead/paths.py
-     (the monorepo layout: this file lives at tools/camp/plugins/camp/scripts/).
+     (the monorepo layout: this file lives at tools/camp/plugins/camp/).
      This anchor is co-located with the code already executing — the same trust
      domain — so it wins over the environment, which crosses subprocess / CI /
      settings-injection boundaries.

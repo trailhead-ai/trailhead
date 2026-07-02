@@ -26,11 +26,8 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
@@ -342,7 +339,7 @@ class TestInputCharset:
     """
 
     def test_slug_is_constrained_to_safe_charset(self):
-        from spine import _VALID_SLUG_RE
+        from camp.spine import _VALID_SLUG_RE
 
         assert _VALID_SLUG_RE.pattern == r"^[a-z0-9-]+$"
         assert _VALID_SLUG_RE.match("feat-x")

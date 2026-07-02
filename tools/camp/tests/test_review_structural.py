@@ -80,7 +80,7 @@ class TestFix6InjectIsLight:
                 mod.main()
             except SystemExit:
                 pass
-            print("SPINE_IMPORTED" if "spine" in sys.modules else "SPINE_ABSENT")
+            print("SPINE_IMPORTED" if "camp.spine" in sys.modules else "SPINE_ABSENT")
             """
         )
         result = subprocess.run(
@@ -167,7 +167,7 @@ class TestFix7SlugFromCwdThreadsEnv:
 class TestFix9VerbTaxonomy:
     @pytest.mark.parametrize("verb", ["new", "setup"])
     def test_needs_group_configure_message(self, verb, capsys):
-        import spine
+        import camp.spine as spine
 
         with pytest.raises(SystemExit) as exc:
             spine.cmd_needs_group(verb)
@@ -177,7 +177,7 @@ class TestFix9VerbTaxonomy:
 
     @pytest.mark.parametrize("verb", ["remove", "pwd", "activate"])
     def test_needs_group_pass_group_message(self, verb, capsys):
-        import spine
+        import camp.spine as spine
 
         with pytest.raises(SystemExit) as exc:
             spine.cmd_needs_group(verb)

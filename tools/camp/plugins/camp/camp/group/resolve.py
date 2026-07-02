@@ -59,8 +59,8 @@ class GroupConfinementError(Exception):
 # ---------------------------------------------------------------------------
 
 # Group names share the slug charset (spine._VALID_SLUG_RE). Replicated rather
-# than imported because spine is a sibling script, not an importable package, and
-# the rule is a one-liner: lowercase letters, digits, and hyphens only.
+# than imported to avoid a cross-domain import for a one-liner rule: lowercase
+# letters, digits, and hyphens only.
 # `\Z` (not `$`) anchors the END OF STRING: `$` also matches just before a
 # trailing newline, which would let a group name like "valid\n" slip through and
 # defeat the control-character guarantee.

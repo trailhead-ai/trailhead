@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import IO, Any, NoReturn
 
-from verb_taxonomy import (  # noqa: E402 — single source of truth
+from .workspace.verb_taxonomy import (
     DISABLED_VERBS,
     LEGACY_REDIRECTS,
     NEEDS_GROUP_VERBS,
@@ -399,7 +399,7 @@ def cmd_ls(args: list[str]) -> None:
     surface is identical regardless of cwd. `group` is None here (the
     standalone registry is not group-scoped).
     """
-    from camp.provision.lifecycle import render_workspace_list
+    from .provision.lifecycle import render_workspace_list
 
     as_json = "--json" in args
     workspace_root = _workspace_root()

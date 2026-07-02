@@ -186,7 +186,7 @@ def bring_up_workspace(
     The caller may pass the once-resolved HarnessProfile; otherwise it is resolved
     from group here. Returns the manifest path; the harness launch follows.
     """
-    from workspace_doc import write_workspace_doc
+    from ..workspace.doc import write_workspace_doc
     from ..harness.hooks_writer import write_workspace_hooks, write_workspace_inject_hook
     from ..harness.profile import resolve_harness_profile
 

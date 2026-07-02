@@ -344,7 +344,7 @@ class TestHooksWriter:
 class TestInitCmd:
     def test_init_writes_hooks_for_all_members(self, two_member_group):
         """camp init <group> writes hook entries to each member's .claude/settings.json."""
-        from init_cmd import run_init
+        from camp.workspace.init import run_init
 
         g = two_member_group
         camp_bin = str(_BIN_CAMP)
@@ -361,7 +361,7 @@ class TestInitCmd:
 
     def test_init_idempotent(self, two_member_group):
         """Re-running init produces no duplicate hook entries for any member."""
-        from init_cmd import run_init
+        from camp.workspace.init import run_init
 
         g = two_member_group
         camp_bin = str(_BIN_CAMP)
