@@ -32,28 +32,15 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
 
 def _load_cli():
-    """Load cli/lore in-process (no .py extension — SourceFileLoader)."""
-    from importlib.machinery import SourceFileLoader
+    """Return the areas command module (``lore.cli.areas``).
 
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in list(sys.modules):
-        if cached in (
-            "recall",
-            "vault",
-            "frontmatter",
-            "sessions",
-            "layers",
-            "promote",
-            "review",
-        ):
-            sys.modules.pop(cached, None)
-    loader = SourceFileLoader("lore_cli_areas_test", str(CLI_PATH))
-    spec = importlib.util.spec_from_loader("lore_cli_areas_test", loader)
-    sys.modules.pop("lore_cli_areas_test", None)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
+    ``cmd_areas`` and its ``recall_mod`` alias moved out of the monolithic
+    ``cli/lore`` into their command-group module; conftest puts the ``lore``
+    package's plugin root on sys.path so it imports by its dotted name. A fresh
+    ``reload`` keeps the per-test isolation the old in-process loader provided.
+    """
+    from lore.cli import areas
+    return importlib.reload(areas)
 
 
 # ---------------------------------------------------------------------------

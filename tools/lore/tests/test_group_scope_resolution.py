@@ -11,9 +11,7 @@ value always matches the elected vault for slashed names.
 
 from __future__ import annotations
 
-import importlib.util
 import sys
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
 
@@ -24,26 +22,10 @@ _CAMP_SCRIPTS = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
 if str(_CAMP_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_CAMP_SCRIPTS))
 
-_CLI_PATH = Path(__file__).parent.parent / "plugins" / "lore" / "cli" / "lore"
-
-
-def _load_cli():
-    """Load cli/lore as a module to access its private helpers.
-
-    cli/lore has no .py suffix, so the loader is named explicitly —
-    spec_from_file_location cannot infer one from the extensionless path.
-    """
-    loader = SourceFileLoader("lore_cli", str(_CLI_PATH))
-    spec = importlib.util.spec_from_loader("lore_cli", loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-# Load once; the lazy imports inside _resolve_group_scopes do not depend on
-# module-load-time state, so a single load is sufficient for all tests.
-_CLI = _load_cli()
-_resolve_group_scopes = _CLI._resolve_group_scopes
+# The group-default scope routing helper now lives in the record command module
+# (``lore.cli.record``); conftest puts the ``lore`` package's plugin root on
+# sys.path so it imports by its dotted name.
+from lore.cli.record import _resolve_group_scopes
 
 
 # ---------------------------------------------------------------------------
