@@ -103,7 +103,7 @@ def cmd_session_bootstrap() -> None:
 
     # Reconcile (idempotent create-or-complete).
     try:
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         reconcile_worktree(group, slug)
     except Exception as e:
@@ -141,7 +141,7 @@ def cmd_worktree_cleanup(*, force: bool = False) -> None:
         sys.exit(0)
 
     try:
-        from reconcile import reconcile_break, ReconcileError
+        from camp.provision.reconcile import reconcile_break, ReconcileError
         from camp.group.manifest import ManifestError
     except ImportError:
         sys.exit(0)

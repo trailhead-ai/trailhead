@@ -224,9 +224,9 @@ class TestC1RmtreeGuard:
         passes), but the slug workspace dir itself is a symlink escaping
         worktrees_root. The dedicated rmtree guard must fire and refuse — without
         rmtree'ing the escape target."""
-        from reconcile import reconcile_break, ConfinementError
-        from provision import bring_up_workspace
-        from lifecycle_cmds import cmd_setup_group
+        from camp.provision.reconcile import reconcile_break, ConfinementError
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
         from camp.group.manifest import workspace_dir, read_central_manifest
 
         repo = tmp_path / "repo_a"
@@ -243,7 +243,7 @@ class TestC1RmtreeGuard:
         env = {"CAMP_STATE_DIR": str(state_root)}
 
         # Provision normally (real workspace dir under worktrees_root).
-        import provision
+        import camp.provision.provision as provision
 
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         bring_up_workspace(group, "feat-c1", env=env)

@@ -425,7 +425,7 @@ class TestRemovePathHasNoLoreOrSessionPrecondition:
         )
 
     def test_reconcile_break_makes_no_lore_or_session_call(self):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         src = inspect.getsource(reconcile.reconcile_break)
         # Same narrowed assertion: check for import or subprocess invocation,
@@ -465,7 +465,7 @@ def inproc_group(tmp_path: Path, monkeypatch):
     """In-process group + env with the detached provisioner stubbed.
 
     Used for direct reconcile_break calls (lock-held + no-spurious-dir tests)."""
-    import provision
+    import camp.provision.provision as provision
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
@@ -485,8 +485,8 @@ def inproc_group(tmp_path: Path, monkeypatch):
 
 
 def _provision_inproc(g, slug):
-    from provision import bring_up_workspace
-    from lifecycle_cmds import cmd_setup_group
+    from camp.provision.provision import bring_up_workspace
+    from camp.provision.lifecycle import cmd_setup_group
 
     bring_up_workspace(g["group"], slug, env=g["env"])
     cmd_setup_group(g["group"], slug, env=g["env"])
@@ -499,9 +499,9 @@ class TestReconcileBreakHoldsLock:
         reconcile_break runs (serializes the TOCTOU race)."""
         import fcntl
 
-        import reconcile
+        import camp.provision.reconcile as reconcile
         from camp.group.manifest import manifest_path_for, lock_path_for
-        from reconcile import reconcile_break
+        from camp.provision.reconcile import reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-lock")
@@ -547,9 +547,9 @@ class TestReconcileBreakHoldsLock:
         import fcntl
         import shutil
 
-        import reconcile
+        import camp.provision.reconcile as reconcile
         from camp.group.manifest import manifest_path_for, lock_path_for
-        from reconcile import reconcile_break
+        from camp.provision.reconcile import reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-rmtree")
@@ -588,7 +588,7 @@ class TestReconcileBreakHoldsLock:
         fail-fast manifest read (else a later `camp new <slug>` wrongly resumes a
         ghost workspace)."""
         from camp.group.manifest import ManifestError, workspace_dir
-        from reconcile import reconcile_break
+        from camp.provision.reconcile import reconcile_break
 
         g = inproc_group
         ws = workspace_dir("removegroup", "ghost-slug", env=g["env"])
@@ -608,7 +608,7 @@ class TestRemoveExitCode:
     def test_total_removal_failure_exits_nonzero_empty_stdout(
         self, inproc_group, monkeypatch, capsys
     ):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         cli = _load_cli_module()
         g = inproc_group
@@ -636,7 +636,7 @@ class TestRemoveExitCode:
         assert "repo_a" in captured.err and "repo_b" in captured.err
 
     def test_partial_removal_failure_exits_nonzero(self, inproc_group, monkeypatch, capsys):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         cli = _load_cli_module()
         g = inproc_group
@@ -660,7 +660,7 @@ class TestRemoveExitCode:
         assert "partially removed" in captured.err and "repo_a" in captured.err
 
     def test_clean_removal_still_exits_zero(self, inproc_group, monkeypatch, capsys):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         cli = _load_cli_module()
         g = inproc_group
@@ -697,7 +697,7 @@ class TestConfinementAdversarial:
         outside the workspace dir triggers ConfinementError BEFORE any removal
         — the symlink target outside the state dir is not touched."""
         from camp.group.manifest import manifest_path_for, write_central_manifest, workspace_dir
-        from reconcile import ConfinementError, reconcile_break
+        from camp.provision.reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-symlink")
@@ -741,9 +741,9 @@ class TestConfinementAdversarial:
         executed in it. Plant an escaping symlink as a member worktree_path, spy
         on _git_is_dirty, and assert ConfinementError is raised WITHOUT it firing
         (force defaults False, so the dirty-check would otherwise run)."""
-        import reconcile
+        import camp.provision.reconcile as reconcile
         from camp.group.manifest import manifest_path_for, write_central_manifest, workspace_dir
-        from reconcile import ConfinementError, reconcile_break
+        from camp.provision.reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-order")
@@ -787,9 +787,9 @@ class TestConfinementAdversarial:
         (wt_path.is_dir() == False → idempotent no-op, no errors, removals 'succeed');
         the pre-rmtree guard then sees the outside dir is not under worktrees_root.
         """
-        import reconcile
+        import camp.provision.reconcile as reconcile
         from camp.group.manifest import manifest_path_for, write_central_manifest
-        from reconcile import ConfinementError, reconcile_break
+        from camp.provision.reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-ws-escape")

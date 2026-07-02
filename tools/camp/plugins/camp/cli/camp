@@ -373,7 +373,7 @@ def _cmd_status_group_cli(
     Fleet view (no slug): the git-status table across all worktrees (exit 0).
     """
     import json as _json
-    from lifecycle_cmds import cmd_status_group, provision_status_code
+    from camp.provision.lifecycle import cmd_status_group, provision_status_code
 
     as_json = "--json" in args
     filtered = [a for a in args if a != "--json"]
@@ -452,7 +452,7 @@ def _cmd_ls_group_cli(
     the same renderer spine.main's no-group `cmd_ls` uses, so the surface is
     identical regardless of cwd.
     """
-    from lifecycle_cmds import cmd_ls_group, render_workspace_list
+    from camp.provision.lifecycle import cmd_ls_group, render_workspace_list
 
     as_json = "--json" in args
     entries = cmd_ls_group(group, env=env)
@@ -474,7 +474,7 @@ def _cmd_setup_group_cli(
     The slug is resolved from the positional arg, --name, or cwd.
     """
     import json as _json
-    from lifecycle_cmds import cmd_setup_group
+    from camp.provision.lifecycle import cmd_setup_group
     from spine import _consume_flag_value, _die
 
     # Read-only status mode (the SessionStart hook runs `camp setup --status`).
@@ -536,7 +536,7 @@ def _cmd_setup_status_cli(
     worktree add, no manifest write, no junk dir. The structured 0/2/3 exit codes
     stay on `camp status` for direct agent use, NOT on `--status`.
     """
-    from lifecycle_cmds import provision_status_code
+    from camp.provision.lifecycle import provision_status_code
 
     filtered = [a for a in args if a not in ("--status", "--background", "--json")]
     from spine import _consume_flag_value
@@ -575,7 +575,7 @@ def _cmd_sync_group_cli(
 ) -> None:
     """camp sync [--force] [--json]"""
     import json as _json
-    from lifecycle_cmds import cmd_sync_group
+    from camp.provision.lifecycle import cmd_sync_group
 
     as_json = "--json" in args
     force = "--force" in args
@@ -610,7 +610,7 @@ def _cmd_remove_group_cli(
     block live in reconcile_break, which also serializes concurrent same-slug
     removals on the slug reconcile lock.
     """
-    from reconcile import reconcile_break
+    from camp.provision.reconcile import reconcile_break
     from spine import _die
 
     force = "--force" in args
@@ -922,7 +922,7 @@ def _cmd_new_group_cli(
     guidance is part of the stderr confirmation so the user is not stranded.
     """
     from spine import _resolve_slug, _consume_flag_value, _die
-    from provision import bring_up_workspace
+    from camp.provision.provision import bring_up_workspace
     from camp.group.manifest import workspace_dir, manifest_path_for
 
     rest = list(args)
@@ -1001,7 +1001,7 @@ def _cmd_enter_group_cli(
     CLAUDE.md to stdout so the calling agent ingests it as context.
     """
     from spine import _die
-    from activation import enter_member, MemberNotReadyError
+    from camp.provision.activation import enter_member, MemberNotReadyError
     from camp.group.config import GroupConfigError
     from harness_profile import resolve_harness_profile
 

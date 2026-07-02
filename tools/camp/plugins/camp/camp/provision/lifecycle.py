@@ -268,7 +268,7 @@ def cmd_setup_group(
     Returns {"slug", "members": {name: {"provision_state", "reason"?}}}.
     """
     from camp.group.manifest import flip_member_state_unlocked
-    import provision
+    from . import provision
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)

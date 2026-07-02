@@ -187,7 +187,7 @@ class TestCampSetup:
 class TestCampStatusExitCodes:
     def _seed_states(self, cli_env, slug, states):
         from camp.group.resolve import central_state_dir
-        from provision import seed_pending_workspace
+        from camp.provision.provision import seed_pending_workspace
         from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
         from camp.group.config import load_group
 

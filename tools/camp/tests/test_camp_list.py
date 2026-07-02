@@ -104,7 +104,7 @@ class TestCmdLsGroupWorkspacePath:
     the canonical workspace_dir computation."""
 
     def test_entry_has_workspace_path(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -118,7 +118,7 @@ class TestCmdLsGroupWorkspacePath:
         )
 
     def test_workspace_path_is_absolute(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -131,7 +131,7 @@ class TestCmdLsGroupWorkspacePath:
         assert Path(path).is_absolute(), f"workspace_path must be absolute, got {path!r}"
 
     def test_workspace_path_agrees_with_workspace_dir(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
         from camp.group.manifest import workspace_dir
 
         group = _make_group("wpg")
@@ -147,7 +147,7 @@ class TestCmdLsGroupWorkspacePath:
         )
 
     def test_empty_group_returns_empty_list(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -157,7 +157,7 @@ class TestCmdLsGroupWorkspacePath:
         assert entries == [], f"empty group must return [], got {entries!r}"
 
     def test_multiple_workspaces_all_have_workspace_path(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -283,7 +283,7 @@ class TestListJson:
         """The renderer projects group-style and spine-style entries (different
         source keys) onto the SAME fixed schema."""
         sys.path.insert(0, str(_SCRIPTS_DIR))
-        from lifecycle_cmds import render_workspace_list
+        from camp.provision.lifecycle import render_workspace_list
 
         group_entry = {  # carries source-specific manifest_path (must be dropped)
             "slug": "g", "branch": "b", "workspace_path": "/ws/g",

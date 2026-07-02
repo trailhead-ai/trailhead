@@ -50,8 +50,8 @@ class TestImportLint:
     def test_consumer_modules_import(self):
         # A stale `from harness_launch import …` left in any of these would raise
         # ImportError here (workspace_doc imports it at module scope).
-        import activation  # noqa: F401
-        import provision  # noqa: F401
+        import camp.provision.activation as activation  # noqa: F401
+        import camp.provision.provision as provision  # noqa: F401
         import workspace_doc  # noqa: F401
 
     def test_no_module_names_old_harness_launch(self):

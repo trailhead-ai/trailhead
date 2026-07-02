@@ -613,7 +613,7 @@ def _run_worktree_cleanup(
 class TestWorktreeCleanup:
     def test_removes_member_worktrees_and_manifest(self, tmp_path: Path):
         """worktree-cleanup removes member worktrees + central manifest."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
         from camp.group.manifest import manifest_path_for
 
         # CAMP_CONFIG_DIR override: config_dir("camp") returns the override directly.
@@ -687,7 +687,7 @@ bootstrap = []
 
     def test_dirty_worktree_blocks_cleanup_without_force(self, tmp_path: Path):
         """A dirty worktree blocks cleanup unless --force."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         camp_config_dir = tmp_path / "camp-config"
         groups_dir = camp_config_dir / "groups"
@@ -739,7 +739,7 @@ bootstrap = []
 
     def test_dirty_worktree_cleanup_succeeds_with_force(self, tmp_path: Path):
         """--force removes a dirty worktree."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         camp_config_dir = tmp_path / "camp-config"
         groups_dir = camp_config_dir / "groups"

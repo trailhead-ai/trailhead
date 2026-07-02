@@ -36,8 +36,9 @@ from camp.group.manifest import (
 )
 
 # The camp binary this process was launched as — used to build the detached
-# `camp setup --background` argv. Resolved relative to this scripts/ dir.
-_CAMP_BIN = Path(__file__).resolve().parent.parent / "bin" / "camp"
+# `camp setup --background` argv. Resolved relative to the plugin root
+# (tools/camp/plugins/camp/), three levels up from this camp/provision/ module.
+_CAMP_BIN = Path(__file__).resolve().parent.parent.parent / "bin" / "camp"
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +107,7 @@ def seed_pending_workspace(
     Idempotent: a member already listed keeps its existing provision_state so a
     re-run of camp ai does not reset a ready member back to pending.
     """
-    import reconcile
+    from . import reconcile
     from camp.group.manifest import read_central_manifest, reconcile_lock
 
     group_name = group["group"]["name"]
@@ -244,8 +245,8 @@ def provision_member(
     member's manifest state to failed+reason. Best-effort: a failure here is
     isolated to this member by the caller.
     """
-    import reconcile
-    from reconcile import DEFAULT_BASE, FETCH_TIMEOUT_SECONDS
+    from . import reconcile
+    from .reconcile import DEFAULT_BASE, FETCH_TIMEOUT_SECONDS
 
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")

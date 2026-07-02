@@ -568,7 +568,7 @@ class TestHasInjectDrainHook:
 class TestBringUpWorkspaceIntegration:
     def test_bring_up_creates_claude_md(self, tmp_path: Path):
         """bring_up_workspace writes CLAUDE.md at the workspace root."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -578,7 +578,7 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc", env=env)
 
         from camp.group.resolve import central_state_dir
@@ -588,7 +588,7 @@ class TestBringUpWorkspaceIntegration:
 
     def test_bring_up_does_not_create_agent_md_by_default(self, tmp_path: Path):
         """bring_up_workspace (claude default) does NOT write AGENT.md."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -598,7 +598,7 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc2", env=env)
 
         from camp.group.resolve import central_state_dir
@@ -610,7 +610,7 @@ class TestBringUpWorkspaceIntegration:
 
     def test_bring_up_creates_workspace_settings(self, tmp_path: Path):
         """bring_up_workspace writes workspace .claude/settings.json with SessionStart hook."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -620,7 +620,7 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc3", env=env)
 
         from camp.group.resolve import central_state_dir
@@ -639,7 +639,7 @@ class TestBringUpWorkspaceIntegration:
 
     def test_bring_up_claude_md_has_member_names(self, tmp_path: Path):
         """bring_up_workspace CLAUDE.md embeds member names."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -652,7 +652,7 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc4", env=env)
 
         from camp.group.resolve import central_state_dir
@@ -663,7 +663,7 @@ class TestBringUpWorkspaceIntegration:
 
     def test_bring_up_idempotent_docs(self, tmp_path: Path):
         """Calling bring_up_workspace twice produces identical docs (no duplication)."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -673,7 +673,7 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-idem", env=env)
 
         from camp.group.resolve import central_state_dir
@@ -681,7 +681,7 @@ class TestBringUpWorkspaceIntegration:
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-idem"
         first_claude = (ws_dir / "CLAUDE.md").read_text()
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-idem", env=env)
 
         second_claude = (ws_dir / "CLAUDE.md").read_text()

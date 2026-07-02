@@ -100,7 +100,7 @@ def _make_group(
 
 def test_enter_pending_prints_provisioning_message(tmp_path: Path) -> None:
     """A pending member → 'still provisioning' message + retry hint; hooks NOT run."""
-    from activation import enter_member, MemberNotReadyError
+    from camp.provision.activation import enter_member, MemberNotReadyError
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -135,7 +135,7 @@ def test_enter_pending_prints_provisioning_message(tmp_path: Path) -> None:
 
 def test_enter_pending_does_not_run_hooks(tmp_path: Path) -> None:
     """A pending member triggers MemberNotReadyError before any hook is fired."""
-    from activation import enter_member, MemberNotReadyError
+    from camp.provision.activation import enter_member, MemberNotReadyError
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -177,7 +177,7 @@ def test_enter_pending_does_not_run_hooks(tmp_path: Path) -> None:
 
 def test_enter_failed_names_failure_and_retry(tmp_path: Path) -> None:
     """A failed member → MemberNotReadyError naming the failure and retry command."""
-    from activation import enter_member, MemberNotReadyError
+    from camp.provision.activation import enter_member, MemberNotReadyError
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -219,7 +219,7 @@ def test_enter_failed_names_failure_and_retry(tmp_path: Path) -> None:
 
 def test_enter_ready_fires_each_hook_once(tmp_path: Path) -> None:
     """A ready member: each activation hook is fired exactly once (list-mode)."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -261,7 +261,7 @@ def test_enter_ready_fires_each_hook_once(tmp_path: Path) -> None:
 
 def test_enter_ready_hooks_run_shell_false(tmp_path: Path) -> None:
     """Activation hooks are run with shell=False (list-mode, trust)."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -297,7 +297,7 @@ def test_enter_ready_hooks_run_shell_false(tmp_path: Path) -> None:
 
 def test_enter_ready_prints_member_claude_md(tmp_path: Path, capsys) -> None:
     """enter_member prints the member's CLAUDE.md content to stdout."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -333,7 +333,7 @@ def test_enter_ready_prints_member_claude_md(tmp_path: Path, capsys) -> None:
 
 def test_enter_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys) -> None:
     """When no CLAUDE.md exists, enter_member still prints something useful to stdout."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -368,7 +368,7 @@ def test_enter_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys) -
 
 def test_enter_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
     """After enter_member succeeds, the manifest member has activated=true."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
     from camp.group.manifest import read_central_manifest
 
     group_name = "mygroup"
@@ -405,7 +405,7 @@ def test_enter_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
 
 def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
     """Re-entering an already-activated member skips hooks; doc is still printed."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -450,7 +450,7 @@ def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
 
 def test_enter_ready_reenter_reprints_doc(tmp_path: Path, capsys) -> None:
     """Re-entering an activated member still prints the CLAUDE.md to stdout."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -780,7 +780,7 @@ def test_cli_enter_unknown_hook_kind_exits_nonzero_with_legible_message(
 def test_failing_hook_does_not_mark_activated(tmp_path: Path) -> None:
     """When an activation hook exits non-zero, activated must NOT be set in the
     manifest, and a CalledProcessError must propagate (not be swallowed)."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
     from camp.group.manifest import read_central_manifest
 
     group_name = "mygroup"
@@ -929,7 +929,7 @@ def _ready_member_setup(tmp_path: Path, doc: str | None) -> tuple[str, str, str,
 def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> None:
     """Under claude-hook WITH the drain hook installed, the full doc is enqueued,
     NOT dumped to stdout."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
     from inject import queue_dir_for
     from hooks_writer import write_workspace_inject_hook
 
@@ -958,7 +958,7 @@ def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> No
 def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -> None:
     """Under claude-hook WITH the drain hook installed, a concise confirmation
     naming the member is printed to stdout."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
     from hooks_writer import write_workspace_inject_hook
 
     doc = "# Member doc\n"
@@ -980,7 +980,7 @@ def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -
 def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Path, capsys) -> None:
     """BUG 5: claude-hook strategy but NO drain hook installed → fall back to
     printing the full doc to stdout; no false 'will load via hook' claim."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
     from inject import queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
@@ -1004,7 +1004,7 @@ def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Pat
 
 def test_enter_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:
     """Under the stdout strategy, the full doc is printed to stdout (unchanged)."""
-    from activation import enter_member
+    from camp.provision.activation import enter_member
     from inject import queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"

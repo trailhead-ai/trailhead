@@ -399,7 +399,7 @@ def cmd_ls(args: list[str]) -> None:
     surface is identical regardless of cwd. `group` is None here (the
     standalone registry is not group-scoped).
     """
-    from lifecycle_cmds import render_workspace_list
+    from camp.provision.lifecycle import render_workspace_list
 
     as_json = "--json" in args
     workspace_root = _workspace_root()

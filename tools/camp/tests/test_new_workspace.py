@@ -98,7 +98,7 @@ def _manifest_path(env, slug):
 @pytest.fixture(autouse=True)
 def _stub_spawn(monkeypatch):
     """Never spawn a real detached provisioner in these tests."""
-    import provision
+    import camp.provision.provision as provision
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
@@ -140,7 +140,7 @@ class TestExistingWorkspace:
     def test_existing_workspace_reenters_same_path_no_reseed(
         self, camp_cli, group_env, monkeypatch, capsys
     ):
-        import provision
+        import camp.provision.provision as provision
 
         g = group_env
         # First create the workspace for real.
@@ -169,7 +169,7 @@ class TestExistingWorkspace:
         Keying re-enter on ws_dir.exists() would re-enter the broken dir forever
         and make `camp remove` unrecoverable; keying on manifest presence repairs
         it."""
-        import provision
+        import camp.provision.provision as provision
 
         g = group_env
         # Simulate the partial state: ws_dir exists, NO manifest.
@@ -193,7 +193,7 @@ class TestExistingWorkspace:
 
 class TestFailure:
     def test_seed_failure_nonzero_stderr_empty_stdout(self, camp_cli, group_env, monkeypatch, capsys):
-        import provision
+        import camp.provision.provision as provision
 
         def _boom(*a, **k):
             raise RuntimeError("seed exploded")

@@ -118,7 +118,7 @@ def two_member_group(tmp_path: Path):
 @pytest.fixture(autouse=True)
 def _stub_spawn(monkeypatch):
     """Never spawn a real detached provisioner in these tests."""
-    import provision
+    import camp.provision.provision as provision
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
@@ -131,8 +131,8 @@ def _stub_spawn(monkeypatch):
 class TestBug1SetupStatus:
     def _provision(self, camp_cli, g, slug):
         """Seed + provision a workspace so members are ready."""
-        from provision import bring_up_workspace
-        from lifecycle_cmds import cmd_setup_group
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
 
         bring_up_workspace(g["group"], slug, env=g["env"])
         cmd_setup_group(g["group"], slug, env=g["env"])
@@ -169,7 +169,7 @@ class TestBug1SetupStatus:
     def test_status_exits_zero_when_pending_or_failed(
         self, camp_cli, two_member_group, monkeypatch, capsys
     ):
-        from provision import seed_pending_workspace
+        from camp.provision.provision import seed_pending_workspace
         from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
 
         g = two_member_group
@@ -216,14 +216,14 @@ class TestBug1SetupStatus:
 
 class TestBug2RmRemovesWorkspaceDir:
     def _provision(self, g, slug):
-        from provision import bring_up_workspace
-        from lifecycle_cmds import cmd_setup_group
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
 
         bring_up_workspace(g["group"], slug, env=g["env"])
         cmd_setup_group(g["group"], slug, env=g["env"])
 
     def test_rm_removes_workspace_dir(self, two_member_group):
-        from reconcile import reconcile_break
+        from camp.provision.reconcile import reconcile_break
         from camp.group.manifest import workspace_dir
 
         g = two_member_group
@@ -238,7 +238,7 @@ class TestBug2RmRemovesWorkspaceDir:
     # assert here.
 
     def test_dirty_block_without_force_leaves_dir_intact(self, two_member_group):
-        from reconcile import reconcile_break, ReconcileError
+        from camp.provision.reconcile import reconcile_break, ReconcileError
         from camp.group.manifest import workspace_dir
 
         g = two_member_group
@@ -254,8 +254,8 @@ class TestBug2RmRemovesWorkspaceDir:
     ):
         """The workspace-dir rmtree uses the same confinement guard — an
         out-of-tree resolved workspace dir is rejected, not rmtree'd."""
-        from reconcile import reconcile_break, ConfinementError
-        import reconcile
+        from camp.provision.reconcile import reconcile_break, ConfinementError
+        import camp.provision.reconcile as reconcile
         from camp.group.manifest import workspace_dir
 
         g = two_member_group
@@ -322,7 +322,7 @@ class _FetchFailGit:
 def _fetch_fails(monkeypatch):
     """Patch reconcile.subprocess.run so the `git fetch` in _fetch_base returns
     non-zero (a fast fetch failure), without touching real git."""
-    import reconcile
+    import camp.provision.reconcile as reconcile
     import subprocess as _sp
 
     def fake_run(argv, **kwargs):
@@ -342,9 +342,9 @@ class TestBug4FetchFailureFailsMember:
     def test_fetch_failure_unresolved_base_flips_failed(self, two_member_group, monkeypatch):
         """Fetch fails AND origin/<base> does not resolve → member flipped to
         failed with the fetch error in the reason (not ready, not branched off HEAD)."""
-        import reconcile
-        from provision import bring_up_workspace
-        from lifecycle_cmds import cmd_setup_group
+        import camp.provision.reconcile as reconcile
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
         from camp.group.manifest import read_central_manifest
 
         g = two_member_group
@@ -379,8 +379,8 @@ class TestBug4FetchFailureFailsMember:
     def test_fetch_failure_resolved_base_proceeds(self, two_member_group, monkeypatch):
         """Fetch fails but the base ref DOES resolve locally (cached) → proceed
         (member ready). The fetch failure is non-fatal."""
-        import reconcile
-        from provision import provision_member
+        import camp.provision.reconcile as reconcile
+        from camp.provision.provision import provision_member
 
         g = two_member_group
         fake = _FetchFailGit(base_resolves=True)
@@ -400,8 +400,8 @@ class TestBug4FetchFailureFailsMember:
 
     def test_successful_fetch_branches_off_base(self, two_member_group, monkeypatch):
         """A successful fetch proceeds and branches off origin/<base>."""
-        import reconcile
-        from provision import provision_member
+        import camp.provision.reconcile as reconcile
+        from camp.provision.provision import provision_member
 
         g = two_member_group
 
