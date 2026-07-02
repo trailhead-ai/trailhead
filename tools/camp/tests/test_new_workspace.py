@@ -16,8 +16,7 @@ Test contract:
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -33,13 +32,12 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 
 def _load_cli_module():
-    """Import cli/camp (extensionless) as a module for in-process dispatch tests."""
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the new-workspace handler.
+
+    `_cmd_new_group_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.group` command-group module (group authoring + workspace creation).
+    """
+    return importlib.import_module("camp.cli.group")
 
 
 @pytest.fixture()

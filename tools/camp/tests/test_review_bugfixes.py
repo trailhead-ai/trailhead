@@ -21,8 +21,7 @@ claude exec).
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -85,12 +84,12 @@ def _workspace_dir(group_name, slug, env):
 
 
 def _load_cli_module():
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the setup handlers.
+
+    `_cmd_setup_group_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.lifecycle` command-group module (setup/sync/remove/rebase).
+    """
+    return importlib.import_module("camp.cli.lifecycle")
 
 
 @pytest.fixture()

@@ -23,8 +23,7 @@ C1 — the rmtree-confinement guard in reconcile_break (anchored on
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import subprocess
 import sys
 import textwrap
@@ -44,12 +43,12 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 
 def _load_cli_module():
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the inject handler.
+
+    `_cmd_inject_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.inject` command-group module (the hidden PostToolUse drain).
+    """
+    return importlib.import_module("camp.cli.inject")
 
 
 # ===========================================================================
@@ -66,18 +65,15 @@ class TestFix6InjectIsLight:
         (ws / ".camp").mkdir(parents=True)
         probe = textwrap.dedent(
             f"""
-            import sys, importlib.machinery, importlib.util
-            mod_path = {str(_CLI_CAMP)!r}
-            spec = importlib.util.spec_from_loader(
-                "camp_cli",
-                importlib.machinery.SourceFileLoader("camp_cli", mod_path),
-            )
-            mod = importlib.util.module_from_spec(spec)
+            import sys
+            sys.path.insert(0, {str(_PLUGIN_DIR)!r})
+            # Importing dispatch pulls in only the pure-data verb taxonomy; the
+            # inject route in main() must skip both the bootstrap walk and the
+            # spine module-load, mirroring the real cli/camp shim entry.
+            from camp.cli import dispatch
             sys.argv = ["camp", "inject", "--drain", "--workspace", {str(ws)!r}]
-            # Loading the module runs the top-level bootstrap+dispatch detection.
-            spec.loader.exec_module(mod)
             try:
-                mod.main()
+                dispatch.main()
             except SystemExit:
                 pass
             print("SPINE_IMPORTED" if "camp.spine" in sys.modules else "SPINE_ABSENT")
@@ -134,7 +130,8 @@ class TestFix7SlugFromCwdThreadsEnv:
         won't resolve from inside the env's workspace dir."""
         from camp.group.resolve import central_state_dir
 
-        camp_cli = _load_cli_module()
+        # `_slug_from_args_or_cwd` moved to camp.cli.dispatch (the shared router).
+        camp_cli = importlib.import_module("camp.cli.dispatch")
 
         # Two distinct state roots: the env points at one; os.environ at another.
         env_state = tmp_path / "env-state"

@@ -26,8 +26,7 @@ Pattern: fake-git + tmp_path + CAMP_STATE_DIR/CAMP_CONFIG_DIR (no real
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import inspect
 import json
 import os
@@ -51,14 +50,12 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 
 def _load_cli_module():
-    """Import cli/camp (extensionless) as a module for in-process dispatch tests."""
-    spec = importlib.util.spec_from_loader(
-        "camp_cli_remove",
-        importlib.machinery.SourceFileLoader("camp_cli_remove", str(_CLI_CAMP)),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the remove handler.
+
+    `_cmd_remove_group_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.lifecycle` command-group module (setup/sync/remove/rebase).
+    """
+    return importlib.import_module("camp.cli.lifecycle")
 
 
 def _init_git_repo(path: Path) -> None:
@@ -381,15 +378,6 @@ class TestCampRemoveInvokesReconcileBreak:
 # ===========================================================================
 # Structural: no lore / no session-liveness precondition in the remove path
 # ===========================================================================
-
-
-def _load_cli_module():
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 class TestRemovePathHasNoLoreOrSessionPrecondition:

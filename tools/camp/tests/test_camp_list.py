@@ -12,8 +12,7 @@ coverage; subprocess tests exercise the alias dispatch path through the full
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import inspect
 import json
 import os
@@ -35,12 +34,13 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 
 def _load_cli_module():
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the list handler.
+
+    `_cmd_ls_group_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.workspace` command-group module (enter/pwd/list all act on an
+    existing workspace); the in-process tests call it there directly.
+    """
+    return importlib.import_module("camp.cli.workspace")
 
 
 @pytest.fixture()
