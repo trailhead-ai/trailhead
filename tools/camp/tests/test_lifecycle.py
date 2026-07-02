@@ -55,10 +55,10 @@ from unittest.mock import patch
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> Path:
     """Return the unified-layout worktree path for a member:
     central_state_dir(group)/worktrees/<slug>/<member>."""
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     return central_state_dir(group_name, env=env) / "worktrees" / slug / member
 
@@ -169,7 +169,7 @@ def two_member_group(tmp_path: Path):
 class TestReconcileWorktreeCreates:
     def test_creates_both_worktrees_on_correct_branch(self, two_member_group):
         """Both member worktrees land under …/worktrees/<slug>/<member>."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "feat-x"
@@ -192,9 +192,9 @@ class TestReconcileWorktreeCreates:
 
     def test_central_manifest_written_after_success(self, two_member_group):
         """Central manifest is written at central_state_dir/worktrees/<slug>/manifest.json."""
-        from group_resolve import central_state_dir
-        from manifest import read_central_manifest
-        from reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
+        from camp.group.manifest import read_central_manifest
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "feat-x"
@@ -213,9 +213,9 @@ class TestReconcileWorktreeCreates:
 
     def test_manifest_lists_correct_worktree_paths(self, two_member_group):
         """Manifest records the actual worktree paths for each member."""
-        from manifest import read_central_manifest
-        from reconcile import reconcile_worktree
-        from group_resolve import central_state_dir
+        from camp.group.manifest import read_central_manifest
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
 
         g = two_member_group
         slug = "feat-x"
@@ -234,7 +234,7 @@ class TestReconcileWorktreeCreates:
 
     def test_configured_bootstrap_runs_per_member(self, two_member_group):
         """The bootstrap command from the group config runs for each member."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         reconcile_worktree(g["group"], "feat-x", env=g["env"])
@@ -244,8 +244,8 @@ class TestReconcileWorktreeCreates:
 
     def test_manifest_mode_is_0600(self, two_member_group):
         """Central manifest is written with mode 0o600 (umask-proof)."""
-        from reconcile import reconcile_worktree
-        from group_resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
 
         g = two_member_group
         slug = "feat-x"
@@ -265,7 +265,7 @@ class TestReconcileWorktreeCreates:
 class TestReconcileIdempotency:
     def test_rerun_is_noop_no_worktree_already_exists_error(self, two_member_group):
         """Re-running reconcile on an already-created worktree is a no-op (no crash)."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "feat-x"
@@ -275,9 +275,9 @@ class TestReconcileIdempotency:
 
     def test_rerun_does_not_create_duplicate_manifest_entries(self, two_member_group):
         """Re-running does not duplicate entries in the manifest."""
-        from reconcile import reconcile_worktree
-        from manifest import read_central_manifest
-        from group_resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.manifest import read_central_manifest
+        from camp.group.resolve import central_state_dir
 
         g = two_member_group
         slug = "feat-x"
@@ -298,8 +298,8 @@ class TestReconcileIdempotency:
 class TestPartialCreationAtomicity:
     def test_partial_create_then_rerun_completes_set(self, two_member_group):
         """After partial creation (member-1 only), re-run completes without crash."""
-        from reconcile import reconcile_worktree
-        from group_resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
 
         g = two_member_group
         slug = "feat-partial"
@@ -327,8 +327,8 @@ class TestPartialCreationAtomicity:
 
     def test_manifest_never_lists_partial_set(self, two_member_group):
         """The manifest is never written until ALL members have their worktree."""
-        from group_resolve import central_state_dir
-        from reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "feat-partial2"
@@ -341,11 +341,11 @@ class TestPartialCreationAtomicity:
                 raise RuntimeError("simulated crash mid-creation")
             return original_add(member, wt_path, branch, repo_root)
 
-        from reconcile import _add_worktree_for_member as _orig
+        from camp.provision.reconcile import _add_worktree_for_member as _orig
 
         original_add = _orig
 
-        with patch("reconcile._add_worktree_for_member", side_effect=failing_add_for_member_b):
+        with patch("camp.provision.reconcile._add_worktree_for_member", side_effect=failing_add_for_member_b):
             with pytest.raises(Exception):
                 reconcile_worktree(g["group"], slug, env=g["env"])
 
@@ -365,8 +365,8 @@ class TestPartialCreationAtomicity:
 class TestBootstrapFailureAtomicity:
     def test_bootstrap_failure_on_member2_no_manifest(self, tmp_path):
         """A real bootstrap failure on member-2 → no manifest written."""
-        from reconcile import reconcile_worktree
-        from group_resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
 
         repo_a = tmp_path / "repo_a"
         repo_b = tmp_path / "repo_b"
@@ -406,7 +406,7 @@ class TestBootstrapFailureAtomicity:
 
     def test_bootstrap_failure_error_names_member(self, tmp_path):
         """Bootstrap failure error message clearly names the failing member."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         repo_a = tmp_path / "repo_a"
         repo_b = tmp_path / "repo_b"
@@ -468,8 +468,8 @@ class _FakeGit:
 class TestBranchBasePolicy:
     def test_default_base_origin_main_in_worktree_add(self, monkeypatch, tmp_path):
         """Default base origin/main is the start-point of `worktree add -b`."""
-        import reconcile
-        from reconcile import _add_worktree_for_member
+        import camp.provision.reconcile as reconcile
+        from camp.provision.reconcile import _add_worktree_for_member
 
         fake = _FakeGit()
         monkeypatch.setattr(reconcile, "_git", fake)
@@ -495,8 +495,8 @@ class TestBranchBasePolicy:
 
     def test_per_member_base_override_honored(self, monkeypatch, tmp_path):
         """A per-member `base` overrides the default in `worktree add -b`."""
-        import reconcile
-        from reconcile import _add_worktree_for_member
+        import camp.provision.reconcile as reconcile
+        from camp.provision.reconcile import _add_worktree_for_member
 
         fake = _FakeGit()
         monkeypatch.setattr(reconcile, "_git", fake)
@@ -517,7 +517,7 @@ class TestBranchBasePolicy:
 
     def test_reconcile_reads_member_base_from_config(self, monkeypatch, tmp_path):
         """reconcile_worktree threads each member's `base` into the add invocation."""
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         captured: dict[str, str] = {}
 
@@ -568,7 +568,7 @@ def _admin_name(wt: Path) -> str:
 class TestWorktreeAdminName:
     def test_admin_name_is_slug_not_member(self, two_member_group):
         """Each member worktree's git admin name is the SLUG; folder is the member."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "lore-refactor-s3"
@@ -587,7 +587,7 @@ class TestWorktreeAdminName:
 
     def test_idempotent_rerun_is_noop(self, two_member_group):
         """A second reconcile is a clean no-op — worktrees + admin name unchanged."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "feat-idem"
@@ -602,7 +602,7 @@ class TestWorktreeAdminName:
     def test_member_equal_slug_short_circuit_still_adds(self, tmp_path):
         """When slug == member name (stage == wt_path) the add happens directly,
         with no move, and still produces a registered worktree named the slug."""
-        from reconcile import _add_worktree_for_member, _worktree_registered
+        from camp.provision.reconcile import _add_worktree_for_member, _worktree_registered
 
         repo = tmp_path / "trailhead"
         _init_git_repo(repo)
@@ -626,7 +626,7 @@ class TestWorktreeAdminName:
     def test_partial_stage_recovery_resumes_at_move(self, tmp_path):
         """A prior run that added <stage> but never moved → recover via move, not a
         failing re-add."""
-        from reconcile import _add_worktree_for_member
+        from camp.provision.reconcile import _add_worktree_for_member
 
         repo = tmp_path / "trailhead"
         _init_git_repo(repo)
@@ -662,7 +662,7 @@ class TestWorktreeAdminName:
     def test_orphaned_stage_dir_is_cleaned_and_add_succeeds(self, tmp_path):
         """A stage dir left on disk but NOT git-registered (failed prior add /
         pruned registry) must not brick the fresh add — it is cleared first."""
-        from reconcile import _add_worktree_for_member
+        from camp.provision.reconcile import _add_worktree_for_member
 
         repo = tmp_path / "trailhead"
         _init_git_repo(repo)
@@ -691,7 +691,7 @@ class TestWorktreeAdminName:
     def test_confinement_rejects_escaping_slug(self, tmp_path):
         """A '../'-laden slug that would push <stage> outside the workspace is
         rejected with ReconcileError before any git call."""
-        from reconcile import _add_worktree_for_member, ReconcileError
+        from camp.provision.reconcile import _add_worktree_for_member, ReconcileError
 
         repo = tmp_path / "trailhead"
         _init_git_repo(repo)
@@ -724,8 +724,8 @@ class TestBreakRemovalConfinement:
 
     def test_break_rejects_path_outside_workspace_dir(self, two_member_group, tmp_path):
         """A manifest worktree_path outside the workspace dir → named error, no deletion."""
-        from group_resolve import central_state_dir
-        from reconcile import reconcile_break, reconcile_worktree
+        from camp.group.resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_break, reconcile_worktree
 
         g = two_member_group
         slug = "confinement-test"
@@ -756,8 +756,8 @@ class TestBreakRemovalConfinement:
         The target lexically sits inside the workspace dir but resolves outside
         it; resolve-before-check must catch this.
         """
-        from group_resolve import central_state_dir
-        from reconcile import reconcile_break, reconcile_worktree
+        from camp.group.resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_break, reconcile_worktree
 
         g = two_member_group
         slug = "confinement-symlink"
@@ -795,8 +795,8 @@ class TestBreakRemovalConfinement:
     def test_break_legacy_layout_path_legible_error(self, two_member_group, tmp_path):
         """An OLD-layout manifest path (under repo_root, outside the workspace dir)
         → legible legacy-layout error, NOT a half-applied break."""
-        from group_resolve import central_state_dir
-        from reconcile import reconcile_break, reconcile_worktree
+        from camp.group.resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_break, reconcile_worktree
 
         g = two_member_group
         slug = "legacy-layout"
@@ -842,9 +842,9 @@ class TestBreakAtomicitySymmetry:
         but must update the manifest to remove entries for successfully-removed
         members so the manifest never lists a member whose worktree is gone.
         """
-        from reconcile import reconcile_worktree, reconcile_break
-        from manifest import read_central_manifest
-        from group_resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree, reconcile_break
+        from camp.group.manifest import read_central_manifest
+        from camp.group.resolve import central_state_dir
 
         g = two_member_group
         slug = "break-atomic"
@@ -866,7 +866,7 @@ class TestBreakAtomicitySymmetry:
             # Second member (repo_b): simulate failure
             raise RuntimeError("simulated removal failure on member 2")
 
-        with patch("reconcile._remove_worktree_for_member", side_effect=patched_remove):
+        with patch("camp.provision.reconcile._remove_worktree_for_member", side_effect=patched_remove):
             result = reconcile_break(g["group"], slug, env=g["env"])
 
         # ok_with_errors: repo_a removed, repo_b failed
@@ -901,7 +901,7 @@ class TestBreakAtomicitySymmetry:
 class TestConcurrentRunGuard:
     def test_concurrent_reconciles_do_not_double_add_worktree(self, two_member_group):
         """Two concurrent reconcile_worktree calls must not both git-worktree-add."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "concurrent-slug"
@@ -943,9 +943,9 @@ class TestConcurrentRunGuard:
 class TestMalformedManifest:
     def test_truncated_manifest_gives_legible_error_from_read(self, two_member_group):
         """A truncated manifest file raises ManifestError, not a raw exception."""
-        from manifest import read_central_manifest, ManifestError
-        from group_resolve import central_state_dir
-        from reconcile import reconcile_worktree
+        from camp.group.manifest import read_central_manifest, ManifestError
+        from camp.group.resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         slug = "bad-manifest"
@@ -965,9 +965,9 @@ class TestMalformedManifest:
 
     def test_malformed_manifest_status_gives_legible_error(self, two_member_group):
         """cmd_status with a malformed manifest must not traceback."""
-        from reconcile import reconcile_worktree
-        from group_resolve import central_state_dir
-        from manifest import ManifestError
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
+        from camp.group.manifest import ManifestError
 
         g = two_member_group
         slug = "bad-status"
@@ -978,7 +978,7 @@ class TestMalformedManifest:
         manifest_path.write_text("{bad json!!!")
 
         # Status via the group-aware path must give ManifestError, not raw JSONDecodeError
-        from manifest import read_central_manifest
+        from camp.group.manifest import read_central_manifest
 
         with pytest.raises(ManifestError):
             read_central_manifest(manifest_path)
@@ -992,7 +992,7 @@ class TestMalformedManifest:
 class TestCentralManifestPath:
     def test_manifest_path_uses_camp_state_dir_injection(self, tmp_path):
         """Central manifest path is central_state_dir(group)/worktrees/<slug>/manifest.json."""
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         custom_state = tmp_path / "custom-state"
         custom_state.mkdir()
@@ -1003,8 +1003,8 @@ class TestCentralManifestPath:
 
     def test_manifest_written_to_injected_path(self, tmp_path):
         """reconcile_worktree writes manifest under the CAMP_STATE_DIR-injected path."""
-        from reconcile import reconcile_worktree
-        from group_resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.resolve import central_state_dir
 
         repo_a = tmp_path / "repo_a"
         _init_git_repo(repo_a)
@@ -1034,7 +1034,7 @@ class TestCentralManifestPath:
 class TestSuccessSummary:
     def test_reconcile_worktree_returns_summary(self, two_member_group):
         """reconcile_worktree returns a result dict with summary info."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         g = two_member_group
         result = reconcile_worktree(g["group"], "feat-summary", env=g["env"])
@@ -1054,8 +1054,8 @@ class TestSuccessSummary:
 class TestCmdStatusAndLs:
     def test_cmd_status_fleet_view_lists_all_worktrees(self, two_member_group):
         """cmd_status with slug=None from repo root → fleet view (all group worktrees)."""
-        from reconcile import reconcile_worktree
-        from lifecycle_cmds import cmd_status_group
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import cmd_status_group
 
         g = two_member_group
         reconcile_worktree(g["group"], "alpha", env=g["env"])
@@ -1068,8 +1068,8 @@ class TestCmdStatusAndLs:
 
     def test_cmd_status_scoped_returns_single_worktree(self, two_member_group):
         """cmd_status with a specific slug returns only that worktree."""
-        from reconcile import reconcile_worktree
-        from lifecycle_cmds import cmd_status_group
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import cmd_status_group
 
         g = two_member_group
         reconcile_worktree(g["group"], "alpha", env=g["env"])
@@ -1081,8 +1081,8 @@ class TestCmdStatusAndLs:
 
     def test_cmd_ls_returns_all_worktrees_for_group(self, two_member_group):
         """cmd_ls returns all worktrees for the group."""
-        from reconcile import reconcile_worktree
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import cmd_ls_group
 
         g = two_member_group
         reconcile_worktree(g["group"], "alpha", env=g["env"])
@@ -1095,7 +1095,7 @@ class TestCmdStatusAndLs:
 
     def test_cmd_ls_empty_when_no_worktrees(self, two_member_group):
         """cmd_ls returns empty list when no worktrees created yet."""
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         g = two_member_group
         entries = cmd_ls_group(g["group"], env=g["env"])
@@ -1110,7 +1110,7 @@ class TestCmdStatusAndLs:
 class TestCmdBreak:
     def test_break_removes_both_member_worktrees(self, two_member_group):
         """break removes both member worktrees."""
-        from reconcile import reconcile_worktree, reconcile_break
+        from camp.provision.reconcile import reconcile_worktree, reconcile_break
 
         g = two_member_group
         slug = "break-me"
@@ -1128,8 +1128,8 @@ class TestCmdBreak:
 
     def test_break_removes_central_manifest(self, two_member_group):
         """break removes the central manifest."""
-        from reconcile import reconcile_worktree, reconcile_break
-        from group_resolve import central_state_dir
+        from camp.provision.reconcile import reconcile_worktree, reconcile_break
+        from camp.group.resolve import central_state_dir
 
         g = two_member_group
         slug = "break-manifest"
@@ -1145,7 +1145,7 @@ class TestCmdBreak:
 
     def test_break_dirty_worktree_blocked_without_force(self, two_member_group):
         """break on a dirty worktree fails unless --force."""
-        from reconcile import reconcile_worktree, reconcile_break
+        from camp.provision.reconcile import reconcile_worktree, reconcile_break
 
         g = two_member_group
         slug = "break-dirty"
@@ -1164,7 +1164,7 @@ class TestCmdBreak:
 
     def test_break_dirty_worktree_succeeds_with_force(self, two_member_group):
         """break --force succeeds even with dirty worktrees."""
-        from reconcile import reconcile_worktree, reconcile_break
+        from camp.provision.reconcile import reconcile_worktree, reconcile_break
 
         g = two_member_group
         slug = "break-force"
@@ -1187,7 +1187,7 @@ class TestCmdBreak:
 class TestCmdSync:
     def test_cmd_sync_operates_on_all_group_members(self, two_member_group):
         """cmd_sync_group reports all group members (canonical repos)."""
-        from lifecycle_cmds import cmd_sync_group
+        from camp.provision.lifecycle import cmd_sync_group
 
         g = two_member_group
         result = cmd_sync_group(g["group"], env=g["env"])
@@ -1205,7 +1205,7 @@ class TestCmdSync:
 class TestManifestAPI:
     def test_write_and_read_roundtrip(self, tmp_path):
         """write_central_manifest + read_central_manifest round-trips correctly."""
-        from manifest import write_central_manifest, read_central_manifest
+        from camp.group.manifest import write_central_manifest, read_central_manifest
 
         manifest_path = tmp_path / "manifest.json"
         data = {
@@ -1236,7 +1236,7 @@ class TestManifestAPI:
 
     def test_write_is_atomic(self, tmp_path):
         """write_central_manifest uses atomic write (temp + os.replace)."""
-        from manifest import write_central_manifest, read_central_manifest
+        from camp.group.manifest import write_central_manifest, read_central_manifest
 
         manifest_path = tmp_path / "manifest.json"
         data = {"schema_version": 1, "group": "g", "slug": "s", "branch": "b", "members": []}
@@ -1251,7 +1251,7 @@ class TestManifestAPI:
 
     def test_remove_central_manifest(self, tmp_path):
         """remove_central_manifest removes the file."""
-        from manifest import write_central_manifest, remove_central_manifest
+        from camp.group.manifest import write_central_manifest, remove_central_manifest
 
         manifest_path = tmp_path / "manifest.json"
         write_central_manifest(
@@ -1265,7 +1265,7 @@ class TestManifestAPI:
 
     def test_remove_central_manifest_noop_if_absent(self, tmp_path):
         """remove_central_manifest is a no-op if the file doesn't exist."""
-        from manifest import remove_central_manifest
+        from camp.group.manifest import remove_central_manifest
 
         manifest_path = tmp_path / "nonexistent.json"
         remove_central_manifest(manifest_path)  # should not raise

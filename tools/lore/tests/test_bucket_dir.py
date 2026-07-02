@@ -22,12 +22,12 @@ from conftest import load_script
 
 class TestBucketDir:
     def test_appends_year_month(self):
-        vault_mod = load_script("vault")
+        vault_mod = load_script("lore.vault.vault")
         folder = Path("/tmp/widgets/sessions")
         assert vault_mod.bucket_dir(folder, "2026-06-15T09:30:00Z") == folder / "2026-06"
 
     def test_accepts_bare_date(self):
-        vault_mod = load_script("vault")
+        vault_mod = load_script("lore.vault.vault")
         folder = Path("/tmp/widgets/plans")
         assert vault_mod.bucket_dir(folder, "2026-11-03") == folder / "2026-11"
 
@@ -45,7 +45,7 @@ class TestBucketDir:
 
 class TestBucketDirRaceSafe:
     def test_double_create_does_not_crash(self, tmp_path):
-        vault_mod = load_script("vault")
+        vault_mod = load_script("lore.vault.vault")
         target = vault_mod.bucket_dir(tmp_path / "sessions", "2026-06-15T09:30:00Z")
         target.mkdir(parents=True, exist_ok=True)
         target.mkdir(parents=True, exist_ok=True)

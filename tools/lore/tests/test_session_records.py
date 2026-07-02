@@ -41,7 +41,6 @@ from conftest import (
 )
 
 REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 
 SID = "11111111-2222-4333-8444-555555555555"
 SID2 = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
@@ -64,7 +63,7 @@ def _sidecar(vault: Path, key: str) -> dict:
 
 
 def _index_rows(state: Path, name: str | None = None):
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
     try:
         if name is None:
@@ -81,7 +80,7 @@ def _index_rows(state: Path, name: str | None = None):
 
 
 def _fts_body(state: Path, name: str) -> str | None:
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
     try:
         row = conn.execute(
@@ -186,7 +185,7 @@ class TestCleanToDirty:
         # Re-run the index to reflect the clean state first (use a fresh candidate
         # would re-dirty; instead assert via the next candidate). Write the clean
         # sidecar atomically through the record store helper to mirror real writes.
-        record_store = load_script("record_store")
+        record_store = load_script("lore.record.store")
         record_store.write_temp_then_rename(
             js, json.dumps(side, sort_keys=True, separators=(",", ":"))
         )
@@ -230,7 +229,7 @@ class TestReferenced:
         side = json.loads(js.read_text())
         side["status"] = "clean"
         side.pop("last-referenced-at", None)
-        record_store = load_script("record_store")
+        record_store = load_script("lore.record.store")
         record_store.write_temp_then_rename(
             js, json.dumps(side, sort_keys=True, separators=(",", ":"))
         )
@@ -298,7 +297,7 @@ class TestWorktreeConfinement:
             assert not any(sdir.iterdir()), "no partial write on rejection"
 
     def test_sanitize_worktree_name_unit(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         # Accepts a plain allowlist name.
         assert store.sanitize_worktree_name("lore-flush") == "lore-flush"
         assert store.sanitize_worktree_name("Feat_123") == "Feat_123"
@@ -323,7 +322,6 @@ class TestWorktreeConfinement:
 _RACE_WORKER = r"""
 import sys, time
 from pathlib import Path
-sys.path.insert(0, {scripts!r})
 import os
 # Config-only resolution: LORE_VAULT is not read, so the active vault is
 # resolved from the config.json seeded under XDG_CONFIG_HOME (arg 7).
@@ -363,7 +361,7 @@ if r.returncode != 0:
 def _run_race(vault, state, session_id, n_workers=3):
     barrier_file = vault / "_barrier"
     cli = REPO_ROOT / "plugins" / "lore" / "cli" / "lore"
-    code = _RACE_WORKER.format(scripts=str(SCRIPTS_DIR), cli=str(cli))
+    code = _RACE_WORKER.format(cli=str(cli))
     # Seed config.json ONCE (before spawning) so every worker resolves the same
     # test vault via config — no LORE_VAULT, no write race on the config file.
     config_home = state / "_xdg_config"

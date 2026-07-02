@@ -28,9 +28,9 @@ from unittest.mock import patch
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _read_claude_json(home: Path) -> dict:
@@ -44,7 +44,7 @@ def _read_claude_json(home: Path) -> dict:
 
 class TestAbsentFile:
     def test_creates_file_with_trust_flag(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
@@ -55,7 +55,7 @@ class TestAbsentFile:
         assert data["projects"][key]["hasTrustDialogAccepted"] is True
 
     def test_created_file_mode_is_0o600(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
@@ -66,7 +66,7 @@ class TestAbsentFile:
 
     def test_key_is_realpath(self, tmp_path):
         """The project key must be the realpath — important on macOS where /tmp → /private/tmp."""
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
@@ -78,7 +78,7 @@ class TestAbsentFile:
 
     def test_only_trust_flag_written_no_extra_keys(self, tmp_path):
         """Verified: only hasTrustDialogAccepted is written; no companion keys."""
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
@@ -98,7 +98,7 @@ class TestAbsentFile:
 
 class TestExistingFile:
     def test_merges_into_existing_file_preserves_other_keys(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         existing = {
@@ -123,7 +123,7 @@ class TestExistingFile:
     def test_loose_existing_mode_tightened_to_0o600(self, tmp_path):
         """~/.claude.json holds OAuth secrets — a looser pre-existing mode is
         tightened to 0o600, never preserved (security)."""
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text(json.dumps({"projects": {}}))
@@ -144,7 +144,7 @@ class TestExistingFile:
 
 class TestIdempotent:
     def test_second_call_produces_identical_file(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
@@ -157,7 +157,7 @@ class TestIdempotent:
         assert first == second
 
     def test_already_trusted_dir_is_noop(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         launch_dir = tmp_path / "ws"
         launch_dir.mkdir()
@@ -181,7 +181,7 @@ class TestIdempotent:
 
 class TestMalformedJson:
     def test_malformed_json_does_not_overwrite(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text("not valid { json }")
@@ -194,7 +194,7 @@ class TestMalformedJson:
         assert claude_json.read_text() == original_content
 
     def test_malformed_json_does_not_raise(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text("{bad json}")
@@ -205,7 +205,7 @@ class TestMalformedJson:
         pretrust_workspace(launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)})
 
     def test_malformed_json_emits_camp_stderr(self, tmp_path, capsys):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text("{bad json}")
@@ -233,7 +233,7 @@ class TestUnexpectedStructure:
     """
 
     def _run(self, tmp_path, content):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         claude_json.write_text(content)
@@ -252,7 +252,7 @@ class TestUnexpectedStructure:
         assert claude_json.read_text() == original
 
     def test_project_entry_not_object_aborts_without_overwrite(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         claude_json = tmp_path / ".claude.json"
         launch_dir = tmp_path / "ws"
@@ -278,7 +278,7 @@ class TestUnexpectedStructure:
 class TestUnreadableFile:
     def test_unreadable_file_does_not_overwrite(self, tmp_path):
         """OSError on read (e.g. EACCES) → abort without overwriting."""
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         # Create the file first — then simulate it being unreadable on open().
         claude_json = tmp_path / ".claude.json"
@@ -291,7 +291,7 @@ class TestUnreadableFile:
         def _raise_oserror(*_a, **_kw):
             raise OSError("Permission denied")
 
-        with patch("claude_trust.open", side_effect=_raise_oserror):
+        with patch("camp.harness.claude_trust.open", side_effect=_raise_oserror):
             # Should not raise
             pretrust_workspace(launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)})
 
@@ -299,7 +299,7 @@ class TestUnreadableFile:
         assert claude_json.read_text() == original_content
 
     def test_unreadable_file_emits_camp_stderr_distinguishable(self, tmp_path, capsys):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         # Create the file first.
         claude_json = tmp_path / ".claude.json"
@@ -311,7 +311,7 @@ class TestUnreadableFile:
         def _raise_oserror(*_a, **_kw):
             raise OSError("Permission denied")
 
-        with patch("claude_trust.open", side_effect=_raise_oserror):
+        with patch("camp.harness.claude_trust.open", side_effect=_raise_oserror):
             pretrust_workspace(launch_dir, workspace_root=launch_dir, env={"HOME": str(tmp_path)})
 
         err = capsys.readouterr().err
@@ -327,7 +327,7 @@ class TestUnreadableFile:
 
 class TestConfinement:
     def test_launch_dir_equals_workspace_root_is_written(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         ws = tmp_path / "workspace"
         ws.mkdir()
@@ -338,7 +338,7 @@ class TestConfinement:
         assert data["projects"][key]["hasTrustDialogAccepted"] is True
 
     def test_launch_dir_is_descendant_of_workspace_root_is_written(self, tmp_path):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         ws = tmp_path / "workspace"
         sub = ws / "app"
@@ -350,7 +350,7 @@ class TestConfinement:
         assert data["projects"][key]["hasTrustDialogAccepted"] is True
 
     def test_launch_dir_outside_workspace_root_is_refused(self, tmp_path, capsys):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         ws = tmp_path / "workspace"
         ws.mkdir()
@@ -366,7 +366,7 @@ class TestConfinement:
         assert "confin" in err.lower() or "outside" in err.lower() or "not under" in err.lower()
 
     def test_dotdot_escape_is_refused(self, tmp_path, capsys):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         ws = tmp_path / "workspace"
         ws.mkdir()
@@ -381,7 +381,7 @@ class TestConfinement:
         assert err.startswith("camp:")
 
     def test_etc_path_is_refused(self, tmp_path, capsys):
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         ws = tmp_path / "workspace"
         ws.mkdir()
@@ -394,7 +394,7 @@ class TestConfinement:
 
     def test_stderr_confinement_message_distinguishable_from_read_error(self, tmp_path, capsys):
         """Stderr for out-of-confinement must be distinguishable from read errors."""
-        from claude_trust import pretrust_workspace
+        from camp.harness.claude_trust import pretrust_workspace
 
         ws = tmp_path / "workspace"
         ws.mkdir()
@@ -421,7 +421,7 @@ class TestResolvedCwd:
         return g
 
     def test_default_cwd_is_workspace(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group())
         ws = Path("/work/space")
@@ -429,7 +429,7 @@ class TestResolvedCwd:
         assert cwd == ws
 
     def test_custom_cwd_template_substituted(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"cwd": "{workspace}/app"}))
         ws = Path("/work/space")
@@ -437,7 +437,7 @@ class TestResolvedCwd:
         assert cwd == Path("/work/space/app")
 
     def test_resolved_cwd_accepts_path_workspace(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group())
         ws = Path("/tmp/myws")
@@ -458,38 +458,38 @@ class TestIsClaudeLaunch:
         return g
 
     def test_baked_in_default_is_claude_launch(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group())
         assert p.is_claude_launch() is True
 
     def test_explicit_claude_binary_is_claude_launch(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"binary": "claude"}))
         assert p.is_claude_launch() is True
 
     def test_codex_is_not_claude_launch(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"binary": "codex"}))
         assert p.is_claude_launch() is False
 
     def test_other_binary_is_not_claude_launch(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"binary": "cursor"}))
         assert p.is_claude_launch() is False
 
     def test_path_to_claude_binary_is_claude_launch(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"binary": "/usr/local/bin/claude"}))
         assert p.is_claude_launch() is True
 
     def test_empty_binary_is_not_claude_launch_no_raise(self):
         """Directly-built profile with empty binary must answer False, not raise."""
-        from harness_profile import HarnessProfile
+        from camp.harness.profile import HarnessProfile
 
         p = HarnessProfile(
             binary="",
@@ -514,7 +514,7 @@ class TestShouldPretrust:
         return g
 
     def test_bare_default_pretrusts(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         assert resolve_harness_profile(self._group()).should_pretrust() is True
 
@@ -522,20 +522,20 @@ class TestShouldPretrust:
         """Regression guard: a [harness] block defaults inject to 'stdout', but a
         plain `claude` binary must still pretrust (gated via is_claude_launch,
         not the inject signal alone)."""
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"binary": "claude"}))
         assert p.inject == "stdout"  # block present, no inject key
         assert p.should_pretrust() is True
 
     def test_pretrust_false_disables(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"binary": "claude", "pretrust": False}))
         assert p.should_pretrust() is False
 
     def test_non_claude_binary_without_claude_hook_does_not_pretrust(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(self._group({"binary": "codex"}))
         assert p.should_pretrust() is False
@@ -543,7 +543,7 @@ class TestShouldPretrust:
     def test_wrapper_with_claude_hook_inject_pretrusts(self):
         """Opt-in path: a claude wrapper named non-'claude' can still pretrust by
         declaring the native claude-hook inject channel."""
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         p = resolve_harness_profile(
             self._group({"binary": "claude-wrapper", "inject": "claude-hook"})

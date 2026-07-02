@@ -32,9 +32,6 @@ import pytest
 
 from conftest import load_script, make_vault as _make_vault, run_cli as _run
 
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
-
 SID = "11111111-2222-4333-8444-555555555555"
 
 
@@ -95,7 +92,7 @@ def _flush(vault, state, sid=SID):
 
 
 def _index_status(state: Path, key: str = SID):
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
     try:
         row = conn.execute(
@@ -236,7 +233,7 @@ class TestNoLegacyStatus:
 class TestFlushedAtSharedContract:
 
     def test_pinned_key_and_format_constants(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         assert store.FLUSHED_AT_KEY == "flushed-at"
         assert store.FLUSHED_AT_FORMAT == "%Y-%m-%dT%H:%M:%SZ"
 
@@ -247,7 +244,7 @@ class TestFlushedAtSharedContract:
         _commit_baseline(vault)
         assert _flush(vault, state).returncode == 0
 
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         annotations = _sidecar(vault)["annotations"]
         assert store.FLUSHED_AT_KEY in annotations
         # The stamped value round-trips through the shared reader as UTC.
@@ -260,32 +257,32 @@ class TestParseFlushedAtReader:
     """The validate-before-trust reader — corrupt/missing/naive/non-UTC → None."""
 
     def test_valid_utc_value_parses(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         parsed = store.parse_flushed_at("2026-06-24T12:00:00Z")
         assert parsed is not None
         assert parsed.utcoffset() == timedelta(0)
 
     def test_future_value_parses_without_error(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         assert store.parse_flushed_at("2099-12-31T23:59:59Z") is not None
 
     @pytest.mark.parametrize("raw", [
         None, "", "not-a-date", "2026/06/24", "June 24 2026", "12345",
     ])
     def test_missing_or_corrupt_returns_none(self, raw):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         assert store.parse_flushed_at(raw) is None
 
     def test_naive_datetime_returns_none(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         assert store.parse_flushed_at("2026-06-24T12:00:00") is None
 
     def test_non_utc_offset_returns_none(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         assert store.parse_flushed_at("2026-06-24T12:00:00+05:30") is None
 
     def test_non_string_returns_none(self):
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         assert store.parse_flushed_at(12345) is None
 
     def test_fallback_means_all_candidates_outstanding(self, tmp_path):
@@ -294,7 +291,7 @@ class TestParseFlushedAtReader:
         This is the conservative contract: never silently drop candidates. We
         exercise it against a real flushed session whose watermark we then corrupt.
         """
-        store = load_script("session_store")
+        store = load_script("lore.session.store")
         body_lines = [
             "- candidate 2026-06-24T10:00:00Z kind=decision phase=Plan",
             "- candidate 2026-06-24T11:00:00Z kind=lesson phase=Build",

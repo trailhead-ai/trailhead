@@ -32,7 +32,6 @@ import pytest
 
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 HOOKS_DIR = PLUGIN_ROOT / "hooks"
 
@@ -88,10 +87,13 @@ _ALLOWLIST: dict[str, str] = {}
 
 def _code_files():
     """Yield every lore-plugin code file the audit scans (.py + cli/lore + .sh)."""
-    for p in SCRIPTS_DIR.rglob("*.py"):
+    # The lore/lore/ package tree — every module the lore/camp packaging
+    # refactor moved out of the old flat scripts/ bag (now fully drained).
+    for p in (PLUGIN_ROOT / "lore").rglob("*.py"):
         if "__pycache__" in p.parts:
             continue
         yield p
+    yield PLUGIN_ROOT / "_bootstrap.py"
     yield CLI_PATH
     for p in HOOKS_DIR.rglob("*"):
         if p.is_file() and p.suffix in (".sh", ".py"):
@@ -148,7 +150,7 @@ class TestSingularDirAudit:
 
     def test_frontmatter_slug_prefixes_are_singular(self):
         """frontmatter._SLUG_PREFIXES is singularized."""
-        fm = load_script("frontmatter")
+        fm = load_script("lore.search.frontmatter")
         assert "area/" in fm._SLUG_PREFIXES
         assert "plan/" in fm._SLUG_PREFIXES
         assert "areas/" not in fm._SLUG_PREFIXES
@@ -166,7 +168,7 @@ class TestVaultGitignoreScaffolding:
         `lore sync`'s `git add -A` would otherwise commit the session/<key>.lock
         flock sidecars. Uses tmp_path only — never the real vault (Axiom 6).
         """
-        installer = load_script("installer")
+        installer = load_script("lore.config.installer")
         vaults_root = tmp_path / "vaults"
         vault = installer.bootstrap_vault(vaults_root, vault_path=None)
 
@@ -187,7 +189,7 @@ class TestVaultGitignoreScaffolding:
         """
         import subprocess
 
-        installer = load_script("installer")
+        installer = load_script("lore.config.installer")
         vaults_root = tmp_path / "vaults"
         vault = installer.bootstrap_vault(vaults_root, vault_path=None)
 
@@ -210,7 +212,7 @@ class TestVaultGitignoreScaffolding:
 
     def test_bootstrap_is_idempotent_on_gitignore(self, tmp_path):
         """Re-running bootstrap_vault does not duplicate or clobber the .gitignore."""
-        installer = load_script("installer")
+        installer = load_script("lore.config.installer")
         vaults_root = tmp_path / "vaults"
         vault = installer.bootstrap_vault(vaults_root, vault_path=None)
         first = (vault / ".gitignore").read_text(encoding="utf-8")

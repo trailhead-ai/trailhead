@@ -33,7 +33,6 @@ from pathlib import Path
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 
 sys.path.insert(0, str(TESTS_DIR))
 from conftest import load_script  # noqa: E402
@@ -86,7 +85,7 @@ def _ruleset_path(home):
 
 
 def _ruleset_content():
-    return load_script("agent_ruleset").RULESET_CONTENT
+    return load_script("lore.config.agent_ruleset").RULESET_CONTENT
 
 
 # ---------------------------------------------------------------------------

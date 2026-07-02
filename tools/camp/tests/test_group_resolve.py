@@ -34,10 +34,10 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ class TestStateDirResolverMatrix:
     def _resolve(
         self, cwd: Path, group_configs: list[dict], camp_state: Path
     ) -> tuple[str, str | None]:
-        from group_resolve import resolve_from_cwd
+        from camp.group.resolve import resolve_from_cwd
 
         return resolve_from_cwd(cwd, group_configs, camp_state_dir=camp_state)
 
@@ -184,7 +184,7 @@ class TestStateDirResolverMatrix:
     def test_6_non_member_dir_raises(
         self, tmp_path: Path, group_configs: list[dict], camp_state: Path
     ) -> None:
-        from group_resolve import GroupResolutionError
+        from camp.group.resolve import GroupResolutionError
 
         unrelated = tmp_path / "some" / "unrelated" / "dir"
         unrelated.mkdir(parents=True)
@@ -195,7 +195,7 @@ class TestStateDirResolverMatrix:
         self, camp_state: Path, group_configs: list[dict]
     ) -> None:
         """cwd = camp_state itself (no group/worktrees/slug segments) → error."""
-        from group_resolve import GroupResolutionError
+        from camp.group.resolve import GroupResolutionError
 
         with pytest.raises(GroupResolutionError, match="no group resolved from cwd"):
             self._resolve(camp_state, group_configs, camp_state)
@@ -207,7 +207,7 @@ class TestStateDirResolverMatrix:
 
         A stray dir under the state dir must not resolve to a phantom group.
         """
-        from group_resolve import GroupResolutionError
+        from camp.group.resolve import GroupResolutionError
 
         stray = camp_state / "ghost-group" / "worktrees" / "some-slug"
         stray.mkdir(parents=True)
@@ -240,7 +240,7 @@ class TestStateDirResolverMatrix:
 
     # Position 8: workspace dir under a DEEP state dir → still parses correctly
     def test_8_deep_state_dir_root(self, tmp_path: Path) -> None:
-        from group_resolve import resolve_from_cwd
+        from camp.group.resolve import resolve_from_cwd
 
         deep_state = tmp_path / "a" / "b" / "c" / "d" / "state"
         deep_state.mkdir(parents=True)
@@ -265,7 +265,7 @@ class TestStateDirResolverMatrix:
     ) -> None:
         """canonical member repo (pos 5) vs non-member dir (pos 6) coexist
         without ambiguity against the same configs."""
-        from group_resolve import GroupResolutionError
+        from camp.group.resolve import GroupResolutionError
 
         group, slug = self._resolve(member_repos[0], group_configs, camp_state)
         assert group == "mygroup"
@@ -284,7 +284,7 @@ class TestStateDirResolverMatrix:
 
 def test_group_override_beats_cwd(tmp_path: Path) -> None:
     """--group override returns the requested group regardless of cwd."""
-    from group_resolve import resolve_group_override
+    from camp.group.resolve import resolve_group_override
 
     repo_a = tmp_path / "repo_a"
     repo_a.mkdir()
@@ -300,7 +300,7 @@ def test_group_override_beats_cwd(tmp_path: Path) -> None:
 
 def test_group_override_unknown_group_errors(tmp_path: Path) -> None:
     """--group override with an unknown group name → legible error."""
-    from group_resolve import GroupResolutionError, resolve_group_override
+    from camp.group.resolve import GroupResolutionError, resolve_group_override
 
     configs = [_make_group_config("group_a", [tmp_path / "repo_a"])]
     with pytest.raises(GroupResolutionError, match="group_b"):
@@ -314,7 +314,7 @@ def test_group_override_unknown_group_errors(tmp_path: Path) -> None:
 
 def test_no_group_legible_error(tmp_path: Path) -> None:
     """cwd ∉ any group + no --group → explicit 'no group resolved from cwd, pass --group'."""
-    from group_resolve import GroupResolutionError, resolve_from_cwd
+    from camp.group.resolve import GroupResolutionError, resolve_from_cwd
 
     state_root = tmp_path / "state"
     state_root.mkdir()
@@ -337,7 +337,7 @@ def test_no_group_legible_error(tmp_path: Path) -> None:
 
 def test_repo_in_two_groups_error(tmp_path: Path) -> None:
     """A repo listed in two groups → error naming both groups + the repo."""
-    from group_resolve import GroupResolutionError, validate_no_overlap
+    from camp.group.resolve import GroupResolutionError, validate_no_overlap
 
     shared_repo = tmp_path / "shared_repo"
     shared_repo.mkdir()
@@ -355,7 +355,7 @@ def test_repo_in_two_groups_error(tmp_path: Path) -> None:
 
 def test_repo_in_two_groups_surfaces_on_cwd_resolve(tmp_path: Path) -> None:
     """Overlap is detected at resolve time too (canonical member repo walk)."""
-    from group_resolve import GroupResolutionError, resolve_from_cwd
+    from camp.group.resolve import GroupResolutionError, resolve_from_cwd
 
     state_root = tmp_path / "state"
     state_root.mkdir()
@@ -406,7 +406,7 @@ def test_group_name_confinement_rejects_path_traversal(tmp_path: Path, bad_name:
     tightening that rules out shell metacharacters, whitespace, control chars,
     underscores, and uppercase.
     """
-    from group_resolve import GroupConfinementError, validate_group_name
+    from camp.group.resolve import GroupConfinementError, validate_group_name
 
     with pytest.raises(GroupConfinementError):
         validate_group_name(bad_name)
@@ -414,7 +414,7 @@ def test_group_name_confinement_rejects_path_traversal(tmp_path: Path, bad_name:
 
 def test_group_name_valid(tmp_path: Path) -> None:
     """A slug-charset group name passes confinement validation."""
-    from group_resolve import validate_group_name
+    from camp.group.resolve import validate_group_name
 
     validate_group_name("my-group")
     validate_group_name("trailhead")
@@ -428,13 +428,13 @@ def test_group_name_valid(tmp_path: Path) -> None:
 
 def test_central_state_path_uses_resolver(tmp_path: Path) -> None:
     """The central state path = state_dir("camp")/<group>/ via resolver env= injection."""
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     override = tmp_path / "custom_state"
     env = {"CAMP_STATE_DIR": str(override), "HOME": str(tmp_path)}
     result = central_state_dir("mygroup", env=env, platform="linux")
     assert result == override / "mygroup"
-    import group_resolve as gr_mod
+    import camp.group.resolve as gr_mod
 
     module_path = Path(gr_mod.__file__).resolve()
     assert not str(result).startswith(str(module_path.parent))
@@ -442,7 +442,7 @@ def test_central_state_path_uses_resolver(tmp_path: Path) -> None:
 
 def test_central_state_path_no_file_anchor(tmp_path: Path) -> None:
     """central_state_dir without override uses the resolver, not __file__."""
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     env = {"HOME": str(tmp_path)}
     result = central_state_dir("mygroup", env=env, platform="linux")
@@ -458,7 +458,7 @@ def test_central_state_path_no_file_anchor(tmp_path: Path) -> None:
 def test_resolve_derives_state_dir_from_env(tmp_path: Path) -> None:
     """When camp_state_dir is not passed, the resolver derives it from env via
     trailhead.paths — proving the env= injection path the design lock-in allows."""
-    from group_resolve import resolve_from_cwd
+    from camp.group.resolve import resolve_from_cwd
 
     state_root = tmp_path / "state"
     state_root.mkdir()

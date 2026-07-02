@@ -15,16 +15,9 @@ import importlib
 import importlib.util
 import io
 import os
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
-
-REPO_ROOT = Path(__file__).parent.parent
-PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
-CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-
 
 # ---------------------------------------------------------------------------
 # Module loader
@@ -32,28 +25,15 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
 
 def _load_cli():
-    """Load cli/lore in-process (no .py extension — SourceFileLoader)."""
-    from importlib.machinery import SourceFileLoader
+    """Return the areas command module (``lore.cli.areas``).
 
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in list(sys.modules):
-        if cached in (
-            "recall",
-            "vault",
-            "frontmatter",
-            "sessions",
-            "layers",
-            "promote",
-            "review",
-        ):
-            sys.modules.pop(cached, None)
-    loader = SourceFileLoader("lore_cli_areas_test", str(CLI_PATH))
-    spec = importlib.util.spec_from_loader("lore_cli_areas_test", loader)
-    sys.modules.pop("lore_cli_areas_test", None)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
+    ``cmd_areas`` moved out of the monolithic ``cli/lore`` into its own
+    command-group module; conftest puts the ``lore`` package's plugin root on
+    sys.path so it imports by its dotted name. A fresh ``reload`` keeps the
+    per-test isolation the old in-process loader provided.
+    """
+    from lore.cli import areas
+    return importlib.reload(areas)
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +300,8 @@ class TestAreasBuildAreaMapRaises:
         with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
-                    with mock.patch.object(
-                        cli.recall_mod,
-                        "build_area_map",
+                    with mock.patch(
+                        "lore.search.recall.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         rc = cli.cmd_areas(args)
@@ -344,9 +323,8 @@ class TestAreasBuildAreaMapRaises:
         with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
-                    with mock.patch.object(
-                        cli.recall_mod,
-                        "build_area_map",
+                    with mock.patch(
+                        "lore.search.recall.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)
@@ -368,9 +346,8 @@ class TestAreasBuildAreaMapRaises:
         with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
-                    with mock.patch.object(
-                        cli.recall_mod,
-                        "build_area_map",
+                    with mock.patch(
+                        "lore.search.recall.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)

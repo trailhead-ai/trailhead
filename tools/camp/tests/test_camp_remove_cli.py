@@ -26,8 +26,7 @@ Pattern: fake-git + tmp_path + CAMP_STATE_DIR/CAMP_CONFIG_DIR (no real
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import inspect
 import json
 import os
@@ -42,21 +41,18 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
-    """Import cli/camp (extensionless) as a module for in-process dispatch tests."""
-    spec = importlib.util.spec_from_loader(
-        "camp_cli_remove",
-        importlib.machinery.SourceFileLoader("camp_cli_remove", str(_CLI_CAMP)),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the remove handler.
+
+    `_cmd_remove_group_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.lifecycle` command-group module (setup/sync/remove/rebase).
+    """
+    return importlib.import_module("camp.cli.lifecycle")
 
 
 def _init_git_repo(path: Path) -> None:
@@ -351,7 +347,7 @@ class TestCampRemoveInvokesReconcileBreak:
         triggers a legible error, confirming the real reconcile_break is called
         (not the stub).
         """
-        from manifest import write_central_manifest, manifest_path_for
+        from camp.group.manifest import write_central_manifest, manifest_path_for
 
         env = {"CAMP_STATE_DIR": str(remove_env["state_dir"])}
         mpath = manifest_path_for("rmgroup", "ws-slug", env=env)
@@ -379,15 +375,6 @@ class TestCampRemoveInvokesReconcileBreak:
 # ===========================================================================
 # Structural: no lore / no session-liveness precondition in the remove path
 # ===========================================================================
-
-
-def _load_cli_module():
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 class TestRemovePathHasNoLoreOrSessionPrecondition:
@@ -423,7 +410,7 @@ class TestRemovePathHasNoLoreOrSessionPrecondition:
         )
 
     def test_reconcile_break_makes_no_lore_or_session_call(self):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         src = inspect.getsource(reconcile.reconcile_break)
         # Same narrowed assertion: check for import or subprocess invocation,
@@ -463,7 +450,7 @@ def inproc_group(tmp_path: Path, monkeypatch):
     """In-process group + env with the detached provisioner stubbed.
 
     Used for direct reconcile_break calls (lock-held + no-spurious-dir tests)."""
-    import provision
+    import camp.provision.provision as provision
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
@@ -483,8 +470,8 @@ def inproc_group(tmp_path: Path, monkeypatch):
 
 
 def _provision_inproc(g, slug):
-    from provision import bring_up_workspace
-    from lifecycle_cmds import cmd_setup_group
+    from camp.provision.provision import bring_up_workspace
+    from camp.provision.lifecycle import cmd_setup_group
 
     bring_up_workspace(g["group"], slug, env=g["env"])
     cmd_setup_group(g["group"], slug, env=g["env"])
@@ -497,9 +484,9 @@ class TestReconcileBreakHoldsLock:
         reconcile_break runs (serializes the TOCTOU race)."""
         import fcntl
 
-        import reconcile
-        from manifest import manifest_path_for, lock_path_for
-        from reconcile import reconcile_break
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import manifest_path_for, lock_path_for
+        from camp.provision.reconcile import reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-lock")
@@ -545,9 +532,9 @@ class TestReconcileBreakHoldsLock:
         import fcntl
         import shutil
 
-        import reconcile
-        from manifest import manifest_path_for, lock_path_for
-        from reconcile import reconcile_break
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import manifest_path_for, lock_path_for
+        from camp.provision.reconcile import reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-rmtree")
@@ -585,8 +572,8 @@ class TestReconcileBreakHoldsLock:
         its workspace dir — the reconcile lock's mkdir must be guarded by a
         fail-fast manifest read (else a later `camp new <slug>` wrongly resumes a
         ghost workspace)."""
-        from manifest import ManifestError, workspace_dir
-        from reconcile import reconcile_break
+        from camp.group.manifest import ManifestError, workspace_dir
+        from camp.provision.reconcile import reconcile_break
 
         g = inproc_group
         ws = workspace_dir("removegroup", "ghost-slug", env=g["env"])
@@ -606,7 +593,7 @@ class TestRemoveExitCode:
     def test_total_removal_failure_exits_nonzero_empty_stdout(
         self, inproc_group, monkeypatch, capsys
     ):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         cli = _load_cli_module()
         g = inproc_group
@@ -634,7 +621,7 @@ class TestRemoveExitCode:
         assert "repo_a" in captured.err and "repo_b" in captured.err
 
     def test_partial_removal_failure_exits_nonzero(self, inproc_group, monkeypatch, capsys):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         cli = _load_cli_module()
         g = inproc_group
@@ -658,7 +645,7 @@ class TestRemoveExitCode:
         assert "partially removed" in captured.err and "repo_a" in captured.err
 
     def test_clean_removal_still_exits_zero(self, inproc_group, monkeypatch, capsys):
-        import reconcile
+        import camp.provision.reconcile as reconcile
 
         cli = _load_cli_module()
         g = inproc_group
@@ -694,8 +681,8 @@ class TestConfinementAdversarial:
         """A manifest whose member worktree_path is a symlink that resolves
         outside the workspace dir triggers ConfinementError BEFORE any removal
         — the symlink target outside the state dir is not touched."""
-        from manifest import manifest_path_for, write_central_manifest, workspace_dir
-        from reconcile import ConfinementError, reconcile_break
+        from camp.group.manifest import manifest_path_for, write_central_manifest, workspace_dir
+        from camp.provision.reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-symlink")
@@ -739,9 +726,9 @@ class TestConfinementAdversarial:
         executed in it. Plant an escaping symlink as a member worktree_path, spy
         on _git_is_dirty, and assert ConfinementError is raised WITHOUT it firing
         (force defaults False, so the dirty-check would otherwise run)."""
-        import reconcile
-        from manifest import manifest_path_for, write_central_manifest, workspace_dir
-        from reconcile import ConfinementError, reconcile_break
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import manifest_path_for, write_central_manifest, workspace_dir
+        from camp.provision.reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-order")
@@ -785,9 +772,9 @@ class TestConfinementAdversarial:
         (wt_path.is_dir() == False → idempotent no-op, no errors, removals 'succeed');
         the pre-rmtree guard then sees the outside dir is not under worktrees_root.
         """
-        import reconcile
-        from manifest import manifest_path_for, write_central_manifest
-        from reconcile import ConfinementError, reconcile_break
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+        from camp.provision.reconcile import ConfinementError, reconcile_break
 
         g = inproc_group
         _provision_inproc(g, "feat-ws-escape")

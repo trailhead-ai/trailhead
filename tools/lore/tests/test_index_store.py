@@ -22,33 +22,19 @@ from pathlib import Path
 
 import pytest
 
+from conftest import load_script
+
 # ---------------------------------------------------------------------------
 # Conftest helpers
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
 CLI_PATH = REPO_ROOT / "plugins" / "lore" / "cli" / "lore"
 
 
 def load_index_store(xdg_state_home: Path | None = None):
     """Load index_store freshly, optionally injecting XDG_STATE_HOME."""
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    name = "index_store"
-    if name in sys.modules:
-        del sys.modules[name]
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    if xdg_state_home is not None:
-        # Inject env override before exec so the module resolves path at import.
-        # index_store uses a module-level lazy resolver; pass env via monkeypatch
-        # is caller responsibility — we just pass xdg_state_home for open_index.
-        pass
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script("lore.search.index")
 
 
 # ---------------------------------------------------------------------------

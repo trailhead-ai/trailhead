@@ -6,7 +6,7 @@ lore init git-init wiring:
   - fresh dir produces a git repo (.git/ exists)
   - init installs NO pre-commit hook (the old vault-integrity hook subsystem was
     retired; record validation now lives in the `lore record` CLI via
-    record_model.py)
+    lore/record/model.py)
   - re-running init does not re-initialize an existing repo
 
 lore sync:
@@ -92,6 +92,9 @@ def test_init_creates_git_repo(tmp_path):
     env = {
         "XDG_STATE_HOME": str(state),
         "XDG_CONFIG_HOME": str(config),
+        # init installs the vault-guard into ~/.claude/settings.json (resolved via
+        # Path.home()); isolate HOME so it lands in tmp, never the real file.
+        "HOME": str(state.parent / "home"),
     }
     r = run_cli(["init"], env=env)
     assert r.returncode == 0, r.stderr
@@ -108,6 +111,9 @@ def test_init_installs_pre_commit_hook(tmp_path):
     env = {
         "XDG_STATE_HOME": str(state),
         "XDG_CONFIG_HOME": str(config),
+        # init installs the vault-guard into ~/.claude/settings.json (resolved via
+        # Path.home()); isolate HOME so it lands in tmp, never the real file.
+        "HOME": str(state.parent / "home"),
     }
     r = run_cli(["init"], env=env)
     assert r.returncode == 0, r.stderr
@@ -126,6 +132,9 @@ def test_init_skips_git_init_if_already_a_repo(tmp_path):
     env = {
         "XDG_STATE_HOME": str(state),
         "XDG_CONFIG_HOME": str(config),
+        # init installs the vault-guard into ~/.claude/settings.json (resolved via
+        # Path.home()); isolate HOME so it lands in tmp, never the real file.
+        "HOME": str(state.parent / "home"),
     }
     run_cli(["init"], env=env)
     r = run_cli(["init"], env=env)
@@ -312,6 +321,9 @@ def test_init_planned_tree_shows_both_template_dirs(tmp_path):
     env = {
         "XDG_STATE_HOME": str(state),
         "XDG_CONFIG_HOME": str(config),
+        # init installs the vault-guard into ~/.claude/settings.json (resolved via
+        # Path.home()); isolate HOME so it lands in tmp, never the real file.
+        "HOME": str(state.parent / "home"),
     }
     r = run_cli(["init"], env=env)
     assert r.returncode == 0, r.stderr

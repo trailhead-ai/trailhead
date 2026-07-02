@@ -13,8 +13,9 @@ Covers the test contract:
   - Pre-existing config is not clobbered.
   - Config missing default vault gets it merged in.
 
-All tests inject XDG_STATE_HOME / XDG_CONFIG_HOME via env and use tmp_path so
-they NEVER touch the real config, state, or vault (Axiom 6).
+All tests inject XDG_STATE_HOME / XDG_CONFIG_HOME / HOME via env and use tmp_path
+so they NEVER touch the real config, state, vault, or ``~/.claude/settings.json``
+(Axiom 6).
 """
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ import pytest
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 
 sys.path.insert(0, str(TESTS_DIR))
 from conftest import load_script  # noqa: E402
@@ -41,11 +41,18 @@ from conftest import load_script  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _run(args, *, state, config, cwd=None, extra=None):
-    """Run lore CLI with isolated XDG dirs."""
+def _run(args, *, state, config, home, cwd=None, extra=None):
+    """Run lore CLI with isolated XDG dirs and an isolated HOME (Axiom 6).
+
+    ``HOME`` is isolated because ``lore init`` installs its vault-guard into the
+    user-global ``~/.claude/settings.json`` (resolved via ``Path.home()``); an
+    unisolated HOME would leak guardrail deny rules into the developer's real
+    Claude settings on every run.
+    """
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = str(state)
     env["XDG_CONFIG_HOME"] = str(config)
+    env["HOME"] = str(home)
     env["LORE_EMAIL"] = "tester@example.com"
     if extra:
         env.update(extra)
@@ -61,9 +68,10 @@ def _run(args, *, state, config, cwd=None, extra=None):
 def _dirs(tmp_path):
     state = tmp_path / "state"
     config = tmp_path / "config"
-    state.mkdir(parents=True, exist_ok=True)
-    config.mkdir(parents=True, exist_ok=True)
-    return state, config
+    home = tmp_path / "home"
+    for d in (state, config, home):
+        d.mkdir(parents=True, exist_ok=True)
+    return state, config, home
 
 
 def _config_path(config):
@@ -88,26 +96,26 @@ def _default_vault(state):
 
 
 def test_fresh_init_exits_zero(tmp_path):
-    state, config = _dirs(tmp_path)
-    res = _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    res = _run(["init"], state=state, config=config, home=home)
     assert res.returncode == 0, res.stderr
 
 
 def test_fresh_init_creates_default_vault_dir(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
     assert _default_vault(state).is_dir()
 
 
 def test_fresh_init_git_inits_default_vault(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
     assert (_default_vault(state) / ".git").is_dir()
 
 
 def test_fresh_init_provisions_index_parent(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
     index_parent = state / "lore"
     assert index_parent.is_dir()
 
@@ -118,8 +126,8 @@ def test_fresh_init_provisions_index_parent(tmp_path):
 
 
 def test_index_location_not_under_vault_root(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
     index_parent = state / "lore"
     vault_root = _vaults_root(state)
     # index_parent is state/lore; vault_root is state/lore/vaults
@@ -137,25 +145,25 @@ def test_index_location_not_under_vault_root(tmp_path):
 
 
 def test_rerun_exits_zero(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
-    res = _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
+    res = _run(["init"], state=state, config=config, home=home)
     assert res.returncode == 0, res.stderr
 
 
 def test_rerun_does_not_duplicate_config_vaults(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
+    _run(["init"], state=state, config=config, home=home)
     cfg = _read_config(config)
     assert len(cfg["vaults"]) == 1
 
 
 def test_rerun_does_not_regit_init(tmp_path):
     """A second init must not re-git-init (no git re-initialization message)."""
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
-    res = _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
+    res = _run(["init"], state=state, config=config, home=home)
     # git-init on an existing repo prints "Reinitialized" — ensure we don't do it
     combined = res.stdout + res.stderr
     assert "Reinitialized" not in combined
@@ -167,14 +175,14 @@ def test_rerun_does_not_regit_init(tmp_path):
 
 
 def test_no_harvest_pending_created(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
     assert not (_default_vault(state) / "harvest-pending.md").exists()
 
 
 def test_no_precommit_hook_installed(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
     pre_commit = _default_vault(state) / ".git" / "hooks" / "pre-commit"
     # The old installer put a lore guard in pre-commit; new init must not.
     assert not pre_commit.exists()
@@ -191,7 +199,7 @@ def test_bootstrap_vault_raises_on_git_init_failure(tmp_path):
     silently non-repo vault."""
     from unittest import mock
 
-    installer = load_script("installer")
+    installer = load_script("lore.config.installer")
     vaults_root = tmp_path / "state" / "vaults"
     fail = mock.Mock(returncode=1, stderr="fatal: simulated git init failure")
     with mock.patch.object(installer.subprocess, "run", return_value=fail):
@@ -200,7 +208,7 @@ def test_bootstrap_vault_raises_on_git_init_failure(tmp_path):
 
 
 def test_resolve_targets_returns_user_global_settings(tmp_path):
-    installer = load_script("installer")
+    installer = load_script("lore.config.installer")
     settings = installer.resolve_targets()
     # User-global only: ~/.claude/settings.json (no --local project mode).
     assert settings.name == "settings.json"
@@ -217,12 +225,12 @@ def test_vault_flag_is_unknown_flag_error(tmp_path):
     vault under the state dir — vault access is CLI-resolved, never path-steered.
     argparse rejects the unknown flag with a usage error (exit 2), writing
     nothing."""
-    state, config = _dirs(tmp_path)
+    state, config, home = _dirs(tmp_path)
     target_repo = tmp_path / "existing-repo"
     target_repo.mkdir()
     subprocess.run(["git", "init", str(target_repo)], check=True, capture_output=True)
 
-    res = _run(["init", "--vault", str(target_repo)], state=state, config=config)
+    res = _run(["init", "--vault", str(target_repo)], state=state, config=config, home=home)
     assert res.returncode == 2, (
         f"lore init --vault must be an argparse usage error (exit 2); "
         f"got {res.returncode}; stderr={res.stderr!r}"
@@ -237,8 +245,8 @@ def test_vault_flag_is_unknown_flag_error(tmp_path):
 def test_local_flag_is_unknown_flag_error(tmp_path):
     """``--local`` was removed (single user-level install). argparse rejects the
     unknown flag with a usage error (exit 2), writing nothing."""
-    state, config = _dirs(tmp_path)
-    res = _run(["init", "--local"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    res = _run(["init", "--local"], state=state, config=config, home=home)
     assert res.returncode == 2, (
         f"lore init --local must be an argparse usage error (exit 2); "
         f"got {res.returncode}; stderr={res.stderr!r}"
@@ -251,8 +259,8 @@ def test_local_flag_is_unknown_flag_error(tmp_path):
 
 
 def test_init_seeds_config_if_absent(tmp_path):
-    state, config = _dirs(tmp_path)
-    _run(["init"], state=state, config=config)
+    state, config, home = _dirs(tmp_path)
+    _run(["init"], state=state, config=config, home=home)
 
     cfg = _read_config(config)
     vaults = cfg["vaults"]
@@ -267,7 +275,7 @@ def test_init_seeds_config_if_absent(tmp_path):
 
 
 def test_init_does_not_clobber_existing_config(tmp_path):
-    state, config = _dirs(tmp_path)
+    state, config, home = _dirs(tmp_path)
     # Write a config with a user-defined extra vault
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,7 +287,7 @@ def test_init_does_not_clobber_existing_config(tmp_path):
     }
     cfg_path.write_text(json.dumps(existing))
 
-    res = _run(["init"], state=state, config=config)
+    res = _run(["init"], state=state, config=config, home=home)
     assert res.returncode == 0, res.stderr
 
     # Config must be unchanged
@@ -295,13 +303,13 @@ def test_init_does_not_clobber_existing_config(tmp_path):
 
 
 def test_init_merges_default_vault_if_missing(tmp_path):
-    state, config = _dirs(tmp_path)
+    state, config, home = _dirs(tmp_path)
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     # Config exists but has only a team vault (no default)
     cfg_path.write_text(json.dumps({"vaults": [{"name": "team-alpha", "scope": "team"}]}))
 
-    res = _run(["init"], state=state, config=config)
+    res = _run(["init"], state=state, config=config, home=home)
     assert res.returncode == 0, res.stderr
 
     cfg = _read_config(config)
@@ -319,12 +327,12 @@ def test_init_merges_default_vault_if_missing(tmp_path):
 def test_init_corrupt_config_is_clean_error(tmp_path):
     """Error-hygiene axiom: a present-but-unparseable config.json must surface a
     clean named error on stderr + nonzero exit, never a silent exit-0 no-op."""
-    state, config = _dirs(tmp_path)
+    state, config, home = _dirs(tmp_path)
     cfg_path = _config_path(config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text("{ this is not valid json")
 
-    res = _run(["init"], state=state, config=config)
+    res = _run(["init"], state=state, config=config, home=home)
     assert res.returncode != 0
     assert "error:" in res.stderr
     assert "config" in res.stderr.lower()

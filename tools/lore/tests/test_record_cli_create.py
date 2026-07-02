@@ -45,13 +45,14 @@ config.json (isolated XDG_CONFIG_HOME) and XDG_STATE_HOME is fenced too.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
-from conftest import make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
-
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
+from conftest import (  # noqa: F401
+    load_script,
+    make_vault as _make_vault,
+    run_cli as _run,
+    write_default_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +153,6 @@ def test_create_with_piped_body_body_and_sidecar_consistent(tmp_path):
 
 def test_create_with_piped_body_index_row_present(tmp_path):
     """The index row is upserted on create."""
-    import importlib.util
-
     vault, state = _make_vault(tmp_path)
     r = _run(
         _BASE_ARGS,
@@ -165,14 +164,7 @@ def test_create_with_piped_body_index_row_present(tmp_path):
     record_id = r.stdout.strip()
     kind, name = record_id.split("/", 1)
 
-    # Load index_store from scripts to verify the row is there.
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    spec = importlib.util.spec_from_file_location(
-        "index_store_test", SCRIPTS_DIR / "index_store.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = load_script("lore.search.index")
     conn = mod.open_index(env={"XDG_STATE_HOME": str(state)})
     try:
         rows = conn.execute(

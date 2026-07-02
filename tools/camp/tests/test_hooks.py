@@ -56,11 +56,11 @@ from typing import Any
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _BIN_CAMP = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "bin" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> Path:
     """Return the unified-layout worktree path:
     central_state_dir(group)/worktrees/<slug>/<member>."""
-    from group_resolve import central_state_dir
+    from camp.group.resolve import central_state_dir
 
     return central_state_dir(group_name, env=env) / "worktrees" / slug / member
 
@@ -158,7 +158,7 @@ class TestHooksWriter:
     def test_writes_session_start_hook(self, two_member_group):
         """init writes a SessionStart hook for session-bootstrap into each
         member's settings.json."""
-        from hooks_writer import write_hooks_for_member
+        from camp.harness.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -183,7 +183,7 @@ class TestHooksWriter:
 
         No WorktreeRemove entry must be written into the member's settings.json.
         """
-        from hooks_writer import write_hooks_for_member
+        from camp.harness.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -203,7 +203,7 @@ class TestHooksWriter:
 
     def test_writes_env_camp_bin(self, two_member_group):
         """init writes the env.CAMP_BIN key into the settings.json."""
-        from hooks_writer import write_hooks_for_member
+        from camp.harness.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -219,7 +219,7 @@ class TestHooksWriter:
 
     def test_hook_command_shape(self, two_member_group):
         """The hook command string is exactly '${CAMP_BIN:-<abs>} session-bootstrap'."""
-        from hooks_writer import write_hooks_for_member
+        from camp.harness.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -240,7 +240,7 @@ class TestHooksWriter:
 
     def test_idempotent_no_duplicates(self, two_member_group):
         """Re-running write_hooks_for_member adds NO duplicate hook entries."""
-        from hooks_writer import write_hooks_for_member
+        from camp.harness.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -268,7 +268,7 @@ class TestHooksWriter:
 
     def test_preserves_existing_unrelated_keys(self, two_member_group):
         """An existing settings.json with unrelated keys is preserved after write."""
-        from hooks_writer import write_hooks_for_member
+        from camp.harness.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -305,7 +305,7 @@ class TestHooksWriter:
 
     def test_json_robustness_path_with_space_and_quote(self, tmp_path: Path):
         """A repo_root / CAMP_BIN path with a space and a quote round-trips correctly."""
-        from hooks_writer import write_hooks_for_member
+        from camp.harness.hooks_writer import write_hooks_for_member
 
         # Create a repo_root path with a space and a quote in it
         spaced_dir = tmp_path / "my repo's dir"
@@ -341,7 +341,7 @@ class TestHooksWriter:
 class TestInitCmd:
     def test_init_writes_hooks_for_all_members(self, two_member_group):
         """camp init <group> writes hook entries to each member's .claude/settings.json."""
-        from init_cmd import run_init
+        from camp.workspace.init import run_init
 
         g = two_member_group
         camp_bin = str(_BIN_CAMP)
@@ -358,7 +358,7 @@ class TestInitCmd:
 
     def test_init_idempotent(self, two_member_group):
         """Re-running init produces no duplicate hook entries for any member."""
-        from init_cmd import run_init
+        from camp.workspace.init import run_init
 
         g = two_member_group
         camp_bin = str(_BIN_CAMP)
@@ -610,8 +610,8 @@ def _run_worktree_cleanup(
 class TestWorktreeCleanup:
     def test_removes_member_worktrees_and_manifest(self, tmp_path: Path):
         """worktree-cleanup removes member worktrees + central manifest."""
-        from reconcile import reconcile_worktree
-        from manifest import manifest_path_for
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.group.manifest import manifest_path_for
 
         # CAMP_CONFIG_DIR override: config_dir("camp") returns the override directly.
         # groups/ lives at <camp_config_dir>/groups, not <camp_config_dir>/camp/groups.
@@ -684,7 +684,7 @@ bootstrap = []
 
     def test_dirty_worktree_blocks_cleanup_without_force(self, tmp_path: Path):
         """A dirty worktree blocks cleanup unless --force."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         camp_config_dir = tmp_path / "camp-config"
         groups_dir = camp_config_dir / "groups"
@@ -736,7 +736,7 @@ bootstrap = []
 
     def test_dirty_worktree_cleanup_succeeds_with_force(self, tmp_path: Path):
         """--force removes a dirty worktree."""
-        from reconcile import reconcile_worktree
+        from camp.provision.reconcile import reconcile_worktree
 
         camp_config_dir = tmp_path / "camp-config"
         groups_dir = camp_config_dir / "groups"

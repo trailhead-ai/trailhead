@@ -1,6 +1,6 @@
 """Tests for lore's static agent-ruleset content.
 
-``scripts/agent_ruleset.py`` renders lore's user-level ruleset: the
+``lore/config/agent_ruleset.py`` renders lore's user-level ruleset: the
 write-prohibition rules (minus the stale per-project multi-rules-file "Drift
 caveat") plus a short disposition primer. The content is STATIC — no
 computed/per-session state — so two renders must be byte-identical.
@@ -21,7 +21,7 @@ from conftest import load_script  # noqa: E402
 
 
 def _render():
-    return load_script("agent_ruleset").RULESET_CONTENT
+    return load_script("lore.config.agent_ruleset").RULESET_CONTENT
 
 
 def test_contains_write_prohibition_rules():
@@ -33,7 +33,7 @@ def test_contains_write_prohibition_rules():
 
 
 def test_primer_names_the_three_entry_commands():
-    primer = load_script("agent_ruleset").PRIMER
+    primer = load_script("lore.config.agent_ruleset").PRIMER
     assert "lore search" in primer
     assert "lore record" in primer
     assert "lore session" in primer

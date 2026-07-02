@@ -11,44 +11,14 @@ value always matches the elected vault for slashed names.
 
 from __future__ import annotations
 
-import importlib.util
 import sys
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
 
-# Camp scripts must be on sys.path so the lazy camp imports inside
-# _resolve_group_scopes can succeed when tests exercise the happy path.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_CAMP_SCRIPTS = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
-if str(_CAMP_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_CAMP_SCRIPTS))
-
-from conftest import SCRIPTS_DIR  # noqa: E402
-
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-_CLI_PATH = Path(__file__).parent.parent / "plugins" / "lore" / "cli" / "lore"
-
-
-def _load_cli():
-    """Load cli/lore as a module to access its private helpers.
-
-    cli/lore has no .py suffix, so the loader is named explicitly —
-    spec_from_file_location cannot infer one from the extensionless path.
-    """
-    loader = SourceFileLoader("lore_cli", str(_CLI_PATH))
-    spec = importlib.util.spec_from_loader("lore_cli", loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-# Load once; the lazy imports inside _resolve_group_scopes do not depend on
-# module-load-time state, so a single load is sufficient for all tests.
-_CLI = _load_cli()
-_resolve_group_scopes = _CLI._resolve_group_scopes
+# The group-default scope routing helper now lives in the record command module
+# (``lore.cli.record``); conftest puts the ``lore`` package's plugin root on
+# sys.path so it imports by its dotted name.
+from lore.cli.record import _resolve_group_scopes
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +176,9 @@ class TestDegradation:
             sys.modules,
             {
                 "camp": None,
-                "camp.scripts": None,
-                "camp.scripts.group_config": None,
-                "camp.scripts.group_resolve": None,
+                "camp.group": None,
+                "camp.group.config": None,
+                "camp.group.resolve": None,
             },
         ):
             result = _resolve_group_scopes(cwd=tmp_path, groups_dir=groups_dir)
@@ -294,11 +264,11 @@ class TestDegradation:
         groups_dir.mkdir()
 
         camp_plugins = (
-            Path(__file__).resolve().parents[3] / "tools" / "camp" / "plugins"
+            Path(__file__).resolve().parents[3] / "tools" / "camp" / "plugins" / "camp"
         )
         if str(camp_plugins) not in sys.path:
             sys.path.insert(0, str(camp_plugins))
-        import camp.scripts.group_config as camp_gc
+        import camp.group.config as camp_gc
 
         def _raise_oserror(_groups_dir):
             raise OSError("simulated unreadable group config")

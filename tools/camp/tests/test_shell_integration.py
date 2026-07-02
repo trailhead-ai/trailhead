@@ -17,11 +17,11 @@ from pathlib import Path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "cli" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ def _run_cli(
 class TestCmdPwd:
     def test_cmd_pwd_returns_workspace_dir(self, tmp_path: Path) -> None:
         """cmd_pwd returns the resolved workspace dir for a known slug."""
-        from shell_integration import cmd_pwd
+        from camp.harness.shell_integration import cmd_pwd
 
         group_name = "mygroup"
         member_name = "myrepo"
@@ -95,7 +95,7 @@ class TestCmdPwd:
 
     def test_cmd_pwd_is_absolute(self, tmp_path: Path) -> None:
         """The path returned by cmd_pwd is absolute."""
-        from shell_integration import cmd_pwd
+        from camp.harness.shell_integration import cmd_pwd
 
         group_name = "mygroup"
         member_name = "myrepo"

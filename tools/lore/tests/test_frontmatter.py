@@ -7,7 +7,7 @@ from conftest import load_script
 
 
 def test_parse_frontmatter_scalars(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text("---\ntype: deferred\nstatus: open\n---\n\nbody\n")
     out = fm.parse_frontmatter(p)
@@ -16,7 +16,7 @@ def test_parse_frontmatter_scalars(tmp_path):
 
 
 def test_parse_frontmatter_inline_list(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text('---\nsubsystems: ["foo", "bar"]\n---\n\nbody\n')
     out = fm.parse_frontmatter(p)
@@ -24,7 +24,7 @@ def test_parse_frontmatter_inline_list(tmp_path):
 
 
 def test_parse_frontmatter_strips_quotes(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text('---\ntitle: "Hello World"\n---\n\n')
     out = fm.parse_frontmatter(p)
@@ -32,14 +32,14 @@ def test_parse_frontmatter_strips_quotes(tmp_path):
 
 
 def test_parse_frontmatter_no_frontmatter(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text("just a body, no frontmatter\n")
     assert fm.parse_frontmatter(p) == {}
 
 
 def test_parse_frontmatter_missing_file(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     assert fm.parse_frontmatter(tmp_path / "nope.md") == {}
 
 
@@ -47,7 +47,7 @@ def test_parse_frontmatter_missing_file(tmp_path):
 
 
 def test_set_status_replaces_existing(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text("---\ntype: deferred\nstatus: open\n---\n\n# Body\ncontent\n")
     fm.set_status(p, "resolved")
@@ -58,7 +58,7 @@ def test_set_status_replaces_existing(tmp_path):
 
 
 def test_set_status_adds_when_missing(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text("---\ntype: deferred\n---\n\nbody\n")
     fm.set_status(p, "open")
@@ -66,7 +66,7 @@ def test_set_status_adds_when_missing(tmp_path):
 
 
 def test_set_status_only_touches_status_line(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     original = "---\ntype: deferred\nstatus: open\nproject: x\n---\n\nbody\n"
     p.write_text(original)
@@ -85,7 +85,7 @@ def _doc():
 
 
 def test_patch_section_appends_under_heading(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text(_doc())
     fm.patch_section(p, "Alpha", "- new alpha entry")
@@ -97,7 +97,7 @@ def test_patch_section_appends_under_heading(tmp_path):
 
 
 def test_patch_section_leaves_sibling_byte_identical(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text(_doc())
     fm.patch_section(p, "Alpha", "- new alpha entry")
@@ -108,7 +108,7 @@ def test_patch_section_leaves_sibling_byte_identical(tmp_path):
 
 
 def test_patch_section_creates_section_when_missing(tmp_path):
-    fm = load_script("frontmatter")
+    fm = load_script("lore.search.frontmatter")
     p = tmp_path / "note.md"
     p.write_text(_doc())
     fm.patch_section(p, "Gamma", "gamma content")

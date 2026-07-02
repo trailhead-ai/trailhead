@@ -8,7 +8,7 @@ Covers the test contract:
   - Deterministic suggestion: unknown field yields the same "did you mean" output
     on every call — no nondeterministic ordering from set iteration.
 
-All tests load ``kql`` via ``load_script("kql")`` (pure stdlib, no I/O).
+All tests load ``kql`` via ``load_script("lore.search.kql")`` (pure stdlib, no I/O).
 """
 
 import pytest
@@ -17,7 +17,7 @@ from conftest import load_script
 
 @pytest.fixture()
 def kql():
-    return load_script("kql")
+    return load_script("lore.search.kql")
 
 
 # ---------------------------------------------------------------------------

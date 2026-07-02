@@ -30,14 +30,9 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 from conftest import load_script, make_vault as _make_vault, run_cli as _run
-
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
-CLI_PATH = REPO_ROOT / "plugins" / "lore" / "cli" / "lore"
 
 # Distinct synthetic session GUIDs.
 SID_A = "aaaaaaaa-1111-4111-8111-111111111111"
@@ -282,9 +277,12 @@ class TestMidBatchFaultInjection:
         index/vault via the same env the conftest harness uses, and patches
         ``cli._flush_commit`` — the per-session commit — to raise after one success.
         """
-        import importlib.util
         import os
-        from importlib.machinery import SourceFileLoader
+
+        # ``_flush_commit`` (the per-session commit seam) lives in the flush
+        # command module; ``build_parser`` is the dispatcher. Patch the seam
+        # where it is defined and looked up (``flush._flush_commit``).
+        from lore.cli import dispatch, flush
 
         env = {
             "XDG_STATE_HOME": str(state),
@@ -292,16 +290,9 @@ class TestMidBatchFaultInjection:
             "LORE_EMAIL": "tester@example.com",
             **_NO_AMBIENT_SID,
         }
-        # The CLI entry point has no `.py` suffix, so use an explicit source loader.
-        if str(SCRIPTS_DIR) not in sys.path:
-            sys.path.insert(0, str(SCRIPTS_DIR))
-        loader = SourceFileLoader("lore_cli_faulttest", str(CLI_PATH))
-        spec = importlib.util.spec_from_loader("lore_cli_faulttest", loader)
-        cli = importlib.util.module_from_spec(spec)
-        loader.exec_module(cli)
 
         calls = {"n": 0}
-        real_commit = cli._flush_commit
+        real_commit = flush._flush_commit
 
         def flaky_commit(vault_path, key, *, push=True):
             calls["n"] += 1
@@ -311,17 +302,17 @@ class TestMidBatchFaultInjection:
 
         old_environ = dict(os.environ)
         os.environ.update(env)
-        cli._flush_commit = flaky_commit
+        flush._flush_commit = flaky_commit
         import io
         import contextlib
         buf_out, buf_err = io.StringIO(), io.StringIO()
         code = None
         try:
-            args = cli.build_parser().parse_args(["flush", "all"])
+            args = dispatch.build_parser().parse_args(["flush", "all"])
             with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
                 code = args.func(args)
         finally:
-            cli._flush_commit = real_commit
+            flush._flush_commit = real_commit
             os.environ.clear()
             os.environ.update(old_environ)
         return code, buf_out.getvalue(), buf_err.getvalue()
@@ -378,10 +369,15 @@ class TestBatchPushesOnce:
 
     def _run_counting_pushes(self, state):
         import contextlib
-        import importlib.util
         import io
         import os
-        from importlib.machinery import SourceFileLoader
+
+        # The push/remote git calls happen inside ``_flush_push`` /
+        # ``_flush_commit`` in the flush command module, which look up ``_git`` as
+        # their own module global — so patch ``flush._git`` (not ``common._git``)
+        # to intercept them. The vault-is-git-toplevel check runs through the real
+        # ``common._git`` and still sees the real repo.
+        from lore.cli import dispatch, flush
 
         env = {
             "XDG_STATE_HOME": str(state),
@@ -389,14 +385,8 @@ class TestBatchPushesOnce:
             "LORE_EMAIL": "tester@example.com",
             **_NO_AMBIENT_SID,
         }
-        if str(SCRIPTS_DIR) not in sys.path:
-            sys.path.insert(0, str(SCRIPTS_DIR))
-        loader = SourceFileLoader("lore_cli_pushtest", str(CLI_PATH))
-        spec = importlib.util.spec_from_loader("lore_cli_pushtest", loader)
-        cli = importlib.util.module_from_spec(spec)
-        loader.exec_module(cli)
 
-        real_git = cli._git
+        real_git = flush._git
         pushes = {"n": 0}
 
         def counting_git(vault_path, *args):
@@ -411,15 +401,15 @@ class TestBatchPushesOnce:
 
         old_environ = dict(os.environ)
         os.environ.update(env)
-        cli._git = counting_git
+        flush._git = counting_git
         buf_out, buf_err = io.StringIO(), io.StringIO()
         code = None
         try:
-            args = cli.build_parser().parse_args(["flush", "all"])
+            args = dispatch.build_parser().parse_args(["flush", "all"])
             with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
                 code = args.func(args)
         finally:
-            cli._git = real_git
+            flush._git = real_git
             os.environ.clear()
             os.environ.update(old_environ)
         return code, pushes["n"], buf_out.getvalue(), buf_err.getvalue()
@@ -493,7 +483,7 @@ class TestKqlInjectionSafety:
         assert _sidecar(vault, SID_A)["status"] == "dirty", "no injection side effect"
 
         # The records table still exists + still holds the session row (not dropped).
-        index_store = load_script("index_store")
+        index_store = load_script("lore.search.index")
         conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
         try:
             row = conn.execute(
@@ -511,8 +501,8 @@ class TestKqlInjectionSafety:
         Directly exercises the named guard — ``kql_compile.compile`` — proving the
         dangerous string lands in ``params`` (bound), never in the SQL text.
         """
-        kql = load_script("kql")
-        kql_compile = load_script("kql_compile")
+        kql = load_script("lore.search.kql")
+        kql_compile = load_script("lore.search.kql_compile")
         evil = "x; DROP TABLE records; --"
         ast = kql.parse(f'status:"{evil}"')
         cq = kql_compile.compile(ast)

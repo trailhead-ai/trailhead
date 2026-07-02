@@ -13,13 +13,13 @@ from conftest import load_script
 
 def test_resolve_user_honors_lore_user_env():
     with mock.patch.dict(os.environ, {"LORE_USER": "ada"}, clear=False):
-        v = load_script("vault")
+        v = load_script("lore.vault.vault")
         assert v.resolve_user() == "ada"
 
 
 def test_resolve_user_sanitizes_lore_user():
     with mock.patch.dict(os.environ, {"LORE_USER": "  ada\nlovelace\t "}, clear=False):
-        v = load_script("vault")
+        v = load_script("lore.vault.vault")
         # newlines and control chars stripped; surrounding whitespace trimmed
         assert v.resolve_user() == "adalovelace"
 
@@ -27,7 +27,7 @@ def test_resolve_user_sanitizes_lore_user():
 def test_resolve_user_falls_back_to_git_config():
     env = {k: val for k, val in os.environ.items() if k != "LORE_USER"}
     with mock.patch.dict(os.environ, env, clear=True):
-        v = load_script("vault")
+        v = load_script("lore.vault.vault")
         with mock.patch.object(
             subprocess, "run",
             return_value=subprocess.CompletedProcess([], 0, stdout="Grace Hopper\n", stderr=""),
@@ -38,7 +38,7 @@ def test_resolve_user_falls_back_to_git_config():
 def test_resolve_user_falls_back_to_literal_you():
     env = {k: val for k, val in os.environ.items() if k != "LORE_USER"}
     with mock.patch.dict(os.environ, env, clear=True):
-        v = load_script("vault")
+        v = load_script("lore.vault.vault")
         with mock.patch.object(
             subprocess, "run",
             return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="not set"),
@@ -49,7 +49,7 @@ def test_resolve_user_falls_back_to_literal_you():
 def test_resolve_user_git_failure_falls_back_to_you():
     env = {k: val for k, val in os.environ.items() if k != "LORE_USER"}
     with mock.patch.dict(os.environ, env, clear=True):
-        v = load_script("vault")
+        v = load_script("lore.vault.vault")
         with mock.patch.object(subprocess, "run", side_effect=OSError("no git")):
             assert v.resolve_user() == "you"
 
@@ -77,7 +77,7 @@ def test_find_session_note_returns_singular_record(tmp_path):
     sd.mkdir(parents=True)
     alpha = _make_session_record(sd, "alpha")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     result = v.find_session_note(vault, worktree_name="alpha")
     assert result == alpha
 
@@ -90,7 +90,7 @@ def test_find_session_note_scoped_to_alpha_ignores_beta(tmp_path):
     alpha = _make_session_record(sd, "alpha")
     _make_session_record(sd, "beta")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     result = v.find_session_note(vault, worktree_name="alpha")
     assert result == alpha
 
@@ -102,7 +102,7 @@ def test_find_session_note_scoped_no_note_returns_none(tmp_path):
     sd.mkdir(parents=True)
     _make_session_record(sd, "beta")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     result = v.find_session_note(vault, worktree_name="alpha")
     assert result is None
 
@@ -112,7 +112,7 @@ def test_find_session_note_no_session_dir_returns_none(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note(vault) is None
     assert v.find_session_note(vault, worktree_name="alpha") is None
 
@@ -125,6 +125,6 @@ def test_find_session_note_no_collision_with_super_prefix(tmp_path):
     _make_session_record(sd, "super-foo")
     foo = _make_session_record(sd, "foo")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     result = v.find_session_note(vault, worktree_name="foo")
     assert result == foo

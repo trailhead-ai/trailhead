@@ -23,8 +23,7 @@ C1 — the rmtree-confinement guard in reconcile_break (anchored on
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import subprocess
 import sys
 import textwrap
@@ -34,20 +33,18 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
-_CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the inject handler.
+
+    `_cmd_inject_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.inject` command-group module (the hidden PostToolUse drain).
+    """
+    return importlib.import_module("camp.cli.inject")
 
 
 # ===========================================================================
@@ -64,21 +61,18 @@ class TestFix6InjectIsLight:
         (ws / ".camp").mkdir(parents=True)
         probe = textwrap.dedent(
             f"""
-            import sys, importlib.machinery, importlib.util
-            mod_path = {str(_CLI_CAMP)!r}
-            spec = importlib.util.spec_from_loader(
-                "camp_cli",
-                importlib.machinery.SourceFileLoader("camp_cli", mod_path),
-            )
-            mod = importlib.util.module_from_spec(spec)
+            import sys
+            sys.path.insert(0, {str(_PLUGIN_DIR)!r})
+            # Importing dispatch pulls in only the pure-data verb taxonomy; the
+            # inject route in main() must skip both the bootstrap walk and the
+            # spine module-load, mirroring the real cli/camp shim entry.
+            from camp.cli import dispatch
             sys.argv = ["camp", "inject", "--drain", "--workspace", {str(ws)!r}]
-            # Loading the module runs the top-level bootstrap+dispatch detection.
-            spec.loader.exec_module(mod)
             try:
-                mod.main()
+                dispatch.main()
             except SystemExit:
                 pass
-            print("SPINE_IMPORTED" if "spine" in sys.modules else "SPINE_ABSENT")
+            print("SPINE_IMPORTED" if "camp.spine" in sys.modules else "SPINE_ABSENT")
             """
         )
         result = subprocess.run(
@@ -93,7 +87,7 @@ class TestFix6InjectIsLight:
 
     def test_inject_drain_still_drains(self, tmp_path: Path, monkeypatch, capsys):
         """The drain still emits the queued additionalContext and clears the queue."""
-        from inject import enqueue_doc
+        from camp.harness.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         (ws / ".camp").mkdir(parents=True)
@@ -130,9 +124,10 @@ class TestFix7SlugFromCwdThreadsEnv:
         dir — matching the downstream manifest/workspace ops. If env is dropped,
         resolve_from_cwd derives state_dir from os.environ instead and the slug
         won't resolve from inside the env's workspace dir."""
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
-        camp_cli = _load_cli_module()
+        # `_slug_from_args_or_cwd` moved to camp.cli.dispatch (the shared router).
+        camp_cli = importlib.import_module("camp.cli.dispatch")
 
         # Two distinct state roots: the env points at one; os.environ at another.
         env_state = tmp_path / "env-state"
@@ -165,7 +160,7 @@ class TestFix7SlugFromCwdThreadsEnv:
 class TestFix9VerbTaxonomy:
     @pytest.mark.parametrize("verb", ["new", "setup"])
     def test_needs_group_configure_message(self, verb, capsys):
-        import spine
+        import camp.spine as spine
 
         with pytest.raises(SystemExit) as exc:
             spine.cmd_needs_group(verb)
@@ -175,7 +170,7 @@ class TestFix9VerbTaxonomy:
 
     @pytest.mark.parametrize("verb", ["remove", "pwd", "activate"])
     def test_needs_group_pass_group_message(self, verb, capsys):
-        import spine
+        import camp.spine as spine
 
         with pytest.raises(SystemExit) as exc:
             spine.cmd_needs_group(verb)
@@ -222,10 +217,10 @@ class TestC1RmtreeGuard:
         passes), but the slug workspace dir itself is a symlink escaping
         worktrees_root. The dedicated rmtree guard must fire and refuse — without
         rmtree'ing the escape target."""
-        from reconcile import reconcile_break, ConfinementError
-        from provision import bring_up_workspace
-        from lifecycle_cmds import cmd_setup_group
-        from manifest import workspace_dir, read_central_manifest
+        from camp.provision.reconcile import reconcile_break, ConfinementError
+        from camp.provision.provision import bring_up_workspace
+        from camp.provision.lifecycle import cmd_setup_group
+        from camp.group.manifest import workspace_dir, read_central_manifest
 
         repo = tmp_path / "repo_a"
         _init_git_repo(repo)
@@ -241,7 +236,7 @@ class TestC1RmtreeGuard:
         env = {"CAMP_STATE_DIR": str(state_root)}
 
         # Provision normally (real workspace dir under worktrees_root).
-        import provision
+        import camp.provision.provision as provision
 
         monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
         bring_up_workspace(group, "feat-c1", env=env)

@@ -122,9 +122,9 @@ tools/<name>/
     .claude-plugin/plugin.json
     skills/<skill>/SKILL.md    # user-invocable skills  → selectable by name
     agents/<agent>.md          # subagent definitions    → selectable by name
-    scripts/*.py               # logic (importable, testable)
+    <name>/                    # package: domain subpackages + cli/ (importable, testable)
     hooks/                     # lifecycle hooks (lore)
-    bin/ + cli/                # PATH wrapper → real CLI (lore, camp)
+    bin/ + cli/                # PATH wrapper → thin shim delegating to <name>.cli.dispatch
   tests/                       # pytest, stdlib-only
 ```
 
@@ -132,8 +132,11 @@ To make a subagent/skill selectable, just add the `agents/<name>.md` file or
 `skills/<name>/SKILL.md` dir — `capabilities.py` discovers it; the config and
 installer pick it up automatically. `bin/<tool>` wrappers resolve the real CLI via
 `${CLAUDE_PLUGIN_ROOT}/cli/<tool>` with a symlink-safe self-relative fallback (no
-GNU `readlink -f`, macOS-safe). Keeping logic in `scripts/*.py` (not the shim) makes
-it unit-testable.
+GNU `readlink -f`, macOS-safe); `cli/<tool>` itself is a thin shim that bootstraps
+`sys.path` then delegates to `<name>.cli.dispatch.main()`. Domain logic lives in
+real subpackages under `<name>/<domain>/*.py` (e.g. `lore/vault/`, `lore/record/`,
+`camp/group/`, `camp/provision/`), one directory per domain with relative imports
+between them — keeping it unit-testable independent of the CLI shim.
 
 ## Conventions worth matching
 

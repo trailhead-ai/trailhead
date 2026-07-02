@@ -109,7 +109,7 @@ def _sidecar(kind, name, title):
 
 
 def _open_index(state):
-    index_store = load_script("index_store")
+    index_store = load_script("lore.search.index")
     return index_store.open_index(env={"XDG_STATE_HOME": str(state)})
 
 
@@ -132,7 +132,9 @@ def _index_rows_for(state, vault_root):
 def test_init_seeds_config_with_single_default_vault(tmp_path):
     """init seeds config.json with exactly one default-scope vault."""
     state, config = _dirs(tmp_path)
-    res = _run(["init"], state=state, config=config)
+    # init installs the vault-guard into ~/.claude/settings.json (resolved via
+    # Path.home()); isolate HOME so the guardrail lands in tmp, never the real file.
+    res = _run(["init"], state=state, config=config, extra={"HOME": str(tmp_path / "home")})
     assert res.returncode == 0, res.stderr
 
     cfg = _read_config(config)
@@ -145,7 +147,9 @@ def test_init_seeds_config_with_single_default_vault(tmp_path):
 def test_init_creates_default_vault_under_state_dir(tmp_path):
     """init creates vaults/default under XDG_STATE_HOME/lore/ (not a user path)."""
     state, config = _dirs(tmp_path)
-    res = _run(["init"], state=state, config=config)
+    # init installs the vault-guard into ~/.claude/settings.json (resolved via
+    # Path.home()); isolate HOME so the guardrail lands in tmp, never the real file.
+    res = _run(["init"], state=state, config=config, extra={"HOME": str(tmp_path / "home")})
     assert res.returncode == 0, res.stderr
     assert _vaults_root(state).is_dir()
     assert (_vaults_root(state) / "default").is_dir()

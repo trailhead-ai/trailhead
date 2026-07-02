@@ -19,15 +19,16 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_CAMP_PKG_DIR = _PLUGIN_DIR / "camp"
 _CLI_CAMP = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "cli" / "camp"
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _production_sources() -> list[Path]:
-    """Every production source in the camp plugin (scripts/*.py + the cli/camp script)."""
-    sources = sorted(_SCRIPTS_DIR.glob("*.py"))
+    """Every production source in the camp plugin (camp/**/*.py + the cli/camp script)."""
+    sources = sorted(_CAMP_PKG_DIR.rglob("*.py"))
     sources.append(_CLI_CAMP)
     return sources
 
@@ -39,7 +40,7 @@ def _production_sources() -> list[Path]:
 
 class TestImportLint:
     def test_harness_profile_imports(self):
-        import harness_profile
+        import camp.harness.profile as harness_profile
 
         assert hasattr(harness_profile, "resolve_harness_profile")
         assert hasattr(harness_profile, "HarnessProfile")
@@ -47,9 +48,9 @@ class TestImportLint:
     def test_consumer_modules_import(self):
         # A stale `from harness_launch import …` left in any of these would raise
         # ImportError here (workspace_doc imports it at module scope).
-        import activation  # noqa: F401
-        import provision  # noqa: F401
-        import workspace_doc  # noqa: F401
+        import camp.provision.activation as activation  # noqa: F401
+        import camp.provision.provision as provision  # noqa: F401
+        import camp.workspace.doc as workspace_doc  # noqa: F401
 
     def test_no_module_names_old_harness_launch(self):
         offenders = [p.name for p in _production_sources() if "harness_launch" in p.read_text()]
@@ -88,7 +89,7 @@ class TestSeamAbsence:
 
 class TestPretrustSurvivesStrip:
     def test_default_profile_should_pretrust(self):
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         group = {"group": {"name": "g"}, "members": [{"name": "r", "repo_root": "/tmp/r"}]}
         profile = resolve_harness_profile(group)

@@ -6,7 +6,7 @@ that fronts it. The motivating bug: callers degraded to a fuzzy worktree+mtime
 guess because the session-id was never consulted.
 """
 
-import importlib.util
+import importlib
 import os
 import subprocess
 import sys
@@ -14,19 +14,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 
 
 def load_script(name: str):
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    for cached in (name, "vault", "frontmatter", "sessions", "config"):
-        sys.modules.pop(cached, None)
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    mod = importlib.import_module(name)
+    return importlib.reload(mod)
 
 
 def run_cli(args, env=None, cwd=None, *, seed_vault=None):
@@ -74,7 +67,7 @@ def test_by_session_id_matches_singular_record(tmp_path):
     _write_session_record(sd, "aaa")
     want = _write_session_record(sd, "bbb")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, "bbb") == want
 
 
@@ -86,7 +79,7 @@ def test_by_session_id_matches_frontmatter(tmp_path):
     _write_session_record(sd, "aaa")
     want = _write_session_record(sd, "bbb")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, "bbb") == want
 
 
@@ -99,7 +92,7 @@ def test_by_session_id_matches_bucketed_note(tmp_path):
     _write_session_record(sd, "flat")
     want = _write_session_record(sd, "bucketed")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, "bucketed") == want
 
 
@@ -110,7 +103,7 @@ def test_by_session_id_ignores_body_mentions(tmp_path):
     sd.mkdir(parents=True)
     _write_session_record(sd, "real")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     # decoy-real is mentioned in the body but is not the stem; must not match.
     assert v.find_session_note_by_session_id(vault, "decoy-real") is None
 
@@ -118,14 +111,14 @@ def test_by_session_id_ignores_body_mentions(tmp_path):
 def test_by_session_id_empty_returns_none(tmp_path):
     vault = tmp_path / "v"
     (vault / "session").mkdir(parents=True)
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, "") is None
 
 
 def test_by_session_id_no_sessions_dir_returns_none(tmp_path):
     vault = tmp_path / "v"
     vault.mkdir()
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, "aaa") is None
 
 
@@ -147,7 +140,7 @@ def test_by_session_id_matches_body_only_guid_file(tmp_path):
         sd, _GUID, extra="- candidate ... kind=lesson phase=Build\n"
     )
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, _GUID) == want
 
 
@@ -158,7 +151,7 @@ def test_by_session_id_body_only_requires_stem_match(tmp_path):
     sd.mkdir(parents=True)
     _write_session_record(sd, _OTHER_GUID)
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, _GUID) is None
 
 
@@ -169,7 +162,7 @@ def test_by_session_id_frontmatter_still_wins_over_body_only(tmp_path):
     sd.mkdir(parents=True)
     want = _write_session_record(sd, "legacy")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.find_session_note_by_session_id(vault, "legacy") == want
 
 
@@ -183,7 +176,7 @@ def test_detect_prefers_claude_project_dir(monkeypatch, tmp_path):
         "CLAUDE_PROJECT_DIR",
         "/Users/x/code/orchestrator/.claude/worktrees/my-feature",
     )
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     # cwd is somewhere unrelated; env must still win.
     assert v.detect_worktree_name(cwd=tmp_path) == "my-feature"
 
@@ -192,7 +185,7 @@ def test_detect_walks_worktrees_segment(monkeypatch, tmp_path):
     """With no CLAUDE_PROJECT_DIR, a `.claude/worktrees/<name>/` segment in a
     sibling-repo or subdir cwd resolves to <name>."""
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     cwd = Path("/Users/x/code/platform/.claude/worktrees/my-feature/apps/platform")
     assert v.detect_worktree_name(cwd=cwd) == "my-feature"
 
@@ -201,7 +194,7 @@ def test_detect_falls_back_to_cwd_basename(monkeypatch, tmp_path):
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     plain = tmp_path / "just-a-dir"
     plain.mkdir()
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.detect_worktree_name(cwd=plain) == "just-a-dir"
 
 
@@ -212,7 +205,7 @@ def test_detect_uses_git_toplevel_basename(monkeypatch, tmp_path):
     repo = tmp_path / "myrepo"
     (repo / "sub").mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     assert v.detect_worktree_name(cwd=repo / "sub") == "myrepo"
 
 
@@ -232,7 +225,7 @@ def test_resolve_session_id_beats_worktree_fallback(tmp_path):
     mine = _write_session_record(sd, "mine")
     _write_session_record(sd, "feat")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     got = v.resolve_session_note(vault, session_id="mine", worktree_name="feat")
     assert got == mine
 
@@ -244,7 +237,7 @@ def test_resolve_falls_back_to_worktree_when_id_unmatched(tmp_path):
     sd.mkdir(parents=True)
     feat = _write_session_record(sd, "feat")
 
-    v = load_script("vault")
+    v = load_script("lore.vault.vault")
     # session id 'absent' matches nothing → worktree record for 'feat'.
     got = v.resolve_session_note(vault, session_id="absent", worktree_name="feat")
     assert got == feat

@@ -14,15 +14,16 @@ to the real vault: the CLI resolves the test vault from a seeded config.json
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-from conftest import make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
-
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
+from conftest import (  # noqa: F401
+    load_script,
+    make_vault as _make_vault,
+    run_cli as _run,
+    write_default_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -44,15 +45,7 @@ def _create_record(vault, state, *, kind="spec", title="Test Record", body="body
 
 def _open_index(state_dir):
     """Load index_store and open the index for test assertions."""
-    import importlib.util
-
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    spec = importlib.util.spec_from_file_location(
-        "index_store_test", SCRIPTS_DIR / "index_store.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = load_script("lore.search.index")
     return mod.open_index(env={"XDG_STATE_HOME": str(state_dir)})
 
 

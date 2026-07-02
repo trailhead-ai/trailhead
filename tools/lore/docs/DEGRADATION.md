@@ -19,7 +19,7 @@ requires a UserPromptSubmit hook, which depends on infrastructure not yet
 in place.
 
 **How to turn it on:** Port the UserPromptSubmit classifier hook, then flip
-the capability flag in `plugins/lore/scripts/config.py`:
+the capability flag in the config domain (`plugins/lore/lore/config/`):
 
 ```python
 RECALL_CLASSIFIER_ENABLED = True

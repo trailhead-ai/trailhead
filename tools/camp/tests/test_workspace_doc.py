@@ -42,10 +42,10 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ def _camp_state_env(tmp_path: Path) -> dict[str, str]:
 class TestWorkspaceDocFiles:
     def test_claude_md_written(self, tmp_path: Path):
         """write_workspace_doc writes CLAUDE.md at the workspace root."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -91,7 +91,7 @@ class TestWorkspaceDocFiles:
 
     def test_agent_md_not_written_by_default(self, tmp_path: Path):
         """write_workspace_doc (claude default, no [harness]) does NOT write AGENT.md."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -115,7 +115,7 @@ class TestWorkspaceDocFiles:
 
 class TestWorkspaceDocCommandTable:
     def _get_claude_md(self, tmp_path: Path) -> str:
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -159,7 +159,7 @@ class TestWorkspaceDocCommandTable:
 
     def test_configured_agents_md_contains_camp_activate_exact(self, tmp_path: Path):
         """When doc_files=[AGENTS.md], that file contains 'camp activate <member>'."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -196,7 +196,7 @@ class TestWorkspaceDocCommandTable:
 class TestWorkspaceDocMemberList:
     def test_claude_md_contains_all_member_names(self, tmp_path: Path):
         """CLAUDE.md lists all member names."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -216,7 +216,7 @@ class TestWorkspaceDocMemberList:
 
     def test_configured_agents_md_contains_all_member_names(self, tmp_path: Path):
         """When doc_files=[AGENTS.md], that file lists all member names."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -242,7 +242,7 @@ class TestWorkspaceDocMemberList:
 
 class TestWorkspaceDocGuidance:
     def _write_and_read(self, tmp_path: Path):
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -286,7 +286,7 @@ class TestWorkspaceDocGuidance:
 class TestWorkspaceDocIdempotent:
     def test_no_duplication_on_second_write(self, tmp_path: Path):
         """Writing twice produces identical CLAUDE.md — no duplication."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -307,7 +307,7 @@ class TestWorkspaceDocIdempotent:
 
     def test_configured_agents_md_no_duplication_on_second_write(self, tmp_path: Path):
         """Writing twice with doc_files=[AGENTS.md] produces identical AGENTS.md."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -326,7 +326,7 @@ class TestWorkspaceDocIdempotent:
 
     def test_stable_content_for_same_inputs(self, tmp_path: Path):
         """Same group + slug always produces the same content."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         group = _make_group_config(
             "mygroup",
@@ -358,7 +358,7 @@ class TestWorkspaceDocIdempotent:
 class TestWorkspaceHooks:
     def test_workspace_settings_written(self, tmp_path: Path):
         """write_workspace_hooks writes .claude/settings.json at the workspace root."""
-        from hooks_writer import write_workspace_hooks
+        from camp.harness.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -368,7 +368,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_settings_has_session_start_hook(self, tmp_path: Path):
         """workspace .claude/settings.json carries SessionStart→camp setup --status."""
-        from hooks_writer import write_workspace_hooks
+        from camp.harness.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -386,7 +386,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_session_start_command_exact(self, tmp_path: Path):
         """The SessionStart command is exactly the expected shell-expandable form."""
-        from hooks_writer import write_workspace_hooks
+        from camp.harness.hooks_writer import write_workspace_hooks
 
         camp_bin = "/usr/local/bin/camp"
         ws_dir = tmp_path / "workspace"
@@ -404,7 +404,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_hooks_idempotent(self, tmp_path: Path):
         """Re-running write_workspace_hooks adds NO duplicate entries."""
-        from hooks_writer import write_workspace_hooks
+        from camp.harness.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -422,7 +422,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_hooks_preserves_existing_keys(self, tmp_path: Path):
         """Existing unrelated keys in workspace settings.json are preserved."""
-        from hooks_writer import write_workspace_hooks
+        from camp.harness.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -443,7 +443,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_hooks_written_not_in_member_repo(self, tmp_path: Path):
         """The workspace .claude/settings.json is written to the workspace dir, not a member."""
-        from hooks_writer import write_workspace_hooks
+        from camp.harness.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -474,7 +474,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_written(self, tmp_path: Path):
         """write_workspace_inject_hook writes a PostToolUse → inject --drain hook."""
-        from hooks_writer import write_workspace_inject_hook
+        from camp.harness.hooks_writer import write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -488,7 +488,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_matcher_is_bash(self, tmp_path: Path):
         """The PostToolUse inject hook uses the Bash matcher."""
-        from hooks_writer import write_workspace_inject_hook
+        from camp.harness.hooks_writer import write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -499,7 +499,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_idempotent(self, tmp_path: Path):
         """Re-running write_workspace_inject_hook adds NO duplicate entries."""
-        from hooks_writer import write_workspace_inject_hook
+        from camp.harness.hooks_writer import write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -514,7 +514,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_preserves_session_start(self, tmp_path: Path):
         """Writing the inject hook does not clobber an existing SessionStart hook."""
-        from hooks_writer import write_workspace_hooks, write_workspace_inject_hook
+        from camp.harness.hooks_writer import write_workspace_hooks, write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -531,7 +531,7 @@ class TestHasInjectDrainHook:
     """BUG 5: detecting whether the PostToolUse inject --drain hook is installed."""
 
     def test_true_when_drain_hook_installed(self, tmp_path: Path):
-        from hooks_writer import has_inject_drain_hook, write_workspace_inject_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook, write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -540,7 +540,7 @@ class TestHasInjectDrainHook:
         assert has_inject_drain_hook(ws_dir) is True
 
     def test_false_when_no_settings_file(self, tmp_path: Path):
-        from hooks_writer import has_inject_drain_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -548,7 +548,7 @@ class TestHasInjectDrainHook:
         assert has_inject_drain_hook(ws_dir) is False
 
     def test_false_when_only_session_start_hook(self, tmp_path: Path):
-        from hooks_writer import has_inject_drain_hook, write_workspace_hooks
+        from camp.harness.hooks_writer import has_inject_drain_hook, write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -565,7 +565,7 @@ class TestHasInjectDrainHook:
 class TestBringUpWorkspaceIntegration:
     def test_bring_up_creates_claude_md(self, tmp_path: Path):
         """bring_up_workspace writes CLAUDE.md at the workspace root."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -575,17 +575,17 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc"
         assert (ws_dir / "CLAUDE.md").is_file(), "CLAUDE.md missing after bring_up_workspace"
 
     def test_bring_up_does_not_create_agent_md_by_default(self, tmp_path: Path):
         """bring_up_workspace (claude default) does NOT write AGENT.md."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -595,10 +595,10 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc2", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc2"
         assert not (ws_dir / "AGENT.md").exists(), (
@@ -607,7 +607,7 @@ class TestBringUpWorkspaceIntegration:
 
     def test_bring_up_creates_workspace_settings(self, tmp_path: Path):
         """bring_up_workspace writes workspace .claude/settings.json with SessionStart hook."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -617,10 +617,10 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc3", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc3"
         settings_path = ws_dir / ".claude" / "settings.json"
@@ -636,7 +636,7 @@ class TestBringUpWorkspaceIntegration:
 
     def test_bring_up_claude_md_has_member_names(self, tmp_path: Path):
         """bring_up_workspace CLAUDE.md embeds member names."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -649,10 +649,10 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-doc4", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-doc4"
         content = (ws_dir / "CLAUDE.md").read_text()
@@ -660,7 +660,7 @@ class TestBringUpWorkspaceIntegration:
 
     def test_bring_up_idempotent_docs(self, tmp_path: Path):
         """Calling bring_up_workspace twice produces identical docs (no duplication)."""
-        from provision import bring_up_workspace
+        from camp.provision.provision import bring_up_workspace
 
         env = _camp_state_env(tmp_path)
         group = _make_group_config(
@@ -670,15 +670,15 @@ class TestBringUpWorkspaceIntegration:
 
         import unittest.mock as mock
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-idem", env=env)
 
-        from group_resolve import central_state_dir
+        from camp.group.resolve import central_state_dir
 
         ws_dir = central_state_dir("mygroup", env=env) / "worktrees" / "feat-idem"
         first_claude = (ws_dir / "CLAUDE.md").read_text()
 
-        with mock.patch("provision.spawn_detached_provisioner"):
+        with mock.patch("camp.provision.provision.spawn_detached_provisioner"):
             bring_up_workspace(group, "feat-idem", env=env)
 
         second_claude = (ws_dir / "CLAUDE.md").read_text()
@@ -695,14 +695,14 @@ class TestResolveDocFiles:
 
     def test_no_harness_returns_claude_md(self):
         """No [harness] block → doc_files is ['CLAUDE.md']."""
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         group = {"group": {"name": "g"}, "members": []}
         assert resolve_harness_profile(group).doc_files == ["CLAUDE.md"]
 
     def test_harness_without_doc_files_returns_claude_md(self):
         """[harness] block without doc_files → ['CLAUDE.md']."""
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -716,7 +716,7 @@ class TestResolveDocFiles:
 
     def test_configured_doc_files_returned(self):
         """Configured doc_files is returned as-is."""
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -727,7 +727,7 @@ class TestResolveDocFiles:
 
     def test_multiple_doc_files_returned(self):
         """Multiple configured doc_files are all returned."""
-        from harness_profile import resolve_harness_profile
+        from camp.harness.profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -742,7 +742,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_default_writes_only_claude_md(self, tmp_path: Path):
         """No [harness] config → only CLAUDE.md written, AGENT.md not written."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -758,7 +758,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_configured_agents_md_writes_agents_md_only(self, tmp_path: Path):
         """doc_files=['AGENTS.md'] → AGENTS.md written, CLAUDE.md not written."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -774,7 +774,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_configured_both_writes_both(self, tmp_path: Path):
         """doc_files=['AGENTS.md','CLAUDE.md'] → both files written."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -790,7 +790,7 @@ class TestWriteWorkspaceDocFiles:
 
     def test_each_doc_has_same_content(self, tmp_path: Path):
         """All written doc files have identical rendered content."""
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -810,7 +810,7 @@ class TestRenderedDocMembersLine:
     """The trailing 'Members: ...' line must be removed."""
 
     def _get_content(self, tmp_path: Path, member_names=None) -> str:
-        from workspace_doc import write_workspace_doc
+        from camp.workspace.doc import write_workspace_doc
 
         ws_dir = tmp_path / "ws"
         ws_dir.mkdir()
@@ -864,7 +864,7 @@ doc_files = {doc_files_toml}
 
     def test_valid_doc_files_loads(self, tmp_path: Path):
         """A valid doc_files list is accepted and returned."""
-        from group_config import load_group
+        from camp.group.config import load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('["AGENTS.md"]'))
@@ -873,7 +873,7 @@ doc_files = {doc_files_toml}
 
     def test_doc_files_multiple_accepted(self, tmp_path: Path):
         """Multiple doc_files entries are accepted."""
-        from group_config import load_group
+        from camp.group.config import load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('["AGENTS.md", "CLAUDE.md"]'))
@@ -882,7 +882,7 @@ doc_files = {doc_files_toml}
 
     def test_empty_list_raises(self, tmp_path: Path):
         """An empty doc_files list → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files("[]"))
@@ -892,7 +892,7 @@ doc_files = {doc_files_toml}
 
     def test_whitespace_token_raises(self, tmp_path: Path):
         """A whitespace-only token in doc_files → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('["  "]'))
@@ -902,7 +902,7 @@ doc_files = {doc_files_toml}
 
     def test_non_string_token_raises(self, tmp_path: Path):
         """A non-string token in doc_files → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files("[42]"))
@@ -912,7 +912,7 @@ doc_files = {doc_files_toml}
 
     def test_not_a_list_raises(self, tmp_path: Path):
         """doc_files as a string (not a list) → GroupConfigError."""
-        from group_config import GroupConfigError, load_group
+        from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
         f.write_text(self._toml_with_doc_files('"AGENTS.md"'))
@@ -922,7 +922,7 @@ doc_files = {doc_files_toml}
 
     def test_absent_doc_files_returns_none(self, tmp_path: Path):
         """When doc_files is absent from [harness], it's not present in the parsed harness."""
-        from group_config import load_group
+        from camp.group.config import load_group
 
         toml = """\
 [group]

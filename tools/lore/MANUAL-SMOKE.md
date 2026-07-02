@@ -72,7 +72,7 @@ harvest hook remains.
 
 The PostToolUse hook (`plugins/lore/hooks/harvest-candidates.py`) runs via
 `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/harvest-candidates.py"`. It imports
-sibling modules from the same plugin's `scripts/` directory.
+sibling modules from the plugin's `lore/` package.
 
 For explicit confirmation, look at the tool-use log for any Python traceback
 or import error. There should be none.

@@ -22,10 +22,10 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -35,14 +35,14 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 def test_verb_aliases_table() -> None:
     """VERB_ALIASES maps the two short aliases to their canonical verbs."""
-    from verb_taxonomy import VERB_ALIASES
+    from camp.workspace.verb_taxonomy import VERB_ALIASES
 
     assert VERB_ALIASES == {"rm": "remove", "ls": "list"}
 
 
 def test_canonical_verb_normalizes_aliases() -> None:
     """canonical_verb resolves an alias to its canonical verb."""
-    from verb_taxonomy import canonical_verb
+    from camp.workspace.verb_taxonomy import canonical_verb
 
     assert canonical_verb("rm") == "remove"
     assert canonical_verb("ls") == "list"
@@ -50,7 +50,7 @@ def test_canonical_verb_normalizes_aliases() -> None:
 
 def test_canonical_verb_identity_for_non_aliases() -> None:
     """canonical_verb returns the verb unchanged when it is not an alias."""
-    from verb_taxonomy import canonical_verb
+    from camp.workspace.verb_taxonomy import canonical_verb
 
     for verb in ("new", "remove", "activate", "list", "setup", "status", "pwd", "group"):
         assert canonical_verb(verb) == verb
@@ -63,7 +63,7 @@ def test_canonical_verb_identity_for_non_aliases() -> None:
 
 def test_needs_group_verbs_is_canonical_set() -> None:
     """NEEDS_GROUP_VERBS is the renamed canonical set (no ai/rm/enter)."""
-    from verb_taxonomy import NEEDS_GROUP_VERBS
+    from camp.workspace.verb_taxonomy import NEEDS_GROUP_VERBS
 
     assert set(NEEDS_GROUP_VERBS) == {"new", "remove", "pwd", "activate", "setup"}
 
@@ -75,7 +75,7 @@ def test_needs_group_verbs_is_canonical_set() -> None:
 
 def test_legacy_redirects_point_directly_at_canonicals() -> None:
     """Renamed verbs map straight to the live canonical verb."""
-    from verb_taxonomy import LEGACY_REDIRECTS
+    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS
 
     assert LEGACY_REDIRECTS == {
         "open": "new",
@@ -88,7 +88,7 @@ def test_legacy_redirects_point_directly_at_canonicals() -> None:
 
 def test_legacy_redirects_never_chain() -> None:
     """No redirect target is itself a removed verb (no chained redirect)."""
-    from verb_taxonomy import LEGACY_REDIRECTS
+    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS
 
     removed_verbs = {"ai", "rm", "enter", "open", "break", "init"}
     for old, new in LEGACY_REDIRECTS.items():
@@ -105,7 +105,7 @@ def test_legacy_redirects_never_chain() -> None:
 
 def test_resolve_verb_canonicalizes_aliases_to_live() -> None:
     """An alias resolves to its canonical verb with kind 'live'."""
-    from verb_taxonomy import resolve_verb
+    from camp.workspace.verb_taxonomy import resolve_verb
 
     assert resolve_verb("rm") == ("remove", "live")
     assert resolve_verb("ls") == ("list", "live")
@@ -113,7 +113,7 @@ def test_resolve_verb_canonicalizes_aliases_to_live() -> None:
 
 def test_resolve_verb_classifies_disabled_and_legacy() -> None:
     """Disabled and legacy verbs are classified by kind (canonical unchanged)."""
-    from verb_taxonomy import resolve_verb
+    from camp.workspace.verb_taxonomy import resolve_verb
 
     assert resolve_verb("restock") == ("restock", "disabled")
     assert resolve_verb("open") == ("open", "legacy")
@@ -122,7 +122,7 @@ def test_resolve_verb_classifies_disabled_and_legacy() -> None:
 
 def test_resolve_verb_unknown_token_is_live_identity() -> None:
     """An unknown token (a would-be bare slug) is ('token', 'live')."""
-    from verb_taxonomy import resolve_verb
+    from camp.workspace.verb_taxonomy import resolve_verb
 
     assert resolve_verb("my-feature") == ("my-feature", "live")
     assert resolve_verb("new") == ("new", "live")
@@ -134,7 +134,7 @@ def test_resolve_verb_alias_takes_precedence_over_classification() -> None:
     SAME way at both entry points. We assert the order
     directly on a synthetic table so the guarantee does not depend on today's
     disjoint keys."""
-    import verb_taxonomy as vt
+    import camp.workspace.verb_taxonomy as vt
 
     # The real tables keep alias keys disjoint from disabled/legacy keys; assert
     # that invariant explicitly so a future collision is caught here too.
@@ -152,7 +152,7 @@ def test_reserved_membership_is_pinned() -> None:
     its exact membership: any drift — adding/renaming a taxonomy verb or editing
     _STATIC_RESERVED — must update this set DELIBERATELY rather than silently
     changing bare-slug validation."""
-    from spine import RESERVED
+    from camp.spine import RESERVED
 
     assert RESERVED == frozenset(
         {
@@ -195,8 +195,8 @@ def test_reserved_membership_is_pinned() -> None:
 def test_reserved_superset_of_taxonomy_tokens() -> None:
     """Every taxonomy-owned token (alias keys + canonical targets, legacy keys +
     targets, disabled, needs-group) is reserved — the derivation cannot drop one."""
-    from spine import RESERVED
-    from verb_taxonomy import (
+    from camp.spine import RESERVED
+    from camp.workspace.verb_taxonomy import (
         DISABLED_VERBS,
         LEGACY_REDIRECTS,
         NEEDS_GROUP_VERBS,

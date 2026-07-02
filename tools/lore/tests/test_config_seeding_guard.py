@@ -44,7 +44,6 @@ TESTS_DIR = Path(__file__).parent
 REPO_ROOT = TESTS_DIR.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
 
 sys.path.insert(0, str(TESTS_DIR))
 from conftest import load_script, write_default_config  # noqa: E402
@@ -186,7 +185,7 @@ def test_smoke_direct_import_resolve_active_vault_no_lore_vault(tmp_path, monkey
     monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
     monkeypatch.delenv("LORE_VAULT", raising=False)
 
-    vc = load_script("vault_config")
+    vc = load_script("lore.vault.config")
     resolved = vc.resolve_active_vault(env=None)  # env=None → reads os.environ
 
     assert resolved == vault_dir.resolve(), (

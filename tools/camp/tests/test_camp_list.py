@@ -12,8 +12,7 @@ coverage; subprocess tests exercise the alias dispatch path through the full
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import inspect
 import json
 import os
@@ -26,19 +25,19 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the list handler.
+
+    `_cmd_ls_group_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.workspace` command-group module (enter/pwd/list all act on an
+    existing workspace); the in-process tests call it there directly.
+    """
+    return importlib.import_module("camp.cli.workspace")
 
 
 @pytest.fixture()
@@ -67,7 +66,7 @@ def _seed_manifest(group_name: str, slug: str, *, env: dict) -> Path:
 
     Returns the workspace dir path.
     """
-    from manifest import manifest_path_for, workspace_dir, write_central_manifest
+    from camp.group.manifest import manifest_path_for, workspace_dir, write_central_manifest
 
     ws = workspace_dir(group_name, slug, env=env)
     ws.mkdir(parents=True, exist_ok=True)
@@ -102,7 +101,7 @@ class TestCmdLsGroupWorkspacePath:
     the canonical workspace_dir computation."""
 
     def test_entry_has_workspace_path(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -116,7 +115,7 @@ class TestCmdLsGroupWorkspacePath:
         )
 
     def test_workspace_path_is_absolute(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -129,8 +128,8 @@ class TestCmdLsGroupWorkspacePath:
         assert Path(path).is_absolute(), f"workspace_path must be absolute, got {path!r}"
 
     def test_workspace_path_agrees_with_workspace_dir(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
-        from manifest import workspace_dir
+        from camp.provision.lifecycle import cmd_ls_group
+        from camp.group.manifest import workspace_dir
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -145,7 +144,7 @@ class TestCmdLsGroupWorkspacePath:
         )
 
     def test_empty_group_returns_empty_list(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -155,7 +154,7 @@ class TestCmdLsGroupWorkspacePath:
         assert entries == [], f"empty group must return [], got {entries!r}"
 
     def test_multiple_workspaces_all_have_workspace_path(self, tmp_path):
-        from lifecycle_cmds import cmd_ls_group
+        from camp.provision.lifecycle import cmd_ls_group
 
         group = _make_group("wpg")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
@@ -280,8 +279,7 @@ class TestListJson:
     def test_shared_renderer_projects_both_sources_to_one_schema(self, capsys):
         """The renderer projects group-style and spine-style entries (different
         source keys) onto the SAME fixed schema."""
-        sys.path.insert(0, str(_SCRIPTS_DIR))
-        from lifecycle_cmds import render_workspace_list
+        from camp.provision.lifecycle import render_workspace_list
 
         group_entry = {  # carries source-specific manifest_path (must be dropped)
             "slug": "g", "branch": "b", "workspace_path": "/ws/g",
@@ -350,7 +348,7 @@ class TestListPureRead:
 
     def test_list_does_not_call_write_manifest(self, camp_cli, tmp_path, monkeypatch):
         """camp list must not call write_central_manifest (pure read)."""
-        import manifest as _manifest
+        import camp.group.manifest as _manifest
 
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}

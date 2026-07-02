@@ -26,7 +26,6 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
 
 
 def _run(args: list[str], *, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -137,8 +136,8 @@ def test_bare_slug_message_is_single_source_of_truth() -> None:
     verb_taxonomy.bare_slug_message — not duplicated inline in cli/camp + spine."""
     import sys
 
-    sys.path.insert(0, str(_SCRIPTS_DIR))
-    from verb_taxonomy import bare_slug_message
+    sys.path.insert(0, str(_PLUGIN_DIR))
+    from camp.workspace.verb_taxonomy import bare_slug_message
 
     msg = bare_slug_message("my-feature-slug")
     assert "bare slug dispatch is no longer supported" in msg

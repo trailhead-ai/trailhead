@@ -19,14 +19,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Helpers — locate the scripts dir under the plugin tree
+# Helpers — locate the plugin dir so the camp package resolves
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "scripts"
+_PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -36,12 +36,12 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 def test_spine_imports_without_dev_env() -> None:
     """spine.py (worktree handlers) must be importable with dev_env.* absent."""
-    import spine  # noqa: F401 — this is the import under test
+    import camp.spine  # noqa: F401 — this is the import under test
 
 
 def test_no_dev_env_in_sys_modules_after_import() -> None:
     """After importing spine, no dev_env.* module must appear in sys.modules."""
-    import spine  # noqa: F401
+    import camp.spine  # noqa: F401
 
     for mod in sys.modules:
         assert not mod.startswith("dev_env"), f"dev_env module leaked into sys.modules: {mod!r}"
@@ -53,7 +53,7 @@ def test_no_dev_env_in_sys_modules_after_import() -> None:
 
 
 def test_normalize_slug_lowercases() -> None:
-    from spine import _normalize_slug
+    from camp.spine import _normalize_slug
 
     result, changed = _normalize_slug("MySlug")
     assert result == "myslug"
@@ -61,7 +61,7 @@ def test_normalize_slug_lowercases() -> None:
 
 
 def test_normalize_slug_replaces_non_alnum() -> None:
-    from spine import _normalize_slug
+    from camp.spine import _normalize_slug
 
     result, changed = _normalize_slug("my feature branch")
     assert result == "my-feature-branch"
@@ -69,7 +69,7 @@ def test_normalize_slug_replaces_non_alnum() -> None:
 
 
 def test_normalize_slug_trims_dashes() -> None:
-    from spine import _normalize_slug
+    from camp.spine import _normalize_slug
 
     result, changed = _normalize_slug("-hello-")
     assert result == "hello"
@@ -77,7 +77,7 @@ def test_normalize_slug_trims_dashes() -> None:
 
 
 def test_normalize_slug_already_clean() -> None:
-    from spine import _normalize_slug
+    from camp.spine import _normalize_slug
 
     result, changed = _normalize_slug("clean-slug-123")
     assert result == "clean-slug-123"
@@ -85,41 +85,41 @@ def test_normalize_slug_already_clean() -> None:
 
 
 def test_validate_slug_accepts_valid() -> None:
-    from spine import _validate_slug
+    from camp.spine import _validate_slug
 
     _validate_slug("valid-slug-123")  # must not raise / exit
 
 
 def test_validate_slug_rejects_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    from spine import _validate_slug
+    from camp.spine import _validate_slug
 
     with pytest.raises(SystemExit):
         _validate_slug("")
 
 
 def test_validate_slug_rejects_uppercase(monkeypatch: pytest.MonkeyPatch) -> None:
-    from spine import _validate_slug
+    from camp.spine import _validate_slug
 
     with pytest.raises(SystemExit):
         _validate_slug("Bad-Slug")
 
 
 def test_resolve_slug_rejects_path_traversal(monkeypatch: pytest.MonkeyPatch) -> None:
-    from spine import _resolve_slug
+    from camp.spine import _resolve_slug
 
     with pytest.raises(SystemExit):
         _resolve_slug("../evil")
 
 
 def test_resolve_slug_rejects_shell_metachar(monkeypatch: pytest.MonkeyPatch) -> None:
-    from spine import _resolve_slug
+    from camp.spine import _resolve_slug
 
     with pytest.raises(SystemExit):
         _resolve_slug("bad;slug")
 
 
 def test_resolve_slug_normalizes_and_returns() -> None:
-    from spine import _resolve_slug
+    from camp.spine import _resolve_slug
 
     result = _resolve_slug("My Feature")
     assert result == "my-feature"
@@ -132,7 +132,7 @@ def test_resolve_slug_normalizes_and_returns() -> None:
 
 def test_git_forms_correct_argv(tmp_path: Path) -> None:
     """_git forms [git, -C, <root>, ...args] and passes shell=False."""
-    from spine import _git
+    from camp.spine import _git
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -144,7 +144,7 @@ def test_git_forms_correct_argv(tmp_path: Path) -> None:
 
 
 def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
-    from spine import _git_out
+    from camp.spine import _git_out
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="  main  \n", stderr="")
@@ -153,7 +153,7 @@ def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
 
 
 def test_git_out_returns_empty_on_nonzero(tmp_path: Path) -> None:
-    from spine import _git_out
+    from camp.spine import _git_out
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1, stdout="something", stderr="err")
@@ -168,7 +168,7 @@ def test_git_out_returns_empty_on_nonzero(tmp_path: Path) -> None:
 
 def test_trailhead_paths_guard_emits_legible_message_on_import_error() -> None:
     """The guard function emits a human-readable message when trailhead.paths fails."""
-    from spine import _check_trailhead_paths_importable
+    from camp.spine import _check_trailhead_paths_importable
     import io
 
     buf = io.StringIO()
@@ -183,7 +183,7 @@ def test_trailhead_paths_guard_emits_legible_message_on_import_error() -> None:
 
 def test_trailhead_paths_guard_succeeds_when_importable() -> None:
     """The guard function returns True when trailhead.paths is importable."""
-    from spine import _check_trailhead_paths_importable
+    from camp.spine import _check_trailhead_paths_importable
 
     result = _check_trailhead_paths_importable()
     assert result is True

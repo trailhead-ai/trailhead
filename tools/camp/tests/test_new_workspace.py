@@ -16,8 +16,7 @@ Test contract:
 
 from __future__ import annotations
 
-import importlib.machinery
-import importlib.util
+import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -26,21 +25,18 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
-_SCRIPTS_DIR = _PLUGIN_DIR / "scripts"
-_CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 
 def _load_cli_module():
-    """Import cli/camp (extensionless) as a module for in-process dispatch tests."""
-    spec = importlib.util.spec_from_loader(
-        "camp_cli", importlib.machinery.SourceFileLoader("camp_cli", str(_CLI_CAMP))
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """Import the CLI command-group module holding the new-workspace handler.
+
+    `_cmd_new_group_cli` moved out of the monolithic `cli/camp` into the
+    `camp.cli.group` command-group module (group authoring + workspace creation).
+    """
+    return importlib.import_module("camp.cli.group")
 
 
 @pytest.fixture()
@@ -82,13 +78,13 @@ def group_env(tmp_path):
 
 
 def _workspace_dir(env, slug):
-    from manifest import workspace_dir
+    from camp.group.manifest import workspace_dir
 
     return workspace_dir("g", slug, env=env)
 
 
 def _manifest_path(env, slug):
-    from manifest import manifest_path_for
+    from camp.group.manifest import manifest_path_for
 
     return manifest_path_for("g", slug, env=env)
 
@@ -96,7 +92,7 @@ def _manifest_path(env, slug):
 @pytest.fixture(autouse=True)
 def _stub_spawn(monkeypatch):
     """Never spawn a real detached provisioner in these tests."""
-    import provision
+    import camp.provision.provision as provision
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
 
@@ -138,7 +134,7 @@ class TestExistingWorkspace:
     def test_existing_workspace_reenters_same_path_no_reseed(
         self, camp_cli, group_env, monkeypatch, capsys
     ):
-        import provision
+        import camp.provision.provision as provision
 
         g = group_env
         # First create the workspace for real.
@@ -167,7 +163,7 @@ class TestExistingWorkspace:
         Keying re-enter on ws_dir.exists() would re-enter the broken dir forever
         and make `camp remove` unrecoverable; keying on manifest presence repairs
         it."""
-        import provision
+        import camp.provision.provision as provision
 
         g = group_env
         # Simulate the partial state: ws_dir exists, NO manifest.
@@ -191,7 +187,7 @@ class TestExistingWorkspace:
 
 class TestFailure:
     def test_seed_failure_nonzero_stderr_empty_stdout(self, camp_cli, group_env, monkeypatch, capsys):
-        import provision
+        import camp.provision.provision as provision
 
         def _boom(*a, **k):
             raise RuntimeError("seed exploded")
@@ -216,7 +212,7 @@ class TestBringUpInjectHook:
 
     def test_claude_hook_strategy_installs_posttooluse_hook(self, camp_cli, group_env):
         """Default (no [harness] block) → inject='claude-hook' → hook IS wired."""
-        from hooks_writer import has_inject_drain_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook
 
         g = group_env
         # No [harness] block: resolve_harness_profile returns inject='claude-hook' (the default).
@@ -229,7 +225,7 @@ class TestBringUpInjectHook:
 
     def test_stdout_strategy_does_not_install_posttooluse_hook(self, camp_cli, group_env):
         """Explicit inject='stdout' → hook must NOT be installed (negative guard)."""
-        from hooks_writer import has_inject_drain_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook
 
         g = group_env
         g["group"]["harness"] = {"inject": "stdout"}
@@ -242,7 +238,7 @@ class TestBringUpInjectHook:
 
     def test_inject_hook_idempotent_on_reentry(self, camp_cli, group_env):
         """Re-entering an existing workspace must not duplicate the inject hook."""
-        from hooks_writer import has_inject_drain_hook
+        from camp.harness.hooks_writer import has_inject_drain_hook
         import json
 
         g = group_env
@@ -340,7 +336,7 @@ class TestInputCharset:
     """
 
     def test_slug_is_constrained_to_safe_charset(self):
-        from spine import _VALID_SLUG_RE
+        from camp.spine import _VALID_SLUG_RE
 
         assert _VALID_SLUG_RE.pattern == r"^[a-z0-9-]+$"
         assert _VALID_SLUG_RE.match("feat-x")
@@ -348,7 +344,7 @@ class TestInputCharset:
         assert not _VALID_SLUG_RE.match("feat;rm")
 
     def test_group_name_is_constrained_to_slug_charset(self):
-        from group_resolve import validate_group_name, GroupConfinementError
+        from camp.group.resolve import validate_group_name, GroupConfinementError
 
         # Path-separator confinement and slug-charset confinement are both enforced:
         # a group name now rejects the same characters a slug does.

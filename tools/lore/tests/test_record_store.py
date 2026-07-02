@@ -40,37 +40,21 @@ import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = REPO_ROOT / "plugins" / "lore" / "scripts"
-
-
-def _load(name: str):
-    """Load a scripts/ module freshly each call (mirrors conftest.load_script)."""
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    if name in sys.modules:
-        del sys.modules[name]
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from conftest import load_script
 
 
 @pytest.fixture()
 def rs():
-    return _load("record_store")
+    return load_script("lore.record.store")
 
 
 @pytest.fixture()
 def index():
-    return _load("index_store")
+    return load_script("lore.search.index")
 
 
 @pytest.fixture()

@@ -25,7 +25,7 @@ from conftest import load_script
 
 
 def vc():
-    return load_script("vault_config")
+    return load_script("lore.vault.config")
 
 
 # ---------------------------------------------------------------------------

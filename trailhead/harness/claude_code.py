@@ -98,7 +98,7 @@ class ClaudeCodeHarness(Harness):
     ) -> None:
         """Write ``~/.claude/rules/<name>.md`` idempotently and atomically.
 
-        Mirrors ``scripts/settings_writer.py`` ``_save``: same-mount temp file via
+        Mirrors ``lore/config/settings_writer.py`` ``_save``: same-mount temp file via
         ``mkstemp(dir=target.parent)`` + ``os.replace`` so the swap is atomic and
         the rename can't fail cross-filesystem; clean up the temp on any error.
         A re-run with byte-identical content is a true no-op (no write, no swap).
