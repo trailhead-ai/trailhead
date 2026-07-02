@@ -5,11 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-from ..config import agent_ruleset as agent_ruleset_mod
-from ..config import installer as installer_mod
-from ..config import settings_writer as settings_writer_mod
-from ..vault import config as vault_config_mod
-from ..vault import vault as vault_mod
 from .common import _resolve_config_path, _resolve_lore_state_dir
 
 # Finds its sibling plugin root (and the plugin-root-level _bootstrap module) so
@@ -42,6 +37,8 @@ def _seed_or_merge_config(config_path: Path) -> None:
       (never clobbers existing vaults).
     - Present config.json that already has a ``default``-scope vault: no-op.
     """
+    from ..vault import config as vault_config_mod
+
     default_entry = {"name": "default", "scope": "default"}
 
     if not config_path.exists():
@@ -116,6 +113,8 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     a present-but-corrupt settings file raises ``ValueError`` (caller surfaces a
     clean error rather than clobbering it).
     """
+    from ..config import settings_writer as settings_writer_mod
+
     default_link = vaults_root / "default"
     guard_root_value = _GUARD_ROOT_DELIM.join([str(vaults_root), str(default_link)])
 
@@ -153,6 +152,10 @@ def cmd_init(args) -> int:
       6. Install lore's static user-level ruleset into every detected harness;
          degrade visibly for any harness that lacks user-ruleset support.
     """
+    from ..config import agent_ruleset as agent_ruleset_mod
+    from ..config import installer as installer_mod
+    from ..vault import vault as vault_mod
+
     # Step 1: resolve the user-global settings path.
     settings_path = installer_mod.resolve_targets()
 
@@ -243,6 +246,8 @@ def cmd_status(args) -> int:
     PreToolUse guardrail does not cover Bash-mediated writes), so a missing or
     stale ruleset is a real coverage hole worth surfacing.
     """
+    from ..config import agent_ruleset as agent_ruleset_mod
+
     content = agent_ruleset_mod.RULESET_CONTENT
     for h in _detect_harnesses():
         status = h.user_ruleset_status(_RULESET_NAME, content)

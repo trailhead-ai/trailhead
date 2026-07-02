@@ -8,11 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..config import installer as installer_mod
-from ..record import model as record_model_mod
-from ..search import index as index_store_mod
-from ..vault import config as vault_config_mod
-from ..vault import layers as layers_mod
 from .common import _resolve_config_path, _resolve_vaults_root
 
 
@@ -55,6 +50,11 @@ def _cmd_vault_add(args) -> int:
     already-populated directory makes its records immediately searchable. Re-adding
     a name whose directory still exists reattaches + re-scans (no clobber).
     """
+    from ..config import installer as installer_mod
+    from ..record import model as record_model_mod
+    from ..search import index as index_store_mod
+    from ..vault import config as vault_config_mod
+
     config_path = _resolve_config_path()
     name = args.name
     normalized = vault_config_mod.normalize_vault_name(name)
@@ -186,6 +186,10 @@ def _cmd_vault_delete(args) -> int:
     realpath to ``state_dir("lore")/vaults`` — refusing any path that resolves
     outside that root or reaches it via a symlink.
     """
+    from ..search import index as index_store_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import layers as layers_mod
+
     config_path = _resolve_config_path()
     name = args.name
     normalized = vault_config_mod.normalize_vault_name(name)
@@ -306,6 +310,8 @@ def _cmd_vault_ls(args) -> int:
     Tolerates a not-yet-created config (pre-``init``): prints a hint and exits 0,
     never a traceback.
     """
+    from ..vault import config as vault_config_mod
+
     config_path = _resolve_config_path()
     if not config_path.exists():
         print("No vault config found; run 'lore init' to seed one.")

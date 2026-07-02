@@ -5,9 +5,6 @@ import os
 import sys
 from pathlib import Path
 
-from ..search import engine as search_mod
-from ..vault import config as vault_config_mod
-from ..vault import layers as layers_mod
 from .common import _resolve_config_path, _resolve_groups_dir
 
 
@@ -23,6 +20,10 @@ def cmd_search(args) -> int:
     and exits non-zero — never a traceback, never a silent empty result. A VALID
     query with zero matches prints an empty-result banner and exits 0.
     """
+    from ..search import engine as search_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import layers as layers_mod
+
     # Vault root(s) for the coarse staleness stat (best-effort; never fail search).
     # Search always spans the resolved layers (personal + any shared/group vaults);
     # it never takes an arbitrary path — vault access stays CLI-resolved.

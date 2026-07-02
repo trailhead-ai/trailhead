@@ -6,11 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-from ..record import store as record_store_mod
-from ..search import index as index_store_mod
-from ..vault import config as vault_config_mod
-from ..vault import layers as layers_mod
-from ..vault import resolve as vault_resolve_mod
 from .common import _load_vault_config, _read_stdin_body, _resolve_groups_dir
 
 
@@ -35,6 +30,8 @@ def _resolve_group_scopes(
     contract (trailhead/camp unavailable, no group, overlap, malformed/unreadable
     config). ``camp_state_dir`` is forwarded so resolution stays isolated in tests.
     """
+    from ..vault import layers as layers_mod
+
     cfg = layers_mod.resolve_active_group_config(
         groups_dir, cwd, camp_state_dir=camp_state_dir, degrade_target="default routing"
     )
@@ -64,6 +61,9 @@ def _resolve_record_op_vault(record_id: str, args) -> str:
     config-routing work introduced. Vault resolution is now config-only across
     *every* lore command (and the hooks).
     """
+    from ..vault import config as vault_config_mod
+    from ..vault import resolve as vault_resolve_mod
+
     loaded = _load_vault_config()
     if loaded is None:
         return str(vault_config_mod.resolve_active_vault())
@@ -315,6 +315,8 @@ def _render_record(record_id: str, vault_root: str, as_json: bool) -> int:
     (caller-supplied ``<kind>/<name>``) and ``lore session show`` (the resolved
     session record id), so the output shape is identical for both.
     """
+    from ..record import store as record_store_mod
+
     try:
         loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
     except (
@@ -385,6 +387,9 @@ def _cmd_record_delete(args) -> int:
     RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
     An invalid format or nonexistent record → non-zero + clear stderr.
     """
+    from ..record import store as record_store_mod
+    from ..search import index as index_store_mod
+
     record_id = getattr(args, "record_id", None)
     if not record_id or "/" not in record_id:
         print(
@@ -438,6 +443,11 @@ def _cmd_record_create(args) -> int:
     per-field flags (``--status``, ``--keyword``, ``--related-*``, ``--related``)
     applied by :func:`_apply_record_fields`.
     """
+    from ..record import store as record_store_mod
+    from ..search import index as index_store_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import resolve as vault_resolve_mod
+
     # --kind is required.
     kind = getattr(args, "kind", None)
     if not kind:
@@ -607,6 +617,9 @@ def _find_current_record_location(record_id: str):
     Raises :class:`record_store.RecordNotFoundError` when no configured vault holds
     the record.
     """
+    from ..record import store as record_store_mod
+    from ..vault import config as vault_config_mod
+
     loaded = _load_vault_config()
     if loaded is None:
         root = str(vault_config_mod.resolve_active_vault())
@@ -634,6 +647,9 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
     vault the record actually lands in — symmetric with create (which passes
     ``vault_config.shared_flag(chosen)``). Vanilla (no config) is always 0.
     """
+    from ..vault import config as vault_config_mod
+    from ..vault import resolve as vault_resolve_mod
+
     loaded = _load_vault_config()
     if loaded is None:
         return str(vault_config_mod.resolve_active_vault()), 0
@@ -692,6 +708,9 @@ def _cmd_record_update(args) -> int:
     Invalid/nonexistent RECORD_ID → non-zero.
     """
     import json
+
+    from ..record import store as record_store_mod
+    from ..search import index as index_store_mod
 
     record_id = getattr(args, "record_id", None)
     if not record_id or "/" not in record_id:

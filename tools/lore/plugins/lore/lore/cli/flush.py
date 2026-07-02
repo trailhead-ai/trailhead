@@ -6,10 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-from ..search import engine as search_mod
-from ..session import store as session_store_mod
-from ..vault import config as vault_config_mod
-from ..vault import vault as vault_mod
 from .common import _add_session_selectors, _git, _vault_is_git_toplevel
 from .session import _open_session_index, _resolve_session_key
 
@@ -143,6 +139,10 @@ def _flush_current_session(args) -> int:
         pinned key/ISO-UTC format), reindex the one record, then commit the
         record's EXPLICIT paths only (the `.json` + `.md`; never `git add -A`).
     """
+    from ..session import store as session_store_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import vault as vault_mod
+
     vault = Path(vault_config_mod.resolve_active_vault())
     key, rc = _resolve_session_key(args)
     if key is None:
@@ -218,6 +218,8 @@ def _discover_dirty_session_keys(query: str) -> list[str]:
     `session` AND its `status` is `dirty`. The session KEY is the last path segment of
     the index `id` (`<vault>/session/<key>`); session keys never contain `/`.
     """
+    from ..search import engine as search_mod
+
     text, code = search_mod.run_search(
         query, env=dict(os.environ), as_json=True, limit=_FLUSH_DISCOVERY_LIMIT
     )
@@ -253,6 +255,10 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     match set is a clean no-op (exit 0). A roll-up of the flushed count closes a
     successful batch.
     """
+    from ..session import store as session_store_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import vault as vault_mod
+
     vault = Path(vault_config_mod.resolve_active_vault())
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 

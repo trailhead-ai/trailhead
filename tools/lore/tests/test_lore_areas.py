@@ -28,10 +28,10 @@ from unittest import mock
 def _load_cli():
     """Return the areas command module (``lore.cli.areas``).
 
-    ``cmd_areas`` and its ``recall_mod`` alias moved out of the monolithic
-    ``cli/lore`` into their command-group module; conftest puts the ``lore``
-    package's plugin root on sys.path so it imports by its dotted name. A fresh
-    ``reload`` keeps the per-test isolation the old in-process loader provided.
+    ``cmd_areas`` moved out of the monolithic ``cli/lore`` into its own
+    command-group module; conftest puts the ``lore`` package's plugin root on
+    sys.path so it imports by its dotted name. A fresh ``reload`` keeps the
+    per-test isolation the old in-process loader provided.
     """
     from lore.cli import areas
     return importlib.reload(areas)
@@ -301,9 +301,8 @@ class TestAreasBuildAreaMapRaises:
         with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
-                    with mock.patch.object(
-                        cli.recall_mod,
-                        "build_area_map",
+                    with mock.patch(
+                        "lore.search.recall.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         rc = cli.cmd_areas(args)
@@ -325,9 +324,8 @@ class TestAreasBuildAreaMapRaises:
         with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
-                    with mock.patch.object(
-                        cli.recall_mod,
-                        "build_area_map",
+                    with mock.patch(
+                        "lore.search.recall.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)
@@ -349,9 +347,8 @@ class TestAreasBuildAreaMapRaises:
         with _config_env(str(vault)):
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
-                    with mock.patch.object(
-                        cli.recall_mod,
-                        "build_area_map",
+                    with mock.patch(
+                        "lore.search.recall.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)

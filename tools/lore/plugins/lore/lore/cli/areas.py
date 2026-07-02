@@ -4,9 +4,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from ..search import index as index_store_mod
-from ..search import recall as recall_mod
-from ..vault import config as vault_config_mod
 from .common import _load_vault_config
 
 
@@ -18,6 +15,9 @@ def cmd_areas(args) -> int:
     the resolved vault path does not exist on disk, or when build_area_map
     raises. Empty or absent areas/ dir prints a friendly "no areas" line.
     """
+    from ..search import recall as recall_mod
+    from ..vault import config as vault_config_mod
+
     _NO_AREAS_LINE = "No areas defined yet."
 
     try:
@@ -65,6 +65,9 @@ def cmd_reindex(args) -> int:
     — there is no path override, since the active vault is fully determined by
     scoping.
     """
+    from ..search import index as index_store_mod
+    from ..vault import config as vault_config_mod
+
     loaded = _load_vault_config()
 
     if loaded is not None:

@@ -4,13 +4,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from ..vault import config as vault_config_mod
 from .common import _git, _vault_is_git_toplevel
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
 
 
 def cmd_sync(args) -> int:
+    from ..vault import config as vault_config_mod
+
     vault = Path(vault_config_mod.resolve_active_vault())
 
     if not vault.exists():

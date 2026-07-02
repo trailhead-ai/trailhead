@@ -6,11 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-from ..record import store as record_store_mod
-from ..search import index as index_store_mod
-from ..session import store as session_store_mod
-from ..vault import config as vault_config_mod
-from ..vault import vault as vault_mod
 from .common import _add_session_selectors, _read_stdin_body
 from .record import _render_record
 
@@ -79,6 +74,9 @@ def _cmd_session_show(args) -> int:
 
     An unresolvable session → non-zero + a stderr diagnostic naming what was tried.
     """
+    from ..vault import config as vault_config_mod
+    from ..vault import vault as vault_mod
+
     as_json = bool(getattr(args, "json", False))
     vault = Path(vault_config_mod.resolve_active_vault())
     session_id = _session_id_from_args_or_env(args)
@@ -112,6 +110,9 @@ def _resolve_session_key(args) -> tuple[str | None, int]:
     clear stderr message). The sanitizer is the confinement boundary for ``session/``
     — call this BEFORE any path is constructed.
     """
+    from ..session import store as session_store_mod
+    from ..vault import vault as vault_mod
+
     raw_id = _session_id_from_args_or_env(args)
     if raw_id:
         try:
@@ -142,6 +143,8 @@ def _open_session_index():
     opens the index inside the held lock while honoring ``XDG_STATE_HOME`` test
     isolation via ``os.environ`` — the same env ``index_store.open_index`` reads.
     """
+    from ..search import index as index_store_mod
+
     return index_store_mod.open_index(env=dict(os.environ))
 
 
@@ -156,6 +159,11 @@ def _cmd_session_candidate(args) -> int:
     ``record_store.neutralize_fences``; the sidecar-ensure-dirty + body-append +
     reindex are ONE race-safe critical section via ``session_store.capture_candidate``.
     """
+    from ..record import store as record_store_mod
+    from ..session import store as session_store_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import vault as vault_mod
+
     key, rc = _resolve_session_key(args)
     if key is None:
         return rc
@@ -204,6 +212,11 @@ def _cmd_session_referenced(args) -> int:
     ``annotations`` map, but **never flips status**. The append + bump + reindex are
     one race-safe critical section via ``session_store.capture_referenced``.
     """
+    from ..record import store as record_store_mod
+    from ..session import store as session_store_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import vault as vault_mod
+
     key, rc = _resolve_session_key(args)
     if key is None:
         return rc
