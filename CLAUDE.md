@@ -134,9 +134,9 @@ installer pick it up automatically. `bin/<tool>` wrappers resolve the real CLI v
 `${CLAUDE_PLUGIN_ROOT}/cli/<tool>` with a symlink-safe self-relative fallback (no
 GNU `readlink -f`, macOS-safe); `cli/<tool>` itself is a thin shim that bootstraps
 `sys.path` then delegates to `<name>.cli.dispatch.main()`. Domain logic lives in
-real subpackages under `<name>/<domain>/*.py` (e.g. `lore/vault/`, `lore/record/`),
-one directory per domain with relative imports between them — keeping it
-unit-testable independent of the CLI shim.
+real subpackages under `<name>/<domain>/*.py` (e.g. `lore/vault/`, `lore/record/`,
+`camp/group/`, `camp/provision/`), one directory per domain with relative imports
+between them — keeping it unit-testable independent of the CLI shim.
 
 ## Conventions worth matching
 
