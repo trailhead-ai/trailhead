@@ -34,6 +34,11 @@ Safety model (git is the only safety net):
     ``--kind plan``.
   * Planning (walk + transcode + validate + link-integrity gate) writes NOTHING;
     an ``--apply`` run that finds any problem aborts before the first write.
+  * **Duplicate-target gate** — if both ``backlog/<name>`` and ``plan/<name>``
+    exist, they migrate to the same ``task/<name>``; the per-record subset gate
+    can't catch this (each record's own links check out in isolation), so this is
+    a dedicated up-front check that blocks the whole run rather than letting the
+    second write silently clobber the first.
   * **Post-checks** after the writes: zero legacy kinds/keys remain; every sidecar
     validates clean (checked AFTER both the remap and the sweep — a mid-sequence
     check would transiently reject records still carrying a swept key); and a
@@ -98,6 +103,15 @@ _STATUS_MAP = {
 
 #: The named git restore point the script creates before any ``--apply`` write.
 RESTORE_TAG = "pre-task-migration"
+
+#: Reminder appended to every rollback message. A re-run self-heals the index
+#: (it always does a full rebuild), but an operator who aborts here without
+#: re-running leaves the index reflecting the migrated state against a
+#: reverted vault until they reindex by hand.
+_REINDEX_REMINDER = (
+    "if you are not re-running the migration now, run `lore reindex` — "
+    "the search index may still reflect the migrated state"
+)
 
 #: Retired-kind reference forms a composed skill could still EMIT. Deliberately
 #: the machine/command shapes (``--kind backlog``, ``related.plan``, YAML
@@ -169,6 +183,28 @@ def check_subset(pre_union, post_targets):
     return set(pre_union) - set(post_targets)
 
 
+def find_duplicate_targets(vault_root):
+    """Detect two legacy records that would migrate to the same ``task/<name>``.
+
+    Both ``backlog/<name>`` and ``plan/<name>`` migrate to the same target
+    ``task/<name>``; if both exist, each individually passes the per-record
+    subset gate (it only checks that record's own links), so nothing else in the
+    plan catches the second ``validate_and_write`` silently clobbering the
+    first. Returns a dict of ``target record_id -> sorted source record_ids``,
+    restricted to targets with more than one source (empty == no collision).
+    """
+    root = Path(vault_root)
+    sources_by_target = {}
+    for legacy_kind in LEGACY_KINDS:
+        kind_dir = root / legacy_kind
+        if not kind_dir.exists():
+            continue
+        for source_json in sorted(kind_dir.glob("*.json")):
+            target = f"{TARGET_KIND}/{source_json.stem}"
+            sources_by_target.setdefault(target, []).append(f"{legacy_kind}/{source_json.stem}")
+    return {target: srcs for target, srcs in sources_by_target.items() if len(srcs) > 1}
+
+
 def check_composed_tree(composed_root):
     """Grep the composed skill tree for retired-kind reference forms.
 
@@ -230,6 +266,15 @@ def plan_migration(vault_root):
     """
     root = Path(vault_root)
     plan = _Plan()
+
+    # Collision gate: two legacy records migrating to the same task/<name>
+    # target would have the second validate_and_write silently clobber the
+    # first. Checked up front so it blocks regardless of iteration order below.
+    for target, sources in sorted(find_duplicate_targets(root).items()):
+        plan.errors.append(
+            f"duplicate migration target {target}: {' and '.join(sources)} both migrate to it"
+        )
+
     for source_json in sorted(root.rglob("*.json")):
         if ".git" in source_json.parts:
             continue
@@ -358,7 +403,14 @@ def _rollback(root, restore_sha):
 
 
 def _write_changes(plan, root):
-    """Write every planned record, retire moved legacy sources, then reindex."""
+    """Write every planned record, retire moved legacy sources, then reindex.
+
+    Goes through the same ``validate_and_write`` every other writer uses, so
+    every migrated record's ``updated-at``/``updated-by`` gets re-stamped to
+    this run's identity/timestamp — a deliberate, accepted side effect (the
+    records genuinely are being rewritten by this operation), not an
+    accidental provenance clobber.
+    """
     conn = index_store.open_index()
     try:
         for change in plan.changes:
@@ -505,7 +557,8 @@ def run_migration(vault_root, *, apply=False, composed_root=None):
     except Exception as exc:  # noqa: BLE001 — any raise means a partial write.
         _rollback(root, restore_sha)
         print(
-            f"error mid-apply: {exc}\nrolled back to {RESTORE_TAG}; vault restored",
+            f"error mid-apply: {exc}\nrolled back to {RESTORE_TAG}; vault restored\n"
+            f"{_REINDEX_REMINDER}",
             file=sys.stderr,
         )
         return 1
@@ -515,7 +568,8 @@ def run_migration(vault_root, *, apply=False, composed_root=None):
         _rollback(root, restore_sha)
         print(
             f"post-check failed; rolled back to {RESTORE_TAG}:\n  "
-            + "\n  ".join(post_errors),
+            + "\n  ".join(post_errors)
+            + f"\n{_REINDEX_REMINDER}",
             file=sys.stderr,
         )
         return 1

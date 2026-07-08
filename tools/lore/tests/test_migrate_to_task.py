@@ -412,6 +412,71 @@ def test_apply_subset_gate_blocks_dropped_link(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Duplicate migration target (backlog/X and plan/X both -> task/X)
+# ---------------------------------------------------------------------------
+
+
+def test_find_duplicate_targets_detects_collision(tmp_path):
+    mod = _mod()
+    vault = tmp_path / "vault"
+    write_record(vault, "backlog", "duplicate-name", status="open")
+    write_record(vault, "plan", "duplicate-name", status="draft")
+
+    duplicates = mod.find_duplicate_targets(vault)
+
+    assert duplicates == {"task/duplicate-name": ["backlog/duplicate-name", "plan/duplicate-name"]}
+
+
+def test_find_duplicate_targets_empty_when_no_collision(tmp_path):
+    mod = _mod()
+    vault = tmp_path / "vault"
+    seed_full_vault(vault)
+
+    assert mod.find_duplicate_targets(vault) == {}
+
+
+def test_dry_run_reports_duplicate_target_as_blocking(tmp_path, monkeypatch):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_full_vault(vault)
+    write_record(vault, "backlog", "duplicate-name", status="open")
+    write_record(vault, "plan", "duplicate-name", status="draft")
+    commit_all(vault)
+
+    plan = mod.plan_migration(vault)
+
+    assert plan.blocked
+    assert any(
+        "duplicate-name" in error and "task/duplicate-name" in error for error in plan.errors
+    ), plan.errors
+
+    before = tree_digest(vault)
+    rc = mod.run_migration(str(vault), apply=False)
+    assert rc == 1
+    assert tree_digest(vault) == before
+
+
+def test_apply_refuses_duplicate_migration_target(tmp_path, monkeypatch):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_full_vault(vault)
+    write_record(vault, "backlog", "duplicate-name", status="open")
+    write_record(vault, "plan", "duplicate-name", status="draft")
+    commit_all(vault)
+
+    before = tree_digest(vault)
+    rc = mod.run_migration(str(vault), apply=True, composed_root=clean_composed(tmp_path))
+
+    assert rc == 1
+    # Blocked before any write — the second validate_and_write never runs, so
+    # neither colliding source is silently clobbered.
+    assert tree_digest(vault) == before
+    assert not (vault / "task").exists()
+
+
+# ---------------------------------------------------------------------------
 # Interrupted run → restore → re-run converges
 # ---------------------------------------------------------------------------
 
@@ -456,6 +521,42 @@ def test_interrupted_apply_rolls_back_then_reruns_to_same_state(tmp_path, monkey
     rc = mod.run_migration(str(vault), apply=True, composed_root=clean_composed(tmp_path))
     assert rc == 0
     assert tree_digest(vault) == reference
+
+
+# ---------------------------------------------------------------------------
+# Rollback messages remind the operator to reindex if they abort
+# ---------------------------------------------------------------------------
+
+
+def test_mid_apply_rollback_message_reminds_to_reindex(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_full_vault(vault)
+    commit_all(vault)
+
+    def always_fails(*args, **kwargs):
+        raise RuntimeError("simulated crash mid-apply")
+
+    monkeypatch.setattr(mod.record_store, "validate_and_write", always_fails)
+    rc = mod.run_migration(str(vault), apply=True, composed_root=clean_composed(tmp_path))
+
+    assert rc == 1
+    assert "reindex" in capsys.readouterr().err.lower()
+
+
+def test_post_check_rollback_message_reminds_to_reindex(tmp_path, monkeypatch, capsys):
+    mod = _mod()
+    isolate_index(monkeypatch, tmp_path)
+    vault = make_git_vault(tmp_path)
+    seed_full_vault(vault)
+    commit_all(vault)
+
+    monkeypatch.setattr(mod, "_verify_post", lambda plan, root: ["simulated post-check failure"])
+    rc = mod.run_migration(str(vault), apply=True, composed_root=clean_composed(tmp_path))
+
+    assert rc == 1
+    assert "reindex" in capsys.readouterr().err.lower()
 
 
 # ---------------------------------------------------------------------------
