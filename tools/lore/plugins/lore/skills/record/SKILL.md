@@ -1,13 +1,18 @@
 ---
 name: record
-description: Log ONE specific item to the vault right now — a single deliberate capture you already have in mind (this decision, this lesson, this backlog item). Orients you to the `lore record` capture surface for one item. Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson". For a batch promotion of the session's pending items, use /lore:flush.
+description: Capture ONE specific item now — a single deliberate capture you already have in mind. Orients you to the two capture surfaces and helps you pick: a `lore session candidate` (the default, for findings that arise during work — promoted to a durable record at flush) versus a direct `lore record` write (the exception, for deliberately authored artifacts or an explicit "pin this one now"). Use for /lore:record, "record this", "capture this one thing", "log this decision now", "save this lesson". For a batch promotion of the session's pending items, use /lore:flush.
 ---
 
 # /lore:record — Capture one deliberate item now
 
 `lore:record` is for the moment where you have **one specific thing** in mind and
-want it in the vault **now** — this decision, this lesson, this backlog item. It is a
-*single deliberate capture*, not a review of the session.
+want it captured **now** — this finding, this decision, this authored artifact. It
+is a *single deliberate capture*, not a review of the session.
+
+Most findings land as a **session candidate** (the default — see below) and are
+promoted at flush; a direct vault record is the exception, reserved for authored
+artifacts or an explicit "pin this one now". This skill orients you to both
+surfaces and helps you pick.
 
 This is the complement of `/lore:flush`: flush *evaluates all outstanding session
 candidates* and promotes them to records in batch; `record` captures the one
@@ -19,10 +24,32 @@ the writing.
 
 ## Two capture surfaces
 
-### A persistent vault record — `lore record create`
+### A session candidate — `lore session …` (the default)
 
-For a durable, standalone record (a decision, lesson, area profile, spec, …),
-create it directly:
+For an incidental **finding** that arose during work — a decision made in
+passing, a dead-end, a deferred item, a gotcha — log it as a session candidate.
+It rides the session note and is promoted to a durable record at flush. Body
+from STDIN; session id auto-resolves from `$CLAUDE_CODE_SESSION_ID`:
+
+```bash
+printf '%s' "<the finding, in your own words>" \
+  | lore session candidate --kind <kind> --phase <phase>
+```
+
+Or, if you're recording that an existing vault record was *used* this session:
+
+```bash
+lore session referenced <kind>/<record-name>
+```
+
+Candidates are cheap and lazy-created — capture liberally. `/lore:flush` applies
+judgment later, promoting the keepers into durable records.
+
+### A persistent vault record — `lore record create` (the exception)
+
+Reserved for a deliberately **authored artifact** (a `plan`, `spec`, or `area`
+profile), or a finding you *explicitly* mean to pin as a standalone record right
+now. Create it directly:
 
 ```bash
 lore record create --kind <kind> --title "<title>"
@@ -45,31 +72,17 @@ lore record create --kind decision --title "Use frontmatter for session status" 
 Run `lore record create --help` for the full flag set. Related sub-actions:
 `lore record update`, `lore record delete`, `lore record blob`.
 
-### A session-scoped marker — `lore session …`
-
-If the item belongs to the *active session* rather than as a standalone record,
-log it as a session candidate (body from STDIN; session id auto-resolves from
-`$CLAUDE_CODE_SESSION_ID`):
-
-```bash
-printf '%s' "<the item, in your own words>" \
-  | lore session candidate --kind <kind> --phase <phase>
-```
-
-Or, if you're recording that an existing vault record was *used* this session:
-
-```bash
-lore session referenced <kind>/<record-name>
-```
-
 ## Choosing the surface
 
-- Durable, worth finding later on its own → `lore record create`.
-- Belongs to *this* session's narrative (a candidate to promote at finish) →
-  `lore session candidate`.
+- An incidental finding that arose during work (a decision, lesson, dead-end,
+  deferred item, gotcha) → `lore session candidate`. **This is the default** —
+  durable records are mostly born at flush, not mid-work.
+- A deliberately authored artifact (`plan`, `spec`, `area` profile), or a finding
+  you *explicitly* mean to pin as a standalone record right now →
+  `lore record create`.
 
-If in doubt for a one-off capture during a session, `lore session candidate` is
-the lighter default — it's lazy-created and travels with the session note.
+When unsure, prefer `lore session candidate` — capture is cheap, and `/lore:flush`
+applies the judgment later.
 
 ## Edge cases
 

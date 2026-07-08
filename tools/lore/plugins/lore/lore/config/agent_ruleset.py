@@ -13,8 +13,10 @@ The content is two parts:
     and the SOLE guardrail for harnesses without a PreToolUse hook.  The old
     "Drift caveat" paragraph (which described a since-removed per-project
     multi-rules-file model) is intentionally dropped.
-  * ``PRIMER`` — a short (≤20-line) disposition primer: what lore is, the three
-    entry commands, and the trigger conditions for reaching for lore.
+  * ``PRIMER`` — a short (≤20-line) disposition primer: what lore is, the capture
+    disposition (``lore session candidate`` is the default for findings during
+    work; ``lore record`` is the direct-write exception for authored artifacts;
+    ``/lore:flush`` promotes candidates), and the triggers for reaching for lore.
 
 ``RULESET_CONTENT`` is STATIC — no computed or per-session state — so two renders
 are byte-identical.  Whole-file equality is how ``lore status`` detects drift.
@@ -38,12 +40,16 @@ protection for that gap.  Violating it silently corrupts vault records.
 For harnesses without a PreToolUse hook (Cursor, Codex, etc.) this block is
 the **sole guardrail** — treat it as binding regardless of harness.
 
-Capture and read records via the CLI: `lore record …` / `lore session …` to
-write, `lore search …` to read. See `lore --help` and the lore skills
-(`/lore:record`, `/lore:search`, `/lore:flush`).
+Capture and read records via the CLI: `lore session candidate …` to capture
+findings during work and `lore record …` to write a durable record directly;
+`lore search …` to read. See `lore --help` and the lore skills (`/lore:record`,
+`/lore:search`, `/lore:flush`).
 
-Mid-task capture: `lore session candidate` — continuous capture during a session;
-`/lore:flush` evaluates outstanding candidates and finalizes the session.
+Mid-task capture: `lore session candidate` is the **default** — continuous capture
+of findings during a session. `/lore:flush` promotes the outstanding candidates
+into durable records and finalizes the session. Reserve a direct `lore record`
+write for deliberately authored artifacts (`plan`, `spec`, `area`) or an explicit
+"record this one now"; incidental findings become candidates, not records.
 """
 
 PRIMER = """\
@@ -54,10 +60,14 @@ work, follow-ups, area notes, and session history — all in a git-backed vault.
 
 - `lore search …` — read the vault before deciding; check for prior art,
   dead-ends, and decisions on the area you're about to touch.
-- `lore record …` — capture a durable finding: a decision, a dead-end, a
-  deferred item, or a gotcha worth a future agent's time.
-- `lore session …` — open/append/close a working session note so context
-  survives a `/clear` or a hand-off.
+- `lore session candidate …` — the **default** capture. As findings arise during
+  work (a decision, a dead-end, a deferred item, a gotcha), log them to the
+  session; they ride the session note and become durable records at flush.
+  Capture liberally — judgment happens later.
+- `lore record …` — write a durable record directly. Reserved for deliberately
+  authored artifacts (`plan`, `spec`, `area` profile) or an explicit "record this
+  one now". Incidental findings go through a candidate instead.
+- `/lore:flush` — promote the session's candidates into durable records.
 
 Reach for lore when: starting work in an unfamiliar area, about to repeat an
 approach that may have failed before, making a non-obvious design call, or
