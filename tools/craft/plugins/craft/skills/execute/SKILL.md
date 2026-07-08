@@ -71,7 +71,7 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 ### 3. Dispatch `executor`
 
 The agent expects:
-- Plan path and slice number/name
+- Plan path and task name
 - Proven unknowns summary (or "None")
 - Assumption-prover tests to clean up (or "None")
 - Working directory
@@ -92,7 +92,7 @@ Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Exec
 | **Medium** (30-200 lines, 3-5 files) | Dispatch `code-reviewer` for combined spec + quality pass. |
 | **Large** (200+ lines or 5+ files) | Dispatch `code-reviewer` for a single combined spec + quality pass. Dispatch a second pass only when the first returns saturated/over-length. |
 
-When dispatching `code-reviewer`, give it: plan path + slice number, the executor's status report (so it can verify the claim), and base/head SHAs for the diff.
+When dispatching `code-reviewer`, give it: plan path + task name, the executor's status report (so it can verify the claim), and base/head SHAs for the diff.
 
 Absorb only the reviewer's verdict + Critical findings into your working context. Important and Minor findings are in the review tail — read them only if a Critical is ambiguous or you need to understand scope.
 
@@ -157,9 +157,9 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 **VALIDATED:** Proceed to build the slice.
 
 **INVALIDATED:** Do NOT build. Report to user with the evidence. Options:
-1. **Minor adjustment** — the design holds, just one slice changes. Edit the plan file inline, note what changed and why, continue.
-2. **Design change** — the invalidation affects multiple slices or the architecture. Re-enter planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline. Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
-3. **Drop the slice** — the feature doesn't need this part. Remove it from the plan, note why, continue with remaining slices.
+1. **Minor adjustment** — the design holds, just one child task changes. Update the affected child task record (`lore record update task/<name> …`), note what changed and why, continue.
+2. **Design change** — the invalidation affects multiple child tasks or the architecture. Re-enter planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline. Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
+3. **Drop the task** — the feature doesn't need this part. Reshape the child task record to `superseded` (or `dropped`) via `lore record update`, note why, continue with remaining tasks.
 
 If the INVALIDATED result is surprising (behavior you thought was standard turns out to differ), that may also be a `troubleshooter` question: dispatch it to figure out *why* the assumption was wrong before reshaping the plan.
 
