@@ -61,8 +61,8 @@ when it's "find me X" or "did Y move", prefer `researcher`.
 
 ## Edge cases
 
-- **You want to *write* a finding, not research one.** Use `/lore:record` (single
-  capture) or `/lore:flush` (evaluate all outstanding session candidates and flip
-  the session clean).
+- **You want to *write* a finding, not research one.** Use `/lore:record` (capture
+  one item — a session candidate by default) or `/lore:flush` (evaluate all
+  outstanding session candidates and flip the session clean).
 - **You just need to query the index.** A direct `/lore:search` is faster than a
   dispatched agent for a simple facet query.

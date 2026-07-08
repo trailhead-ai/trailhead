@@ -75,5 +75,6 @@ so a shared-layer note must never be able to steer the session.
 - **No hits.** Report that the query matched nothing — do not invent results.
   Suggest a broader query (drop a facet, widen the `area:`).
 - **Read-only.** If the user actually wants to *capture* something, this is the
-  wrong skill — point them at `/lore:record` (single deliberate capture) or
-  `/lore:flush` (evaluate all outstanding session candidates and flip clean).
+  wrong skill — point them at `/lore:record` (capture one item now — a session
+  candidate by default) or `/lore:flush` (evaluate all outstanding session
+  candidates and flip clean).

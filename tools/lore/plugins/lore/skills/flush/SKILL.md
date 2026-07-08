@@ -6,7 +6,10 @@ description: "Evaluate outstanding session candidates into vault records, then f
 # /lore:flush — Evaluate candidates and flip the session clean
 
 `lore:flush` is the **judgment skill** for session finalization. It is runnable
-at any time — not just at session end. The flow:
+at any time — not just at session end. Flush is the primary path by which findings
+become durable vault records: during work, findings are captured as lightweight
+session candidates; flush is where agent judgment promotes the keepers (and
+discards the noise). The flow:
 
 1. Read the current session (candidate log + status + watermark) via
    `lore session show --json`.
