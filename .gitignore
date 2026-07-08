@@ -16,3 +16,6 @@ config/*
 
 # Added by code-review-graph
 .code-review-graph/
+
+# Local MCP server config — contains machine-specific absolute paths.
+.mcp.json
