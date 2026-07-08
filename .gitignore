@@ -13,3 +13,9 @@ dist/
 # Only the shipped defaults are tracked.
 config/*
 !config/default.toml
+
+# Added by code-review-graph
+.code-review-graph/
+
+# Local MCP server config — contains machine-specific absolute paths.
+.mcp.json
