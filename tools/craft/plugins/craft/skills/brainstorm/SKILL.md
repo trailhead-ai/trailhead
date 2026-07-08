@@ -84,8 +84,8 @@ returns a summary.
     (outside the block, `layer="personal"`) are the trusted self-authored channel.
 - **For cross-cutting topics** spanning multiple areas, dispatch a knowledge-synthesis subagent if
   available (such as `lore:librarian`) with a synthesis question ("what do we know about X — what was
-  decided, tried, or left on the backlog?"). Otherwise read vault records directly — specs,
-  decisions, backlog items, and active lessons for the touched areas, where each lesson's prevention
+  decided, tried, or left as an open task?"). Otherwise read vault records directly — specs,
+  decisions, tasks, and active lessons for the touched areas, where each lesson's prevention
   check should shape acceptance criteria or non-goals.
 - Never modify a prior spec. If this work supersedes one, link it from the new spec's `Related`
   section.
@@ -134,8 +134,8 @@ drops into step 3.
 For each open question raised in step 2, route it:
 
 - **Resolve now** — work through it together until there's a clear answer.
-- **Defer** — capture as a backlog item via `lore record create --kind backlog` with a revisit
-  condition. Note in spec.
+- **Defer** — capture as a `task` record via `lore record create --kind task --status open` with
+  a revisit condition. Note in spec.
 - **Accept as risk** — acknowledge in spec under "Open Questions / Risks" with mitigation if any.
 
 Non-obvious choices made during this step → capture via `lore record create --kind decision`.

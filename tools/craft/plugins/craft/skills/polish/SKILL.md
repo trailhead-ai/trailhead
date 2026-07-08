@@ -49,15 +49,15 @@ Read every item the user provided. Number them 1..N if not already numbered. Res
 
 If the user invoked `/polish` with no items in the same message, ask for the batch and stop.
 
-### 1b. Resolve the parent plan
+### 1b. Resolve the parent task
 
-Before writing anything, identify the plan these follow-ups belong to, so the followup brief links back to its parent via `followup-to:` frontmatter.
+Before writing anything, identify the plan these follow-ups belong to — a plan is a parent `task` record — so the followup brief links back to its parent via `followup-to:` frontmatter.
 
-Resolve the active session note (e.g. `lore current`) and read its `plan:` frontmatter:
+Resolve the active session note (e.g. `lore current`) and read the plan task it links to (the `related` task on the session note, or the task named in its frontmatter):
 
-- **Exactly one plan slug listed** → that's the parent. Use its filename stem (e.g. `2026-04-27-survey-config-activation-cascade`) as `<parent-slug>`.
-- **Multiple plan slugs** → ask the user which plan these follow-ups apply to in your clarifying turn (step 2).
-- **No plan slugs OR session note missing** → either the user is doing fix-ups on work that didn't go through `/plan`, or this is a fresh session. Ask the user for the parent plan filename. If they say "none / standalone", proceed without a parent (`<parent-slug>` becomes the free-form `<feature-slug>` derived from conversation context, and the brief omits `followup-to`).
+- **Exactly one plan task** → that's the parent. Use its record name (e.g. `2026-04-27-survey-config-activation-cascade`) as `<parent-slug>`.
+- **Multiple plan tasks** → ask the user which one these follow-ups apply to in your clarifying turn (step 2).
+- **No plan task OR session note missing** → either the user is doing fix-ups on work that didn't go through `/plan`, or this is a fresh session. Ask the user for the parent task name. If they say "none / standalone", proceed without a parent (`<parent-slug>` becomes the free-form `<feature-slug>` derived from conversation context, and the brief omits `followup-to`).
 
 Also capture the parent's `related-subsystems` from its frontmatter — you'll inherit those into the brief so the followup is associated with the right subsystems for recall.
 
@@ -86,23 +86,23 @@ If items span multiple working directories, group them by directory. You will di
 
 ### 4. Write the brief
 
-Write one brief per working directory, persisting it with `lore record create` (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind plan --title "<brief>" --status draft`:
+Write one brief per working directory, persisting it with `lore record create` (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind task --title "<brief>" --status ready`:
 
 ```
 YYYY-MM-DD-<parent-slug-stripped>-followup-<n>
 ```
 
-`YYYY-MM-DD` is *today's* date (the followup's creation date), so files sort chronologically alongside other dated plans. `<parent-slug-stripped>` is the parent plan's filename stem with its own leading `YYYY-MM-DD-` prefix removed (e.g. parent `2026-03-05-hybrid-graphql-websocket-authority-implementation` → `hybrid-graphql-websocket-authority-implementation`). `<n>` is always present and starts at `1`; increment to `2`, `3`, ... on collision (multiple briefs against the same parent on the same date). For multi-repo, insert the directory identifier *before* `-followup-<n>`: `YYYY-MM-DD-<parent-slug-stripped>-<dir>-followup-<n>`. If there is no parent plan (standalone path), substitute a free-form `<feature-slug>` for `<parent-slug-stripped>` and omit the `followup-to:` frontmatter field.
+`YYYY-MM-DD` is *today's* date (the followup's creation date), so records sort chronologically alongside other dated tasks. `<parent-slug-stripped>` is the parent task's record name with its own leading `YYYY-MM-DD-` prefix removed (e.g. parent `2026-03-05-hybrid-graphql-websocket-authority-implementation` → `hybrid-graphql-websocket-authority-implementation`). `<n>` is always present and starts at `1`; increment to `2`, `3`, ... on collision (multiple briefs against the same parent on the same date). For multi-repo, insert the directory identifier *before* `-followup-<n>`: `YYYY-MM-DD-<parent-slug-stripped>-<dir>-followup-<n>`. If there is no parent task (standalone path), substitute a free-form `<feature-slug>` for `<parent-slug-stripped>` and omit the `followup-to:` frontmatter field.
 
 Use this structure for the brief:
 
 ```markdown
 ---
-type: plan
+type: task
 project: <derive from the vault/repo, or omit if not determinable>
 slug: YYYY-MM-DD-<parent-slug-stripped>-followup-<n>
 created: YYYY-MM-DD
-followup-to: <parent-plan-filename>     # omit if no parent
+followup-to: <parent-task-name>           # omit if no parent
 related-subsystems:                      # inherit from parent
   - <subsystem-from-parent>
 related-spec: [[specs/...]]              # optional, only if parent had one
@@ -110,7 +110,7 @@ related-spec: [[specs/...]]              # optional, only if parent had one
 
 # Followups: <feature description>
 
-**Parent plan:** [[plans/<parent-plan-filename>]]   _(or "n/a — standalone follow-up")_
+**Parent task:** [[task/<parent-task-name>]]   _(or "n/a — standalone follow-up")_
 **Working directory:** <absolute path to worktree>
 
 ## Goal
