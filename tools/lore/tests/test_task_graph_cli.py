@@ -22,7 +22,7 @@ to the real vault: the CLI resolves the test vault from a seeded config.json
 """
 from __future__ import annotations
 
-from conftest import make_vault as _make_vault, run_cli as _run  # noqa: F401
+from conftest import load_script, make_vault as _make_vault, run_cli as _run  # noqa: F401
 
 
 def _create_task(vault, state, title, *, extra=None):
@@ -175,3 +175,69 @@ def test_output_has_no_ansi_escapes(tmp_path):
     r = _run(["task", "graph", "root"], vault=vault, state_dir=state)
     assert r.returncode == 0, r.stderr
     assert "\x1b" not in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# adjacency-map build — a single pre-pass, not a per-node graph.children() scan
+# ---------------------------------------------------------------------------
+
+
+def _sidecar(status="open", *, depends_on=None, parent=None):
+    sc = {"kind": "task", "status": status}
+    if depends_on is not None:
+        sc["depends-on"] = list(depends_on)
+    if parent is not None:
+        sc["parent"] = parent
+    return sc
+
+
+def test_walk_never_calls_graph_children_directly(monkeypatch):
+    """``_render_task_graph`` builds one adjacency map up front and never calls
+    ``graph.children`` per node during the recursive walk (the O(V^2) pattern
+    the fix removes).
+    """
+    graph_mod = load_script("lore.record.graph")
+
+    def _boom(graph, name):
+        raise AssertionError("graph.children must not be called during the walk")
+
+    monkeypatch.setattr(graph_mod, "children", _boom)
+
+    task_mod = load_script("lore.cli.task")
+    graph = {
+        "root": _sidecar(status="in-progress"),
+        "child-a": _sidecar(status="ready", parent="root"),
+        "child-b": _sidecar(status="ready", parent="root"),
+        "grandchild": _sidecar(status="ready", parent="child-a"),
+    }
+
+    output = task_mod._render_task_graph(graph, "root")
+
+    lines = output.splitlines()
+    assert lines[0] == "root [in-progress]"
+    assert lines[1].strip().startswith("child-a [ready]")
+    assert lines[2].strip().startswith("grandchild [ready]")
+    assert lines[3].strip().startswith("child-b [ready]")
+
+
+def test_adjacency_map_orders_children_same_as_graph_children(tmp_path):
+    """The pre-built adjacency map reproduces ``graph.children``'s sorted order.
+
+    Same fixture as the render-correctness tests, but asserted directly against
+    ``graph.parent_edges`` (what the adjacency map is built from) rather than
+    duplicating the CLI-output assertions those tests already make.
+    """
+    graph_mod = load_script("lore.record.graph")
+    graph = {
+        "root": _sidecar(status="in-progress"),
+        "child-b": _sidecar(status="ready", parent="root"),
+        "child-a": _sidecar(status="ready", parent="root"),
+    }
+
+    children_map: dict[str, list[str]] = {}
+    for child, parent in graph_mod.parent_edges(graph).items():
+        children_map.setdefault(parent, []).append(child)
+    for kids in children_map.values():
+        kids.sort()
+
+    assert children_map["root"] == graph_mod.children(graph, "root")

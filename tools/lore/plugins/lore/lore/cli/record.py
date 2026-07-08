@@ -256,6 +256,38 @@ def _add_record_field_flags(parser) -> None:
     )
 
 
+def _add_map_field_flags(parser) -> None:
+    """Register the shared ``--label``/``--annotation`` map flags on a record subparser.
+
+    Sibling of :func:`_add_record_field_flags` for the map-field branch
+    (:func:`_apply_map_labels_annotations`) — the ``--label``/``--annotation``/
+    ``--unset-label``/``--unset-annotation`` quartet is identical on ``create``
+    and ``update``, so both subparser blocks call this instead of repeating the
+    four ``add_argument`` calls verbatim.
+    """
+    parser.add_argument(
+        "--label", dest="label_pairs", action="append", default=[],
+        metavar="KEY=VALUE",
+        help="Set a label (repeatable, upsert). Split on first '=' so "
+             "'namespace/name=value' works unescaped.",
+    )
+    parser.add_argument(
+        "--annotation", dest="annotation_pairs", action="append", default=[],
+        metavar="KEY=VALUE",
+        help="Set an annotation (repeatable, upsert). Split on first '='.",
+    )
+    parser.add_argument(
+        "--unset-label", dest="unset_labels", action="append", default=[],
+        metavar="KEY",
+        help="Remove a label key (repeatable). Absent key is a silent no-op.",
+    )
+    parser.add_argument(
+        "--unset-annotation", dest="unset_annotations", action="append", default=[],
+        metavar="KEY",
+        help="Remove an annotation key (repeatable). Absent key is a silent no-op.",
+    )
+
+
 def _apply_map_labels_annotations(
     sidecar: dict,
     label_pairs: list[str],
@@ -307,6 +339,43 @@ def _apply_map_labels_annotations(
     _unset("annotations", unset_annotations)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Shared CLI-handler helpers (create/update/delete/show)
+# ---------------------------------------------------------------------------
+
+
+def _fail(errors: list[str], prefix: str = "") -> int:
+    """Print each of *errors* to stderr (optionally *prefix*-ed) and return 1.
+
+    The shared "surface every failure, block the write" tail shared by
+    field-flag errors, task-graph guard errors, and
+    :class:`record_store.RecordValidationError` messages across create/update.
+    Field-flag and guard-error strings already carry their own ``error:``/
+    ``graph-guard [...]:`` framing, so they pass through with the default empty
+    *prefix*; ``RecordValidationError.errors`` are bare messages, so its two
+    call sites pass ``prefix="error: "``.
+    """
+    for msg in errors:
+        print(f"{prefix}{msg}", file=sys.stderr)
+    return 1
+
+
+def _require_record_id(args) -> str | None:
+    """Validate ``args.record_id`` is ``<kind>/<name>``; else print + return None.
+
+    Shared by show/delete/update — the same "missing or malformed RECORD_ID"
+    check and error text, so the three handlers stay byte-for-byte consistent.
+    """
+    record_id = getattr(args, "record_id", None)
+    if not record_id or "/" not in record_id:
+        print(
+            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
+            file=sys.stderr,
+        )
+        return None
+    return record_id
 
 
 # ---------------------------------------------------------------------------
@@ -434,29 +503,41 @@ def _evaluate_task_guards(
     if errors:
         return errors, []
 
-    # Overlay the in-flight record onto the on-disk task graph.
-    graph = _load_task_sidecars(vault_root)
-    graph[name] = sidecar
+    # The vault-wide sidecar load (and the overlay of the in-flight record onto
+    # it) is deferred until a guard actually needs the graph — memoized here so
+    # every guard below shares one load. A node with no outgoing parent/
+    # depends-on edges can never be the entry point of a NEW cycle or ancestor
+    # loop, so a plain status-only update (no references, no done/dropped/
+    # superseded transition) never touches the vault-wide glob+parse at all.
+    graph: dict[str, dict] | None = None
 
-    cycle = graph_mod.find_dependency_cycle(graph, start=name)
-    if cycle:
-        errors.append(
-            graph_mod.format_guard_message(
-                "depends-on-cycle",
-                f"task {name!r} would create a dependency cycle: " + " -> ".join(cycle),
+    def _graph() -> dict[str, dict]:
+        nonlocal graph
+        if graph is None:
+            graph = _load_task_sidecars(vault_root)
+            graph[name] = sidecar
+        return graph
+
+    if references:
+        cycle = graph_mod.find_dependency_cycle(_graph(), start=name)
+        if cycle:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "depends-on-cycle",
+                    f"task {name!r} would create a dependency cycle: " + " -> ".join(cycle),
+                )
             )
-        )
-    loop = graph_mod.find_ancestor_loop(graph, name)
-    if loop:
-        errors.append(
-            graph_mod.format_guard_message(
-                "parent-loop",
-                f"task {name!r} would create a parent ancestor loop: " + " -> ".join(loop),
+        loop = graph_mod.find_ancestor_loop(_graph(), name)
+        if loop:
+            errors.append(
+                graph_mod.format_guard_message(
+                    "parent-loop",
+                    f"task {name!r} would create a parent ancestor loop: " + " -> ".join(loop),
+                )
             )
-        )
 
     if status_set == "done":
-        open_children = graph_mod.non_terminal_children(graph, name)
+        open_children = graph_mod.non_terminal_children(_graph(), name)
         if open_children:
             errors.append(
                 graph_mod.format_guard_message(
@@ -471,7 +552,7 @@ def _evaluate_task_guards(
 
     notices = []
     if status_set in ("dropped", "superseded"):
-        deps = graph_mod.dependents(graph, name)
+        deps = graph_mod.dependents(_graph(), name)
         if deps:
             notices.append(
                 graph_mod.format_guard_message(
@@ -482,7 +563,7 @@ def _evaluate_task_guards(
             )
     if (
         status_set == "done"
-        and graph_mod.children(graph, name)
+        and graph_mod.children(_graph(), name)
         and not _body_has_flow_out(body)
     ):
         notices.append(
@@ -580,14 +661,10 @@ def _cmd_record_show(args) -> int:
     record (resolved by session-id / worktree, not a fixed name), use the
     dedicated ``lore session show``.
     """
-    record_id = getattr(args, "record_id", None)
-    as_json = bool(getattr(args, "json", False))
-    if not record_id or "/" not in record_id:
-        print(
-            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
-            file=sys.stderr,
-        )
+    record_id = _require_record_id(args)
+    if record_id is None:
         return 1
+    as_json = bool(getattr(args, "json", False))
     vault_root = _resolve_record_op_vault(record_id, args)
     return _render_record(record_id, vault_root, as_json)
 
@@ -606,12 +683,8 @@ def _cmd_record_delete(args) -> int:
     from ..record import store as record_store_mod
     from ..search import index as index_store_mod
 
-    record_id = getattr(args, "record_id", None)
-    if not record_id or "/" not in record_id:
-        print(
-            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
-            file=sys.stderr,
-        )
+    record_id = _require_record_id(args)
+    if record_id is None:
         return 1
 
     # Resolve the target vault via config (symmetric with `record create`) when a
@@ -705,9 +778,7 @@ def _cmd_record_create(args) -> int:
     # required positional already seeded above, so the applier leaves it alone.
     sidecar, field_errors = _apply_record_fields(sidecar, args)
     if field_errors:
-        for msg in field_errors:
-            print(msg, file=sys.stderr)
-        return 1
+        return _fail(field_errors)
 
     # Apply --label / --annotation / --unset-label / --unset-annotation.
     sidecar = _apply_map_labels_annotations(
@@ -819,9 +890,7 @@ def _cmd_record_create(args) -> int:
                 status_set=getattr(args, "status", None),
             )
             if guard_errors:
-                for msg in guard_errors:
-                    print(msg, file=sys.stderr)
-                return 1
+                return _fail(guard_errors)
             record_id = record_store_mod.validate_and_write(
                 location=location,
                 sidecar=sidecar,
@@ -833,9 +902,7 @@ def _cmd_record_create(args) -> int:
         finally:
             conn.close()
     except record_store_mod.RecordValidationError as exc:
-        for msg in exc.errors:
-            print(f"error: {msg}", file=sys.stderr)
-        return 1
+        return _fail(exc.errors, prefix="error: ")
     except record_store_mod.ProvenanceError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -966,12 +1033,8 @@ def _cmd_record_update(args) -> int:
     from ..record import store as record_store_mod
     from ..search import index as index_store_mod
 
-    record_id = getattr(args, "record_id", None)
-    if not record_id or "/" not in record_id:
-        print(
-            f"error: invalid RECORD_ID {record_id!r}; expected '<kind>/<name>'",
-            file=sys.stderr,
-        )
+    record_id = _require_record_id(args)
+    if record_id is None:
         return 1
 
     use_diff = bool(getattr(args, "diff", False))
@@ -1050,9 +1113,7 @@ def _cmd_record_update(args) -> int:
 
             sidecar, field_errors = _apply_record_fields(sidecar, args)
             if field_errors:
-                for msg in field_errors:
-                    print(msg, file=sys.stderr)
-                return 1
+                return _fail(field_errors)
 
             # Apply --label / --annotation / --unset-label / --unset-annotation.
             sidecar = _apply_map_labels_annotations(
@@ -1076,9 +1137,7 @@ def _cmd_record_update(args) -> int:
                 status_set=getattr(args, "status", None),
             )
             if guard_errors:
-                for msg in guard_errors:
-                    print(msg, file=sys.stderr)
-                return 1
+                return _fail(guard_errors)
 
             # (3) re-resolve the DESTINATION (root + shared trust) from the merged scope.
             dest_root, dest_shared = _resolve_destination_root(sidecar, location.kind)
@@ -1103,13 +1162,21 @@ def _cmd_record_update(args) -> int:
                 stamped, safe_body = record_store_mod.validate_stamp_neutralize(
                     location, sidecar, new_body
                 )
+                # Destination paths are confined via the shared
+                # ``confine_record_id`` seam (the same guard every RECORD_ID-bearing
+                # op uses) rather than hand-rolled — so a destination vault whose
+                # ``kind`` dir is symlinked outside its root is rejected here, not
+                # merely relied upon downstream.
+                dest_kind, dest_name, dest_body_path, dest_sidecar_path = (
+                    record_store_mod.confine_record_id(location.record_id, dest_root)
+                )
                 dest_location = record_store_mod.RecordLocation(
                     vault_root=dest_root,
-                    kind=location.kind,
-                    name=location.name,
+                    kind=dest_kind,
+                    name=dest_name,
                     record_id=location.record_id,  # ID is vault-root-agnostic
-                    body_path=Path(dest_root) / location.kind / f"{location.name}.md",
-                    sidecar_path=Path(dest_root) / location.kind / f"{location.name}.json",
+                    body_path=dest_body_path,
+                    sidecar_path=dest_sidecar_path,
                 )
                 new_id = record_store_mod.move_record(
                     old_id=location.record_id,
@@ -1132,9 +1199,7 @@ def _cmd_record_update(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except record_store_mod.RecordValidationError as exc:
-        for msg in exc.errors:
-            print(f"error: {msg}", file=sys.stderr)
-        return 1
+        return _fail(exc.errors, prefix="error: ")
     except record_store_mod.ProvenanceError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -1197,27 +1262,7 @@ def add_record_subparser(sub) -> None:
     )
     _add_record_field_flags(p_record_create)
     # Map flags (labels/annotations): dedicated branch.
-    p_record_create.add_argument(
-        "--label", dest="label_pairs", action="append", default=[],
-        metavar="KEY=VALUE",
-        help="Set a label (repeatable, upsert). Split on first '=' so "
-             "'namespace/name=value' works unescaped.",
-    )
-    p_record_create.add_argument(
-        "--annotation", dest="annotation_pairs", action="append", default=[],
-        metavar="KEY=VALUE",
-        help="Set an annotation (repeatable, upsert). Split on first '='.",
-    )
-    p_record_create.add_argument(
-        "--unset-label", dest="unset_labels", action="append", default=[],
-        metavar="KEY",
-        help="Remove a label key (repeatable). Absent key is a silent no-op.",
-    )
-    p_record_create.add_argument(
-        "--unset-annotation", dest="unset_annotations", action="append", default=[],
-        metavar="KEY",
-        help="Remove an annotation key (repeatable). Absent key is a silent no-op.",
-    )
+    _add_map_field_flags(p_record_create)
     p_record_create.set_defaults(func=cmd_record)
 
     # ``lore record update RECORD_ID``.
@@ -1265,27 +1310,7 @@ def add_record_subparser(sub) -> None:
     )
     _add_record_field_flags(p_record_update)
     # Map flags (labels/annotations): dedicated branch.
-    p_record_update.add_argument(
-        "--label", dest="label_pairs", action="append", default=[],
-        metavar="KEY=VALUE",
-        help="Set a label (repeatable, upsert). Split on first '=' so "
-             "'namespace/name=value' works unescaped.",
-    )
-    p_record_update.add_argument(
-        "--annotation", dest="annotation_pairs", action="append", default=[],
-        metavar="KEY=VALUE",
-        help="Set an annotation (repeatable, upsert). Split on first '='.",
-    )
-    p_record_update.add_argument(
-        "--unset-label", dest="unset_labels", action="append", default=[],
-        metavar="KEY",
-        help="Remove a label key (repeatable). Absent key is a silent no-op.",
-    )
-    p_record_update.add_argument(
-        "--unset-annotation", dest="unset_annotations", action="append", default=[],
-        metavar="KEY",
-        help="Remove an annotation key (repeatable). Absent key is a silent no-op.",
-    )
+    _add_map_field_flags(p_record_update)
     p_record_update.set_defaults(func=cmd_record)
 
     # ``lore record delete RECORD_ID``.

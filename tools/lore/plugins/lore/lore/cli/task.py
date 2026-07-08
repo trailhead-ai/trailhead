@@ -41,6 +41,16 @@ def _render_task_graph(graph: dict, root: str) -> str:
     lines: list[str] = []
     visited: set[str] = set()
 
+    # Build the parent -> children adjacency once, up front, instead of calling
+    # graph_mod.children (a full graph scan + sort) per node visited — an O(V^2)
+    # pattern for a V-node subtree. Inverting parent_edges() and sorting each
+    # bucket once reproduces children()'s exact ordering per parent.
+    children_map: dict[str, list[str]] = {}
+    for child, parent in graph_mod.parent_edges(graph).items():
+        children_map.setdefault(parent, []).append(child)
+    for kids in children_map.values():
+        kids.sort()
+
     def _status(name: str) -> str:
         return graph.get(name, {}).get("status", "unknown")
 
@@ -57,7 +67,7 @@ def _render_task_graph(graph: dict, root: str) -> str:
         visited.add(name)
         marker = " (runnable)" if name in runnable_leaves else ""
         lines.append(f"{'  ' * depth}{name} [{_status(name)}]{marker}{_depends_on_suffix(name)}")
-        for child in graph_mod.children(graph, name):
+        for child in children_map.get(name, []):
             _walk(child, depth + 1)
 
     _walk(root, 0)

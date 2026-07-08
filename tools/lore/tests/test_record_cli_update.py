@@ -573,6 +573,36 @@ def test_update_same_scope_is_noop_with_symlinked_vault_root(tmp_path):
     assert "moved:" not in r.stdout
 
 
+def test_update_scope_change_rejects_symlinked_dest_kind_dir(tmp_path):
+    """A move destination whose ``kind`` dir is symlinked outside the dest vault
+    is rejected — mirroring the confinement guard applied to ``--parent``/
+    ``--depends-on`` edge values, now also applied to the move destination.
+    """
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
+    body_before = (vault_a / kind / f"{name}.md").read_text()
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (vault_b / kind).symlink_to(outside, target_is_directory=True)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode != 0
+    assert "error:" in r.stderr
+
+    # Nothing written through the symlink escape; the record never moved.
+    assert not (outside / f"{name}.md").exists()
+    assert not (outside / f"{name}.json").exists()
+    assert (vault_a / kind / f"{name}.md").read_text() == body_before
+
+
 def test_update_zero_prior_scope_resolves_fresh_and_moves(tmp_path):
     """A record with no team field + ``--team beta`` resolves fresh and moves to B."""
     vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
@@ -1218,3 +1248,84 @@ def test_guard_error_messages_share_one_format(tmp_path):
     assert lines, "expected at least one graph-guard line"
     for ln in lines:
         assert shape.match(ln), f"malformed guard line: {ln!r}"
+
+
+# ---------------------------------------------------------------------------
+# guard short-circuit — no references, no vault-wide sidecar load
+# ---------------------------------------------------------------------------
+
+
+def test_status_only_update_skips_vault_wide_sidecar_load(tmp_path, monkeypatch):
+    """A plain status update with no --parent/--depends-on never loads the graph.
+
+    A node with no outgoing parent/depends-on edges can never be the entry
+    point of a NEWLY-introduced cycle or ancestor loop, so
+    ``_evaluate_task_guards`` must not call ``_load_task_sidecars`` (a
+    vault-wide glob+parse) at all for this shape of update — even though the
+    function is exercised end-to-end through the CLI, not called directly.
+    ``in-progress`` is deliberately non-terminal so the parent-completion /
+    dependent-warning / flow-out branches (which legitimately need the graph)
+    stay unfired too.
+    """
+    record_mod = load_script("lore.cli.record")
+    calls: list[str] = []
+    original = record_mod._load_task_sidecars
+
+    def _spy(vault_root):
+        calls.append(vault_root)
+        return original(vault_root)
+
+    monkeypatch.setattr(record_mod, "_load_task_sidecars", _spy)
+
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "task", "--title", "solo"],
+        vault=vault, state_dir=state, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+
+    errors, notices = record_mod._evaluate_task_guards(
+        kind="task",
+        name=record_id.split("/", 1)[1],
+        sidecar={"kind": "task", "status": "in-progress"},
+        body="body\n",
+        vault_root=str(vault),
+        status_set="in-progress",
+    )
+    assert errors == []
+    assert notices == []
+    assert calls == []
+
+
+def test_update_with_depends_on_still_loads_sidecars_for_cycle_check(tmp_path, monkeypatch):
+    """A reference-bearing update DOES load the graph (the short-circuit is scoped)."""
+    record_mod = load_script("lore.cli.record")
+    calls: list[str] = []
+    original = record_mod._load_task_sidecars
+
+    def _spy(vault_root):
+        calls.append(vault_root)
+        return original(vault_root)
+
+    monkeypatch.setattr(record_mod, "_load_task_sidecars", _spy)
+
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "task", "--title", "dep-target"],
+        vault=vault, state_dir=state, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    dep_id = r.stdout.strip()
+
+    errors, notices = record_mod._evaluate_task_guards(
+        kind="task",
+        name="depender",
+        sidecar={"kind": "task", "status": "open", "depends-on": [dep_id.split("/", 1)[1]]},
+        body="body\n",
+        vault_root=str(vault),
+        status_set="open",
+    )
+    assert errors == []
+    assert notices == []
+    assert calls == [str(vault)]

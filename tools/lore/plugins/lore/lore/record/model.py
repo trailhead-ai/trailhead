@@ -185,7 +185,7 @@ _REQUIRED_OPERATOR_KEYS: dict[str, frozenset[str]] = {
 
 
 def is_valid_kind(kind: str | None) -> bool:
-    """Return True iff ``kind`` is one of the 9 closed kinds."""
+    """Return True iff ``kind`` is one of the 8 closed kinds."""
     return kind in KINDS
 
 
