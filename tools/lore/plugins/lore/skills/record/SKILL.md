@@ -36,7 +36,8 @@ printf '%s' "<the finding, in your own words>" \
   | lore session candidate --kind <kind> --phase <phase>
 ```
 
-Or, if you're recording that an existing vault record was *used* this session:
+Or, to note that an existing vault record was *used* this session (a usage
+marker, not a candidate — nothing here is promoted at flush):
 
 ```bash
 lore session referenced <kind>/<record-name>
