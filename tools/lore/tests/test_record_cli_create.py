@@ -539,6 +539,108 @@ def test_unknown_subcommand_hints_did_you_mean(tmp_path):
     assert "did you mean" in out.lower() or "unknown" in out.lower()
 
 
+def _create_task(vault, state, title, *, extra=None, body="body\n"):
+    """Create a ``task`` record; return the CompletedProcess."""
+    args = ["record", "create", "--kind", "task", "--title", title]
+    if extra:
+        args += extra
+    return _run(args, vault=vault, state_dir=state, stdin_text=body)
+
+
+# ---------------------------------------------------------------------------
+# task graph edges: --depends-on / --parent round-trip to the sidecar
+# ---------------------------------------------------------------------------
+
+
+def test_task_depends_on_flag_round_trips(tmp_path):
+    """--depends-on appends task names to the depends-on sidecar list."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--depends-on", "x", "--depends-on", "y"])
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["depends-on"] == ["x", "y"]
+
+
+def test_task_parent_flag_round_trips(tmp_path):
+    """--parent sets the parent scalar on the sidecar."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--parent", "p"])
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["parent"] == "p"
+
+
+# ---------------------------------------------------------------------------
+# graph guards: cycle / self-parent / confinement rejection at create time
+# ---------------------------------------------------------------------------
+
+
+def test_depends_on_cycle_rejected_at_create(tmp_path):
+    """Creating a task that closes an A→B→A dependency cycle is rejected."""
+    vault, state = _make_vault(tmp_path)
+    # a depends-on b (b not yet created — dangling is allowed).
+    r1 = _create_task(vault, state, "a", extra=["--depends-on", "b"])
+    assert r1.returncode == 0, r1.stderr
+    # b depends-on a → closes the cycle a→b→a.
+    r2 = _create_task(vault, state, "b", extra=["--depends-on", "a"])
+    assert r2.returncode != 0
+    assert "graph-guard [depends-on-cycle]" in r2.stderr
+    # b was not written.
+    assert not (vault / "task" / "b.md").exists()
+
+
+def test_self_parent_rejected_at_create(tmp_path):
+    """A task whose --parent is its own name is rejected as an ancestor loop."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "loop-me", extra=["--parent", "loop-me"])
+    assert r.returncode != 0
+    assert "graph-guard [parent-loop]" in r.stderr
+    assert not (vault / "task" / "loop-me.md").exists()
+
+
+def test_traversal_parent_rejected_by_confinement(tmp_path):
+    """A path-traversal-shaped --parent value is rejected by the confinement guard."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--parent", "../../etc/passwd"])
+    assert r.returncode != 0
+    assert "graph-guard [edge-reference]" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
+def test_traversal_depends_on_rejected_by_confinement(tmp_path):
+    """A path-traversal-shaped --depends-on value is rejected by the confinement guard."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--depends-on", "../evil"])
+    assert r.returncode != 0
+    assert "graph-guard [edge-reference]" in r.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# flow-out reminder on parent completion (create with --status done)
+# ---------------------------------------------------------------------------
+
+
+def test_flow_out_reminder_when_body_lacks_section(tmp_path):
+    """--status done on a task whose body lacks '## Flow-out' prints the reminder."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--status", "done"], body="just prose\n")
+    assert r.returncode == 0, r.stderr
+    assert "graph-guard [flow-out]" in r.stderr
+
+
+def test_no_flow_out_reminder_when_body_has_section(tmp_path):
+    """A '## Flow-out' section suppresses the reminder on completion."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(
+        vault, state, "a",
+        extra=["--status", "done"],
+        body="intro\n\n## Flow-out\n- [ ] update area\n",
+    )
+    assert r.returncode == 0, r.stderr
+    assert "graph-guard [flow-out]" not in r.stderr
+
+
 def test_search_is_a_registered_command(tmp_path):
     """``search`` is a real command, not an unknown-command hint.
 
