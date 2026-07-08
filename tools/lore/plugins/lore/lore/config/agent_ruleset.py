@@ -48,7 +48,7 @@ findings during work and `lore record …` to write a durable record directly;
 Mid-task capture: `lore session candidate` is the **default** — continuous capture
 of findings during a session. `/lore:flush` promotes the outstanding candidates
 into durable records and finalizes the session. Reserve a direct `lore record`
-write for deliberately authored artifacts (`plan`, `spec`, `area`) or an explicit
+write for deliberately authored artifacts (`task`, `spec`, `area`) or an explicit
 "record this one now"; incidental findings become candidates, not records.
 """
 
@@ -65,7 +65,7 @@ work, follow-ups, area notes, and session history — all in a git-backed vault.
   session; they ride the session note and become durable records at flush.
   Capture liberally — judgment happens later.
 - `lore record …` — write a durable record directly. Reserved for deliberately
-  authored artifacts (`plan`, `spec`, `area` profile) or an explicit "record this
+  authored artifacts (`task`, `spec`, `area` profile) or an explicit "record this
   one now". Incidental findings go through a candidate instead.
 - `/lore:flush` — promote the session's candidates into durable records.
 
