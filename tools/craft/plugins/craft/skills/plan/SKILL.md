@@ -31,8 +31,8 @@ Do not use `EnterPlanMode`/`ExitPlanMode` — plan mode forces plans into an eph
 
 - **Look for an upstream spec first.** If your project uses lore, check for a `status: ready` spec on this topic (`lore search 'kind:spec status:ready'`). If one exists, it defines the *what* and *why* — your job is the *how*. Read it fully (`lore record show spec/<name>`) before proceeding. If none exists and the idea is fuzzy (acceptance criteria unclear, scope ambiguous, UI undecided), stop and route to a brainstorming skill instead.
 - Check files, docs, recent commits relevant to the request
-- For cross-subsystem features, if a knowledge-synthesis subagent is available (such as `lore:librarian`), dispatch it to get a synthesized view of subsystems, decisions, backlog items, and lessons rather than listing directories yourself. If none is configured, query the vault through the `lore` CLI directly (`lore search`, then `lore record show` — never raw file reads), and note in the plan that the prior-art synthesis pass was skipped.
-- **Consult your vault's lessons, if present,** for the touched subsystems before sketching the plan. Active lessons capture mistakes made before with concrete prevention checks — explicitly note in the plan how each relevant lesson's prevention applies (or why it doesn't). This is the same gate as a dropped backlog item, just one level higher: a dropped approach says "don't try X technique"; lessons say "don't repeat Y kind of judgment error."
+- For cross-subsystem features, if a knowledge-synthesis subagent is available (such as `lore:librarian`), dispatch it to get a synthesized view of subsystems, decisions, tasks, and lessons rather than listing directories yourself. If none is configured, query the vault through the `lore` CLI directly (`lore search`, then `lore record show` — never raw file reads), and note in the plan that the prior-art synthesis pass was skipped.
+- **Consult your vault's lessons, if present,** for the touched subsystems before sketching the plan. Active lessons capture mistakes made before with concrete prevention checks — explicitly note in the plan how each relevant lesson's prevention applies (or why it doesn't). This is the same gate as a dropped task, just one level higher: a dropped approach says "don't try X technique"; lessons say "don't repeat Y kind of judgment error."
 - For genuinely complex existing code you need to understand before designing, dispatch `researcher` rather than burning your own context on file surveying
 - If the request spans multiple independent subsystems, flag it immediately — decompose before designing
 
@@ -94,23 +94,42 @@ Slices don't need step-by-step implementation detail. The subagent figures out h
 
 ### 8. Write the Plan
 
-Persist the plan with `lore record create` (`../_shared/note-storage.md`): render craft's plan body template (`templates/plan.md`), fill in the sections, then pipe the filled body to it — `printf '%s' "$BODY" | lore record create --kind plan --title "<topic>" --status draft`. This stores it as a searchable lore `plan` record, which keeps it linkable from session notes and future planning.
+A plan is persisted as a **`task` record graph** (`../_shared/note-storage.md`): one parent
+`task` record for the plan as a whole, plus one child `task` record per slice, wired to the
+parent and ordered against each other with the graph edges.
 
-If the `lore` CLI is not on PATH, write the plan to a `plans/` directory in your vault manually, mirroring the template shape below.
+1. **Create the parent task.** Render craft's parent-task body template (`templates/plan.md`),
+   fill in the sections, then pipe it in — `printf '%s' "$BODY" | lore record create --kind
+   task --title "<topic>" --status ready`. This stores the plan as a searchable lore `task`
+   record, linkable from session notes and future planning.
+2. **Create a child task per slice.** Render craft's child-task body template
+   (`templates/task.md`) for each slice, then create it contained by the parent and ordered
+   after any slice it builds on — `printf '%s' "$SLICE_BODY" | lore record create --kind task
+   --title "<slice topic>" --status ready --parent <parent-name> --depends-on
+   <earlier-slice-name>`. Create children at `ready`; the `depends-on` edges — not the status —
+   gate which are runnable, so a later slice stays un-runnable until its dependencies are
+   `done`. Omit `--depends-on` for slices with no predecessor.
+3. **Verify the graph** with `lore task graph <parent-name>` — confirm the containment subtree,
+   `depends-on` edges, and per-task statuses match your slice ordering before handing off.
 
-**Populate `related-subsystems:` frontmatter** from your vault's subsystem profiles, if present — so the plan is linked to the areas it touches. List every subsystem the plan touches, not just the primary one.
+If the `lore` CLI is not on PATH, write the parent plan and its slice bodies to a `plans/`
+directory in your vault manually, mirroring the template shapes.
 
-If an upstream spec exists, link the plan to it with `lore record update <plan-id> --related spec=<spec-name>` and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
+**Populate `related-subsystems:` frontmatter** on the parent task from your vault's subsystem profiles, if present — so the plan is linked to the areas it touches. List every subsystem the plan touches, not just the primary one.
 
-The plan body template (`templates/plan.md`) carries these canonical sections — fill each in:
+If an upstream spec exists, link the parent task to it with `lore record update <parent-id> --related spec=<spec-name>` and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
+
+The parent-task body template (`templates/plan.md`) carries these canonical sections — fill each in:
 
 - **Goal** — one or two sentences
-- **Architecture** — 2-3 sentences about the approach
-- **Given Axioms** — the ground truth this plan rests on. Each axiom must be either (a) verifiable at a file:line citation, (b) traced to a recorded decision/ADR, or (c) a constraint stated by the user. If you'd need to investigate to know it's true, it belongs in **Known Unknowns**, not here.
-- **Known Unknowns** — checkbox list; each notes which slice it blocks.
-- **Slices** — each slice carries Delivers / Test contract / Files, plus "Unknown to resolve first" and "Depends on" where applicable.
+- **Delta design** — 2-3 sentences about the approach to the change
+- **Given Axioms** — the ground truth this plan rests on, each **as a citation**. Each axiom must be either (a) verifiable at a file:line citation, (b) traced to a recorded decision/ADR, or (c) a constraint stated by the user. If you'd need to investigate to know it's true, it belongs in **Known Unknowns**, not here.
+- **Known Unknowns** — checkbox list; each notes which child task (slice) it blocks.
+- **`## Flow-out`** — the knowledge-flow-out completion gate (ticked at execution time before the parent goes `done`); leave the checklist unticked here.
 
-Leave the `## Council Review` section for Step 8.5 to append — do not pre-fill it.
+Each child-task body (`templates/task.md`) carries **Delivers / Test contract / Files**, plus "Unknown to resolve first" and "Depends on" noted in the body where applicable (the `depends-on` edge is the machine-checked form).
+
+Leave the `## Council Review` section for Step 8.5 to append to the parent task — do not pre-fill it.
 
 ### 8.5. Council Review (mandatory)
 
@@ -121,12 +140,14 @@ After the plan is written and before presenting it for approval, dispatch a coun
 This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens Critical bars in `_shared/council.md`, not via per-invocation opt-outs.
 
 **Dispatch:** per `_shared/council.md`, make four parallel `Agent` tool calls — one each to `builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the **prompt template, per-lens Critical bars, and synthesis rules in `_shared/council.md`** — do not re-inline them here. Fill the template's substitution tokens BEFORE sending each member its prompt (never ship a literal `<token>`):
-- the context-pointer line → these two lines (substitute `<spec-path>` with the plan's linked spec absolute path; if the plan has no `related-spec` frontmatter, replace the whole `Spec:` line with `Spec: none — review against the plan's own Goal and Architecture blocks`):
+- the context-pointer line → these two lines (substitute `<spec-path>` with the plan's linked spec absolute path; if the plan has no `related-spec` frontmatter, replace the whole `Spec:` line with `Spec: none — review against the plan's own Goal and Delta design blocks`):
   ```text
   Review the implementation plan and its linked spec against your lens.
   Plan: <plan-path>
   Spec: <spec-path>
   ```
+  (`<plan-path>` points at the parent task; the reviewer reads its child tasks via `lore task
+  graph <parent-name>`.)
 - `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in `_shared/council.md`
 - `<cross-cutting>` → this plan-specific extra Critical block:
   ```text
@@ -149,7 +170,7 @@ For each Critical finding, the user assigns one of:
 
 Important and Minor findings do NOT require dispositions — they are logged for the audit trail only.
 
-**Persistence:** append a `## Council Review` section to the plan file capturing all findings and the disposition for each Critical. Each Critical disposition is exactly one of `resolved` / `bounced-back-to-spec` / `accepted-as-risk: <reason>` / `disputed: <reason>`. Mirror this populated shape:
+**Persistence:** append a `## Council Review` section to the parent task's body capturing all findings and the disposition for each Critical. Each Critical disposition is exactly one of `resolved` / `bounced-back-to-spec` / `accepted-as-risk: <reason>` / `disputed: <reason>`. Mirror this populated shape:
 
 ```markdown
 ## Council Review
