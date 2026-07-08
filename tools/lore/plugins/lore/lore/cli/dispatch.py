@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import areas, flush, init, record, search, session, sync, vault
+from . import areas, flush, init, record, search, session, sync, task, vault
 
 
 # Table mapping removed/renamed commands to their replacements.
@@ -38,13 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Registration order determines the ``--help`` subcommand listing; it mirrors
     # the historical single-file ``build_parser`` (init, status, sync, flush,
-    # areas, reindex, search, record, vault, session).
+    # areas, reindex, search, record, task, vault, session).
     init.add_init_subparsers(sub)
     sync.add_sync_subparser(sub)
     flush.add_flush_subparser(sub)
     areas.add_areas_subparsers(sub)
     search.add_search_subparser(sub)
     record.add_record_subparser(sub)
+    task.add_task_subparser(sub)
     vault.add_vault_subparser(sub)
     session.add_session_subparser(sub)
 
