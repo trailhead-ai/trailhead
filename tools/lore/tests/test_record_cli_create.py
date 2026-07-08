@@ -621,22 +621,42 @@ def test_traversal_depends_on_rejected_by_confinement(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_flow_out_reminder_when_body_lacks_section(tmp_path):
-    """--status done on a task whose body lacks '## Flow-out' prints the reminder."""
+def test_flow_out_reminder_when_parent_body_lacks_section(tmp_path):
+    """--status done on a parent whose body lacks '## Flow-out' prints the reminder.
+
+    The child is created first (already terminal, so it satisfies the
+    parent-completion guard), pointing ``--parent`` at the not-yet-created "a"
+    (edges are not existence-checked) — so by the time "a" itself is created it
+    already has a child in the graph.
+    """
     vault, state = _make_vault(tmp_path)
+    _create_task(vault, state, "kid", extra=["--parent", "a", "--status", "done"])
     r = _create_task(vault, state, "a", extra=["--status", "done"], body="just prose\n")
     assert r.returncode == 0, r.stderr
     assert "graph-guard [flow-out]" in r.stderr
 
 
-def test_no_flow_out_reminder_when_body_has_section(tmp_path):
-    """A '## Flow-out' section suppresses the reminder on completion."""
+def test_no_flow_out_reminder_when_parent_body_has_section(tmp_path):
+    """A '## Flow-out' section suppresses the reminder on a parent's completion."""
     vault, state = _make_vault(tmp_path)
+    _create_task(vault, state, "kid", extra=["--parent", "a", "--status", "done"])
     r = _create_task(
         vault, state, "a",
         extra=["--status", "done"],
         body="intro\n\n## Flow-out\n- [ ] update area\n",
     )
+    assert r.returncode == 0, r.stderr
+    assert "graph-guard [flow-out]" not in r.stderr
+
+
+def test_no_flow_out_reminder_for_childless_task(tmp_path):
+    """A childless leaf task set to done never gets the flow-out reminder.
+
+    Leaf tasks use the child template, which has no '## Flow-out' section by
+    design — the reminder is scoped to parent completion only.
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _create_task(vault, state, "a", extra=["--status", "done"], body="just prose\n")
     assert r.returncode == 0, r.stderr
     assert "graph-guard [flow-out]" not in r.stderr
 

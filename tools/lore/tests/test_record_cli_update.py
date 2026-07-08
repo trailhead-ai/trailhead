@@ -1128,20 +1128,31 @@ def test_dependent_warning_on_delete_does_not_block(tmp_path):
     assert not (vault / "task" / "a.md").exists()
 
 
-def test_flow_out_reminder_iff_body_lacks_section(tmp_path):
+def test_flow_out_reminder_iff_parent_body_lacks_section(tmp_path):
     """Completing a parent prints the flow-out reminder only when body lacks the section."""
     vault, state = _make_vault(tmp_path)
-    # No section → reminder.
+    # No section → reminder (only fires for a task with children).
     plain = _mk_task(vault, state, "plain", body="prose only\n")
+    _mk_task(vault, state, "plain-kid", extra=["--parent", "plain", "--status", "done"])
     u1 = _run(["record", "update", plain, "--status", "done"], vault=vault, state_dir=state)
     assert u1.returncode == 0, u1.stderr
     assert "graph-guard [flow-out]" in u1.stderr
 
     # Has section → no reminder (metadata-only update keeps the body).
     ritual = _mk_task(vault, state, "ritual", body="intro\n\n## Flow-out\n- [ ] x\n")
+    _mk_task(vault, state, "ritual-kid", extra=["--parent", "ritual", "--status", "done"])
     u2 = _run(["record", "update", ritual, "--status", "done"], vault=vault, state_dir=state)
     assert u2.returncode == 0, u2.stderr
     assert "graph-guard [flow-out]" not in u2.stderr
+
+
+def test_no_flow_out_reminder_for_childless_task_on_update(tmp_path):
+    """A childless leaf task set to done via update never gets the flow-out reminder."""
+    vault, state = _make_vault(tmp_path)
+    leaf = _mk_task(vault, state, "leaf", body="prose only\n")
+    u = _run(["record", "update", leaf, "--status", "done"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert "graph-guard [flow-out]" not in u.stderr
 
 
 def test_non_task_kind_unaffected_by_dependent_guard(tmp_path):

@@ -144,10 +144,45 @@ def test_find_dependency_cycle_none_for_acyclic():
     assert g.find_dependency_cycle(graph, start="a") is None
 
 
+def test_find_dependency_cycle_none_for_diamond_reconvergence():
+    """A diamond (a→b, a→c, b→d, c→d) is acyclic even though d is reached twice.
+
+    Exercises the ``visited``-set re-convergence path: once ``d`` is fully
+    explored via ``b``, revisiting it via ``c`` must short-circuit rather than
+    be mistaken for a cycle (the false-positive risk this DFS design invites).
+    """
+    g = _graph()
+    graph = {
+        "a": _task(depends_on=["b", "c"]),
+        "b": _task(depends_on=["d"]),
+        "c": _task(depends_on=["d"]),
+        "d": _task(),
+    }
+    assert g.find_dependency_cycle(graph, start="a") is None
+
+
 def test_find_dependency_cycle_ignores_dangling_deps():
     g = _graph()
     graph = {"a": _task(depends_on=["ghost"])}
     assert g.find_dependency_cycle(graph, start="a") is None
+
+
+def test_find_dependency_cycle_does_not_attribute_unrelated_cycle_to_start():
+    """A cycle reachable from ``start`` but not containing it is not reported.
+
+    ``a`` depends on ``b``; ``b``/``c`` form a pre-existing cycle that does not
+    involve ``a`` at all. Writing ``a`` did not create that cycle, so the
+    write-guard scoped to ``start="a"`` must not misattribute it.
+    """
+    g = _graph()
+    graph = {
+        "a": _task(depends_on=["b"]),
+        "b": _task(depends_on=["c"]),
+        "c": _task(depends_on=["b"]),
+    }
+    assert g.find_dependency_cycle(graph, start="a") is None
+    # The pre-existing b<->c cycle is still detected when scoped to itself.
+    assert g.find_dependency_cycle(graph, start="b") is not None
 
 
 # ---------------------------------------------------------------------------

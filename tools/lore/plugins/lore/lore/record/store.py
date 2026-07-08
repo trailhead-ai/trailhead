@@ -515,6 +515,17 @@ def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, 
     return kind, name, body_path, sidecar_path
 
 
+def confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, Path]:
+    """Public alias for :func:`_confine_record_id` — the module's confinement seam.
+
+    Exposed so callers outside this module (e.g. the CLI's ``--parent``/
+    ``--depends-on`` edge-reference guard) validate a candidate RECORD_ID against
+    the SAME confinement rule as every in-module caller, without reaching into a
+    private, underscore-prefixed name.
+    """
+    return _confine_record_id(record_id, root)
+
+
 # ---------------------------------------------------------------------------
 # place_record
 # ---------------------------------------------------------------------------

@@ -136,9 +136,12 @@ def find_dependency_cycle(
 
     Follows ``depends-on`` edges. When *start* is given, only cycles reachable
     from that node are searched (the write-guard case: only the in-flight node's
-    edges changed). The returned path repeats its entry node at both ends —
-    e.g. ``["a", "b", "a"]`` for ``a → b → a`` — so a caller can render the loop
-    verbatim. Dangling dependency targets are treated as edge-free leaves.
+    edges changed) — and a cycle is only reported if it actually **contains**
+    *start*, so a pre-existing cycle elsewhere in the graph (reachable from, but
+    not passing through, *start*) is never misattributed to the in-flight write.
+    The returned path repeats its entry node at both ends — e.g. ``["a", "b",
+    "a"]`` for ``a → b → a`` — so a caller can render the loop verbatim.
+    Dangling dependency targets are treated as edge-free leaves.
     """
     edges = depends_on_edges(graph)
     origins = [start] if start is not None else list(edges)
@@ -146,6 +149,8 @@ def find_dependency_cycle(
     for origin in origins:
         found = _dfs_cycle(origin, edges, [], set(), visited)
         if found is not None:
+            if start is not None and start not in found:
+                continue
             return found
     return None
 

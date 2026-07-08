@@ -350,7 +350,7 @@ def _confine_edge_reference(value: str, vault_root: str) -> str | None:
 
     ``--parent``/``--depends-on`` values are record names, so they flow through the
     SAME name-resolution/confinement guard every RECORD_ID-bearing op uses
-    (:func:`record_store._confine_record_id`): a ``..`` segment, absolute
+    (:func:`record_store.confine_record_id`): a ``..`` segment, absolute
     component, NUL byte, or empty/degenerate segment is rejected before the value
     is ever written. Existence is deliberately NOT checked — referential integrity
     is not enforced (a dangling edge is valid, per the record model's shape-only
@@ -362,7 +362,7 @@ def _confine_edge_reference(value: str, vault_root: str) -> str | None:
     if not value:
         return graph_mod.format_guard_message("edge-reference", "empty task reference")
     try:
-        record_store_mod._confine_record_id(f"task/{value}", vault_root)
+        record_store_mod.confine_record_id(f"task/{value}", vault_root)
     except record_store_mod.InvalidRecordIdError as exc:
         return graph_mod.format_guard_message(
             "edge-reference", f"unsafe task reference {value!r}: {exc}"
@@ -480,7 +480,11 @@ def _evaluate_task_guards(
                     offenders=deps,
                 )
             )
-    if status_set == "done" and not _body_has_flow_out(body):
+    if (
+        status_set == "done"
+        and graph_mod.children(graph, name)
+        and not _body_has_flow_out(body)
+    ):
         notices.append(
             graph_mod.format_guard_message(
                 "flow-out",
