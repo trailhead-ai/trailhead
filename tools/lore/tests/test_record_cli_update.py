@@ -573,6 +573,36 @@ def test_update_same_scope_is_noop_with_symlinked_vault_root(tmp_path):
     assert "moved:" not in r.stdout
 
 
+def test_update_scope_change_rejects_symlinked_dest_kind_dir(tmp_path):
+    """A move destination whose ``kind`` dir is symlinked outside the dest vault
+    is rejected — mirroring the confinement guard applied to ``--parent``/
+    ``--depends-on`` edge values, now also applied to the move destination.
+    """
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    kind, name = rid.split("/", 1)
+    body_before = (vault_a / kind / f"{name}.md").read_text()
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (vault_b / kind).symlink_to(outside, target_is_directory=True)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--team", "beta"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode != 0
+    assert "error:" in r.stderr
+
+    # Nothing written through the symlink escape; the record never moved.
+    assert not (outside / f"{name}.md").exists()
+    assert not (outside / f"{name}.json").exists()
+    assert (vault_a / kind / f"{name}.md").read_text() == body_before
+
+
 def test_update_zero_prior_scope_resolves_fresh_and_moves(tmp_path):
     """A record with no team field + ``--team beta`` resolves fresh and moves to B."""
     vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
@@ -1016,3 +1046,286 @@ def test_update_inside_group_does_not_relocate_record(tmp_path):
     assert (vault / kind / f"{name}.md").exists()
     assert not (trailhead_vault / kind / f"{name}.md").exists()
     assert _find_body(vault, record_id) == "updated body\n"
+
+
+# ===========================================================================
+# Task graph guards on update / delete
+# ===========================================================================
+
+
+def _mk_task(vault, state, title, *, extra=None, body="body\n"):
+    """Create a ``task`` record and return its RECORD_ID."""
+    args = ["record", "create", "--kind", "task", "--title", title]
+    if extra:
+        args += extra
+    r = _run(args, vault=vault, state_dir=state, stdin_text=body)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_unset_depends_on_and_parent_round_trip(tmp_path):
+    """--unset-depends-on removes one dep; --unset-parent clears the parent scalar."""
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_task(vault, state, "a", extra=["--depends-on", "x", "--depends-on", "y", "--parent", "p"])
+    before = _find_sidecar(vault, rid)
+    assert before["depends-on"] == ["x", "y"]
+    assert before["parent"] == "p"
+
+    u = _run(
+        ["record", "update", rid, "--unset-depends-on", "x", "--unset-parent"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert u.returncode == 0, u.stderr
+    after = _find_sidecar(vault, rid)
+    assert after["depends-on"] == ["y"]
+    assert "parent" not in after
+
+
+def test_depends_on_cycle_rejected_on_update(tmp_path):
+    """update introducing A→B→A is rejected and the record is left unchanged."""
+    vault, state = _make_vault(tmp_path)
+    a = _mk_task(vault, state, "a")
+    _mk_task(vault, state, "b", extra=["--depends-on", "a"])
+    # a depends-on b would close the cycle a→b→a.
+    u = _run(["record", "update", a, "--depends-on", "b"], vault=vault, state_dir=state)
+    assert u.returncode != 0
+    assert "graph-guard [depends-on-cycle]" in u.stderr
+    # a's sidecar unchanged — no depends-on written.
+    assert "depends-on" not in _find_sidecar(vault, a)
+
+
+def test_deep_ancestor_loop_rejected_on_update(tmp_path):
+    """A three-level parent loop (c→a→b→c) is rejected."""
+    vault, state = _make_vault(tmp_path)
+    c = _mk_task(vault, state, "c")
+    _mk_task(vault, state, "b", extra=["--parent", "c"])
+    _mk_task(vault, state, "a", extra=["--parent", "b"])
+    # Point c's parent at a → closes c→a→b→c.
+    u = _run(["record", "update", c, "--parent", "a"], vault=vault, state_dir=state)
+    assert u.returncode != 0
+    assert "graph-guard [parent-loop]" in u.stderr
+    assert "parent" not in _find_sidecar(vault, c)
+
+
+def test_status_done_with_open_children_rejected_naming_them(tmp_path):
+    """--status done on a parent with a non-terminal child is rejected, naming the child."""
+    vault, state = _make_vault(tmp_path)
+    parent = _mk_task(vault, state, "parent")
+    _mk_task(vault, state, "kid", extra=["--parent", "parent"])  # status defaults to open
+    u = _run(["record", "update", parent, "--status", "done"], vault=vault, state_dir=state)
+    assert u.returncode != 0
+    assert "graph-guard [parent-completion]" in u.stderr
+    assert "kid" in u.stderr
+    # Parent was not completed.
+    assert _find_sidecar(vault, parent)["status"] != "done"
+
+
+def test_terminal_children_satisfy_completion_guard(tmp_path):
+    """Children in done/dropped/superseded do not block the parent completing."""
+    vault, state = _make_vault(tmp_path)
+    parent = _mk_task(vault, state, "parent")
+    _mk_task(vault, state, "kid-done", extra=["--parent", "parent", "--status", "done"])
+    _mk_task(vault, state, "kid-dropped", extra=["--parent", "parent", "--status", "dropped"])
+    _mk_task(vault, state, "kid-sup", extra=["--parent", "parent", "--status", "superseded"])
+    u = _run(["record", "update", parent, "--status", "done"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert _find_sidecar(vault, parent)["status"] == "done"
+
+
+def test_dependent_warning_on_drop_does_not_block(tmp_path):
+    """Dropping a depended-on task warns listing dependents but succeeds (exit 0)."""
+    vault, state = _make_vault(tmp_path)
+    a = _mk_task(vault, state, "a")
+    _mk_task(vault, state, "b", extra=["--depends-on", "a"])
+    u = _run(["record", "update", a, "--status", "dropped"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert "graph-guard [dependents]" in u.stderr
+    assert "b" in u.stderr
+    # The drop still happened — it is a warning, not a block.
+    assert _find_sidecar(vault, a)["status"] == "dropped"
+
+
+def test_dependent_warning_on_delete_does_not_block(tmp_path):
+    """Deleting a depended-on task warns listing dependents but succeeds."""
+    vault, state = _make_vault(tmp_path)
+    a = _mk_task(vault, state, "a")
+    _mk_task(vault, state, "b", extra=["--depends-on", "a"])
+    d = _run(["record", "delete", a], vault=vault, state_dir=state)
+    assert d.returncode == 0, d.stderr
+    assert "graph-guard [dependents]" in d.stderr
+    assert "b" in d.stderr
+    assert not (vault / "task" / "a.md").exists()
+
+
+def test_flow_out_reminder_iff_parent_body_lacks_section(tmp_path):
+    """Completing a parent prints the flow-out reminder only when body lacks the section."""
+    vault, state = _make_vault(tmp_path)
+    # No section → reminder (only fires for a task with children).
+    plain = _mk_task(vault, state, "plain", body="prose only\n")
+    _mk_task(vault, state, "plain-kid", extra=["--parent", "plain", "--status", "done"])
+    u1 = _run(["record", "update", plain, "--status", "done"], vault=vault, state_dir=state)
+    assert u1.returncode == 0, u1.stderr
+    assert "graph-guard [flow-out]" in u1.stderr
+
+    # Has section → no reminder (metadata-only update keeps the body).
+    ritual = _mk_task(vault, state, "ritual", body="intro\n\n## Flow-out\n- [ ] x\n")
+    _mk_task(vault, state, "ritual-kid", extra=["--parent", "ritual", "--status", "done"])
+    u2 = _run(["record", "update", ritual, "--status", "done"], vault=vault, state_dir=state)
+    assert u2.returncode == 0, u2.stderr
+    assert "graph-guard [flow-out]" not in u2.stderr
+
+
+def test_no_flow_out_reminder_for_childless_task_on_update(tmp_path):
+    """A childless leaf task set to done via update never gets the flow-out reminder."""
+    vault, state = _make_vault(tmp_path)
+    leaf = _mk_task(vault, state, "leaf", body="prose only\n")
+    u = _run(["record", "update", leaf, "--status", "done"], vault=vault, state_dir=state)
+    assert u.returncode == 0, u.stderr
+    assert "graph-guard [flow-out]" not in u.stderr
+
+
+def test_non_task_kind_unaffected_by_dependent_guard(tmp_path):
+    """A non-task record sharing a name with a task is not swept into the task graph.
+
+    A task ``bar`` depends-on task ``foo``. Dropping the *task* ``foo`` warns;
+    dropping a *decision* that happens to be named ``foo`` does not — the guards
+    are task-gated and read only the task/ subtree.
+    """
+    vault, state = _make_vault(tmp_path)
+    _mk_task(vault, state, "foo")
+    _mk_task(vault, state, "bar", extra=["--depends-on", "foo"])
+    # A decision named foo (decision vocab includes 'dropped').
+    dc = _run(
+        ["record", "create", "--kind", "decision", "--title", "foo"],
+        vault=vault, state_dir=state, stdin_text="body\n",
+    )
+    assert dc.returncode == 0, dc.stderr
+    decision_id = dc.stdout.strip()
+    assert decision_id.startswith("decision/")
+
+    # Dropping the decision must NOT warn about the task's dependents.
+    ud = _run(["record", "update", decision_id, "--status", "dropped"], vault=vault, state_dir=state)
+    assert ud.returncode == 0, ud.stderr
+    assert "graph-guard [dependents]" not in ud.stderr
+
+    # Dropping the task DOES warn (proves the guard is live, just task-scoped).
+    ut = _run(["record", "update", "task/foo", "--status", "dropped"], vault=vault, state_dir=state)
+    assert ut.returncode == 0, ut.stderr
+    assert "graph-guard [dependents]" in ut.stderr
+    assert "bar" in ut.stderr
+
+
+def test_guard_error_messages_share_one_format(tmp_path):
+    """Every graph-guard line (errors + warning) matches the one shared shape."""
+    import re
+
+    vault, state = _make_vault(tmp_path)
+    shape = re.compile(r"^graph-guard \[[a-z-]+\]: ", re.MULTILINE)
+
+    lines: list[str] = []
+
+    # depends-on cycle.
+    a = _mk_task(vault, state, "a")
+    _mk_task(vault, state, "b", extra=["--depends-on", "a"])
+    r_cycle = _run(["record", "update", a, "--depends-on", "b"], vault=vault, state_dir=state)
+    lines += [ln for ln in r_cycle.stderr.splitlines() if ln.startswith("graph-guard")]
+
+    # parent loop.
+    r_loop = _run(["record", "update", a, "--parent", "a"], vault=vault, state_dir=state)
+    lines += [ln for ln in r_loop.stderr.splitlines() if ln.startswith("graph-guard")]
+
+    # parent completion.
+    parent = _mk_task(vault, state, "parent")
+    _mk_task(vault, state, "kid", extra=["--parent", "parent"])
+    r_done = _run(["record", "update", parent, "--status", "done"], vault=vault, state_dir=state)
+    lines += [ln for ln in r_done.stderr.splitlines() if ln.startswith("graph-guard")]
+
+    # dependent warning.
+    r_warn = _run(["record", "update", a, "--status", "dropped"], vault=vault, state_dir=state)
+    lines += [ln for ln in r_warn.stderr.splitlines() if ln.startswith("graph-guard")]
+
+    assert lines, "expected at least one graph-guard line"
+    for ln in lines:
+        assert shape.match(ln), f"malformed guard line: {ln!r}"
+
+
+# ---------------------------------------------------------------------------
+# guard short-circuit — no references, no vault-wide sidecar load
+# ---------------------------------------------------------------------------
+
+
+def test_status_only_update_skips_vault_wide_sidecar_load(tmp_path, monkeypatch):
+    """A plain status update with no --parent/--depends-on never loads the graph.
+
+    A node with no outgoing parent/depends-on edges can never be the entry
+    point of a NEWLY-introduced cycle or ancestor loop, so
+    ``_evaluate_task_guards`` must not call ``_load_task_sidecars`` (a
+    vault-wide glob+parse) at all for this shape of update — even though the
+    function is exercised end-to-end through the CLI, not called directly.
+    ``in-progress`` is deliberately non-terminal so the parent-completion /
+    dependent-warning / flow-out branches (which legitimately need the graph)
+    stay unfired too.
+    """
+    record_mod = load_script("lore.cli.record")
+    calls: list[str] = []
+    original = record_mod._load_task_sidecars
+
+    def _spy(vault_root):
+        calls.append(vault_root)
+        return original(vault_root)
+
+    monkeypatch.setattr(record_mod, "_load_task_sidecars", _spy)
+
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "task", "--title", "solo"],
+        vault=vault, state_dir=state, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+
+    errors, notices = record_mod._evaluate_task_guards(
+        kind="task",
+        name=record_id.split("/", 1)[1],
+        sidecar={"kind": "task", "status": "in-progress"},
+        body="body\n",
+        vault_root=str(vault),
+        status_set="in-progress",
+    )
+    assert errors == []
+    assert notices == []
+    assert calls == []
+
+
+def test_update_with_depends_on_still_loads_sidecars_for_cycle_check(tmp_path, monkeypatch):
+    """A reference-bearing update DOES load the graph (the short-circuit is scoped)."""
+    record_mod = load_script("lore.cli.record")
+    calls: list[str] = []
+    original = record_mod._load_task_sidecars
+
+    def _spy(vault_root):
+        calls.append(vault_root)
+        return original(vault_root)
+
+    monkeypatch.setattr(record_mod, "_load_task_sidecars", _spy)
+
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "task", "--title", "dep-target"],
+        vault=vault, state_dir=state, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    dep_id = r.stdout.strip()
+
+    errors, notices = record_mod._evaluate_task_guards(
+        kind="task",
+        name="depender",
+        sidecar={"kind": "task", "status": "open", "depends-on": [dep_id.split("/", 1)[1]]},
+        body="body\n",
+        vault_root=str(vault),
+        status_set="open",
+    )
+    assert errors == []
+    assert notices == []
+    assert calls == [str(vault)]

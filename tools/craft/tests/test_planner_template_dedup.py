@@ -36,9 +36,8 @@ _REQUIRED_SPEC_SECTIONS = [
 
 _REQUIRED_PLAN_SECTIONS = [
     "Goal",
-    "Architecture",
+    "Delta design",
     "Known Unknowns",
-    "Slices",
 ]
 
 

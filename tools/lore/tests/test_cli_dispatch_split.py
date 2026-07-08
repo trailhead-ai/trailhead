@@ -90,13 +90,13 @@ class TestHelpAtEveryLevel:
         assert f"usage: {prog}" in result.stdout, result.stdout
 
     def test_top_level_help_lists_every_command_group(self, tmp_path):
-        """The single top-level parser lists all ten command groups, in order."""
+        """The single top-level parser lists all eleven command groups, in order."""
         result = _run(["--help"], tmp_path)
         assert result.returncode == 0
         # Registration order is load-bearing for the help listing; assert the
         # exact choices string argparse renders.
         assert (
-            "{init,status,sync,flush,areas,reindex,search,record,vault,session}"
+            "{init,status,sync,flush,areas,reindex,search,record,task,vault,session}"
             in result.stdout
         )
 

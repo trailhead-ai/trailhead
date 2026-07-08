@@ -20,7 +20,7 @@ You are building a slice of a larger feature using strict TDD. The controller di
 The dispatch prompt will give you:
 
 - **plan path** — the plan file the caller provides
-- **slice number and name** — which slice to build
+- **task name** — the child task record to build
 - **proven unknowns** — assumption-prover's VALIDATED summary, if an assumption-prover ran. Otherwise "None."
 - **assumption-prover tests to clean up** — file paths / line ranges to remove once your behavioral tests cover that ground. Or "None."
 - **working directory** — the repo or worktree to operate in

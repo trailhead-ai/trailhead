@@ -6,8 +6,8 @@ etc.) per the public-repo fixture discipline axiom — never real brain content.
 Test contract (all must fail before the fix, pass after):
 - Block-style surfaces:  - '[[area/synth-alpha]]' → ["synth-alpha"]
 - Inline surfaces: ["[[area/synth-alpha]]", "[[tools/synth-tool]]"] → ["synth-alpha", "synth-tool"]
-- Prefix coverage: area/, tools/, AND plan/ all strip to bare slug for overlap keys
-  (singular vault dirs — areas/ and plans/ prefixes are retired)
+- Prefix coverage: area/, tools/, AND task/ all strip to bare slug for overlap keys
+  (singular vault dirs — areas/ and tasks/ prefixes are retired)
 - related-spec: '[[specs/synth-spec-slug]]' → "specs/synth-spec-slug"
   (full path, NOT slug-reduced, NOT a list)
 - Bare-slug forms (inline [a, b] and block - a) unchanged (regression guard)
@@ -78,11 +78,11 @@ class TestWikilinkUnwrapSlugReduced:
         result = _fm("surfaces:\n  - '[[tools/synth-tool]]'")
         assert result["surfaces"] == ["synth-tool"]
 
-    def test_block_wikilink_plans_prefix_stripped(self):
-        """Block-style [[plan/synth-plan]] → synth-plan for surfaces key.
-        Singular vault dirs — plan/ (not plans/)."""
-        result = _fm("surfaces:\n  - '[[plan/synth-plan]]'")
-        assert result["surfaces"] == ["synth-plan"]
+    def test_block_wikilink_tasks_prefix_stripped(self):
+        """Block-style [[task/synth-task]] → synth-task for surfaces key.
+        Singular vault dirs — task/ (not tasks/)."""
+        result = _fm("surfaces:\n  - '[[task/synth-task]]'")
+        assert result["surfaces"] == ["synth-task"]
 
     def test_block_wikilink_double_quoted(self):
         """Block-style double-quoted wikilink → slug-reduced (singular prefix)."""
@@ -105,11 +105,11 @@ class TestWikilinkUnwrapSlugReduced:
         assert result["related-areas"] == ["synth-alpha"]
 
     def test_all_three_prefixes_for_each_overlap_key(self):
-        """area/, tools/, plan/ all strip for surfaces key (singular dirs)."""
+        """area/, tools/, task/ all strip for surfaces key (singular dirs)."""
         for prefix, slug in [
             ("area", "synth-alpha"),
             ("tools", "synth-tool"),
-            ("plan", "synth-plan"),
+            ("task", "synth-task"),
         ]:
             result = _fm(f"surfaces:\n  - '[[{prefix}/{slug}]]'")
             assert result["surfaces"] == [slug], (
@@ -130,12 +130,12 @@ class TestNonOverlapWikilinkFields:
         assert result["related-spec"] == "specs/synth-spec-slug"
         assert not isinstance(result["related-spec"], list)
 
-    def test_related_plan_keeps_full_path(self):
-        """related-plan: '[[plans/synth-plan-slug]]' → 'plans/synth-plan-slug'
+    def test_related_task_keeps_full_path(self):
+        """related-task: '[[tasks/synth-task-slug]]' → 'tasks/synth-task-slug'
         (scalar, full path)."""
-        result = _fm("related-plan: '[[plans/synth-plan-slug]]'")
-        assert result["related-plan"] == "plans/synth-plan-slug"
-        assert not isinstance(result["related-plan"], list)
+        result = _fm("related-task: '[[tasks/synth-task-slug]]'")
+        assert result["related-task"] == "tasks/synth-task-slug"
+        assert not isinstance(result["related-task"], list)
 
     def test_scalar_wikilink_unwraps_in_place(self):
         """Arbitrary scalar wikilink field → full target string, not a list."""

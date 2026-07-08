@@ -1,6 +1,6 @@
 ---
 name: research
-description: Dispatch a lore research agent — the deep `investigator` for open-ended how/why/tradeoff investigations that span multiple files and systems, or the lighter `researcher` for quick lookups and polling `tracking`-status backlog items. Use for /lore:research, "investigate how X works", "research the tradeoffs of Y", "look up where Z is documented", "poll the tracking backlog".
+description: Dispatch a lore research agent — the deep `investigator` for open-ended how/why/tradeoff investigations that span multiple files and systems, or the lighter `researcher` for quick lookups and polling `blocked`-status tasks. Use for /lore:research, "investigate how X works", "research the tradeoffs of Y", "look up where Z is documented", "poll blocked tasks".
 ---
 
 # /lore:research — Dispatch a lore research agent
@@ -31,21 +31,20 @@ specific note, API, function, config option, or doc and return a pointer plus a
 short excerpt. It's the cheap path when you don't need the investigator's deep
 synthesis.
 
-It is also the agent for **polling `tracking`-status backlog items** — periodic
-status checks on the tracking backlog (has a tracked item changed? did a backlog
-item's revisit condition fire?), where each poll is a quick lookup, not an
-investigation.
+It is also the agent for **polling `blocked`-status tasks** — periodic
+status checks on blocked work (has a dependency cleared? did an external
+condition fire?), where each poll is a quick lookup, not an investigation.
 
 Good fits:
 - "Where is the `lore search` query shape documented?"
 - "Find the area profile for the auth module."
-- "Poll the `tracking`-status backlog items and report any that changed state."
+- "Poll the `blocked`-status tasks and report any that changed state."
 
 ## Choosing — signal to yourself before dispatching
 
 - Open-ended, multi-file, "understand before acting" → **`investigator`** (deep,
   expensive).
-- Single-target lookup, or a `tracking`-backlog status poll → **`researcher`**
+- Single-target lookup, or a `blocked`-status task poll → **`researcher`**
   (cheap, light).
 
 When in doubt and the question is genuinely open-ended, prefer `investigator`;
@@ -53,7 +52,7 @@ when it's "find me X" or "did Y move", prefer `researcher`.
 
 ## Process
 
-1. Classify the question (deep investigation vs. lookup / tracking poll).
+1. Classify the question (deep investigation vs. lookup / blocked-task poll).
 2. Dispatch the matching lore agent (`investigator` or `researcher`) with the
    question and any relevant context.
 3. Relay the agent's synthesized answer to the user. Both agents return a

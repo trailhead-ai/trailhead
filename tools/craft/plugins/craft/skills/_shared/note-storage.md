@@ -4,14 +4,18 @@ Persist plans and specs through the `lore` CLI. The planning skills (`brainstorm
 `plan`, `polish`) and the `planner` agent use the commands below for their plan/spec
 lifecycle operations.
 
-- Craft owns the plan/spec template **bodies** at
-  `${CLAUDE_PLUGIN_ROOT}/templates/plan.md` and `${CLAUDE_PLUGIN_ROOT}/templates/spec.md`
-  (section skeleton only — Goal / Architecture / Slices …; Problem / Objectives /
+- Craft owns the template **bodies** at `${CLAUDE_PLUGIN_ROOT}/templates/plan.md`,
+  `${CLAUDE_PLUGIN_ROOT}/templates/task.md`, and `${CLAUDE_PLUGIN_ROOT}/templates/spec.md`
+  (section skeletons only — parent task: Goal / Delta design / Given Axioms / Known Unknowns /
+  `## Flow-out`; child task: Delivers / Test contract / Files; spec: Problem / Objectives /
   Acceptance Criteria …). Render the body, then pipe it to `lore record create`.
-- `plan` and `spec` are lore **record kinds** with their own status vocabs
-  (plan: `draft → ready → in-progress → complete`; spec: `draft → ready → planned →
-  complete`). Persisting a plan/spec is `lore record create --kind plan|spec` — **not**
-  `lore new`.
+- A **plan is a `task` record graph**, not a single document. The parent plan is one `task`
+  record (rendered from `templates/plan.md`); each slice is a child `task` record (rendered
+  from `templates/task.md`) wired to the parent with `--parent` and ordered against its
+  siblings with `--depends-on`. A **spec** is a `spec` record. `task` and `spec` each carry
+  their own status vocab (task: `open → ready → in-progress → done`, off-path `blocked` /
+  `dropped` / `superseded`; spec: `draft → ready → planned → complete`). Persisting a plan or
+  spec is `lore record create --kind task|spec` — **not** `lore new`.
 - **Vault-write rule:** record bodies are authored **through the lore CLI** (`lore record
   create` reads the body from stdin), never by direct file edits to a vault path.
 
@@ -26,10 +30,29 @@ The new record ID (`<kind>/<name>`) is printed on stdout.
 
 ```sh
 printf '%s' "$BODY" | lore record create \
-  --kind plan \
+  --kind task \
   --title "<topic>" \
-  --status draft
+  --status ready
 ```
+
+### `graph(parent, children)`
+
+A plan is a parent task plus its child tasks. Create the parent first, then create each child
+with `--parent <parent-name>` (the containment edge) and, where a slice depends on an earlier
+one, `--depends-on <sibling-name>` (the ordering edge). Both flags are `task`-only.
+
+```sh
+# parent
+printf '%s' "$PARENT_BODY" | lore record create \
+  --kind task --title "<plan topic>" --status ready
+# child slice, contained by the parent and ordered after an earlier slice
+printf '%s' "$CHILD_BODY" | lore record create \
+  --kind task --title "<slice topic>" --status ready \
+  --parent <parent-name> --depends-on <earlier-slice-name>
+```
+
+Render the resulting graph — containment subtree, `depends-on` edges, per-task status, and
+runnable markers on workable leaves — with `lore task graph <parent-name>`.
 
 ### `status(handle, status)`
 
@@ -37,17 +60,19 @@ Advance a record's status with `lore record update` and the `--status <value>` f
 status is validated against the kind's vocab):
 
 ```sh
-lore record update <kind>/<name> --status ready
+lore record update task/<name> --status in-progress
 ```
 
-This covers brainstorm's `draft → ready`, planning's `ready → planned`, and execute's
-`in-progress → complete`.
+This covers a child task's `ready → in-progress → done` walk and the parent's `ready →
+in-progress → done` lifecycle. Setting a parent `--status done` while it still has
+non-terminal children is refused (the children are named in the error); a parent completed
+without a `## Flow-out` section gets a non-blocking flow-out reminder.
 
 ### `link(plan → spec)`
 
-Point a plan at its upstream spec by adding the spec to the plan's `related` map under the
-`spec` kind (the `--related <kind>=<name>` flag, which appends to that kind's list):
+Point the parent plan task at its upstream spec by adding the spec to the task's `related` map
+under the `spec` kind (the `--related <kind>=<name>` flag, which appends to that kind's list):
 
 ```sh
-lore record update <plan-kind>/<plan-name> --related spec=<spec-name>
+lore record update task/<parent-name> --related spec=<spec-name>
 ```

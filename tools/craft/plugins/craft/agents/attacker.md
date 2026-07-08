@@ -43,7 +43,7 @@ You think like a red-teamer. For the question at hand, ask:
 - Does it introduce a new dependency? What's that dependency's security track record?
 
 **Precedent**
-- Have we had a vuln, near-miss, or explicit decision about this shape before? Consult the project's knowledge vault, **if one is present** (e.g. decisions, dropped backlog items, subsystem profiles) — via the `lore:librarian` subagent (below), never by reading vault files directly.
+- Have we had a vuln, near-miss, or explicit decision about this shape before? Consult the project's knowledge vault, **if one is present** (e.g. decisions, dropped tasks, subsystem profiles) — via the `lore:librarian` subagent (below), never by reading vault files directly.
 - Is there a known class of attack (OWASP, CVE pattern) this shape falls into? Name it.
 
 Ground every claim. Hand-waved paranoia is noise; a specific attack path with the first two steps named is signal.

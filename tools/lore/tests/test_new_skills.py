@@ -10,7 +10,7 @@ These three skills sit on top of the rewired session skills:
                 / `lore session …`. Its trigger must be scope-disjoint from
                 `checkpoint` (which is a session *sweep*).
   - `research` — dispatches the lore `investigator` agent (deep) or `researcher`
-                agent (lighter / `tracking`-backlog polling). Dispatch targets
+                agent (lighter / `blocked`-task polling). Dispatch targets
                 must resolve to real agent FILES.
 
 The FINAL LOCKSTEP GATE greps ALL retained lore skills for the removed
@@ -199,15 +199,18 @@ def test_research_dispatch_targets_resolve_to_real_agent_files():
 
 def test_research_signals_investigator_vs_researcher_selection():
     """research must explain WHEN to pick the deep `investigator` vs the lighter
-    `researcher` (incl. `tracking`-backlog polling) so the caller routes
+    `researcher` (incl. `blocked`-task polling) so the caller routes
     correctly (council Minor — Advocate)."""
     text = _skill_text("research").lower()
     assert "deep" in text, (
         "research/SKILL.md must signal `investigator` is the deep/expensive path"
     )
-    assert "tracking" in text, (
-        "research/SKILL.md must document `researcher` for polling `tracking`-status "
-        "backlog items"
+    assert "blocked" in text, (
+        "research/SKILL.md must document `researcher` for polling `blocked`-status "
+        "tasks"
+    )
+    assert "tracking" not in text, (
+        "research/SKILL.md must not reference the retired `tracking` status"
     )
 
 

@@ -2,7 +2,7 @@
 
 Agent-native project memory that works with your existing setup. Lore captures
 the durable, non-obvious things worth remembering across sessions — decisions,
-lessons, backlog items (work to revisit, abandoned approaches, things to watch),
+lessons, tasks (work to revisit, abandoned approaches, things to watch),
 area mental models, and a running session log — and surfaces what's relevant on
 demand.
 
@@ -12,15 +12,15 @@ CLI (invoked over `Bash`) plus `Bash(git)` — no MCP server, no bespoke tools.
 ## What lore captures
 
 Capture is one skill — `/lore:record` (`lore record create --kind <kind>`) —
-over a **closed set of nine kinds**:
+over a **closed set of eight kinds**:
 
 | Kind | What it records |
 |---|---|
 | `decision` | Non-obvious architectural choices and their reasoning |
 | `lesson` | A mistake plus a concrete prevention check |
-| `backlog` | Work to revisit, an approach abandoned, or an external thing to watch — distinguished by `status` (`open` / `tracking` / `dropped`) |
+| `task` | Anything worth seeing through to completion — implementation work, a deferred item, an abandoned approach, or an external thing to watch — distinguished by `status` (`open` / `ready` / `in-progress` / `blocked` / `done` / `dropped` / `superseded`) |
 | `area` | Mental model of a codebase area (files, gotchas, conventions) |
-| `spec`, `plan` | Spec → plan artifacts |
+| `spec` | Frozen specification artifacts |
 | `collaboration` | Working-style preferences and conventions |
 | `blob` | Freeform capture that doesn't fit another kind |
 | `session` | One note per working session — the running log |
@@ -85,7 +85,7 @@ demand via `lore areas` and surfaced through lore's agent-rules orientation.
 
 The agent reads the area map as part of its normal task analysis, matches the
 current task to one or more areas, and runs `lore search 'area:<name>'` to
-pull that area's accumulated memory — decisions, lessons, and backlog items
+pull that area's accumulated memory — decisions, lessons, and tasks
 linked to that area — into the conversation. The search is **scoped and
 explainable**: the agent can say "I searched the auth-module area because the
 task touches login flows," not just "here is some context." Search also covers
@@ -107,23 +107,22 @@ The pre-commit guard rejects non-canonical values. See the vault's
 Key transitions:
 
 - **session:** `dirty` → `clean`
-- **backlog:** `open` → `tracking` / `dropped`
+- **task:** `open` → `ready` → `in-progress` → `done` (off-path: `blocked` / `dropped` / `superseded`)
 - **decision:** `active` → `superseded` / `dropped`
 - **lesson:** `active` → `conditional`
-- **plan / spec:** `draft` → `ready` → … → `complete` (off-path: `superseded` / `dropped`)
+- **spec:** `draft` → `ready` → … → `complete` (off-path: `superseded` / `dropped`)
 
 ## Record kinds
 
-The kind set is closed — nine kinds:
+The kind set is closed — eight kinds:
 
 - `session` — one note per working session (the running log)
 - `area` — mental models of codebase areas
 - `decision` — lightweight ADRs
 - `lesson` — mistakes plus prevention checks
-- `backlog` — work to revisit, abandoned approaches, things to watch (status: open/tracking/dropped)
+- `task` — work to track to completion: implementation work, deferred items, abandoned approaches, things to watch (status: open/ready/in-progress/blocked/done/dropped/superseded)
 - `collaboration` — working-style preferences
 - `spec` — specification artifacts
-- `plan` — implementation plans
 - `blob` — freeform captures that don't fit another kind
 
 ## Searching the vault

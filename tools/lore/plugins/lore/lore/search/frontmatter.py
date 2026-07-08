@@ -19,8 +19,8 @@ _SLUG_REDUCED_KEYS = frozenset({"surfaces", "areas", "related-areas"})
 
 # Path prefixes stripped when slug-reducing overlap-key wikilink values.
 # Singular kind dirs: vault directories are singular, so a wikilink
-# like ``[[area/foo]]`` / ``[[plan/foo]]`` slug-reduces to ``foo``.
-_SLUG_PREFIXES = ("area/", "tools/", "plan/")
+# like ``[[area/foo]]`` / ``[[task/foo]]`` slug-reduces to ``foo``.
+_SLUG_PREFIXES = ("area/", "tools/", "task/")
 
 
 def _unwrap_wikilink(value: str) -> str:
@@ -57,7 +57,7 @@ def _parse_fm_text(text: str) -> dict:
 
     For every list item (inline or block): strips surrounding quotes and
     unwraps [[wikilinks]]. For overlap keys (surfaces, areas,
-    related-areas), the path prefix (area/, tools/, plan/) is
+    related-areas), the path prefix (area/, tools/, task/) is
     stripped to a bare slug. For all other keys, the full wikilink target
     is kept verbatim.
     """

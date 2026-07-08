@@ -17,7 +17,7 @@ silently omitting a step.
 
 | Capability | How it degrades | How it surfaces to the user | Re-add path |
 |---|---|---|---|
-| `note_store` — Plan/spec persistence provider (brainstorm / plan / polish / planner; `skills/_shared/note-storage.md`) | Default provider is **lore** (`lore record create --kind plan\|spec`). Per-repo config resolution and any non-lore provider are **deferred** — only the lore default exists, so there is no fallback provider to elect | "note_store: using the lore provider (alternative providers deferred)" — the seam names lore as the sole provider; if the `lore` CLI is absent the planner falls back to its documented manual-write path | Implement an alternative provider behind the `note_store` contract (`skills/_shared/note-storage.md`) + per-repo config resolution — both deferred to forthcoming craft changes |
+| `note_store` — Task/spec persistence provider (brainstorm / plan / polish / planner; `skills/_shared/note-storage.md`) | Default provider is **lore** (`lore record create --kind task\|spec`). Per-repo config resolution and any non-lore provider are **deferred** — only the lore default exists, so there is no fallback provider to elect | "note_store: using the lore provider (alternative providers deferred)" — the seam names lore as the sole provider; if the `lore` CLI is absent the planner falls back to its documented manual-write path | Implement an alternative provider behind the `note_store` contract (`skills/_shared/note-storage.md`) + per-repo config resolution — both deferred to forthcoming craft changes |
 
 ## Removed, not degraded
 

@@ -47,8 +47,8 @@ operators.
   ``-x`` is canonically represented as ``Not(x)``.
 
 **``field:(a or b)`` expansion:**
-``kind:(spec or plan)`` is expanded at parse time to
-``Or(FieldEq("kind","spec"), FieldEq("kind","plan"))`` — one leaf per value,
+``kind:(spec or task)`` is expanded at parse time to
+``Or(FieldEq("kind","spec"), FieldEq("kind","task"))`` — one leaf per value,
 distributed over the OR. This is the simplest form for the compiler to pattern-match.
 
 **Known fields (hard error on anything else):**

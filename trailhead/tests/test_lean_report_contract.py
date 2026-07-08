@@ -319,67 +319,71 @@ def _split_execute_at_section(text: str, section_heading: str) -> str:
 
 
 class TestExecuteSkillSection5WorkingSet:
-    """§5 Update the plan file: must name the per-cycle working set and no-full-reread."""
+    """§5 Update the task graph: must name the per-cycle working set and no-full-reread.
 
-    def test_section5_names_current_slice_in_working_set(self):
-        """§5 must reference 'current slice' as part of the working-set directive."""
+    A plan is now a parent `task` record whose slices are child `task` records, so §5 updates
+    the task graph (per-task status + parent lifecycle) rather than a single plan document.
+    """
+
+    def test_section5_names_current_child_task_in_working_set(self):
+        """§5 must reference the 'current child task' as part of the working-set directive."""
         text = _execute_skill_text()
-        section = _split_execute_at_section(text, "Update the plan file")
-        assert "current slice" in section.lower(), (
-            "skills/execute/SKILL.md §5 must name 'current slice' in the working-set directive — "
-            "the controller's per-cycle working set is the current slice section "
-            "+ unknowns checklist."
+        section = _split_execute_at_section(text, "Update the task graph")
+        assert "current child task" in section.lower(), (
+            "skills/execute/SKILL.md §5 must name the 'current child task' in the working-set "
+            "directive — the controller's per-cycle working set is the current child task "
+            "+ the parent's Known Unknowns block."
         )
 
-    def test_section5_names_unknowns_checklist_in_working_set(self):
-        """§5 must reference 'unknowns checklist' as part of the working-set directive."""
+    def test_section5_names_unknowns_in_working_set(self):
+        """§5 must reference the parent's 'Known Unknowns' block in the working-set directive."""
         text = _execute_skill_text()
-        section = _split_execute_at_section(text, "Update the plan file")
-        assert "unknowns checklist" in section.lower(), (
-            "skills/execute/SKILL.md §5 must name 'unknowns checklist' in the "
+        section = _split_execute_at_section(text, "Update the task graph")
+        assert "known unknowns" in section.lower(), (
+            "skills/execute/SKILL.md §5 must name the 'Known Unknowns' block in the "
             "working-set directive."
         )
 
-    def test_section5_states_does_not_reread_full_plan(self):
-        """§5 must contain the contiguous phrase 'does not re-read the full plan'.
+    def test_section5_states_does_not_reread_full_graph(self):
+        """§5 must contain the contiguous phrase 'does not re-read the whole graph'.
 
         This is the load-bearing POSITIVE that distinguishes a real working-set constraint
-        from prose that merely mentions 'plan'. The contiguous phrase must be present.
+        from prose that merely mentions the graph. The contiguous phrase must be present.
         """
         text = _execute_skill_text()
-        section = _split_execute_at_section(text, "Update the plan file")
-        assert "does not re-read the full plan" in section.lower(), (
+        section = _split_execute_at_section(text, "Update the task graph")
+        assert "does not re-read the whole graph" in section.lower(), (
             "skills/execute/SKILL.md §5 must contain the contiguous phrase "
-            "'does not re-read the full plan' — asserting the controller pins its "
-            "working set to the current slice + unknowns checklist rather than re-reading "
-            "the entire plan each cycle."
+            "'does not re-read the whole graph' — asserting the controller pins its "
+            "working set to the current child task + Known Unknowns rather than re-reading "
+            "the entire graph each cycle."
         )
 
     def test_section5_preserves_source_of_truth_language(self):
-        """INVARIANT: §5 must retain plan-file-as-source-of-truth language.
+        """INVARIANT: §5 must retain source-of-truth language.
 
         This invariant must not be regressed. A rewrite that strips
         'source of truth' must go RED.
         """
         text = _execute_skill_text()
-        section = _split_execute_at_section(text, "Update the plan file")
+        section = _split_execute_at_section(text, "Update the task graph")
         assert "source of truth" in section.lower(), (
             "skills/execute/SKILL.md §5 must retain 'source of truth' language — "
-            "spec Constraint: do not regress the plan-file-as-source-of-truth invariant."
+            "spec Constraint: the task graph is the source of truth for what's left."
         )
 
-    def test_section5_preserves_draft_to_in_progress_status_flip(self):
-        """INVARIANT: §5 must retain the draft→in-progress status-flip behavior.
+    def test_section5_preserves_ready_to_in_progress_status_flip(self):
+        """INVARIANT: §5 must retain the parent ready→in-progress status-flip behavior.
 
-        This behavior must be preserved. Stripping 'draft' or
-        'in-progress' from §5 must cause this test to go RED.
+        The unified `task` kind has no `draft` status; the parent-task lifecycle flip is
+        `ready → in-progress`. Stripping 'ready' or 'in-progress' from §5 must go RED.
         """
         text = _execute_skill_text()
-        section = _split_execute_at_section(text, "Update the plan file")
-        has_draft = "draft" in section.lower()
+        section = _split_execute_at_section(text, "Update the task graph")
+        has_ready = "ready" in section.lower()
         has_in_progress = "in-progress" in section.lower()
-        assert has_draft and has_in_progress, (
-            "skills/execute/SKILL.md §5 must retain the draft→in-progress status-flip behavior "
-            "(assert 'draft' and 'in-progress' both present). "
-            f"Found: draft={has_draft}, in-progress={has_in_progress}."
+        assert has_ready and has_in_progress, (
+            "skills/execute/SKILL.md §5 must retain the parent ready→in-progress status-flip "
+            "behavior (assert 'ready' and 'in-progress' both present). "
+            f"Found: ready={has_ready}, in-progress={has_in_progress}."
         )
