@@ -15,17 +15,16 @@ def rm():
 # --- declarative model + accessors ---------------------------------
 
 
-def test_kinds_are_exactly_the_nine():
+def test_kinds_are_exactly_the_eight():
     assert set(rm().KINDS) == {
         "area",
-        "backlog",
         "blob",
         "collaboration",
         "decision",
         "lesson",
-        "plan",
         "session",
         "spec",
+        "task",
     }
 
 
@@ -36,19 +35,10 @@ def test_version_is_v1():
 def test_status_vocab_matches_spec_per_kind():
     vocab = rm().STATUS_VOCAB
     assert set(vocab["area"]) == {"active"}
-    assert set(vocab["backlog"]) == {"open", "tracking", "dropped"}
     assert set(vocab["blob"]) == {"active"}
     assert set(vocab["collaboration"]) == {"active"}
     assert set(vocab["decision"]) == {"active", "superseded", "dropped"}
     assert set(vocab["lesson"]) == {"active", "conditional"}
-    assert set(vocab["plan"]) == {
-        "draft",
-        "ready",
-        "in-progress",
-        "complete",
-        "superseded",
-        "dropped",
-    }
     assert set(vocab["session"]) == {"dirty", "clean"}
     assert set(vocab["spec"]) == {
         "draft",
@@ -58,27 +48,35 @@ def test_status_vocab_matches_spec_per_kind():
         "superseded",
         "dropped",
     }
+    assert set(vocab["task"]) == {
+        "open",
+        "ready",
+        "in-progress",
+        "blocked",
+        "done",
+        "dropped",
+        "superseded",
+    }
 
 
 def test_status_vocab_is_ordered_tuple_not_frozenset():
     """First element == initial; ordering must be preserved (tuple, not set)."""
     vocab = rm().STATUS_VOCAB
     assert all(isinstance(v, tuple) for v in vocab.values())
-    assert vocab["plan"][0] == "draft"
-    assert vocab["backlog"][0] == "open"
+    assert vocab["spec"][0] == "draft"
+    assert vocab["task"][0] == "open"
 
 
 def test_initial_status_per_kind():
     m = rm()
     assert m.initial_status("area") == "active"
-    assert m.initial_status("backlog") == "open"
     assert m.initial_status("blob") == "active"
     assert m.initial_status("collaboration") == "active"
     assert m.initial_status("decision") == "active"
     assert m.initial_status("lesson") == "active"
-    assert m.initial_status("plan") == "draft"
     assert m.initial_status("session") == "dirty"
     assert m.initial_status("spec") == "draft"
+    assert m.initial_status("task") == "open"
 
 
 def test_phases_are_ordered_closed_set():
@@ -192,7 +190,7 @@ def _worked_example_spec_sidecar():
         "updated-at": "2026-06-17T15:10:00Z",
         "updated-by": "tom.duffield@gmail.com",
         "team": "trailhead",
-        "related": {"plan": ["kql-search-rollout"], "decision": ["why-kql-subset"]},
+        "related": {"task": ["kql-search-rollout"], "decision": ["why-kql-subset"]},
         "related-phases": ["frame"],
     }
 
@@ -218,6 +216,36 @@ def test_invalid_kind_rejected():
     sidecar["kind"] = "widget"
     result = rm().validate(sidecar)
     assert any("widget" in e for e in result.errors)
+
+
+def test_backlog_kind_rejected_naming_it():
+    """``backlog`` was retired in favor of ``task`` — rejected, naming it."""
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["kind"] = "backlog"
+    result = rm().validate(sidecar)
+    assert any("backlog" in e for e in result.errors)
+
+
+def test_plan_kind_rejected_naming_it():
+    """``plan`` was retired in favor of ``task`` — rejected, naming it."""
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["kind"] = "plan"
+    result = rm().validate(sidecar)
+    assert any("plan" in e for e in result.errors)
+
+
+def test_backlog_rejected_as_related_map_key_naming_it():
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["related"] = {"backlog": ["x"]}
+    result = rm().validate(sidecar)
+    assert any("related.backlog" in e for e in result.errors)
+
+
+def test_plan_rejected_as_related_map_key_naming_it():
+    sidecar = _worked_example_spec_sidecar()
+    sidecar["related"] = {"plan": ["x"]}
+    result = rm().validate(sidecar)
+    assert any("related.plan" in e for e in result.errors)
 
 
 def test_status_outside_vocab_rejected_naming_value_and_allowed_set():
@@ -271,7 +299,7 @@ def test_keywords_as_string_rejected_naming_key():
 
 def test_related_not_a_map_rejected():
     sidecar = _worked_example_spec_sidecar()
-    sidecar["related"] = ["plan", "decision"]
+    sidecar["related"] = ["task", "decision"]
     result = rm().validate(sidecar)
     assert any("related" in e for e in result.errors)
 
@@ -285,9 +313,9 @@ def test_related_non_kind_key_names_path():
 
 def test_related_value_not_list_of_str_names_path():
     sidecar = _worked_example_spec_sidecar()
-    sidecar["related"] = {"plan": "not-a-list"}
+    sidecar["related"] = {"task": "not-a-list"}
     result = rm().validate(sidecar)
-    assert any("related.plan" in e for e in result.errors)
+    assert any("related.task" in e for e in result.errors)
 
 
 def test_datetime_not_iso_rejected_naming_key():
@@ -351,7 +379,7 @@ def test_version_non_v1_rejected_with_named_error():
 
 def test_related_empty_list_boundary_clean():
     sidecar = _worked_example_spec_sidecar()
-    sidecar["related"] = {"plan": []}
+    sidecar["related"] = {"task": []}
     result = rm().validate(sidecar)
     assert result.errors == []
 
@@ -380,10 +408,10 @@ def test_lesson_conditional_clean():
     assert result.errors == []
 
 
-def test_backlog_tracking_clean():
+def test_task_blocked_clean():
     sidecar = _worked_example_spec_sidecar()
-    sidecar["kind"] = "backlog"
-    sidecar["status"] = "tracking"
+    sidecar["kind"] = "task"
+    sidecar["status"] = "blocked"
     sidecar.pop("related", None)
     sidecar.pop("related-phases", None)
     result = rm().validate(sidecar)
@@ -577,6 +605,91 @@ def test_annotations_same_key_rules_as_labels():
         result = rm().validate(sidecar)
         msg = f"expected error for {desc} key {bad_key!r}"
         assert any(bad_key in e for e in result.errors), msg
+
+
+# --- kind-gated fields: depends-on / parent (task-only graph edges) --------
+
+
+def _base_task_sidecar_with(**extra):
+    """Minimal valid task sidecar with optional extras merged in."""
+    s = {
+        "version": "v1",
+        "kind": "task",
+        "title": "Test Task",
+        "status": "open",
+        "created-at": "2026-06-17T14:32:00Z",
+        "created-by": "tester@example.com",
+        "updated-at": "2026-06-17T15:00:00Z",
+        "updated-by": "tester@example.com",
+    }
+    s.update(extra)
+    return s
+
+
+def test_kind_gated_fields_table_exact():
+    """``depends-on``/``parent`` are gated to ``task`` only, and nothing else is gated."""
+    assert rm().KIND_GATED_FIELDS == {
+        "depends-on": frozenset({"task"}),
+        "parent": frozenset({"task"}),
+    }
+
+
+def test_depends_on_in_fields_v1_as_list_str():
+    fields = rm().FIELDS_V1
+    assert fields["depends-on"].type_tag == "list[str]"
+    assert fields["depends-on"].required is False
+
+
+def test_parent_in_fields_v1_as_str():
+    fields = rm().FIELDS_V1
+    assert fields["parent"].type_tag == "str"
+    assert fields["parent"].required is False
+
+
+def test_depends_on_accepted_on_task():
+    sidecar = _base_task_sidecar_with(**{"depends-on": ["other-task"]})
+    result = rm().validate(sidecar)
+    assert result.errors == []
+
+
+def test_parent_accepted_on_task():
+    sidecar = _base_task_sidecar_with(parent="parent-task")
+    result = rm().validate(sidecar)
+    assert result.errors == []
+
+
+_NON_TASK_KINDS = sorted(rm().KINDS - {"task"})
+
+
+def test_non_task_kinds_are_the_expected_seven():
+    """Guards the parametrized rejection tests below against a silent kind-set drift."""
+    assert _NON_TASK_KINDS == [
+        "area",
+        "blob",
+        "collaboration",
+        "decision",
+        "lesson",
+        "session",
+        "spec",
+    ]
+
+
+def test_depends_on_rejected_on_every_non_task_kind_naming_field_and_kind():
+    for kind in _NON_TASK_KINDS:
+        sidecar = _base_sidecar_with(kind=kind, **{"depends-on": ["other"]})
+        result = rm().validate(sidecar)
+        joined = " ".join(result.errors)
+        assert "depends-on" in joined, f"kind={kind!r}: {result.errors}"
+        assert kind in joined, f"kind={kind!r}: {result.errors}"
+
+
+def test_parent_rejected_on_every_non_task_kind_naming_field_and_kind():
+    for kind in _NON_TASK_KINDS:
+        sidecar = _base_sidecar_with(kind=kind, parent="some-parent")
+        result = rm().validate(sidecar)
+        joined = " ".join(result.errors)
+        assert "parent" in joined, f"kind={kind!r}: {result.errors}"
+        assert kind in joined, f"kind={kind!r}: {result.errors}"
 
 
 # --- session status vocab → {dirty, clean} ---------------------------------

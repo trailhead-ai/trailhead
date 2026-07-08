@@ -413,16 +413,16 @@ def test_related_phase_flag_appends(tmp_path):
 
 
 def test_related_map_flag_appends_under_kind(tmp_path):
-    """--related plan=foo --related plan=bar → related == {'plan': ['foo','bar']}."""
+    """--related task=foo --related task=bar → related == {'task': ['foo','bar']}."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + ["--related", "plan=foo", "--related", "plan=bar"],
+        _BASE_ARGS + ["--related", "task=foo", "--related", "task=bar"],
         vault=vault,
         state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     sidecar = _find_sidecar(vault, r.stdout.strip())
-    assert sidecar["related"] == {"plan": ["foo", "bar"]}
+    assert sidecar["related"] == {"task": ["foo", "bar"]}
 
 
 def test_related_map_invalid_kind_nonzero_names_kind(tmp_path):
@@ -439,10 +439,10 @@ def test_related_map_invalid_kind_nonzero_names_kind(tmp_path):
 
 
 def test_related_map_empty_name_rejected_by_guard(tmp_path):
-    """--related plan= (empty name) → non-zero from the applier guard (before validate)."""
+    """--related task= (empty name) → non-zero from the applier guard (before validate)."""
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + ["--related", "plan="],
+        _BASE_ARGS + ["--related", "task="],
         vault=vault,
         state_dir=state,
     )

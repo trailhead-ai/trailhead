@@ -1,7 +1,7 @@
 """Canonical lore record model + pure sidecar validator.
 
 This module is the single, machine-checkable definition of *what a lore record
-is*: the closed set of 9 kinds, the per-record JSON sidecar field schema (`v1`),
+is*: the closed set of 8 kinds, the per-record JSON sidecar field schema (`v1`),
 the per-kind status vocabularies and their initial/default value, the phases
 taxonomy, and a **pure** `validate(sidecar, kind)` function.
 
@@ -12,15 +12,17 @@ files or touches the search index — the validator operates on an already-parse
 dict and is shared verbatim by the `lore record` CLI and the migration.
 
 Invariants:
-- The kind set is closed: exactly the 9 kinds in ``KINDS``; any other ``kind`` is
+- The kind set is closed: exactly the 8 kinds in ``KINDS``; any other ``kind`` is
   rejected.
 - Each record carries ``version: v1``; the schema is keyed by ``(kind, version)``,
   but in ``v1`` all kinds share one global field schema (``FIELDS_V1``).
 - ``status`` is drawn from the kind's ordered vocab; the **first** element is the
   initial/default value applied when ``status`` is omitted on create.
+- ``depends-on``/``parent`` are gated to ``task`` records only (``KIND_GATED_FIELDS``);
+  present on any other kind, they are rejected naming both the field and the kind.
 - The validator checks **shape, not referential integrity**: ``related`` keys must
   be valid kinds and values ``list[str]``, but referenced names are *not* verified
-  to exist (a dangling ``{"plan": ["nope"]}`` validates clean — existence is
+  to exist (a dangling ``{"task": ["nope"]}`` validates clean — existence is
   enforced nowhere; the index materializes whatever edges exist).
 - ``created-by``/``updated-by`` are plaintext provenance PII (e.g. a git email),
   git-tracked, exactly as the legacy YAML frontmatter already stored. They are
@@ -42,18 +44,19 @@ from typing import NamedTuple
 
 # --- Canonical declarative model --------------------------------------------
 
-#: The closed set of 9 record kinds. Any other ``kind`` value is rejected.
+#: The closed set of 8 record kinds. Any other ``kind`` value is rejected.
+#: ``task`` unifies the former ``backlog``/``plan`` kinds — a single kind for
+#: anything worth tracking to completion, ordered via ``depends-on``/``parent``.
 KINDS: frozenset[str] = frozenset(
     {
         "area",
-        "backlog",
         "blob",
         "collaboration",
         "decision",
         "lesson",
-        "plan",
         "session",
         "spec",
+        "task",
     }
 )
 
@@ -70,14 +73,21 @@ VERSION: str = "v1"
 #: Ordered (not a ``frozenset``) so "first == initial" is well-defined.
 STATUS_VOCAB: dict[str, tuple[str, ...]] = {
     "area": ("active",),
-    "backlog": ("open", "tracking", "dropped"),
     "blob": ("active",),
     "collaboration": ("active",),
     "decision": ("active", "superseded", "dropped"),
     "lesson": ("active", "conditional"),
-    "plan": ("draft", "ready", "in-progress", "complete", "superseded", "dropped"),
     "session": ("dirty", "clean"),
     "spec": ("draft", "ready", "planned", "complete", "superseded", "dropped"),
+    "task": (
+        "open",
+        "ready",
+        "in-progress",
+        "blocked",
+        "done",
+        "dropped",
+        "superseded",
+    ),
 }
 
 #: The closed, ordered phase taxonomy. ``related-phases`` is a subset of these;
@@ -136,10 +146,23 @@ FIELDS_V1: dict[str, FieldSpec] = {
     "related-phases": FieldSpec(required=False, type_tag=_LIST_STR),
     "labels": FieldSpec(required=False, type_tag=_MAP_STR_STR),
     "annotations": FieldSpec(required=False, type_tag=_MAP_STR_STR),
+    "depends-on": FieldSpec(required=False, type_tag=_LIST_STR),
+    "parent": FieldSpec(required=False, type_tag=_STR),
 }
 
 #: Schema registry keyed by version (only ``v1`` exists today).
 _SCHEMAS: dict[str, dict[str, FieldSpec]] = {"v1": FIELDS_V1}
+
+#: Fields gated to a subset of kinds — present here means "the field is a valid
+#: sidecar key everywhere, but only ``validate()``-clean on the listed kinds".
+#: ``depends-on``/``parent`` are ``task``-only graph edges; naming a field here
+#: is the entire mechanism for rejecting it on every other surviving kind
+#: (naming both the field and the offending kind in the error). A field absent
+#: from this table is ungated — valid on any kind, as before this table existed.
+KIND_GATED_FIELDS: dict[str, frozenset[str]] = {
+    "depends-on": frozenset({"task"}),
+    "parent": frozenset({"task"}),
+}
 
 # Derived key sets are constant per version, so compute them once at import
 # rather than rebuilding a frozenset on every accessor call (the migration may
@@ -369,7 +392,7 @@ def validate(sidecar: dict, kind: str | None = None) -> ValidationResult:
 
     schema = field_spec(version)
 
-    # --- kind: must be one of the 9; otherwise we cannot check status vocab. ---
+    # --- kind: must be one of the 8; otherwise we cannot check status vocab. ---
     if kind is None:
         kind = sidecar.get("kind")
     vocab = permitted_statuses(kind)
@@ -386,6 +409,14 @@ def validate(sidecar: dict, kind: str | None = None) -> ValidationResult:
     for key in required_operator_keys(version):
         if key not in sidecar:
             errors.append(f"missing required key {key!r}")
+
+    # --- kind-gated fields: present only on the kinds that permit them. ------
+    for key, permitted_kinds in KIND_GATED_FIELDS.items():
+        if key in sidecar and kind not in permitted_kinds:
+            errors.append(
+                f"key {key!r} is not valid on kind {kind!r}: only permitted on"
+                f" {sorted(permitted_kinds)}"
+            )
 
     # --- status: default when omitted; else enforce the kind's vocab. --------
     status = sidecar.get("status")

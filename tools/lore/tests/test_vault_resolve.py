@@ -34,7 +34,7 @@ def vr():
 #   { "vaults": [
 #       { "name": "default",               "scope": "default" },
 #       { "name": "trailhead-ai_trailhead", "scope": "repo",
-#         "records": ["decision","spec","plan"] },
+#         "records": ["decision","spec","task"] },
 #       { "name": "product-engineering",    "scope": "team",  "records": ["blob"] }
 #   ]}
 
@@ -57,7 +57,7 @@ def _spec_config():
     """Return the worked config as a list[Vault]."""
     return [
         _make_vault("default", "default"),
-        _make_vault("trailhead-ai_trailhead", "repo", records=["decision", "spec", "plan"]),
+        _make_vault("trailhead-ai_trailhead", "repo", records=["decision", "spec", "task"]),
         _make_vault("product-engineering", "team", records=["blob"]),
     ]
 
@@ -195,7 +195,7 @@ def test_default_floor_when_all_higher_ineligible():
     config = [
         _make_vault("default", "default"),
         _make_vault("my-repo", "repo", records=["spec"]),
-        _make_vault("my-team", "team", records=["plan"]),
+        _make_vault("my-team", "team", records=["task"]),
     ]
     # blob is not in either allowlist
     result = mod.resolve_vault({"repo": "my-repo", "team": "my-team"}, "blob", config)
@@ -214,7 +214,7 @@ def test_totality_default_floor_always_eligible():
     config = [
         _make_vault("default", "default"),
         _make_vault("repo-a", "repo", records=["spec"]),
-        _make_vault("team-a", "team", records=["plan"]),
+        _make_vault("team-a", "team", records=["task"]),
         _make_vault("product-a", "product", records=["decision"]),
     ]
     result = mod.resolve_vault(
@@ -236,8 +236,8 @@ def test_three_scopes_two_ineligible_falls_through_to_third():
     mod = vr()
     config = [
         _make_vault("default", "default"),
-        _make_vault("my-repo", "repo", records=["spec", "plan"]),
-        _make_vault("my-product", "product", records=["spec", "plan"]),
+        _make_vault("my-repo", "repo", records=["spec", "task"]),
+        _make_vault("my-product", "product", records=["spec", "task"]),
         _make_vault("my-team", "team", records=["blob"]),
     ]
     result = mod.resolve_vault(
@@ -296,11 +296,10 @@ def test_default_vault_eligible_for_any_kind():
     for kind in (
         "blob",
         "spec",
-        "plan",
+        "task",
         "session",
         "decision",
         "area",
-        "backlog",
         "collaboration",
         "lesson",
     ):

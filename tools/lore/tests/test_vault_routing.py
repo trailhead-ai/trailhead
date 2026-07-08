@@ -84,7 +84,7 @@ def _spec_config_vaults(state: Path) -> list[dict]:
         {
             "name": "trailhead-ai_trailhead",
             "scope": "repo",
-            "records": ["decision", "spec", "plan"],
+            "records": ["decision", "spec", "task"],
             "path": str(root / "trailhead-ai_trailhead"),
         },
         {

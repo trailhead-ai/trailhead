@@ -70,7 +70,7 @@ def test_parse_multi_vault_config(tmp_path, monkeypatch):
     cfg = vc()
     data = _minimal_config(
         extra_vaults=[
-            {"name": "trailhead-ai_trailhead", "scope": "repo", "records": ["spec", "plan"]},
+            {"name": "trailhead-ai_trailhead", "scope": "repo", "records": ["spec", "task"]},
             {"name": "product-engineering", "scope": "team", "records": ["blob"]},
         ]
     )
