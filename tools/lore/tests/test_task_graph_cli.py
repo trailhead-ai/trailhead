@@ -121,10 +121,10 @@ def test_runnable_marker_only_on_qualifying_leaf(tmp_path):
     assert r.returncode == 0, r.stderr
 
     lines = {line.strip() for line in r.stdout.splitlines()}
-    grandchild_line = next(l for l in lines if l.startswith("grandchild "))
-    child_a_line = next(l for l in lines if l.startswith("child-a "))
-    child_b_line = next(l for l in lines if l.startswith("child-b "))
-    root_line = next(l for l in lines if l.startswith("root "))
+    grandchild_line = next(line for line in lines if line.startswith("grandchild "))
+    child_a_line = next(line for line in lines if line.startswith("child-a "))
+    child_b_line = next(line for line in lines if line.startswith("child-b "))
+    root_line = next(line for line in lines if line.startswith("root "))
 
     assert "(runnable)" in grandchild_line
     # child-a is ready with every dep done, but it is NOT a leaf (it has
