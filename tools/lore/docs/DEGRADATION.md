@@ -12,7 +12,7 @@ Each entry states: what is off, why, how it surfaces, and how to turn it on.
 
 **What is off:** The UserPromptSubmit classifier that would trigger vault
 recall mid-conversation — matching the current user prompt against area and
-backlog record surfaces — is not yet ported to lore.
+task record surfaces — is not yet ported to lore.
 
 **Why:** Porting the classifier is a Tier-1.5 item (P1.5 / P-later). It
 requires a UserPromptSubmit hook, which depends on infrastructure not yet

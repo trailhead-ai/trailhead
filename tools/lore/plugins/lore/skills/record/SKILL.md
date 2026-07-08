@@ -48,7 +48,7 @@ judgment later, promoting the keepers into durable records.
 
 ### A persistent vault record — `lore record create` (the exception)
 
-Reserved for a deliberately **authored artifact** (a `plan`, `spec`, or `area`
+Reserved for a deliberately **authored artifact** (a `task`, `spec`, or `area`
 profile), or a finding you *explicitly* mean to pin as a standalone record right
 now. Create it directly:
 
@@ -56,8 +56,8 @@ now. Create it directly:
 lore record create --kind <kind> --title "<title>"
 ```
 
-`<kind>` is one of: `area`, `backlog`, `blob`, `collaboration`, `decision`,
-`lesson`, `plan`, `session`, `spec`. The title derives the record name slug.
+`<kind>` is one of: `area`, `blob`, `collaboration`, `decision`,
+`lesson`, `session`, `spec`, `task`. The title derives the record name slug.
 
 Set sidecar metadata with the dedicated per-field flags — `--status` (scalar),
 the repeatable list flags `--keyword` / `--related-file` / `--related-url` /
@@ -67,7 +67,7 @@ routing flags (`--repo`, `--product`, `--suite`, `--team`):
 
 ```bash
 lore record create --kind decision --title "Use frontmatter for session status" \
-  --status active --keyword frontmatter --related plan=session-status-rollout
+  --status active --keyword frontmatter --related task=session-status-rollout
 ```
 
 Run `lore record create --help` for the full flag set. Related sub-actions:
@@ -78,7 +78,7 @@ Run `lore record create --help` for the full flag set. Related sub-actions:
 - An incidental finding that arose during work (a decision, lesson, dead-end,
   deferred item, gotcha) → `lore session candidate`. **This is the default** —
   durable records are mostly born at flush, not mid-work.
-- A deliberately authored artifact (`plan`, `spec`, `area` profile), or a finding
+- A deliberately authored artifact (`task`, `spec`, `area` profile), or a finding
   you *explicitly* mean to pin as a standalone record right now →
   `lore record create`.
 

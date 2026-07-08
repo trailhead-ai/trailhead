@@ -85,14 +85,25 @@ treat ALL candidates as outstanding — never silently drop candidates.
 For each outstanding candidate, apply agent judgment:
 
 - **Promote to a vault record**: if the candidate describes a durable finding
-  worth finding later on its own — a `decision`, `lesson`, `spec`, `plan`,
-  `area` profile, `collaboration` convention, or a `backlog` item (work to
-  revisit, an approach dropped, or an external thing to watch) — create a
-  record:
+  worth finding later on its own — a `decision`, `lesson`, `spec`,
+  `area` profile, `collaboration` convention, or a `task` (open work item:
+  something to revisit, an approach dropped, or an external thing to watch,
+  tracked via `status`) — create a record:
 
   ```bash
   lore record create --kind <kind> --title "<title>"
   ```
+
+  **Ambient capture for `task` outcomes.** At flush, `task` is a first-class
+  candidate outcome: the candidate becomes an `open` task with
+  **auto-provenance** — no extra judgment call needed for these fields:
+  - `--related task=<active-parent-task-name>`, if this session's work sits
+    under a parent task — provenance, not membership. This does NOT set
+    `--parent`: the new task is not part of the parent's completion scope
+    unless later deliberately promoted (setting `--parent` is a separate,
+    judgment-driven step).
+  - `--related-file <path>` for the file(s)/folder(s) the candidate concerns,
+    when known from the session's work.
 
   Log the new record as referenced by this session:
 

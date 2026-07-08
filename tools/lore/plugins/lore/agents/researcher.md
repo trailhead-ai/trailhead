@@ -1,13 +1,13 @@
 ---
 name: researcher
 description: |
-  Lighter lookups across the lore vault and the codebase — locates a specific note, API, library, function, config option, or concept and returns a pointer (path:line or URL) plus the minimum relevant excerpt. Runs on Haiku with low effort, so it's the cheap path when you don't need the `investigator`'s deep cross-referenced synthesis. Also the agent for **polling `tracking`-status backlog items**: periodic status checks on the tracking backlog (has a tracked item changed? did a backlog item's revisit condition fire?), where each poll is a quick lookup, not an investigation.
+  Lighter lookups across the lore vault and the codebase — locates a specific note, API, library, function, config option, or concept and returns a pointer (path:line or URL) plus the minimum relevant excerpt. Runs on Haiku with low effort, so it's the cheap path when you don't need the `investigator`'s deep cross-referenced synthesis. Also the agent for **polling `blocked`-status tasks**: periodic status checks on blocked work (has a blocked task's dependency cleared? did an external condition change?), where each poll is a quick lookup, not an investigation.
 
   Good fits:
   - "Where is the documentation for the HTTP client's retry option?"
   - "Find the area profile for the payments module"
   - "What does our CLAUDE.md say about worktrees?"
-  - "Poll the `tracking`-status backlog items and report any that changed state."
+  - "Poll the `blocked`-status tasks and report any that changed state."
 
   Bad fits:
   - "Explain how X works" (use `investigator`)

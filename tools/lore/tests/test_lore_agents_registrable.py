@@ -24,13 +24,20 @@ AGENTS_DIR = Path(__file__).parent.parent / "plugins" / "lore" / "agents"
 # ---------------------------------------------------------------------------
 
 
-def test_researcher_documents_tracking_backlog_polling():
+def test_researcher_documents_blocked_task_polling():
     """The lore researcher's description must document its use for polling
-    tracking-status backlog items (periodic status checks) — the distinguishing
-    purpose that justifies the lighter profile."""
+    blocked-status task items (periodic status checks) — the distinguishing
+    purpose that justifies the lighter profile. `backlog`/`tracking` are
+    retired (unified into the `task` kind's `blocked` status)."""
     text = (AGENTS_DIR / "researcher.md").read_text()
-    assert "tracking" in text, (
-        "researcher must document its use for polling `tracking`-status backlog items"
+    assert "blocked" in text, (
+        "researcher must document its use for polling `blocked`-status task items"
+    )
+    assert "tracking" not in text, (
+        "researcher must not reference the retired `tracking` status"
+    )
+    assert "backlog" not in text, (
+        "researcher must not reference the retired `backlog` kind"
     )
 
 

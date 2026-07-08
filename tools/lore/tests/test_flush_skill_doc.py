@@ -31,3 +31,38 @@ def test_flush_skill_frontmatter_still_registrable():
         if ln.strip().startswith("description:") and ln.split(":", 1)[1].strip()
     ]
     assert desc_lines, "flush/SKILL.md must still carry a non-empty description:"
+
+
+# ---------------------------------------------------------------------------
+# Ambient-capture ritual: candidate -> `open` task with auto-provenance
+# ---------------------------------------------------------------------------
+
+def test_flush_skill_documents_task_as_evaluation_outcome():
+    """`backlog`/`plan` are retired; the evaluation-outcome kind list must name
+    `task` as the outcome for open work items, not the removed kinds."""
+    text = _skill_text()
+    assert "`task`" in text, (
+        "flush/SKILL.md must document `task` as a candidate-evaluation outcome"
+    )
+    assert "backlog" not in text, (
+        "flush/SKILL.md must not reference the retired `backlog` kind"
+    )
+    assert "`plan`" not in text, (
+        "flush/SKILL.md must not reference the retired `plan` kind"
+    )
+
+
+def test_flush_skill_documents_ambient_capture_auto_provenance():
+    """The ambient-capture ritual auto-provenances a promoted `task`: the active
+    parent task as `related` (provenance, not membership) and
+    `related-files-or-folders` — no extra judgment call needed for these fields."""
+    text = _skill_text()
+    assert "auto-provenance" in text, (
+        "flush/SKILL.md must name the auto-provenance ambient-capture ritual"
+    )
+    assert "related-files-or-folders" in text or "--related-file" in text, (
+        "flush/SKILL.md must document auto-provenancing related-files-or-folders"
+    )
+    assert "parent" in text.lower(), (
+        "flush/SKILL.md must document auto-provenancing the active parent task"
+    )
