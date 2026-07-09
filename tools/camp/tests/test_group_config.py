@@ -65,25 +65,27 @@ def test_load_valid_config(tmp_path: Path) -> None:
 
 
 def test_load_bootstrap_is_list(tmp_path: Path) -> None:
-    """bootstrap is parsed as a list (for subprocess shell=False), not a shell string."""
+    """Legacy bootstrap argv survives normalization as a list (for subprocess
+    shell=False), not a shell string — preserved on the implicit bootstrap task."""
     from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML)
     cfg = load_group(f)
-    bootstrap = cfg["members"][0]["bootstrap"]
-    assert isinstance(bootstrap, list), "bootstrap must be a list"
-    assert bootstrap == ["pip", "install", "-e", "."]
+    bootstrap_task = cfg["members"][0]["tasks"][0]
+    cmd = bootstrap_task["steps"][0]["cmd"]
+    assert isinstance(cmd, list), "bootstrap argv must be a list"
+    assert cmd == ["pip", "install", "-e", "."]
 
 
 def test_load_bootstrap_defaults_to_empty_list(tmp_path: Path) -> None:
-    """When bootstrap is absent, it defaults to []."""
+    """When bootstrap is absent, no implicit bootstrap task is created."""
     from camp.group.config import load_group
 
     f = tmp_path / "testgroup.toml"
     f.write_text(_VALID_TOML_NO_BOOTSTRAP)
     cfg = load_group(f)
-    assert cfg["members"][0]["bootstrap"] == []
+    assert cfg["members"][0]["tasks"] == []
 
 
 def test_load_branch_pattern_defaults(tmp_path: Path) -> None:
@@ -867,3 +869,411 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
     # binary name still falls back to the claude default
     assert profile.binary == "claude"
     assert profile.is_claude_launch() is True
+# ---------------------------------------------------------------------------
+# [tasks.<name>] block — config-driven multi-step member tasks
+# ---------------------------------------------------------------------------
+
+_VALID_TOML_WITH_TASK = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["graphify"]
+
+[tasks.graphify]
+phase = "provision"
+required = true
+timeout_seconds = 30
+
+[[tasks.graphify.steps]]
+name = "seed"
+cmd = ["rsync", "-a", "{repo_root}/.code-review-graph/", "{worktree}/.code-review-graph/"]
+
+[[tasks.graphify.steps]]
+name = "update"
+cmd = ["code-review-graph", "update", "--repo", "{worktree}"]
+"""
+
+
+def test_task_valid_config_parses_to_normalized_shape(tmp_path: Path) -> None:
+    """A valid [tasks.<name>] table, referenced by a member, parses into the
+    member's resolved tasks list with all fields normalized."""
+    from camp.group.config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML_WITH_TASK)
+    cfg = load_group(f)
+
+    tasks = cfg["members"][0]["tasks"]
+    assert tasks == [
+        {
+            "name": "graphify",
+            "phase": "provision",
+            "required": True,
+            "timeout_seconds": 30,
+            "steps": [
+                {
+                    "name": "seed",
+                    "cmd": [
+                        "rsync",
+                        "-a",
+                        "{repo_root}/.code-review-graph/",
+                        "{worktree}/.code-review-graph/",
+                    ],
+                },
+                {
+                    "name": "update",
+                    "cmd": ["code-review-graph", "update", "--repo", "{worktree}"],
+                },
+            ],
+        }
+    ]
+
+
+def test_task_defaults_phase_and_required(tmp_path: Path) -> None:
+    """A task omitting phase/required/timeout_seconds defaults to provision,
+    not required, and no timeout."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task = cfg["members"][0]["tasks"][0]
+    assert task["phase"] == "provision"
+    assert task["required"] is False
+    assert task["timeout_seconds"] is None
+
+
+def test_task_step_unknown_placeholder_raises(tmp_path: Path) -> None:
+    """An unknown {placeholder} in a task step's argv → GroupConfigError naming
+    file + field, reusing _reject_unknown_placeholders (not a parallel check)."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["graphify"]
+
+[tasks.graphify]
+[[tasks.graphify.steps]]
+name = "seed"
+cmd = ["echo", "{bogus}"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "bogus" in msg
+    assert "graphify" in msg
+
+
+def test_task_unknown_member_reference_raises(tmp_path: Path) -> None:
+    """A member referencing a task name with no matching [tasks.<name>] table
+    → GroupConfigError naming file + field."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["ghost"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "ghost" in msg
+    assert "tasks" in msg
+
+
+def test_task_name_collision_with_implicit_bootstrap_raises(tmp_path: Path) -> None:
+    """A member with legacy bootstrap AND an explicit tasks=["bootstrap"]
+    reference collides with the implicit legacy bootstrap task name."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+bootstrap = ["pip", "install", "-e", "."]
+tasks = ["bootstrap"]
+
+[tasks.bootstrap]
+[[tasks.bootstrap.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "bootstrap" in msg
+
+
+def test_task_name_collision_with_implicit_dep_install_raises(tmp_path: Path) -> None:
+    """A member with legacy dep-install hooks AND an explicit
+    tasks=["dep-install"] reference collides with the implicit legacy task name."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["dep-install"]
+
+[[members.hooks]]
+kind = "dep-install"
+cmd = ["npm", "install"]
+
+[tasks.dep-install]
+[[tasks.dep-install.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "dep-install" in msg
+
+
+def test_task_empty_steps_list_raises(tmp_path: Path) -> None:
+    """A task with an empty steps list → GroupConfigError naming file + field."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+steps = []
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "steps" in msg
+
+
+def test_task_bad_phase_type_raises(tmp_path: Path) -> None:
+    """A task with an invalid phase value → GroupConfigError naming file + field."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+phase = "deploy"
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "phase" in msg
+
+
+def test_task_bad_required_type_raises(tmp_path: Path) -> None:
+    """A task with a non-boolean required value → GroupConfigError naming file + field."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+required = "yes"
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "required" in msg
+
+
+def test_task_bad_timeout_seconds_type_raises(tmp_path: Path) -> None:
+    """A task with a non-positive-int timeout_seconds → GroupConfigError naming
+    file + field."""
+    from camp.group.config import GroupConfigError, load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+tasks = ["mytask"]
+
+[tasks.mytask]
+timeout_seconds = 0
+[[tasks.mytask.steps]]
+name = "step1"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    with pytest.raises(GroupConfigError) as exc_info:
+        load_group(f)
+    msg = str(exc_info.value)
+    assert str(f) in msg or "testgroup.toml" in msg
+    assert "timeout_seconds" in msg
+
+
+def test_legacy_bootstrap_normalizes_to_required_provision_task(tmp_path: Path) -> None:
+    """A legacy bootstrap-only member (no [tasks.*]) normalizes to a required
+    provision-phase task named 'bootstrap', preserving the original argv."""
+    from camp.group.config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML)
+    cfg = load_group(f)
+    tasks = cfg["members"][0]["tasks"]
+    assert tasks == [
+        {
+            "name": "bootstrap",
+            "phase": "provision",
+            "required": True,
+            "timeout_seconds": None,
+            "steps": [{"name": "bootstrap", "cmd": ["pip", "install", "-e", "."]}],
+        }
+    ]
+
+
+def test_legacy_hooks_normalizes_to_required_activate_task(tmp_path: Path) -> None:
+    """A legacy dep-install hook normalizes to a required activate-phase task
+    named 'dep-install', preserving the original argv."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+
+[[members.hooks]]
+kind = "dep-install"
+cmd = ["npm", "install"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    tasks = cfg["members"][0]["tasks"]
+    assert tasks == [
+        {
+            "name": "dep-install",
+            "phase": "activate",
+            "required": True,
+            "timeout_seconds": None,
+            "steps": [{"name": "dep-install", "cmd": ["npm", "install"]}],
+        }
+    ]
+
+
+def test_normalized_member_has_no_bootstrap_or_hooks_keys(tmp_path: Path) -> None:
+    """After load_group, a member dict never carries the legacy 'bootstrap' or
+    'hooks' keys — the rest of the codebase sees exactly one resolved tasks list."""
+    from camp.group.config import load_group
+
+    f = tmp_path / "testgroup.toml"
+    f.write_text(_VALID_TOML)
+    cfg = load_group(f)
+    member = cfg["members"][0]
+    assert "bootstrap" not in member
+    assert "hooks" not in member
+    assert "tasks" in member
+
+
+def test_implicit_legacy_tasks_ordered_before_referenced_group_tasks(
+    tmp_path: Path,
+) -> None:
+    """A member with both legacy bootstrap and an explicit group-task reference
+    gets the implicit legacy task ordered first in the resolved tasks list."""
+    from camp.group.config import load_group
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/myrepo"
+bootstrap = ["pip", "install", "-e", "."]
+tasks = ["graphify"]
+
+[tasks.graphify]
+[[tasks.graphify.steps]]
+name = "seed"
+cmd = ["echo", "hi"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    cfg = load_group(f)
+    task_names = [t["name"] for t in cfg["members"][0]["tasks"]]
+    assert task_names == ["bootstrap", "graphify"]

@@ -76,7 +76,7 @@ def test_render_group_toml_round_trips_through_load_group(tmp_path: Path) -> Non
     ]
 
     for m in cfg["members"]:
-        assert m["bootstrap"] == []
+        assert m["tasks"] == []
 
 
 def test_render_group_toml_lore_scopes_round_trip(tmp_path: Path) -> None:

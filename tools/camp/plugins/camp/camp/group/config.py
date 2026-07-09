@@ -9,12 +9,22 @@ Schema:
   [[members]]
   name = "<repo-name>"
   repo_root = "/absolute/path/to/repo"
-  bootstrap = ["cmd", "arg1", "arg2"]   # list for subprocess shell=False; optional
+  bootstrap = ["cmd", "arg1", "arg2"]   # legacy; list for shell=False; optional
   base = "origin/main"                  # branch start-point; optional, default origin/main
+  tasks = ["graphify"]                  # optional; names must match [tasks.<name>] below
 
   [[members.hooks]]
-  kind = "dep-install"                  # keyed activation hook kind; required
+  kind = "dep-install"                  # legacy; keyed activation hook kind; required
   cmd = ["cmd", "arg1", "arg2"]        # list for subprocess shell=False; required
+
+  [tasks.graphify]
+  phase = "provision"                   # optional; "provision" (default) | "activate"
+  required = false                      # optional; default false
+  timeout_seconds = 30                  # optional; positive int; per-task subprocess timeout
+
+  [[tasks.graphify.steps]]
+  name = "seed"                         # required; legible label (status/failure reasons)
+  cmd = ["rsync", "-a", "{repo_root}/x/", "{worktree}/x/"]  # required; shell=False argv
 
   [branch]
   pattern = "worktree-{slug}"            # optional; default "worktree-{slug}"
@@ -26,12 +36,23 @@ Schema:
   scope = "product"                      # one of: repo, product, suite, team
   name  = "<vault-name>"                 # non-empty; no duplicate scope in one group
 
-Bootstrap and hook commands are author-trusted local input. camp runs them
-list-mode (subprocess, shell=False). Sharing group configs from untrusted
-authors is explicitly out of scope.
+Task steps, bootstrap, and hook commands are author-trusted local input. camp
+runs them list-mode (subprocess, shell=False). Sharing group configs from
+untrusted authors is explicitly out of scope.
 
 Activation hook kinds:
   "dep-install"   Run a dependency installation command in the worktree.
+
+Legacy normalization: at load time, a member's `bootstrap` list normalizes
+into an implicit REQUIRED provision-phase task named literally "bootstrap"
+(preserving its argv), and `[[members.hooks]]` dep-install entries normalize
+into an implicit REQUIRED activate-phase task named literally "dep-install".
+The `bootstrap` and `hooks` keys are then DROPPED from the normalized member
+dict — every consumer downstream of load_group sees exactly one resolved,
+ordered `tasks` list per member (implicit legacy tasks first, then tasks
+referenced by name via the member's `tasks` field). A member cannot both
+produce an implicit legacy task and separately reference a task of the same
+name — that is a name collision, rejected at load.
 
 lore_scopes invariants: scope in {repo, product, suite, team} ("default" is
 rejected — it is the unconditional floor in vault_resolve, not a routing target);
@@ -69,6 +90,27 @@ class GroupConfigNotFound(Exception):
 KNOWN_HOOK_KINDS = frozenset({"dep-install"})
 
 # ---------------------------------------------------------------------------
+# [tasks.<name>] — config-driven multi-step member tasks
+# ---------------------------------------------------------------------------
+
+# Placeholders task step argv may reference. Distinct from _HARNESS_PLACEHOLDERS
+# (harness.cwd's {slug}/{workspace}/{session_id}) — task steps run in a specific
+# member's worktree, so they additionally get {repo_root}/{worktree}.
+_TASK_PLACEHOLDERS = frozenset({"repo_root", "worktree", "workspace", "slug"})
+
+_TASK_PHASES = frozenset({"provision", "activate"})
+_DEFAULT_TASK_PHASE = "provision"
+
+# Legacy bootstrap/hooks normalize into implicit tasks under these literal,
+# legible names (they appear in `camp status` output and persisted failure
+# reasons) — not internal tokens. Reserved: a member cannot both carry the
+# legacy config that produces one of these implicit tasks AND separately
+# reference a same-named task via `tasks = [...]` — see the collision check
+# in load_group.
+_LEGACY_BOOTSTRAP_TASK_NAME = "bootstrap"
+_LEGACY_DEP_INSTALL_TASK_NAME = "dep-install"
+
+# ---------------------------------------------------------------------------
 # Valid lore routing scopes
 # ---------------------------------------------------------------------------
 
@@ -91,11 +133,22 @@ def load_group(path: Path) -> dict[str, Any]:
     Returns a normalized dict:
       {
         "group": {"name": str},
-        "members": [{"name": str, "repo_root": str, "bootstrap": list[str]}],
+        "members": [{
+            "name": str, "repo_root": str, "base": str,
+            "tasks": [{"name": str, "phase": "provision"|"activate",
+                       "required": bool, "timeout_seconds": int | None,
+                       "steps": [{"name": str, "cmd": list[str]}]}],
+        }],
         "branch_pattern": str,
         "shared_vaults": [{"name": str, "root": str}],
         "lore_scopes": [{"scope": str, "name": str}],
       }
+
+    Each member's "tasks" is the fully resolved, ordered list — implicit legacy
+    tasks (normalized from that member's "bootstrap"/"hooks" TOML fields, if
+    any) first, then tasks referenced by name via the member's `tasks = [...]`
+    field. The legacy "bootstrap"/"hooks" keys are NOT present on the returned
+    member dict — this is the only shape downstream code should read.
 
     lore_scopes invariants: scope in {repo, product, suite, team}; name is a
     non-empty string; no duplicate scope within one group's list.
@@ -125,6 +178,9 @@ def load_group(path: Path) -> dict[str, Any]:
         raise GroupConfigError(
             f"{path}: field 'group.name' is required and must be a non-empty string"
         )
+
+    # --- [tasks.<name>] section (optional; may be referenced by members below) ---
+    task_defs = _parse_tasks(raw.get("tasks"), path)
 
     # --- [[members]] section ---
     members_raw = raw.get("members")
@@ -215,13 +271,35 @@ def load_group(path: Path) -> dict[str, Any]:
 
             hooks.append({"kind": hook_kind, "cmd": cmd})
 
+        # --- 'tasks' member field (optional): references into [tasks.<name>] ---
+        member_tasks_raw = m.get("tasks", [])
+        if member_tasks_raw is None:
+            member_tasks_raw = []
+        referenced_task_names = _validate_string_list_field(
+            member_tasks_raw,
+            path=path,
+            where=f"members[{i}] ('{member_name}'): field 'tasks'",
+            allow_empty_list=True,
+        )
+
+        # Legacy bootstrap/hooks normalize into implicit tasks; the 'bootstrap'
+        # and 'hooks' keys are dropped from the normalized member dict below —
+        # downstream code sees exactly one resolved 'tasks' list per member.
+        resolved_tasks = _resolve_member_tasks(
+            member_name=member_name,
+            task_defs=task_defs,
+            referenced_task_names=referenced_task_names,
+            bootstrap_raw=bootstrap_raw,
+            hooks=hooks,
+            path=path,
+        )
+
         members.append(
             {
                 "name": member_name,
                 "repo_root": repo_root,
-                "bootstrap": list(bootstrap_raw),
                 "base": base,
-                "hooks": hooks,
+                "tasks": resolved_tasks,
             }
         )
 
@@ -341,16 +419,27 @@ _HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace", "session_id"})
 _INJECT_STRATEGIES = frozenset({"stdout", "claude-hook"})
 
 
-def _reject_unknown_placeholders(value: str, *, path: Path, where: str) -> None:
+def _reject_unknown_placeholders(
+    value: str,
+    *,
+    path: Path,
+    where: str,
+    known: frozenset[str] = _HARNESS_PLACEHOLDERS,
+) -> None:
     """Reject any {placeholder} not in the known set so a typo'd template fails
-    legibly at load instead of with a KeyError at launch time."""
+    legibly at load instead of with a KeyError at launch time.
+
+    `known` defaults to the harness-profile placeholder set; task steps pass
+    `known=_TASK_PLACEHOLDERS` to validate against their own set instead of a
+    parallel re-implementation of this scan.
+    """
     import string
 
     for _, field, _, _ in string.Formatter().parse(value):
-        if field is not None and field not in _HARNESS_PLACEHOLDERS:
+        if field is not None and field not in known:
             raise GroupConfigError(
                 f"{path}: {where} references unknown placeholder {{{field}}} — "
-                f"supported placeholders: {sorted(_HARNESS_PLACEHOLDERS)}"
+                f"supported placeholders: {sorted(known)}"
             )
 
 
@@ -445,6 +534,166 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
         result["pretrust"] = pretrust
 
     return result
+
+
+def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
+    """Parse + validate the optional top-level [tasks.<name>] table.
+
+    Returns a dict keyed by task name; each value is a normalized task dict:
+      {"name": str, "phase": "provision"|"activate", "required": bool,
+       "timeout_seconds": int | None, "steps": [{"name": str, "cmd": [str, ...]}]}
+
+    Placeholder validation in step argv reuses _reject_unknown_placeholders
+    against _TASK_PLACEHOLDERS — no parallel implementation.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise GroupConfigError(f"{path}: [tasks] must be a table of named task tables")
+
+    tasks: dict[str, dict[str, Any]] = {}
+    for task_name, task_tbl in raw.items():
+        if not isinstance(task_tbl, dict):
+            raise GroupConfigError(f"{path}: tasks.{task_name} must be a table")
+
+        phase = task_tbl.get("phase", _DEFAULT_TASK_PHASE)
+        if not isinstance(phase, str) or phase not in _TASK_PHASES:
+            raise GroupConfigError(
+                f"{path}: tasks.{task_name}.phase must be one of "
+                f"{sorted(_TASK_PHASES)}, got {phase!r}"
+            )
+
+        required = task_tbl.get("required", False)
+        if not isinstance(required, bool):
+            raise GroupConfigError(
+                f"{path}: tasks.{task_name}.required must be a boolean (true/false), "
+                f"got {type(required).__name__!r}"
+            )
+
+        timeout_seconds = task_tbl.get("timeout_seconds")
+        if timeout_seconds is not None and (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or timeout_seconds <= 0
+        ):
+            raise GroupConfigError(
+                f"{path}: tasks.{task_name}.timeout_seconds must be a positive integer, "
+                f"got {timeout_seconds!r}"
+            )
+
+        steps_raw = task_tbl.get("steps")
+        if not isinstance(steps_raw, list) or len(steps_raw) == 0:
+            raise GroupConfigError(
+                f"{path}: tasks.{task_name}.steps must be a non-empty list of step tables"
+            )
+
+        steps: list[dict[str, Any]] = []
+        for i, step in enumerate(steps_raw):
+            if not isinstance(step, dict):
+                raise GroupConfigError(f"{path}: tasks.{task_name}.steps[{i}] must be a table")
+
+            step_name = step.get("name")
+            if not isinstance(step_name, str) or not step_name.strip():
+                raise GroupConfigError(
+                    f"{path}: tasks.{task_name}.steps[{i}].name is required and must "
+                    "be a non-empty string"
+                )
+
+            cmd_raw = step.get("cmd")
+            if cmd_raw is None:
+                raise GroupConfigError(
+                    f"{path}: tasks.{task_name}.steps[{i}] ('{step_name}') is missing "
+                    "required field 'cmd'"
+                )
+            where = f"tasks.{task_name}.steps[{i}] ('{step_name}').cmd"
+            cmd = _validate_string_list_field(
+                cmd_raw, path=path, where=where, allow_empty_list=False
+            )
+            for token in cmd:
+                _reject_unknown_placeholders(
+                    token, path=path, where=where, known=_TASK_PLACEHOLDERS
+                )
+
+            steps.append({"name": step_name, "cmd": cmd})
+
+        tasks[task_name] = {
+            "name": task_name,
+            "phase": phase,
+            "required": required,
+            "timeout_seconds": timeout_seconds,
+            "steps": steps,
+        }
+
+    return tasks
+
+
+def _resolve_member_tasks(
+    *,
+    member_name: str,
+    task_defs: dict[str, dict[str, Any]],
+    referenced_task_names: list[str],
+    bootstrap_raw: list[str],
+    hooks: list[dict[str, Any]],
+    path: Path,
+) -> list[dict[str, Any]]:
+    """Resolve one member's ordered task list: implicit legacy tasks (from
+    bootstrap/hooks normalization) ordered before explicitly referenced group
+    tasks. Raises on an unknown reference or a name collision between an
+    implicit legacy task and a referenced group task.
+    """
+    resolved: list[dict[str, Any]] = []
+
+    if bootstrap_raw:
+        resolved.append(
+            {
+                "name": _LEGACY_BOOTSTRAP_TASK_NAME,
+                "phase": "provision",
+                "required": True,
+                "timeout_seconds": None,
+                "steps": [
+                    {"name": _LEGACY_BOOTSTRAP_TASK_NAME, "cmd": list(bootstrap_raw)}
+                ],
+            }
+        )
+
+    if hooks:
+        resolved.append(
+            {
+                "name": _LEGACY_DEP_INSTALL_TASK_NAME,
+                "phase": "activate",
+                "required": True,
+                "timeout_seconds": None,
+                "steps": [
+                    {
+                        "name": (
+                            _LEGACY_DEP_INSTALL_TASK_NAME
+                            if len(hooks) == 1
+                            else f"{_LEGACY_DEP_INSTALL_TASK_NAME}-{k}"
+                        ),
+                        "cmd": hook["cmd"],
+                    }
+                    for k, hook in enumerate(hooks)
+                ],
+            }
+        )
+
+    implicit_names = {t["name"] for t in resolved}
+
+    for j, task_name in enumerate(referenced_task_names):
+        if task_name not in task_defs:
+            raise GroupConfigError(
+                f"{path}: members ('{member_name}'): tasks[{j}] references unknown "
+                f"task {task_name!r} — no [tasks.{task_name}] is defined"
+            )
+        if task_name in implicit_names:
+            raise GroupConfigError(
+                f"{path}: members ('{member_name}'): tasks[{j}] references "
+                f"{task_name!r}, which collides with the implicit legacy task of "
+                "the same name — rename the legacy config or the referenced task"
+            )
+        resolved.append(task_defs[task_name])
+
+    return resolved
 
 
 def load_all_groups(groups_dir: Path) -> list[dict[str, Any]]:
