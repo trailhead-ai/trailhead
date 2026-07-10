@@ -828,15 +828,6 @@ class TestSessionBootstrapGenuineFailure:
     and exits 0 — no traceback.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "reconcile._run_bootstrap still reads member['bootstrap'], which "
-            "load_group no longer populates now that legacy bootstrap normalizes "
-            "into member['tasks'] (camp config-driven member tasks, slice 1); "
-            "reconcile.py switches to the task runner in slice 3."
-        ),
-    )
     def test_genuine_reconcile_failure_warns_once_names_slug_exits_0(self, tmp_path: Path):
         """A genuine reconcile failure in a valid member worktree emits exactly one
         stderr line naming the slug, exits 0, and contains no traceback.

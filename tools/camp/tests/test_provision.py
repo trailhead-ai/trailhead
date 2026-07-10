@@ -116,8 +116,8 @@ def two_member_group(tmp_path: Path):
     group = _make_group_config(
         "testgroup",
         [
-            {"name": "repo_a", "repo_root": str(repo_a), "bootstrap": [], "base": "origin/main"},
-            {"name": "repo_b", "repo_root": str(repo_b), "bootstrap": [], "base": "origin/main"},
+            {"name": "repo_a", "repo_root": str(repo_a), "tasks": [], "base": "origin/main"},
+            {"name": "repo_b", "repo_root": str(repo_b), "tasks": [], "base": "origin/main"},
         ],
     )
     env = _camp_state_env(tmp_path)
@@ -554,13 +554,13 @@ class TestForegroundSetup:
                 {
                     "name": "repo_a",
                     "repo_root": str(repo_a),
-                    "bootstrap": [],
+                    "tasks": [],
                     "base": "origin/main",
                 },
                 {
                     "name": "repo_b",
                     "repo_root": str(tmp_path / "nonexistent"),
-                    "bootstrap": [],
+                    "tasks": [],
                     "base": "origin/main",
                 },
             ],
@@ -629,9 +629,9 @@ class TestForegroundSetup:
         processed: list[str] = []
         real_provision = provision.provision_member
 
-        def tracking_provision(group, slug, member, *, env):
+        def tracking_provision(group, slug, member, *, completed=None, env):
             processed.append(member["name"])
-            return real_provision(group, slug, member, env=env)
+            return real_provision(group, slug, member, completed=completed, env=env)
 
         monkeypatch.setattr(provision, "provision_member", tracking_provision)
 

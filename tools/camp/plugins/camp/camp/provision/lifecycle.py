@@ -261,14 +261,23 @@ def cmd_setup_group(
 
     Holds the slug-scoped .reconcile.lock for the whole operation so a concurrent
     background provisioner serializes (no torn manifest, no double-add). For each
-    non-ready member it runs the per-member provision (fetch+add+bootstrap) and
-    flips the manifest pending→ready or →failed+reason. A ready member is left
-    untouched. Best-effort: one member failing never blocks the others.
+    non-ready member it runs the per-member provision (fetch+add+tasks), persists
+    the per-task results into the member's `tasks` map, and flips the manifest
+    pending→ready or →failed+reason. A required-task failure flips the member to
+    failed; an optional-task failure leaves the member ready, records the failed
+    task, and warns on stderr. A ready member is left untouched. Best-effort: one
+    member failing never blocks the others.
 
     Returns {"slug", "members": {name: {"provision_state", "reason"?}}}.
     """
     from ..group.manifest import flip_member_state_unlocked
     from . import provision
+    from .reconcile import (
+        _completed_from_tasks_map,
+        _tasks_map_from_results,
+        _warn_optional_task_failures,
+    )
+    from .tasks import TaskError
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -289,18 +298,36 @@ def cmd_setup_group(
                 # Manifest lists a member no longer in the group config.
                 continue
 
+            completed = _completed_from_tasks_map(entry.get("tasks"))
             try:
-                provision.provision_member(group, slug, member, env=env)
+                task_results = provision.provision_member(
+                    group, slug, member, completed=completed, env=env
+                )
             except subprocess.TimeoutExpired as e:
                 reason = f"git fetch timeout after {e.timeout}s"
                 flip_member_state_unlocked(mpath, name, "failed", reason=reason)
+                results[name] = {"provision_state": "failed", "reason": reason}
+            except TaskError as e:
+                # A required task failed: persist its (and any prior) results
+                # alongside the failed state so `camp status` shows the task.
+                reason = str(e)
+                flip_member_state_unlocked(
+                    mpath,
+                    name,
+                    "failed",
+                    reason=reason,
+                    tasks=_tasks_map_from_results(e.results),
+                )
                 results[name] = {"provision_state": "failed", "reason": reason}
             except Exception as e:
                 reason = str(e)
                 flip_member_state_unlocked(mpath, name, "failed", reason=reason)
                 results[name] = {"provision_state": "failed", "reason": reason}
             else:
-                flip_member_state_unlocked(mpath, name, "ready")
+                _warn_optional_task_failures(task_results, name)
+                flip_member_state_unlocked(
+                    mpath, name, "ready", tasks=_tasks_map_from_results(task_results)
+                )
                 results[name] = {"provision_state": "ready"}
 
     return {"slug": slug, "members": results}

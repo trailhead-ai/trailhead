@@ -15,9 +15,10 @@ camp ai brings a workspace up in two phases:
 bring_up_workspace ties the two together: seed, then spawn.
 
 The actual per-member work (provision_member) runs the git fetch (under a timeout),
-the worktree add, and the bootstrap, then the caller flips the member's manifest
-state pending→ready or →failed+reason under the slug-scoped .reconcile.lock. It is
-shared by the foreground `camp setup` and the background provisioner —
+the worktree add, and the member's provision-phase tasks, then the caller flips the
+member's manifest state pending→ready or →failed+reason under the slug-scoped
+.reconcile.lock and persists the per-task results into the member's `tasks` map.
+It is shared by the foreground `camp setup` and the background provisioner —
 ONE code path.
 """
 
@@ -237,16 +238,28 @@ def provision_member(
     slug: str,
     member: dict[str, Any],
     *,
+    completed: dict[str, str] | None = None,
     env: dict[str, str] | None = None,
-) -> None:
-    """Provision one member: fetch base (timeout), add worktree, bootstrap.
+) -> list[Any]:
+    """Provision one member: fetch base (timeout), add worktree, run tasks.
 
-    Raises ReconcileError / TimeoutExpired on failure — the caller flips the
-    member's manifest state to failed+reason. Best-effort: a failure here is
-    isolated to this member by the caller.
+    Runs the member's provision-phase tasks through the shared task runner and
+    returns the list of TaskResults so the caller can persist them into the
+    member's manifest `tasks` map. `completed` is the member's prior per-task
+    state ({name: state}); an "ok" task is skipped (run-once).
+
+    Raises on failure — the caller flips the member's manifest state to
+    failed+reason. Best-effort: a failure here is isolated to this member by
+    the caller:
+      - ReconcileError / TimeoutExpired: git fetch or worktree add failed.
+      - TaskError: a REQUIRED task failed (carries the partial results so the
+        caller can still persist them alongside the failed state).
+    An OPTIONAL task failure does not raise: it is recorded in the returned
+    results with state="failed" for the caller to warn on and persist.
     """
     from . import reconcile
     from .reconcile import DEFAULT_BASE, FETCH_TIMEOUT_SECONDS
+    from .tasks import run_member_tasks
 
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")
@@ -262,4 +275,13 @@ def provision_member(
     # the member on the wrong base; a cached, locally-resolving base proceeds.
     reconcile._fetch_base(repo_root, base, timeout=FETCH_TIMEOUT_SECONDS)
     reconcile._add_worktree_for_member(member, wt_path, branch, repo_root, base=base, slug=slug)
-    reconcile._run_bootstrap(member, wt_path)
+
+    context = reconcile._build_task_context(
+        repo_root=repo_root, worktree=wt_path, slug=slug, member_name=member["name"]
+    )
+    return run_member_tasks(
+        reconcile._adapt_task_steps(member.get("tasks") or []),
+        reconcile.PROVISION_PHASE,
+        context,
+        completed or {},
+    )
