@@ -786,6 +786,19 @@ def _print_status_human(
         )
 
 
+def _empty_registry_drift() -> list[str]:
+    """Return a fresh empty list — the "always empty" registry-drift fact.
+
+    No writer of ``registry.json`` exists yet, so registry-drift detection can
+    never find anything: `cmd_status`'s ``drift`` block (both
+    ``stale_registry_instances`` and ``orphaned_git_worktrees``) and
+    `cmd_doctor`'s consistency check each need an always-empty list for this
+    same reason. One helper documents the "why", instead of two independent
+    hardcoded ``[]`` literals drifting out of sync.
+    """
+    return []
+
+
 def cmd_status(args: list[str], dry_run: bool = False) -> None:
     """camp status [--name <slug>] [--json] [--stale [--days N]]
 
@@ -862,8 +875,8 @@ def cmd_status(args: list[str], dry_run: bool = False) -> None:
         output: dict[str, Any] = {
             "worktrees": worktrees,
             "drift": {
-                "stale_registry_instances": [],
-                "orphaned_git_worktrees": [],
+                "stale_registry_instances": _empty_registry_drift(),
+                "orphaned_git_worktrees": _empty_registry_drift(),
             },
         }
         print(json.dumps(output))
@@ -977,8 +990,7 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
     )
 
     # --- check (b): manifest ↔ registry consistency ---
-    # Placeholder: no writer of registry.json exists, so drift is never detected.
-    stale_ids: list[str] = []
+    stale_ids: list[str] = _empty_registry_drift()
     consistency_ok = not stale_ids
     if not consistency_ok:
         any_failed = True
