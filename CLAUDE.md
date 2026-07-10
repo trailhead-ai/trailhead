@@ -100,8 +100,8 @@ harness **compose + wire** the selection under the wire lock → build the camp/
   no full rollback. Knows nothing about `claude plugin` or `marketplace.json`.
 - **`paths.py`** — OS-aware config/state/cache resolver. Resolvers are **pure**
   (never create dirs — use `ensure_dir`); honor `XDG_*` and per-app
-  `<APP>_STATE_DIR`-style overrides; full basedir/XDG on every OS incl. macOS, with
-  a read-only legacy `~/Library` fallback (Axiom 4; see `trailhead/docs/paths.md`).
+  `<APP>_STATE_DIR`-style overrides; full basedir/XDG on every OS incl. macOS —
+  unconditionally, never `~/Library` (Axiom 4; see `trailhead/docs/paths.md`).
 - **`vcs/`** — provider-agnostic VCS seam (`repos`/`pr`/`ci`/`deploy` surfaces) that
   portage and landing build on. GitHub-backed today; designed so a GitLab backend
   maps onto the same method set.
