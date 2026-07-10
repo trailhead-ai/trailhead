@@ -19,6 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 TESTS_DIR = Path(__file__).parent
 PLUGIN_ROOT = TESTS_DIR.parent / "plugins" / "lore"
 sys.path.insert(0, str(TESTS_DIR))
@@ -137,6 +139,11 @@ def test_importing_agent_ruleset_does_not_import_cli_dispatch():
 # ---------------------------------------------------------------------------
 
 def test_drift_via_the_seam_current_stale_missing(tmp_path):
+    pytest.importorskip(
+        "trailhead",
+        reason="requires the trailhead package on sys.path; lore's suite is "
+        "also run standalone (tools/lore/pyproject.toml testpaths) without it",
+    )
     from trailhead.harness.claude_code import ClaudeCodeHarness
 
     content = _render()
