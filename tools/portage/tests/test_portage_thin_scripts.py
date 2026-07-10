@@ -293,6 +293,30 @@ class TestWaitForActionable:
         rc = mod.main([f"{tmp_path}:1"])
         assert rc == 1
 
+    def test_bad_pair_format_exits_2_with_clean_message(self, monkeypatch, capsys):
+        """A malformed repo:pr pair (no colon) must exit 2 with a clear stderr
+        message, not raise a raw ValueError traceback from the unguarded split."""
+        provider = _FakeProvider()
+        mod = _load("wait_for_actionable")
+        _patch_provider(mod, monkeypatch, provider)
+        rc = mod.main(["no-colon-here"])
+        assert rc == 2
+        assert provider.ci.calls == []
+        err = capsys.readouterr().err
+        assert "no-colon-here" in err
+
+    def test_non_digit_pr_number_exits_2_with_clean_message(self, monkeypatch, capsys):
+        """A repo:pr pair whose pr half isn't all digits must exit 2 cleanly,
+        matching merge_prs.py's guard rather than reaching ci.wait unvalidated."""
+        provider = _FakeProvider()
+        mod = _load("wait_for_actionable")
+        _patch_provider(mod, monkeypatch, provider)
+        rc = mod.main(["some/path:--repo=owner/other"])
+        assert rc == 2
+        assert provider.ci.calls == []
+        err = capsys.readouterr().err
+        assert "--repo=owner/other" in err
+
 
 # ---------------------------------------------------------------------------
 # release_prs_sidecar.py — record/read via provider.pr

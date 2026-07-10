@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
 
 from _bootstrap import ensure_trailhead_importable
 
@@ -37,7 +39,20 @@ def main(argv: list[str] | None = None) -> int:
 
     pr_pairs: list[tuple[str, str]] = []
     for pair in args.pairs:
-        repo, pr = pair.split(":", 1)
+        parts = pair.split(":", 1)
+        if len(parts) != 2:
+            print(
+                f"wait_for_actionable: bad pair format '{pair}' (expected repo:pr_number)",
+                file=sys.stderr,
+            )
+            return 2
+        repo, pr = parts
+        if not re.fullmatch(r"\d+", pr):
+            print(
+                f"wait_for_actionable: pr_number must be all digits, got: {pr!r}",
+                file=sys.stderr,
+            )
+            return 2
         pr_pairs.append((repo, pr))
 
     result = get_provider().ci.wait(
