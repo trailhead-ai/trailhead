@@ -16,7 +16,6 @@ so tests never shell out.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -24,11 +23,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from trailhead.harness import HarnessError, get_harness
 from trailhead.pathint import resolve_shim_dir
 from trailhead.paths import state_dir
 
-_REGISTERED_MARKER = ".trailhead-registered"
-_INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 _CLI_NAMES = ("camp", "lore")
 
 
@@ -46,28 +44,29 @@ def _default_python_version_runner(cmd: list[str]) -> subprocess.CompletedProces
 
 
 def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
+    """Report each composed harness tree's registration state via the harness seam.
+
+    Registration state is read through the :class:`~trailhead.harness.base.Harness`
+    (``is_registered`` / ``installed_tools`` / ``manifest_name``) rather than by
+    re-deriving the harness's on-disk marker scheme here.  An unknown harness dir
+    (no registered implementation) is still reported present, but its scheme can't
+    be introspected through the seam, so its state reads as empty.
+    """
     out: dict[str, dict] = {}
     if not composed_base.is_dir():
         return out
     for hdir in sorted(composed_base.iterdir()):
         if not hdir.is_dir():
             continue
-        installed = sorted(
-            f.name[len(_INSTALLED_MARKER_PREFIX) :]
-            for f in hdir.iterdir()
-            if f.is_file() and f.name.startswith(_INSTALLED_MARKER_PREFIX)
-        )
-        marketplace_name = None
-        mkt = hdir / ".claude-plugin" / "marketplace.json"
-        if mkt.exists():
-            try:
-                marketplace_name = json.loads(mkt.read_text()).get("name")
-            except (OSError, json.JSONDecodeError):
-                marketplace_name = "(unreadable)"
+        try:
+            harness = get_harness(hdir.name)
+        except HarnessError:
+            out[hdir.name] = {"registered": False, "installed": [], "marketplace": None}
+            continue
         out[hdir.name] = {
-            "registered": (hdir / _REGISTERED_MARKER).exists(),
-            "installed": installed,
-            "marketplace": marketplace_name,
+            "registered": harness.is_registered(hdir),
+            "installed": harness.installed_tools(hdir),
+            "marketplace": harness.manifest_name(hdir),
         }
     return out
 
