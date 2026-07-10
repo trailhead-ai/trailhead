@@ -159,6 +159,25 @@ class TestCheckPrStatus:
         assert rc == 1
         assert "not a directory" in capsys.readouterr().out
 
+    def test_invalid_pr_number_exits_1_with_clean_error(self, tmp_path, monkeypatch, capsys):
+        """A flag-injection-shaped pr_number surfaces provider.pr.status's
+        InvalidInputError as a clean JSON error, never a raw traceback."""
+        from trailhead.vcs.github import InvalidInputError
+
+        provider = _FakeProvider()
+
+        def raising_status(repo_path, pr_number, *, since=None, review_bot_login=None):
+            raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
+
+        provider.pr.status = raising_status
+        mod = _load("check_pr_status")
+        _patch_provider(mod, monkeypatch, provider)
+
+        rc = mod.main([str(tmp_path), "abc"])
+        assert rc == 1
+        out = json.loads(capsys.readouterr().out)
+        assert "must be all digits" in out["error"]
+
 
 # ---------------------------------------------------------------------------
 # pr_evaluate_status.py
@@ -177,6 +196,25 @@ class TestPrEvaluate:
         assert "status" in kinds and "evaluate" in kinds
         out = json.loads(capsys.readouterr().out)
         assert out["action"] == "done"
+
+    def test_invalid_pr_number_exits_1_with_clean_error(self, tmp_path, monkeypatch, capsys):
+        """A flag-injection-shaped pr_number surfaces provider.pr.status's
+        InvalidInputError as a clean JSON error, never a raw traceback."""
+        from trailhead.vcs.github import InvalidInputError
+
+        provider = _FakeProvider()
+
+        def raising_status(repo_path, pr_number, *, since=None, review_bot_login=None):
+            raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
+
+        provider.pr.status = raising_status
+        mod = _load("pr_evaluate_status")
+        _patch_provider(mod, monkeypatch, provider)
+
+        rc = mod.main([str(tmp_path), "abc"])
+        assert rc == 1
+        out = json.loads(capsys.readouterr().out)
+        assert "must be all digits" in out["reason"]
 
 
 # ---------------------------------------------------------------------------

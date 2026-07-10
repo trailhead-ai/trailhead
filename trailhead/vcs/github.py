@@ -16,7 +16,10 @@ the release cluster is deleted):
 
 Safety invariants preserved: the merge gate, shell=False, option-injection
 guards (pr_number digits-only, branch leading-dash / push ``--`` terminator),
-no hardcoded review-bot login (a passed param).
+no hardcoded review-bot login (a passed param). The pr_number/job_id digits-only
+guards are enforced inside ``_check_status`` and ``_GitHubDeploy.logs`` themselves
+(not just at the merge call site), so every caller — status/checks/wait reads
+included — is covered before anything reaches ``gh`` argv.
 """
 
 from __future__ import annotations
@@ -253,6 +256,7 @@ def _check_status(
     review_bot_login: str | None,
     runner: rp.Runner,
 ) -> dict[str, Any]:
+    _validate_pr_number(pr_number)
     pr = _gh(
         ["pr", "view", pr_number, "--json", "mergeable,mergeStateStatus,isDraft,reviews"],
         cwd=repo_path,
@@ -429,7 +433,12 @@ def _load_merge_order(toml_path: str | None) -> list[str] | None:
 
 def _validate_pr_number(pr_number: str) -> None:
     if not re.fullmatch(r"\d+", pr_number):
-        raise InvalidInputError(f"merge_prs: pr_number must be all digits, got: {pr_number!r}")
+        raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
+
+
+def _validate_job_id(job_id: str) -> None:
+    if not re.fullmatch(r"\d+", job_id):
+        raise InvalidInputError(f"job_id must be all digits, got: {job_id!r}")
 
 
 def _resolve_author_email(runner: rp.Runner) -> str:
@@ -874,6 +883,7 @@ class _GitHubDeploy(DeploySurface):
         A not-found / clean job yields ``[]`` (no false alarm); the truncation
         sentinel is appended when the raw count exceeds ``max_annotations``.
         """
+        _validate_job_id(job_id)
         owner_repo = _resolve_owner_repo(repo_path, self._runner)
         args = [
             "api",
