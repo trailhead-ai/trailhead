@@ -65,6 +65,7 @@ def cmd_reindex(args) -> int:
     — there is no path override, since the active vault is fully determined by
     scoping.
     """
+    from ..record import store as record_store_mod
     from ..search import index as index_store_mod
     from ..vault import config as vault_config_mod
 
@@ -83,8 +84,7 @@ def cmd_reindex(args) -> int:
         shared_roots = None
 
     try:
-        conn = index_store_mod.open_index()
-        try:
+        with record_store_mod.index_transaction() as conn:
             count = index_store_mod.rebuild(
                 vault_roots, conn, shared_roots=shared_roots
             )
@@ -97,8 +97,6 @@ def cmd_reindex(args) -> int:
                 except OSError:
                     pass
             conn.commit()
-        finally:
-            conn.close()
     except Exception as exc:
         print(f"error: reindex failed: {exc}", file=sys.stderr)
         return 1
