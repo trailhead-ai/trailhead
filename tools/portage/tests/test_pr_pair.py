@@ -2,35 +2,20 @@
 wait_for_actionable.py and merge_prs.py.
 
 Loaded the same way test_portage_thin_scripts.py loads the scripts themselves
-(by file path, inserting the scripts dir onto sys.path), since the module lives
-alongside the thin scripts rather than in an importable package.
+(by file path, via the shared `_script_loader.load_script` helper), since the
+module lives alongside the thin scripts rather than in an importable package.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "plugins" / "portage" / "scripts"
-
-
-def _load(name: str):
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from _script_loader import load_script
 
 
 @pytest.fixture()
 def pr_pair():
-    return _load("_pr_pair")
+    return load_script("_pr_pair")
 
 
 class TestSplitPair:
