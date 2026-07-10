@@ -17,6 +17,7 @@ cmd_sync_group(group, env):
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -259,6 +260,7 @@ def _provision_member_and_flip(
     mpath: Path,
     *,
     env: dict[str, str] | None,
+    retrying_ready: bool = False,
 ) -> tuple[dict[str, Any], list[Any] | None]:
     """Run one member's per-member provision under the held reconcile lock and
     flip its manifest state accordingly.
@@ -266,12 +268,26 @@ def _provision_member_and_flip(
     Returns (result, task_results): `result` is the per-member entry for
     cmd_setup_group's return map ({"provision_state", "reason"?}); `task_results`
     is the list of TaskResults on the success path (so the caller can classify a
-    retry outcome), or None when provisioning raised (member → failed).
+    retry outcome), or None when provisioning raised.
 
     A required-task failure (TaskError) flips the member to failed and persists
     the partial results; a git fetch/add failure flips it to failed with a
     reason; an optional-task failure leaves the member ready with the failed task
     recorded and warned. The caller MUST already hold the .reconcile.lock.
+
+    `retrying_ready=True` marks this call as a retry of an outstanding OPTIONAL
+    task on a member that is ALREADY ready (a required-task failure already
+    keeps a member out of ready in the first place, so this call can only ever
+    be chasing an optional task). Before this flag existed, `camp setup` never
+    touched an already-ready member at all, so it could never regress one; the
+    outstanding-task retry must preserve that invariant — a git fetch timeout or
+    any other exception encountered DURING the retry is infrastructure noise
+    incidental to the retry attempt, not a reason to demote an already-known-good
+    member. So in this mode every exception branch leaves provision_state
+    "ready" (persisting partial TaskError results into `tasks` if any were
+    produced) and warns to stderr instead of flipping to failed; the returned
+    result carries an internal `_retry_failed` marker (popped by the caller) so
+    `cmd_setup_group` can still classify the outcome as "still-failing".
     """
     from ..group.manifest import flip_member_state_unlocked
     from . import provision
@@ -290,18 +306,45 @@ def _provision_member_and_flip(
         )
     except subprocess.TimeoutExpired as e:
         reason = f"git fetch timeout after {e.timeout}s"
+        if retrying_ready:
+            print(
+                f"camp: retry for member {name!r} hit {reason} — member remains "
+                "ready; run `camp status` for details.",
+                file=sys.stderr,
+            )
+            return {"provision_state": "ready", "_retry_failed": True}, None
         flip_member_state_unlocked(mpath, name, "failed", reason=reason)
         return {"provision_state": "failed", "reason": reason}, None
     except TaskError as e:
+        reason = str(e)
+        if retrying_ready:
+            # A required task cannot actually fail here (see docstring), but
+            # persist any partial results defensively rather than silently
+            # dropping them.
+            flip_member_state_unlocked(
+                mpath, name, "ready", tasks=_tasks_map_from_results(e.results)
+            )
+            print(
+                f"camp: retry for member {name!r} hit {reason} — member remains "
+                "ready; run `camp status` for details.",
+                file=sys.stderr,
+            )
+            return {"provision_state": "ready", "_retry_failed": True}, None
         # A required task failed: persist its (and any prior) results alongside
         # the failed state so `camp status` shows the task.
-        reason = str(e)
         flip_member_state_unlocked(
             mpath, name, "failed", reason=reason, tasks=_tasks_map_from_results(e.results)
         )
         return {"provision_state": "failed", "reason": reason}, None
     except Exception as e:
         reason = str(e)
+        if retrying_ready:
+            print(
+                f"camp: retry for member {name!r} hit {reason} — member remains "
+                "ready; run `camp status` for details.",
+                file=sys.stderr,
+            )
+            return {"provision_state": "ready", "_retry_failed": True}, None
         flip_member_state_unlocked(mpath, name, "failed", reason=reason)
         return {"provision_state": "failed", "reason": reason}, None
     else:
@@ -337,7 +380,13 @@ def cmd_setup_group(
     manifest write). Each ready member carries a `retry` outcome in the result:
         "none"          all tasks ok — nothing retried
         "fixed"         outstanding tasks retried and now all ok
-        "still-failing" retried but a task is still failed
+        "still-failing" retried but a task is still failed — OR the retry
+                        attempt itself hit an infrastructure error (git fetch
+                        timeout, or any other exception from provisioning); a
+                        ready member is NEVER demoted to failed by that noise,
+                        since a required-task failure already keeps a member
+                        out of ready in the first place, so a ready member can
+                        only ever be chasing an optional task here.
     Pending/failed members provisioned normally do NOT carry a `retry` field.
 
     Returns {"slug", "members": {name: {"provision_state", "reason"?, "retry"?}}}.
@@ -366,10 +415,13 @@ def cmd_setup_group(
                     continue
                 # Re-run outstanding tasks in place, then classify the outcome.
                 result, task_results = _provision_member_and_flip(
-                    group, slug, member, entry, mpath, env=env
+                    group, slug, member, entry, mpath, env=env, retrying_ready=True
                 )
-                still_failing = result["provision_state"] != "ready" or any(
-                    r.state == "failed" for r in (task_results or [])
+                retry_failed = result.pop("_retry_failed", False)
+                still_failing = (
+                    retry_failed
+                    or result["provision_state"] != "ready"
+                    or any(r.state == "failed" for r in (task_results or []))
                 )
                 result["retry"] = "still-failing" if still_failing else "fixed"
                 results[name] = result

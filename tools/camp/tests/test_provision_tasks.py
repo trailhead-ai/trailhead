@@ -364,6 +364,100 @@ def test_setup_ready_member_task_still_failing(tmp_path):
     assert entry["tasks"]["graphify"]["state"] == "failed"
 
 
+def test_setup_ready_member_retry_timeout_does_not_demote(tmp_path, monkeypatch, capsys):
+    """A transient git-fetch timeout hit while retrying an already-ready member's
+    outstanding optional task must NOT demote the member to failed — it stays
+    ready, the retry outcome is "still-failing", and the reason is warned."""
+    import camp.provision.provision as provision
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group
+    from camp.group.manifest import read_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "readytimeout",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("graphify", ["false"], required=False)],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    cmd_setup_group(group, "s", env=env)  # ready with graphify failed (optional)
+
+    def boom(group, slug, member, *, completed=None, env):
+        raise subprocess.TimeoutExpired(cmd=["git", "fetch"], timeout=5)
+
+    monkeypatch.setattr(provision, "provision_member", boom)
+
+    result = cmd_setup_group(group, "s", env=env)
+    assert result["members"]["repo"] == {
+        "provision_state": "ready",
+        "retry": "still-failing",
+    }
+
+    entry = read_central_manifest(_manifest_path("readytimeout", "s", env))["members"][0]
+    assert entry["provision_state"] == "ready"
+
+    err = capsys.readouterr().err
+    assert "repo" in err
+    assert "timeout" in err.lower()
+
+
+def test_setup_ready_member_retry_generic_exception_does_not_demote(
+    tmp_path, monkeypatch, capsys
+):
+    """A generic exception (e.g. a git command failure) hit while retrying an
+    already-ready member's outstanding optional task must NOT demote the member
+    to failed — same "still-failing"-but-ready contract as a timeout."""
+    import camp.provision.provision as provision
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group
+    from camp.group.manifest import read_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "readygeneric",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("graphify", ["false"], required=False)],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    cmd_setup_group(group, "s", env=env)  # ready with graphify failed (optional)
+
+    def boom(group, slug, member, *, completed=None, env):
+        raise RuntimeError("git command failed")
+
+    monkeypatch.setattr(provision, "provision_member", boom)
+
+    result = cmd_setup_group(group, "s", env=env)
+    assert result["members"]["repo"] == {
+        "provision_state": "ready",
+        "retry": "still-failing",
+    }
+
+    entry = read_central_manifest(_manifest_path("readygeneric", "s", env))["members"][0]
+    assert entry["provision_state"] == "ready"
+
+    err = capsys.readouterr().err
+    assert "repo" in err
+    assert "git command failed" in err
+
+
 # ---------------------------------------------------------------------------
 # reconcile_worktree path
 # ---------------------------------------------------------------------------
