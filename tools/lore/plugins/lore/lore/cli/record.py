@@ -9,6 +9,12 @@ from typing import Any
 
 from .common import _load_vault_config, _read_stdin_body, _resolve_groups_dir
 
+# The scope flags a record can carry, in resolution-precedence order. Does not
+# include "default" -- that's a vault-routing fallback (see
+# vault/resolve.py's _PRECEDENCE), not a scope a record's --repo/--product/
+# --suite/--team flags can set directly.
+_SCOPE_FLAGS = ("repo", "product", "suite", "team")
+
 
 def _resolve_group_scopes(
     *,
@@ -72,7 +78,7 @@ def _resolve_record_op_vault(record_id: str, args) -> str:
     kind = record_id.split("/", 1)[0]
     participating_scopes = {
         flag: getattr(args, flag)
-        for flag in ("repo", "product", "suite", "team")
+        for flag in _SCOPE_FLAGS
         if getattr(args, flag, None)
     }
     chosen = vault_resolve_mod.resolve_vault(participating_scopes, kind, vaults)
@@ -483,7 +489,7 @@ def _cmd_record_create(args) -> int:
     # route to, so we never stamp implicit scope fields the user did not type.
     loaded = _load_vault_config()
     participating_scopes: dict = {}
-    for flag in ("repo", "product", "suite", "team"):
+    for flag in _SCOPE_FLAGS:
         val = getattr(args, flag, None)
         if val:
             participating_scopes[flag] = val
@@ -540,7 +546,7 @@ def _cmd_record_create(args) -> int:
     scope = (
         ",".join(
             f"{flag}:{participating_scopes[flag]}"
-            for flag in ("repo", "product", "suite", "team")
+            for flag in _SCOPE_FLAGS
             if flag in participating_scopes
         )
         or None
@@ -646,7 +652,7 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
     _, vaults = loaded
     participating_scopes = {
         flag: merged_sidecar[flag]
-        for flag in ("repo", "product", "suite", "team")
+        for flag in _SCOPE_FLAGS
         if merged_sidecar.get(flag)
     }
     resolution = vault_resolve_mod.explain_resolution(participating_scopes, kind, vaults)
@@ -775,7 +781,7 @@ def _cmd_record_update(args) -> int:
             # scope; the non-scope per-field flags (--status / --title / --keyword
             # / --related-*) reuse the shared applier. --title is optional here.
             sidecar = dict(existing_sidecar)
-            for flag in ("repo", "product", "suite", "team"):
+            for flag in _SCOPE_FLAGS:
                 val = getattr(args, flag, None)
                 if val:
                     sidecar[flag] = val

@@ -9,7 +9,7 @@ removed, and the SessionStart area-pointer path now points at `lore search`.
 The area-map path (`cmd_areas`, `build_area_map`, `render_area_pointer`,
 `render_area_menu`, `AreaEntry`) is KEPT — it serves `lore areas` and the
 SessionStart pointer, not the recall command — and is covered by
-`test_recall_core.py` / `test_subsystem_recall.py`.
+`test_area_map_core.py`.
 """
 
 from __future__ import annotations
@@ -63,13 +63,13 @@ class TestAreaPointerCallSite:
         """The area-pointer (serve `lore areas` / recall flows) must point at
         `lore search`, not the removed `lore recall`.
         Area profiles live under area/ (singular), not areas/."""
-        recall = load_script("lore.search.recall")
+        area_map = load_script("lore.search.area_map")
         vault = tmp_path / "vault"
         (vault / "area").mkdir(parents=True)
         (vault / "area" / "penny.md").write_text(
             "---\nname: penny\nsummary: the penny worker\n---\n## Overview\nPenny.\n"
         )
-        pointer = recall.render_area_pointer(vault)
+        pointer = area_map.render_area_pointer(vault)
         assert pointer, "area pointer must be non-empty when areas exist"
         assert "lore search" in pointer, (
             f"area pointer must reference `lore search`; got: {pointer!r}"

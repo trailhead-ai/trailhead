@@ -301,7 +301,7 @@ class TestAreasBuildAreaMapRaises:
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch(
-                        "lore.search.recall.build_area_map",
+                        "lore.search.area_map.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         rc = cli.cmd_areas(args)
@@ -324,7 +324,7 @@ class TestAreasBuildAreaMapRaises:
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch(
-                        "lore.search.recall.build_area_map",
+                        "lore.search.area_map.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)
@@ -347,7 +347,7 @@ class TestAreasBuildAreaMapRaises:
             with mock.patch("sys.stdout", out):
                 with mock.patch("sys.stderr", err):
                     with mock.patch(
-                        "lore.search.recall.build_area_map",
+                        "lore.search.area_map.build_area_map",
                         side_effect=RuntimeError("parse failure"),
                     ):
                         cli.cmd_areas(args)

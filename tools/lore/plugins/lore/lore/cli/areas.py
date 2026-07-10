@@ -15,7 +15,7 @@ def cmd_areas(args) -> int:
     the resolved vault path does not exist on disk, or when build_area_map
     raises. Empty or absent areas/ dir prints a friendly "no areas" line.
     """
-    from ..search import recall as recall_mod
+    from ..search import area_map as area_map_mod
     from ..vault import config as vault_config_mod
 
     _NO_AREAS_LINE = "No areas defined yet."
@@ -30,13 +30,13 @@ def cmd_areas(args) -> int:
         return 0
 
     try:
-        entries = recall_mod.build_area_map(vault)
+        entries = area_map_mod.build_area_map(vault)
     except Exception as exc:
         print(f"lore areas: could not build area map ({exc})", file=sys.stderr)
         print(_NO_AREAS_LINE)
         return 0
 
-    menu = recall_mod.render_area_menu(entries)
+    menu = area_map_mod.render_area_menu(entries)
     if menu:
         print(menu)
     else:
