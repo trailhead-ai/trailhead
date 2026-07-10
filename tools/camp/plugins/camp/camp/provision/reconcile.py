@@ -500,6 +500,13 @@ def reconcile_worktree(
     is recorded in the member's manifest `tasks` map, warned on stderr, and does
     not block the manifest write.
 
+    Each member's manifest entry is rebuilt from scratch every run, so any prior
+    `provision_state`/`activated`/`reason` (set elsewhere, by cmd_setup_group /
+    activation.py) is read up front and copied onto the rebuilt entry unchanged —
+    reconcile_worktree never sets these fields itself, so this is a pure
+    carry-forward. Without it, this function (invoked on every SessionStart) would
+    silently wipe them.
+
     Returns a result dict with:
         member_count:  int
         members:       list of member names
@@ -539,13 +546,25 @@ def reconcile_worktree(
 
             # Prior per-member task states (run-once): a task recorded "ok" in a
             # prior manifest is skipped this run. Absent on the first reconcile.
+            #
+            # prior_state carries forward provision_state/activated/reason set by
+            # cmd_setup_group/activation.py — reconcile_worktree never sets these
+            # itself, so this is a pure carry-forward (not a merge with new
+            # values). A member with no prior entry gets no key, same as today.
             prior_tasks: dict[str, dict[str, Any]] = {}
+            prior_state: dict[str, dict[str, Any]] = {}
             if mpath.is_file():
                 try:
                     for m in read_central_manifest(mpath).get("members", []):
                         prior_tasks[m["name"]] = m.get("tasks") or {}
+                        prior_state[m["name"]] = {
+                            key: m[key]
+                            for key in ("provision_state", "activated", "reason")
+                            if key in m
+                        }
                 except ManifestError:
                     prior_tasks = {}
+                    prior_state = {}
 
             # -- Phase 2: Run provision-phase tasks per member in parallel.
             task_results: dict[str, list[TaskResult]] = {}
@@ -596,6 +615,7 @@ def reconcile_worktree(
                 merged.update(_tasks_map_from_results(results))
                 if merged:
                     mr["tasks"] = merged
+                mr.update(prior_state.get(member["name"], {}))
 
             # -- Phase 3: Write central manifest atomically (only after all succeed)
             manifest_data: dict[str, Any] = {

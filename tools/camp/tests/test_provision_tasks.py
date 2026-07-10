@@ -358,6 +358,128 @@ def test_task_states_persist_and_survive_reread(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# reconcile_worktree: provision_state/activated carry-forward
+# ---------------------------------------------------------------------------
+
+
+def test_reconcile_preserves_provision_state_and_activated(tmp_path):
+    """A second reconcile_worktree run never regresses provision_state/activated
+    set by cmd_setup_group/activation.py — it only rebuilds worktree bookkeeping
+    and tasks, so prior provision_state/activated must survive unchanged."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "carryg",
+        [{"name": "repo", "repo_root": str(repo), "base": "origin/main"}],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    mpath = _manifest_path("carryg", "s", env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["provision_state"] = "ready"
+    data["members"][0]["activated"] = True
+    write_central_manifest(mpath, data)
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["provision_state"] == "ready"
+    assert entry["activated"] is True
+
+
+def test_reconcile_first_run_has_no_provision_state_or_activated_key(tmp_path):
+    """A member with no prior manifest entry (first-ever reconcile) gets no
+    provision_state/activated key — unchanged from today's first-run shape."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "firstrung",
+        [{"name": "repo", "repo_root": str(repo), "base": "origin/main"}],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(_manifest_path("firstrung", "s", env))["members"][0]
+    assert "provision_state" not in entry
+    assert "activated" not in entry
+
+
+def test_reconcile_preserves_failed_provision_state_and_reason(tmp_path):
+    """A member whose prior provision_state was "failed" (with a reason) keeps
+    both across a reconcile run that doesn't touch provision itself."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "failedg",
+        [{"name": "repo", "repo_root": str(repo), "base": "origin/main"}],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    mpath = _manifest_path("failedg", "s", env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["provision_state"] = "failed"
+    data["members"][0]["reason"] = "migrate task failed"
+    write_central_manifest(mpath, data)
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["provision_state"] == "failed"
+    assert entry["reason"] == "migrate task failed"
+
+
+def test_reconcile_carries_provision_state_activated_and_tasks_together(tmp_path):
+    """A single reconcile run carries forward provision_state, activated, AND
+    the tasks map together in the same member entry, none clobbering the others."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "combinedg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("ok", ["true"])],
+            }
+        ],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    mpath = _manifest_path("combinedg", "s", env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["provision_state"] = "ready"
+    data["members"][0]["activated"] = True
+    write_central_manifest(mpath, data)
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["provision_state"] == "ready"
+    assert entry["activated"] is True
+    assert entry["tasks"] == {"ok": {"state": "ok"}}
+
+
+# ---------------------------------------------------------------------------
 # manifest persistence primitive
 # ---------------------------------------------------------------------------
 
