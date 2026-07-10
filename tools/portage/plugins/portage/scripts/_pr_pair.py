@@ -7,14 +7,13 @@ pr_number field, pr_number all-digits -- and both exit 2 with a clean stderr
 message on malformity rather than raising a raw exception. This module is the
 single place that shared rule lives; the field count differs per caller via
 `max_parts`, and any extra fields beyond repo/pr_number are the caller's to
-interpret.
+interpret. The digit check itself delegates to
+`trailhead.vcs.github.validate_pr_number` (imported lazily inside `split_pair`,
+since callers import this module before `trailhead` is guaranteed importable)
+so there is one place that defines "what a valid pr_number looks like".
 """
 
 from __future__ import annotations
-
-import re
-
-_PR_NUMBER_RE = re.compile(r"\d+")
 
 
 class PairFormatError(Exception):
@@ -30,10 +29,14 @@ def split_pair(token: str, *, max_parts: int = 2) -> tuple[str, ...]:
     input has more fields, up to `max_parts`). Raises PairFormatError on any
     violation; callers print the message to stderr and exit 2.
     """
+    from trailhead.vcs.github import InvalidInputError, validate_pr_number
+
     parts = token.split(":", max_parts - 1)
     if len(parts) < 2:
         raise PairFormatError(f"bad pair format {token!r} (expected repo:pr_number)")
     pr_number = parts[1]
-    if not _PR_NUMBER_RE.fullmatch(pr_number):
-        raise PairFormatError(f"pr_number must be all digits, got: {pr_number!r}")
+    try:
+        validate_pr_number(pr_number)
+    except InvalidInputError as exc:
+        raise PairFormatError(str(exc)) from exc
     return tuple(parts)

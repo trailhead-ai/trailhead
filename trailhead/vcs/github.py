@@ -256,7 +256,7 @@ def _check_status(
     review_bot_login: str | None,
     runner: rp.Runner,
 ) -> dict[str, Any]:
-    _validate_pr_number(pr_number)
+    validate_pr_number(pr_number)
     pr = _gh(
         ["pr", "view", pr_number, "--json", "mergeable,mergeStateStatus,isDraft,reviews"],
         cwd=repo_path,
@@ -432,7 +432,13 @@ def _load_merge_order(toml_path: str | None) -> list[str] | None:
     return None
 
 
-def _validate_pr_number(pr_number: str) -> None:
+def validate_pr_number(pr_number: str) -> None:
+    """Validate ``pr_number`` is all-digits; raise InvalidInputError otherwise.
+
+    Public (not underscore-prefixed) so callers outside this module — e.g.
+    ``tools/portage``'s ``_pr_pair.py`` — can share this one validation rule
+    instead of re-deriving their own digit regex.
+    """
     if not re.fullmatch(r"\d+", pr_number):
         raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
 
@@ -519,7 +525,7 @@ def _merge_prs(
     runner: rp.Runner,
 ) -> dict[str, Any]:
     for pair in pr_pairs:
-        _validate_pr_number(pair.pr_number)
+        validate_pr_number(pair.pr_number)
 
     manifest_data = _load_manifest(manifest_path)
     member_names = {m["name"] for m in manifest_data.get("members", [])}
