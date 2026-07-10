@@ -40,14 +40,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
-
-def _subparsers_action(parser: argparse.ArgumentParser) -> "argparse._SubParsersAction | None":
-    """Return the one ``_SubParsersAction`` among *parser*'s actions, or None."""
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            return action
-    return None
-
+from ..argparse_util import find_subparsers_action
 
 # The two-depth shape this generator covers: `search` is a leaf in its own
 # right; `record`/`session` are groups whose own nested subparsers hold the
@@ -63,7 +56,7 @@ def _leaf_parsers(parser: argparse.ArgumentParser) -> "dict[str, argparse.Argume
     Raises ``ValueError`` if the expected top-level or nested subparsers
     structure is missing — a caller must never receive a silently-partial map.
     """
-    top_action = _subparsers_action(parser)
+    top_action = find_subparsers_action(parser)
     if top_action is None:
         raise ValueError("parser has no top-level subparsers action")
 
@@ -72,7 +65,7 @@ def _leaf_parsers(parser: argparse.ArgumentParser) -> "dict[str, argparse.Argume
     }
     for group_name in _EXPAND_GROUPS:
         group_parser = top_action.choices[group_name]
-        nested_action = _subparsers_action(group_parser)
+        nested_action = find_subparsers_action(group_parser)
         if nested_action is None:
             raise ValueError(f"{group_name!r} subparser has no nested subparsers action")
         for sub_name, sub_leaf in nested_action.choices.items():
@@ -84,23 +77,29 @@ def _is_hidden(action: argparse.Action) -> bool:
     return action.help is argparse.SUPPRESS
 
 
+def _flag_descriptor(flag: str, action: argparse.Action) -> str:
+    """Render a bare (unbracketed) ``--flag`` or ``--flag VALUE``.
+
+    ``--flag`` alone when the action takes no value (``nargs == 0``), else
+    ``--flag VALUE`` using its metavar, falling back to its dest upper-cased.
+    """
+    if action.nargs == 0:
+        return flag
+    token = (action.metavar or action.dest).upper()
+    return f"{flag} {token}"
+
+
 def _required_action_descriptor(action: argparse.Action) -> str:
     """Render one required action as a bare (unbracketed) token.
 
     A positional (no ``option_strings``) becomes ``<TOKEN>`` using its metavar,
     falling back to its dest — not every positional sets an explicit metavar.
-    A required flag becomes ``--flag`` alone when it takes no value
-    (``nargs == 0``), else ``--flag VALUE`` using its metavar, falling back to
-    its dest upper-cased.
+    A required flag renders via ``_flag_descriptor``.
     """
     if not action.option_strings:
         token = action.metavar or action.dest
         return f"<{token}>"
-    flag = action.option_strings[0]
-    if action.nargs == 0:
-        return flag
-    token = (action.metavar or action.dest).upper()
-    return f"{flag} {token}"
+    return _flag_descriptor(action.option_strings[0], action)
 
 
 def _required_args(leaf_parser: argparse.ArgumentParser) -> "list[str]":
@@ -132,10 +131,7 @@ def _extra_action_descriptor(leaf_parser: argparse.ArgumentParser, flag: str) ->
     """
     for action in leaf_parser._actions:
         if flag in action.option_strings:
-            if action.nargs == 0:
-                return f"[{flag}]"
-            token = (action.metavar or action.dest).upper()
-            return f"[{flag} {token}]"
+            return f"[{_flag_descriptor(flag, action)}]"
     raise ValueError(f"curated extra flag {flag!r} does not exist on this leaf's parser")
 
 
@@ -156,17 +152,8 @@ class _LeafSpec:
     stdin_hint: "str | None" = None
 
 
-_LEAF_ORDER: "tuple[str, ...]" = (
-    "search",
-    "record create",
-    "record update",
-    "record delete",
-    "record show",
-    "session candidate",
-    "session referenced",
-    "session show",
-)
-
+#: Display order matches insertion order — dicts preserve it, so there is no
+#: separate order list to keep in sync by hand.
 _LEAF_SPECS: "dict[str, _LeafSpec]" = {
     "search": _LeafSpec(
         purpose="Query the vault via the KQL-subset search facade.",
@@ -232,9 +219,8 @@ def build_reference(parser: argparse.ArgumentParser) -> str:
     leaves = _leaf_parsers(parser)
 
     blocks = [_HEADER]
-    for name in _LEAF_ORDER:
+    for name, spec in _LEAF_SPECS.items():
         leaf_parser = leaves[name]
-        spec = _LEAF_SPECS[name]
 
         required = _required_args(leaf_parser)
         invocation = " ".join([f"lore {name}", *required]).rstrip()

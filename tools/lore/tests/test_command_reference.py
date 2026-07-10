@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 
 import pytest
+from lore.argparse_util import find_subparsers_action
 from lore.cli.dispatch import build_parser
 from lore.config import command_reference as cr
 
@@ -59,7 +60,7 @@ def test_mixed_depth_both_shapes_are_reachable():
 
 def test_no_uncurated_leaves_exist_under_record_or_session():
     parser = build_parser()
-    top_action = cr._subparsers_action(parser)
+    top_action = find_subparsers_action(parser)
 
     curated = {
         "record": {"create", "update", "delete", "show"},
@@ -67,7 +68,7 @@ def test_no_uncurated_leaves_exist_under_record_or_session():
     }
     for group, known in curated.items():
         group_parser = top_action.choices[group]
-        nested_action = cr._subparsers_action(group_parser)
+        nested_action = find_subparsers_action(group_parser)
         actual = set(nested_action.choices)
         assert actual == known, (
             f"'{group}' subcommands changed: {actual - known!r} are uncurated — "
