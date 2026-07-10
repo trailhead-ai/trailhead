@@ -26,7 +26,7 @@ Selection shape:
 
 Contract:
   - The harness CLI runner is stubbed in all tests (hermeticity).
-  - apply_plan(mode="copy") — no symlinks in composed tree.
+  - apply_plan always copies — no symlinks in composed tree.
   - staging-dir + atomic promote — a mid-compose failure leaves the
     prior dest unchanged.
   - staging cleanup runs on ANY exception (try/finally).

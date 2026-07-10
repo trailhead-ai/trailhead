@@ -245,7 +245,7 @@ def _compose_tool(
 
         try:
             plan = compose_plan(manifest, subagents, skills, staging_dir_path)
-            apply_plan(plan, mode="copy")
+            apply_plan(plan)
         except BaseException as exc:
             raise WireError(tool=tool, stage="compose", cause=exc) from exc
 
@@ -286,7 +286,3 @@ def default_manifest_paths() -> dict[str, Path]:
     repo_root = Path(__file__).parent.parent
     tools = ["lore", "camp", "craft", "portage", "landing"]
     return {t: repo_root / "tools" / t / "capabilities.toml" for t in tools}
-
-
-# Keep the private alias for any callers that haven't migrated yet.
-_default_manifest_paths = default_manifest_paths

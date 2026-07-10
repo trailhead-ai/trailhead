@@ -10,7 +10,6 @@ from trailhead.harness import (
     detect_harnesses,
     get_harness,
     known_harness_names,
-    resolve_harnesses,
 )
 from trailhead.harness.base import UNSUPPORTED_RULESET_NOTICE
 
@@ -32,15 +31,6 @@ class TestFactory:
     def test_unknown_harness_raises(self):
         with pytest.raises(HarnessError, match="codex"):
             get_harness("codex")
-
-    def test_resolve_harnesses_dedupes_by_canonical_name(self):
-        out = resolve_harnesses(["claude", "claude_code", "claude-code"])
-        assert len(out) == 1
-        assert out[0].name == "claude_code"
-
-    def test_resolve_harnesses_preserves_order(self):
-        out = resolve_harnesses(["claude_code"])
-        assert [h.name for h in out] == ["claude_code"]
 
 
 class TestDetection:

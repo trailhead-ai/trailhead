@@ -50,8 +50,9 @@ A skill dir without a `SKILL.md` (e.g. `skills/_shared` holding a shared
 include) is therefore never selectable on its own — list it in `base` so it
 still ships. To make a new subagent or skill selectable, just add the
 `agents/<name>.md` file or `skills/<name>/SKILL.md` dir; no manifest edit
-needed. `all_selectable()` returns the union of discovered subagent and skill
-names — the "ALL" set an install config can request.
+needed. `Manifest.subagents` and `Manifest.skills` are the discovered
+inventory — the "ALL" set an install config can request by passing a bare
+plugin string (see `install_config.py`).
 
 ---
 

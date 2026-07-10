@@ -4,7 +4,7 @@ Contract:
   - a selected subagent name -> a CopyOp for agents/<name>.md (a file, not a dir).
   - apply_plan lands the file under dest/agents/.
   - unselected subagents never appear in the plan.
-  - apply_plan(mode="copy") produces real files, never symlinks.
+  - apply_plan produces real files, never symlinks.
 """
 
 from pathlib import Path
@@ -52,7 +52,7 @@ class TestSubagentApply:
     def test_subagent_lands_and_content_preserved(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "dest"
-        apply_plan(compose_plan(m, {"librarian": None}, {}, dest), mode="copy")
+        apply_plan(compose_plan(m, {"librarian": None}, {}, dest))
         landed = dest / "agents" / "librarian.md"
         assert landed.is_file()
         assert landed.read_text() == (m.plugin_root / "agents" / "librarian.md").read_text()
@@ -61,6 +61,6 @@ class TestSubagentApply:
         m = load_manifest(_CRAFT_MANIFEST)
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"planner": None, "doc-finder": None}, {"plan": None}, dest)
-        apply_plan(plan, mode="copy")
+        apply_plan(plan)
         for path in dest.rglob("*"):
             assert not path.is_symlink()

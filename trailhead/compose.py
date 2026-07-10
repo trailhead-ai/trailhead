@@ -92,10 +92,6 @@ class UnknownSkillError(UnknownSelectionError):
         super().__init__(f"unknown skill {name!r} for tool {tool!r}")
 
 
-# Back-compat alias for callers importing the old name (removed with the old CLI).
-UnknownCapabilityError = UnknownSelectionError
-
-
 class OverrideError(Exception):
     """Raised when an override file_path does not exist."""
 
@@ -304,35 +300,26 @@ def compose_plan(
     return Plan(ops=deduped)
 
 
-def apply_plan(plan: Plan, *, mode: str = "copy") -> None:
+def apply_plan(plan: Plan) -> None:
     """Execute a :class:`Plan`, writing files to disk.
 
     This is the ONLY function in this module that writes to the filesystem.
+    Always copies (``shutil.copytree`` / ``shutil.copy2`` with ``symlinks=False``)
+    — composed trees never carry symlinks.
 
     Args:
         plan: The composition plan from :func:`compose_plan`.
-        mode: ``"copy"`` (default) uses ``shutil.copytree`` / ``shutil.copy2`` with
-              ``symlinks=False``.  ``"symlink"`` creates directory symlinks instead.
-
-    Raises:
-        ValueError: Unknown mode.
     """
-    if mode not in ("copy", "symlink"):
-        raise ValueError(f"unknown apply_plan mode {mode!r}; expected 'copy' or 'symlink'")
-
     for op in plan.ops:
         op.dest.parent.mkdir(parents=True, exist_ok=True)
-        if mode == "copy":
-            if op.src.is_dir():
-                # Skip Python build cruft so a stray __pycache__/*.pyc never ships.
-                shutil.copytree(
-                    op.src,
-                    op.dest,
-                    symlinks=False,
-                    dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-                )
-            else:
-                shutil.copy2(op.src, op.dest)
+        if op.src.is_dir():
+            # Skip Python build cruft so a stray __pycache__/*.pyc never ships.
+            shutil.copytree(
+                op.src,
+                op.dest,
+                symlinks=False,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
         else:
-            op.dest.symlink_to(op.src)
+            shutil.copy2(op.src, op.dest)

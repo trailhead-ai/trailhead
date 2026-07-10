@@ -16,7 +16,7 @@ split in `paths.py`:
 
 ```
 compose_plan(manifest, selected, dest) -> Plan   # pure — NO filesystem side-effects
-apply_plan(plan, *, mode="copy") -> None          # the ONLY function that writes
+apply_plan(plan) -> None                          # the ONLY function that writes
 ```
 
 **`compose_plan`** is completely pure.  It resolves source directories and returns
@@ -66,7 +66,7 @@ absolute-path injection.  Confinement is checked BEFORE any stat/copy.
 
 ## `symlinks=False` (binding)
 
-`apply_plan(plan, mode="copy")` uses `shutil.copytree(..., symlinks=False)`.
+`apply_plan(plan)` always copies, via `shutil.copytree(..., symlinks=False)`.
 Symlinks inside a source tree are **never** preserved as escaping links —
 their target contents are copied instead.  This eliminates the risk of a
 symlink inside a tool's plugin dir pointing outside the plugin boundary and
@@ -83,7 +83,7 @@ directly; it does not re-parse the manifest or reimplement the confinement helpe
 
 **Structural validity is proven**:
 
-After `apply_plan(plan, mode="copy")`:
+After `apply_plan(plan)`:
 
 - `dest/.claude-plugin/plugin.json` exists and parses as valid JSON.
 - Selected skill dirs (e.g. `dest/skills/decision`) exist and contain content.
@@ -124,7 +124,7 @@ The following are explicitly handled by the installer layer, not this module:
 
 | Error | Raised by | Condition |
 |---|---|---|
-| `UnknownCapabilityError(name, tool)` | `compose_plan` | A name in `selected` is not in the manifest. |
+| `UnknownSubagentError(name, tool)` / `UnknownSkillError(name, tool)` | `compose_plan` | A name in `selected` is not in the manifest. |
 | `CollisionError(dest, src_a, src_b)` | `compose_plan` | Two different srcs map to the same dest. |
 | `DestConfinementError(dest_root, path)` | `compose_plan` | A dest path escapes the target plugin dir. |
 | `ConfineError(tool, context, entry)` | Loader + `compose_plan` | A src path escapes the plugin root. |
