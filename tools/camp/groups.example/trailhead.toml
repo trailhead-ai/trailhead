@@ -25,6 +25,9 @@ repo_root = "/path/to/trailhead"
 # trailhead is reached via sys.path (walk-up from cli/camp), not pip install.
 # No build step is needed for import resolution on a fresh git clone.
 bootstrap = []
+# Build a code-review-graph knowledge graph in each new worktree (see the
+# [tasks.code-review-graph] block below). Referenced by name; opt-in per member.
+tasks = ["code-review-graph"]
 
 [[members]]
 name = "trailhead-ai.github.io"
@@ -38,6 +41,37 @@ bootstrap = []
 
 [branch]
 pattern = "worktree-{slug}"
+
+# [tasks.<name>] — group-level named, multi-step member tasks (referenced per
+# member via `tasks = [...]`). Steps are argv lists (shell=False, author-trusted
+# local input) with {repo_root}/{worktree}/{workspace}/{slug} placeholders.
+#
+# phase          "provision" (default) runs when a worktree is created and on
+#                each SessionStart reconcile; "activate" runs on first
+#                `camp activate`. Completion is recorded per member in the
+#                central manifest, so a task that finished "ok" is never re-run —
+#                only failed/never-run tasks execute (run-once-on-success).
+# required       false (default) → a failure records state + prints a one-line
+#                `camp status` warning and continues; true → failure is fatal.
+# timeout_seconds  per-step subprocess timeout (positive int; runner default
+#                otherwise).
+#
+# code-review-graph builds a knowledge graph of the worktree so review agents can
+# query it. A full `build` (not incremental `update`) is used deliberately: it
+# re-parses every file and roots every node's path at {worktree}, so there is no
+# stale base commit and no stale file paths. The full-parse cost is paid once per
+# member per workspace via run-once-on-success semantics, not per session.
+#
+# Requires the `code-review-graph` CLI on PATH. Opt in per member (see the
+# trailhead member above); a member with no graph should simply not reference it.
+[tasks.code-review-graph]
+phase = "provision"
+required = false
+timeout_seconds = 180
+
+[[tasks.code-review-graph.steps]]
+name = "build"
+cmd = ["code-review-graph", "build", "--repo", "{worktree}"]
 
 # [harness] — optional harness-profile config (doc surfacing, injection, trust).
 #
