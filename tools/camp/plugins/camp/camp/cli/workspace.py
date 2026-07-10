@@ -32,18 +32,19 @@ def _cmd_ls_group_cli(
     render_workspace_list(entries, as_json=as_json)
 
 
-def _cmd_enter_group_cli(
+def _cmd_activate_group_cli(
     args: list[str],
     group: dict,
     env: dict[str, str] | None,
 ) -> None:
     """camp activate <member> [--name <slug>] — activate a member for the current session.
 
-    Fires the member's activation hooks idempotently, then prints the member's
+    Runs the member's activate-phase tasks idempotently, then prints the member's
     CLAUDE.md to stdout so the calling agent ingests it as context.
     """
     from ..spine import _die
-    from ..provision.activation import enter_member, MemberNotReadyError
+    from ..provision.activation import activate_member, MemberNotReadyError
+    from ..provision.tasks import TaskError
     from ..group.config import GroupConfigError
     from ..harness.profile import resolve_harness_profile
 
@@ -57,23 +58,18 @@ def _cmd_enter_group_cli(
 
     profile = resolve_harness_profile(group)
 
-    import subprocess as _subprocess
     try:
-        enter_member(group, slug, member_name, env=env, profile=profile)
+        activate_member(group, slug, member_name, env=env, profile=profile)
     except MemberNotReadyError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
     except GroupConfigError as e:
         print(f"camp activate: {e}", file=sys.stderr)
         sys.exit(1)
-    except _subprocess.CalledProcessError as e:
-        cmd_str = " ".join(str(t) for t in e.cmd) if isinstance(e.cmd, (list, tuple)) else str(e.cmd)
-        print(
-            f"camp activate: activation hook failed for member {member_name!r}\n"
-            f"  command: {cmd_str}\n"
-            f"  exit code: {e.returncode}",
-            file=sys.stderr,
-        )
+    except TaskError as e:
+        # A required activate-phase task failed; the message already names the
+        # member, the task, and the failing step (no raw traceback).
+        print(str(e), file=sys.stderr)
         sys.exit(1)
     except ValueError as e:
         _die(f"camp activate: {e}")

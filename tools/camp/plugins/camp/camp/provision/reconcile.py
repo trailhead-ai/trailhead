@@ -8,7 +8,8 @@ reconcile_worktree(group, slug):
       the actual `git fetch` is deferred to the async provisioner, so a
       missing base falls back to HEAD rather than failing synchronous bring-up.
     - Existence-guard before git worktree add (never blindly re-add).
-    - Bootstraps each member's configured bootstrap list in parallel (shell=False).
+    - Runs each member's provision-phase tasks in parallel (shell=False),
+      run-once on success via the manifest's per-member `tasks` state.
     - Writes the central manifest atomically only after ALL members succeed.
 
 reconcile_break(group, slug):
@@ -34,6 +35,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -48,6 +50,7 @@ from ..group.manifest import (
     workspace_dir,
     write_central_manifest,
 )
+from .tasks import TaskError, TaskResult, run_member_tasks
 
 # Thread-local lock registry for concurrent-run guard (same process; file lock
 # guards cross-process concurrency).
@@ -332,38 +335,119 @@ def _add_worktree_for_member(
         _move_worktree(member, stage, wt_path, repo_root)
 
 
-def _run_bootstrap(member: dict[str, Any], wt_path: Path) -> None:
-    """Run a member's bootstrap command in the worktree directory.
+# ---------------------------------------------------------------------------
+# Config-driven task wiring
+#
+# The task runner (camp.provision.tasks) is a standalone module that consumes
+# plain data: it does not know the config-resolved task shape, the manifest, or
+# how to print warnings. These helpers adapt between the config-resolved member
+# `tasks` list, the manifest's persisted per-task state, and the runner — used
+# identically by BOTH provision call paths (provision_member and
+# reconcile_worktree phase 2).
+# ---------------------------------------------------------------------------
 
-    bootstrap is a flat list of strings representing a single command +
-    its arguments (shell=False trust boundary). E.g.:
-        ["pip", "install", "-e", "."]
+# Provision-phase tasks run wherever the retired single bootstrap command ran.
+PROVISION_PHASE = "provision"
 
-    An empty list means no bootstrap; a no-op.
-    Raises ReconcileError if the command exits non-zero.
-    """
-    bootstrap = member.get("bootstrap") or []
-    if not bootstrap:
-        return
 
-    if not all(isinstance(part, str) for part in bootstrap):
-        raise ReconcileError(
-            f"camp: bootstrap for member {member['name']!r} must be a list of strings "
-            f"(shell=False); got non-string elements"
-        )
-
-    result = subprocess.run(
-        bootstrap,
-        cwd=str(wt_path),
-        capture_output=True,
-        text=True,
-        check=False,
+def _has_provision_tasks(member: dict[str, Any]) -> bool:
+    """True if the member has any provision-phase task to run."""
+    return any(
+        t.get("phase", PROVISION_PHASE) == PROVISION_PHASE for t in member.get("tasks") or []
     )
-    if result.returncode != 0:
-        raise ReconcileError(
-            f"camp: bootstrap failed for member {member['name']!r} "
-            f"(exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}"
-        )
+
+
+def _has_outstanding_provision_tasks(
+    member: dict[str, Any], tasks_map: dict[str, Any] | None
+) -> bool:
+    """True if the member has a provision-phase task not recorded "ok".
+
+    Compares the member's config-resolved provision tasks against the manifest's
+    persisted per-task state map: a task whose state is "failed" or absent
+    (never-run) is outstanding. Used by `camp setup` to decide whether an
+    otherwise-ready member still has task work to retry — an all-ok (or task-less)
+    member is a true no-op and is not re-provisioned.
+    """
+    tasks_map = tasks_map or {}
+    for task in member.get("tasks") or []:
+        if task.get("phase", PROVISION_PHASE) != PROVISION_PHASE:
+            continue
+        if (tasks_map.get(task["name"]) or {}).get("state") != "ok":
+            return True
+    return False
+
+
+def _adapt_task_steps(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Adapt config-resolved tasks to the runner's shape.
+
+    The config layer resolves each step as a {"name", "cmd"} table (a legible
+    per-step name for reporting); the runner expects each step as a bare argv
+    list. Map each task's steps to their `cmd` argv, leaving the rest intact.
+    """
+    adapted: list[dict[str, Any]] = []
+    for task in tasks:
+        adapted.append({**task, "steps": [step["cmd"] for step in task.get("steps") or []]})
+    return adapted
+
+
+def _completed_from_tasks_map(tasks_map: dict[str, Any] | None) -> dict[str, str]:
+    """Project a manifest `tasks` map ({name: {"state": ...}}) onto the runner's
+    `completed` shape ({name: state}) so an "ok" task is skipped (run-once)."""
+    return {name: info.get("state", "") for name, info in (tasks_map or {}).items()}
+
+
+def _tasks_map_from_results(results: list[TaskResult]) -> dict[str, Any]:
+    """Project a run's TaskResults onto the persisted manifest `tasks` map.
+
+    A skipped task carries forward its "ok" state (it only skips when already
+    ok); a failed task persists its (capped) stderr excerpt as the reason.
+    """
+    out: dict[str, Any] = {}
+    for result in results:
+        if result.state == "failed":
+            entry: dict[str, Any] = {"state": "failed"}
+            if result.stderr_excerpt:
+                entry["reason"] = result.stderr_excerpt
+            out[result.name] = entry
+        else:  # "ok" or "skipped" (skipped means already ok)
+            out[result.name] = {"state": "ok"}
+    return out
+
+
+def _warn_optional_task_failures(results: list[TaskResult], member_name: str) -> None:
+    """Print a one-line stderr warning for each optional task that failed.
+
+    A required-task failure raises TaskError instead of returning, so any failed
+    result reaching here is an optional task whose failure the run tolerated —
+    it must still be visible, or a member reads "ready" while a downstream tool
+    silently breaks. Matches the stderr-warning convention used elsewhere.
+    """
+    for result in results:
+        if result.state == "failed":
+            print(
+                f"camp: optional task {result.name!r} failed for member "
+                f"{member_name!r} — run `camp status` for details.",
+                file=sys.stderr,
+            )
+
+
+def _build_task_context(
+    *, repo_root: Path | str, worktree: Path, slug: str, member_name: str
+) -> dict[str, Any]:
+    """Build the {placeholder} substitution + cwd context for the task runner.
+
+    Carries the placeholders a task recipe may reference (repo_root, worktree,
+    workspace, slug); `worktree` is also the subprocess cwd, and `member` names
+    the member in error/warning messages. The workspace dir is the worktree's
+    parent (<workspace>/<member>).
+    """
+    return {
+        "repo_root": repo_root,
+        "worktree": worktree,
+        "workspace": worktree.parent,
+        "slug": slug,
+        "member": member_name,
+    }
 
 
 def _remove_worktree_for_member(
@@ -424,20 +508,33 @@ def reconcile_worktree(
 
     For each member:
       1. Ensures <repo_root>/.claude/worktrees/<slug> exists on branch worktree-<slug>.
-      2. Runs each member's bootstrap commands (shell=False).
+      2. Runs each member's provision-phase tasks (shell=False), run-once on
+         success via the manifest's per-member `tasks` state.
     Then writes the central manifest atomically.
 
     Concurrent-run guard: a per-slug lock (threading + file lock) prevents two
     concurrent reconcile_worktree calls from both running git worktree add.
 
+    A required task's failure raises ReconcileError and writes no manifest
+    (atomicity — never a half-provisioned member set). An optional task's failure
+    is recorded in the member's manifest `tasks` map, warned on stderr, and does
+    not block the manifest write.
+
+    Each member's manifest entry is rebuilt from scratch every run, so any prior
+    `provision_state`/`activated`/`reason` (set elsewhere, by cmd_setup_group /
+    activation.py) is read up front and copied onto the rebuilt entry unchanged —
+    reconcile_worktree never sets these fields itself, so this is a pure
+    carry-forward. Without it, this function (invoked on every SessionStart) would
+    silently wipe them.
+
     Returns a result dict with:
         member_count:  int
-        members:       list of {"name", "worktree_path"}
+        members:       list of member names
         manifest_path: str
-        bootstrap:     "ok" | "skipped"
+        tasks:         "ok"
 
     Raises:
-        ReconcileError: on git or bootstrap failure (with member name in message).
+        ReconcileError: on git failure or a required-task failure (member named).
     """
     group_name: str = group["group"]["name"]
     members: list[dict[str, Any]] = group["members"]
@@ -467,26 +564,78 @@ def reconcile_worktree(
                     }
                 )
 
-            # -- Phase 2: Bootstrap members in parallel (shell=False)
-            any_bootstrap_failure: Exception | None = None
-            if any(bool(m.get("bootstrap")) for m in members):
+            # Prior per-member task states (run-once): a task recorded "ok" in a
+            # prior manifest is skipped this run. Absent on the first reconcile.
+            #
+            # prior_state carries forward provision_state/activated/reason set by
+            # cmd_setup_group/activation.py — reconcile_worktree never sets these
+            # itself, so this is a pure carry-forward (not a merge with new
+            # values). A member with no prior entry gets no key, same as today.
+            prior_tasks: dict[str, dict[str, Any]] = {}
+            prior_state: dict[str, dict[str, Any]] = {}
+            if mpath.is_file():
+                try:
+                    for m in read_central_manifest(mpath).get("members", []):
+                        prior_tasks[m["name"]] = m.get("tasks") or {}
+                        prior_state[m["name"]] = {
+                            key: m[key]
+                            for key in ("provision_state", "activated", "reason")
+                            if key in m
+                        }
+                except ManifestError:
+                    prior_tasks = {}
+                    prior_state = {}
+
+            # -- Phase 2: Run provision-phase tasks per member in parallel.
+            task_results: dict[str, list[TaskResult]] = {}
+            required_failure: Exception | None = None
+            if any(_has_provision_tasks(m) for m in members):
                 with ThreadPoolExecutor(max_workers=len(members)) as executor:
                     futures = {}
                     for member, mr in zip(members, member_results):
-                        wt_path = Path(mr["worktree_path"])
-                        fut = executor.submit(_run_bootstrap, member, wt_path)
-                        futures[fut] = member
+                        context = _build_task_context(
+                            repo_root=mr["repo_root"],
+                            worktree=Path(mr["worktree_path"]),
+                            slug=slug,
+                            member_name=member["name"],
+                        )
+                        fut = executor.submit(
+                            run_member_tasks,
+                            _adapt_task_steps(member.get("tasks") or []),
+                            PROVISION_PHASE,
+                            context,
+                            _completed_from_tasks_map(prior_tasks.get(member["name"])),
+                        )
+                        futures[fut] = member["name"]
 
                     for fut in as_completed(futures):
-                        member = futures[fut]
+                        name = futures[fut]
                         try:
-                            fut.result()
+                            task_results[name] = fut.result()
+                        except TaskError as e:
+                            # A required task failed — surface it as ReconcileError
+                            # so the caller (and the session hook) treats it exactly
+                            # as a bootstrap failure did: no manifest is written.
+                            required_failure = ReconcileError(str(e))
+                            break
                         except Exception as e:
-                            any_bootstrap_failure = e
+                            required_failure = e
                             break
 
-            if any_bootstrap_failure is not None:
-                raise any_bootstrap_failure
+            if required_failure is not None:
+                raise required_failure
+
+            # Optional-task failures: warn on stderr and persist their state, but
+            # do not block the manifest write. Merge each member's results over
+            # its prior task map so states from other phases/runs survive.
+            for member, mr in zip(members, member_results):
+                results = task_results.get(member["name"], [])
+                _warn_optional_task_failures(results, member["name"])
+                merged = dict(prior_tasks.get(member["name"]) or {})
+                merged.update(_tasks_map_from_results(results))
+                if merged:
+                    mr["tasks"] = merged
+                mr.update(prior_state.get(member["name"], {}))
 
             # -- Phase 3: Write central manifest atomically (only after all succeed)
             manifest_data: dict[str, Any] = {
@@ -503,7 +652,7 @@ def reconcile_worktree(
         "member_count": len(member_results),
         "members": [mr["name"] for mr in member_results],
         "manifest_path": str(mpath),
-        "bootstrap": "ok",
+        "tasks": "ok",
     }
 
 

@@ -1,12 +1,16 @@
-"""Tests for activation.py — camp enter <member>.
+"""Tests for activation.py — camp activate <member>.
 
 Test contract:
-- camp enter <ready-member>: fires each hook once (list-mode, fake subprocess),
-  prints the member's CLAUDE.md content, marks activated; re-enter → hooks NOT
-  re-run, doc re-printed.
-- camp enter <pending-member> → "still provisioning" message + retry hint,
-  hooks NOT run.
-- camp enter <failed-member> → names the failure + retry command.
+- camp activate <ready-member>: runs each activate-phase task step once
+  (list-mode, fake subprocess), prints the member's CLAUDE.md content, marks
+  activated; re-activate → tasks NOT re-run, doc re-printed.
+- camp activate <pending-member> → "still provisioning" message + retry hint,
+  tasks NOT run.
+- camp activate <failed-member> → names the failure + retry command.
+- A legacy dep-install hook config still executes at first activate (via
+  load_group's normalization into an implicit required activate-phase task).
+- A required activate-task failure aborts (TaskError) and leaves activated unset.
+- An optional activate-task failure marks activated=True and warns on stderr.
 - malformed/unknown hook kind in config → GroupConfigError naming member + kind.
 - group_config parses + validates the activation-hook block: string-list
   enforcement, PLUS strip-and-reject empty/whitespace-only argv tokens.
@@ -64,21 +68,29 @@ def _env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_STATE_DIR": str(tmp_path / "camp")}
 
 
+def _activate_task(name: str, cmds: list[list[str]], *, required: bool = True) -> dict:
+    """Build a config-resolved activate-phase task (steps as {"cmd": argv})."""
+    return {
+        "name": name,
+        "phase": "activate",
+        "required": required,
+        "steps": [{"cmd": cmd} for cmd in cmds],
+    }
+
+
 def _make_group(
     group_name: str,
     member_name: str,
-    hooks: list[dict] | None = None,
+    tasks: list[dict] | None = None,
     harness: dict | None = None,
 ) -> dict:
-    """Build a minimal group config dict with optional activation hooks."""
+    """Build a minimal group config dict with optional resolved tasks."""
     member = {
         "name": member_name,
         "repo_root": "/tmp/fake-repo",
-        "bootstrap": [],
         "base": "origin/main",
+        "tasks": tasks or [],
     }
-    if hooks is not None:
-        member["hooks"] = hooks
     group = {
         "group": {"name": group_name},
         "members": [member],
@@ -91,13 +103,13 @@ def _make_group(
 
 
 # ---------------------------------------------------------------------------
-# enter_member: pending member → "still provisioning" + hint, no hooks
+# activate_member: pending member → "still provisioning" + hint, no tasks
 # ---------------------------------------------------------------------------
 
 
-def test_enter_pending_prints_provisioning_message(tmp_path: Path) -> None:
-    """A pending member → 'still provisioning' message + retry hint; hooks NOT run."""
-    from camp.provision.activation import enter_member, MemberNotReadyError
+def test_activate_pending_prints_provisioning_message(tmp_path: Path) -> None:
+    """A pending member → 'still provisioning' message + retry hint; tasks NOT run."""
+    from camp.provision.activation import activate_member, MemberNotReadyError
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -123,16 +135,16 @@ def test_enter_pending_prints_provisioning_message(tmp_path: Path) -> None:
     env = _env(tmp_path)
 
     with pytest.raises(MemberNotReadyError) as exc_info:
-        enter_member(group, slug, member_name, env=env)
+        activate_member(group, slug, member_name, env=env)
 
     msg = str(exc_info.value)
     assert "still provisioning" in msg.lower() or "provisioning" in msg.lower()
     assert "camp status" in msg or "camp setup" in msg
 
 
-def test_enter_pending_does_not_run_hooks(tmp_path: Path) -> None:
-    """A pending member triggers MemberNotReadyError before any hook is fired."""
-    from camp.provision.activation import enter_member, MemberNotReadyError
+def test_activate_pending_does_not_run_tasks(tmp_path: Path) -> None:
+    """A pending member triggers MemberNotReadyError before any task step runs."""
+    from camp.provision.activation import activate_member, MemberNotReadyError
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -157,24 +169,24 @@ def test_enter_pending_does_not_run_hooks(tmp_path: Path) -> None:
     group = _make_group(
         group_name,
         member_name,
-        hooks=[{"kind": "dep-install", "cmd": ["echo", "hook-ran"]}],
+        tasks=[_activate_task("dep-install", [["echo", "hook-ran"]])],
     )
     env = _env(tmp_path)
 
     with patch("subprocess.run") as mock_run:
         with pytest.raises(MemberNotReadyError):
-            enter_member(group, slug, member_name, env=env)
+            activate_member(group, slug, member_name, env=env)
         mock_run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# enter_member: failed member → names failure + retry command
+# activate_member: failed member → names failure + retry command
 # ---------------------------------------------------------------------------
 
 
-def test_enter_failed_names_failure_and_retry(tmp_path: Path) -> None:
+def test_activate_failed_names_failure_and_retry(tmp_path: Path) -> None:
     """A failed member → MemberNotReadyError naming the failure and retry command."""
-    from camp.provision.activation import enter_member, MemberNotReadyError
+    from camp.provision.activation import activate_member, MemberNotReadyError
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -202,7 +214,7 @@ def test_enter_failed_names_failure_and_retry(tmp_path: Path) -> None:
     env = _env(tmp_path)
 
     with pytest.raises(MemberNotReadyError) as exc_info:
-        enter_member(group, slug, member_name, env=env)
+        activate_member(group, slug, member_name, env=env)
 
     msg = str(exc_info.value)
     assert failure_reason in msg
@@ -210,13 +222,13 @@ def test_enter_failed_names_failure_and_retry(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# enter_member: ready member — fires hooks, prints CLAUDE.md, marks activated
+# activate_member: ready member — runs task steps, prints CLAUDE.md, marks activated
 # ---------------------------------------------------------------------------
 
 
-def test_enter_ready_fires_each_hook_once(tmp_path: Path) -> None:
-    """A ready member: each activation hook is fired exactly once (list-mode)."""
-    from camp.provision.activation import enter_member
+def test_activate_ready_runs_each_step_once(tmp_path: Path) -> None:
+    """A ready member: each activate-phase task step is run exactly once (list-mode)."""
+    from camp.provision.activation import activate_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -238,16 +250,15 @@ def test_enter_ready_fires_each_hook_once(tmp_path: Path) -> None:
         ],
     )
 
-    hooks = [
-        {"kind": "dep-install", "cmd": ["npm", "install"]},
-        {"kind": "dep-install", "cmd": ["pip", "install", "-e", "."]},
+    tasks = [
+        _activate_task("dep-install", [["npm", "install"], ["pip", "install", "-e", "."]])
     ]
-    group = _make_group(group_name, member_name, hooks=hooks)
+    group = _make_group(group_name, member_name, tasks=tasks)
     env = _env(tmp_path)
 
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        enter_member(group, slug, member_name, env=env)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        activate_member(group, slug, member_name, env=env)
 
     assert mock_run.call_count == 2
     first_call_argv = mock_run.call_args_list[0][0][0]
@@ -256,9 +267,9 @@ def test_enter_ready_fires_each_hook_once(tmp_path: Path) -> None:
     assert second_call_argv == ["pip", "install", "-e", "."]
 
 
-def test_enter_ready_hooks_run_shell_false(tmp_path: Path) -> None:
-    """Activation hooks are run with shell=False (list-mode, trust)."""
-    from camp.provision.activation import enter_member
+def test_activate_ready_tasks_run_shell_false(tmp_path: Path) -> None:
+    """Activate-phase task steps are run with shell=False (list-mode, trust)."""
+    from camp.provision.activation import activate_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -280,21 +291,21 @@ def test_enter_ready_hooks_run_shell_false(tmp_path: Path) -> None:
         ],
     )
 
-    hooks = [{"kind": "dep-install", "cmd": ["npm", "install"]}]
-    group = _make_group(group_name, member_name, hooks=hooks)
+    tasks = [_activate_task("dep-install", [["npm", "install"]])]
+    group = _make_group(group_name, member_name, tasks=tasks)
     env = _env(tmp_path)
 
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        enter_member(group, slug, member_name, env=env)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        activate_member(group, slug, member_name, env=env)
 
     kwargs = mock_run.call_args_list[0][1]
     assert kwargs.get("shell") is not True
 
 
-def test_enter_ready_prints_member_claude_md(tmp_path: Path, capsys) -> None:
-    """enter_member prints the member's CLAUDE.md content to stdout."""
-    from camp.provision.activation import enter_member
+def test_activate_ready_prints_member_claude_md(tmp_path: Path, capsys) -> None:
+    """activate_member prints the member's CLAUDE.md content to stdout."""
+    from camp.provision.activation import activate_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -322,15 +333,15 @@ def test_enter_ready_prints_member_claude_md(tmp_path: Path, capsys) -> None:
     group = _make_group(group_name, member_name, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
-    enter_member(group, slug, member_name, env=env)
+    activate_member(group, slug, member_name, env=env)
 
     captured = capsys.readouterr()
     assert claude_md_content in captured.out
 
 
-def test_enter_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys) -> None:
-    """When no CLAUDE.md exists, enter_member still prints something useful to stdout."""
-    from camp.provision.activation import enter_member
+def test_activate_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys) -> None:
+    """When no CLAUDE.md exists, activate_member still prints something useful."""
+    from camp.provision.activation import activate_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -356,16 +367,16 @@ def test_enter_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys) -
     group = _make_group(group_name, member_name, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
-    enter_member(group, slug, member_name, env=env)
+    activate_member(group, slug, member_name, env=env)
 
     captured = capsys.readouterr()
     # Should mention the member name at minimum
     assert member_name in captured.out or member_name in captured.err
 
 
-def test_enter_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
-    """After enter_member succeeds, the manifest member has activated=true."""
-    from camp.provision.activation import enter_member
+def test_activate_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
+    """After activate_member succeeds, the manifest member has activated=true."""
+    from camp.provision.activation import activate_member
     from camp.group.manifest import read_central_manifest
 
     group_name = "mygroup"
@@ -392,17 +403,55 @@ def test_enter_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
     env = _env(tmp_path)
 
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)
-        enter_member(group, slug, member_name, env=env)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        activate_member(group, slug, member_name, env=env)
 
     data = read_central_manifest(mpath)
     member_entry = next(m for m in data["members"] if m["name"] == member_name)
     assert member_entry.get("activated") is True
 
 
-def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
-    """Re-entering an already-activated member skips hooks; doc is still printed."""
-    from camp.provision.activation import enter_member
+def test_activate_ready_records_task_state_in_manifest(tmp_path: Path) -> None:
+    """A successful activate-phase task records state 'ok' in the manifest tasks map."""
+    from camp.provision.activation import activate_member
+    from camp.group.manifest import read_central_manifest
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+    wt_path = tmp_path / "camp" / group_name / "worktrees" / slug / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    mpath = _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(wt_path),
+                "provision_state": "ready",
+            }
+        ],
+    )
+
+    tasks = [_activate_task("dep-install", [["npm", "install"]])]
+    group = _make_group(group_name, member_name, tasks=tasks)
+    env = _env(tmp_path)
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        activate_member(group, slug, member_name, env=env)
+
+    data = read_central_manifest(mpath)
+    member_entry = next(m for m in data["members"] if m["name"] == member_name)
+    assert member_entry["tasks"]["dep-install"]["state"] == "ok"
+
+
+def test_activate_ready_reactivate_does_not_rerun_tasks(tmp_path: Path) -> None:
+    """Re-activating an already-activated member skips tasks; doc is still printed."""
+    from camp.provision.activation import activate_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -428,8 +477,8 @@ def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
         ],
     )
 
-    hooks = [{"kind": "dep-install", "cmd": ["npm", "install"]}]
-    group = _make_group(group_name, member_name, hooks=hooks, harness={"inject": "stdout"})
+    tasks = [_activate_task("dep-install", [["npm", "install"]])]
+    group = _make_group(group_name, member_name, tasks=tasks, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
     with patch("subprocess.run") as mock_run:
@@ -438,16 +487,16 @@ def test_enter_ready_reenter_does_not_rerun_hooks(tmp_path: Path) -> None:
 
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            enter_member(group, slug, member_name, env=env)
+            activate_member(group, slug, member_name, env=env)
         mock_run.assert_not_called()
 
     # Doc was still printed
     assert claude_md_content in out.getvalue()
 
 
-def test_enter_ready_reenter_reprints_doc(tmp_path: Path, capsys) -> None:
-    """Re-entering an activated member still prints the CLAUDE.md to stdout."""
-    from camp.provision.activation import enter_member
+def test_activate_ready_reactivate_reprints_doc(tmp_path: Path, capsys) -> None:
+    """Re-activating an activated member still prints the CLAUDE.md to stdout."""
+    from camp.provision.activation import activate_member
 
     group_name = "mygroup"
     member_name = "myrepo"
@@ -476,10 +525,171 @@ def test_enter_ready_reenter_reprints_doc(tmp_path: Path, capsys) -> None:
     group = _make_group(group_name, member_name, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
-    enter_member(group, slug, member_name, env=env)
+    activate_member(group, slug, member_name, env=env)
 
     captured = capsys.readouterr()
     assert claude_md_content in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Legacy dep-install hook config still executes at first activate (normalized).
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_dep_install_executes_at_first_activate(tmp_path: Path) -> None:
+    """A legacy [[members.hooks]] dep-install block, normalized by load_group into
+    an implicit required activate-phase task, still runs at first activate."""
+    from camp.group.config import load_group
+    from camp.provision.activation import activate_member
+    from camp.group.manifest import read_central_manifest
+
+    group_name = "testgroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+
+    toml = """\
+[group]
+name = "testgroup"
+
+[[members]]
+name = "myrepo"
+repo_root = "/tmp/fake-repo"
+
+[[members.hooks]]
+kind = "dep-install"
+cmd = ["echo", "installing"]
+"""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(toml)
+    group = load_group(f)
+
+    wt_path = tmp_path / "camp" / group_name / "worktrees" / slug / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    mpath = _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(wt_path),
+                "provision_state": "ready",
+            }
+        ],
+    )
+    env = _env(tmp_path)
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        activate_member(group, slug, member_name, env=env)
+
+    assert mock_run.call_count == 1
+    assert mock_run.call_args_list[0][0][0] == ["echo", "installing"]
+
+    data = read_central_manifest(mpath)
+    member_entry = next(m for m in data["members"] if m["name"] == member_name)
+    assert member_entry.get("activated") is True
+    assert member_entry["tasks"]["dep-install"]["state"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Required activate-task failure — aborts, activated stays UNSET.
+# ---------------------------------------------------------------------------
+
+
+def test_required_task_failure_does_not_mark_activated(tmp_path: Path) -> None:
+    """When a required activate-task fails, TaskError propagates and activated is
+    NOT set in the manifest."""
+    from camp.provision.activation import activate_member
+    from camp.provision.tasks import TaskError
+    from camp.group.manifest import read_central_manifest
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+    wt_path = tmp_path / "camp" / group_name / "worktrees" / slug / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    mpath = _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(wt_path),
+                "provision_state": "ready",
+            }
+        ],
+    )
+
+    tasks = [_activate_task("dep-install", [["false"]], required=True)]
+    group = _make_group(group_name, member_name, tasks=tasks)
+    env = _env(tmp_path)
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="boom")
+        with pytest.raises(TaskError):
+            activate_member(group, slug, member_name, env=env)
+
+    data = read_central_manifest(mpath)
+    member_entry = next(m for m in data["members"] if m["name"] == member_name)
+    assert not member_entry.get("activated", False), (
+        "activated must NOT be set when a required activate-task fails"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Optional activate-task failure — marks activated, warns on stderr, proceeds.
+# ---------------------------------------------------------------------------
+
+
+def test_optional_task_failure_marks_activated_and_warns(tmp_path: Path, capsys) -> None:
+    """An optional activate-task failure warns on stderr, records the failed state,
+    and activation PROCEEDS (member is marked activated)."""
+    from camp.provision.activation import activate_member
+    from camp.group.manifest import read_central_manifest
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+    slug = "my-slug"
+    wt_path = tmp_path / "camp" / group_name / "worktrees" / slug / member_name
+    wt_path.mkdir(parents=True, exist_ok=True)
+
+    mpath = _make_manifest(
+        tmp_path,
+        slug,
+        group_name,
+        [
+            {
+                "name": member_name,
+                "repo_root": "/tmp/fake-repo",
+                "worktree_path": str(wt_path),
+                "provision_state": "ready",
+            }
+        ],
+    )
+
+    tasks = [_activate_task("optional-task", [["false"]], required=False)]
+    group = _make_group(group_name, member_name, tasks=tasks, harness={"inject": "stdout"})
+    env = _env(tmp_path)
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="nope")
+        activate_member(group, slug, member_name, env=env)
+
+    data = read_central_manifest(mpath)
+    member_entry = next(m for m in data["members"] if m["name"] == member_name)
+    assert member_entry.get("activated") is True
+    assert member_entry["tasks"]["optional-task"]["state"] == "failed"
+
+    captured = capsys.readouterr()
+    assert "optional-task" in captured.err
+    assert member_name in captured.err
+    assert "camp status" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +728,8 @@ cmd = ["npm", "install"]
 
 
 def test_group_config_parses_activation_hooks(tmp_path: Path) -> None:
-    """group_config.load_group parses [[members.hooks]] into each member dict."""
+    """group_config.load_group normalizes [[members.hooks]] dep-install entries
+    into one implicit 'dep-install' task, one step per hook, argv preserved."""
     from camp.group.config import load_group
 
     toml = """\
@@ -540,14 +751,20 @@ cmd = ["pip", "install", "-e", "."]
     f = tmp_path / "testgroup.toml"
     f.write_text(toml)
     cfg = load_group(f)
-    hooks = cfg["members"][0]["hooks"]
-    assert len(hooks) == 2
-    assert hooks[0] == {"kind": "dep-install", "cmd": ["npm", "install"]}
-    assert hooks[1] == {"kind": "dep-install", "cmd": ["pip", "install", "-e", "."]}
+    tasks = cfg["members"][0]["tasks"]
+    assert len(tasks) == 1
+    dep_install_task = tasks[0]
+    assert dep_install_task["name"] == "dep-install"
+    assert dep_install_task["phase"] == "activate"
+    assert dep_install_task["required"] is True
+    steps = dep_install_task["steps"]
+    assert len(steps) == 2
+    assert steps[0]["cmd"] == ["npm", "install"]
+    assert steps[1]["cmd"] == ["pip", "install", "-e", "."]
 
 
 def test_group_config_no_hooks_defaults_to_empty_list(tmp_path: Path) -> None:
-    """When no [[members.hooks]], member['hooks'] defaults to []."""
+    """When no [[members.hooks]], no implicit dep-install task is created."""
     from camp.group.config import load_group
 
     toml = """\
@@ -561,7 +778,7 @@ repo_root = "/tmp/myrepo"
     f = tmp_path / "testgroup.toml"
     f.write_text(toml)
     cfg = load_group(f)
-    assert cfg["members"][0]["hooks"] == []
+    assert cfg["members"][0]["tasks"] == []
 
 
 def test_group_config_hook_cmd_must_be_list(tmp_path: Path) -> None:
@@ -707,12 +924,12 @@ kind = "dep-install"
 
 
 # ---------------------------------------------------------------------------
-# Fix 1: GroupConfigError from the REAL CLI entrypoint (not just load_group).
+# GroupConfigError from the REAL CLI entrypoint (not just load_group).
 #
 # Regression: _resolve_group_for_command had a bare `except Exception: return
 # (None, None)` that swallowed GroupConfigError.  A malformed config (unknown
-# hook kind) caused `camp enter <member>` to fall through to spine and print an
-# unrelated error instead of naming the member + kind.
+# hook kind) caused `camp activate <member>` to fall through to spine and print
+# an unrelated error instead of naming the member + kind.
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT_FOR_CLI = Path(__file__).resolve().parents[3]
@@ -730,10 +947,10 @@ def _run_cli(args: list[str], *, env: dict[str, str]) -> subprocess.CompletedPro
     )
 
 
-def test_cli_enter_unknown_hook_kind_exits_nonzero_with_legible_message(
+def test_cli_activate_unknown_hook_kind_exits_nonzero_with_legible_message(
     tmp_path: Path,
 ) -> None:
-    """camp enter <member> against a config with an unknown hook kind must exit
+    """camp activate <member> against a config with an unknown hook kind must exit
     non-zero and name both the member and the unknown kind in the error output.
 
     Regression: _resolve_group_for_command swallowed GroupConfigError via a bare
@@ -770,59 +987,13 @@ def test_cli_enter_unknown_hook_kind_exits_nonzero_with_legible_message(
 
 
 # ---------------------------------------------------------------------------
-# Fix 2: Failing activation hook — legible error, activated stays UNSET.
+# Failing required activate-task — legible error via CLI, no raw traceback.
 # ---------------------------------------------------------------------------
 
 
-def test_failing_hook_does_not_mark_activated(tmp_path: Path) -> None:
-    """When an activation hook exits non-zero, activated must NOT be set in the
-    manifest, and a CalledProcessError must propagate (not be swallowed)."""
-    from camp.provision.activation import enter_member
-    from camp.group.manifest import read_central_manifest
-
-    group_name = "mygroup"
-    member_name = "myrepo"
-    slug = "my-slug"
-    wt_path = tmp_path / "camp" / group_name / "worktrees" / slug / member_name
-    wt_path.mkdir(parents=True, exist_ok=True)
-
-    mpath = _make_manifest(
-        tmp_path,
-        slug,
-        group_name,
-        [
-            {
-                "name": member_name,
-                "repo_root": "/tmp/fake-repo",
-                "worktree_path": str(wt_path),
-                "provision_state": "ready",
-            }
-        ],
-    )
-
-    hooks = [{"kind": "dep-install", "cmd": ["false"]}]
-    group = _make_group(group_name, member_name, hooks=hooks)
-    env = _env(tmp_path)
-
-    # Simulate a hook that exits non-zero via a CalledProcessError.
-    import subprocess as _subprocess
-
-    fake_error = _subprocess.CalledProcessError(1, ["false"])
-    with patch("subprocess.run", side_effect=fake_error):
-        with pytest.raises(_subprocess.CalledProcessError):
-            enter_member(group, slug, member_name, env=env)
-
-    # activated must NOT be set after the hook failure.
-    data = read_central_manifest(mpath)
-    member_entry = next(m for m in data["members"] if m["name"] == member_name)
-    assert not member_entry.get("activated", False), (
-        "activated must NOT be set when an activation hook fails"
-    )
-
-
-def test_failing_hook_surfaces_legibly_via_cli(tmp_path: Path) -> None:
-    """camp enter <member> when an activation hook fails must exit non-zero and
-    name the member + failing command in the error; no raw Python traceback."""
+def test_failing_required_task_surfaces_legibly_via_cli(tmp_path: Path) -> None:
+    """camp activate <member> when a required activate-task fails must exit
+    non-zero and name the member in the error; no raw Python traceback."""
     import json as _json
 
     group_name = "mygroup"
@@ -875,13 +1046,13 @@ def test_failing_hook_surfaces_legibly_via_cli(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0, (
-        "camp activate with a failing hook must exit non-zero.\n"
+        "camp activate with a failing required task must exit non-zero.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    # Must name the member and the failing command; must NOT be a raw traceback.
-    assert member_name in combined or "hook" in combined.lower(), (
-        f"Error must reference the member or hook. combined: {combined}"
+    # Must name the member; must NOT be a raw traceback.
+    assert member_name in combined or "task" in combined.lower(), (
+        f"Error must reference the member or task. combined: {combined}"
     )
     assert "Traceback" not in combined, (
         f"Must not dump a raw Python traceback. combined: {combined}"
@@ -889,7 +1060,7 @@ def test_failing_hook_surfaces_legibly_via_cli(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# inject strategy dispatch in enter_member
+# inject strategy dispatch in activate_member
 # ---------------------------------------------------------------------------
 
 
@@ -923,10 +1094,10 @@ def _ready_member_setup(tmp_path: Path, doc: str | None) -> tuple[str, str, str,
     return group_name, member_name, slug, ws_dir
 
 
-def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> None:
+def test_activate_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> None:
     """Under claude-hook WITH the drain hook installed, the full doc is enqueued,
     NOT dumped to stdout."""
-    from camp.provision.activation import enter_member
+    from camp.provision.activation import activate_member
     from camp.harness.inject import queue_dir_for
     from camp.harness.hooks_writer import write_workspace_inject_hook
 
@@ -940,7 +1111,7 @@ def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> No
     group = _make_group(group_name, member_name)
     env = _env(tmp_path)
 
-    enter_member(group, slug, member_name, env=env)
+    activate_member(group, slug, member_name, env=env)
 
     # Full doc must be enqueued.
     files = list(queue_dir_for(ws_dir).iterdir())
@@ -952,10 +1123,10 @@ def test_enter_claude_hook_enqueues_doc_not_stdout(tmp_path: Path, capsys) -> No
     assert "FULL-DOC-BODY-marker" not in captured.out
 
 
-def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -> None:
+def test_activate_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -> None:
     """Under claude-hook WITH the drain hook installed, a concise confirmation
     naming the member is printed to stdout."""
-    from camp.provision.activation import enter_member
+    from camp.provision.activation import activate_member
     from camp.harness.hooks_writer import write_workspace_inject_hook
 
     doc = "# Member doc\n"
@@ -966,7 +1137,7 @@ def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -
     group = _make_group(group_name, member_name)
     env = _env(tmp_path)
 
-    enter_member(group, slug, member_name, env=env)
+    activate_member(group, slug, member_name, env=env)
 
     captured = capsys.readouterr()
     assert member_name in captured.out
@@ -974,10 +1145,12 @@ def test_enter_claude_hook_prints_concise_confirmation(tmp_path: Path, capsys) -
     assert "next turn" in captured.out.lower() or "hook" in captured.out.lower()
 
 
-def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Path, capsys) -> None:
-    """BUG 5: claude-hook strategy but NO drain hook installed → fall back to
-    printing the full doc to stdout; no false 'will load via hook' claim."""
-    from camp.provision.activation import enter_member
+def test_activate_claude_hook_without_drain_hook_falls_back_to_stdout(
+    tmp_path: Path, capsys
+) -> None:
+    """claude-hook strategy but NO drain hook installed → fall back to printing the
+    full doc to stdout; no false 'will load via hook' claim."""
+    from camp.provision.activation import activate_member
     from camp.harness.inject import queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
@@ -987,7 +1160,7 @@ def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Pat
     group = _make_group(group_name, member_name)
     env = _env(tmp_path)
 
-    enter_member(group, slug, member_name, env=env)
+    activate_member(group, slug, member_name, env=env)
 
     captured = capsys.readouterr()
     # Content must still reach the agent — full doc on stdout.
@@ -999,9 +1172,9 @@ def test_enter_claude_hook_without_drain_hook_falls_back_to_stdout(tmp_path: Pat
     assert not qdir.exists() or list(qdir.iterdir()) == []
 
 
-def test_enter_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:
+def test_activate_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:
     """Under the stdout strategy, the full doc is printed to stdout (unchanged)."""
-    from camp.provision.activation import enter_member
+    from camp.provision.activation import activate_member
     from camp.harness.inject import queue_dir_for
 
     doc = "# Member CLAUDE.md\n\nFULL-DOC-BODY-marker\n"
@@ -1010,7 +1183,7 @@ def test_enter_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> None:
     group = _make_group(group_name, member_name, harness={"inject": "stdout"})
     env = _env(tmp_path)
 
-    enter_member(group, slug, member_name, env=env)
+    activate_member(group, slug, member_name, env=env)
 
     captured = capsys.readouterr()
     assert "FULL-DOC-BODY-marker" in captured.out

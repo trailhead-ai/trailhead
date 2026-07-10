@@ -69,6 +69,18 @@ def _cmd_status_group_cli(
     branch programmatically — 0=all ready, 2=some pending, 3=some failed. --json
     prints the stable report shape on stdout.
 
+    Text output is line-oriented and STABLE for agent parsing:
+        camp status: <slug> — provisioning
+          <member>: <provision_state>[ (<reason>)]
+            <task-name>: <state>          # one per task, manifest insertion order
+
+    Each member line is indented two spaces; its per-task sub-lines are indented
+    four spaces and appear in the member's manifest task-insertion order. A
+    member with no tasks emits no sub-lines. Per-task detail never changes the
+    exit code — a ready member with a failed OPTIONAL task stays exit 0 with the
+    failed task listed. Task-level failure reasons are omitted from the text
+    (they may be multi-line stderr excerpts); read --json for the full map.
+
     Fleet view (no slug): the git-status table across all worktrees (exit 0).
     """
     import json as _json
@@ -96,6 +108,8 @@ def _cmd_status_group_cli(
                 if m.get("reason"):
                     line += f" ({m['reason']})"
                 print(line)
+                for task_name, info in (m.get("tasks") or {}).items():
+                    print(f"    {task_name}: {info.get('state', '?')}")
         sys.exit(code)
 
     try:

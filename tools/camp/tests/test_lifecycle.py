@@ -102,6 +102,18 @@ def _make_group_config(
     }
 
 
+def _provision_task(name: str, cmd: list[str], *, required: bool = True) -> dict[str, Any]:
+    """Build a member provision-phase task in the config-resolved shape (steps
+    carry {name, cmd}), matching what load_group emits for a member's tasks."""
+    return {
+        "name": name,
+        "phase": "provision",
+        "required": required,
+        "timeout_seconds": None,
+        "steps": [{"name": name, "cmd": cmd}],
+    }
+
+
 def _camp_state_env(tmp_path: Path) -> dict[str, str]:
     """Return env override dict pointing CAMP_STATE_DIR at tmp_path."""
     state_root = tmp_path / "camp-state"
@@ -140,12 +152,12 @@ def two_member_group(tmp_path: Path):
             {
                 "name": "repo_a",
                 "repo_root": str(repo_a),
-                "bootstrap": ["touch", str(sentinel_a)],
+                "tasks": [_provision_task("bootstrap", ["touch", str(sentinel_a)])],
             },
             {
                 "name": "repo_b",
                 "repo_root": str(repo_b),
-                "bootstrap": ["touch", str(sentinel_b)],
+                "tasks": [_provision_task("bootstrap", ["touch", str(sentinel_b)])],
             },
         ],
     )
@@ -380,12 +392,12 @@ class TestBootstrapFailureAtomicity:
                 {
                     "name": "repo_a",
                     "repo_root": str(repo_a),
-                    "bootstrap": ["true"],  # always succeeds
+                    "tasks": [_provision_task("bootstrap", ["true"])],  # always succeeds
                 },
                 {
                     "name": "repo_b",
                     "repo_root": str(repo_b),
-                    "bootstrap": ["false"],  # always fails (exit 1)
+                    "tasks": [_provision_task("bootstrap", ["false"])],  # always fails (exit 1)
                 },
             ],
         )
@@ -417,8 +429,10 @@ class TestBootstrapFailureAtomicity:
         group = _make_group_config(
             "failgroup",
             [
-                {"name": "repo_a", "repo_root": str(repo_a), "bootstrap": ["true"]},
-                {"name": "repo_b", "repo_root": str(repo_b), "bootstrap": ["false"]},
+                {"name": "repo_a", "repo_root": str(repo_a),
+                 "tasks": [_provision_task("bootstrap", ["true"])]},
+                {"name": "repo_b", "repo_root": str(repo_b),
+                 "tasks": [_provision_task("bootstrap", ["false"])]},
             ],
         )
 
@@ -530,11 +544,11 @@ class TestBranchBasePolicy:
         group = _make_group_config(
             "basegroup",
             [
-                {"name": "repo_a", "repo_root": str(tmp_path / "a"), "bootstrap": []},
+                {"name": "repo_a", "repo_root": str(tmp_path / "a"), "tasks": []},
                 {
                     "name": "repo_b",
                     "repo_root": str(tmp_path / "b"),
-                    "bootstrap": [],
+                    "tasks": [],
                     "base": "origin/trunk",
                 },
             ],
@@ -1015,7 +1029,7 @@ class TestCentralManifestPath:
 
         group = _make_group_config(
             "mygroup",
-            [{"name": "repo_a", "repo_root": str(repo_a), "bootstrap": []}],
+            [{"name": "repo_a", "repo_root": str(repo_a), "tasks": []}],
         )
 
         slug = "path-test"

@@ -24,6 +24,10 @@ Schema (v1):
                 # background) provisioner. A "failed" member also carries "reason".
                 "provision_state": "pending",
                 "reason": "<failure reason — present only when failed>",
+                # Per-task run-once state, keyed by task name. Written by the
+                # provision/reconcile task runner; a task recorded "ok" is never
+                # re-run. Present only once a member has run tasks.
+                "tasks": {"<task-name>": {"state": "ok"}},
             },
             ...
         ]
@@ -171,12 +175,26 @@ def reconcile_lock(ws_dir: Path):
         lock_fd.close()
 
 
+def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:
+    """Merge a per-task state map into `member["tasks"]` in place.
+
+    Shared by every manifest write that records task outcomes
+    (`flip_member_state_unlocked` for provision-phase, `activation._mark_activated`
+    for activate-phase) so persisting one phase's results never clobbers task
+    states recorded by another phase or a prior run.
+    """
+    merged = member.get("tasks", {})
+    merged.update(tasks)
+    member["tasks"] = merged
+
+
 def flip_member_state_unlocked(
     path: Path,
     member_name: str,
     state: str,
     *,
     reason: str | None = None,
+    tasks: dict[str, Any] | None = None,
 ) -> None:
     """Read-mutate-write one member's provision_state WITHOUT acquiring the lock.
 
@@ -185,6 +203,11 @@ def flip_member_state_unlocked(
     `with reconcile_lock(path.parent): ...`. Production flips run inside the
     reconcile_lock already held by the provisioner, so this unlocked primitive is
     the only flip path.
+
+    When `tasks` is given, it is a per-task state map ({name: {"state": ...}})
+    that is MERGED into the member's existing `tasks` map in the same write, so
+    persisting a provision run's task outcomes never clobbers task states
+    recorded by another phase or a prior run.
     """
     data = read_central_manifest(path)
     for member in data.get("members", []):
@@ -194,6 +217,8 @@ def flip_member_state_unlocked(
                 member["reason"] = reason
             elif state != "failed":
                 member.pop("reason", None)
+            if tasks:
+                merge_member_tasks(member, tasks)
             break
     write_central_manifest(path, data)
 
