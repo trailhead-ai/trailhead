@@ -1,12 +1,51 @@
 """Claude Code harness implementation.
 
-Wraps :mod:`trailhead.registry` (the Shape-A ``marketplace.json`` writer and the
-``claude plugin …`` CLI calls) behind the generic :class:`~trailhead.harness.base.Harness`
-interface.  Registration markers live in ``composed_root`` (written by
-``registry`` after the CLI step succeeds):
+This module owns **everything** Claude-Code-specific about installing trailhead's
+composed plugin trees: the Shape-A ``marketplace.json`` writer, the
+``claude plugin …`` CLI calls, and the on-disk registration markers.  Nothing
+Claude-Code-specific lives outside this file (Axiom 1) — the shared
+install/compose/wire/doctor/uninstall path talks to it only through the generic
+:class:`~trailhead.harness.base.Harness` interface.
 
-- global ``.trailhead-registered`` — the marketplace has been added.
-- per-tool ``.trailhead-installed-<tool>`` — the tool has been installed.
+Registration markers (single source of truth)
+----------------------------------------------
+Markers live in ``composed_root`` (NOT inside ``plugins/<tool>/``, which the
+atomic promote ``rmtree``s on every re-wire).  They are this harness's on-disk
+truth, written only AFTER the corresponding CLI step succeeds:
+
+- global ``.trailhead-registered`` — the marketplace has been added.  A
+  skip-optimisation for :meth:`register` (the call itself is idempotent).
+- per-tool ``.trailhead-installed-<tool>`` — the tool has been installed.  A
+  self-heal signal for the ``wire()`` loop: a missing marker means
+  :meth:`install_tool` should run; a present marker means :meth:`rewire_tool`.
+
+``_REGISTERED_MARKER`` / ``_INSTALLED_MARKER_PREFIX`` are defined here ONCE; the
+rest of trailhead reads registration state via :meth:`is_registered`,
+:meth:`is_installed`, and :meth:`installed_tools` rather than re-deriving the
+marker filenames.
+
+Input guard
+-----------
+Every ``tool`` value is validated against ``^[a-z][a-z0-9_-]*$`` before it
+reaches any CLI arg, marker filename, or ``source`` path.
+
+Hermeticity contract
+--------------------
+Each CLI invocation is injectable via a ``runner=`` keyword argument.  Tests
+ALWAYS pass a stub runner and NEVER invoke the real ``claude plugin`` CLI against
+the user's harness.  The default runner is ``subprocess.run`` with ``check=True``;
+it is only exercised in live-session dogfood runs.  This harness NEVER writes to
+``~/.claude/plugins/`` directly — the CLI manages ``known_marketplaces.json`` and
+the plugin cache; this harness only generates ``marketplace.json`` under the
+``state_dir``-rooted ``composed_root``.
+
+Shape-A marketplace.json
+-------------------------
+The generated marketplace.json follows Shape A (validated live via
+``claude plugin validate``): one marketplace named ``trailhead`` with one
+``plugins[]`` entry per tool, each sourced at ``./plugins/<tool>``.  All tools
+share one marketplace root (``composed_root``); plugin trees live at
+``composed_root/plugins/<tool>/``.
 
 Detection: Claude Code is considered present when ``~/.claude`` exists.  Tests
 may redirect this with the ``TRAILHEAD_CLAUDE_DIR`` env override.
@@ -14,11 +53,13 @@ may redirect this with the ``TRAILHEAD_CLAUDE_DIR`` env override.
 
 from __future__ import annotations
 
+import json
 import os
+import re
+import subprocess
 import tempfile
 from pathlib import Path
 
-from trailhead import registry
 from trailhead.harness.base import Harness
 
 _REGISTERED_MARKER = ".trailhead-registered"
@@ -26,6 +67,40 @@ _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 
 #: Subdir under the Claude dir holding user-level rulesets (``~/.claude/rules/``).
 _RULES_SUBDIR = "rules"
+
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "lore": (
+        "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall."
+    ),
+    "camp": (
+        "Portable worktree-orchestration plugin: group config, "
+        "dev-env orchestration, and worktree management."
+    ),
+    "craft": (
+        "Portable software-development plugin: general-purpose dev agents and dev-ritual skills."
+    ),
+    "portage": ("Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group."),
+    "landing": (
+        "Get it deployed: post-merge deploy soak and deploy-health "
+        "incident handling for a camp group."
+    ),
+}
+
+
+def _tool_description(tool: str) -> str:
+    return _TOOL_DESCRIPTIONS.get(tool, f"Trailhead-composed plugin for {tool}.")
+
+
+def _validate_tool(tool: str) -> None:
+    """Raise ValueError if tool does not match ^[a-z][a-z0-9_-]*$."""
+    if not isinstance(tool, str) or not _TOOL_NAME_RE.match(tool):
+        raise ValueError(f"Invalid tool name {tool!r}: must match ^[a-z][a-z0-9_-]*$")
+
+
+def _default_runner(args, **kw):
+    return subprocess.run(args, check=True, **kw)
 
 
 def _claude_dir(env: dict[str, str]) -> Path:
@@ -55,9 +130,63 @@ class ClaudeCodeHarness(Harness):
     # -- manifest -------------------------------------------------------------
 
     def generate_manifest(self, tools: list[str], composed_root: Path) -> None:
-        registry.generate_marketplace_json(tools, composed_root)
+        """Write ONE consolidated Shape-A marketplace.json at composed_root/.claude-plugin/.
 
-    # -- registration state ---------------------------------------------------
+        The marketplace is named ``trailhead`` and has one ``plugins[]`` entry per
+        tool.  Plugin order is deterministic (sorted).  The write is atomic:
+        rendered to a sibling temp file first, then ``os.replace()``-ed into place,
+        so a crash mid-write can never leave a torn shared marketplace.json.
+        """
+        for tool in tools:
+            _validate_tool(tool)
+
+        claude_plugin_dir = composed_root / ".claude-plugin"
+        claude_plugin_dir.mkdir(parents=True, exist_ok=True)
+
+        marketplace = {
+            "name": "trailhead",
+            "owner": {"name": "trailhead"},
+            "description": "Trailhead-composed plugin marketplace.",
+            "plugins": [
+                {
+                    "name": tool,
+                    "source": f"./plugins/{tool}",
+                    "description": _tool_description(tool),
+                }
+                for tool in sorted(tools)
+            ],
+        }
+
+        out = claude_plugin_dir / "marketplace.json"
+        fd, tmp_path = tempfile.mkstemp(
+            dir=claude_plugin_dir, prefix=".marketplace-", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(json.dumps(marketplace, indent=2))
+            os.replace(tmp_path, out)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def manifest_name(self, composed_root: Path) -> str | None:
+        """Return the display name of the generated marketplace, or None.
+
+        None when the manifest is absent or unparseable — used by ``doctor`` for a
+        read-only report, so a malformed file must never raise.
+        """
+        mkt = composed_root / ".claude-plugin" / "marketplace.json"
+        if not mkt.exists():
+            return None
+        try:
+            return json.loads(mkt.read_text()).get("name")
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    # -- registration state (on-disk truth) -----------------------------------
 
     def is_registered(self, composed_root: Path) -> bool:
         return (composed_root / _REGISTERED_MARKER).exists()
@@ -65,22 +194,111 @@ class ClaudeCodeHarness(Harness):
     def is_installed(self, tool: str, composed_root: Path) -> bool:
         return (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").exists()
 
+    def installed_tools(self, composed_root: Path) -> list[str]:
+        """Return the sorted tool names recorded installed under composed_root."""
+        if not composed_root.is_dir():
+            return []
+        return sorted(
+            f.name[len(_INSTALLED_MARKER_PREFIX) :]
+            for f in composed_root.iterdir()
+            if f.is_file() and f.name.startswith(_INSTALLED_MARKER_PREFIX)
+        )
+
     # -- install / uninstall --------------------------------------------------
 
     def register(self, composed_root: Path, *, runner=None) -> None:
-        registry.register_marketplace(composed_root, runner=runner)
+        """Register the consolidated trailhead marketplace via the harness CLI.
+
+        Shells ``claude plugin marketplace add --scope user <composed_root>``
+        (idempotent) and writes the global ``.trailhead-registered`` marker only
+        after the CLI call succeeds.
+        """
+        _run = runner or _default_runner
+        _run(
+            ["claude", "plugin", "marketplace", "add", "--scope", "user", str(composed_root)]
+        )
+        (composed_root / _REGISTERED_MARKER).write_text("{}")
 
     def install_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
-        registry.install_tool(tool, composed_root, runner=runner)
+        """Install a tool from the consolidated trailhead marketplace.
+
+        Shells ``claude plugin install <tool>@trailhead --scope user`` and writes
+        the per-tool ``.trailhead-installed-<tool>`` marker only after success.
+        """
+        _validate_tool(tool)
+        _run = runner or _default_runner
+        _run(["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"])
+        (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").write_text("{}")
 
     def rewire_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
-        registry.rewire_tool(tool, composed_root, runner=runner)
+        """Refresh an already-installed tool after recomposition.
+
+        Sequence: **uninstall THEN install** (NOT ``plugin update``, which is
+        version-keyed and keeps stale content when the version is static).  The
+        per-tool marker is cleared before the pair and rewritten only after install
+        succeeds (self-heal — a failure mid-pair leaves the marker absent so the
+        next wire re-attempts cleanly).  A failing uninstall (``not installed``) is
+        tolerated; the install must still run.
+        """
+        _validate_tool(tool)
+        _run = runner or _default_runner
+
+        marker = composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}"
+        marker.unlink(missing_ok=True)
+
+        try:
+            _run(["claude", "plugin", "uninstall", f"{tool}@trailhead", "--scope", "user"])
+        except Exception:
+            pass
+
+        _run(["claude", "plugin", "install", f"{tool}@trailhead", "--scope", "user"])
+        marker.write_text("{}")
 
     def unregister_tool(self, tool: str, composed_root: Path, *, runner=None) -> None:
-        registry.unregister_tool(tool, composed_root, runner=runner)
+        """Uninstall ONE tool from the consolidated trailhead marketplace.
+
+        Shells ``claude plugin uninstall <tool>@trailhead --scope user --keep-data
+        --yes``.  ``--keep-data`` preserves the plugin's persistent data dir so an
+        uninstall is *wiring only*; ``--yes`` keeps it non-interactive.  Does NOT
+        remove the marketplace (shared across all tools — torn down once by
+        :meth:`unregister_marketplace` after the last tool).  The per-tool marker is
+        cleared in ``finally`` so a torn-down tree never reads as installed even if
+        the CLI call raises.
+        """
+        _validate_tool(tool)
+        _run = runner or _default_runner
+        try:
+            _run(
+                [
+                    "claude",
+                    "plugin",
+                    "uninstall",
+                    f"{tool}@trailhead",
+                    "--scope",
+                    "user",
+                    "--keep-data",
+                    "--yes",
+                ]
+            )
+        finally:
+            (composed_root / f"{_INSTALLED_MARKER_PREFIX}{tool}").unlink(missing_ok=True)
 
     def unregister_marketplace(self, composed_root: Path, *, runner=None) -> None:
-        registry.unregister_marketplace(composed_root, runner=runner)
+        """Remove the shared ``trailhead`` marketplace (inverse of :meth:`register`).
+
+        Called **once** after every tool has been uninstalled — NEVER per-tool,
+        since a single marketplace is shared across all tools.  Shells
+        ``claude plugin marketplace remove trailhead --scope user`` and clears the
+        global marker in ``finally`` so a half-removed state never reads as
+        registered.
+        """
+        _run = runner or _default_runner
+        try:
+            _run(
+                ["claude", "plugin", "marketplace", "remove", "trailhead", "--scope", "user"]
+            )
+        finally:
+            (composed_root / _REGISTERED_MARKER).unlink(missing_ok=True)
 
     # -- user-level rulesets --------------------------------------------------
     #

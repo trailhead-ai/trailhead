@@ -94,7 +94,7 @@ This confirms structural validity by inspection.
 actually loads the composed plugin as a working harness extension).  This
 requires the installer UX to exist and is deferred until then.
 
-## Multi-tool orchestration: `wire.py` + `registry.py`
+## Multi-tool orchestration: `wire.py` + the harness seam
 
 `compose_plan`/`apply_plan` compose a single tool.  Multi-tool orchestration
 lives in `wire.py`, which sequences:
@@ -103,12 +103,19 @@ lives in `wire.py`, which sequences:
 2. Write to a **staging dir** under `state_dir("trailhead")/composed/tmp/`.
 3. **Atomic promote**: `shutil.rmtree(live_dest)` then `shutil.move(staging, live_dest)`.
    A mid-compose failure leaves the prior live dest untouched.
-4. Call `registry.generate_marketplace_json` and `registry.register` (or `rewire`).
+4. Delegate the registration tail to the injected `Harness`:
+   `harness.generate_manifest`, then `harness.register` (once) and per tool
+   `harness.install_tool` / `rewire_tool`.
 
-`registry.py` owns the narrow harness-registration concern: generate
-`marketplace.json` (Shape A) and shell the `claude plugin` CLI.  The runner is
-injectable for test hermeticity — tests stub it and assert on the args; the real
-`claude plugin` CLI is never invoked in tests.
+`wire.py` is harness-agnostic — it knows nothing about `marketplace.json` or the
+`claude plugin` CLI.  Everything Claude-Code-specific (the Shape-A
+`marketplace.json` writer, the `claude plugin …` CLI calls, and the on-disk
+registration markers) lives in `harness/claude_code.py` behind the `Harness`
+interface (`harness/base.py`).  The CLI runner is injectable for test
+hermeticity — tests stub it and assert on the args; the real `claude plugin` CLI
+is never invoked in tests.  `doctor`/`uninstall` likewise read registration state
+through the seam (`is_registered` / `installed_tools` / `manifest_name`), never by
+re-deriving the marker scheme.
 
 ## What is NOT here (installer layer)
 
@@ -116,7 +123,8 @@ The following are explicitly handled by the installer layer, not this module:
 
 - Preset → capability-name mapping (`--preset minimal` → `{}`).  See `presets.py`.
 - Installer UX (`trailhead install`, `trailhead config` sub-command).  See `cli.py`.
-- Multi-tool orchestration and marketplace registration.  See `wire.py` and `registry.py`.
+- Multi-tool orchestration and marketplace registration.  See `wire.py` and
+  `harness/claude_code.py`.
 - Live harness-launch validation (structural validity proven; live load deferred to
   the dogfood checkpoint).
 
