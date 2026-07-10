@@ -33,10 +33,19 @@ raised is omitted; an unselected tool is never processed → omitted.
 
 Atomicity
 ---------
-All writes go to a temporary staging dir first; only after a clean compose is it
-atomically promoted via ``shutil.move``.  Staging cleanup always runs in a
-``try/finally``, so a ``KeyboardInterrupt`` / ``SystemExit`` mid-compose
-never orphans ``_<tool>_staging_*`` dirs.
+All writes go to a temporary staging dir first.  Promotion is a two-``os.rename``
+dance, not a ``rmtree``-then-``move``: if ``live_dest`` already exists, it is
+renamed aside to a reserved ``_<tool>_old_*`` name, then the staging dir is
+renamed into ``live_dest``'s place.  Both renames are same-filesystem metadata
+operations (staging/old/live all live under ``composed_root/plugins/``), so
+each is effectively instantaneous — ``live_dest`` is never observably absent
+for longer than the gap between two syscalls, unlike a content-deleting
+``rmtree`` whose duration scales with tree size.  If the second rename fails,
+the old dest is renamed back into place before ``WireError`` propagates, so a
+failed promote leaves the prior tree intact rather than gone.  Staging (and
+any leftover old-dest) cleanup always runs in a ``try/finally``, so a
+``KeyboardInterrupt`` / ``SystemExit`` mid-compose never orphans
+``_<tool>_staging_*`` / ``_<tool>_old_*`` dirs.
 
 Multi-tool semantics
 --------------------
@@ -229,6 +238,7 @@ def _compose_tool(
     """
     staging_parent = composed_root / "plugins"
     staging_dir_path: Path | None = None
+    old_dest_path: Path | None = None
 
     try:
         staging_dir_path = Path(tempfile.mkdtemp(prefix=f"_{tool}_staging_", dir=staging_parent))
@@ -241,8 +251,24 @@ def _compose_tool(
 
         try:
             if live_dest.exists():
-                shutil.rmtree(live_dest)
-            shutil.move(str(staging_dir_path), str(live_dest))
+                # Reserve a unique name (mkdtemp), free it (rmdir — it's empty),
+                # then rename the live dest into it. Renaming onto an
+                # already-absent target keeps this portable to platforms (e.g.
+                # Windows) whose rename doesn't allow an existing destination.
+                old_dest_path = Path(
+                    tempfile.mkdtemp(prefix=f"_{tool}_old_", dir=staging_parent)
+                )
+                old_dest_path.rmdir()
+                os.rename(live_dest, old_dest_path)
+            try:
+                os.rename(staging_dir_path, live_dest)
+            except BaseException:
+                # Promote failed after the prior tree was moved aside — restore
+                # it so live_dest is never left absent.
+                if old_dest_path is not None:
+                    os.rename(old_dest_path, live_dest)
+                    old_dest_path = None
+                raise
         except BaseException as exc:
             raise WireError(tool=tool, stage="promote", cause=exc) from exc
 
@@ -251,6 +277,8 @@ def _compose_tool(
     finally:
         if staging_dir_path is not None and staging_dir_path.exists():
             shutil.rmtree(staging_dir_path, ignore_errors=True)
+        if old_dest_path is not None and old_dest_path.exists():
+            shutil.rmtree(old_dest_path, ignore_errors=True)
 
 
 def default_manifest_paths() -> dict[str, Path]:
