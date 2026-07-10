@@ -130,7 +130,7 @@ def test_resolve_slug_normalizes_and_returns() -> None:
 
 def test_git_forms_correct_argv(tmp_path: Path) -> None:
     """_git forms [git, -C, <root>, ...args] and passes shell=False."""
-    from camp.spine import _git
+    from camp.gitutil import _git
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -142,7 +142,7 @@ def test_git_forms_correct_argv(tmp_path: Path) -> None:
 
 
 def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
-    from camp.spine import _git_out
+    from camp.gitutil import _git_out
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="  main  \n", stderr="")
@@ -151,7 +151,7 @@ def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
 
 
 def test_git_out_returns_empty_on_nonzero(tmp_path: Path) -> None:
-    from camp.spine import _git_out
+    from camp.gitutil import _git_out
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1, stdout="something", stderr="err")
