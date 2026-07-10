@@ -851,7 +851,7 @@ def test_groups_example_harness_commented_block_round_trips(tmp_path: Path) -> N
     default (the launch surface was removed).
     """
     from camp.group.config import load_group
-    from camp.harness.profile import resolve_harness_profile
+    from camp.launch.profile import resolve_harness_profile
 
     f = tmp_path / "trailhead.toml"
     f.write_text(

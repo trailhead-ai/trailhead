@@ -149,10 +149,10 @@ def _surface_member_doc(
     doc = _member_doc_content(member_name, wt_path)
 
     if inject == "claude-hook":
-        from ..harness.hooks_writer import has_inject_drain_hook
+        from ..launch.hooks_writer import has_inject_drain_hook
 
         if has_inject_drain_hook(workspace_dir):
-            from ..harness.inject import enqueue_doc
+            from ..launch.inject import enqueue_doc
 
             enqueue_doc(workspace_dir, doc)
             print(
@@ -199,7 +199,7 @@ def activate_member(
     from ..group.manifest import manifest_path_for, read_central_manifest
 
     if profile is None:
-        from ..harness.profile import resolve_harness_profile
+        from ..launch.profile import resolve_harness_profile
 
         profile = resolve_harness_profile(group)
 

@@ -46,7 +46,7 @@ reaching into the other's shape):
 Substitution: each argv token is passed through `str.format(**context)`,
 so a single token may combine multiple placeholders, e.g.
 "{repo_root}/foo/{slug}". This mirrors the `_substitute` pattern already
-used for harness-profile placeholders (camp/harness/profile.py) — no parallel
+used for harness-profile placeholders (camp/launch/profile.py) — no parallel
 implementation.
 
 Execution: shell=False, cwd=worktree, output captured (text mode). A

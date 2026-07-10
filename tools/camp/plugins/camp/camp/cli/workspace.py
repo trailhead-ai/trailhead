@@ -46,7 +46,7 @@ def _cmd_activate_group_cli(
     from ..provision.activation import activate_member, MemberNotReadyError
     from ..provision.tasks import TaskError
     from ..group.config import GroupConfigError
-    from ..harness.profile import resolve_harness_profile
+    from ..launch.profile import resolve_harness_profile
 
     filtered = list(args)
     slug = _slug_from_args_or_cwd(filtered, group, verb="activate", env=env)
@@ -85,7 +85,7 @@ def _cmd_pwd_group_cli(
     Security contract: stdout carries ONLY the path; diagnostics go to stderr.
     """
     from ..spine import _resolve_slug, _consume_flag_value
-    from ..harness.shell_integration import cmd_pwd, WorkspaceNotFoundError
+    from ..launch.shell_integration import cmd_pwd, WorkspaceNotFoundError
 
     filtered = list(args)
     _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it

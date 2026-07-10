@@ -158,7 +158,7 @@ class TestHooksWriter:
     def test_writes_session_start_hook(self, two_member_group):
         """init writes a SessionStart hook for session-bootstrap into each
         member's settings.json."""
-        from camp.harness.hooks_writer import write_hooks_for_member
+        from camp.launch.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -183,7 +183,7 @@ class TestHooksWriter:
 
         No WorktreeRemove entry must be written into the member's settings.json.
         """
-        from camp.harness.hooks_writer import write_hooks_for_member
+        from camp.launch.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -203,7 +203,7 @@ class TestHooksWriter:
 
     def test_writes_env_camp_bin(self, two_member_group):
         """init writes the env.CAMP_BIN key into the settings.json."""
-        from camp.harness.hooks_writer import write_hooks_for_member
+        from camp.launch.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -219,7 +219,7 @@ class TestHooksWriter:
 
     def test_hook_command_shape(self, two_member_group):
         """The hook command string is exactly '${CAMP_BIN:-<abs>} session-bootstrap'."""
-        from camp.harness.hooks_writer import write_hooks_for_member
+        from camp.launch.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -240,7 +240,7 @@ class TestHooksWriter:
 
     def test_idempotent_no_duplicates(self, two_member_group):
         """Re-running write_hooks_for_member adds NO duplicate hook entries."""
-        from camp.harness.hooks_writer import write_hooks_for_member
+        from camp.launch.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -268,7 +268,7 @@ class TestHooksWriter:
 
     def test_preserves_existing_unrelated_keys(self, two_member_group):
         """An existing settings.json with unrelated keys is preserved after write."""
-        from camp.harness.hooks_writer import write_hooks_for_member
+        from camp.launch.hooks_writer import write_hooks_for_member
 
         g = two_member_group
         repo_a = g["repo_a"]
@@ -305,7 +305,7 @@ class TestHooksWriter:
 
     def test_json_robustness_path_with_space_and_quote(self, tmp_path: Path):
         """A repo_root / CAMP_BIN path with a space and a quote round-trips correctly."""
-        from camp.harness.hooks_writer import write_hooks_for_member
+        from camp.launch.hooks_writer import write_hooks_for_member
 
         # Create a repo_root path with a space and a quote in it
         spaced_dir = tmp_path / "my repo's dir"

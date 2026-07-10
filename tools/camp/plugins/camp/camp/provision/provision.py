@@ -188,8 +188,8 @@ def bring_up_workspace(
     from group here. Returns the manifest path; the harness launch follows.
     """
     from ..workspace.doc import write_workspace_doc
-    from ..harness.hooks_writer import write_workspace_hooks, write_workspace_inject_hook
-    from ..harness.profile import resolve_harness_profile
+    from ..launch.hooks_writer import write_workspace_hooks, write_workspace_inject_hook
+    from ..launch.profile import resolve_harness_profile
 
     if profile is None:
         profile = resolve_harness_profile(group)
@@ -210,7 +210,7 @@ def bring_up_workspace(
     # and NON-FATAL: bring-up (manifest seed + detached spawn) still completes.
     try:
         if profile.should_pretrust():
-            from ..harness import claude_trust
+            from ..launch import claude_trust
 
             claude_trust.pretrust_workspace(
                 profile.resolved_cwd(slug=slug, workspace=ws_dir),

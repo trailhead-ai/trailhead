@@ -206,12 +206,12 @@ def main() -> None:
     # These run before group resolution — they handle their own silent no-op logic.
     # ---------------------------------------------------------------------------
     if first == "session-bootstrap":
-        from ..harness.hook_handlers import cmd_session_bootstrap
+        from ..launch.hook_handlers import cmd_session_bootstrap
         cmd_session_bootstrap()
         return
 
     if first == "worktree-cleanup":
-        from ..harness.hook_handlers import cmd_worktree_cleanup
+        from ..launch.hook_handlers import cmd_worktree_cleanup
         force = "--force" in argv[1:]
         cmd_worktree_cleanup(force=force)
         return
