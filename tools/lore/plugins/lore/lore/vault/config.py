@@ -375,7 +375,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
         shared = bool(entry.get("shared", False))
         explicit_path = entry.get("path")
 
-        # --- 1. Validate scope ---
+        # Validate scope
         if scope not in VALID_SCOPES:
             raise VaultConfigError(
                 f"lore: vault {raw_name!r} has invalid scope {scope!r}; "
@@ -385,7 +385,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
         # --- Normalize the name (/ → _) ---
         name = normalize_vault_name(raw_name)
 
-        # --- 7. Validate the normalized name via layers ---
+        # Validate the normalized name via layers
         try:
             layers.validate_layer_name(name)
         except layers.LayerConfinementError as exc:
@@ -393,7 +393,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
                 f"lore: vault name {raw_name!r} (normalized: {name!r}) is invalid: {exc}"
             ) from exc
 
-        # --- 3. Globally unique names after normalization ---
+        # Globally unique names after normalization
         if name in seen_names:
             raise VaultConfigError(
                 f"lore: duplicate vault name {name!r} (after normalization); "
@@ -401,7 +401,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
             )
         seen_names.add(name)
 
-        # --- 6. Every records kind ∈ record_model.KINDS ---
+        # Every records kind must be in record_model.KINDS
         for kind in records:
             if kind not in record_model.KINDS:
                 raise VaultConfigError(
@@ -412,14 +412,14 @@ def validate_config(data: dict, env: dict | None = None) -> list:
         # --- default-scope-specific rules ---
         if scope == "default":
             default_count += 1
-            # --- 4. default vault may NOT have a records allowlist ---
+            # The default vault may not have a records allowlist
             if records:
                 raise VaultConfigError(
                     f"lore: the default-scope vault {name!r} may not carry a "
                     "records allowlist; it is the "
                     "resolution floor and must accept every kind"
                 )
-            # --- 5. default vault may NOT be shared: true ---
+            # The default vault may not be shared: true
             if shared:
                 raise VaultConfigError(
                     f"lore: the default-scope vault {name!r} may not be "
@@ -461,7 +461,7 @@ def validate_config(data: dict, env: dict | None = None) -> list:
             )
         )
 
-    # --- 2. Exactly one default-scope vault ---
+    # Exactly one default-scope vault
     if default_count == 0:
         raise VaultConfigError(
             "lore: config.json must contain exactly one vault with scope 'default'; found zero"
