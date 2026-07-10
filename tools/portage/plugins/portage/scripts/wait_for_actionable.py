@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 
 from _bootstrap import ensure_trailhead_importable
+from _pr_pair import PairFormatError, split_pair
 
 ensure_trailhead_importable()
 
@@ -39,19 +39,10 @@ def main(argv: list[str] | None = None) -> int:
 
     pr_pairs: list[tuple[str, str]] = []
     for pair in args.pairs:
-        parts = pair.split(":", 1)
-        if len(parts) != 2:
-            print(
-                f"wait_for_actionable: bad pair format '{pair}' (expected repo:pr_number)",
-                file=sys.stderr,
-            )
-            return 2
-        repo, pr = parts
-        if not re.fullmatch(r"\d+", pr):
-            print(
-                f"wait_for_actionable: pr_number must be all digits, got: {pr!r}",
-                file=sys.stderr,
-            )
+        try:
+            repo, pr = split_pair(pair)
+        except PairFormatError as e:
+            print(f"wait_for_actionable: {e}", file=sys.stderr)
             return 2
         pr_pairs.append((repo, pr))
 
