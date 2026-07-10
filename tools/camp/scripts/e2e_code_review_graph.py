@@ -8,7 +8,7 @@ mktemp dir with an injected CAMP_STATE_DIR, and the clone is a disposable copy o
 the current worktree. The live `~/.config/camp` and any canonical checkout are
 never read or written.
 
-It proves the four-step provision flow:
+It proves the provision flow:
   1. A fresh workspace reconcile creates the trailhead worktree and marks the
      code-review-graph task "ok".
   2. `code-review-graph build --repo {worktree}` actually ran there:

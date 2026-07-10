@@ -90,7 +90,7 @@ cmd = ["code-review-graph", "build", "--repo", "{worktree}"]
 # You can also supply both to support multiple tools simultaneously:
 #   # doc_files = ["AGENTS.md", "CLAUDE.md"]
 #
-# inject — mid-session context-injection strategy for `camp enter`.
+# inject — mid-session context-injection strategy for `camp activate`.
 #   "stdout"      print the member doc to stdout (universal floor; works with any
 #                 harness, including Aider).
 #   "claude-hook" enqueue the member doc for the Claude Code PostToolUse hook so it

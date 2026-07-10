@@ -3,14 +3,17 @@
 run_member_tasks(tasks, phase, context, completed) -> list[TaskResult]
 
 This module is standalone: it accepts plain data and has no dependency on
-`camp.group.config` (or any manifest reader/writer). Wiring it into the real
-provision/activate call paths — reading a member's normalized `tasks` list,
-persisting `TaskResult`s into the central manifest, printing warnings — is a
-later slice's job.
+`camp.group.config` (or any manifest reader/writer). `camp.provision.reconcile`
+and `camp.provision.activation` are its consumers — they read a member's
+normalized `tasks` list from config, adapt each step's shape to what this
+runner expects (see `tasks` below), call `run_member_tasks`, persist the
+returned `TaskResult`s into the central manifest, and print warnings on
+optional-task failure. This module itself does none of that wiring.
 
-Expected shapes (documented here so a later slice's config-driven `tasks` list
-can be adapted to whatever this runner needs, whichever way its own shape
-ends up landing):
+Expected shapes (documented here because config.py's step shape — a
+`{"name", "cmd"}` dict, for legible per-step reporting — doesn't match what
+this runner takes; each caller adapts locally rather than either module
+reaching into the other's shape):
 
     tasks: list of task definitions, each a mapping with:
         name:            str — task name (used in results + error messages).
