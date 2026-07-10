@@ -130,7 +130,7 @@ def write_workspace_inject_hook(workspace_dir: Path, camp_bin: str) -> None:
 
     Installed only when the resolved inject strategy is "claude-hook": a Bash-matched
     PostToolUse hook drains the workspace inject queue (the member doc enqueued by
-    `camp enter`) into the session via additionalContext on the next tool call.
+    `camp activate`) into the session via additionalContext on the next tool call.
 
     Idempotent: re-running adds NO duplicate entries. Existing unrelated keys
     (including the SessionStart hook) are preserved.

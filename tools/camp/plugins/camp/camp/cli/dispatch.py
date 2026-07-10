@@ -279,7 +279,7 @@ def _dispatch_group_command(
         _cmd_rebase_group_cli,
     )
     from .workspace import (
-        _cmd_enter_group_cli,
+        _cmd_activate_group_cli,
         _cmd_pwd_group_cli,
         _cmd_ls_group_cli,
     )
@@ -310,7 +310,7 @@ def _dispatch_group_command(
         _cmd_setup_group_cli(rest, group, group_env, dry_run)
         return
     if cmd == "activate":
-        _cmd_enter_group_cli(rest, group, group_env)
+        _cmd_activate_group_cli(rest, group, group_env)
         return
     if cmd == "pwd":
         _cmd_pwd_group_cli(rest, group, group_env)

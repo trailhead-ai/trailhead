@@ -1,26 +1,33 @@
 """Lazy member activation for camp.
 
-camp enter <member>:
+camp activate <member>:
   (a) Ensures the member is ready — else raises MemberNotReadyError with a
       legible message: 'still provisioning' hint for pending, failure reason
       for failed.
-  (b) Fires activation hooks IDEMPOTENTLY — tracks an 'activated' field in the
-      manifest; re-enter is a cheap no-op (hooks not re-run), doc re-printed.
+  (b) Runs the member's activate-phase tasks IDEMPOTENTLY — tracks an
+      'activated' field in the manifest; re-activate is a cheap no-op (tasks not
+      re-run), doc re-printed. A required activate-task failure aborts activation
+      and leaves the member NOT activated; an optional-task failure warns on
+      stderr and activation proceeds. Task outcomes are recorded in the manifest's
+      per-member `tasks` map (uniformly with provision-phase tasks) so
+      `camp status` surfaces them regardless of phase.
   (c) Prints the member's CLAUDE.md to stdout so the calling agent ingests it.
 
-Hooks run shell=False (list-mode, bootstrap-trust posture).
+Tasks run shell=False (list-mode, bootstrap-trust posture).
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+# Activate-phase tasks run wherever the retired dep-install activation hooks ran.
+ACTIVATE_PHASE = "activate"
+
 
 class MemberNotReadyError(Exception):
-    """Raised when camp enter is called on a member that is not ready."""
+    """Raised when camp activate is called on a member that is not ready."""
 
 
 def _find_member_entry(data: dict[str, Any], member_name: str) -> dict[str, Any] | None:
@@ -37,8 +44,16 @@ def _find_member_config(group: dict[str, Any], member_name: str) -> dict[str, An
     return None
 
 
-def _mark_activated(mpath: Path, member_name: str) -> None:
-    """Atomically set activated=True for the named member in the manifest."""
+def _mark_activated(
+    mpath: Path, member_name: str, *, tasks: dict[str, Any] | None = None
+) -> None:
+    """Atomically set activated=True (and merge task states) for the named member.
+
+    When `tasks` is given it is a per-task state map ({name: {"state": ...}})
+    merged into the member's existing `tasks` map in the same locked write, so
+    activate-phase task outcomes are recorded uniformly with provision-phase
+    outcomes (both feed `camp status`).
+    """
     from ..group.manifest import read_central_manifest, write_central_manifest, reconcile_lock
 
     with reconcile_lock(mpath.parent):
@@ -46,16 +61,57 @@ def _mark_activated(mpath: Path, member_name: str) -> None:
         for m in data.get("members", []):
             if m.get("name") == member_name:
                 m["activated"] = True
+                if tasks:
+                    merged = m.get("tasks", {})
+                    merged.update(tasks)
+                    m["tasks"] = merged
                 break
         write_central_manifest(mpath, data)
 
 
-def _run_hooks(member_config: dict[str, Any], wt_path: Path) -> None:
-    """Fire each activation hook in order, shell=False."""
-    hooks = member_config.get("hooks") or []
-    for hook in hooks:
-        cmd = hook["cmd"]
-        subprocess.run(cmd, cwd=str(wt_path), check=True)
+def _run_activate_tasks(
+    member_config: dict[str, Any] | None,
+    wt_path: Path,
+    slug: str,
+    member_name: str,
+) -> dict[str, Any]:
+    """Run the member's activate-phase tasks; return their manifest tasks map.
+
+    Reuses the same config→runner→manifest adapters the provision path uses, so
+    the persisted task-state shape and the optional-failure stderr warning are
+    identical across both phases. A required-task failure raises TaskError
+    (activation aborts before the member is marked activated); an optional-task
+    failure is warned on stderr and tolerated. Returns the per-task state map to
+    merge into the manifest.
+    """
+    if not member_config:
+        return {}
+
+    from .reconcile import (
+        _adapt_task_steps,
+        _build_task_context,
+        _tasks_map_from_results,
+        _warn_optional_task_failures,
+    )
+    from .tasks import run_member_tasks
+
+    context = _build_task_context(
+        repo_root=member_config["repo_root"],
+        worktree=wt_path,
+        slug=slug,
+        member_name=member_name,
+    )
+    # The `activated` flag (not per-task run-once state) is the activate-path
+    # idempotency gate, so every activate-phase task runs together on first
+    # activation — pass an empty `completed` map so none are skipped here.
+    results = run_member_tasks(
+        _adapt_task_steps(member_config.get("tasks") or []),
+        ACTIVATE_PHASE,
+        context,
+        {},
+    )
+    _warn_optional_task_failures(results, member_name)
+    return _tasks_map_from_results(results)
 
 
 def _member_doc_content(member_name: str, wt_path: Path) -> str:
@@ -111,7 +167,7 @@ def _surface_member_doc(
     print(doc, end="")
 
 
-def enter_member(
+def activate_member(
     group: dict[str, Any],
     slug: str,
     member_name: str,
@@ -122,7 +178,7 @@ def enter_member(
     """Activate a member for the current session.
 
     (a) Checks provision_state: raises MemberNotReadyError for pending or failed.
-    (b) Fires activation hooks idempotently (skipped if already activated).
+    (b) Runs activate-phase tasks idempotently (skipped if already activated).
     (c) Prints the member's CLAUDE.md to stdout.
 
     Args:
@@ -133,6 +189,8 @@ def enter_member(
 
     Raises:
         MemberNotReadyError: If the member is not in the 'ready' state.
+        TaskError: If a required activate-phase task fails (member stays
+            not-activated).
         ValueError: If the member name is not found in the manifest.
     """
     from ..group.manifest import manifest_path_for, read_central_manifest
@@ -167,12 +225,21 @@ def enter_member(
     wt_path = Path(entry["worktree_path"])
     member_config = _find_member_config(group, member_name)
 
-    # Idempotency: only fire hooks on first activation.
+    # Idempotency: only run activate-phase tasks on the first activation. The
+    # `activated` flag is the gate (not per-task run-once state), so all
+    # activate-phase tasks run together on first activation and never again.
+    #
+    # Inherited TOCTOU: this `activated` read is unlocked while _mark_activated's
+    # write below takes the reconcile lock, so two concurrent first activations
+    # could both run the tasks. Pre-existing (the single-hook path had the same
+    # window); left as-is here rather than widened — activate tasks must be
+    # convergent under a rare double-run.
     already_activated = entry.get("activated", False)
     if not already_activated:
-        if member_config:
-            _run_hooks(member_config, wt_path)
-        _mark_activated(mpath, member_name)
+        # A required-task failure raises TaskError here BEFORE the member is
+        # marked activated, so activation aborts and re-activate retries.
+        tasks_map = _run_activate_tasks(member_config, wt_path, slug, member_name)
+        _mark_activated(mpath, member_name, tasks=tasks_map)
 
     # The workspace dir is the parent of the member worktree
     # (<workspace>/<member>) — the inject queue lives at <workspace>/.camp/.

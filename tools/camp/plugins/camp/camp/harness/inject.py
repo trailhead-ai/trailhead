@@ -1,12 +1,12 @@
 """Mid-session context-injection queue + drain (claude-hook strategy).
 
-The claude-hook inject strategy decouples `camp enter` (which knows the member
+The claude-hook inject strategy decouples `camp activate` (which knows the member
 and where its doc lives) from the Claude Code PostToolUse hook (which fires on the
-next tool call). `camp enter` ENQUEUES the member doc to:
+next tool call). `camp activate` ENQUEUES the member doc to:
 
     <workspace>/.camp/inject_queue/<unique>.md
 
-One file per enqueue, so multiple `camp enter`s before a drain are never lost.
+One file per enqueue, so multiple `camp activate`s before a drain are never lost.
 
 The hidden `camp inject --drain` (wired as the PostToolUse hook, matcher Bash)
 reads the queue, emits the Claude Code additionalContext JSON contract:
@@ -58,7 +58,7 @@ def find_workspace_root(start: Path) -> Path:
 def enqueue_doc(workspace_dir: Path, doc: str) -> Path:
     """Write `doc` to a fresh unique file in the workspace inject queue.
 
-    One file per enqueue so concurrent / repeated `camp enter`s before a drain
+    One file per enqueue so concurrent / repeated `camp activate`s before a drain
     are not lost. The filename is prefixed with a zero-padded monotonic
     nanosecond timestamp so `sorted()` yields enqueue order; the uuid suffix
     keeps filenames unique even if two enqueues land on the same `time_ns`.
