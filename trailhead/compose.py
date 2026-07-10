@@ -222,15 +222,9 @@ def compose_plan(
     plugin_root: Path = manifest.plugin_root.resolve()
     raw_ops: list[CopyOp] = []
 
-    def _add_in_repo_dir(rel: str) -> None:
-        src = (manifest.plugin_root / rel).resolve()
-        if not src.is_relative_to(plugin_root):
-            raise ConfineError(manifest.tool_name, "compose", rel)
-        d = dest / rel
-        _confine_dest(dest, d)
-        raw_ops.append(CopyOp(src=src, dest=d))
-
-    def _add_in_repo_file(rel: str) -> None:
+    def _add_in_repo(rel: str) -> None:
+        # Handles both files and dirs — apply_plan's copy call picks
+        # copytree vs copy2 by checking the resolved src on disk.
         src = (manifest.plugin_root / rel).resolve()
         if not src.is_relative_to(plugin_root):
             raise ConfineError(manifest.tool_name, "compose", rel)
@@ -251,18 +245,18 @@ def compose_plan(
     # ------------------------------------------------------------------
     # Always-on set
     # ------------------------------------------------------------------
-    _add_in_repo_dir(".claude-plugin")
+    _add_in_repo(".claude-plugin")
     for base_dir in manifest.base:
-        _add_in_repo_dir(base_dir)
+        _add_in_repo(base_dir)
     if manifest.hooks_json is not None:
         # hooks.json shells out to sibling scripts via ${CLAUDE_PLUGIN_ROOT}/hooks/;
         # wire the whole containing dir so the scripts ship too (bare file fallback
         # when hooks_json sits at the plugin root with no dedicated dir).
         hooks_dir = str(Path(manifest.hooks_json).parent)
         if hooks_dir != ".":
-            _add_in_repo_dir(hooks_dir)
+            _add_in_repo(hooks_dir)
         else:
-            _add_in_repo_file(manifest.hooks_json)
+            _add_in_repo(manifest.hooks_json)
 
     # ------------------------------------------------------------------
     # Selected subagents (always a single .md file)
@@ -274,7 +268,7 @@ def compose_plan(
             rel = manifest.subagents.get(name)
             if rel is None:
                 raise UnknownSubagentError(name, manifest.tool_name)
-            _add_in_repo_file(rel)
+            _add_in_repo(rel)
 
     # ------------------------------------------------------------------
     # Selected skills (in-repo = whole dir; override file = SKILL.md, dir = tree)
@@ -293,7 +287,7 @@ def compose_plan(
             rel = manifest.skills.get(name)
             if rel is None:
                 raise UnknownSkillError(name, manifest.tool_name)
-            _add_in_repo_dir(rel)
+            _add_in_repo(rel)
 
     deduped = _dedup_ops(raw_ops)
     _detect_collisions(deduped)

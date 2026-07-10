@@ -310,6 +310,27 @@ def _check_status(
 # ---------------------------------------------------------------------------
 
 
+def _bot_review_action(
+    status: dict[str, Any], review_bot_login: str | None
+) -> dict[str, Any] | None:
+    """Build the "review" action when review_bot_login left blocking feedback
+    (CHANGES_REQUESTED or COMMENTED), else None."""
+    if not review_bot_login:
+        return None
+    bot_reviews = status.get("botReviews", [])
+    changes = [r for r in bot_reviews if r.get("state") == "CHANGES_REQUESTED"]
+    comments = [r for r in bot_reviews if r.get("state") == "COMMENTED"]
+    if not (changes or comments):
+        return None
+    return {
+        "action": "review",
+        "reason": (
+            f"{len(changes)} changes requested, {len(comments)} comments from {review_bot_login}"
+        ),
+        "details": {"reviews": bot_reviews},
+    }
+
+
 def _evaluate(
     status: dict[str, Any],
     *,
@@ -325,19 +346,9 @@ def _evaluate(
         return {"action": "wait", "reason": "PR is a draft", "details": {}}
 
     if mergeable == "MERGEABLE" and merge_state == "CLEAN":
-        if review_bot_login:
-            bot_reviews = status.get("botReviews", [])
-            changes = [r for r in bot_reviews if r.get("state") == "CHANGES_REQUESTED"]
-            comments = [r for r in bot_reviews if r.get("state") == "COMMENTED"]
-            if changes or comments:
-                return {
-                    "action": "review",
-                    "reason": (
-                        f"{len(changes)} changes requested, "
-                        f"{len(comments)} comments from {review_bot_login}"
-                    ),
-                    "details": {"reviews": bot_reviews},
-                }
+        review_action = _bot_review_action(status, review_bot_login)
+        if review_action is not None:
+            return review_action
         return {"action": "done", "reason": "PR is mergeable and clean", "details": status}
 
     if mergeable == "CONFLICTING":
@@ -386,19 +397,9 @@ def _evaluate(
             },
         }
 
-    if review_bot_login:
-        bot_reviews = status.get("botReviews", [])
-        changes = [r for r in bot_reviews if r.get("state") == "CHANGES_REQUESTED"]
-        comments = [r for r in bot_reviews if r.get("state") == "COMMENTED"]
-        if changes or comments:
-            return {
-                "action": "review",
-                "reason": (
-                    f"{len(changes)} changes requested, "
-                    f"{len(comments)} comments from {review_bot_login}"
-                ),
-                "details": {"reviews": bot_reviews},
-            }
+    review_action = _bot_review_action(status, review_bot_login)
+    if review_action is not None:
+        return review_action
 
     return {
         "action": "wait",
