@@ -59,11 +59,15 @@ def _leaf_parsers(parser: argparse.ArgumentParser) -> "dict[str, argparse.Argume
     top_action = find_subparsers_action(parser)
     if top_action is None:
         raise ValueError("parser has no top-level subparsers action")
+    if _TOP_LEVEL_LEAF not in top_action.choices:
+        raise ValueError(f"parser has no {_TOP_LEVEL_LEAF!r} top-level command")
 
     leaves: dict[str, argparse.ArgumentParser] = {
         _TOP_LEVEL_LEAF: top_action.choices[_TOP_LEVEL_LEAF],
     }
     for group_name in _EXPAND_GROUPS:
+        if group_name not in top_action.choices:
+            raise ValueError(f"parser has no {group_name!r} top-level command")
         group_parser = top_action.choices[group_name]
         nested_action = find_subparsers_action(group_parser)
         if nested_action is None:
