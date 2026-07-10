@@ -58,6 +58,7 @@ import hashlib
 import json
 import os
 import re
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
@@ -622,6 +623,24 @@ def update_index(
     """
     kind, name = record_id.split("/", 1)
     index_store.upsert_row(conn, vault_root, kind, name, sidecar, body, shared=shared)
+
+
+@contextmanager
+def index_transaction():
+    """Open the search index, yield the connection, always close it on exit.
+
+    The shared open/close wrapper for the ``record create``/``update``/``delete``
+    handlers: it owns only the resource lifetime (open on enter, ``close()`` in
+    ``finally``). Commit stays the caller's responsibility — the handler calls
+    ``conn.commit()`` on its success path, so an early return on a guard rejection
+    or a raised store error skips the commit and leaves the index unchanged, while
+    the connection is still closed unconditionally.
+    """
+    conn = index_store.open_index()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
