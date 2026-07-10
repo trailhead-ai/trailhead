@@ -251,6 +251,67 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
         print(f"{e['slug']} {e['workspace_path']}")
 
 
+def _provision_member_and_flip(
+    group: dict[str, Any],
+    slug: str,
+    member: dict[str, Any],
+    entry: dict[str, Any],
+    mpath: Path,
+    *,
+    env: dict[str, str] | None,
+) -> tuple[dict[str, Any], list[Any] | None]:
+    """Run one member's per-member provision under the held reconcile lock and
+    flip its manifest state accordingly.
+
+    Returns (result, task_results): `result` is the per-member entry for
+    cmd_setup_group's return map ({"provision_state", "reason"?}); `task_results`
+    is the list of TaskResults on the success path (so the caller can classify a
+    retry outcome), or None when provisioning raised (member → failed).
+
+    A required-task failure (TaskError) flips the member to failed and persists
+    the partial results; a git fetch/add failure flips it to failed with a
+    reason; an optional-task failure leaves the member ready with the failed task
+    recorded and warned. The caller MUST already hold the .reconcile.lock.
+    """
+    from ..group.manifest import flip_member_state_unlocked
+    from . import provision
+    from .reconcile import (
+        _completed_from_tasks_map,
+        _tasks_map_from_results,
+        _warn_optional_task_failures,
+    )
+    from .tasks import TaskError
+
+    name = member["name"]
+    completed = _completed_from_tasks_map(entry.get("tasks"))
+    try:
+        task_results = provision.provision_member(
+            group, slug, member, completed=completed, env=env
+        )
+    except subprocess.TimeoutExpired as e:
+        reason = f"git fetch timeout after {e.timeout}s"
+        flip_member_state_unlocked(mpath, name, "failed", reason=reason)
+        return {"provision_state": "failed", "reason": reason}, None
+    except TaskError as e:
+        # A required task failed: persist its (and any prior) results alongside
+        # the failed state so `camp status` shows the task.
+        reason = str(e)
+        flip_member_state_unlocked(
+            mpath, name, "failed", reason=reason, tasks=_tasks_map_from_results(e.results)
+        )
+        return {"provision_state": "failed", "reason": reason}, None
+    except Exception as e:
+        reason = str(e)
+        flip_member_state_unlocked(mpath, name, "failed", reason=reason)
+        return {"provision_state": "failed", "reason": reason}, None
+    else:
+        _warn_optional_task_failures(task_results, name)
+        flip_member_state_unlocked(
+            mpath, name, "ready", tasks=_tasks_map_from_results(task_results)
+        )
+        return {"provision_state": "ready"}, task_results
+
+
 def cmd_setup_group(
     group: dict[str, Any],
     slug: str,
@@ -265,19 +326,23 @@ def cmd_setup_group(
     the per-task results into the member's `tasks` map, and flips the manifest
     pending→ready or →failed+reason. A required-task failure flips the member to
     failed; an optional-task failure leaves the member ready, records the failed
-    task, and warns on stderr. A ready member is left untouched. Best-effort: one
-    member failing never blocks the others.
+    task, and warns on stderr. Best-effort: one member failing never blocks the
+    others.
 
-    Returns {"slug", "members": {name: {"provision_state", "reason"?}}}.
+    Ready-member retry: a ready member that still carries a failed or never-run
+    provision-phase task (an optional failure leaves a member ready) is
+    re-provisioned so those outstanding tasks re-run — an already-ok task is
+    skipped (run-once). A ready member whose tasks are all ok (or that has no
+    tasks) is a TRUE no-op: it is not re-provisioned at all (no git fetch, no
+    manifest write). Each ready member carries a `retry` outcome in the result:
+        "none"          all tasks ok — nothing retried
+        "fixed"         outstanding tasks retried and now all ok
+        "still-failing" retried but a task is still failed
+    Pending/failed members provisioned normally do NOT carry a `retry` field.
+
+    Returns {"slug", "members": {name: {"provision_state", "reason"?, "retry"?}}}.
     """
-    from ..group.manifest import flip_member_state_unlocked
-    from . import provision
-    from .reconcile import (
-        _completed_from_tasks_map,
-        _tasks_map_from_results,
-        _warn_optional_task_failures,
-    )
-    from .tasks import TaskError
+    from .reconcile import _has_outstanding_provision_tasks
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -289,46 +354,29 @@ def cmd_setup_group(
         data = read_central_manifest(mpath)
         for entry in data.get("members", []):
             name = entry["name"]
-            if entry.get("provision_state") == "ready":
-                results[name] = {"provision_state": "ready"}
-                continue
-
             member = member_by_name.get(name)
             if member is None:
                 # Manifest lists a member no longer in the group config.
                 continue
 
-            completed = _completed_from_tasks_map(entry.get("tasks"))
-            try:
-                task_results = provision.provision_member(
-                    group, slug, member, completed=completed, env=env
+            if entry.get("provision_state") == "ready":
+                if not _has_outstanding_provision_tasks(member, entry.get("tasks")):
+                    # No failed/never-run tasks — a true no-op, not re-provisioned.
+                    results[name] = {"provision_state": "ready", "retry": "none"}
+                    continue
+                # Re-run outstanding tasks in place, then classify the outcome.
+                result, task_results = _provision_member_and_flip(
+                    group, slug, member, entry, mpath, env=env
                 )
-            except subprocess.TimeoutExpired as e:
-                reason = f"git fetch timeout after {e.timeout}s"
-                flip_member_state_unlocked(mpath, name, "failed", reason=reason)
-                results[name] = {"provision_state": "failed", "reason": reason}
-            except TaskError as e:
-                # A required task failed: persist its (and any prior) results
-                # alongside the failed state so `camp status` shows the task.
-                reason = str(e)
-                flip_member_state_unlocked(
-                    mpath,
-                    name,
-                    "failed",
-                    reason=reason,
-                    tasks=_tasks_map_from_results(e.results),
+                still_failing = result["provision_state"] != "ready" or any(
+                    r.state == "failed" for r in (task_results or [])
                 )
-                results[name] = {"provision_state": "failed", "reason": reason}
-            except Exception as e:
-                reason = str(e)
-                flip_member_state_unlocked(mpath, name, "failed", reason=reason)
-                results[name] = {"provision_state": "failed", "reason": reason}
-            else:
-                _warn_optional_task_failures(task_results, name)
-                flip_member_state_unlocked(
-                    mpath, name, "ready", tasks=_tasks_map_from_results(task_results)
-                )
-                results[name] = {"provision_state": "ready"}
+                result["retry"] = "still-failing" if still_failing else "fixed"
+                results[name] = result
+                continue
+
+            result, _ = _provision_member_and_flip(group, slug, member, entry, mpath, env=env)
+            results[name] = result
 
     return {"slug": slug, "members": results}
 
@@ -346,7 +394,17 @@ def provision_status_code(
         2  some members pending (none failed)
         3  any member failed (failed takes precedence over pending)
 
-    report = {"slug", "code", "members": [{"name", "provision_state", "reason"?}]}.
+    Exit codes are driven purely by each member's provision_state, NOT by
+    individual task states: a ready member with a failed OPTIONAL task stays
+    exit 0 (a failed REQUIRED task already flips the member itself to failed).
+    Each member carries its persisted per-task state map (`tasks`, always
+    present — an empty dict when the member has no tasks) so callers can surface
+    per-task detail without changing exit-code semantics.
+
+    report = {
+        "slug", "code",
+        "members": [{"name", "provision_state", "tasks", "reason"?}],
+    }, where `tasks` is the manifest's {task-name: {"state", "reason"?}} map.
     """
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -357,7 +415,11 @@ def provision_status_code(
     any_pending = False
     for entry in data.get("members", []):
         state = entry.get("provision_state", "pending")
-        m: dict[str, Any] = {"name": entry["name"], "provision_state": state}
+        m: dict[str, Any] = {
+            "name": entry["name"],
+            "provision_state": state,
+            "tasks": entry.get("tasks") or {},
+        }
         if state == "failed":
             any_failed = True
             if entry.get("reason"):

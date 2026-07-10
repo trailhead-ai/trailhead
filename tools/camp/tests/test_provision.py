@@ -851,3 +851,119 @@ class TestStatusExitCodes:
         assert by_name["repo_a"]["provision_state"] == "ready"
         assert by_name["repo_b"]["provision_state"] == "pending"
         assert report["code"] == code
+
+
+# ===========================================================================
+# Test 7: per-task surfacing in the status report + CLI output
+# ===========================================================================
+
+
+class TestStatusPerTaskSurfacing:
+    """`camp status` surfaces each member's per-task state. Exit codes are
+    unchanged — a ready member with a failed OPTIONAL task stays exit 0, the
+    failed task merely becomes visible in the report and the CLI output."""
+
+    def _seed(self, group, slug, env, members):
+        """Seed a workspace, flipping each member to (state, tasks_map).
+
+        members: {name: (provision_state, tasks_map)}.
+        """
+        import camp.provision.provision as provision
+        from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
+
+        provision.seed_pending_workspace(group, slug, env=env)
+        mpath = _workspace_dir(group["group"]["name"], slug, env) / "manifest.json"
+        for name, (state, tasks) in members.items():
+            with reconcile_lock(mpath.parent):
+                flip_member_state_unlocked(mpath, name, state, tasks=tasks)
+        return mpath
+
+    def test_report_includes_tasks_map(self, two_member_group):
+        """provision_status_code carries each member's manifest tasks map through
+        to the report (both the text and --json paths read this dict)."""
+        from camp.provision.lifecycle import provision_status_code
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "rt",
+            g["env"],
+            {
+                "repo_a": (
+                    "ready",
+                    {
+                        "seed": {"state": "ok"},
+                        "graphify": {"state": "failed", "reason": "boom"},
+                    },
+                ),
+                "repo_b": ("ready", {}),
+            },
+        )
+        code, report = provision_status_code(g["group"], "rt", env=g["env"])
+
+        # A failed OPTIONAL task does NOT change the exit code — the member is ready.
+        assert code == 0
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo_a"]["tasks"] == {
+            "seed": {"state": "ok"},
+            "graphify": {"state": "failed", "reason": "boom"},
+        }
+        # A member with no tasks reports an empty (never absent) map — stable shape.
+        assert by_name["repo_b"]["tasks"] == {}
+
+    def test_status_cli_text_lists_per_task_states(self, two_member_group, capsys):
+        """The text CLI prints one indented `    <task>: <state>` sub-line per
+        task, in manifest insertion order, under each member line, and exits 0
+        when the only failing task is optional (member ready)."""
+        from camp.cli.status import _cmd_status_group_cli
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "cli",
+            g["env"],
+            {
+                "repo_a": (
+                    "ready",
+                    {"seed": {"state": "ok"}, "graphify": {"state": "failed"}},
+                ),
+                "repo_b": ("ready", {}),
+            },
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            _cmd_status_group_cli(["--name", "cli"], g["group"], g["env"], False)
+        assert exc.value.code == 0
+
+        lines = capsys.readouterr().out.splitlines()
+        assert "  repo_a: ready" in lines
+        assert "    seed: ok" in lines
+        assert "    graphify: failed" in lines
+        # Insertion order preserved and sub-lines sit under their member line.
+        i_member = lines.index("  repo_a: ready")
+        i_seed = lines.index("    seed: ok")
+        i_graphify = lines.index("    graphify: failed")
+        assert i_member < i_seed < i_graphify
+
+    def test_status_cli_json_includes_tasks(self, two_member_group, capsys):
+        """The --json path emits the same tasks map for structured consumers."""
+        from camp.cli.status import _cmd_status_group_cli
+
+        g = two_member_group
+        self._seed(
+            g["group"],
+            "cj",
+            g["env"],
+            {
+                "repo_a": ("ready", {"seed": {"state": "ok"}}),
+                "repo_b": ("ready", {}),
+            },
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            _cmd_status_group_cli(["--name", "cj", "--json"], g["group"], g["env"], False)
+        assert exc.value.code == 0
+
+        report = json.loads(capsys.readouterr().out)
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo_a"]["tasks"] == {"seed": {"state": "ok"}}

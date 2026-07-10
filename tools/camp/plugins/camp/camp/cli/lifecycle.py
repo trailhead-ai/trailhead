@@ -26,6 +26,12 @@ def _cmd_setup_group_cli(
     runs the same per-member provisioning as the foreground invocation, flipping
     each member pending→ready or →failed under the slug-scoped .reconcile.lock.
     The slug is resolved from the positional arg, --name, or cwd.
+
+    A member that was already ready carries a `retry` outcome, appended to its
+    text line so a no-op is distinguishable from a repaired or still-broken retry:
+      - `retry=none`          already ready, all tasks ok — nothing re-run
+      - `retry=fixed`         outstanding tasks re-run and now all ok
+      - `retry=still-failing` re-run but a task is still failed
     """
     import json as _json
     from ..provision.lifecycle import cmd_setup_group
@@ -74,6 +80,8 @@ def _cmd_setup_group_cli(
         line = f"  {nm}: {info.get('provision_state', '?')}"
         if info.get("reason"):
             line += f" ({info['reason']})"
+        if info.get("retry"):
+            line += f" [retry={info['retry']}]"
         print(line, file=sys.stderr)
 
 

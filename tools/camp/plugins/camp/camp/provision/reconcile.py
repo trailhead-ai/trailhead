@@ -357,6 +357,26 @@ def _has_provision_tasks(member: dict[str, Any]) -> bool:
     )
 
 
+def _has_outstanding_provision_tasks(
+    member: dict[str, Any], tasks_map: dict[str, Any] | None
+) -> bool:
+    """True if the member has a provision-phase task not recorded "ok".
+
+    Compares the member's config-resolved provision tasks against the manifest's
+    persisted per-task state map: a task whose state is "failed" or absent
+    (never-run) is outstanding. Used by `camp setup` to decide whether an
+    otherwise-ready member still has task work to retry — an all-ok (or task-less)
+    member is a true no-op and is not re-provisioned.
+    """
+    tasks_map = tasks_map or {}
+    for task in member.get("tasks") or []:
+        if task.get("phase", PROVISION_PHASE) != PROVISION_PHASE:
+            continue
+        if (tasks_map.get(task["name"]) or {}).get("state") != "ok":
+            return True
+    return False
+
+
 def _adapt_task_steps(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Adapt config-resolved tasks to the runner's shape.
 

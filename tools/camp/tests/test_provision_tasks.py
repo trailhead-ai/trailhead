@@ -225,6 +225,146 @@ def test_setup_retry_skips_ok_task_reruns_failed_required(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# setup retry on already-READY members (outstanding-task re-run)
+#
+# A ready member may still carry a failed/never-run OPTIONAL task (an optional
+# failure leaves the member ready). `camp setup` re-runs those outstanding tasks
+# in place, distinguishing three outcomes per member: "none" (all ok — a true
+# no-op, no re-provision), "fixed" (retry cleared the failure), "still-failing".
+# ---------------------------------------------------------------------------
+
+
+def test_setup_reruns_outstanding_task_on_ready_member_and_clears_on_success(tmp_path):
+    """A ready member with a failed optional task re-runs ONLY that task on the
+    next setup (an already-ok task is skipped), clears it to ok, and reports the
+    retry outcome as "fixed"."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group
+    from camp.group.manifest import read_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    seed_runs = tmp_path / "seed_runs"
+    sentinel = tmp_path / "ready.flag"
+    group = _make_group(
+        "readyfix",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [
+                    _provision_task("seed", ["sh", "-c", f"echo x >> {seed_runs}"]),
+                    _provision_task("graphify", ["sh", "-c", f"test -f {sentinel}"]),
+                ],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    # First setup: seed ok; graphify (optional) fails → member stays ready.
+    r1 = cmd_setup_group(group, "s", env=env)
+    assert r1["members"]["repo"]["provision_state"] == "ready"
+    entry = read_central_manifest(_manifest_path("readyfix", "s", env))["members"][0]
+    assert entry["tasks"]["graphify"]["state"] == "failed"
+
+    # The outstanding task can now succeed.
+    sentinel.write_text("go\n")
+
+    # Second setup on the READY member: re-runs ONLY the outstanding task; the
+    # already-ok seed is skipped (run-once); graphify clears to ok.
+    r2 = cmd_setup_group(group, "s", env=env)
+    assert r2["members"]["repo"] == {"provision_state": "ready", "retry": "fixed"}
+    assert seed_runs.read_text().count("x") == 1
+
+    entry = read_central_manifest(_manifest_path("readyfix", "s", env))["members"][0]
+    assert entry["tasks"]["seed"]["state"] == "ok"
+    assert entry["tasks"]["graphify"]["state"] == "ok"
+
+
+def test_setup_ready_member_all_tasks_ok_is_noop(tmp_path, monkeypatch):
+    """A ready member whose tasks are all ok is a true no-op: setup does not
+    invoke the per-member provision (no git fetch, no re-run) and reports the
+    retry outcome as "none"."""
+    import camp.provision.provision as provision
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    seed_runs = tmp_path / "seed_runs"
+    group = _make_group(
+        "readynoop",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("seed", ["sh", "-c", f"echo x >> {seed_runs}"])],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    first = cmd_setup_group(group, "s", env=env)  # pending → ready, seed ok
+    assert seed_runs.read_text().count("x") == 1
+    # A pending member provisioned normally does NOT carry a retry outcome.
+    assert "retry" not in first["members"]["repo"]
+
+    # Track whether the per-member provision runs at all on the second pass.
+    calls: list[str] = []
+    real = provision.provision_member
+
+    def tracking(group, slug, member, *, completed=None, env):
+        calls.append(member["name"])
+        return real(group, slug, member, completed=completed, env=env)
+
+    monkeypatch.setattr(provision, "provision_member", tracking)
+
+    result = cmd_setup_group(group, "s", env=env)
+    assert calls == [], f"a no-op ready member must not be re-provisioned: {calls}"
+    assert result["members"]["repo"] == {"provision_state": "ready", "retry": "none"}
+    assert seed_runs.read_text().count("x") == 1
+
+
+def test_setup_ready_member_task_still_failing(tmp_path):
+    """A ready member whose outstanding optional task fails again on retry keeps
+    provision_state ready and reports the retry outcome as "still-failing"."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group
+    from camp.group.manifest import read_central_manifest
+
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    env = _camp_state_env(tmp_path)
+    group = _make_group(
+        "readystill",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("graphify", ["false"], required=False)],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    cmd_setup_group(group, "s", env=env)  # ready with graphify failed (optional)
+
+    result = cmd_setup_group(group, "s", env=env)
+    assert result["members"]["repo"] == {
+        "provision_state": "ready",
+        "retry": "still-failing",
+    }
+
+    entry = read_central_manifest(_manifest_path("readystill", "s", env))["members"][0]
+    assert entry["tasks"]["graphify"]["state"] == "failed"
+
+
+# ---------------------------------------------------------------------------
 # reconcile_worktree path
 # ---------------------------------------------------------------------------
 
