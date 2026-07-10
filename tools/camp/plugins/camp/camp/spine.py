@@ -445,35 +445,6 @@ def cmd_help(_args: list[str]) -> None:
     )
 
 
-def _read_registry(canonical_root: Path) -> dict[str, Any]:
-    """Read the dev-env registry from canonical_root/.worktree-dev/registry.json.
-
-    Returns an empty registry (schema_version=3, instances={}) if the file is
-    absent or unparseable.
-    """
-    reg_path = canonical_root / ".worktree-dev" / "registry.json"
-    if not reg_path.is_file():
-        return {"schema_version": 3, "instances": {}}
-    try:
-        return json.loads(reg_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {"schema_version": 3, "instances": {}}
-
-
-def _vanished_registry_instances(instances: dict[str, Any]) -> list[str]:
-    """Return instance IDs whose worktree_root path does not exist on disk."""
-    stale: list[str] = []
-    for iid, data in instances.items():
-        if not isinstance(data, dict):
-            continue
-        recorded = data.get("paths", {}).get("worktree_root")
-        if not isinstance(recorded, str) or not recorded:
-            continue
-        if not Path(recorded).exists():
-            stale.append(iid)
-    return stale
-
-
 # ---------------------------------------------------------------------------
 # camp sync — update canonical siblings
 # ---------------------------------------------------------------------------
@@ -775,7 +746,6 @@ def _activity_epoch(repos: list[dict[str, Any]]) -> float | None:
 def _build_worktree_entry(
     slug: str,
     manifest: dict[str, Any],
-    instances: dict[str, Any],
     wt_path: Path,
 ) -> dict[str, Any]:
     branch = manifest.get("branch", "")
@@ -864,9 +834,10 @@ def _print_status_human(
 def cmd_status(args: list[str], dry_run: bool = False) -> None:
     """camp status [--name <slug>] [--json] [--stale [--days N]]
 
-    Reconcile manifest membership + per-member git state + registry drift.
-    Retains dev_env_instance / fire_state / orphan_instances keys for contract
-    stability (null / none when no registry exists).
+    Reconcile manifest membership + per-member git state. Each worktree entry
+    retains the dev_env_instance / fire_state keys (null / none) and the drift
+    block retains stale_registry_instances / orphaned_git_worktrees (always
+    empty) for output-shape stability.
     """
     as_json = "--json" in args
     filtered_args = [a for a in args if a != "--json"]
@@ -897,9 +868,6 @@ def cmd_status(args: list[str], dry_run: bool = False) -> None:
         i += 1
 
     workspace_root = _workspace_root()
-    canonical_root = _canonical_root()
-    registry = _read_registry(canonical_root)
-    instances: dict[str, Any] = registry.get("instances") or {}
 
     name = _consume_flag_value(list(filtered_args), "--name")
 
@@ -915,46 +883,37 @@ def cmd_status(args: list[str], dry_run: bool = False) -> None:
         if manifest is None:
             _die(f"camp: could not read manifest at {manifest_path}")
         entries = [(wt_path, manifest)]
-        scoped = True
     else:
         cwd = Path.cwd()
         resolved = _resolve_worktree_from(cwd)
         if resolved is not None:
             wt, manifest = resolved
             entries = [(wt, manifest)]
-            scoped = True
         else:
             entries = _list_manifests(workspace_root)
-            scoped = False
 
     worktrees: list[dict[str, Any]] = []
     for wt_path, manifest in entries:
         slug = manifest.get("name", wt_path.name)
-        entry = _build_worktree_entry(slug, manifest, instances, wt_path)
+        entry = _build_worktree_entry(slug, manifest, wt_path)
         worktrees.append(entry)
 
     if check_stale:
         _annotate_stale(worktrees, threshold_days=stale_days)
 
-    if scoped:
-        stale = _vanished_registry_instances(instances)
-    else:
-        stale = _vanished_registry_instances(instances)
-
+    # Registry-drift detection is a placeholder: no writer of registry.json
+    # exists, so there are never stale instances or orphaned git worktrees.
     if as_json:
         output: dict[str, Any] = {
             "worktrees": worktrees,
             "drift": {
-                "stale_registry_instances": sorted(stale),
+                "stale_registry_instances": [],
                 "orphaned_git_worktrees": [],
             },
         }
         print(json.dumps(output))
     else:
-        _print_status_human(
-            worktrees,
-            stale_instances=stale if stale else None,
-        )
+        _print_status_human(worktrees)
 
 
 # ---------------------------------------------------------------------------
@@ -1041,12 +1000,11 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
 
     Checks:
       (a) asdf present — asdf resolvable/installed.
-      (b) manifest ↔ git-worktree consistency — stale registry instances
-          whose worktree_root has vanished.
+      (b) manifest ↔ git-worktree consistency — a placeholder that always
+          passes (no writer of registry.json exists to produce drift).
     """
     as_json = "--json" in args
 
-    canonical_root = _canonical_root()
     checks: list[dict[str, Any]] = []
     any_failed = False
 
@@ -1064,9 +1022,8 @@ def cmd_doctor(args: list[str], dry_run: bool = False) -> None:
     )
 
     # --- check (b): manifest ↔ registry consistency ---
-    registry = _read_registry(canonical_root)
-    instances: dict[str, Any] = registry.get("instances") or {}
-    stale_ids = _vanished_registry_instances(instances)
+    # Placeholder: no writer of registry.json exists, so drift is never detected.
+    stale_ids: list[str] = []
     consistency_ok = not stale_ids
     if not consistency_ok:
         any_failed = True
