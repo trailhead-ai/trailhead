@@ -27,6 +27,8 @@ import pytest
 
 from trailhead.harness.claude_code import ClaudeCodeHarness
 
+from .conftest import capturing_runner
+
 
 def _harness():
     return ClaudeCodeHarness()
@@ -38,101 +40,77 @@ def _harness():
 
 
 class TestGenerateManifest:
-    def test_marketplace_json_written(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_marketplace_json_written(self, composed_root):
         _harness().generate_manifest(["lore"], composed_root)
         assert (composed_root / ".claude-plugin" / "marketplace.json").exists()
 
-    def test_marketplace_name_is_trailhead(self, tmp_path):
+    def test_marketplace_name_is_trailhead(self, composed_root):
         """Consolidated marketplace name must be 'trailhead', not 'trailhead-<tool>'."""
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
         _harness().generate_manifest(["lore"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert data["name"] == "trailhead"
 
-    def test_marketplace_owner_name_is_trailhead(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_marketplace_owner_name_is_trailhead(self, composed_root):
         _harness().generate_manifest(["lore"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert data["owner"] == {"name": "trailhead"}
 
-    def test_multi_tool_plugins_list(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_multi_tool_plugins_list(self, composed_root):
         _harness().generate_manifest(["lore", "camp"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert len(data["plugins"]) == 2
 
-    def test_plugins_contain_correct_names(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_plugins_contain_correct_names(self, composed_root):
         _harness().generate_manifest(["lore", "camp"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         plugin_names = [p["name"] for p in data["plugins"]]
         assert "lore" in plugin_names
         assert "camp" in plugin_names
 
-    def test_plugin_source_relative_to_plugins_subdir(self, tmp_path):
+    def test_plugin_source_relative_to_plugins_subdir(self, composed_root):
         """Each plugin source must be './plugins/<tool>' (relative, Shape A)."""
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
         _harness().generate_manifest(["lore", "camp"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         for plugin in data["plugins"]:
             tool = plugin["name"]
             assert plugin["source"] == f"./plugins/{tool}"
 
-    def test_plugins_list_is_deterministic(self, tmp_path):
+    def test_plugins_list_is_deterministic(self, composed_root):
         """plugins[] order must be deterministic (sorted) across calls."""
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
         _harness().generate_manifest(["camp", "lore"], composed_root)
         data_a = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         _harness().generate_manifest(["lore", "camp"], composed_root)
         data_b = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert [p["name"] for p in data_a["plugins"]] == [p["name"] for p in data_b["plugins"]]
 
-    def test_single_tool_is_valid(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_single_tool_is_valid(self, composed_root):
         _harness().generate_manifest(["craft"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert data["name"] == "trailhead"
         assert len(data["plugins"]) == 1
         assert data["plugins"][0]["name"] == "craft"
 
-    def test_three_tools_all_present(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_three_tools_all_present(self, composed_root):
         _harness().generate_manifest(["lore", "camp", "craft"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         assert len(data["plugins"]) == 3
         assert {p["name"] for p in data["plugins"]} == {"lore", "camp", "craft"}
 
-    def test_claude_plugin_dir_created_automatically(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_claude_plugin_dir_created_automatically(self, composed_root):
         claude_dir = composed_root / ".claude-plugin"
         assert not claude_dir.exists()
         _harness().generate_manifest(["lore"], composed_root)
         assert claude_dir.exists()
 
-    def test_atomic_write_no_partial_file(self, tmp_path):
+    def test_atomic_write_no_partial_file(self, composed_root):
         """Write must be atomic: the destination is valid JSON after the call."""
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
         _harness().generate_manifest(["lore", "camp"], composed_root)
         out = composed_root / ".claude-plugin" / "marketplace.json"
         data = json.loads(out.read_text())
         assert isinstance(data, dict)
         assert data["name"] == "trailhead"
 
-    def test_plugin_entries_have_description(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_plugin_entries_have_description(self, composed_root):
         _harness().generate_manifest(["lore", "camp"], composed_root)
         data = json.loads((composed_root / ".claude-plugin" / "marketplace.json").read_text())
         for plugin in data["plugins"]:
@@ -158,32 +136,24 @@ class TestInputGuard:
             "-lore",  # starts with hyphen
         ],
     )
-    def test_generate_rejects_invalid_tool_names(self, tmp_path, invalid_tool):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_generate_rejects_invalid_tool_names(self, composed_root, invalid_tool):
         with pytest.raises((ValueError, TypeError)):
             _harness().generate_manifest([invalid_tool], composed_root)
 
     @pytest.mark.parametrize("invalid_tool", ["Lore", "1lore", "lore tool", "", "-lore"])
-    def test_install_tool_rejects_invalid_tool_names(self, tmp_path, invalid_tool):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_install_tool_rejects_invalid_tool_names(self, composed_root, invalid_tool):
         with pytest.raises((ValueError, TypeError)):
             _harness().install_tool(invalid_tool, composed_root, runner=lambda args, **kw: None)
 
     @pytest.mark.parametrize("invalid_tool", ["Lore", "1lore", "lore tool", "", "-lore"])
-    def test_rewire_tool_rejects_invalid_tool_names(self, tmp_path, invalid_tool):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_rewire_tool_rejects_invalid_tool_names(self, composed_root, invalid_tool):
         with pytest.raises((ValueError, TypeError)):
             _harness().rewire_tool(invalid_tool, composed_root, runner=lambda args, **kw: None)
 
     @pytest.mark.parametrize(
         "valid_tool", ["lore", "camp", "craft", "lore-plugin", "tool123", "my-tool"]
     )
-    def test_generate_accepts_valid_tool_names(self, tmp_path, valid_tool):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_generate_accepts_valid_tool_names(self, composed_root, valid_tool):
         _harness().generate_manifest([valid_tool], composed_root)  # must not raise
 
 
@@ -193,33 +163,24 @@ class TestInputGuard:
 
 
 class TestRegister:
-    def test_calls_marketplace_add(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().register(composed_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+    def test_calls_marketplace_add(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().register(composed_root, runner=runner)
         add_calls = [args for args in calls_seen if "marketplace" in args and "add" in args]
         assert len(add_calls) == 1
         assert str(composed_root) in add_calls[0]
 
-    def test_scope_user(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().register(composed_root, runner=lambda args, **kw: calls_seen.append(list(args)))
+    def test_scope_user(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().register(composed_root, runner=runner)
         for call_args in calls_seen:
             assert call_args[call_args.index("--scope") + 1] == "user"
 
-    def test_writes_global_marker_on_success(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_writes_global_marker_on_success(self, composed_root):
         _harness().register(composed_root, runner=lambda args, **kw: None)
         assert (composed_root / ".trailhead-registered").exists()
 
-    def test_no_marker_when_runner_raises(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-
+    def test_no_marker_when_runner_raises(self, composed_root):
         def failing_runner(args, **kw):
             raise RuntimeError("marketplace add failed")
 
@@ -227,17 +188,13 @@ class TestRegister:
             _harness().register(composed_root, runner=failing_runner)
         assert not (composed_root / ".trailhead-registered").exists()
 
-    def test_args_are_list(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().register(composed_root, runner=lambda args, **kw: calls_seen.append(args))
+    def test_args_are_list(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().register(composed_root, runner=runner)
         for call_args in calls_seen:
             assert isinstance(call_args, list)
 
-    def test_never_invokes_real_cli(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_never_invokes_real_cli(self, composed_root):
         with patch("subprocess.run") as mock_run:
             _harness().register(composed_root, runner=lambda args, **kw: None)
             mock_run.assert_not_called()
@@ -249,47 +206,30 @@ class TestRegister:
 
 
 class TestInstallTool:
-    def test_calls_plugin_install(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().install_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_calls_plugin_install(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().install_tool("lore", composed_root, runner=runner)
         assert len([args for args in calls_seen if "install" in args]) == 1
 
-    def test_ref_is_trailhead_not_per_tool(self, tmp_path):
+    def test_ref_is_trailhead_not_per_tool(self, composed_root):
         """Install ref must be '<tool>@trailhead', NOT '<tool>@trailhead-<tool>'."""
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().install_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+        runner, calls_seen = capturing_runner()
+        _harness().install_tool("lore", composed_root, runner=runner)
         install_call = [args for args in calls_seen if "install" in args][0]
         assert "lore@trailhead" in install_call
         assert "lore@trailhead-lore" not in install_call
 
-    def test_scope_user(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().install_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_scope_user(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().install_tool("lore", composed_root, runner=runner)
         for call_args in calls_seen:
             assert call_args[call_args.index("--scope") + 1] == "user"
 
-    def test_writes_per_tool_marker_on_success(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_writes_per_tool_marker_on_success(self, composed_root):
         _harness().install_tool("lore", composed_root, runner=lambda args, **kw: None)
         assert (composed_root / ".trailhead-installed-lore").exists()
 
-    def test_no_marker_when_runner_raises(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-
+    def test_no_marker_when_runner_raises(self, composed_root):
         def failing_runner(args, **kw):
             raise RuntimeError("install failed")
 
@@ -297,27 +237,19 @@ class TestInstallTool:
             _harness().install_tool("lore", composed_root, runner=failing_runner)
         assert not (composed_root / ".trailhead-installed-lore").exists()
 
-    def test_per_tool_markers_are_distinct(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_per_tool_markers_are_distinct(self, composed_root):
         _harness().install_tool("lore", composed_root, runner=lambda args, **kw: None)
         _harness().install_tool("camp", composed_root, runner=lambda args, **kw: None)
         assert (composed_root / ".trailhead-installed-lore").exists()
         assert (composed_root / ".trailhead-installed-camp").exists()
 
-    def test_args_are_list(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().install_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(args)
-        )
+    def test_args_are_list(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().install_tool("lore", composed_root, runner=runner)
         for call_args in calls_seen:
             assert isinstance(call_args, list)
 
-    def test_never_invokes_real_cli(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_never_invokes_real_cli(self, composed_root):
         with patch("subprocess.run") as mock_run:
             _harness().install_tool("lore", composed_root, runner=lambda args, **kw: None)
             mock_run.assert_not_called()
@@ -329,13 +261,9 @@ class TestInstallTool:
 
 
 class TestRewireTool:
-    def test_calls_uninstall_then_install(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().rewire_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_calls_uninstall_then_install(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().rewire_tool("lore", composed_root, runner=runner)
         verbs = []
         for call_args in calls_seen:
             if "uninstall" in call_args:
@@ -344,30 +272,20 @@ class TestRewireTool:
                 verbs.append("install")
         assert verbs == ["uninstall", "install"]
 
-    def test_does_not_call_plugin_update(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().rewire_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_does_not_call_plugin_update(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().rewire_tool("lore", composed_root, runner=runner)
         assert [args for args in calls_seen if "update" in args] == []
 
-    def test_uses_trailhead_ref(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().rewire_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_uses_trailhead_ref(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().rewire_tool("lore", composed_root, runner=runner)
         for call_args in calls_seen:
             if "uninstall" in call_args or "install" in call_args:
                 assert "lore@trailhead" in call_args
                 assert "lore@trailhead-lore" not in call_args
 
-    def test_tolerates_uninstall_failure(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_tolerates_uninstall_failure(self, composed_root):
         install_calls = []
 
         def stub_runner(args, **kwargs):
@@ -379,9 +297,7 @@ class TestRewireTool:
         _harness().rewire_tool("lore", composed_root, runner=stub_runner)
         assert len(install_calls) == 1
 
-    def test_clears_per_tool_marker_before_pair(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_clears_per_tool_marker_before_pair(self, composed_root):
         marker = composed_root / ".trailhead-installed-lore"
         marker.write_text("{}")
         marker_state_at_call_time = []
@@ -392,15 +308,11 @@ class TestRewireTool:
         )
         assert all(not present for present in marker_state_at_call_time)
 
-    def test_rewrites_per_tool_marker_after_install(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_rewrites_per_tool_marker_after_install(self, composed_root):
         _harness().rewire_tool("lore", composed_root, runner=lambda args, **kw: None)
         assert (composed_root / ".trailhead-installed-lore").exists()
 
-    def test_no_marker_when_install_raises(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_no_marker_when_install_raises(self, composed_root):
         marker = composed_root / ".trailhead-installed-lore"
         marker.write_text("{}")
 
@@ -412,19 +324,13 @@ class TestRewireTool:
             _harness().rewire_tool("lore", composed_root, runner=failing_on_install)
         assert not marker.exists()
 
-    def test_scope_user_on_both_calls(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().rewire_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_scope_user_on_both_calls(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().rewire_tool("lore", composed_root, runner=runner)
         for call_args in calls_seen:
             assert call_args[call_args.index("--scope") + 1] == "user"
 
-    def test_never_invokes_real_subprocess(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_never_invokes_real_subprocess(self, composed_root):
         with patch("subprocess.run") as mock_run:
             _harness().rewire_tool("lore", composed_root, runner=lambda args, **kw: None)
             mock_run.assert_not_called()
@@ -452,51 +358,35 @@ class TestInjectableRunner:
 
 
 class TestUnregisterTool:
-    def test_calls_plugin_uninstall_consolidated_ref(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().unregister_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_calls_plugin_uninstall_consolidated_ref(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().unregister_tool("lore", composed_root, runner=runner)
         uninstall_calls = [a for a in calls_seen if "uninstall" in a]
         assert len(uninstall_calls) == 1
         assert "lore@trailhead" in uninstall_calls[0]
         assert "lore@trailhead-lore" not in uninstall_calls[0]
 
-    def test_passes_keep_data_and_yes(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().unregister_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_passes_keep_data_and_yes(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().unregister_tool("lore", composed_root, runner=runner)
         call = calls_seen[0]
         assert "--keep-data" in call
         assert "--yes" in call
         assert call[call.index("--scope") + 1] == "user"
 
-    def test_does_not_remove_marketplace(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().unregister_tool(
-            "lore", composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_does_not_remove_marketplace(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().unregister_tool("lore", composed_root, runner=runner)
         for call in calls_seen:
             assert not ("marketplace" in call and "remove" in call)
 
-    def test_clears_per_tool_marker(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_clears_per_tool_marker(self, composed_root):
         marker = composed_root / ".trailhead-installed-lore"
         marker.write_text("{}")
         _harness().unregister_tool("lore", composed_root, runner=lambda args, **kw: None)
         assert not marker.exists()
 
-    def test_clears_per_tool_marker_even_if_runner_raises(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_clears_per_tool_marker_even_if_runner_raises(self, composed_root):
         marker = composed_root / ".trailhead-installed-lore"
         marker.write_text("{}")
 
@@ -507,38 +397,28 @@ class TestUnregisterTool:
             _harness().unregister_tool("lore", composed_root, runner=failing)
         assert not marker.exists()
 
-    def test_validates_tool_name(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_validates_tool_name(self, composed_root):
         with pytest.raises(ValueError):
             _harness().unregister_tool("../evil", composed_root, runner=lambda args, **kw: None)
 
 
 class TestUnregisterMarketplace:
-    def test_calls_marketplace_remove_trailhead(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
-        calls_seen = []
-        _harness().unregister_marketplace(
-            composed_root, runner=lambda args, **kw: calls_seen.append(list(args))
-        )
+    def test_calls_marketplace_remove_trailhead(self, composed_root):
+        runner, calls_seen = capturing_runner()
+        _harness().unregister_marketplace(composed_root, runner=runner)
         assert len(calls_seen) == 1
         call = calls_seen[0]
         assert call[:5] == ["claude", "plugin", "marketplace", "remove", "trailhead"]
         assert call[call.index("--scope") + 1] == "user"
         assert "trailhead-lore" not in call
 
-    def test_clears_global_marker(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_clears_global_marker(self, composed_root):
         marker = composed_root / ".trailhead-registered"
         marker.write_text("{}")
         _harness().unregister_marketplace(composed_root, runner=lambda args, **kw: None)
         assert not marker.exists()
 
-    def test_clears_global_marker_even_if_runner_raises(self, tmp_path):
-        composed_root = tmp_path / "composed"
-        composed_root.mkdir(parents=True)
+    def test_clears_global_marker_even_if_runner_raises(self, composed_root):
         marker = composed_root / ".trailhead-registered"
         marker.write_text("{}")
 
