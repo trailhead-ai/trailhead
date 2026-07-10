@@ -300,59 +300,48 @@ def _provision_member_and_flip(
 
     name = member["name"]
     completed = _completed_from_tasks_map(entry.get("tasks"))
+    tasks_kwarg: dict[str, Any] | None = None
     try:
         task_results = provision.provision_member(
             group, slug, member, completed=completed, env=env
         )
     except subprocess.TimeoutExpired as e:
         reason = f"git fetch timeout after {e.timeout}s"
-        if retrying_ready:
-            print(
-                f"camp: retry for member {name!r} hit {reason} — member remains "
-                "ready; run `camp status` for details.",
-                file=sys.stderr,
-            )
-            return {"provision_state": "ready", "_retry_failed": True}, None
-        flip_member_state_unlocked(mpath, name, "failed", reason=reason)
-        return {"provision_state": "failed", "reason": reason}, None
     except TaskError as e:
-        reason = str(e)
-        if retrying_ready:
-            # A required task cannot actually fail here (see docstring), but
-            # persist any partial results defensively rather than silently
-            # dropping them.
-            flip_member_state_unlocked(
-                mpath, name, "ready", tasks=_tasks_map_from_results(e.results)
-            )
-            print(
-                f"camp: retry for member {name!r} hit {reason} — member remains "
-                "ready; run `camp status` for details.",
-                file=sys.stderr,
-            )
-            return {"provision_state": "ready", "_retry_failed": True}, None
         # A required task failed: persist its (and any prior) results alongside
         # the failed state so `camp status` shows the task.
-        flip_member_state_unlocked(
-            mpath, name, "failed", reason=reason, tasks=_tasks_map_from_results(e.results)
-        )
-        return {"provision_state": "failed", "reason": reason}, None
+        reason = str(e)
+        tasks_kwarg = _tasks_map_from_results(e.results)
     except Exception as e:
         reason = str(e)
-        if retrying_ready:
-            print(
-                f"camp: retry for member {name!r} hit {reason} — member remains "
-                "ready; run `camp status` for details.",
-                file=sys.stderr,
-            )
-            return {"provision_state": "ready", "_retry_failed": True}, None
-        flip_member_state_unlocked(mpath, name, "failed", reason=reason)
-        return {"provision_state": "failed", "reason": reason}, None
     else:
         _warn_optional_task_failures(task_results, name)
         flip_member_state_unlocked(
             mpath, name, "ready", tasks=_tasks_map_from_results(task_results)
         )
         return {"provision_state": "ready"}, task_results
+
+    # Reached only when provisioning raised — one of the three `except` clauses
+    # above set `reason` (and, for TaskError, `tasks_kwarg`).
+    if retrying_ready:
+        # A retry of an outstanding OPTIONAL task on an already-ready member
+        # never demotes it — see the docstring above. A required-task failure
+        # can't actually reach here (defensive only), but its partial results
+        # are still persisted rather than silently dropped.
+        if tasks_kwarg:
+            flip_member_state_unlocked(mpath, name, "ready", tasks=tasks_kwarg)
+        print(
+            f"camp: retry for member {name!r} hit {reason} — member remains "
+            "ready; run `camp status` for details.",
+            file=sys.stderr,
+        )
+        return {"provision_state": "ready", "_retry_failed": True}, None
+
+    flip_kwargs: dict[str, Any] = {"reason": reason}
+    if tasks_kwarg:
+        flip_kwargs["tasks"] = tasks_kwarg
+    flip_member_state_unlocked(mpath, name, "failed", **flip_kwargs)
+    return {"provision_state": "failed", "reason": reason}, None
 
 
 def cmd_setup_group(

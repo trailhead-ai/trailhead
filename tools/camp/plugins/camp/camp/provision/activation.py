@@ -54,7 +54,12 @@ def _mark_activated(
     activate-phase task outcomes are recorded uniformly with provision-phase
     outcomes (both feed `camp status`).
     """
-    from ..group.manifest import read_central_manifest, write_central_manifest, reconcile_lock
+    from ..group.manifest import (
+        merge_member_tasks,
+        read_central_manifest,
+        reconcile_lock,
+        write_central_manifest,
+    )
 
     with reconcile_lock(mpath.parent):
         data = read_central_manifest(mpath)
@@ -62,9 +67,7 @@ def _mark_activated(
             if m.get("name") == member_name:
                 m["activated"] = True
                 if tasks:
-                    merged = m.get("tasks", {})
-                    merged.update(tasks)
-                    m["tasks"] = merged
+                    merge_member_tasks(m, tasks)
                 break
         write_central_manifest(mpath, data)
 

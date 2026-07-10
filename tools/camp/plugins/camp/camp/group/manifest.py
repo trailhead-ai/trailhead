@@ -175,6 +175,19 @@ def reconcile_lock(ws_dir: Path):
         lock_fd.close()
 
 
+def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:
+    """Merge a per-task state map into `member["tasks"]` in place.
+
+    Shared by every manifest write that records task outcomes
+    (`flip_member_state_unlocked` for provision-phase, `activation._mark_activated`
+    for activate-phase) so persisting one phase's results never clobbers task
+    states recorded by another phase or a prior run.
+    """
+    merged = member.get("tasks", {})
+    merged.update(tasks)
+    member["tasks"] = merged
+
+
 def flip_member_state_unlocked(
     path: Path,
     member_name: str,
@@ -205,9 +218,7 @@ def flip_member_state_unlocked(
             elif state != "failed":
                 member.pop("reason", None)
             if tasks:
-                merged = member.get("tasks", {})
-                merged.update(tasks)
-                member["tasks"] = merged
+                merge_member_tasks(member, tasks)
             break
     write_central_manifest(path, data)
 
