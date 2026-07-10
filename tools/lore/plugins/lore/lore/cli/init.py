@@ -137,7 +137,7 @@ def cmd_init(args) -> int:
 
     Bootstraps the canonical default vault and global index location so the
     machine is lore-ready, installs the vault write-protection guardrail, and
-    installs lore's static user-level ruleset into every detected harness via the
+    installs lore's user-level ruleset into every detected harness via the
     trailhead ``Harness`` seam. No ``input()`` prompts — safe to call from scripts
     and ``trailhead install``. There is no ``--local`` mode: the ruleset is a
     single user-global install.
@@ -149,7 +149,7 @@ def cmd_init(args) -> int:
       3. Provision ``$XDG_STATE_HOME/lore/`` (the index parent). Idempotent.
       4. Seed or merge ``config.json`` (seed-if-absent / merge default-if-missing).
       5. Install the vault write-protection guardrail (PreToolUse hook).
-      6. Install lore's static user-level ruleset into every detected harness;
+      6. Install lore's user-level ruleset into every detected harness;
          degrade visibly for any harness that lacks user-ruleset support.
     """
     from ..config import agent_ruleset as agent_ruleset_mod
@@ -191,12 +191,12 @@ def cmd_init(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    # Step 6: install lore's static user-level ruleset into every detected
+    # Step 6: install lore's user-level ruleset into every detected
     # harness via the trailhead seam. Confirmation/notice lines go to STDERR
     # (repo CLI convention) so they survive even if `trailhead install` filters
     # lore stdout. An unsupported harness degrades visibly (its no-op install
     # emits the seam's fixed UNSUPPORTED notice — never silently writes nothing).
-    content = agent_ruleset_mod.RULESET_CONTENT
+    content = agent_ruleset_mod.render_ruleset_content()
     for h in _detect_harnesses():
         status = h.user_ruleset_status(_RULESET_NAME, content)
         if status == "unsupported":
@@ -237,7 +237,7 @@ def cmd_status(args) -> int:
     """Report the lore user-level ruleset status for every detected harness.
 
     For each detected harness, compares the installed ruleset against lore's
-    static content via the seam (``user_ruleset_status``) and reports one of
+    rendered content via the seam (``user_ruleset_status``) and reports one of
     ``current`` / ``stale`` / ``missing`` / ``unsupported``. Any non-``current``
     state carries a "re-run `lore init`" remedy so the operator can self-heal
     without re-running init blind.
@@ -248,7 +248,7 @@ def cmd_status(args) -> int:
     """
     from ..config import agent_ruleset as agent_ruleset_mod
 
-    content = agent_ruleset_mod.RULESET_CONTENT
+    content = agent_ruleset_mod.render_ruleset_content()
     for h in _detect_harnesses():
         status = h.user_ruleset_status(_RULESET_NAME, content)
         if status == "current":

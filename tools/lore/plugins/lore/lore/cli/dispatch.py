@@ -11,6 +11,7 @@ import argparse
 import sys
 
 from . import areas, flush, init, record, search, session, sync, task, vault
+from ..argparse_util import find_subparsers_action
 
 
 # Table mapping removed/renamed commands to their replacements.
@@ -60,10 +61,8 @@ def _known_commands(parser: argparse.ArgumentParser) -> frozenset[str]:
     that merely failed on a sub-argument (e.g. ``record create`` missing
     ``--kind``) — the latter must NOT be mislabelled "unknown command".
     """
-    for action in parser._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            return frozenset(action.choices)
-    return frozenset()
+    action = find_subparsers_action(parser)
+    return frozenset(action.choices) if action is not None else frozenset()
 
 
 def main(argv: list[str] | None = None) -> int:

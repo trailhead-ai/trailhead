@@ -85,7 +85,7 @@ def _ruleset_path(home):
 
 
 def _ruleset_content():
-    return load_script("lore.config.agent_ruleset").RULESET_CONTENT
+    return load_script("lore.config.agent_ruleset").render_ruleset_content()
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ class TestInitWritesRuleset:
         state, config, home = _dirs(tmp_path)
         _run(["init"], state=state, config=config, home=home)
         assert _ruleset_path(home).read_text() == _ruleset_content(), (
-            "the installed ruleset must be byte-exact RULESET_CONTENT"
+            "the installed ruleset must be byte-exact with render_ruleset_content()"
         )
 
     def test_init_emits_per_harness_confirmation_line(self, tmp_path):
