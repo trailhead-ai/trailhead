@@ -4,8 +4,6 @@ Test contract:
 - Regression: spine imports without dev_env modules (they are absent).
 - slug normalize/validate: accept/reject the right inputs.
 - git-wrapper shapes: _git / _git_out form the expected argv.
-- cmd_sweep with no registry → orphan_instances={}, no NotImplementedError.
-- cmd_sweep --prune path hitting stub → raises NotImplementedError.
 - Import guard: the guard function emits a legible message on ImportError,
   not a raw traceback.
 """

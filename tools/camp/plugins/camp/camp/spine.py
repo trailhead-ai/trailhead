@@ -1,13 +1,11 @@
 """Worktree-spine for camp.
 
-Contains slug handling, manifest/cwd resolution, git wrappers, and all
-worktree command handlers (cmd_status, cmd_sync,
-cmd_restock, cmd_ls, cmd_path, cmd_code, cmd_sweep, cmd_foreach,
-cmd_doctor, cmd_help).
+Contains slug handling, manifest/cwd resolution, git wrappers, and the
+worktree command handlers (cmd_status, cmd_sync, cmd_ls, cmd_path,
+cmd_foreach, cmd_doctor, cmd_help).
 
 Notable structure:
 - No _SIBLING_REPOS constant — the member set comes from the group config.
-- cmd_sweep: dev-env prune path raises NotImplementedError (deferred).
 - cmd_doctor: dev-env probes stripped; keeps asdf + consistency checks.
 - _canonical_root() is sourced from the CAMP_CANONICAL_ROOT env var.
 - _check_trailhead_paths_importable() is the shared import guard.
@@ -447,171 +445,6 @@ def cmd_help(_args: list[str]) -> None:
     )
 
 
-_CODE_WORKSPACES_DIR = Path.home() / "code" / ".workspaces"
-
-
-def _detect_active_worktree_name(workspace_root: Path) -> str | None:
-    """Scan workspace siblings' .claude/worktrees/* for the newest HEAD commit."""
-    best_name: str | None = None
-    best_ts: float = 0
-    trailhead_wt_root = workspace_root / "trailhead" / ".claude" / "worktrees"
-    if not trailhead_wt_root.is_dir():
-        return None
-    try:
-        entries = list(trailhead_wt_root.iterdir())
-    except OSError:
-        return None
-    for wt in entries:
-        if not wt.is_dir():
-            continue
-        raw = _git_out(wt, "log", "-1", "--format=%ct", "HEAD")
-        if not raw:
-            continue
-        try:
-            ts = float(raw)
-        except ValueError:
-            continue
-        if ts > best_ts:
-            best_ts = ts
-            best_name = wt.name
-    return best_name
-
-
-def cmd_code(args: list[str], dry_run: bool = False) -> None:
-    """camp code [--name <slug>] [--dry-run] — open a multi-root VSCode workspace."""
-    workspace_root = _workspace_root()
-    filtered = list(args)
-    name_flag = _consume_flag_value(filtered, "--name")
-
-    manifest: dict[str, Any] | None = None
-    wt: Path | None = None
-    workspace_name: str = "canonical"
-
-    if name_flag is not None:
-        slug = _resolve_slug(name_flag, context="--name")
-        wt_path = _worktree_path_for_slug(slug, workspace_root)
-        if not wt_path.is_dir():
-            _die(f"camp code: no worktree found for slug {slug!r} (looked in {wt_path})")
-        manifest_path = wt_path / _MANIFEST_FILENAME
-        if manifest_path.is_file():
-            manifest = _read_manifest(manifest_path)
-            wt = wt_path
-        workspace_name = slug
-    else:
-        cwd = Path.cwd()
-        resolved = _resolve_worktree_from(cwd)
-        if resolved is not None:
-            wt, manifest = resolved
-            workspace_name = manifest.get("name", wt.name) if manifest else wt.name
-
-    if manifest is not None and wt is not None:
-        workspace_name = manifest.get("name", wt.name)
-        folders: list[dict[str, str]] = []
-        for repo_entry in manifest.get("repos", []) or []:
-            if not isinstance(repo_entry, dict):
-                continue
-            repo_name = repo_entry.get("name", "")
-            wt_path_str = repo_entry.get("worktree_path", "")
-            if repo_name and wt_path_str:
-                folders.append({"name": repo_name, "path": wt_path_str})
-    else:
-        detected = _detect_active_worktree_name(workspace_root)
-        if detected:
-            workspace_name = detected
-            folders = []
-        else:
-            workspace_name = "canonical"
-            folders = []
-
-    workspace_content = {"folders": [{"name": f["name"], "path": f["path"]} for f in folders]}
-    workspaces_dir = _CODE_WORKSPACES_DIR
-    workspace_file = workspaces_dir / f"{workspace_name}.code-workspace"
-
-    if dry_run:
-        print(f"[dry-run] workspace: {workspace_name}", file=sys.stderr)
-        print(f"[dry-run] workspace file: {workspace_file}", file=sys.stderr)
-        _dry_run_print(["code", str(workspace_file)])
-        return
-
-    workspaces_dir.mkdir(parents=True, exist_ok=True)
-    workspace_file.write_text(json.dumps(workspace_content, indent=2))
-
-    if not shutil.which("code"):
-        print("camp code: 'code' CLI not on PATH.", file=sys.stderr)
-        print(f"Workspace file: {workspace_file}", file=sys.stderr)
-        sys.exit(1)
-
-    subprocess.run(["code", str(workspace_file)], check=False)
-    print(f"Opened: {workspace_file} (workspace: {workspace_name})")
-
-
-# ---------------------------------------------------------------------------
-# camp sweep — orphan worktree reconciliation
-# ---------------------------------------------------------------------------
-
-
-def _import_dev_env() -> Any:
-    """Stub: dev-env engine deferred.
-
-    This is the single call-site guard for the dev-env prune path. The
-    worktree-orphan half of cmd_sweep (orphan_worktrees) is CLEAN and remains.
-    Only the instance teardown + dropdb path hits this stub.
-    """
-    raise NotImplementedError(
-        "camp sweep --prune: dev-env engine is deferred."
-    )
-
-
-def _active_worktree_names(workspace_root: Path) -> set[str]:
-    """Active set = basenames of worktree dirs that have a manifest."""
-    base = workspace_root / "trailhead" / ".claude" / "worktrees"
-    active: set[str] = set()
-    if not base.is_dir():
-        return active
-    for candidate in base.iterdir():
-        if not candidate.is_dir():
-            continue
-        if (candidate / _MANIFEST_FILENAME).is_file():
-            active.add(candidate.name)
-    return active
-
-
-def _classify_orphan_worktree(wt_path: Path) -> str:
-    """Classify an orphan worktree as SAFE | DIRTY | UNMERGED."""
-    is_dirty = _git_is_dirty(wt_path)
-    if not _git_head_is_ancestor_of_origin_main(wt_path):
-        return "UNMERGED"
-    return "DIRTY" if is_dirty else "SAFE"
-
-
-def _collect_orphan_worktrees(workspace_root: Path, active: set[str]) -> dict[str, dict[str, str]]:
-    """Return {"<repo>/<name>": {repo,name,path,class}} for orphan worktrees.
-
-    The _SIBLING_REPOS constant is removed; this function now accepts any group
-    member repos. It currently checks trailhead only; expanding to group-config
-    members is future work.
-    """
-    orphans: dict[str, dict[str, str]] = {}
-    # Currently only trailhead itself; group members are a future expansion.
-    repos_to_check = [("trailhead", workspace_root / "trailhead")]
-    for repo, repo_root in repos_to_check:
-        if not (repo_root / ".git").exists():
-            continue
-        _git(repo_root, "fetch", "--quiet", "origin", "main")
-        for wt_path in _git_worktree_list(repo_root):
-            name = wt_path.name
-            if name in active:
-                continue
-            cls = _classify_orphan_worktree(wt_path)
-            orphans[f"{repo}/{name}"] = {
-                "repo": repo,
-                "name": name,
-                "path": str(wt_path),
-                "class": cls,
-            }
-    return orphans
-
-
 def _read_registry(canonical_root: Path) -> dict[str, Any]:
     """Read the dev-env registry from canonical_root/.worktree-dev/registry.json.
 
@@ -641,139 +474,6 @@ def _vanished_registry_instances(instances: dict[str, Any]) -> list[str]:
     return stale
 
 
-def _worktree_root_under_workspace(recorded: Any, workspace_root: Path) -> bool:
-    """Validate a registry worktree_root is an absolute path under workspace_root."""
-    if not isinstance(recorded, str) or not recorded:
-        return False
-    if not os.path.isabs(recorded):
-        return False
-    normalized = os.path.normpath(recorded)
-    ws = os.path.normpath(str(workspace_root))
-    return normalized.startswith(ws + os.sep)
-
-
-def _prune_orphan_worktree(repo_root: Path, wt_path: Path, *, dry_run: bool) -> bool:
-    """Remove one orphan git worktree via `git worktree remove --force`."""
-    if dry_run:
-        _dry_run_print(["git", "-C", str(repo_root), "worktree", "remove", "--force", str(wt_path)])
-        return True
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(wt_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.returncode == 0
-
-
-def _print_sweep_human(report: dict[str, Any], *, prune: bool, force: bool) -> None:
-    worktrees = report.get("orphan_worktrees", {})
-    instances = report.get("orphan_instances", {})
-
-    by_class: dict[str, list[dict[str, str]]] = {"UNMERGED": [], "DIRTY": [], "SAFE": []}
-    for entry in worktrees.values():
-        by_class.setdefault(entry["class"], []).append(entry)
-
-    print(f"Active manifests: {report.get('active_count', 0)}")
-    for label, blurb in (
-        ("UNMERGED", "never auto-removed; inspect manually"),
-        ("DIRTY", "merged to main but tree has uncommitted changes"),
-        ("SAFE", "merged + clean"),
-    ):
-        entries = by_class.get(label, [])
-        print(f"\n{label} orphans: {len(entries)} ({blurb})")
-        for e in sorted(entries, key=lambda x: f"{x['repo']}/{x['name']}"):
-            print(f"  {e['repo']}/{e['name']}")
-            if label == "UNMERGED":
-                print(f"    {e['path']}")
-
-    print(f"\nOrphan dev-env instances: {len(instances)}")
-
-    if not prune:
-        print("\nDry-run. Pass --prune to remove SAFE orphans (and --force to also remove DIRTY).")
-
-
-def cmd_sweep(args: list[str], dry_run: bool = False) -> None:
-    """camp sweep [--prune [--force]] [--json]
-
-    Report orphaned worktrees (no manifest) classified SAFE/DIRTY/UNMERGED,
-    plus orphan dev-env registry instances (recorded worktree_root vanished).
-    Read-only by default.
-
-    --prune        removes SAFE orphan worktrees. The dev-env teardown path is
-                   DEFERRED — raises NotImplementedError if orphan instances are
-                   found (see deferred/2026-06/camp-dev-env-engine-half).
-    --prune --force also removes DIRTY orphan worktrees.
-
-    The JSON schema retains dev_env_instance / fire_state / orphan_instances keys
-    as null / {} when no registry exists, for contract stability.
-    """
-    as_json = "--json" in args
-    prune = "--prune" in args
-    force = "--force" in args
-
-    workspace_root = _workspace_root()
-    canonical_root = _canonical_root()
-
-    active = _active_worktree_names(workspace_root)
-    orphan_worktrees = _collect_orphan_worktrees(workspace_root, active)
-
-    registry = _read_registry(canonical_root)
-    instances: dict[str, Any] = registry.get("instances") or {}
-    orphan_instance_ids = _vanished_registry_instances(instances)
-
-    report: dict[str, Any] = {
-        "active_count": len(active),
-        "orphan_worktrees": orphan_worktrees,
-        "orphan_instances": {},
-        "prune": prune,
-        "force": force,
-        "dry_run": dry_run,
-    }
-
-    # Build the orphan-instance report. In report mode we only enumerate; in
-    # prune mode we hit the dev-env stub (NotImplementedError).
-    for iid in sorted(orphan_instance_ids):
-        data = instances.get(iid, {})
-        recorded = data.get("paths", {}).get("worktree_root") if isinstance(data, dict) else None
-        entry: dict[str, Any] = {"worktree_root": recorded}
-
-        if not prune:
-            report["orphan_instances"][iid] = entry
-            continue
-
-        # Prune path: dev-env teardown is deferred — raise NotImplementedError.
-        _import_dev_env()  # raises NotImplementedError
-
-    # Prune orphan worktrees (SAFE always; DIRTY only with --force; UNMERGED never).
-    if prune:
-        removed: list[str] = []
-        failed: list[str] = []
-        rejected: list[str] = []
-        for key, e in sorted(orphan_worktrees.items()):
-            cls = e["class"]
-            if cls == "UNMERGED":
-                continue
-            if cls == "DIRTY" and not force:
-                continue
-            if not _worktree_root_under_workspace(e["path"], workspace_root):
-                e["rejected"] = True
-                rejected.append(key)
-                continue
-            repo_root = workspace_root / e["repo"]
-            ok = _prune_orphan_worktree(repo_root, Path(e["path"]), dry_run=dry_run)
-            e["pruned"] = ok
-            (removed if ok else failed).append(key)
-        report["removed_worktrees"] = removed
-        report["failed_worktrees"] = failed
-        report["rejected_worktrees"] = rejected
-
-    if as_json:
-        print(json.dumps(report))
-    else:
-        _print_sweep_human(report, prune=prune, force=force)
-
-
 # ---------------------------------------------------------------------------
 # camp sync — update canonical siblings
 # ---------------------------------------------------------------------------
@@ -789,10 +489,6 @@ def _sibling_under_workspace(repo_root: Path, workspace_root: Path) -> bool:
     resolved_s = str(resolved)
     ws_s = str(ws)
     return resolved_s.startswith(ws_s + os.sep)
-
-
-def _git_head_is_ancestor_of_origin_main(repo_root: Path) -> bool:
-    return _git(repo_root, "merge-base", "--is-ancestor", "HEAD", "origin/main").returncode == 0
 
 
 def _git_current_branch(repo_root: Path) -> str:
@@ -920,49 +616,6 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
         print(f"camp sync: status={status} moved={moved} errors={errors}")
         for repo, e in siblings.items():
             print(f"  {repo}: {e.get('action', '?')}")
-
-
-# ---------------------------------------------------------------------------
-# camp restock — refresh canonical sibling dep caches
-# ---------------------------------------------------------------------------
-
-
-def cmd_restock(args: list[str], dry_run: bool = False) -> None:
-    """camp restock [--json] — refresh canonical sibling dep caches.
-
-    Currently a passthrough that reports the trailhead repo; operating on
-    group-config members with configured bootstrap commands is future work.
-    """
-    as_json = "--json" in args
-    workspace_root = _workspace_root()
-    refreshed: list[str] = []
-    errors = 0
-    siblings: dict[str, Any] = {}
-
-    # Currently trailhead only; group members are a future expansion.
-    repo, repo_root = "trailhead", workspace_root / "trailhead"
-    if not (repo_root / ".git").exists():
-        siblings[repo] = {"action": "absent"}
-    else:
-        if dry_run:
-            print(f"[dry-run] restock: {repo} at {repo_root}", file=sys.stderr)
-            siblings[repo] = {"action": "dry-run"}
-        else:
-            refreshed.append(repo)
-            siblings[repo] = {"action": "ok"}
-
-    status = "ok" if errors == 0 else "ok_with_warnings"
-    report: dict[str, Any] = {
-        "status": status,
-        "refreshed": refreshed,
-        "errors": errors,
-        "siblings": siblings,
-    }
-
-    if as_json:
-        print(json.dumps(report))
-    else:
-        print(f"camp restock: status={status} refreshed={refreshed} errors={errors}")
 
 
 # ---------------------------------------------------------------------------
@@ -1206,35 +859,6 @@ def _print_status_human(
             f"\nDrift: {len(stale_instances)} stale registry instance(s): "
             f"{', '.join(stale_instances)}"
         )
-
-
-def _git_worktree_list(repo_root: Path) -> list[Path]:
-    if not repo_root.is_dir():
-        return []
-    try:
-        result = _git(repo_root, "worktree", "list", "--porcelain")
-    except OSError:
-        return []
-    if result.returncode != 0:
-        return []
-
-    wt_paths: list[Path] = []
-    for line in result.stdout.splitlines():
-        if not line.startswith("worktree "):
-            continue
-        wt_path_str = line[len("worktree ") :].strip()
-        if not wt_path_str:
-            continue
-        wt_path = Path(wt_path_str)
-        try:
-            parts = wt_path.parts
-        except Exception:
-            continue
-        if ".claude" in parts:
-            idx = parts.index(".claude")
-            if idx + 1 < len(parts) and parts[idx + 1] == "worktrees":
-                wt_paths.append(wt_path)
-    return wt_paths
 
 
 def cmd_status(args: list[str], dry_run: bool = False) -> None:
@@ -1488,20 +1112,6 @@ _DISABLED_MESSAGE = (
 )
 
 
-def cmd_group(args: list[str], dry_run: bool = False) -> None:
-    """RESERVED — this handler is unreachable via normal dispatch.
-
-    cli/camp.main() intercepts 'group' before spine.main() is called, routing
-    it to _cmd_group_cli. This stub exists only so that direct calls to
-    spine.main() (e.g. from tests) produce a legible error rather than
-    falling into the bare-slug handler.
-    """
-    _die(
-        "camp group: this verb routes through the group-aware CLI entry point.\n"
-        "  Run 'camp group --help' for usage."
-    )
-
-
 def cmd_needs_group(verb: str) -> None:
     """Spine fallback for a NEEDS_GROUP verb (new/remove/pwd/activate/setup).
 
@@ -1581,8 +1191,6 @@ def main() -> None:
     # means none resolved (single NEEDS_GROUP_VERBS source of truth).
     elif first in NEEDS_GROUP_VERBS:
         cmd_needs_group(first)
-    elif first == "group":
-        cmd_group(rest, dry_run=dry_run)
     else:
         # Bare slug removed: print legible error pointing at camp new
         # (shared message, defined in verb_taxonomy).
