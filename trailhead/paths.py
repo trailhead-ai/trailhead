@@ -298,26 +298,17 @@ def _linux_cache(app: str, env: dict[str, str]) -> Path:
 
 def _macos_config(app: str, env: dict[str, str]) -> Path:
     # basedir spec on macOS: default to ~/.config, mirroring Linux.
-    xdg = _xdg_override("XDG_CONFIG_HOME", env)
-    if xdg is not None:
-        return xdg / app
-    return _home(env, "config directory") / ".config" / app
+    return _linux_config(app, env)
 
 
 def _macos_state(app: str, env: dict[str, str]) -> Path:
     # basedir spec on macOS: default to ~/.local/state, mirroring Linux.
-    xdg = _xdg_override("XDG_STATE_HOME", env)
-    if xdg is not None:
-        return xdg / app
-    return _home(env, "state directory") / ".local" / "state" / app
+    return _linux_state(app, env)
 
 
 def _macos_cache(app: str, env: dict[str, str]) -> Path:
     # basedir spec on macOS: default to ~/.cache, mirroring Linux.
-    xdg = _xdg_override("XDG_CACHE_HOME", env)
-    if xdg is not None:
-        return xdg / app
-    return _home(env, "cache directory") / ".cache" / app
+    return _linux_cache(app, env)
 
 
 def _windows_config(app: str, env: dict[str, str]) -> Path:

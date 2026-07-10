@@ -23,6 +23,7 @@ from _bootstrap import ensure_trailhead_importable
 ensure_trailhead_importable()
 
 from trailhead.vcs import get_provider  # noqa: E402
+from trailhead.vcs.github import InvalidInputError  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
             since=args.since,
             review_bot_login=args.review_bot_login,
         )
-    except RuntimeError as e:
+    except (RuntimeError, InvalidInputError) as e:
         print(json.dumps({"error": str(e)}))
         return 1
 

@@ -26,7 +26,7 @@ Selection shape:
 
 Contract:
   - The harness CLI runner is stubbed in all tests (hermeticity).
-  - apply_plan(mode="copy") — no symlinks in composed tree.
+  - apply_plan always copies — no symlinks in composed tree.
   - staging-dir + atomic promote — a mid-compose failure leaves the
     prior dest unchanged.
   - staging cleanup runs on ANY exception (try/finally).
@@ -548,6 +548,89 @@ class TestAtomicPromote:
                 )
 
         assert not plugin_dest.exists(), "partial dest exists after failed first wire"
+
+    def test_promote_failure_restores_prior_dest_instead_of_deleting_it(self, tmp_path):
+        """A failure DURING promotion (after the old dest has been set aside but
+        before the new one is confirmed in place) must restore the prior dest —
+        the old rmtree-then-move implementation destroyed the prior dest
+        unconditionally before ever attempting the move, so a failure at that
+        point left live_dest completely absent."""
+        from trailhead.wire import wire
+
+        selection = {"lore": ({}, {"flush": None})}
+        wire(
+            selection,
+            harness=_harness(),
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+        plugin_dest = _live_dest(tmp_path, "lore")
+        assert plugin_dest.exists()
+        before_files = {
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
+        }
+
+        real_rename = os.rename
+        fail_count = {"n": 0}
+
+        def _boom_when_promoting_into_live_dest(src, dst, *args, **kwargs):
+            # Fail only the FIRST rename into live_dest (staging -> live_dest);
+            # let the subsequent recovery rename (old_dest -> live_dest) through,
+            # so the test can assert the code actually recovers.
+            if Path(dst) == plugin_dest and fail_count["n"] == 0:
+                fail_count["n"] += 1
+                raise OSError("simulated failure promoting the staged tree into place")
+            return real_rename(src, dst, *args, **kwargs)
+
+        with patch("os.rename", side_effect=_boom_when_promoting_into_live_dest):
+            with pytest.raises(Exception):  # WireError wrapping OSError
+                wire(
+                    selection,
+                    harness=_harness(),
+                    manifest_paths=_manifest_paths(),
+                    env=_env(tmp_path),
+                    runner=_noop_runner,
+                )
+
+        assert plugin_dest.exists(), (
+            "live dest was left absent after a failed promote — the prior tree "
+            "must be restored, not deleted before the new one is confirmed in place"
+        )
+        after_files = {
+            str(p.relative_to(plugin_dest)) for p in plugin_dest.rglob("*") if p.is_file()
+        }
+        assert before_files == after_files, (
+            "prior dest content was not fully restored after a failed promote\n"
+            f"  missing: {before_files - after_files}\n"
+            f"  unexpected: {after_files - before_files}"
+        )
+
+    def test_successful_rewire_leaves_no_orphaned_old_dest(self, tmp_path):
+        """After a successful re-wire (live dest already existed), the renamed-aside
+        old dest must be cleaned up — never left as debris under plugins/."""
+        from trailhead.wire import wire
+
+        selection = {"lore": ({}, {"flush": None})}
+        wire(
+            selection,
+            harness=_harness(),
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+        # Second wire: live dest already exists, so this exercises the
+        # rename-aside path.
+        wire(
+            selection,
+            harness=_harness(),
+            manifest_paths=_manifest_paths(),
+            env=_env(tmp_path),
+            runner=_noop_runner,
+        )
+        staging_parent = _composed_root(tmp_path) / "plugins"
+        leftover = list(staging_parent.glob("_lore_old_*"))
+        assert leftover == [], f"old-dest dir orphaned after successful re-wire: {leftover}"
 
 
 # ---------------------------------------------------------------------------

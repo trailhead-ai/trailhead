@@ -254,6 +254,19 @@ class TestPrStatus:
         assert len(bot_reviews) == 1, f"expected 1 bot review after since filter, got {bot_reviews}"
         assert bot_reviews[0]["state"] == "APPROVED"
 
+    @pytest.mark.parametrize("bad_pr_number", ["--repo=owner/other", "123; rm -rf", "abc"])
+    def test_flag_injection_shaped_pr_number_rejected(self, bad_pr_number: str) -> None:
+        """A flag-shaped or non-numeric pr_number must never reach gh argv on the read
+        path — otherwise gh could parse it as an option (e.g. --repo=) and silently
+        redirect the query to a different repo."""
+
+        def _boom(cmd, **kwargs):
+            raise AssertionError(f"gh must not be invoked, got: {cmd}")
+
+        provider = get_provider("github", runner=_boom)
+        with pytest.raises(InvalidInputError):
+            provider.pr.status("some/path", bad_pr_number)
+
 
 # ---------------------------------------------------------------------------
 # ci.checks — annotation fetch integration
@@ -310,6 +323,18 @@ class TestCiChecks:
         failing = result["failingChecks"]
         assert len(failing) == 1
         assert failing[0]["annotations"][0]["path"] == "src/foo.py"
+
+    @pytest.mark.parametrize("bad_pr_number", ["--repo=owner/other", "123; rm -rf", "abc"])
+    def test_flag_injection_shaped_pr_number_rejected(self, bad_pr_number: str) -> None:
+        """ci.checks shares _check_status with pr.status; the digits-only guard must
+        cover this entry point too, not just the merge path."""
+
+        def _boom(cmd, **kwargs):
+            raise AssertionError(f"gh must not be invoked, got: {cmd}")
+
+        provider = get_provider("github", runner=_boom)
+        with pytest.raises(InvalidInputError):
+            provider.ci.checks("some/path", bad_pr_number)
 
 
 # ---------------------------------------------------------------------------

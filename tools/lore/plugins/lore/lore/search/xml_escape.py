@@ -2,8 +2,8 @@
 
 The single source of truth for the shared-content wrapping that guards against
 prompt-injection from untrusted (shared-vault) note content. Extracted out of
-``recall.py`` so the consumer — ``engine.py`` — does not depend on
-``recall.py``. ``engine.py`` imports these helpers; there is
+``area_map.py`` so the consumer — ``engine.py`` — does not depend on
+``area_map.py``. ``engine.py`` imports these helpers; there is
 one implementation of the wrapper logic.
 
 Pure, no I/O.

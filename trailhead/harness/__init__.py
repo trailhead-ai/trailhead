@@ -21,7 +21,6 @@ __all__ = [
     "ClaudeCodeHarness",
     "canonical_name",
     "get_harness",
-    "resolve_harnesses",
     "detect_harnesses",
     "known_harness_names",
 ]
@@ -59,21 +58,6 @@ def get_harness(name: str) -> Harness:
     if cls is None:
         raise HarnessError(f"unknown harness {name!r}; known harnesses: {known_harness_names()}")
     return cls()
-
-
-def resolve_harnesses(names: list[str]) -> list[Harness]:
-    """Resolve a list of (possibly aliased) names to Harness instances.
-
-    Order-preserving and de-duplicated by canonical name.
-    """
-    seen: set[str] = set()
-    out: list[Harness] = []
-    for n in names:
-        cn = canonical_name(n)
-        if cn not in seen:
-            seen.add(cn)
-            out.append(get_harness(cn))
-    return out
 
 
 def detect_harnesses(env: dict[str, str] | None = None) -> list[Harness]:

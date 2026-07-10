@@ -87,7 +87,7 @@ class TestFix6InjectIsLight:
 
     def test_inject_drain_still_drains(self, tmp_path: Path, monkeypatch, capsys):
         """The drain still emits the queued additionalContext and clears the queue."""
-        from camp.harness.inject import enqueue_doc
+        from camp.launch.inject import enqueue_doc
 
         ws = tmp_path / "ws"
         (ws / ".camp").mkdir(parents=True)
@@ -150,6 +150,105 @@ class TestFix7SlugFromCwdThreadsEnv:
             "slug-from-cwd must resolve against the env's state dir (env threaded "
             "into resolve_from_cwd), not os.environ"
         )
+
+
+# ===========================================================================
+# Bare `except Exception: return None, None` in group-resolution code masked
+# real bugs as "no group configured" — narrowed to the specific exceptions the
+# resolvers are documented to raise, so anything else propagates.
+# ===========================================================================
+
+
+class TestGroupResolutionBareExceptNarrowed:
+    def test_resolve_group_for_command_propagates_unexpected_exception(
+        self, tmp_path, monkeypatch
+    ):
+        """A genuinely unexpected exception (a bug, not a resolution failure) must
+        propagate out of _resolve_group_for_command, not be silently absorbed into
+        (None, None) as if no group had configured."""
+        camp_cli = importlib.import_module("camp.cli.dispatch")
+        monkeypatch.setattr(camp_cli, "_TRAILHEAD_PATHS_OK", True)
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+
+        import camp.group.config as group_config
+
+        def _boom(groups_dir):
+            raise TypeError("simulated bug in load_all_groups")
+
+        monkeypatch.setattr(group_config, "load_all_groups", _boom)
+
+        with pytest.raises(TypeError, match="simulated bug"):
+            camp_cli._resolve_group_for_command([])
+
+    def test_resolve_group_for_command_still_falls_through_on_group_resolution_error(
+        self, tmp_path, monkeypatch
+    ):
+        """GroupResolutionError ('no group resolved from cwd') is the documented,
+        expected fall-through case — it must still yield (None, None), not
+        propagate."""
+        camp_cli = importlib.import_module("camp.cli.dispatch")
+        monkeypatch.setattr(camp_cli, "_TRAILHEAD_PATHS_OK", True)
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+
+        import camp.group.config as group_config
+        import camp.group.resolve as group_resolve
+
+        monkeypatch.setattr(
+            group_config,
+            "load_all_groups",
+            lambda groups_dir: [{"group": {"name": "grp"}, "members": []}],
+        )
+
+        def _no_group(cwd, configs, **kwargs):
+            raise group_resolve.GroupResolutionError("camp: no group resolved from cwd")
+
+        monkeypatch.setattr(group_resolve, "resolve_from_cwd", _no_group)
+
+        assert camp_cli._resolve_group_for_command([]) == (None, None)
+
+    def test_resolve_group_for_command_propagates_group_confinement_error(
+        self, tmp_path, monkeypatch
+    ):
+        """A group name that fails the path-confinement charset check is a malformed
+        config, the same class of problem as GroupConfigError — it must surface,
+        not be silently absorbed as 'no group configured'."""
+        camp_cli = importlib.import_module("camp.cli.dispatch")
+        monkeypatch.setattr(camp_cli, "_TRAILHEAD_PATHS_OK", True)
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(tmp_path))
+
+        import camp.group.config as group_config
+        import camp.group.resolve as group_resolve
+
+        monkeypatch.setattr(
+            group_config,
+            "load_all_groups",
+            lambda groups_dir: [{"group": {"name": "grp"}, "members": []}],
+        )
+
+        def _bad_name(cwd, configs, **kwargs):
+            raise group_resolve.GroupConfinementError("camp: group name 'Bad Name' invalid")
+
+        monkeypatch.setattr(group_resolve, "resolve_from_cwd", _bad_name)
+
+        with pytest.raises(group_resolve.GroupConfinementError):
+            camp_cli._resolve_group_for_command([])
+
+    def test_slug_from_args_or_cwd_propagates_unexpected_exception(self, monkeypatch):
+        """The bare `except Exception: slug = None` in _slug_from_args_or_cwd had the
+        same problem — a genuinely unexpected exception from resolve_from_cwd must
+        propagate, not be silently coerced into slug=None."""
+        camp_cli = importlib.import_module("camp.cli.dispatch")
+
+        import camp.group.resolve as group_resolve
+
+        def _boom(cwd, configs, **kwargs):
+            raise TypeError("simulated bug in resolve_from_cwd")
+
+        monkeypatch.setattr(group_resolve, "resolve_from_cwd", _boom)
+
+        group = {"group": {"name": "grp"}, "members": [], "branch_pattern": "worktree-{slug}"}
+        with pytest.raises(TypeError, match="simulated bug"):
+            camp_cli._slug_from_args_or_cwd([], group, verb="status", allow_none=True)
 
 
 # ===========================================================================

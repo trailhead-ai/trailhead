@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from _bootstrap import ensure_trailhead_importable
+from _pr_pair import PairFormatError, split_pair
 
 ensure_trailhead_importable()
 
@@ -37,7 +39,11 @@ def main(argv: list[str] | None = None) -> int:
 
     pr_pairs: list[tuple[str, str]] = []
     for pair in args.pairs:
-        repo, pr = pair.split(":", 1)
+        try:
+            repo, pr = split_pair(pair)
+        except PairFormatError as e:
+            print(f"wait_for_actionable: {e}", file=sys.stderr)
+            return 2
         pr_pairs.append((repo, pr))
 
     result = get_provider().ci.wait(

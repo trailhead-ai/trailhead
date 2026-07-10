@@ -2,7 +2,7 @@
 
 The PostToolUse hook handler for the claude-hook inject strategy. It fires on
 every Bash tool call, so it must stay near-free — this module imports only
-stdlib at load time and pulls ``camp.harness.inject`` lazily inside the handler,
+stdlib at load time and pulls ``camp.launch.inject`` lazily inside the handler,
 and ``dispatch.main`` routes to it BEFORE the bootstrap walk and the heavy spine
 module-load.
 """
@@ -38,7 +38,7 @@ def _cmd_inject_cli(args: list[str]) -> None:
             break
 
     try:
-        from ..harness.inject import drain_queue, find_workspace_root
+        from ..launch.inject import drain_queue, find_workspace_root
         ws_dir = Path(workspace) if workspace else find_workspace_root(Path.cwd())
         code = drain_queue(ws_dir)
     except Exception:

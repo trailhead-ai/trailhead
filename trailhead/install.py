@@ -209,6 +209,26 @@ def run_install(
 # ---------------------------------------------------------------------------
 
 
+def _collect_overrides(cfg) -> list[tuple[str, str, str, str, str]]:
+    """Collect active file_path overrides as (harness, plugin, kind, name, file_path).
+
+    A config can point a selectable subagent/skill NAME at an arbitrary
+    ``file_path``; ``compose.py`` copies that content into the composed tree
+    UNCONFINED (deliberately — see its docstring) and registers it as trusted
+    agent content, re-materialized on every install. Overrides are otherwise
+    invisible to whoever runs `trailhead install` — this collection feeds the
+    summary sections below so an override is never silent.
+    """
+    out: list[tuple[str, str, str, str, str]] = []
+    for rh in cfg.harnesses:
+        for plugin in rh.plugins:
+            for kind, selection in (("subagent", plugin.subagents), ("skill", plugin.skills)):
+                for name, override in selection.items():
+                    if override is not None:
+                        out.append((rh.name, plugin.name, kind, name, override))
+    return out
+
+
 def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
     lines: list[str] = []
 
@@ -216,6 +236,13 @@ def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
         lines.append("installed plugins:")
         for harness_name, plugin_names in wired.items():
             lines.append(f"  {harness_name}: {', '.join(plugin_names) or '(none)'}")
+        lines.append("")
+
+    overrides = _collect_overrides(cfg)
+    if overrides:
+        lines.append("config overrides (non-repo content installed as trusted agent content):")
+        for harness_name, plugin_name, kind, name, file_path in overrides:
+            lines.append(f"  {harness_name}: {plugin_name}/{kind} {name} -> {file_path}")
         lines.append("")
 
     clis = []
@@ -245,4 +272,10 @@ def _print_json_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
         "shellenv": f'eval "$({_TRAILHEAD_BIN} shellenv)"',
         "no_harness": no_harness,
     }
+    overrides = _collect_overrides(cfg)
+    if overrides:
+        data["overrides"] = [
+            {"harness": h, "plugin": p, "kind": k, "name": n, "file_path": fp}
+            for h, p, k, n, fp in overrides
+        ]
     print(json.dumps(data))

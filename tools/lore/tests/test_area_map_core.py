@@ -1,4 +1,4 @@
-"""recall.py core: area-map build (the kept area-menu path).
+"""area_map.py core: area-map build (the kept area-menu path).
 
 Covers ``build_area_map`` — the on-demand area menu served by ``lore areas`` and
 the SessionStart pointer. ``lore search`` is the query interface.
@@ -21,9 +21,9 @@ from pathlib import Path
 from conftest import load_script
 
 
-def load_recall():
-    """Load recall module freshly each call to avoid state pollution."""
-    return load_script("lore.search.recall")
+def load_area_map():
+    """Load area_map module freshly each call to avoid state pollution."""
+    return load_script("lore.search.area_map")
 
 
 # ---------------------------------------------------------------------------
@@ -63,8 +63,8 @@ class TestBuildAreaMap:
     def test_reads_name_keywords_one_liner(self, tmp_path):
         vault = _make_vault(tmp_path)
         _write_area(vault, "auth-flow", ["oauth", "login"], summary="Handles auth.")
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert len(entries) == 1
         e = entries[0]
         assert e.name == "auth-flow"
@@ -75,8 +75,8 @@ class TestBuildAreaMap:
     def test_keyword_less_area_still_in_menu(self, tmp_path):
         vault = _make_vault(tmp_path)
         _write_area(vault, "no-keywords", [], summary="An area without keywords.")
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         names = [e.name for e in entries]
         assert "no-keywords" in names
 
@@ -85,8 +85,8 @@ class TestBuildAreaMap:
         _write_area(vault, "zebra", ["z"], summary="Z area.")
         _write_area(vault, "alpha", ["a"], summary="A area.")
         _write_area(vault, "middle", ["m"], summary="M area.")
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         names = [e.name for e in entries]
         assert names == sorted(names)
 
@@ -95,8 +95,8 @@ class TestBuildAreaMap:
         _write_area(vault, "good", ["ok"], summary="Good area.")
         bad = vault / "area" / "bad-file.md"
         bad.write_bytes(b"\xff\xfe not utf8 \x00\x01")
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         names = [e.name for e in entries]
         assert "good" in names
         assert "bad-file" not in names
@@ -105,24 +105,24 @@ class TestBuildAreaMap:
         vault = _make_vault(tmp_path)
         bad = vault / "area" / "bad.md"
         bad.write_bytes(b"\xff\xfe garbage \x00\x01\x02")
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert isinstance(entries, list)
 
     def test_one_liner_capped_at_120_chars(self, tmp_path):
         vault = _make_vault(tmp_path)
         long_summary = "x" * 200
         _write_area(vault, "verbosity", ["v"], summary=long_summary)
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert len(entries[0].one_liner) <= 120
 
     def test_keywords_capped(self, tmp_path):
         vault = _make_vault(tmp_path)
         many_kw = [f"kw{i}" for i in range(20)]
         _write_area(vault, "verbose-kw", many_kw, summary="Many keywords.")
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert len(entries[0].keywords) <= 8
 
     def test_summary_field_preferred_over_overview(self, tmp_path):
@@ -130,15 +130,15 @@ class TestBuildAreaMap:
         _write_area(
             vault, "prefer-summary", ["x"], summary="Summary wins.", overview="Overview text."
         )
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert entries[0].one_liner == "Summary wins."
 
     def test_overview_sentence_used_as_fallback(self, tmp_path):
         vault = _make_vault(tmp_path)
         _write_area(vault, "no-summary", ["x"], overview="First sentence of overview.")
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert "First sentence of overview" in entries[0].one_liner
 
     def test_html_comment_overview_skipped(self, tmp_path):
@@ -148,8 +148,8 @@ class TestBuildAreaMap:
             "---\ntype: area\nname: html-comment\nkeywords: [x]\n---\n\n"
             "## Overview\n<!-- Just a placeholder -->\n\nBody text.\n"
         )
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert len(entries) == 1
         assert "<!--" not in entries[0].one_liner
 
@@ -160,18 +160,18 @@ class TestBuildAreaMap:
             "---\ntype: area\nname: empty-area\nkeywords: [x]\n---\n\n"
             "## Overview\n<!-- Placeholder -->\n"
         )
-        recall = load_recall()
-        entries = recall.build_area_map(vault)
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
         assert len(entries) == 1
         assert entries[0].name == "empty-area"
 
     def test_empty_areas_dir_returns_empty_list(self, tmp_path):
         vault = _make_vault(tmp_path)
-        recall = load_recall()
-        assert recall.build_area_map(vault) == []
+        area_map = load_area_map()
+        assert area_map.build_area_map(vault) == []
 
     def test_missing_areas_dir_returns_empty_list(self, tmp_path):
         vault = tmp_path / "empty-vault"
         vault.mkdir()
-        recall = load_recall()
-        assert recall.build_area_map(vault) == []
+        area_map = load_area_map()
+        assert area_map.build_area_map(vault) == []

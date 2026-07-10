@@ -89,3 +89,44 @@ class TestReport:
             env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
         )
         assert r.data["shim_dir_present"] is True
+
+    def test_unresolvable_harness_reports_empty_state(self, tmp_path):
+        # A composed dir whose name isn't a registered Harness (e.g. leftover from
+        # an uninstalled/renamed harness) must still be reported, not crash doctor.
+        (tmp_path / "composed" / "not_a_real_harness").mkdir(parents=True)
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        info = r.data["harnesses"]["not_a_real_harness"]
+        assert info == {"registered": False, "installed": [], "marketplace": None}
+        assert r.exit_code == 0
+
+
+class TestMalformedManifest:
+    def test_marketplace_none_when_malformed(self, tmp_path):
+        root = tmp_path / "composed" / "claude_code"
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "marketplace.json").write_text("{not json")
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert r.data["harnesses"]["claude_code"]["marketplace"] is None
+
+    def test_human_output_distinguishes_malformed_from_absent(self, tmp_path):
+        root = tmp_path / "composed" / "claude_code"
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "marketplace.json").write_text("{not json")
+        (root / ".trailhead-registered").write_text("{}")
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert "marketplace: (unreadable)" in r.human_output
+        assert "marketplace: (none)" not in r.human_output
+
+    def test_human_output_reports_absent_when_no_manifest_file(self, tmp_path):
+        _make_tree(tmp_path, "claude_code", [], mkt=None)
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert "marketplace: (none)" in r.human_output
+        assert "marketplace: (unreadable)" not in r.human_output

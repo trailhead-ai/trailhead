@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..gitutil import _git_is_dirty, _git_out, _git_repo_status
 from ..group.resolve import central_state_dir
 from ..group.manifest import (
     ManifestError,
@@ -28,56 +29,6 @@ from ..group.manifest import (
     read_central_manifest,
     reconcile_lock,
 )
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-def _git_out(repo_root: Path, *args: str) -> str:
-    result = _git(repo_root, *args)
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def _git_is_dirty(path: Path) -> bool:
-    result = _git(path, "status", "--porcelain")
-    return bool(result.stdout.strip())
-
-
-def _git_repo_status(wt_path: Path) -> dict[str, Any]:
-    path_str = str(wt_path)
-    if not wt_path.is_dir():
-        return {"present": False, "path": path_str}
-
-    branch = _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD") or "unknown"
-    dirty_raw = _git(wt_path, "status", "--porcelain").stdout
-    dirty_files = len([ln for ln in dirty_raw.splitlines() if ln.strip()])
-    ahead_raw = _git(wt_path, "rev-list", "--count", "@{upstream}..HEAD")
-    unpushed = (
-        int(ahead_raw.stdout.strip())
-        if ahead_raw.returncode == 0 and ahead_raw.stdout.strip().isdigit()
-        else 0
-    )
-    last_commit = _git_out(wt_path, "log", "-1", "--oneline")
-
-    return {
-        "present": True,
-        "path": path_str,
-        "branch": branch,
-        "dirty_files": dirty_files,
-        "unpushed_commits": unpushed,
-        "last_commit": last_commit,
-    }
 
 
 def _list_group_worktrees(

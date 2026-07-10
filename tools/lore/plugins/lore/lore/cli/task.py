@@ -1,16 +1,17 @@
 """``lore task`` — read-only task-graph views.
 
 A thin renderer over ``record/graph.py`` (the pure edge-map/query module) and
-``record.py``'s existing task-sidecar loader + multi-vault record locator —
-this module reuses both rather than re-deriving graph traversal or vault
-resolution. It never writes; it is the read counterpart to the ``--parent``/
-``--depends-on`` write-time guards in ``cli/record.py``.
+``record/guards.py``'s task-sidecar loader + ``cli/record.py``'s multi-vault
+record locator — this module reuses all three rather than re-deriving graph
+traversal or vault resolution. It never writes; it is the read counterpart to
+the ``--parent``/``--depends-on`` write-time guards in ``record/guards.py``.
 """
 from __future__ import annotations
 
 import sys
 
-from .record import _find_current_record_location, _load_task_sidecars
+from ..record import guards as guards_mod
+from .record import _find_current_record_location
 
 
 def _render_task_graph(graph: dict, root: str) -> str:
@@ -106,7 +107,7 @@ def _cmd_task_graph(args) -> int:
         )
         return 1
 
-    graph = _load_task_sidecars(location.vault_root)
+    graph = guards_mod.load_task_sidecars(location.vault_root)
     print(_render_task_graph(graph, location.name))
     return 0
 

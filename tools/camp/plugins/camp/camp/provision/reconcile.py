@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from ..gitutil import _git, _git_is_dirty
 from ..group.manifest import (
     ManifestError,
     manifest_path_for,
@@ -127,20 +128,6 @@ def _worktree_path(
     """Return the member's worktree path under the unified workspace dir:
     central_state_dir(group)/worktrees/<slug>/<member>."""
     return workspace_dir(group_name, slug, env=env) / member_name
-
-
-def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-def _git_is_dirty(path: Path) -> bool:
-    result = _git(path, "status", "--porcelain")
-    return bool(result.stdout.strip())
 
 
 def _branch_exists_locally(repo_root: Path, branch: str) -> bool:

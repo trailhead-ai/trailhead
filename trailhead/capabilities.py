@@ -110,10 +110,6 @@ class Manifest:
     subagents: dict[str, str]
     skills: dict[str, str]
 
-    def all_selectable(self) -> set[str]:
-        """Return the union of selectable subagent and skill names ("ALL")."""
-        return set(self.subagents) | set(self.skills)
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers

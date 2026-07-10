@@ -4,8 +4,6 @@ Test contract:
 - Regression: spine imports without dev_env modules (they are absent).
 - slug normalize/validate: accept/reject the right inputs.
 - git-wrapper shapes: _git / _git_out form the expected argv.
-- cmd_sweep with no registry → orphan_instances={}, no NotImplementedError.
-- cmd_sweep --prune path hitting stub → raises NotImplementedError.
 - Import guard: the guard function emits a legible message on ImportError,
   not a raw traceback.
 """
@@ -132,7 +130,7 @@ def test_resolve_slug_normalizes_and_returns() -> None:
 
 def test_git_forms_correct_argv(tmp_path: Path) -> None:
     """_git forms [git, -C, <root>, ...args] and passes shell=False."""
-    from camp.spine import _git
+    from camp.gitutil import _git
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -144,7 +142,7 @@ def test_git_forms_correct_argv(tmp_path: Path) -> None:
 
 
 def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
-    from camp.spine import _git_out
+    from camp.gitutil import _git_out
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="  main  \n", stderr="")
@@ -153,12 +151,92 @@ def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
 
 
 def test_git_out_returns_empty_on_nonzero(tmp_path: Path) -> None:
-    from camp.spine import _git_out
+    from camp.gitutil import _git_out
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1, stdout="something", stderr="err")
         result = _git_out(tmp_path, "status")
     assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# cmd_status / cmd_doctor observable output (no registry writer exists, so the
+# registry-drift plumbing always resolves empty — these lock that contract).
+# ---------------------------------------------------------------------------
+
+
+def _isolate_roots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point workspace + canonical roots at empty tmp dirs and chdir there."""
+    workspace_root = tmp_path / "workspace"
+    canonical_root = tmp_path / "canonical"
+    workspace_root.mkdir()
+    canonical_root.mkdir()
+    monkeypatch.setenv("WORKSPACE_ROOT", str(workspace_root))
+    monkeypatch.setenv("CAMP_CANONICAL_ROOT", str(canonical_root))
+    monkeypatch.chdir(tmp_path)
+    return workspace_root
+
+
+def test_status_json_no_registry_reports_empty_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With no registry present, `camp status --json` reports empty drift."""
+    import json as _json
+
+    from camp.spine import cmd_status
+
+    _isolate_roots(monkeypatch, tmp_path)
+    cmd_status(["--json"])
+    out = _json.loads(capsys.readouterr().out)
+    assert out == {
+        "worktrees": [],
+        "drift": {"stale_registry_instances": [], "orphaned_git_worktrees": []},
+    }
+
+
+def test_status_json_scoped_entry_retains_fire_and_dev_env_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A scoped worktree entry keeps the dev_env_instance / fire_state keys."""
+    import json as _json
+
+    from camp.spine import cmd_status
+
+    from camp.spine import _MANIFEST_FILENAME
+
+    workspace_root = _isolate_roots(monkeypatch, tmp_path)
+    wt = workspace_root / "trailhead" / ".claude" / "worktrees" / "alpha"
+    wt.mkdir(parents=True)
+    (wt / _MANIFEST_FILENAME).write_text(_json.dumps({"name": "alpha", "repos": []}))
+
+    cmd_status(["--name", "alpha", "--json"])
+    out = _json.loads(capsys.readouterr().out)
+    assert len(out["worktrees"]) == 1
+    entry = out["worktrees"][0]
+    assert entry["slug"] == "alpha"
+    assert entry["fire_state"] is None
+    assert entry["dev_env_instance"] is None
+    assert entry["repos"] == []
+
+
+def test_doctor_json_no_registry_consistency_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`camp doctor --json` consistency check passes with no drift and empty ids."""
+    import json as _json
+
+    from camp.spine import cmd_doctor
+
+    _isolate_roots(monkeypatch, tmp_path)
+    try:
+        cmd_doctor(["--json"])
+    except SystemExit:
+        pass  # asdf check may fail in CI; we only assert on the consistency check
+    report = _json.loads(capsys.readouterr().out)
+    consistency = next(c for c in report["checks"] if c["check"] == "consistency")
+    assert consistency["pass"] is True
+    assert consistency["details"] == "no drift detected"
+    assert consistency["stale_registry_instances"] == []
 
 
 # ---------------------------------------------------------------------------

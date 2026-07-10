@@ -10,9 +10,9 @@ Tables:
                      by both dispatchers via canonical_verb() before dispatch, so the
                      rest of the dispatch machinery only ever sees canonical names.
   DISABLED_VERBS   — verbs hidden from help that print the standard disabled
-                     message and exit non-zero. The cmd_<verb> BODIES in spine
-                     (cmd_code/cmd_sweep/cmd_restock) are intentionally retained;
-                     this set only governs the DISPATCH decision.
+                     message and exit non-zero. Dispatch is intercepted before
+                     any command body runs, so these verbs have no handler in
+                     spine — this set is the sole thing that governs them.
   LEGACY_REDIRECTS  — renamed verbs → their live canonical replacement (old → new).
                      All targets must be live canonical verbs; the dispatcher does
                      not support chained redirects, so no target may itself be a

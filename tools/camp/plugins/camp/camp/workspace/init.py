@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..harness.hooks_writer import write_hooks_for_member
+from ..launch.hooks_writer import write_hooks_for_member
 from ..group.resolve import validate_no_overlap
 
 

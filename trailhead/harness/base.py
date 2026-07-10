@@ -95,6 +95,35 @@ class Harness(ABC):
     def is_installed(self, tool: str, composed_root: Path) -> bool:
         """Return True if ``tool`` is currently installed (per-tool marker present)."""
 
+    @abstractmethod
+    def installed_tools(self, composed_root: Path) -> list[str]:
+        """Return the sorted tool names currently installed under ``composed_root``.
+
+        The enumeration counterpart to :meth:`is_installed`: ``doctor`` and
+        ``uninstall`` discover which tools a composed tree holds through this method
+        rather than re-deriving the harness's on-disk marker scheme themselves.
+        """
+
+    def manifest_name(self, composed_root: Path) -> str | None:
+        """Display name of the harness manifest under ``composed_root``, or ``None``.
+
+        Read-only report helper (used by ``doctor``).  The default has no named
+        manifest; harnesses whose :meth:`generate_manifest` writes a named artifact
+        override this.  Must never raise on a malformed/absent manifest.
+        """
+        return None
+
+    def manifest_exists(self, composed_root: Path) -> bool:
+        """Return True if a manifest file is present on disk, parseable or not.
+
+        :meth:`manifest_name` returns ``None`` both when the manifest is absent AND
+        when it exists but is malformed — a deliberate, already-tested collapse.
+        This method exists so ``doctor`` can tell those two cases apart (existence
+        only; it never parses). The default is False; harnesses whose
+        :meth:`generate_manifest` writes a manifest file override this.
+        """
+        return False
+
     # -- install / uninstall --------------------------------------------------
 
     @abstractmethod

@@ -8,7 +8,8 @@ plugin's persistent data dir under the harness, preserved via the harness
 
 Discovery is purely on-disk (no config dependency): each harness composed under
 ``state_dir/composed/<harness>/`` is torn down, with its installed tools read
-from the per-tool ``.trailhead-installed-<tool>`` markers.
+through the harness seam (``Harness.installed_tools``) rather than by re-deriving
+any on-disk marker scheme here.
 
 Teardown steps:
   1. Discover harness composed trees + their installed tools.
@@ -34,9 +35,6 @@ from trailhead.pathint import resolve_shim_dir
 from trailhead.paths import state_dir
 from trailhead.wire import LockError, wire_lock
 
-_REGISTERED_MARKER = ".trailhead-registered"
-_INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
-
 
 def _is_tty() -> bool:
     """Return True if stdin is interactive. Thin wrapper so tests can patch it."""
@@ -56,7 +54,7 @@ def run_uninstall(
     is_tty = _is_tty()
 
     composed_base = state_dir("trailhead", env=_env) / "composed"
-    discovered = _discover(composed_base)
+    discovered = _discover_harness_names(composed_base)
     shim_dir = resolve_shim_dir(env=_env)
     has_pathint = shim_dir.exists()
 
@@ -102,10 +100,8 @@ def run_uninstall(
 
     try:
         with wire_lock(env=_env):
-            for hname, tools in discovered.items():
+            for hname in discovered:
                 composed_root = composed_base / hname
-                if not quiet and not as_json:
-                    print(f"removing {hname}: {', '.join(tools) or '(no tools)'}…")
 
                 harness = None
                 try:
@@ -114,6 +110,12 @@ def run_uninstall(
                     warnings.append(
                         f"{hname}: unknown harness — deleting its tree without CLI de-registration"
                     )
+
+                # Installed tools are read through the harness seam; an unknown
+                # harness can't be introspected, so it tears down with no tool list.
+                tools = harness.installed_tools(composed_root) if harness is not None else []
+                if not quiet and not as_json:
+                    print(f"removing {hname}: {', '.join(tools) or '(no tools)'}…")
 
                 if harness is not None:
                     for tool in tools:
@@ -173,25 +175,17 @@ def _confirm(prompt: str) -> bool:
     return raw.strip().lower() in ("y", "yes")
 
 
-def _discover(composed_base: Path) -> dict[str, list[str]]:
-    """Map each harness composed dir → its installed tools (from markers).
+def _discover_harness_names(composed_base: Path) -> list[str]:
+    """Return the sorted names of harness composed dirs under ``composed_base``.
 
-    A harness dir with no install markers still appears (with an empty list) so
-    its tree + marketplace registration are torn down.
+    Enumerates the composed tree names only (core layout); each harness's installed
+    tools are read later through the harness seam (``Harness.installed_tools``), not
+    by re-deriving the on-disk marker scheme here.  A harness dir with no install
+    markers still appears so its tree + marketplace registration are torn down.
     """
-    out: dict[str, list[str]] = {}
     if not composed_base.is_dir():
-        return out
-    for hdir in sorted(composed_base.iterdir()):
-        if not hdir.is_dir():
-            continue
-        tools = sorted(
-            f.name[len(_INSTALLED_MARKER_PREFIX) :]
-            for f in hdir.iterdir()
-            if f.is_file() and f.name.startswith(_INSTALLED_MARKER_PREFIX)
-        )
-        out[hdir.name] = tools
-    return out
+        return []
+    return sorted(hdir.name for hdir in composed_base.iterdir() if hdir.is_dir())
 
 
 def _print_human_summary(removed: dict[str, list[str]], *, quiet: bool) -> None:

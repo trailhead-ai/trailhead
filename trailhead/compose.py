@@ -92,10 +92,6 @@ class UnknownSkillError(UnknownSelectionError):
         super().__init__(f"unknown skill {name!r} for tool {tool!r}")
 
 
-# Back-compat alias for callers importing the old name (removed with the old CLI).
-UnknownCapabilityError = UnknownSelectionError
-
-
 class OverrideError(Exception):
     """Raised when an override file_path does not exist."""
 
@@ -226,15 +222,9 @@ def compose_plan(
     plugin_root: Path = manifest.plugin_root.resolve()
     raw_ops: list[CopyOp] = []
 
-    def _add_in_repo_dir(rel: str) -> None:
-        src = (manifest.plugin_root / rel).resolve()
-        if not src.is_relative_to(plugin_root):
-            raise ConfineError(manifest.tool_name, "compose", rel)
-        d = dest / rel
-        _confine_dest(dest, d)
-        raw_ops.append(CopyOp(src=src, dest=d))
-
-    def _add_in_repo_file(rel: str) -> None:
+    def _add_in_repo(rel: str) -> None:
+        # Handles both files and dirs — apply_plan's copy call picks
+        # copytree vs copy2 by checking the resolved src on disk.
         src = (manifest.plugin_root / rel).resolve()
         if not src.is_relative_to(plugin_root):
             raise ConfineError(manifest.tool_name, "compose", rel)
@@ -255,18 +245,18 @@ def compose_plan(
     # ------------------------------------------------------------------
     # Always-on set
     # ------------------------------------------------------------------
-    _add_in_repo_dir(".claude-plugin")
+    _add_in_repo(".claude-plugin")
     for base_dir in manifest.base:
-        _add_in_repo_dir(base_dir)
+        _add_in_repo(base_dir)
     if manifest.hooks_json is not None:
         # hooks.json shells out to sibling scripts via ${CLAUDE_PLUGIN_ROOT}/hooks/;
         # wire the whole containing dir so the scripts ship too (bare file fallback
         # when hooks_json sits at the plugin root with no dedicated dir).
         hooks_dir = str(Path(manifest.hooks_json).parent)
         if hooks_dir != ".":
-            _add_in_repo_dir(hooks_dir)
+            _add_in_repo(hooks_dir)
         else:
-            _add_in_repo_file(manifest.hooks_json)
+            _add_in_repo(manifest.hooks_json)
 
     # ------------------------------------------------------------------
     # Selected subagents (always a single .md file)
@@ -278,7 +268,7 @@ def compose_plan(
             rel = manifest.subagents.get(name)
             if rel is None:
                 raise UnknownSubagentError(name, manifest.tool_name)
-            _add_in_repo_file(rel)
+            _add_in_repo(rel)
 
     # ------------------------------------------------------------------
     # Selected skills (in-repo = whole dir; override file = SKILL.md, dir = tree)
@@ -297,42 +287,33 @@ def compose_plan(
             rel = manifest.skills.get(name)
             if rel is None:
                 raise UnknownSkillError(name, manifest.tool_name)
-            _add_in_repo_dir(rel)
+            _add_in_repo(rel)
 
     deduped = _dedup_ops(raw_ops)
     _detect_collisions(deduped)
     return Plan(ops=deduped)
 
 
-def apply_plan(plan: Plan, *, mode: str = "copy") -> None:
+def apply_plan(plan: Plan) -> None:
     """Execute a :class:`Plan`, writing files to disk.
 
     This is the ONLY function in this module that writes to the filesystem.
+    Always copies (``shutil.copytree`` / ``shutil.copy2`` with ``symlinks=False``)
+    — composed trees never carry symlinks.
 
     Args:
         plan: The composition plan from :func:`compose_plan`.
-        mode: ``"copy"`` (default) uses ``shutil.copytree`` / ``shutil.copy2`` with
-              ``symlinks=False``.  ``"symlink"`` creates directory symlinks instead.
-
-    Raises:
-        ValueError: Unknown mode.
     """
-    if mode not in ("copy", "symlink"):
-        raise ValueError(f"unknown apply_plan mode {mode!r}; expected 'copy' or 'symlink'")
-
     for op in plan.ops:
         op.dest.parent.mkdir(parents=True, exist_ok=True)
-        if mode == "copy":
-            if op.src.is_dir():
-                # Skip Python build cruft so a stray __pycache__/*.pyc never ships.
-                shutil.copytree(
-                    op.src,
-                    op.dest,
-                    symlinks=False,
-                    dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-                )
-            else:
-                shutil.copy2(op.src, op.dest)
+        if op.src.is_dir():
+            # Skip Python build cruft so a stray __pycache__/*.pyc never ships.
+            shutil.copytree(
+                op.src,
+                op.dest,
+                symlinks=False,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
         else:
-            op.dest.symlink_to(op.src)
+            shutil.copy2(op.src, op.dest)

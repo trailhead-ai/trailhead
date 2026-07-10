@@ -43,7 +43,7 @@ it fully** — by widening the seam, not by special-casing the core.
   sensible default for harnesses that lack it), then implement it per-harness.
 - Capability differences are modeled as data
   ([`capabilities.py`](../trailhead/capabilities.py),
-  [`capability-manifest.md`](./capability-manifest.md)), so the core can ask "does
+  [`capability-manifest.md`](../trailhead/docs/capability-manifest.md)), so the core can ask "does
   this harness support X?" rather than branching on a harness name.
 
 ## 3. Design for full adoption, but support vanilla usage

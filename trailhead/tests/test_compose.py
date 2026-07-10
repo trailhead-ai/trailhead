@@ -172,7 +172,7 @@ class TestOverrides:
         custom.write_text("custom agent")
         dest = tmp_path / "dest"
         plan = compose_plan(m, {"librarian": str(custom)}, {}, dest)
-        apply_plan(plan, mode="copy")
+        apply_plan(plan)
         landed = dest / "agents" / "librarian.md"
         assert landed.read_text() == "custom agent"
 
@@ -184,7 +184,7 @@ class TestOverrides:
         custom.write_text("custom skill")
         dest = tmp_path / "dest"
         plan = compose_plan(m, {}, {"resolve": str(custom)}, dest)
-        apply_plan(plan, mode="copy")
+        apply_plan(plan)
         assert (dest / "skills" / "resolve" / "SKILL.md").read_text() == "custom skill"
 
     def test_skill_dir_override_copies_whole_tree(self, tmp_path):
@@ -196,7 +196,7 @@ class TestOverrides:
         (custom / "helper.md").write_text("helper")
         dest = tmp_path / "dest"
         plan = compose_plan(m, {}, {"resolve": str(custom)}, dest)
-        apply_plan(plan, mode="copy")
+        apply_plan(plan)
         assert (dest / "skills" / "resolve" / "SKILL.md").read_text() == "body"
         assert (dest / "skills" / "resolve" / "helper.md").read_text() == "helper"
 
@@ -273,7 +273,7 @@ class TestApply:
     def test_roundtrip_structural_validity(self, tmp_path):
         m = load_manifest(_LORE_MANIFEST)
         dest = tmp_path / "composed"
-        apply_plan(compose_plan(m, {}, {"flush": None}, dest), mode="copy")
+        apply_plan(compose_plan(m, {}, {"flush": None}, dest))
         plugin_json = dest / ".claude-plugin" / "plugin.json"
         assert json.loads(plugin_json.read_text())["name"] == "lore"
         assert (dest / "skills" / "flush").is_dir()
@@ -290,7 +290,7 @@ class TestApply:
         (skill / "loose.pyc").write_bytes(b"\x00")
         m = load_manifest(_basic_manifest(tmp_path, "t", base=["skills/withcruft"]))
         dest = tmp_path / "composed"
-        apply_plan(compose_plan(m, {}, {}, dest), mode="copy")
+        apply_plan(compose_plan(m, {}, {}, dest))
         landed = dest / "skills" / "withcruft"
         assert (landed / "helper.py").is_file()
         assert not (landed / "__pycache__").exists()
@@ -305,7 +305,7 @@ class TestApply:
         (skill / "linked.txt").symlink_to(skill / "real.txt")
         m = load_manifest(_basic_manifest(tmp_path, "t"))
         dest = tmp_path / "dest"
-        apply_plan(compose_plan(m, {}, {"withlink": None}, dest), mode="copy")
+        apply_plan(compose_plan(m, {}, {"withlink": None}, dest))
         dest_link = dest / "skills" / "withlink" / "linked.txt"
         assert dest_link.exists() and not dest_link.is_symlink()
         assert dest_link.read_text() == "content"

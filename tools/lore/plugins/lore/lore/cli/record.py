@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
 
 from .common import _load_vault_config, _read_stdin_body, _resolve_groups_dir
+
+# The scope flags a record can carry, in resolution-precedence order. Does not
+# include "default" -- that's a vault-routing fallback (see
+# vault/resolve.py's _PRECEDENCE), not a scope a record's --repo/--product/
+# --suite/--team flags can set directly.
+_SCOPE_FLAGS = ("repo", "product", "suite", "team")
 
 
 def _resolve_group_scopes(
@@ -73,109 +78,11 @@ def _resolve_record_op_vault(record_id: str, args) -> str:
     kind = record_id.split("/", 1)[0]
     participating_scopes = {
         flag: getattr(args, flag)
-        for flag in ("repo", "product", "suite", "team")
+        for flag in _SCOPE_FLAGS
         if getattr(args, flag, None)
     }
     chosen = vault_resolve_mod.resolve_vault(participating_scopes, kind, vaults)
     return str(chosen.path)
-
-
-# Dedicated non-scope list fields: each maps a repeatable ``--<flag>`` /
-# ``--unset-<flag> VALUE`` pair to its sidecar key. Scalars (--status, --title)
-# and the --related map flag are handled inline by the applier. Scope fields
-# (team/suite/product/repo) are NOT here — they remain routing flags handled by
-# the record-write layer.
-_LIST_FIELD_FLAGS: dict[str, str] = {
-    "keyword": "keywords",
-    "related_file": "related-files-or-folders",
-    "related_url": "related-urls",
-    "related_phase": "related-phases",
-    "depends_on": "depends-on",
-}
-
-
-def _apply_record_fields(
-    sidecar: dict,
-    args,
-) -> tuple[dict, list[str]]:
-    """Apply the dedicated per-field flags to *sidecar*; return (updated, errors).
-
-    Structural mirror of :func:`_apply_map_labels_annotations` (upsert/unset on a
-    copy, errors surfaced to the caller), but with heterogeneous type dispatch
-    of the per-field flags:
-
-      - scalars: ``--status`` (always), ``--title`` (update-only setter; create
-        builds it from the required positional) overwrite the scalar key.
-      - repeatable list flags (``--keyword`` / ``--related-file`` /
-        ``--related-url`` / ``--related-phase``) **append** to their list key;
-        each ``--unset-<field> VALUE`` removes one matching item (a value not
-        present is a tolerated no-op).
-      - ``--related <kind>=<name>`` (repeatable) splits on the FIRST ``=`` and
-        appends ``name`` to ``related[kind]``. An empty kind (``=foo``) or empty
-        name (``task=``) is rejected HERE, before ``validate()`` ever sees it.
-
-    All mutations still flow through ``validate()`` downstream: off-vocab
-    ``--status`` and bad ``related`` kinds are caught there. This helper only
-    guards the degenerate ``--related`` split that ``validate()`` could not name.
-
-    Returns a mutated copy and a list of error strings (non-empty → nothing
-    should be written).
-    """
-    errors: list[str] = []
-    result = dict(sidecar)
-
-    # --- scalars -----------------------------------------------------------
-    status = getattr(args, "status", None)
-    if status is not None:
-        result["status"] = status
-    # ``--title`` is an optional setter on update; on create it is the required
-    # positional and already seeded into the sidecar before this runs.
-    title = getattr(args, "title", None)
-    if title is not None:
-        result["title"] = title
-    # ``--parent`` is the task graph's containment edge (a scalar). Set overwrites
-    # the key; ``--unset-parent`` clears it. Both are ``task``-gated downstream by
-    # ``validate()`` (present on a non-task kind → rejected there).
-    parent = getattr(args, "parent", None)
-    if parent is not None:
-        result["parent"] = parent
-    if getattr(args, "unset_parent", False):
-        result.pop("parent", None)
-
-    # --- repeatable list flags (append) ------------------------------------
-    for dest, key in _LIST_FIELD_FLAGS.items():
-        values = getattr(args, dest, None) or []
-        if values:
-            current = result.get(key, [])
-            if not isinstance(current, list):
-                current = []
-            result[key] = current + list(values)
-
-    # --- repeatable list-flag removals (remove one matching item) ----------
-    for dest, key in _LIST_FIELD_FLAGS.items():
-        removals = getattr(args, f"unset_{dest}", None) or []
-        for value in removals:
-            current = result.get(key, [])
-            if isinstance(current, list) and value in current:
-                result[key] = [v for v in current if v != value]
-
-    # --- --related <kind>=<name> map flag (append name to that kind) -------
-    related_pairs = getattr(args, "related_pairs", None) or []
-    if related_pairs:
-        related: dict = dict(result.get("related") or {})
-        for pair in related_pairs:
-            kind, sep, name = pair.partition("=")
-            if not sep or not kind or not name:
-                errors.append(
-                    f"error: --related {pair!r} must be KIND=NAME with a "
-                    f"non-empty kind and name"
-                )
-                continue
-            related[kind] = list(related.get(kind, [])) + [name]
-        if related:
-            result["related"] = related
-
-    return result, errors
 
 
 def _add_record_field_flags(parser) -> None:
@@ -260,7 +167,7 @@ def _add_map_field_flags(parser) -> None:
     """Register the shared ``--label``/``--annotation`` map flags on a record subparser.
 
     Sibling of :func:`_add_record_field_flags` for the map-field branch
-    (:func:`_apply_map_labels_annotations`) — the ``--label``/``--annotation``/
+    (:func:`record.fields.apply_map_labels_annotations`) — the ``--label``/``--annotation``/
     ``--unset-label``/``--unset-annotation`` quartet is identical on ``create``
     and ``update``, so both subparser blocks call this instead of repeating the
     four ``add_argument`` calls verbatim.
@@ -286,59 +193,6 @@ def _add_map_field_flags(parser) -> None:
         metavar="KEY",
         help="Remove an annotation key (repeatable). Absent key is a silent no-op.",
     )
-
-
-def _apply_map_labels_annotations(
-    sidecar: dict,
-    label_pairs: list[str],
-    annotation_pairs: list[str],
-    unset_labels: list[str],
-    unset_annotations: list[str],
-) -> dict:
-    """Apply --label/--annotation/--unset-label/--unset-annotation to *sidecar*.
-
-    Map-field branch — intentionally separate from ``_apply_record_fields``'s
-    scalar/list logic.
-
-    Semantics:
-      - set = upsert: ``--label k=v`` overwrites an existing key silently.
-        Split is on the FIRST ``=`` only, so ``k=a=b`` stores value ``a=b``.
-      - unset = remove one key from the map; when the map becomes empty the
-        whole field is dropped (omit-when-empty — no ``{}`` left behind).
-      - ``--unset-label`` on an absent key is a documented silent no-op (exit 0).
-
-    This function mutates a copy and returns it; the caller passes the result
-    through ``validate_and_write`` so bad keys are rejected there with a
-    non-zero exit naming the offender.
-    """
-    result = dict(sidecar)
-
-    def _upsert(field: str, pairs: list[str]) -> None:
-        if not pairs:
-            return
-        current: dict = dict(result.get(field) or {})
-        for pair in pairs:
-            key, _, value = pair.partition("=")
-            current[key] = value
-        result[field] = current
-
-    def _unset(field: str, keys: list[str]) -> None:
-        if not keys:
-            return
-        current: dict = dict(result.get(field) or {})
-        for key in keys:
-            current.pop(key, None)
-        if current:
-            result[field] = current
-        else:
-            result.pop(field, None)
-
-    _upsert("labels", label_pairs)
-    _upsert("annotations", annotation_pairs)
-    _unset("labels", unset_labels)
-    _unset("annotations", unset_annotations)
-
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -378,202 +232,36 @@ def _require_record_id(args) -> str | None:
     return record_id
 
 
-# ---------------------------------------------------------------------------
-# Task graph guards (task-only; a no-op for every other kind)
-# ---------------------------------------------------------------------------
+def _handle_write_error(exc: Exception, op: str) -> int:
+    """Map a create/update write exception to a stderr line + exit code 1.
 
-# A ``## Flow-out`` markdown heading (the completion-ritual section). Matched
-# loosely — any heading level ≥ 2, case-insensitive — so the reminder fires only
-# when the parent body genuinely lacks the knowledge-flow-out checklist.
-_FLOW_OUT_RE = re.compile(r"(?im)^\s*#{2,}\s+flow-out\b")
-
-
-def _body_has_flow_out(body: str) -> bool:
-    """True iff *body* contains a ``## Flow-out`` section heading."""
-    return bool(_FLOW_OUT_RE.search(body or ""))
-
-
-def _load_task_sidecars(vault_root: str) -> dict[str, dict]:
-    """Read every task sidecar under ``<vault_root>/task/`` → ``{name: sidecar}``.
-
-    The source-of-truth read for the graph guards — sidecars, never the index.
-    A malformed or unreadable sidecar is skipped (best-effort: the guard degrades
-    to not seeing that node rather than failing the whole write).
+    The three failure clauses shared by ``record create`` and ``record update``:
+    a :class:`record_store.RecordValidationError` surfaces every message (prefixed
+    ``error: ``); a :class:`record_store.ProvenanceError` and any other unexpected
+    error each print one framed line, the catch-all naming *op*. ``update``'s
+    ``RecordNotFoundError``/``InvalidRecordIdError`` clause is NOT routed here — it
+    is update-specific and caught before this handler.
     """
-    task_dir = Path(vault_root) / "task"
-    graph: dict[str, dict] = {}
-    if not task_dir.is_dir():
-        return graph
-    for sidecar_path in task_dir.glob("*.json"):
-        try:
-            data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict):
-            graph[sidecar_path.stem] = data
-    return graph
-
-
-def _confine_edge_reference(value: str, vault_root: str) -> str | None:
-    """Return a guard-error string if *value* is an unsafe task reference, else None.
-
-    ``--parent``/``--depends-on`` values are record names, so they flow through the
-    SAME name-resolution/confinement guard every RECORD_ID-bearing op uses
-    (:func:`record_store.confine_record_id`): a ``..`` segment, absolute
-    component, NUL byte, or empty/degenerate segment is rejected before the value
-    is ever written. Existence is deliberately NOT checked — referential integrity
-    is not enforced (a dangling edge is valid, per the record model's shape-only
-    contract).
-    """
-    from ..record import graph as graph_mod
     from ..record import store as record_store_mod
 
-    if not value:
-        return graph_mod.format_guard_message("edge-reference", "empty task reference")
-    try:
-        record_store_mod.confine_record_id(f"task/{value}", vault_root)
-    except record_store_mod.InvalidRecordIdError as exc:
-        return graph_mod.format_guard_message(
-            "edge-reference", f"unsafe task reference {value!r}: {exc}"
-        )
-    return None
+    if isinstance(exc, record_store_mod.RecordValidationError):
+        return _fail(exc.errors, prefix="error: ")
+    if isinstance(exc, record_store_mod.ProvenanceError):
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"error: record {op} failed: {exc}", file=sys.stderr)
+    return 1
 
 
-def _evaluate_task_guards(
-    *,
-    kind: str,
-    name: str,
-    sidecar: dict,
-    body: str,
-    vault_root: str,
-    status_set: str | None,
-    deleting: bool = False,
-) -> tuple[list[str], list[str]]:
-    """Evaluate the task graph guards for a create/update/delete.
+def _print_guard_notices(notices: list[str]) -> None:
+    """Print each non-blocking task-graph notice to stderr (success-path only).
 
-    Returns ``(errors, notices)``:
-
-      - ``errors`` block the operation (nothing is written): a ``depends-on``
-        cycle, a ``parent`` ancestor loop, an unsafe edge reference, or a
-        parent-completion violation (``--status done`` with non-terminal
-        children). Each is a machine-parseable ``graph-guard [...]`` stderr line.
-      - ``notices`` are non-blocking, printed only on a successful op: the
-        dependent-warning (a depended-on task going ``dropped``/``superseded`` or
-        being deleted) and the flow-out reminder (a parent completed without a
-        ``## Flow-out`` section).
-
-    A no-op — ``([], [])`` — for every non-``task`` kind, so no other kind is
-    touched by any of these guards.
+    Shared trailer for create/update/delete — the stdout contract (RECORD_ID /
+    moved line) stays the sole parseable stdout output, so these dependent /
+    flow-out reminders go to stderr.
     """
-    from ..record import graph as graph_mod
-
-    if kind != "task":
-        return [], []
-
-    # Delete only warns about dependents; it is never blocked.
-    if deleting:
-        graph = _load_task_sidecars(vault_root)
-        deps = graph_mod.dependents(graph, name)
-        notices: list[str] = []
-        if deps:
-            notices.append(
-                graph_mod.format_guard_message(
-                    "dependents",
-                    f"task {name!r} deleted but still depended on",
-                    offenders=deps,
-                )
-            )
-        return [], notices
-
-    errors: list[str] = []
-
-    # Edge references are confined before the graph is built — a malformed value
-    # must never be written, and a traversal-shaped name must never reach disk.
-    references: list[str] = []
-    parent = sidecar.get("parent")
-    if isinstance(parent, str):
-        references.append(parent)
-    deps_field = sidecar.get("depends-on")
-    if isinstance(deps_field, list):
-        references.extend(d for d in deps_field if isinstance(d, str))
-    for ref in references:
-        msg = _confine_edge_reference(ref, vault_root)
-        if msg:
-            errors.append(msg)
-    if errors:
-        return errors, []
-
-    # The vault-wide sidecar load (and the overlay of the in-flight record onto
-    # it) is deferred until a guard actually needs the graph — memoized here so
-    # every guard below shares one load. A node with no outgoing parent/
-    # depends-on edges can never be the entry point of a NEW cycle or ancestor
-    # loop, so a plain status-only update (no references, no done/dropped/
-    # superseded transition) never touches the vault-wide glob+parse at all.
-    graph: dict[str, dict] | None = None
-
-    def _graph() -> dict[str, dict]:
-        nonlocal graph
-        if graph is None:
-            graph = _load_task_sidecars(vault_root)
-            graph[name] = sidecar
-        return graph
-
-    if references:
-        cycle = graph_mod.find_dependency_cycle(_graph(), start=name)
-        if cycle:
-            errors.append(
-                graph_mod.format_guard_message(
-                    "depends-on-cycle",
-                    f"task {name!r} would create a dependency cycle: " + " -> ".join(cycle),
-                )
-            )
-        loop = graph_mod.find_ancestor_loop(_graph(), name)
-        if loop:
-            errors.append(
-                graph_mod.format_guard_message(
-                    "parent-loop",
-                    f"task {name!r} would create a parent ancestor loop: " + " -> ".join(loop),
-                )
-            )
-
-    if status_set == "done":
-        open_children = graph_mod.non_terminal_children(_graph(), name)
-        if open_children:
-            errors.append(
-                graph_mod.format_guard_message(
-                    "parent-completion",
-                    f"cannot set task {name!r} to done — non-terminal children remain",
-                    offenders=open_children,
-                )
-            )
-
-    if errors:
-        return errors, []
-
-    notices = []
-    if status_set in ("dropped", "superseded"):
-        deps = graph_mod.dependents(_graph(), name)
-        if deps:
-            notices.append(
-                graph_mod.format_guard_message(
-                    "dependents",
-                    f"task {name!r} set to {status_set} but still depended on",
-                    offenders=deps,
-                )
-            )
-    if (
-        status_set == "done"
-        and graph_mod.children(_graph(), name)
-        and not _body_has_flow_out(body)
-    ):
-        notices.append(
-            graph_mod.format_guard_message(
-                "flow-out",
-                f"task {name!r} completed without a '## Flow-out' section — "
-                f"capture the knowledge flow-out",
-            )
-        )
-    return errors, notices
+    for msg in notices:
+        print(msg, file=sys.stderr)
 
 
 def cmd_record(args) -> int:
@@ -680,8 +368,8 @@ def _cmd_record_delete(args) -> int:
     RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
     An invalid format or nonexistent record → non-zero + clear stderr.
     """
+    from ..record import guards as guards_mod
     from ..record import store as record_store_mod
-    from ..search import index as index_store_mod
 
     record_id = _require_record_id(args)
     if record_id is None:
@@ -697,7 +385,7 @@ def _cmd_record_delete(args) -> int:
     # is never blocked) but warns, listing the dependents. Computed before the
     # delete off the on-disk task graph; a no-op for every non-task kind.
     kind, _, name = record_id.partition("/")
-    _, guard_notices = _evaluate_task_guards(
+    _, guard_notices = guards_mod.evaluate_task_guards(
         kind=kind,
         name=name,
         sidecar={},
@@ -708,12 +396,9 @@ def _cmd_record_delete(args) -> int:
     )
 
     try:
-        conn = index_store_mod.open_index()
-        try:
+        with record_store_mod.index_transaction() as conn:
             record_store_mod.delete_record(record_id, conn, vault_root=vault_root)
             conn.commit()
-        finally:
-            conn.close()
     except (
         record_store_mod.RecordNotFoundError,
         record_store_mod.InvalidRecordIdError,
@@ -724,8 +409,7 @@ def _cmd_record_delete(args) -> int:
         print(f"error: record delete failed: {exc}", file=sys.stderr)
         return 1
 
-    for msg in guard_notices:
-        print(msg, file=sys.stderr)
+    _print_guard_notices(guard_notices)
 
     return 0
 
@@ -747,10 +431,11 @@ def _cmd_record_create(args) -> int:
     routing vault always agree — a record cannot carry ``team: beta`` while living
     in alpha's vault.  Non-scope sidecar fields are set through the dedicated
     per-field flags (``--status``, ``--keyword``, ``--related-*``, ``--related``)
-    applied by :func:`_apply_record_fields`.
+    applied by :func:`record.fields.apply_record_fields`.
     """
+    from ..record import fields as fields_mod
+    from ..record import guards as guards_mod
     from ..record import store as record_store_mod
-    from ..search import index as index_store_mod
     from ..vault import config as vault_config_mod
     from ..vault import resolve as vault_resolve_mod
 
@@ -776,12 +461,12 @@ def _cmd_record_create(args) -> int:
     # Apply the dedicated per-field flags (--status / --keyword / --related-* /
     # --related). On create --title is the
     # required positional already seeded above, so the applier leaves it alone.
-    sidecar, field_errors = _apply_record_fields(sidecar, args)
+    sidecar, field_errors = fields_mod.apply_record_fields(sidecar, args)
     if field_errors:
         return _fail(field_errors)
 
     # Apply --label / --annotation / --unset-label / --unset-annotation.
-    sidecar = _apply_map_labels_annotations(
+    sidecar = fields_mod.apply_map_labels_annotations(
         sidecar,
         label_pairs=list(getattr(args, "label_pairs", None) or []),
         annotation_pairs=list(getattr(args, "annotation_pairs", None) or []),
@@ -804,7 +489,7 @@ def _cmd_record_create(args) -> int:
     # route to, so we never stamp implicit scope fields the user did not type.
     loaded = _load_vault_config()
     participating_scopes: dict = {}
-    for flag in ("repo", "product", "suite", "team"):
+    for flag in _SCOPE_FLAGS:
         val = getattr(args, flag, None)
         if val:
             participating_scopes[flag] = val
@@ -861,7 +546,7 @@ def _cmd_record_create(args) -> int:
     scope = (
         ",".join(
             f"{flag}:{participating_scopes[flag]}"
-            for flag in ("repo", "product", "suite", "team")
+            for flag in _SCOPE_FLAGS
             if flag in participating_scopes
         )
         or None
@@ -869,8 +554,7 @@ def _cmd_record_create(args) -> int:
 
     guard_notices: list[str] = []
     try:
-        conn = index_store_mod.open_index()
-        try:
+        with record_store_mod.index_transaction() as conn:
             location = record_store_mod.place_record(
                 name=title,
                 kind=kind,
@@ -881,7 +565,7 @@ def _cmd_record_create(args) -> int:
             # in-flight record overlaid on the on-disk task graph) before any
             # write. Blocking errors → nothing written; notices are held for the
             # success path. A no-op for every non-task kind.
-            guard_errors, guard_notices = _evaluate_task_guards(
+            guard_errors, guard_notices = guards_mod.evaluate_task_guards(
                 kind=kind,
                 name=location.name,
                 sidecar=sidecar,
@@ -899,16 +583,8 @@ def _cmd_record_create(args) -> int:
                 shared=shared_flag,
             )
             conn.commit()
-        finally:
-            conn.close()
-    except record_store_mod.RecordValidationError as exc:
-        return _fail(exc.errors, prefix="error: ")
-    except record_store_mod.ProvenanceError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
     except Exception as exc:
-        print(f"error: record create failed: {exc}", file=sys.stderr)
-        return 1
+        return _handle_write_error(exc, "create")
 
     # Routing confirmation goes to STDERR so the RECORD_ID stays
     # the sole parseable stdout line (the create contract — test_record_cli_create).
@@ -916,8 +592,7 @@ def _cmd_record_create(args) -> int:
         print(routing_line, file=sys.stderr)
     # Non-blocking graph notices (dependent-warning, flow-out reminder) — stderr,
     # so stdout stays the sole parseable RECORD_ID line.
-    for msg in guard_notices:
-        print(msg, file=sys.stderr)
+    _print_guard_notices(guard_notices)
 
     # Print the vault-relative RECORD_ID on stdout.
     print(record_id)
@@ -977,7 +652,7 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
     _, vaults = loaded
     participating_scopes = {
         flag: merged_sidecar[flag]
-        for flag in ("repo", "product", "suite", "team")
+        for flag in _SCOPE_FLAGS
         if merged_sidecar.get(flag)
     }
     resolution = vault_resolve_mod.explain_resolution(participating_scopes, kind, vaults)
@@ -1030,8 +705,9 @@ def _cmd_record_update(args) -> int:
     """
     import json
 
+    from ..record import fields as fields_mod
+    from ..record import guards as guards_mod
     from ..record import store as record_store_mod
-    from ..search import index as index_store_mod
 
     record_id = _require_record_id(args)
     if record_id is None:
@@ -1049,8 +725,7 @@ def _cmd_record_update(args) -> int:
 
     guard_notices: list[str] = []
     try:
-        conn = index_store_mod.open_index()
-        try:
+        with record_store_mod.index_transaction() as conn:
             # (1) Resolve the CURRENT location, decoupled from the scope flags
             # (which now mean destination); a missing record → RecordNotFoundError.
             location = _find_current_record_location(record_id)
@@ -1106,17 +781,17 @@ def _cmd_record_update(args) -> int:
             # scope; the non-scope per-field flags (--status / --title / --keyword
             # / --related-*) reuse the shared applier. --title is optional here.
             sidecar = dict(existing_sidecar)
-            for flag in ("repo", "product", "suite", "team"):
+            for flag in _SCOPE_FLAGS:
                 val = getattr(args, flag, None)
                 if val:
                     sidecar[flag] = val
 
-            sidecar, field_errors = _apply_record_fields(sidecar, args)
+            sidecar, field_errors = fields_mod.apply_record_fields(sidecar, args)
             if field_errors:
                 return _fail(field_errors)
 
             # Apply --label / --annotation / --unset-label / --unset-annotation.
-            sidecar = _apply_map_labels_annotations(
+            sidecar = fields_mod.apply_map_labels_annotations(
                 sidecar,
                 label_pairs=list(getattr(args, "label_pairs", None) or []),
                 annotation_pairs=list(getattr(args, "annotation_pairs", None) or []),
@@ -1128,7 +803,7 @@ def _cmd_record_update(args) -> int:
             # parent/depends-on relatives live), with the mutated record overlaid.
             # Blocking errors → nothing written; notices are held for the success
             # path. A no-op for every non-task kind.
-            guard_errors, guard_notices = _evaluate_task_guards(
+            guard_errors, guard_notices = guards_mod.evaluate_task_guards(
                 kind=location.kind,
                 name=location.name,
                 sidecar=sidecar,
@@ -1190,27 +865,21 @@ def _cmd_record_update(args) -> int:
                 moved_line = f"moved: {location.record_id} → {new_id}"
 
             conn.commit()
-        finally:
-            conn.close()
     except (
         record_store_mod.RecordNotFoundError,
         record_store_mod.InvalidRecordIdError,
     ) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    except record_store_mod.RecordValidationError as exc:
-        return _fail(exc.errors, prefix="error: ")
-    except record_store_mod.ProvenanceError as exc:
+        # Update-specific: only update locates an existing record, so this
+        # not-found/invalid-id clause is NOT part of the shared write-error
+        # handler and is caught before it.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
-        print(f"error: record update failed: {exc}", file=sys.stderr)
-        return 1
+        return _handle_write_error(exc, "update")
 
     # Non-blocking graph notices (dependent-warning, flow-out reminder) — stderr,
     # so the stdout RECORD_ID/moved contract is unchanged.
-    for msg in guard_notices:
-        print(msg, file=sys.stderr)
+    _print_guard_notices(guard_notices)
 
     # The relocation signal (no silent move) precedes the
     # RECORD_ID so the existing stdout contract for the no-move case is unchanged

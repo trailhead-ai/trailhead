@@ -22,25 +22,10 @@ Unique basename — no collision with craft's per-script tests.
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
-
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "plugins" / "portage" / "scripts"
-
-
-def _load(name: str):
-    """Load a portage thin script module fresh by stem."""
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    if name in sys.modules:
-        del sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from _script_loader import load_script
 
 
 class _FakeRepos:
@@ -122,7 +107,7 @@ class TestDetectRepos:
     def test_delegates_to_repos_detect_and_prints_json(self, tmp_path, monkeypatch, capsys):
         active = [{"repo": "api", "path": "/x", "branch": "feat", "ahead": 1, "dirty": 0}]
         provider = _FakeProvider(repos_result=active)
-        mod = _load("detect_repos")
+        mod = load_script("detect_repos")
         _patch_provider(mod, monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
 
@@ -141,7 +126,7 @@ class TestDetectRepos:
 class TestCheckPrStatus:
     def test_delegates_to_pr_status_and_prints_json(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = _load("check_pr_status")
+        mod = load_script("check_pr_status")
         _patch_provider(mod, monkeypatch, provider)
         repo = tmp_path  # must be a directory (CLI guard)
 
@@ -153,11 +138,30 @@ class TestCheckPrStatus:
 
     def test_not_a_directory_exits_1(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = _load("check_pr_status")
+        mod = load_script("check_pr_status")
         _patch_provider(mod, monkeypatch, provider)
         rc = mod.main([str(tmp_path / "nope"), "42"])
         assert rc == 1
         assert "not a directory" in capsys.readouterr().out
+
+    def test_invalid_pr_number_exits_1_with_clean_error(self, tmp_path, monkeypatch, capsys):
+        """A flag-injection-shaped pr_number surfaces provider.pr.status's
+        InvalidInputError as a clean JSON error, never a raw traceback."""
+        from trailhead.vcs.github import InvalidInputError
+
+        provider = _FakeProvider()
+
+        def raising_status(repo_path, pr_number, *, since=None, review_bot_login=None):
+            raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
+
+        provider.pr.status = raising_status
+        mod = load_script("check_pr_status")
+        _patch_provider(mod, monkeypatch, provider)
+
+        rc = mod.main([str(tmp_path), "abc"])
+        assert rc == 1
+        out = json.loads(capsys.readouterr().out)
+        assert "must be all digits" in out["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +172,7 @@ class TestCheckPrStatus:
 class TestPrEvaluate:
     def test_delegates_status_then_evaluate(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = _load("pr_evaluate_status")
+        mod = load_script("pr_evaluate_status")
         _patch_provider(mod, monkeypatch, provider)
 
         rc = mod.main([str(tmp_path), "7"])
@@ -177,6 +181,25 @@ class TestPrEvaluate:
         assert "status" in kinds and "evaluate" in kinds
         out = json.loads(capsys.readouterr().out)
         assert out["action"] == "done"
+
+    def test_invalid_pr_number_exits_1_with_clean_error(self, tmp_path, monkeypatch, capsys):
+        """A flag-injection-shaped pr_number surfaces provider.pr.status's
+        InvalidInputError as a clean JSON error, never a raw traceback."""
+        from trailhead.vcs.github import InvalidInputError
+
+        provider = _FakeProvider()
+
+        def raising_status(repo_path, pr_number, *, since=None, review_bot_login=None):
+            raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
+
+        provider.pr.status = raising_status
+        mod = load_script("pr_evaluate_status")
+        _patch_provider(mod, monkeypatch, provider)
+
+        rc = mod.main([str(tmp_path), "abc"])
+        assert rc == 1
+        out = json.loads(capsys.readouterr().out)
+        assert "must be all digits" in out["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +210,7 @@ class TestPrEvaluate:
 class TestMergePrs:
     def test_delegates_to_pr_merge_and_prints_json(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = _load("merge_prs")
+        mod = load_script("merge_prs")
         _patch_provider(mod, monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
 
@@ -212,7 +235,7 @@ class TestMergePrs:
             )
 
         provider.pr.merge = raising_merge
-        mod = _load("merge_prs")
+        mod = load_script("merge_prs")
         _patch_provider(mod, monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
 
@@ -223,7 +246,7 @@ class TestMergePrs:
 
     def test_bad_pair_format_exits_2(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = _load("merge_prs")
+        mod = load_script("merge_prs")
         _patch_provider(mod, monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
         rc = mod.main(["--manifest", str(manifest), "no-colon-here"])
@@ -238,7 +261,7 @@ class TestMergePrs:
 class TestWaitForActionable:
     def test_delegates_to_ci_wait_and_prints_json(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = _load("wait_for_actionable")
+        mod = load_script("wait_for_actionable")
         _patch_provider(mod, monkeypatch, provider)
 
         rc = mod.main([f"{tmp_path}:1"])
@@ -250,10 +273,34 @@ class TestWaitForActionable:
     def test_timeout_exits_1(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
         provider.ci.wait_result = {"timeout": True, "elapsed_seconds": 1800}
-        mod = _load("wait_for_actionable")
+        mod = load_script("wait_for_actionable")
         _patch_provider(mod, monkeypatch, provider)
         rc = mod.main([f"{tmp_path}:1"])
         assert rc == 1
+
+    def test_bad_pair_format_exits_2_with_clean_message(self, monkeypatch, capsys):
+        """A malformed repo:pr pair (no colon) must exit 2 with a clear stderr
+        message, not raise a raw ValueError traceback from the unguarded split."""
+        provider = _FakeProvider()
+        mod = load_script("wait_for_actionable")
+        _patch_provider(mod, monkeypatch, provider)
+        rc = mod.main(["no-colon-here"])
+        assert rc == 2
+        assert provider.ci.calls == []
+        err = capsys.readouterr().err
+        assert "no-colon-here" in err
+
+    def test_non_digit_pr_number_exits_2_with_clean_message(self, monkeypatch, capsys):
+        """A repo:pr pair whose pr half isn't all digits must exit 2 cleanly,
+        matching merge_prs.py's guard rather than reaching ci.wait unvalidated."""
+        provider = _FakeProvider()
+        mod = load_script("wait_for_actionable")
+        _patch_provider(mod, monkeypatch, provider)
+        rc = mod.main(["some/path:--repo=owner/other"])
+        assert rc == 2
+        assert provider.ci.calls == []
+        err = capsys.readouterr().err
+        assert "--repo=owner/other" in err
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +311,7 @@ class TestWaitForActionable:
 class TestSidecar:
     def test_write_delegates_to_pr_open(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = _load("release_prs_sidecar")
+        mod = load_script("release_prs_sidecar")
         _patch_provider(mod, monkeypatch, provider)
         sidecar = tmp_path / "prs.json"
 
@@ -297,7 +344,7 @@ class TestSidecar:
             "prs": [{"repo": "api", "pr_number": "1", "url": "u", "branch": "b"}],
             "external_tracker": None,
         }
-        mod = _load("release_prs_sidecar")
+        mod = load_script("release_prs_sidecar")
         _patch_provider(mod, monkeypatch, provider)
         sidecar = tmp_path / "prs.json"
 

@@ -691,3 +691,43 @@ def test_labels_absent_not_written_to_sidecar(rs, conn, tmp_path):
     raw = (vault / "spec" / "no-labels.json").read_text()
     assert "labels" not in raw
     assert "annotations" not in raw
+
+
+# ---------------------------------------------------------------------------
+# index_transaction — shared open/close wrapper for the write handlers
+# ---------------------------------------------------------------------------
+
+
+def test_index_transaction_yields_open_connection(rs, tmp_path, monkeypatch):
+    """The context manager yields a usable index connection."""
+    import sqlite3
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    with rs.index_transaction() as conn:
+        assert isinstance(conn, sqlite3.Connection)
+        conn.execute("SELECT 1")
+
+
+def test_index_transaction_closes_on_clean_exit(rs, tmp_path, monkeypatch):
+    """The connection is closed once the block exits normally."""
+    import sqlite3
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    with rs.index_transaction() as conn:
+        pass
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
+
+
+def test_index_transaction_closes_and_propagates_on_error(rs, tmp_path, monkeypatch):
+    """A raise inside the block still closes the connection and propagates."""
+    import sqlite3
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    captured = {}
+    with pytest.raises(RuntimeError):
+        with rs.index_transaction() as conn:
+            captured["conn"] = conn
+            raise RuntimeError("boom")
+    with pytest.raises(sqlite3.ProgrammingError):
+        captured["conn"].execute("SELECT 1")

@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 
 from _bootstrap import ensure_trailhead_importable
+from _pr_pair import PairFormatError, split_pair
 
 ensure_trailhead_importable()
 
@@ -52,18 +52,12 @@ def main(argv: list[str] | None = None) -> int:
 
     pr_pairs: list[PRPair] = []
     for pair_str in args.pairs:
-        parts = pair_str.split(":", 2)
-        if len(parts) < 2:
-            print(
-                f"merge_prs: bad pair format '{pair_str}' (expected path:pr_number[:name])",
-                file=sys.stderr,
-            )
+        try:
+            parts = split_pair(pair_str, max_parts=3)
+        except PairFormatError as e:
+            print(f"merge_prs: {e}", file=sys.stderr)
             return 2
-        repo_path = parts[0]
-        pr_number = parts[1]
-        if not re.fullmatch(r"\d+", pr_number):
-            print(f"merge_prs: pr_number must be all digits, got: {pr_number!r}", file=sys.stderr)
-            return 2
+        repo_path, pr_number = parts[0], parts[1]
         member_name = parts[2] if len(parts) > 2 else repo_path.rstrip("/").split("/")[-1]
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
 

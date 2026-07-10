@@ -111,13 +111,6 @@ class TestLoreInventory:
         # so it is now a selectable skill.
         assert "sync" in load_manifest(_LORE_MANIFEST).skills
 
-    def test_all_selectable(self):
-        m = load_manifest(_LORE_MANIFEST)
-        assert m.all_selectable() == set(m.subagents) | set(m.skills)
-        assert "librarian" in m.all_selectable()
-        # flush is selectable.
-        assert "flush" in m.all_selectable()
-
 
 # ---------------------------------------------------------------------------
 # Real craft sample
@@ -154,9 +147,19 @@ class TestCraftInventory:
     def test_lifecycle_skills_selectable(self):
         # The craft skills are exactly these — each has a SKILL.md and is
         # discovered as selectable. brainstorm is a craft skill (discovery →
-        # frozen spec, runs before planning).
+        # frozen spec, runs before planning). receiving-code-review is the
+        # untrusted-content-framing reference skill for evaluating incoming
+        # review/CI-annotation feedback.
         m = load_manifest(_CRAFT_MANIFEST)
-        assert set(m.skills) == {"polish", "plan", "execute", "review", "consult", "brainstorm"}
+        assert set(m.skills) == {
+            "polish",
+            "plan",
+            "execute",
+            "review",
+            "consult",
+            "brainstorm",
+            "receiving-code-review",
+        }
 
     def test_shared_not_selectable(self):
         assert "_shared" not in load_manifest(_CRAFT_MANIFEST).skills

@@ -25,7 +25,7 @@ import subprocess
 import pytest
 
 from trailhead.vcs import get_provider
-from trailhead.vcs.github import DeployError
+from trailhead.vcs.github import DeployError, InvalidInputError
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +336,19 @@ class TestLogs:
         provider = get_provider("github", runner=stub)
         with pytest.raises(DeployError):
             provider.deploy.logs("some/path", job_id="999")
+
+    @pytest.mark.parametrize("bad_job_id", ["--repo=owner/other", "123; rm -rf", "abc"])
+    def test_non_digit_job_id_rejected_before_any_gh_call(self, bad_job_id: str) -> None:
+        """A flag-shaped or non-numeric job_id must never reach gh argv — an attacker-
+        controlled job_id could otherwise be parsed as a gh flag (option injection) or
+        redirect the check-runs API path."""
+
+        def _boom(cmd, **kw):
+            raise AssertionError(f"gh must not be invoked, got: {cmd}")
+
+        provider = get_provider("github", runner=_boom)
+        with pytest.raises(InvalidInputError):
+            provider.deploy.logs("some/path", job_id=bad_job_id)
 
     def test_truncation_sentinel_appended_past_cap(self) -> None:
         many = [{"path": f"f{i}.py", "start_line": i, "message": f"err {i}"} for i in range(15)]

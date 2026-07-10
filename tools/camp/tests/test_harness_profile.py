@@ -143,24 +143,24 @@ class TestResolveInject:
     """
 
     def test_no_harness_block_defaults_to_claude_hook(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         assert resolve_harness_profile(_group()).inject == "claude-hook"
 
     def test_harness_block_without_inject_defaults_to_stdout(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         group = _group({"doc_files": ["AGENTS.md"]})
         assert resolve_harness_profile(group).inject == "stdout"
 
     def test_configured_stdout_honored(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         group = _group({"inject": "stdout"})
         assert resolve_harness_profile(group).inject == "stdout"
 
     def test_configured_claude_hook_honored(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         group = _group({"inject": "claude-hook"})
         assert resolve_harness_profile(group).inject == "claude-hook"
@@ -180,7 +180,7 @@ class TestResolveHarnessProfile:
     """
 
     def test_no_harness_block_is_all_claude_defaults(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group())
         assert p.binary == "claude"
@@ -189,7 +189,7 @@ class TestResolveHarnessProfile:
         assert p.inject == "claude-hook"
 
     def test_block_without_inject_defaults_to_stdout(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group({"doc_files": ["AGENTS.md"]}))
         assert p.doc_files == ["AGENTS.md"]
@@ -198,7 +198,7 @@ class TestResolveHarnessProfile:
         assert p.binary == "claude"
 
     def test_configured_fields_honored(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group({"binary": "myh", "inject": "claude-hook"}))
         assert p.binary == "myh"
@@ -207,38 +207,38 @@ class TestResolveHarnessProfile:
     def test_profile_is_frozen(self):
         import dataclasses
 
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group())
         with pytest.raises(dataclasses.FrozenInstanceError):
             p.inject = "stdout"  # type: ignore[misc]
 
     def test_resolved_cwd_default_is_workspace(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group())
         assert p.resolved_cwd(slug="feat-x", workspace="/work/space") == Path("/work/space")
 
     def test_resolved_cwd_custom_substitutes_workspace(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group({"cwd": "{workspace}/sub"}))
         assert p.resolved_cwd(slug="feat-x", workspace="/work/space") == Path("/work/space/sub")
 
     def test_no_harness_block_pretrust_defaults_true(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group())
         assert p.pretrust is True
 
     def test_block_without_pretrust_defaults_true(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group({"doc_files": ["AGENTS.md"]}))
         assert p.pretrust is True
 
     def test_configured_pretrust_false_honored(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group({"pretrust": False}))
         assert p.pretrust is False
@@ -251,36 +251,36 @@ class TestResolveHarnessProfile:
 
 class TestPretrustScoping:
     def test_default_claude_profile_pretrusts(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         assert resolve_harness_profile(_group()).should_pretrust() is True
 
     def test_explicit_claude_block_pretrusts(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         assert resolve_harness_profile(_group({"binary": "claude"})).should_pretrust() is True
 
     def test_non_claude_stdout_block_does_not_pretrust(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         p = resolve_harness_profile(_group({"binary": "myharness", "inject": "stdout"}))
         assert p.is_claude_launch() is False
         assert p.should_pretrust() is False
 
     def test_non_claude_claude_hook_block_pretrusts(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         # inject="claude-hook" is the declarative opt-in for a renamed claude binary.
         p = resolve_harness_profile(_group({"binary": "myharness", "inject": "claude-hook"}))
         assert p.should_pretrust() is True
 
     def test_pretrust_opt_out_suppresses_default(self):
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         assert resolve_harness_profile(_group({"pretrust": False})).should_pretrust() is False
 
     def test_empty_binary_is_not_claude_launch_no_raise(self):
-        from camp.harness.profile import HarnessProfile
+        from camp.launch.profile import HarnessProfile
 
         p = HarnessProfile(
             binary="",

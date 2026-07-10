@@ -358,7 +358,7 @@ class TestWorkspaceDocIdempotent:
 class TestWorkspaceHooks:
     def test_workspace_settings_written(self, tmp_path: Path):
         """write_workspace_hooks writes .claude/settings.json at the workspace root."""
-        from camp.harness.hooks_writer import write_workspace_hooks
+        from camp.launch.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -368,7 +368,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_settings_has_session_start_hook(self, tmp_path: Path):
         """workspace .claude/settings.json carries SessionStart→camp setup --status."""
-        from camp.harness.hooks_writer import write_workspace_hooks
+        from camp.launch.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -386,7 +386,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_session_start_command_exact(self, tmp_path: Path):
         """The SessionStart command is exactly the expected shell-expandable form."""
-        from camp.harness.hooks_writer import write_workspace_hooks
+        from camp.launch.hooks_writer import write_workspace_hooks
 
         camp_bin = "/usr/local/bin/camp"
         ws_dir = tmp_path / "workspace"
@@ -404,7 +404,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_hooks_idempotent(self, tmp_path: Path):
         """Re-running write_workspace_hooks adds NO duplicate entries."""
-        from camp.harness.hooks_writer import write_workspace_hooks
+        from camp.launch.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -422,7 +422,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_hooks_preserves_existing_keys(self, tmp_path: Path):
         """Existing unrelated keys in workspace settings.json are preserved."""
-        from camp.harness.hooks_writer import write_workspace_hooks
+        from camp.launch.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -443,7 +443,7 @@ class TestWorkspaceHooks:
 
     def test_workspace_hooks_written_not_in_member_repo(self, tmp_path: Path):
         """The workspace .claude/settings.json is written to the workspace dir, not a member."""
-        from camp.harness.hooks_writer import write_workspace_hooks
+        from camp.launch.hooks_writer import write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -474,7 +474,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_written(self, tmp_path: Path):
         """write_workspace_inject_hook writes a PostToolUse → inject --drain hook."""
-        from camp.harness.hooks_writer import write_workspace_inject_hook
+        from camp.launch.hooks_writer import write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -488,7 +488,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_matcher_is_bash(self, tmp_path: Path):
         """The PostToolUse inject hook uses the Bash matcher."""
-        from camp.harness.hooks_writer import write_workspace_inject_hook
+        from camp.launch.hooks_writer import write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -499,7 +499,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_idempotent(self, tmp_path: Path):
         """Re-running write_workspace_inject_hook adds NO duplicate entries."""
-        from camp.harness.hooks_writer import write_workspace_inject_hook
+        from camp.launch.hooks_writer import write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -514,7 +514,7 @@ class TestWorkspaceInjectHook:
 
     def test_inject_hook_preserves_session_start(self, tmp_path: Path):
         """Writing the inject hook does not clobber an existing SessionStart hook."""
-        from camp.harness.hooks_writer import write_workspace_hooks, write_workspace_inject_hook
+        from camp.launch.hooks_writer import write_workspace_hooks, write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -531,7 +531,7 @@ class TestHasInjectDrainHook:
     """BUG 5: detecting whether the PostToolUse inject --drain hook is installed."""
 
     def test_true_when_drain_hook_installed(self, tmp_path: Path):
-        from camp.harness.hooks_writer import has_inject_drain_hook, write_workspace_inject_hook
+        from camp.launch.hooks_writer import has_inject_drain_hook, write_workspace_inject_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -540,7 +540,7 @@ class TestHasInjectDrainHook:
         assert has_inject_drain_hook(ws_dir) is True
 
     def test_false_when_no_settings_file(self, tmp_path: Path):
-        from camp.harness.hooks_writer import has_inject_drain_hook
+        from camp.launch.hooks_writer import has_inject_drain_hook
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -548,7 +548,7 @@ class TestHasInjectDrainHook:
         assert has_inject_drain_hook(ws_dir) is False
 
     def test_false_when_only_session_start_hook(self, tmp_path: Path):
-        from camp.harness.hooks_writer import has_inject_drain_hook, write_workspace_hooks
+        from camp.launch.hooks_writer import has_inject_drain_hook, write_workspace_hooks
 
         ws_dir = tmp_path / "workspace"
         ws_dir.mkdir()
@@ -695,14 +695,14 @@ class TestResolveDocFiles:
 
     def test_no_harness_returns_claude_md(self):
         """No [harness] block → doc_files is ['CLAUDE.md']."""
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         group = {"group": {"name": "g"}, "members": []}
         assert resolve_harness_profile(group).doc_files == ["CLAUDE.md"]
 
     def test_harness_without_doc_files_returns_claude_md(self):
         """[harness] block without doc_files → ['CLAUDE.md']."""
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -716,7 +716,7 @@ class TestResolveDocFiles:
 
     def test_configured_doc_files_returned(self):
         """Configured doc_files is returned as-is."""
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},
@@ -727,7 +727,7 @@ class TestResolveDocFiles:
 
     def test_multiple_doc_files_returned(self):
         """Multiple configured doc_files are all returned."""
-        from camp.harness.profile import resolve_harness_profile
+        from camp.launch.profile import resolve_harness_profile
 
         group = {
             "group": {"name": "g"},

@@ -131,7 +131,7 @@ def test_hooks_scripts_referenced_by_hooks_json_get_wired(tool: str, tmp_path: P
 
     dest = tmp_path / tool
     plan = compose_plan(manifest, {}, {}, dest)  # always-on set only
-    apply_plan(plan, mode="copy")
+    apply_plan(plan)
 
     missing = [rel for rel in referenced if not (dest / rel).exists()]
     assert not missing, (

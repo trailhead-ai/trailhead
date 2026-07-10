@@ -16,7 +16,7 @@ split in `paths.py`:
 
 ```
 compose_plan(manifest, selected, dest) -> Plan   # pure — NO filesystem side-effects
-apply_plan(plan, *, mode="copy") -> None          # the ONLY function that writes
+apply_plan(plan) -> None                          # the ONLY function that writes
 ```
 
 **`compose_plan`** is completely pure.  It resolves source directories and returns
@@ -66,7 +66,7 @@ absolute-path injection.  Confinement is checked BEFORE any stat/copy.
 
 ## `symlinks=False` (binding)
 
-`apply_plan(plan, mode="copy")` uses `shutil.copytree(..., symlinks=False)`.
+`apply_plan(plan)` always copies, via `shutil.copytree(..., symlinks=False)`.
 Symlinks inside a source tree are **never** preserved as escaping links —
 their target contents are copied instead.  This eliminates the risk of a
 symlink inside a tool's plugin dir pointing outside the plugin boundary and
@@ -83,7 +83,7 @@ directly; it does not re-parse the manifest or reimplement the confinement helpe
 
 **Structural validity is proven**:
 
-After `apply_plan(plan, mode="copy")`:
+After `apply_plan(plan)`:
 
 - `dest/.claude-plugin/plugin.json` exists and parses as valid JSON.
 - Selected skill dirs (e.g. `dest/skills/decision`) exist and contain content.
@@ -94,7 +94,7 @@ This confirms structural validity by inspection.
 actually loads the composed plugin as a working harness extension).  This
 requires the installer UX to exist and is deferred until then.
 
-## Multi-tool orchestration: `wire.py` + `registry.py`
+## Multi-tool orchestration: `wire.py` + the harness seam
 
 `compose_plan`/`apply_plan` compose a single tool.  Multi-tool orchestration
 lives in `wire.py`, which sequences:
@@ -103,12 +103,19 @@ lives in `wire.py`, which sequences:
 2. Write to a **staging dir** under `state_dir("trailhead")/composed/tmp/`.
 3. **Atomic promote**: `shutil.rmtree(live_dest)` then `shutil.move(staging, live_dest)`.
    A mid-compose failure leaves the prior live dest untouched.
-4. Call `registry.generate_marketplace_json` and `registry.register` (or `rewire`).
+4. Delegate the registration tail to the injected `Harness`:
+   `harness.generate_manifest`, then `harness.register` (once) and per tool
+   `harness.install_tool` / `rewire_tool`.
 
-`registry.py` owns the narrow harness-registration concern: generate
-`marketplace.json` (Shape A) and shell the `claude plugin` CLI.  The runner is
-injectable for test hermeticity — tests stub it and assert on the args; the real
-`claude plugin` CLI is never invoked in tests.
+`wire.py` is harness-agnostic — it knows nothing about `marketplace.json` or the
+`claude plugin` CLI.  Everything Claude-Code-specific (the Shape-A
+`marketplace.json` writer, the `claude plugin …` CLI calls, and the on-disk
+registration markers) lives in `harness/claude_code.py` behind the `Harness`
+interface (`harness/base.py`).  The CLI runner is injectable for test
+hermeticity — tests stub it and assert on the args; the real `claude plugin` CLI
+is never invoked in tests.  `doctor`/`uninstall` likewise read registration state
+through the seam (`is_registered` / `installed_tools` / `manifest_name`), never by
+re-deriving the marker scheme.
 
 ## What is NOT here (installer layer)
 
@@ -116,7 +123,8 @@ The following are explicitly handled by the installer layer, not this module:
 
 - Preset → capability-name mapping (`--preset minimal` → `{}`).  See `presets.py`.
 - Installer UX (`trailhead install`, `trailhead config` sub-command).  See `cli.py`.
-- Multi-tool orchestration and marketplace registration.  See `wire.py` and `registry.py`.
+- Multi-tool orchestration and marketplace registration.  See `wire.py` and
+  `harness/claude_code.py`.
 - Live harness-launch validation (structural validity proven; live load deferred to
   the dogfood checkpoint).
 
@@ -124,7 +132,7 @@ The following are explicitly handled by the installer layer, not this module:
 
 | Error | Raised by | Condition |
 |---|---|---|
-| `UnknownCapabilityError(name, tool)` | `compose_plan` | A name in `selected` is not in the manifest. |
+| `UnknownSubagentError(name, tool)` / `UnknownSkillError(name, tool)` | `compose_plan` | A name in `selected` is not in the manifest. |
 | `CollisionError(dest, src_a, src_b)` | `compose_plan` | Two different srcs map to the same dest. |
 | `DestConfinementError(dest_root, path)` | `compose_plan` | A dest path escapes the target plugin dir. |
 | `ConfineError(tool, context, entry)` | Loader + `compose_plan` | A src path escapes the plugin root. |

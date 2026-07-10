@@ -52,6 +52,7 @@ def _cmd_vault_add(args) -> int:
     """
     from ..config import installer as installer_mod
     from ..record import model as record_model_mod
+    from ..record import store as record_store_mod
     from ..search import index as index_store_mod
     from ..vault import config as vault_config_mod
 
@@ -160,14 +161,11 @@ def _cmd_vault_add(args) -> int:
 
     shared_flag = vault_config_mod.shared_flag(vault)
     try:
-        conn = index_store_mod.open_index()
-        try:
+        with record_store_mod.index_transaction() as conn:
             count = index_store_mod.scan_vault(
                 str(vault.path), conn, shared=shared_flag
             )
             conn.commit()
-        finally:
-            conn.close()
     except Exception as exc:
         print(f"lore: vault add indexed config but failed to scan: {exc}", file=sys.stderr)
         return 1
@@ -186,6 +184,7 @@ def _cmd_vault_delete(args) -> int:
     realpath to ``state_dir("lore")/vaults`` — refusing any path that resolves
     outside that root or reaches it via a symlink.
     """
+    from ..record import store as record_store_mod
     from ..search import index as index_store_mod
     from ..vault import config as vault_config_mod
     from ..vault import layers as layers_mod
@@ -256,13 +255,10 @@ def _cmd_vault_delete(args) -> int:
         # Preview + require --yes (no bare-flag destruction).
         record_count = 0
         if realpath.is_dir():
-            conn = index_store_mod.open_index()
-            try:
+            with record_store_mod.index_transaction() as conn:
                 record_count = conn.execute(
                     "SELECT COUNT(*) FROM records WHERE vault=?", (str(vault.path),)
                 ).fetchone()[0]
-            finally:
-                conn.close()
         print(
             f"--remove-from-disk would permanently delete the directory:\n"
             f"  {realpath}\n"
@@ -285,12 +281,9 @@ def _cmd_vault_delete(args) -> int:
         return 1
 
     try:
-        conn = index_store_mod.open_index()
-        try:
+        with record_store_mod.index_transaction() as conn:
             removed = index_store_mod.remove_vault(str(vault.path), conn)
             conn.commit()
-        finally:
-            conn.close()
     except Exception as exc:
         print(f"lore: removed config entry but failed to clear index rows: {exc}",
               file=sys.stderr)

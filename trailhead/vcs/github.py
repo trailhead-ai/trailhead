@@ -16,7 +16,10 @@ the release cluster is deleted):
 
 Safety invariants preserved: the merge gate, shell=False, option-injection
 guards (pr_number digits-only, branch leading-dash / push ``--`` terminator),
-no hardcoded review-bot login (a passed param).
+no hardcoded review-bot login (a passed param). The pr_number/job_id digits-only
+guards are enforced inside ``_check_status`` and ``_GitHubDeploy.logs`` themselves
+(not just at the merge call site), so every caller — status/checks/wait reads
+included — is covered before anything reaches ``gh`` argv.
 """
 
 from __future__ import annotations
@@ -253,6 +256,7 @@ def _check_status(
     review_bot_login: str | None,
     runner: rp.Runner,
 ) -> dict[str, Any]:
+    validate_pr_number(pr_number)
     pr = _gh(
         ["pr", "view", pr_number, "--json", "mergeable,mergeStateStatus,isDraft,reviews"],
         cwd=repo_path,
@@ -306,6 +310,27 @@ def _check_status(
 # ---------------------------------------------------------------------------
 
 
+def _bot_review_action(
+    status: dict[str, Any], review_bot_login: str | None
+) -> dict[str, Any] | None:
+    """Build the "review" action when review_bot_login left blocking feedback
+    (CHANGES_REQUESTED or COMMENTED), else None."""
+    if not review_bot_login:
+        return None
+    bot_reviews = status.get("botReviews", [])
+    changes = [r for r in bot_reviews if r.get("state") == "CHANGES_REQUESTED"]
+    comments = [r for r in bot_reviews if r.get("state") == "COMMENTED"]
+    if not (changes or comments):
+        return None
+    return {
+        "action": "review",
+        "reason": (
+            f"{len(changes)} changes requested, {len(comments)} comments from {review_bot_login}"
+        ),
+        "details": {"reviews": bot_reviews},
+    }
+
+
 def _evaluate(
     status: dict[str, Any],
     *,
@@ -321,19 +346,9 @@ def _evaluate(
         return {"action": "wait", "reason": "PR is a draft", "details": {}}
 
     if mergeable == "MERGEABLE" and merge_state == "CLEAN":
-        if review_bot_login:
-            bot_reviews = status.get("botReviews", [])
-            changes = [r for r in bot_reviews if r.get("state") == "CHANGES_REQUESTED"]
-            comments = [r for r in bot_reviews if r.get("state") == "COMMENTED"]
-            if changes or comments:
-                return {
-                    "action": "review",
-                    "reason": (
-                        f"{len(changes)} changes requested, "
-                        f"{len(comments)} comments from {review_bot_login}"
-                    ),
-                    "details": {"reviews": bot_reviews},
-                }
+        review_action = _bot_review_action(status, review_bot_login)
+        if review_action is not None:
+            return review_action
         return {"action": "done", "reason": "PR is mergeable and clean", "details": status}
 
     if mergeable == "CONFLICTING":
@@ -382,19 +397,9 @@ def _evaluate(
             },
         }
 
-    if review_bot_login:
-        bot_reviews = status.get("botReviews", [])
-        changes = [r for r in bot_reviews if r.get("state") == "CHANGES_REQUESTED"]
-        comments = [r for r in bot_reviews if r.get("state") == "COMMENTED"]
-        if changes or comments:
-            return {
-                "action": "review",
-                "reason": (
-                    f"{len(changes)} changes requested, "
-                    f"{len(comments)} comments from {review_bot_login}"
-                ),
-                "details": {"reviews": bot_reviews},
-            }
+    review_action = _bot_review_action(status, review_bot_login)
+    if review_action is not None:
+        return review_action
 
     return {
         "action": "wait",
@@ -427,9 +432,20 @@ def _load_merge_order(toml_path: str | None) -> list[str] | None:
     return None
 
 
-def _validate_pr_number(pr_number: str) -> None:
+def validate_pr_number(pr_number: str) -> None:
+    """Validate ``pr_number`` is all-digits; raise InvalidInputError otherwise.
+
+    Public (not underscore-prefixed) so callers outside this module — e.g.
+    ``tools/portage``'s ``_pr_pair.py`` — can share this one validation rule
+    instead of re-deriving their own digit regex.
+    """
     if not re.fullmatch(r"\d+", pr_number):
-        raise InvalidInputError(f"merge_prs: pr_number must be all digits, got: {pr_number!r}")
+        raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
+
+
+def _validate_job_id(job_id: str) -> None:
+    if not re.fullmatch(r"\d+", job_id):
+        raise InvalidInputError(f"job_id must be all digits, got: {job_id!r}")
 
 
 def _resolve_author_email(runner: rp.Runner) -> str:
@@ -509,7 +525,7 @@ def _merge_prs(
     runner: rp.Runner,
 ) -> dict[str, Any]:
     for pair in pr_pairs:
-        _validate_pr_number(pair.pr_number)
+        validate_pr_number(pair.pr_number)
 
     manifest_data = _load_manifest(manifest_path)
     member_names = {m["name"] for m in manifest_data.get("members", [])}
@@ -874,6 +890,7 @@ class _GitHubDeploy(DeploySurface):
         A not-found / clean job yields ``[]`` (no false alarm); the truncation
         sentinel is appended when the raw count exceeds ``max_annotations``.
         """
+        _validate_job_id(job_id)
         owner_repo = _resolve_owner_repo(repo_path, self._runner)
         args = [
             "api",

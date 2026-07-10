@@ -10,7 +10,6 @@ from trailhead.harness import (
     detect_harnesses,
     get_harness,
     known_harness_names,
-    resolve_harnesses,
 )
 from trailhead.harness.base import UNSUPPORTED_RULESET_NOTICE
 
@@ -32,15 +31,6 @@ class TestFactory:
     def test_unknown_harness_raises(self):
         with pytest.raises(HarnessError, match="codex"):
             get_harness("codex")
-
-    def test_resolve_harnesses_dedupes_by_canonical_name(self):
-        out = resolve_harnesses(["claude", "claude_code", "claude-code"])
-        assert len(out) == 1
-        assert out[0].name == "claude_code"
-
-    def test_resolve_harnesses_preserves_order(self):
-        out = resolve_harnesses(["claude_code"])
-        assert [h.name for h in out] == ["claude_code"]
 
 
 class TestDetection:
@@ -86,7 +76,65 @@ class TestMarkers:
         assert h.is_installed("lore", tmp_path) is True
 
 
-class TestDelegationToRegistry:
+class TestInstalledTools:
+    """installed_tools enumerates the per-tool markers under composed_root."""
+
+    def test_empty_when_no_markers(self, tmp_path):
+        assert ClaudeCodeHarness().installed_tools(tmp_path) == []
+
+    def test_empty_when_root_absent(self, tmp_path):
+        assert ClaudeCodeHarness().installed_tools(tmp_path / "nope") == []
+
+    def test_enumerates_markers_sorted(self, tmp_path):
+        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+        (tmp_path / ".trailhead-installed-camp").write_text("{}")
+        assert ClaudeCodeHarness().installed_tools(tmp_path) == ["camp", "lore"]
+
+    def test_ignores_non_install_markers(self, tmp_path):
+        (tmp_path / ".trailhead-registered").write_text("{}")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".trailhead-installed-lore").write_text("{}")
+        assert ClaudeCodeHarness().installed_tools(tmp_path) == ["lore"]
+
+
+class TestManifestName:
+    """manifest_name reads the display name from the harness's generated manifest."""
+
+    def test_none_when_absent(self, tmp_path):
+        assert ClaudeCodeHarness().manifest_name(tmp_path) is None
+
+    def test_reads_name_from_generated_manifest(self, tmp_path):
+        ClaudeCodeHarness().generate_manifest(["lore"], tmp_path)
+        assert ClaudeCodeHarness().manifest_name(tmp_path) == "trailhead"
+
+    def test_none_when_malformed(self, tmp_path):
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "marketplace.json").write_text("{not json")
+        assert ClaudeCodeHarness().manifest_name(tmp_path) is None
+
+
+class TestManifestExists:
+    """manifest_exists distinguishes an absent manifest file from a malformed one.
+
+    manifest_name() returns None for both cases (its contract, pinned above); doctor
+    needs manifest_exists() alongside it to render "absent" vs "present but corrupt"
+    distinctly.
+    """
+
+    def test_false_when_absent(self, tmp_path):
+        assert ClaudeCodeHarness().manifest_exists(tmp_path) is False
+
+    def test_true_when_malformed(self, tmp_path):
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "marketplace.json").write_text("{not json")
+        assert ClaudeCodeHarness().manifest_exists(tmp_path) is True
+
+    def test_true_when_well_formed(self, tmp_path):
+        ClaudeCodeHarness().generate_manifest(["lore"], tmp_path)
+        assert ClaudeCodeHarness().manifest_exists(tmp_path) is True
+
+
+class TestGenerateManifestAndRegister:
     def test_generate_manifest_writes_marketplace(self, tmp_path):
         ClaudeCodeHarness().generate_manifest(["lore"], tmp_path)
         mkt = tmp_path / ".claude-plugin" / "marketplace.json"
@@ -127,6 +175,9 @@ class _BareHarness(Harness):
         raise NotImplementedError
 
     def is_installed(self, tool, composed_root):
+        raise NotImplementedError
+
+    def installed_tools(self, composed_root):
         raise NotImplementedError
 
     def register(self, composed_root, *, runner=None):
