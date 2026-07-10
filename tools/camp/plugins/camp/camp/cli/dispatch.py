@@ -76,6 +76,8 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
         from ..group.resolve import (
             resolve_from_cwd,
             resolve_group_override,
+            GroupConfinementError,
+            GroupResolutionError,
         )
         from .common import _groups_dir
     except ImportError:
@@ -109,11 +111,12 @@ def _resolve_group_for_command(argv: list[str]) -> tuple[dict | None, dict[str, 
                 return None, None
 
         return group, None  # env=None → use os.environ (resolver's default)
-    except GroupConfigError:
-        # Config exists but is malformed — re-raise so the caller can surface it.
+    except (GroupConfigError, GroupConfinementError):
+        # Config exists but is malformed (bad TOML shape, or a group name that fails
+        # the path-confinement charset check) — re-raise so the caller can surface it.
         raise
-    except Exception:
-        # GroupResolutionError, no config, import errors, etc. — fall through to spine.
+    except GroupResolutionError:
+        # No group resolves from cwd / --group — fall through to spine.
         return None, None
 
 
@@ -135,7 +138,7 @@ def _slug_from_args_or_cwd(
     caller falls back, e.g. status's fleet view).
     """
     from ..spine import _consume_flag_value, _resolve_slug, _die
-    from ..group.resolve import resolve_from_cwd
+    from ..group.resolve import resolve_from_cwd, GroupResolutionError
 
     name = _consume_flag_value(args, "--name")
     if name is not None:
@@ -148,7 +151,7 @@ def _slug_from_args_or_cwd(
         # SAME env as the downstream manifest/workspace ops. resolve_from_cwd
         # derives state_dir("camp", env=env) when camp_state_dir is not supplied.
         _, slug = resolve_from_cwd(Path.cwd(), [group], env=env)
-    except Exception:
+    except GroupResolutionError:
         slug = None
     if slug is None and not allow_none:
         _die(
