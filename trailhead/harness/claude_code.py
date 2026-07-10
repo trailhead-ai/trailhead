@@ -186,6 +186,10 @@ class ClaudeCodeHarness(Harness):
         except (OSError, json.JSONDecodeError):
             return None
 
+    def manifest_exists(self, composed_root: Path) -> bool:
+        """True if marketplace.json is present, regardless of whether it parses."""
+        return (composed_root / ".claude-plugin" / "marketplace.json").exists()
+
     # -- registration state (on-disk truth) -----------------------------------
 
     def is_registered(self, composed_root: Path) -> bool:

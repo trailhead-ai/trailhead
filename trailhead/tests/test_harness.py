@@ -113,6 +113,27 @@ class TestManifestName:
         assert ClaudeCodeHarness().manifest_name(tmp_path) is None
 
 
+class TestManifestExists:
+    """manifest_exists distinguishes an absent manifest file from a malformed one.
+
+    manifest_name() returns None for both cases (its contract, pinned above); doctor
+    needs manifest_exists() alongside it to render "absent" vs "present but corrupt"
+    distinctly.
+    """
+
+    def test_false_when_absent(self, tmp_path):
+        assert ClaudeCodeHarness().manifest_exists(tmp_path) is False
+
+    def test_true_when_malformed(self, tmp_path):
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "marketplace.json").write_text("{not json")
+        assert ClaudeCodeHarness().manifest_exists(tmp_path) is True
+
+    def test_true_when_well_formed(self, tmp_path):
+        ClaudeCodeHarness().generate_manifest(["lore"], tmp_path)
+        assert ClaudeCodeHarness().manifest_exists(tmp_path) is True
+
+
 class TestGenerateManifestAndRegister:
     def test_generate_manifest_writes_marketplace(self, tmp_path):
         ClaudeCodeHarness().generate_manifest(["lore"], tmp_path)

@@ -51,6 +51,11 @@ def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
     re-deriving the harness's on-disk marker scheme here.  An unknown harness dir
     (no registered implementation) is still reported present, but its scheme can't
     be introspected through the seam, so its state reads as empty.
+
+    ``manifest_name`` returns ``None`` both when the manifest is absent and when
+    it's present but unparseable; ``marketplace_malformed`` disambiguates the two
+    (via :meth:`~trailhead.harness.base.Harness.manifest_exists`) so
+    ``_build_human`` can render "present but corrupt" distinctly from "not there".
     """
     out: dict[str, dict] = {}
     if not composed_base.is_dir():
@@ -63,10 +68,12 @@ def _discover_harnesses(composed_base: Path) -> dict[str, dict]:
         except HarnessError:
             out[hdir.name] = {"registered": False, "installed": [], "marketplace": None}
             continue
+        marketplace = harness.manifest_name(hdir)
         out[hdir.name] = {
             "registered": harness.is_registered(hdir),
             "installed": harness.installed_tools(hdir),
-            "marketplace": harness.manifest_name(hdir),
+            "marketplace": marketplace,
+            "marketplace_malformed": marketplace is None and harness.manifest_exists(hdir),
         }
     return out
 
@@ -118,7 +125,13 @@ def _build_human(data: dict) -> str:
         for hname, info in harnesses.items():
             lines.append(f"  {hname}:")
             reg = "registered" if info["registered"] else "not registered"
-            lines.append(f"    marketplace: {info.get('marketplace') or '(none)'} ({reg})")
+            if info.get("marketplace"):
+                mkt = info["marketplace"]
+            elif info.get("marketplace_malformed"):
+                mkt = "(unreadable)"
+            else:
+                mkt = "(none)"
+            lines.append(f"    marketplace: {mkt} ({reg})")
             installed = ", ".join(info["installed"]) or "(none)"
             lines.append(f"    installed: {installed}")
     lines.append("")

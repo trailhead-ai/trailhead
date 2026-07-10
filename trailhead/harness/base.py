@@ -113,6 +113,17 @@ class Harness(ABC):
         """
         return None
 
+    def manifest_exists(self, composed_root: Path) -> bool:
+        """Return True if a manifest file is present on disk, parseable or not.
+
+        :meth:`manifest_name` returns ``None`` both when the manifest is absent AND
+        when it exists but is malformed — a deliberate, already-tested collapse.
+        This method exists so ``doctor`` can tell those two cases apart (existence
+        only; it never parses). The default is False; harnesses whose
+        :meth:`generate_manifest` writes a manifest file override this.
+        """
+        return False
+
     # -- install / uninstall --------------------------------------------------
 
     @abstractmethod
