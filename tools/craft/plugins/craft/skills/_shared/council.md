@@ -1,9 +1,9 @@
 # Council membership — shared reference
 
 The **council** is a four-agent review panel. This file is the single source of
-truth for who the members are. Both `/craft:consult` and the `planning` skill's
-Council Review step read membership from here and dispatch the agents **directly**
-via the Agent tool — neither delegates to the other.
+truth for who the members are. `/craft:consult`, the `planning` skill's Council
+Review step, and the `gauntlet` skill's lens pass all read membership from here and
+dispatch the agents **directly** via the Agent tool — none delegates to another.
 
 ## Members
 
@@ -70,7 +70,19 @@ Required output format:
 
 ## Per-lens Critical bars
 
-Paste the matching block into each member's dispatch (the `<lens-critical-bars>` token):
+Two sets ship. Pick by **what is under review**, and paste the matching block into
+each member's dispatch (the `<lens-critical-bars>` token):
+
+| Reviewing | Use |
+|---|---|
+| An implementation plan (`planning` step 8.5) | **Per-lens Critical bars** (below) — phrased at slice altitude |
+| A draft spec (`gauntlet` lens pass) | **Per-lens Critical bars — spec review** (further below) — phrased at spec altitude |
+| A standalone question (`consult`) | The plan bars, read as applying to the unit under review; skip any bar with no analogue |
+
+The two sets are **not** interchangeable. A spec has no slices, no test contracts,
+and no code paths yet — running the plan bars against a spec produces findings that
+are all technically true and all useless ("this slice has no test contract" — there
+are no slices). The spec bars fire on what a spec can actually get wrong.
 
 *Builder:*
 - Slice ordering creates a dependency that can't be tested
@@ -107,6 +119,40 @@ Internal admin UI — Critical ONLY when at least one holds:
 - (c) Feedback ambiguity that propagates bad decisions downstream
 
 Otherwise internal-admin findings are Important at most. Admin users tolerate friction; bikeshedding internal UX is high-cost.
+
+## Per-lens Critical bars — spec review
+
+Used by the `gauntlet` skill's lens pass. A spec is reviewed for what it *commits the
+project to*, not for how it will be built — the lenses here fire on objectives,
+acceptance criteria, non-goals, and constraints.
+
+The four lenses accept the spec's framing and review within it. Attacking the framing
+itself is the `premise-attacker`'s job, not a lens's — a lens finding of the form "this
+is the wrong problem" belongs to that pass and should not be raised here.
+
+*Builder — spec review:*
+- An objective has no implementable reading — no build satisfies it as stated
+- The spec mandates an approach that contradicts a declared project axiom or a prior decision record
+- The spec depends on a capability that does not exist and does not name it as a dependency
+- The spec requires a new subsystem where an existing one already covers the need
+
+*Reliability — spec review:*
+- An acceptance criterion has no observable pass/fail — nothing distinguishes met from unmet
+- An objective has no acceptance criterion covering it
+- A failure mode named in the Problem has no criterion proving it is addressed
+- The spec commits to something irreversible (a migration, a deletion, a published contract) without naming the rollback or migration path
+
+*Security — spec review:*
+- The spec introduces a trust boundary it never names
+- Untrusted or externally-influenced input enters the system with no named handling at the data boundary
+- The spec stores, logs, or transmits sensitive data without naming its classification, retention, or redaction
+- An authorization model is implied by the objectives but never stated
+
+*Advocate — spec review:*
+- A primary user flow, as specified, has a reachable state with no way out
+- The spec names a user-facing surface but gives no direction for its error or empty states
+- Success is defined only in system terms, with no outcome a user would notice
+- The UI Direction contradicts an acceptance criterion
 
 ## Synthesis (main session, NOT a subagent)
 
