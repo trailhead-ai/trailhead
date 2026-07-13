@@ -318,22 +318,49 @@ def _check_status(
     return result
 
 
+_STATUS_CONTEXT_FREE_TEXT_FIELDS = ("context", "targetUrl", "description")
+
+
 def _wrap_status_check_rollup(rollup: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Marker-wrap the free-text ``description`` subfield of ``statusCheckRollup``
+    """Marker-wrap the free-text ``StatusContext`` subfields of ``statusCheckRollup``
     entries.
 
     ``statusCheckRollup`` is a union of GitHub's ``CheckRun`` and ``StatusContext``
-    types. ``StatusContext.description`` is free text set by whoever posts the
-    commit status (``POST /repos/{owner}/{repo}/statuses/{sha}``) — attacker-postable
-    by any CI Action with default ``statuses: write``, or any third-party
-    status-posting integration. ``CheckRun`` entries carry no ``description`` key and
-    pass through unchanged. ``context``/``name``/``state`` are structural identifiers
-    the rollup is keyed on for display and matching, and stay untouched.
+    GraphQL types; ``gh pr view --json statusCheckRollup`` projects each union member
+    to a disjoint field set (verified against ``cli/cli``'s ``api/export_pr.go``):
+
+    - ``StatusContext`` (commit-status API entries — ``context``, ``state``,
+      ``targetUrl``, ``startedAt``): ``context``, ``targetUrl``, and ``description``
+      (not currently emitted by ``gh``, wrapped anyway as defense-in-depth — see
+      commit history) are all set by whoever posts the commit status (``POST
+      /repos/{owner}/{repo}/statuses/{sha}``) — attacker-postable by any CI Action
+      with default ``statuses: write``, or any third-party status-posting
+      integration. All three are wrapped. ``state`` is a GitHub-validated enum
+      (``error|failure|pending|success``, rejected server-side otherwise) and stays
+      structural.
+    - ``CheckRun`` (native GitHub Actions / Checks-API entries — ``name``,
+      ``workflowName``, ``status``, ``conclusion``, ``startedAt``, ``completedAt``,
+      ``detailsUrl``): every field ``gh`` exports here is sourced from the base
+      repo's own workflow run, not the attacker-postable status API. ``name`` /
+      ``workflowName`` come from the workflow YAML's ``name:`` (and any matrix
+      values) — for ``pull_request``-triggered workflows GitHub runs the workflow
+      file version pinned to the base branch, not a fork PR's edits, so a PR author
+      cannot rewrite them via their own workflow-file changes. ``status`` /
+      ``conclusion`` are Checks-API enums; ``startedAt`` / ``completedAt`` /
+      ``detailsUrl`` are GitHub-generated (timestamps and the run's own URL, not
+      workflow-YAML-settable content). The whole entry passes through unchanged;
+      dispatch is by field presence (``StatusContext`` fields are simply absent from
+      ``CheckRun`` entries), not by trusting the ``__typename`` discriminator.
     """
     wrapped = []
     for entry in rollup:
-        if isinstance(entry.get("description"), str):
-            entry = {**entry, "description": wrap_untrusted(entry["description"], source="status-check")}
+        patch = {
+            field: wrap_untrusted(entry[field], source="status-check")
+            for field in _STATUS_CONTEXT_FREE_TEXT_FIELDS
+            if isinstance(entry.get(field), str)
+        }
+        if patch:
+            entry = {**entry, **patch}
         wrapped.append(entry)
     return wrapped
 
@@ -350,9 +377,11 @@ def _summary_inputs(
     view`` (metadata), ``pr diff`` (the diff), and the inline review comments API —
     behind the VCS boundary so the untrusted-content marker covers them. The
     attacker-influenced free-text (``title``/``body``/``diff``/each comment
-    ``body``/each ``statusCheckRollup`` entry's ``description``) is wrapped;
-    structural metadata (``state``/``mergeable``, each rollup entry's
-    ``context``/``name``/``state``, each comment's ``path``/``line``/``author``)
+    ``body``/each ``statusCheckRollup`` ``StatusContext`` entry's
+    ``context``/``targetUrl``/``description`` — see ``_wrap_status_check_rollup``
+    for the full per-union-member field breakdown) is wrapped; structural metadata
+    (``state``/``mergeable``, each rollup ``StatusContext`` entry's ``state`` and
+    every ``CheckRun`` entry's fields, each comment's ``path``/``line``/``author``)
     passes through unwrapped.
     """
     validate_pr_number(pr_number)

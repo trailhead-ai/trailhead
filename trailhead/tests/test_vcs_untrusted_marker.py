@@ -17,10 +17,11 @@ Contract:
   (d) the summarizer's ingested PR text (title/body/diff/review-comments) comes
       back marker-wrapped through ``pr.summary_inputs`` and summarizer.md carries
       no direct-``gh`` PR-read bypass;
-  (e) each ``statusCheckRollup`` entry's ``description`` (the free-text subfield of
-      GitHub's ``StatusContext`` union member, attacker-postable via the commit
-      statuses API) comes back marker-wrapped, while ``context``/``name``/``state``
-      stay structural;
+  (e) each ``statusCheckRollup`` entry's ``StatusContext``-union free text
+      (``context``/``targetUrl``/``description`` — all attacker-postable via the
+      commit statuses API) comes back marker-wrapped, while ``state`` and every
+      ``CheckRun``-union field (``name`` and friends, sourced from the base repo's
+      own workflow run) stay structural;
   (f) ``wrap_untrusted``'s ``source`` attribute is escaped including the delimiting
       ``"``, so a mis-sourced literal can never inject a forged pseudo-attribute.
 """
@@ -300,17 +301,28 @@ class TestSummaryInputsWrapping:
 
 class TestSummaryInputsWrapsStatusContextDescription:
     """`statusCheckRollup` is a union of `CheckRun` and `StatusContext` (GitHub's
-    GraphQL schema). `StatusContext.description` is free text set by whoever posts
-    the commit status (`POST /repos/{o}/{r}/statuses/{sha}`) — attacker-composable
-    by any CI Action with default `statuses: write`. `context`/`name`/`state` are
-    structural identifiers the rollup is keyed on and must stay untouched.
+    GraphQL schema); `gh pr view --json statusCheckRollup` (verified against
+    `cli/cli`'s `api/export_pr.go`) projects each union member to a disjoint field
+    set:
+
+    - `StatusContext`: `context`, `state`, `targetUrl`, `startedAt` (+ `description`,
+      currently dropped by `gh`'s export but wrapped defensively — see
+      `_wrap_status_check_rollup`'s docstring). `context`, `targetUrl`, and
+      `description` are all set via the same attacker-reachable commit-status POST
+      (`POST /repos/{o}/{r}/statuses/{sha}`, default `statuses: write`) and must be
+      wrapped. `state` is a GitHub-validated enum (`error|failure|pending|success`)
+      and stays structural.
+    - `CheckRun`: `name`, `workflowName`, `status`, `conclusion`, `startedAt`,
+      `completedAt`, `detailsUrl` — all sourced from the base repo's own workflow
+      run (workflow YAML `name:`/matrix, GitHub-generated timestamps and run URL),
+      not the attacker-postable status API. The whole entry stays untouched.
     """
 
     _STATUS_CONTEXT_ENTRY = {
         "__typename": "StatusContext",
-        "context": "ci/circleci: build",
+        "context": _HOSTILE,
         "state": "FAILURE",
-        "targetUrl": "https://circleci.com/build/1",
+        "targetUrl": _HOSTILE,
         "startedAt": "2026-06-26T23:07:30Z",
         "description": _HOSTILE,
     }
@@ -352,14 +364,50 @@ class TestSummaryInputsWrapsStatusContextDescription:
         assert description.count(_MARKER_CLOSE) == 1
         assert "&lt;/untrusted-content&gt;" in description
 
+    def test_status_context_context_is_wrapped(self) -> None:
+        # `context` renders as the check-name label in summarizer.md's `## CI`
+        # section — the same live GraphQL field `gh` actually emits today (unlike
+        # `description`), and set via the same attacker-reachable statuses POST.
+        rollup = self._inputs()["statusCheckRollup"]
+        context = rollup[0]["context"]
+        assert context.startswith("<untrusted-content")
+        assert context.endswith(_MARKER_CLOSE)
+
+    def test_status_context_context_breakout_neutralized(self) -> None:
+        rollup = self._inputs()["statusCheckRollup"]
+        context = rollup[0]["context"]
+        assert context.count(_MARKER_CLOSE) == 1
+        assert "&lt;/untrusted-content&gt;" in context
+
+    def test_status_context_target_url_is_wrapped(self) -> None:
+        # `targetUrl` is set via the same POST as `context`/`description` (the
+        # `target_url` param); GitHub documents no URL-format validation on it, and
+        # it renders as the failing-check link in summarizer.md's `## CI` section.
+        rollup = self._inputs()["statusCheckRollup"]
+        target_url = rollup[0]["targetUrl"]
+        assert target_url.startswith("<untrusted-content")
+        assert target_url.endswith(_MARKER_CLOSE)
+
+    def test_status_context_target_url_breakout_neutralized(self) -> None:
+        rollup = self._inputs()["statusCheckRollup"]
+        target_url = rollup[0]["targetUrl"]
+        assert target_url.count(_MARKER_CLOSE) == 1
+        assert "&lt;/untrusted-content&gt;" in target_url
+
     def test_status_context_structural_fields_untouched(self) -> None:
         rollup = self._inputs()["statusCheckRollup"]
         entry = rollup[0]
-        assert entry["context"] == "ci/circleci: build"
         assert entry["state"] == "FAILURE"
-        assert entry["targetUrl"] == "https://circleci.com/build/1"
+        assert entry["startedAt"] == "2026-06-26T23:07:30Z"
+        assert entry["__typename"] == "StatusContext"
 
-    def test_check_run_entry_without_description_untouched(self) -> None:
+    def test_check_run_entry_untouched(self) -> None:
+        # `CheckRun.name` is sourced from the base repo's own workflow YAML: for
+        # `pull_request`-triggered workflows GitHub runs the workflow file version
+        # pinned to the base branch, not a fork PR's edits, so a PR author cannot
+        # rewrite it via their own workflow-file changes. It — and every other
+        # `CheckRun` field `gh` exports — is not attacker-postable the way
+        # `StatusContext`'s POST-set fields are, so the whole entry stays untouched.
         rollup = self._inputs()["statusCheckRollup"]
         assert rollup[1] == self._CHECK_RUN_ENTRY
 
