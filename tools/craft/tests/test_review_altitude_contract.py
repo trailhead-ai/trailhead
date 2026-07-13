@@ -1,4 +1,4 @@
-"""Contract pins for the review-altitude split (slices 1-2).
+"""Contract pins for the review-altitude split (slices 1-3).
 
 `drift-gate` replaces `code-reviewer` as execute's per-slice conformance gate;
 `code-reviewer` is rechartered (slice 2) as the whole-change/PR adversarial
@@ -11,6 +11,12 @@ the new agent, the boundary of what changed in execute's skill text, and the
 recharter of code-reviewer.md + review/SKILL.md — string-pin/structural
 checks, not runtime behavior, consistent with this suite's existing style
 (see test_craft_skills_generic.py, test_agents_generic.py).
+
+Slice 3 adds `simplifier` — the whole-change simplify mutation phase agent.
+It is not yet wired into execute's After-All-Slices pipeline (a later slice's
+scope); these tests only pin the agent charter's shape and its mechanically
+enforced write-scope story (footprint_guard.py, tested separately in
+test_footprint_guard.py).
 """
 
 from pathlib import Path
@@ -20,6 +26,7 @@ SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 
 DRIFT_GATE_MD = AGENTS_DIR / "drift-gate.md"
 CODE_REVIEWER_MD = AGENTS_DIR / "code-reviewer.md"
+SIMPLIFIER_MD = AGENTS_DIR / "simplifier.md"
 EXECUTE_SKILL_MD = SKILLS_DIR / "execute" / "SKILL.md"
 REVIEW_SKILL_MD = SKILLS_DIR / "review" / "SKILL.md"
 
@@ -266,4 +273,98 @@ def test_review_skill_retargets_execute_integration_to_drift_gate():
         "review/SKILL.md must point to `drift-gate` as execute's per-slice "
         "conformance gate, distinguishing it from this skill's whole-change/"
         "ad-hoc dispatch of code-reviewer."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Slice 3: simplifier agent + footprint guard charter
+# ---------------------------------------------------------------------------
+
+
+def test_simplifier_agent_file_exists():
+    assert SIMPLIFIER_MD.exists(), (
+        f"Expected {SIMPLIFIER_MD} — the whole-change simplify mutation phase agent."
+    )
+
+
+def test_simplifier_model_is_opus_high():
+    text = SIMPLIFIER_MD.read_text()
+    frontmatter = _frontmatter(text)
+    assert _field(frontmatter, "model") == "opus", (
+        "simplifier.md frontmatter must pin `model: opus` — a whole-change "
+        "dedup/simplify pass needs the deep-reasoning tier."
+    )
+    assert _field(frontmatter, "effort") == "high", (
+        "simplifier.md frontmatter must pin `effort: high`."
+    )
+
+
+def test_simplifier_omits_tools_line_for_full_inheritance():
+    text = SIMPLIFIER_MD.read_text()
+    frontmatter = _frontmatter(text)
+    assert _tools_line(frontmatter) is None, (
+        "simplifier.md frontmatter must carry NO `tools:` line — it needs to "
+        "edit files, run tests, and commit, so it must inherit the full tool "
+        "set (like executor.md and assumption-prover.md do), not an explicit "
+        "restricted list."
+    )
+
+
+def test_simplifier_charter_has_revert_on_failed_regreen_clause():
+    text = SIMPLIFIER_MD.read_text()
+    lowered = text.lower()
+    assert "revert" in lowered and "pre-simplify" in lowered, (
+        "simplifier.md must state that a failed re-green reverts to the "
+        "pre-simplify state — never commit broken, never leave a dirty tree."
+    )
+
+
+def test_simplifier_charter_has_separate_commit_clause():
+    text = SIMPLIFIER_MD.read_text()
+    assert "separately from slice commits" in text or (
+        "separate" in text.lower() and "slice commit" in text.lower()
+    ), (
+        "simplifier.md must state it commits its change separately from "
+        "slice commits, GPG-signed with a conventional commit prefix."
+    )
+
+
+def test_simplifier_charter_names_flag_dont_apply_rubric():
+    text = SIMPLIFIER_MD.read_text()
+    lowered = text.lower()
+    for term in ["authz", "public", "test coverage"]:
+        assert term in lowered, (
+            f"simplifier.md's flag-don't-apply rubric must name {term!r} as one "
+            "of the categories that are always flagged, never auto-applied."
+        )
+
+
+def test_simplifier_charter_pins_footprint_guard_precommit_invocation():
+    text = SIMPLIFIER_MD.read_text()
+    assert "footprint_guard.py" in text, (
+        "simplifier.md must instruct running footprint_guard.py before committing."
+    )
+    lowered = text.lower()
+    assert "non-zero" in lowered and "revert" in lowered, (
+        "simplifier.md must treat a non-zero footprint_guard.py exit as a "
+        "failed re-green — same remediation path (revert, flag) as a failed "
+        "test re-green."
+    )
+
+
+def test_simplifier_charter_retains_executor_status_vocabulary():
+    text = SIMPLIFIER_MD.read_text()
+    for status in ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"]:
+        assert status in text, (
+            f"simplifier.md must return the executor status vocabulary "
+            f"({status!r} missing)."
+        )
+
+
+def test_simplifier_not_in_execute_dispatched_agents_yet():
+    text = EXECUTE_SKILL_MD.read_text()
+    assert "simplifier" not in text, (
+        "simplifier is not yet wired into execute's After-All-Slices pipeline "
+        "— that's a later slice's scope. execute/SKILL.md must not reference "
+        "it yet."
     )
