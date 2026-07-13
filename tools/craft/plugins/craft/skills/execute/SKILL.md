@@ -178,6 +178,7 @@ The parent carries a `## Flow-out` checklist — work it *before* the parent goe
 - **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)\s*[=:]\s*\S+`
 - **Bearer / api-key shapes** — `(?i)bearer\s+[A-Za-z0-9._\-]+`, `(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}`
 - **High-entropy literals** — `\b[A-Za-z0-9+/]{32,}={0,2}\b` (base64/hex-shaped secrets), `\b[A-Fa-f0-9]{40,}\b`
+- **PEM private-key blocks** — `-----BEGIN [A-Z ]*PRIVATE KEY-----` (the high-entropy pattern catches the body but not this header, so pin it separately)
 
 Then complete the ritual:
 
