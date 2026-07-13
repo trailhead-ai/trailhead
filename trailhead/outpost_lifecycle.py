@@ -27,6 +27,12 @@ Contract & invariants
   is the authoritative "this pid is dead" primitive. A pidfile pointing at a dead
   pid is *stale*; it is detected and cleaned on ``start`` (recovering cleanly) and
   reported+cleaned on ``status``/``stop``.
+* **Identity confirmation, not just liveness.** A live pid alone doesn't prove
+  it's *our* daemon — pids get reused by the OS. ``start``'s idempotency check
+  and ``stop`` both probe ``/health`` before trusting a live recorded pid; if it
+  doesn't answer, the pidfile is treated as stale (cleaned, nothing signaled)
+  rather than risking a SIGTERM to an unrelated process. ``status`` already did
+  this via its own ``/health`` probe.
 * **Idempotence.** A second ``start`` while already running is a no-op. ``stop`` on a
   stopped daemon is a no-op.
 
@@ -192,22 +198,26 @@ def start(
     env: dict[str, str] | None = None,
     node_bin: str = "node",
     port: int = DAEMON_PORT,
+    health_timeout: float = 2.0,
 ) -> int:
     """Spawn the outpost daemon detached. Idempotent when already running.
 
     Resolves and validates the daemon entrypoint BEFORE any spawn, so a bad
     config/path fails loudly without leaving a half-started daemon. A stale
-    pidfile (dead pid) is cleaned and start proceeds.
+    pidfile is cleaned and start proceeds: either the recorded pid is dead,
+    or it's alive but doesn't answer /health, meaning the OS has reused it
+    for an unrelated process since the daemon died.
     """
     checkout, entrypoint = _resolve_entrypoint(env)
 
     pidfile = _pidfile(env)
     existing = _read_pid(pidfile)
-    if existing is not None and _pid_alive(existing):
+    if existing is not None and _pid_alive(existing) and _probe_health(port, health_timeout) is not None:
         print(f"outpost already running (pid {existing}).")
         return 0
     if existing is not None:
-        # Stale pidfile — the recorded process is gone.
+        # Stale pidfile — the recorded process is gone, or its pid has been
+        # reused by an unrelated process. Either way, not the daemon.
         pidfile.unlink(missing_ok=True)
 
     state = ensure_dir(state_dir(APP, env=env))
@@ -236,11 +246,17 @@ def start(
 def stop(
     *,
     env: dict[str, str] | None = None,
+    port: int = DAEMON_PORT,
     timeout: float = _STOP_TIMEOUT_SECONDS,
+    health_timeout: float = 2.0,
 ) -> int:
     """SIGTERM the daemon, wait for a clean exit, and remove the pidfile.
 
-    No-op when not running; a stale pidfile is simply cleaned.
+    No-op when not running. A pidfile is treated as stale (cleaned, nothing
+    signaled) both when its pid is dead and when the pid is alive but doesn't
+    answer /health — the latter means the OS has reused the pid for an
+    unrelated process since the daemon died, and signaling it would kill the
+    wrong process.
     """
     pidfile = _pidfile(env)
     pid = _read_pid(pidfile)
@@ -248,7 +264,7 @@ def stop(
         print("outpost is not running.")
         return 0
 
-    if not _pid_alive(pid):
+    if not _pid_alive(pid) or _probe_health(port, health_timeout) is None:
         pidfile.unlink(missing_ok=True)
         print("outpost is not running; removed stale pidfile.")
         return 0

@@ -120,6 +120,18 @@ def _pid(o) -> int:
     return int((o.state_dir / "outpost.pid").read_text().strip())
 
 
+def _spawn_unrelated_process() -> subprocess.Popen:
+    """A live process that is NOT the outpost daemon and never answers
+    /health — stands in for the OS reassigning a dead daemon's pid to an
+    unrelated process (pid reuse) before stop/start next inspects it."""
+    return subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixture — a validated fake checkout + isolated config/state dirs
 # ---------------------------------------------------------------------------
@@ -232,6 +244,31 @@ def test_start_recovers_from_stale_pidfile(outpost):
     assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
 
 
+def test_start_does_not_treat_reused_pid_as_already_running(outpost):
+    # The recorded pid is alive (liveness check would pass) but belongs to an
+    # unrelated process that never answers /health — simulating the OS
+    # reassigning a dead daemon's pid before start() runs. start() must not
+    # report false idempotency; it must recognize the real daemon is down and
+    # spawn it.
+    unrelated = _spawn_unrelated_process()
+    try:
+        assert _wait_until(lambda: _pid_alive(unrelated.pid), timeout=3.0)
+        pidfile = outpost.state_dir / "outpost.pid"
+        pidfile.parent.mkdir(parents=True, exist_ok=True)
+        pidfile.write_text(f"{unrelated.pid}\n")
+
+        rc = outpost_lifecycle.start(env=outpost.env, node_bin=sys.executable, port=outpost.port)
+
+        assert rc == 0
+        new_pid = _pid(outpost)
+        assert new_pid != unrelated.pid
+        assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
+        assert _pid_alive(unrelated.pid)
+    finally:
+        unrelated.kill()
+        unrelated.wait(timeout=5)
+
+
 # ---------------------------------------------------------------------------
 # stop
 # ---------------------------------------------------------------------------
@@ -241,8 +278,9 @@ def test_stop_terminates_and_removes_pidfile(outpost):
     assert _start(outpost) == 0
     pid = _pid(outpost)
     assert _wait_until(lambda: _pid_alive(pid), timeout=3.0)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
 
-    rc = outpost_lifecycle.stop(env=outpost.env)
+    rc = outpost_lifecycle.stop(env=outpost.env, port=outpost.port)
 
     assert rc == 0
     assert not (outpost.state_dir / "outpost.pid").exists()
@@ -263,6 +301,28 @@ def test_stop_cleans_stale_pidfile(outpost):
 
     assert outpost_lifecycle.stop(env=outpost.env) == 0
     assert not (outpost.state_dir / "outpost.pid").exists()
+
+
+def test_stop_does_not_signal_reused_pid_without_health_confirmation(outpost):
+    # The recorded pid is alive (liveness check would pass) but belongs to an
+    # unrelated process that never answers /health — simulating the OS
+    # reassigning a dead daemon's pid before stop() runs. stop() must not
+    # SIGTERM it; it must treat the pidfile as stale instead.
+    unrelated = _spawn_unrelated_process()
+    try:
+        assert _wait_until(lambda: _pid_alive(unrelated.pid), timeout=3.0)
+        pidfile = outpost.state_dir / "outpost.pid"
+        pidfile.parent.mkdir(parents=True, exist_ok=True)
+        pidfile.write_text(f"{unrelated.pid}\n")
+
+        rc = outpost_lifecycle.stop(env=outpost.env, port=outpost.port)
+
+        assert rc == 0
+        assert not pidfile.exists()
+        assert _pid_alive(unrelated.pid)
+    finally:
+        unrelated.kill()
+        unrelated.wait(timeout=5)
 
 
 # ---------------------------------------------------------------------------
