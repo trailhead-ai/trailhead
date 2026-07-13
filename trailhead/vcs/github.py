@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from trailhead.vcs import runner as rp
+from trailhead.vcs.untrusted import wrap_untrusted
 from trailhead.vcs.interface import (
     CISurface,
     DeploySurface,
@@ -243,6 +244,12 @@ def _fetch_annotations(
     if not raw:
         return []
     annotations = raw[:max_annotations]
+    # `message` is the one attacker-influenced free-text field on an annotation;
+    # wrap it at the boundary. `path`/`start_line` are structural — `_evaluate`
+    # gates on `path`'s truthiness, so wrapping it would flip classification.
+    for ann in annotations:
+        if isinstance(ann.get("message"), str):
+            ann["message"] = wrap_untrusted(ann["message"], source="ci-annotation")
     if len(raw) > max_annotations:
         annotations.append({"truncated": True, "total": len(raw)})
     return annotations
@@ -300,9 +307,75 @@ def _check_status(
             if r.get("author", {}).get("login") == review_bot_login
             and (not since or r.get("submittedAt", "") > since)
         ]
+        # `body` is the attacker-influenced free-text field; wrap it in place on the
+        # (otherwise unprojected) review dict. `state`/`author`/`submittedAt` are
+        # structural — `_bot_review_action` keys on `state`, so it stays untouched.
+        for review in bot_reviews:
+            if isinstance(review.get("body"), str):
+                review["body"] = wrap_untrusted(review["body"], source="bot-review")
         result["botReviews"] = bot_reviews
 
     return result
+
+
+def _summary_inputs(
+    repo_path: str,
+    pr_number: str,
+    *,
+    runner: rp.Runner,
+) -> dict[str, Any]:
+    """Fetch the PR reads a summarizer needs, marker-wrapping every free-text field.
+
+    Consolidates the three direct-``gh`` reads a PR summary otherwise makes — ``pr
+    view`` (metadata), ``pr diff`` (the diff), and the inline review comments API —
+    behind the VCS boundary so the untrusted-content marker covers them. The
+    attacker-influenced free-text (``title``/``body``/``diff``/each comment ``body``)
+    is wrapped; structural metadata (``state``/``mergeable``/``statusCheckRollup``,
+    each comment's ``path``/``line``/``author``) passes through unwrapped.
+    """
+    validate_pr_number(pr_number)
+    view = _gh(
+        ["pr", "view", pr_number, "--json", "number,title,body,state,mergeable,statusCheckRollup"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if not view:
+        raise RuntimeError(f"summary_inputs: could not fetch PR #{pr_number} in {repo_path}")
+
+    owner_repo = _get_owner_repo(repo_path, runner)
+    raw_comments = (
+        _gh(
+            ["api", f"repos/{owner_repo}/pulls/{pr_number}/comments", "--paginate"],
+            cwd=repo_path,
+            runner=runner,
+        )
+        if owner_repo
+        else None
+    ) or []
+
+    diff_r = rp.run(["gh", "pr", "diff", pr_number], cwd=repo_path, runner=runner)
+    diff = diff_r.stdout if diff_r.returncode == 0 else ""
+
+    comments = [
+        {
+            "path": c.get("path"),
+            "line": c.get("line"),
+            "author": c.get("user", {}).get("login"),
+            "body": wrap_untrusted(c.get("body") or "", source="pr-review-comment"),
+        }
+        for c in raw_comments
+    ]
+
+    return {
+        "number": view.get("number"),
+        "title": wrap_untrusted(view.get("title") or "", source="pr-metadata"),
+        "body": wrap_untrusted(view.get("body") or "", source="pr-metadata"),
+        "state": view.get("state"),
+        "mergeable": view.get("mergeable"),
+        "statusCheckRollup": view.get("statusCheckRollup", []),
+        "diff": wrap_untrusted(diff, source="pr-diff"),
+        "comments": comments,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +769,9 @@ class _GitHubPR(PRSurface):
         fail_count: int = 0,
     ) -> dict[str, Any]:
         return _evaluate(status, review_bot_login=review_bot_login, fail_count=fail_count)
+
+    def summary_inputs(self, repo_path: str, pr_number: str) -> dict[str, Any]:
+        return _summary_inputs(repo_path, pr_number, runner=self._runner)
 
     def merge(
         self,

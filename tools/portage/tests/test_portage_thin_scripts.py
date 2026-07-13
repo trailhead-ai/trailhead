@@ -50,6 +50,16 @@ class _FakePR:
         self.evaluate_result = {"action": "done", "reason": "clean", "details": {}}
         self.merge_result = {"merged": ["a:1"], "failed": {}, "skipped": {}}
         self.sidecar = {"schema_version": 1, "prs": [], "external_tracker": None}
+        self.summary_result = {
+            "number": 1,
+            "title": '<untrusted-content source="pr-metadata">t</untrusted-content>',
+            "body": '<untrusted-content source="pr-metadata">b</untrusted-content>',
+            "state": "OPEN",
+            "mergeable": "MERGEABLE",
+            "statusCheckRollup": [],
+            "diff": '<untrusted-content source="pr-diff">d</untrusted-content>',
+            "comments": [],
+        }
 
     def status(self, repo_path, pr_number, *, since=None, review_bot_login=None):
         self.calls.append(("status", repo_path, pr_number, since, review_bot_login))
@@ -62,6 +72,10 @@ class _FakePR:
     def merge(self, pr_pairs, manifest_path, *, toml_path=None):
         self.calls.append(("merge", list(pr_pairs), manifest_path, toml_path))
         return self.merge_result
+
+    def summary_inputs(self, repo_path, pr_number):
+        self.calls.append(("summary_inputs", repo_path, pr_number))
+        return self.summary_result
 
     def open(self, sidecar_path, prs):
         self.calls.append(("open", str(sidecar_path), prs))
@@ -162,6 +176,37 @@ class TestCheckPrStatus:
         assert rc == 1
         out = json.loads(capsys.readouterr().out)
         assert "must be all digits" in out["error"]
+
+
+# ---------------------------------------------------------------------------
+# summarize_pr.py
+# ---------------------------------------------------------------------------
+
+
+class TestSummarizePr:
+    def test_delegates_to_pr_summary_inputs_and_prints_wrapped_json(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        provider = _FakeProvider()
+        mod = load_script("summarize_pr")
+        _patch_provider(mod, monkeypatch, provider)
+        repo = tmp_path  # must be a directory (CLI guard)
+
+        rc = mod.main([str(repo), "42"])
+        assert rc == 0
+        assert provider.pr.calls[0] == ("summary_inputs", str(repo), "42")
+        out = json.loads(capsys.readouterr().out)
+        # The untrusted free-text fields arrive marker-wrapped through the boundary.
+        assert out["title"].startswith("<untrusted-content")
+        assert out["diff"].startswith("<untrusted-content")
+
+    def test_not_a_directory_exits_1(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+        mod = load_script("summarize_pr")
+        _patch_provider(mod, monkeypatch, provider)
+        rc = mod.main([str(tmp_path / "nope"), "42"])
+        assert rc == 1
+        assert "not a directory" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

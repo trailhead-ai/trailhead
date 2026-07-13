@@ -83,6 +83,15 @@ class PRSurface(ABC):
     ) -> dict[str, Any]:
         """Merge PRs in dependency order with the safety gate."""
 
+    @abstractmethod
+    def summary_inputs(self, repo_path: str, pr_number: str) -> dict[str, Any]:
+        """Fetch a PR's summarizer inputs (metadata/diff/inline comments).
+
+        The single boundary read a PR summary makes, so untrusted free text
+        (title/body/diff/comment bodies) is marker-wrapped once at ingress
+        instead of via ad-hoc direct ``gh`` calls that bypass the marker.
+        """
+
 
 class CISurface(ABC):
     """CI checks read + poll-to-actionable."""
