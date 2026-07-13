@@ -97,7 +97,22 @@ Before moving to planning, verify:
 - [ ] UI direction is locked (if applicable)
 - [ ] Spec is written
 
-If all green, update spec frontmatter `status: draft` → `status: ready` and proceed to Planning.
+If all green, **leave the spec at `status: draft`** and proceed to Planning.
+
+**You cannot freeze a spec.** The `draft` → `ready` edge belongs to the `gauntlet` skill — the
+adversarial spec review that every spec passes before it becomes load-bearing. You cannot run it:
+it dispatches eight parallel review agents (you have no `Agent` tool) and it gates on a *user*
+dispositioning each Critical finding, and you run in an isolated context with no user in it.
+
+So the plan you write here is **provisional against an un-reviewed spec**. Say exactly that in your
+returned summary, and tell the caller what closes it:
+
+> Spec written at `draft` — **not yet gauntleted**. The plan below is provisional until it is.
+> Run `/craft:gauntlet <spec-id>` in the main session; if the gauntlet's premise pass reframes the
+> spec, this plan is void and planning restarts against the successor spec.
+
+This is not a formality. In the runs that calibrated the gauntlet, the premise pass reframed a spec
+badly enough to supersede it outright — a plan built on that spec would have been wasted work.
 
 ---
 
@@ -153,7 +168,7 @@ Every slice must include a test contract — the behaviors to prove with failing
 
 ### 8. Write the Plan
 
-Persist the plan as a **`task` record graph** with `lore record create` (see `skills/_shared/note-storage.md`): render craft's parent-task body template (`templates/plan.md`), fill it in, and create the parent — `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`. Then render craft's child-task body template (`templates/task.md`) for each slice and create it under the parent, ordered after any slice it builds on — `printf '%s' "$SLICE_BODY" | lore record create --kind task --title "<slice topic>" --status ready --parent <parent-name> --depends-on <earlier-slice-name>` (create children at `ready`; the `depends-on` edges gate runnability, so omit `--depends-on` for slices with no predecessor). Verify with `lore task graph <parent-name>`. If an upstream spec exists, link the parent to it (`lore record update <parent-id> --related spec=<spec-name>`) and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`; brainstorm leaves the frozen spec at `ready`).
+Persist the plan as a **`task` record graph** with `lore record create` (see `skills/_shared/note-storage.md`): render craft's parent-task body template (`templates/plan.md`), fill it in, and create the parent — `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`. Then render craft's child-task body template (`templates/task.md`) for each slice and create it under the parent, ordered after any slice it builds on — `printf '%s' "$SLICE_BODY" | lore record create --kind task --title "<slice topic>" --status ready --parent <parent-name> --depends-on <earlier-slice-name>` (create children at `ready`; the `depends-on` edges gate runnability, so omit `--depends-on` for slices with no predecessor). Verify with `lore task graph <parent-name>`. If an upstream spec exists, link the parent to it (`lore record update <parent-id> --related spec=<spec-name>`). Advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) **only if the spec is already `ready`** — i.e. it has passed the gauntlet. A spec still at `draft` stays at `draft`: you must not advance it, because `planned` would imply a freeze the gauntlet never granted. Leave it, and flag it in your summary per the Brainstorming Exit Gate above.
 
 Fill the parent in: **Goal** (one sentence) · **Delta design** (2-3 sentences) · **Given Axioms** (each as a citation) · **Known Unknowns** (checkbox per unknown, each names the child task it blocks) · **`## Flow-out`** (completion-ritual checklist, left unticked). Each child task carries **Delivers + Test contract + Files** (test contract = behaviors to prove with failing tests before implementation).
 

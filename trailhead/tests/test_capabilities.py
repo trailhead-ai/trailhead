@@ -132,6 +132,13 @@ class TestCraftInventory:
         for name in ("advocate", "builder", "breaker", "attacker"):
             assert name in m.subagents
 
+    def test_gauntlet_subagents_discovered(self):
+        # The spec-gauntlet passes that aren't council lenses. Each must be
+        # discovered as selectable, or the gauntlet's dispatch dead-ends.
+        m = load_manifest(_CRAFT_MANIFEST)
+        for name in ("premise-attacker", "consistency-auditor", "divergence-prober"):
+            assert name in m.subagents
+
     def test_helper_subagents_discovered(self):
         m = load_manifest(_CRAFT_MANIFEST)
         for name in (
@@ -147,7 +154,9 @@ class TestCraftInventory:
     def test_lifecycle_skills_selectable(self):
         # The craft skills are exactly these — each has a SKILL.md and is
         # discovered as selectable. brainstorm is a craft skill (discovery →
-        # frozen spec, runs before planning). receiving-code-review is the
+        # draft spec, runs before planning). gauntlet is the adversarial spec
+        # review that owns the spec's draft → ready edge, sitting between
+        # brainstorm and plan. receiving-code-review is the
         # untrusted-content-framing reference skill for evaluating incoming
         # review/CI-annotation feedback.
         m = load_manifest(_CRAFT_MANIFEST)
@@ -158,6 +167,7 @@ class TestCraftInventory:
             "review",
             "consult",
             "brainstorm",
+            "gauntlet",
             "receiving-code-review",
         }
 

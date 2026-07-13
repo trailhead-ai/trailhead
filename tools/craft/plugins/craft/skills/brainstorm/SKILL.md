@@ -198,16 +198,25 @@ Before declaring brainstorming done, verify the checklist:
 - [ ] UI direction is locked (if applicable) — described verbally in the spec
 - [ ] Spec is written and shared with the user (the `lore record create` path)
 
-If all checklist items are green, propose the handoff:
+If all checklist items are green, hand off to the **gauntlet** — the adversarial spec review that
+every spec passes before it freezes:
 
-> "The spec is saved as a lore `spec` record (status `draft`). Ready to flip it to `ready` and hand
-> off to planning — agree?"
+> "The spec is saved as a lore `spec` record (status `draft`). Next it goes through the gauntlet —
+> eight parallel passes that attack its facts, premises, consistency, and underdetermination — and
+> the gauntlet flips it to `ready` once you've dispositioned what it finds. Run `/craft:gauntlet
+> <spec-id>`."
 
-On user agreement, update the spec status to `ready` (`lore record update <spec-id> --status ready`)
-and stop.
+**Do not flip the spec to `ready` yourself.** Brainstorm writes the spec at `draft` and stops there;
+the `gauntlet` skill owns the `ready`-flip (its step 6). That split is deliberate — it makes the
+review structurally unskippable rather than a checklist item to honor, because nothing else in the
+pipeline freezes a spec.
 
-**Handoff to planning:** the `plan` skill picks up from here. Do not enter planning yourself from
-within brainstorm — let the user invoke `/craft:plan` explicitly so it loads cleanly.
+Let the user invoke `/craft:gauntlet` explicitly so it loads cleanly — do not enter it from within
+brainstorm (a skill→skill chain is unreliable).
+
+**Handoff to planning:** the `plan` skill picks up **after the gauntlet**, not after brainstorm — it
+plans from a `ready` spec, and only the gauntlet produces one. Do not enter planning yourself from
+within brainstorm; let the user invoke `/craft:plan` explicitly once the spec is `ready`.
 
 ## Status Lifecycle
 
@@ -216,6 +225,11 @@ The spec frontmatter `status` walks `draft` (brainstorming) → `ready` (frozen,
 off-vocab values like `shipped` are rejected. Once `ready`, the spec
 is **frozen**: no more edits; new thinking on the same topic creates a new spec with a
 `Related → Prior specs` link back.
+
+**The `draft` → `ready` edge is the gauntlet's.** Brainstorm leaves the spec at `draft`; the
+`gauntlet` skill flips it once its Criticals are dispositioned. A gauntlet Critical dispositioned
+`reframed` sends the spec to `superseded` instead — the framing didn't survive, so this spec never
+freezes and a new one takes its place. That is the review working, not the spec failing.
 
 ## Bounce-Back from Planning
 

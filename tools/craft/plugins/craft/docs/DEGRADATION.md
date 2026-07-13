@@ -28,3 +28,12 @@ exist in the generic skill at all:
 | Capability | Status |
 |---|---|
 | Plan cost estimation (cost estimate step, session-totals hook, cost-history report) | Removed, not degraded — the generic planning skill has no cost-estimation step, no session-note cost hook, and no extension point for one. |
+| `design_mockup` — UI mockup generation (formerly brainstorm step 4) | Removed, not degraded — brainstorm settles UI direction in conversation and writes it verbally into the spec's UI Direction section. There is no mockup dispatch and no seam for one (pinned by `test_brainstorm_generic.py::test_brainstorm_does_not_dispatch_design_mockup_provider`). |
+| `feature_flags` — feature-flag provider (formerly brainstorm step 5) | Removed, not degraded — craft's brainstorm has no rollout/gating step, so there is nothing to gate on a provider. |
+| `observability` — observability / alerting provider (formerly brainstorm step 5b) | Removed, not degraded — craft's brainstorm has no observability step. Failure visibility is instead grilled for in step 2 (*Failure visibility*) and lands in the spec as ordinary acceptance criteria. |
+| `issue_tracker` — issue tracker / project-management sync (formerly brainstorm exit gate) | Removed, not degraded — the exit gate writes the spec to the note store and hands off to the gauntlet; it syncs no ticket. |
+
+> These four were documented as *degraded* seams back when `brainstorm` was a lore skill. Brainstorm
+> now ships in craft, and the seams were removed rather than carried over — they have no
+> visible-skip notice because there is no step left to skip. `note_store` is the one seam brainstorm
+> retains (see the table above).

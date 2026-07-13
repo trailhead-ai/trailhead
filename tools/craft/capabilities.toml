@@ -4,8 +4,17 @@
 # subagents/skills by name (see trailhead/install_config.py).
 #
 # skills/_shared ships always (base): it holds council.md (the review-panel roster
-# + dispatch contract) read at runtime by the plan and consult skills, and has no
-# SKILL.md so it is never selectable.
+# + dispatch contract) read at runtime by the plan, consult, and gauntlet skills,
+# and has no SKILL.md so it is never selectable.
+#
+# Dependency worth knowing when hand-picking a selection: the `gauntlet` skill owns
+# the spec's draft -> ready edge (brainstorm and plan deliberately cannot freeze a
+# spec). A selection carrying `brainstorm` or `plan` but NOT `gauntlet` therefore
+# deadlocks the spec lifecycle — nothing installed can freeze a spec. The gauntlet
+# also dispatches the `premise-attacker`, `consistency-auditor`, and
+# `divergence-prober` subagents plus the four council lenses; omitting any of them
+# makes the skill halt rather than run a degraded review. The default config selects
+# the whole plugin, so this only bites a hand-written subset.
 
 [tool]
 name = "craft"
