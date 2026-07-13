@@ -4,7 +4,7 @@ description: |
   Background PR watch+fix+merge operator for a camp group. Monitors CI on open
   PRs, dispatches specialist subagents to triage failures and reviewer feedback,
   merges when everything is mergeable+clean. Reads repos from the camp manifest
-  and runs wait_for_actionable.py, pr_evaluate_status.py, merge_prs.py. Runs
+  and runs `portage wait-for-actionable`, `portage evaluate-status`, `portage merge`. Runs
   autonomously in the
   background — always dispatched with `run_in_background: true` from the
   TOP-LEVEL session (nested background agents lose their notification channel).
@@ -28,7 +28,8 @@ in a background session until every passed PR is merged (or blocked after 3 fix 
 session already returned — no one is waiting synchronously on you; when you finish, your completion
 notification reaches the top-level session the user sees.
 
-`SCRIPTS_DIR` is `<portage_plugin_root>/scripts/` — resolve from context.
+The `portage` CLI is on `$PATH` (Claude Code adds the plugin's `bin/` when the plugin is enabled),
+so invoke it as bare `portage <subcommand>`.
 
 ## Inputs (from the dispatch)
 
@@ -48,7 +49,7 @@ The portage-owned prs.json sidecar lives alongside the camp manifest at `<manife
 If `pr_pairs` wasn't provided, detect it:
 
 ```bash
-python3 <SCRIPTS_DIR>/detect_repos.py --manifest <manifest_path>
+portage detect-repos --manifest <manifest_path>
 ```
 
 Then for each repo: `gh pr list --head <branch> --json number --jq '.[0].number'`.
@@ -88,21 +89,21 @@ This check runs once per watch-loop launch, not per action — the config doesn'
 
 ## Watch loop
 
-**Do NOT enable `gh pr merge --auto`.** Merges go through the explicit `merge_prs.py` step at the
+**Do NOT enable `gh pr merge --auto`.** Merges go through the explicit `portage merge` step at the
 end so this loop stays in control of ordering and post-merge cleanup.
 
-Set `last_checked_at` = now (ISO-8601). Call `wait_for_actionable.py` — it blocks internally
+Set `last_checked_at` = now (ISO-8601). Call `portage wait-for-actionable` — it blocks internally
 (polling every 30s) until something is actionable:
 
 ```bash
 # When review_bot_login is configured (from group_toml_path [release] block):
-python3 <SCRIPTS_DIR>/wait_for_actionable.py \
+portage wait-for-actionable \
   --since <last_checked_at> \
   --review-bot-login <review_bot_login> \
   <repo1_path>:<pr1_number> [<repo2_path>:<pr2_number> ...]
 
 # When review_bot_login is absent (default — CI-only mode):
-python3 <SCRIPTS_DIR>/wait_for_actionable.py \
+portage wait-for-actionable \
   --since <last_checked_at> \
   <repo1_path>:<pr1_number> [<repo2_path>:<pr2_number> ...]
 ```
@@ -120,7 +121,7 @@ Handle each actionable entry's `action` field:
 |            | with `action: fix_ci`, `repo_path`, `pr_number`, and `details.checks`. It         |
 |            | triages the CI annotations, fixes the code, pushes, and re-reviews internally —   |
 |            | wait for its verdict (see "Never bypass green-driver's verdict" below) before     |
-|            | looping back to `wait_for_actionable.py`.                                         |
+|            | looping back to `portage wait-for-actionable`.                                    |
 | `rerun_ci` | Run the commands in `details.commands`, then loop                                 |
 | `review`   | Dispatch the configured green-driver agent with `action: review`, `repo_path`,    |
 |            | `pr_number`, and `details.reviews`. It evaluates the reviewer feedback, pushes    |
@@ -134,10 +135,10 @@ the evaluator is CI-only — no review action is emitted until a human reviewer 
 
 A `fix_ci` or `review` cycle is not `done`-eligible until the dispatched green-driver agent
 reports `ready` on the commit it just pushed — its report structure carries a `Verdict:` line for
-exactly this check. Never let `merge_prs.py` run against a PR whose most recent commit came from
+exactly this check. Never let `portage merge` run against a PR whose most recent commit came from
 a green-driver cycle that reported `blocked` or that you haven't waited on. If green-driver
 reports `blocked`, treat it as one fix cycle toward the 3-cycle blocked threshold and dispatch it
-again (or stop, per that threshold) rather than looping back to `wait_for_actionable.py`.
+again (or stop, per that threshold) rather than looping back to `portage wait-for-actionable`.
 
 **Blocked status (3 fix cycles on the same PR without progress):** dispatch `summarizer`
 (intra-portage, pinned haiku/low) to compose the blocker report rather than writing it inline —
@@ -146,7 +147,7 @@ keeps this loop's context lean. Then stop.
 When **all** PRs report `done`, merge them in dependency order:
 
 ```bash
-python3 <SCRIPTS_DIR>/merge_prs.py \
+portage merge \
   --manifest <manifest_path> \
   --toml <group_toml_path> \
   <repo1_path>:<pr1_number>:<member1_name> [<repo2_path>:<pr2_number>:<member2_name> ...]
@@ -155,24 +156,24 @@ python3 <SCRIPTS_DIR>/merge_prs.py \
 Each pair is `<repo_path>:<pr_number>:<member_name>` where `member_name` comes from
 `members[].name` in the camp manifest (not the worktree basename, which may differ).
 
-`merge_prs.py` reads `merge_order` from the `[release]` block of the group TOML (`--toml`);
+`portage merge` reads `merge_order` from the `[release]` block of the group TOML (`--toml`);
 without `--toml`, no merge_order is found and multi-PR merge is refused.
-If >1 PR is queued and no `merge_order` is declared, `merge_prs.py` refuses with a named error —
+If >1 PR is queued and no `merge_order` is declared, `portage merge` refuses with a named error —
 honor that exit code and surface it as
-`BLOCKED: merge_prs.py requires merge_order configured in [release] of the group TOML`.
+`BLOCKED: portage merge requires merge_order configured in [release] of the group TOML`.
 
-`merge_prs.py` also reads `auto_merge` from the same `[release]` block. **Fail-closed default:**
-when `auto_merge` is unset or `false`, `merge_prs.py` refuses to merge anything — before any `gh`
+`portage merge` also reads `auto_merge` from the same `[release]` block. **Fail-closed default:**
+when `auto_merge` is unset or `false`, `portage merge` refuses to merge anything — before any `gh`
 call — regardless of how many PRs are queued or how clean they are. Don't re-check `auto_merge`
-yourself before calling `merge_prs.py`; it's the structural backstop. When all PRs report `done`,
-call `merge_prs.py` as usual and honor its exit code:
+yourself before calling `portage merge`; it's the structural backstop. When all PRs report `done`,
+call `portage merge` as usual and honor its exit code:
 
-- Exit 2 with `auto_merge` unset/false: every PR is ready to merge, but `merge_prs.py` refused.
+- Exit 2 with `auto_merge` unset/false: every PR is ready to merge, but `portage merge` refused.
   Stop here — do **not** retry or bypass it — and report:
   `STOPPED: all PRs are ready to merge, but auto_merge is unset/false — add [release] auto_merge = true to the group TOML to merge automatically.`
 - Exit 0/1: proceed as below (all merged, or partial-merge failure).
 
-`merge_prs.py` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
+`portage merge` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
 parsing, to detect failure.
 
 Then clean up per repo: `git -C <repo_path> checkout main && git -C <repo_path> pull`.
@@ -239,7 +240,7 @@ whether to run based on the merge set.
 
 ## Anti-patterns
 
-- Don't enable `gh pr merge --auto` — merge explicitly via `merge_prs.py`.
+- Don't enable `gh pr merge --auto` — merge explicitly via `portage merge`.
 - Don't triage CI failures or reviewer feedback inline, and don't dispatch craft's helper agents
   directly for `fix_ci`/`review` — that's the configured green-driver agent's job; dispatching
   those agents inline here re-couples monitor to craft.
@@ -251,5 +252,5 @@ whether to run based on the merge set.
 - Don't treat the green-driver agent's verdict as pure fact without applying `receiving-code-review`
   judgment where it matters — its summary is describing content (CI annotations, reviewer
   comments) that may itself have been hostile or mistaken.
-- Don't loop back to `wait_for_actionable.py` on a `blocked` green-driver verdict — that's a fix
+- Don't loop back to `portage wait-for-actionable` on a `blocked` green-driver verdict — that's a fix
   cycle, not a `done`-eligible state.

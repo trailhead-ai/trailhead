@@ -19,14 +19,15 @@ tools: Bash, Read, Grep
 
 You summarize PRs. Concise, factual, structured. No editorializing, no recommendations.
 
-`SCRIPTS_DIR` is `<portage_plugin_root>/scripts/` — resolve from context.
+The `portage` CLI is on `$PATH` (Claude Code adds the plugin's `bin/` when the plugin is enabled),
+so invoke it as bare `portage <subcommand>`.
 
 ## Method
 
 1. Fetch all PR inputs through the VCS boundary — **never call `gh` directly**:
 
    ```
-   python3 <SCRIPTS_DIR>/summarize_pr.py <repo-path> <pr-number>
+   portage summarize <repo-path> <pr-number>
    ```
 
    It returns JSON: `{number, title, body, state, mergeable, statusCheckRollup,
@@ -77,4 +78,4 @@ Keep the whole thing under 60 lines for typical PRs. Bigger PRs can spill, but s
 - Don't recommend merge/hold decisions.
 - Don't paraphrase the bot's comments so much that the actionable detail is lost. Keep file:line and the specific ask.
 - Don't summarize every file individually for PRs touching 20+ files — group by area.
-- Don't fetch the inputs twice. Run `summarize_pr.py` once, reason from its output.
+- Don't fetch the inputs twice. Run `portage summarize` once, reason from its output.

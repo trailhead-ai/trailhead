@@ -470,9 +470,9 @@ class TestSummaryInputsWrapsStatusCheckRollupFreeText:
 
 
 class TestSummarizerHasNoDirectGhBypass:
-    def test_summarizer_routes_through_the_thin_script(self) -> None:
+    def test_summarizer_routes_through_the_cli(self) -> None:
         text = _SUMMARIZER.read_text(encoding="utf-8")
-        assert "summarize_pr.py" in text
+        assert "portage summarize" in text
 
     def test_summarizer_carries_no_direct_gh_pr_read(self) -> None:
         text = _SUMMARIZER.read_text(encoding="utf-8")

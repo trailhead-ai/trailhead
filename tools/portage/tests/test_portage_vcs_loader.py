@@ -1,16 +1,16 @@
-"""Permanent smoke: trailhead.vcs is importable from a portage script context.
+"""Permanent smoke: trailhead.vcs is importable from a portage CLI context.
 
 This test locks that importability in as a permanent guard. It fails if the
 on-disk layout shifts such that the four-tier ``_bootstrap.py`` loader can no
-longer reach the repo root from a portage script.
+longer reach the repo root from the portage CLI.
 
 Three invariants are locked:
 
-1. **parents[6] layout** — a portage thin script lives at
-   ``tools/portage/plugins/portage/scripts/<name>.py``. The Tier-2 upward marker
-   walk in ``_bootstrap.py`` reaches the repo root (the dir containing
-   ``trailhead/paths.py``) at ``parents[6]`` from the script's resolved path:
-   file → scripts → portage → plugins → portage → tools → repo-root.
+1. **Marker reachable from the plugin root** — ``_bootstrap.py`` lives at
+   ``tools/portage/plugins/portage/_bootstrap.py`` (a sibling of the ``portage``
+   package the CLI shim imports). The Tier-2 upward marker walk reaches the repo
+   root (the dir containing ``trailhead/paths.py``) from the bootstrap's resolved
+   path: file → portage → plugins → portage → tools → repo-root.
 
 2. **In-process boundary** — once ``trailhead`` is importable (Tier-1
    already-importable, which is exactly the portage pattern of one
@@ -19,17 +19,10 @@ Three invariants are locked:
    ``trailhead`` package. The env var is irrelevant once Tier-1 wins.
 
 3. **Cold-start boundary** — on a fresh process where Tier-1 fails (the
-   normal thin-script state), the Tier-2 ``__file__`` walk wins over a hostile
+   normal cold-start state), the Tier-2 ``__file__`` walk wins over a hostile
    Tier-3 ``$TRAILHEAD_ROOT``; the env var is only a fallback when the walk
    finds no co-located checkout (camp's shim flow). See
    ``TestColdStartTier2Hardening`` below.
-
-Depth note: the "parents[6]" depth counts the file itself as element 0 of the
-``(here, *here.parents)`` iteration the bootstrap walks — file(0) → scripts(1) →
-portage(2) → plugins(3) → portage(4) → tools(5) → repo-root(6). In ``Path.parents``
-terms (which excludes the file) that is ``parents[5]``. This test asserts the
-marker lands at iteration index 6 of ``(here, *here.parents)`` — i.e. it mirrors
-exactly what ``_bootstrap.py`` does, so a layout shift trips it.
 """
 
 from __future__ import annotations
@@ -44,27 +37,27 @@ from pathlib import Path
 
 
 # This test file lives at tools/portage/tests/test_portage_vcs_loader.py.
-# A real portage thin script lives at tools/portage/plugins/portage/scripts/<name>.py.
+# The portage CLI bootstrap lives at tools/portage/plugins/portage/_bootstrap.py.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPTS_DIR = _REPO_ROOT / "tools" / "portage" / "plugins" / "portage" / "scripts"
-_BOOTSTRAP = _SCRIPTS_DIR / "_bootstrap.py"
+_PLUGIN_ROOT = _REPO_ROOT / "tools" / "portage" / "plugins" / "portage"
+_BOOTSTRAP = _PLUGIN_ROOT / "_bootstrap.py"
 
 
 def _load_bootstrap():
-    """Load portage's _bootstrap.py module fresh (by path, like a thin script)."""
+    """Load portage's _bootstrap.py module fresh (by path, like the CLI shim)."""
     spec = importlib.util.spec_from_file_location("_portage_bootstrap", _BOOTSTRAP)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-class TestParents6Layout:
-    """The marker walk must reach the repo root at the proven depth from a script path."""
+class TestBootstrapLayout:
+    """The marker walk must reach the repo root from the bootstrap's plugin-root path."""
 
     def test_bootstrap_exists(self):
         assert _BOOTSTRAP.exists(), (
-            f"portage _bootstrap.py not found at {_BOOTSTRAP} — the thin scripts "
-            "depend on it to make trailhead.vcs importable"
+            f"portage _bootstrap.py not found at {_BOOTSTRAP} — the CLI "
+            "depends on it to make trailhead.vcs importable"
         )
 
 
@@ -121,7 +114,7 @@ class TestS5InProcessBoundary:
 #
 # TestS5InProcessBoundary above only covers the WARM path: a process where
 # trailhead is *already* imported, so Tier-1 short-circuits before any env var
-# is read. But a real thin-script invocation is a fresh, COLD Python process —
+# is read. But a real CLI invocation is a fresh, COLD Python process —
 # trailhead is not yet importable, Tier-1 fails, and the loader actually walks
 # its tiers. That is the normal execution path, and it is the redirect surface.
 #

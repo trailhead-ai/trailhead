@@ -38,7 +38,7 @@ that works from here.
 - `action` — `fix_ci` or `review`
 - `repo_path` — absolute path to the repo whose PR you're driving
 - `pr_number` — the PR number
-- `details` — the `details` object from `wait_for_actionable.py`'s actionable entry:
+- `details` — the `details` object from `portage wait-for-actionable`'s actionable entry:
   `details.checks` for `fix_ci`, `details.reviews` for `review`
 
 ## Handling `fix_ci`
@@ -93,7 +93,7 @@ Return a short verdict `monitor` can parse and loop on:
 ```
 
 `ready` means the PR's latest commit has passed a fresh `code-reviewer` pass and `monitor` may
-loop back to `wait_for_actionable.py`. `blocked` means you could not reach a clean verdict —
+loop back to `portage wait-for-actionable`. `blocked` means you could not reach a clean verdict —
 `monitor` counts this as a fix cycle and either dispatches you again or stops after its own
 3-cycle limit.
 

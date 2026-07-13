@@ -1,16 +1,17 @@
-"""merge_prs.py's auto_merge gate — fail-closed default.
+"""`portage merge`'s auto_merge gate — fail-closed default.
 
-`trailhead.vcs.github._merge_prs` reads `auto_merge` from the `[release]` block
-of the group TOML, mirroring the existing `merge_order` read. When the key is
-absent or false it refuses to merge — before any `gh`/`git` subprocess call —
-raising `AutoMergeDisabledError`. `merge_prs.py` (the thin CLI) surfaces that
-refusal as a clean exit 2 with the message on stderr, the same contract it
-already has for `MergeOrderRequiredError`/`MergeConfigError`.
+Ported from the retired ``test_merge_prs_auto_merge.py`` onto the unified CLI:
+``trailhead.vcs.github`` reads ``auto_merge`` from the ``[release]`` block of the
+group TOML (mirroring the ``merge_order`` read). When the key is absent or false
+it refuses to merge — before any ``gh``/``git`` subprocess call — raising
+``AutoMergeDisabledError``. The ``merge`` subcommand surfaces that refusal as a
+clean exit 2 with the message on stderr, the same contract it has for
+``MergeOrderRequiredError``/``MergeConfigError``.
 
-These tests exercise the real `GitHubProvider` (an injected spy runner, no
-network) through the `merge_prs.py` CLI entry point, so both halves of the
-gate — the read in `trailhead/vcs/github.py` and the CLI's except-tuple in
-`merge_prs.py` — are proven together.
+These tests exercise the real ``GitHubProvider`` (an injected spy runner, no
+network) through ``dispatch.main(["merge", ...])``, so both halves of the gate —
+the read in ``trailhead/vcs/github.py`` and the CLI's except-tuple in
+``portage.cli.pr`` — are proven together.
 """
 
 from __future__ import annotations
@@ -19,7 +20,10 @@ import json
 import subprocess
 from pathlib import Path
 
-from _script_loader import load_script
+import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
+
+from portage.cli import dispatch
+from portage.cli import pr as pr_cli
 
 from trailhead.vcs.github import GitHubProvider
 
@@ -72,39 +76,38 @@ def _write_toml(tmp_path: Path, content: str) -> Path:
     return p
 
 
-def _run_merge_prs(tmp_path, monkeypatch, capsys, toml_content: str | None):
+def _run_merge(tmp_path, monkeypatch, capsys, toml_content: str | None):
     wt = tmp_path / "wt" / "api"
     wt.mkdir(parents=True)
     manifest = _make_manifest(tmp_path, wt)
     spy = _SpyRunner()
-    mod = load_script("merge_prs")
-    monkeypatch.setattr(mod, "get_provider", lambda *a, **k: GitHubProvider(runner=spy))
+    monkeypatch.setattr(pr_cli, "get_provider", lambda *a, **k: GitHubProvider(runner=spy))
 
-    argv = ["--manifest", str(manifest)]
+    argv = ["merge", "--manifest", str(manifest)]
     if toml_content is not None:
         toml = _write_toml(tmp_path, toml_content)
         argv += ["--toml", str(toml)]
     argv += [f"{wt}:1:api"]
 
-    rc = mod.main(argv)
+    rc = dispatch.main(argv)
     return rc, spy, capsys.readouterr()
 
 
 class TestAutoMergeDefaultRefuses:
     def test_no_auto_merge_key_refuses_with_nonzero_exit(self, tmp_path, monkeypatch, capsys):
-        rc, spy, out = _run_merge_prs(tmp_path, monkeypatch, capsys, "[release]\n")
+        rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, "[release]\n")
         assert rc == 2
         assert not spy.merge_attempted()
 
     def test_no_toml_at_all_refuses(self, tmp_path, monkeypatch, capsys):
-        rc, spy, out = _run_merge_prs(tmp_path, monkeypatch, capsys, None)
+        rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, None)
         assert rc == 2
         assert not spy.merge_attempted()
 
 
 class TestAutoMergeTrueProceeds:
     def test_auto_merge_true_merges(self, tmp_path, monkeypatch, capsys):
-        rc, spy, out = _run_merge_prs(tmp_path, monkeypatch, capsys, "[release]\nauto_merge = true\n")
+        rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, "[release]\nauto_merge = true\n")
         assert rc == 0
         assert spy.merge_attempted()
         result = json.loads(out.out)
@@ -113,14 +116,14 @@ class TestAutoMergeTrueProceeds:
 
 class TestAutoMergeExplicitFalseRefuses:
     def test_explicit_false_refuses_same_as_default(self, tmp_path, monkeypatch, capsys):
-        rc, spy, out = _run_merge_prs(tmp_path, monkeypatch, capsys, "[release]\nauto_merge = false\n")
+        rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, "[release]\nauto_merge = false\n")
         assert rc == 2
         assert not spy.merge_attempted()
 
 
 class TestRefusalMessageNamesRemediation:
     def test_stderr_names_the_release_auto_merge_true_remediation(self, tmp_path, monkeypatch, capsys):
-        rc, spy, out = _run_merge_prs(tmp_path, monkeypatch, capsys, "[release]\n")
+        rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, "[release]\n")
         assert rc == 2
         assert "[release] auto_merge = true" in out.err
 

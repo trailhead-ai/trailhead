@@ -13,7 +13,7 @@ description: >
 **Recommended tier:** Sonnet/medium — most work is dispatched to subagents.
 
 **Agents:** `updater` (push orchestration), `monitor` (background watch + merge loop)
-**Scripts:** `detect_repos.py`, `merge_prs.py`, `release_prs_sidecar.py`
+**CLI:** `portage` (subcommands `detect-repos`, `merge`, `sidecar`) — on `$PATH` when the plugin is enabled
 
 ## Verb parsing
 
@@ -179,12 +179,12 @@ Agent({
 ```
 
 If `pr_pairs` is unknown (i.e. `rest` was empty), the agent will detect it via
-`detect_repos.py` + `gh pr list`. The review bot (if configured in
+`portage detect-repos` + `gh pr list`. The review bot (if configured in
 `[release].review_bot_login`) and external tracker (if configured in
 `[release].external_tracker`) take no action when absent from the group TOML.
 
 `<repo_path>` in `pr_pairs` is a LOCAL filesystem path. The downstream scripts use
-it as `cwd=` for `gh` calls. `pr_evaluate_status.py` fails fast with a clear error
+it as `cwd=` for `gh` calls. `portage evaluate-status` fails fast with a clear error
 if the path is not a directory.
 
 Tell the user: "Watching PRs in the background — I'll notify you when they're merged
@@ -202,15 +202,15 @@ Every camp group member is a peer — there is no privileged member.
 1. **Collect all open PR pairs.** If `rest` didn't supply them, detect them:
 
    ```bash
-   python3 <SCRIPTS_DIR>/detect_repos.py --manifest <manifest_path>
+   portage detect-repos --manifest <manifest_path>
    ```
 
    For each detected repo: `gh pr list --head <branch> --json number --jq '.[0].number'`.
 
-2. **Run merge_prs.py** with the collected pairs in `<repo_path>:<pr_number>:<member_name>` format:
+2. **Run `portage merge`** with the collected pairs in `<repo_path>:<pr_number>:<member_name>` format:
 
    ```bash
-   python3 <SCRIPTS_DIR>/merge_prs.py \
+   portage merge \
      --manifest <manifest_path> \
      --toml <group_toml_path> \
      <repo1>:<pr1>:<member1> [<repo2>:<pr2>:<member2> ...]
@@ -218,10 +218,10 @@ Every camp group member is a peer — there is no privileged member.
 
    Output JSON: `{"merged": [...], "failed": {...}, "skipped": {...}}`.
 
-   `merge_prs.py` reads `merge_order` from the `[release]` block of the group TOML.
-   For >1 PR without `merge_order` declared, the script refuses with a named error —
+   `portage merge` reads `merge_order` from the `[release]` block of the group TOML.
+   For >1 PR without `merge_order` declared, the command refuses with a named error —
    honor that exit code:
-   `BLOCKED: merge_prs.py requires merge_order configured in [release] of the group TOML`
+   `BLOCKED: portage merge requires merge_order configured in [release] of the group TOML`
 
 3. **Report results.** If any failed, surface the reason and suggest next steps.
 
@@ -242,11 +242,11 @@ No issue tracker configured — status transitions skipped. Configure
 ## Notes
 
 - Conventional commits: `feat:`, `fix:`, `chore:`
-- Merges happen explicitly via `merge_prs.py`, not `gh pr merge --auto`.
+- Merges happen explicitly via `portage merge`, not `gh pr merge --auto`.
 - Review bot login: configured in `[release].review_bot_login` of the group TOML;
   default none (CI-only mode). No configured review bot — no review action is emitted.
 - Merge order: configured in `[release].merge_order` of the group TOML; absent for
   single-PR groups (no order needed); required for >1 PR to avoid silent mis-merges.
 - No issue tracker configured — status transitions skipped. Configure
   `[release].external_tracker` in the group TOML to wire a tracker.
-- `SCRIPTS_DIR` is `<portage_plugin_root>/scripts/`.
+- The `portage` CLI is on `$PATH` when the plugin is enabled (Claude Code adds the plugin's `bin/`).

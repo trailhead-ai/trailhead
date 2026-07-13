@@ -33,7 +33,8 @@ code review — that's the caller's job.
 Every member of a camp group is a peer. There is no privileged member, no special-cased repo with a
 different push path. All members go through the same preflight → push → open/link → sidecar flow.
 
-`SCRIPTS_DIR` is `<portage_plugin_root>/scripts/` — resolve from context or pass as an env/input.
+The `portage` CLI is on `$PATH` (Claude Code adds the plugin's `bin/` when the plugin is enabled),
+so invoke it as bare `portage <subcommand>`.
 
 ## Inputs (from the dispatch)
 
@@ -50,7 +51,7 @@ The camp manifest (schema v1) lives at `manifest_path` and carries:
 ### Step 1 — Detect active repos
 
 ```bash
-python3 <SCRIPTS_DIR>/detect_repos.py --manifest <manifest_path>
+portage detect-repos --manifest <manifest_path>
 ```
 
 Returns a JSON array of `{ repo, path, branch, ahead, dirty }` for the active members. Members
@@ -91,7 +92,7 @@ cross-link the siblings.
 Record PR associations to the portage-owned `prs.json` sidecar that lives alongside the camp manifest:
 
 ```bash
-python3 <SCRIPTS_DIR>/release_prs_sidecar.py write \
+portage sidecar write \
   --sidecar <manifest_dir>/prs.json \
   --pr <repo1>:<pr_number1>:<pr_url1>:<branch1> \
   [--pr <repo2>:<pr_number2>:<pr_url2>:<branch2> ...]
@@ -140,7 +141,7 @@ Keep it under 15 lines.
 
 - Don't make judgment calls on code review feedback — that's the caller's job.
 - Don't re-run steps on partial failure. Report what failed and let the caller decide.
-- Don't mutate unrelated repos. Only push the repos `detect_repos.py` reported as active.
+- Don't mutate unrelated repos. Only push the repos `portage detect-repos` reported as active.
 - Don't launch monitor from inside this subagent — return `pr_pairs` to the caller so it can
   launch monitor from the top-level session where notifications are visible.
 - Don't treat any one repo as special or privileged. Every member of a camp group is a peer.

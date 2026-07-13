@@ -600,7 +600,7 @@ def validate_pr_number(pr_number: str) -> None:
     """Validate ``pr_number`` is all-digits; raise InvalidInputError otherwise.
 
     Public (not underscore-prefixed) so callers outside this module — e.g.
-    ``tools/portage``'s ``_pr_pair.py`` — can share this one validation rule
+    ``tools/portage``'s ``portage.pairs`` — can share this one validation rule
     instead of re-deriving their own digit regex.
     """
     if not re.fullmatch(r"\d+", pr_number):
