@@ -744,6 +744,93 @@ def test_scoped_record_updatable_and_deletable_with_same_flags(tmp_path):
     assert not list((pe_path / "blob").glob("*.md")), "scoped record not deleted"
 
 
+def test_scoped_record_show_reachable_without_flags(tmp_path):
+    """``record show`` on a record ``create`` routed to a non-default vault must
+    find it WITHOUT re-supplying the routing flag — the bug this test guards:
+    ``show`` used to resolve the vault from ONLY the current invocation's flags
+    (defaulting to the floor vault when none were given), while ``search`` and
+    ``update`` located the record correctly via a config-driven scan. A caller
+    that reads a RECORD_ID off ``search`` output has no reason to know — or
+    re-supply — the scope it was created with.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    _write_config(config_home, _spec_config_vaults(state))
+
+    r = _run_with_config(
+        [
+            "record",
+            "create",
+            "--kind",
+            "blob",
+            "--title",
+            "Grape",
+            "--keyword",
+            "foo",
+            "--team",
+            "product-engineering",
+        ],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+        stdin_text="grape body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+
+    # Show with NO scope flags must still find the scoped record.
+    r2 = _run_with_config(
+        ["record", "show", record_id],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+    )
+    assert r2.returncode == 0, f"show should reach the scoped record: {r2.stderr}"
+    assert "grape body" in r2.stdout
+
+
+def test_scoped_record_delete_reachable_without_flags(tmp_path):
+    """``record delete`` on a scoped record must also work without re-supplying
+    the routing flag (symmetric with the ``show`` fix above and with ``update``,
+    which already scans for the record's current vault)."""
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    _write_config(config_home, _spec_config_vaults(state))
+    pe_path = Path(_vault_path(state, "product-engineering"))
+
+    r = _run_with_config(
+        [
+            "record",
+            "create",
+            "--kind",
+            "blob",
+            "--title",
+            "Grape",
+            "--keyword",
+            "foo",
+            "--team",
+            "product-engineering",
+        ],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+        stdin_text="grape body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    assert list((pe_path / "blob").glob("*.md")), "record not in team vault"
+
+    # Delete with NO scope flags must still find and remove the scoped record.
+    r2 = _run_with_config(
+        ["record", "delete", record_id],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+    )
+    assert r2.returncode == 0, f"delete should reach the scoped record: {r2.stderr}"
+    assert not list((pe_path / "blob").glob("*.md")), "scoped record not deleted"
+
+
 # ---------------------------------------------------------------------------
 # Vanilla regression: no config.json present → today's behavior
 # ---------------------------------------------------------------------------

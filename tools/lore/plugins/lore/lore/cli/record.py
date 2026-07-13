@@ -48,26 +48,33 @@ def _resolve_group_scopes(
 
 
 def _resolve_record_op_vault(record_id: str, args) -> str:
-    """Resolve the vault root that ``record delete`` should act on.
+    """Resolve the vault root that ``record show``/``record delete`` should act on.
 
-    Symmetric with ``record create``: when a ``config.json`` exists, the
-    target vault is chosen by the SAME config resolution — the record's ``kind``
-    (from ``record_id``) plus the command's routing flags (``--repo/--product/
-    --suite/--team``) — so delete operates on the very vault create routed the
-    record to (a no-scope record lands in, and is deleted from, the ``default``
-    vault). When **no** config exists, fall back to the config-resolved active
-    vault (``vault_config.resolve_active_vault()`` → the floor) — vanilla usage
-    is unchanged (Axiom 3).
+    Two paths:
 
-    NOTE: ``record update`` no longer uses this resolver. Its scope flags
-    express the *destination*, not the current location, so update locates the record via
-    ``_find_current_record_location`` (a config scan independent of the flag
-    values) and re-resolves the destination via ``_resolve_destination_root``.
+      - **No scope flags** (the common case — a caller read ``record_id`` off
+        ``lore search`` or another record's ``--related`` and has no idea which
+        vault it lives in): locate the record's CURRENT vault via
+        :func:`_find_current_record_location` — the SAME config-driven scan
+        ``record update`` uses — so a record ``create`` auto-routed elsewhere (an
+        explicit flag or a camp group ``[[lore_scopes]]`` default) stays reachable
+        without the caller re-supplying that routing on every subsequent op. This
+        is symmetric with ``update``: create/update/show/delete all locate an
+        EXISTING record the same way. Falls through to the default-floor
+        resolution below when the scan finds nothing (a genuinely nonexistent
+        record), so the caller still gets a clean not-found rather than a scan
+        failure.
+      - **Explicit scope flag(s)** (``--repo/--product/--suite/--team``, kept for
+        the rare case where the same ``<kind>/<name>`` collides across more than
+        one configured vault and the scan's first-match would be ambiguous):
+        resolved via ``vault_resolve.resolve_vault`` — the same routing ``create``
+        uses — so an explicit flag always wins over the scan.
 
-    NOTE: this reconciles the create-vs-update/delete location split that the
-    config-routing work introduced. Vault resolution is now config-only across
-    *every* lore command (and the hooks).
+    When **no** config exists, fall back to the config-resolved active vault
+    (``vault_config.resolve_active_vault()`` → the floor) — vanilla usage is
+    unchanged (Axiom 3).
     """
+    from ..record import store as record_store_mod
     from ..vault import config as vault_config_mod
     from ..vault import resolve as vault_resolve_mod
 
@@ -81,6 +88,11 @@ def _resolve_record_op_vault(record_id: str, args) -> str:
         for flag in _SCOPE_FLAGS
         if getattr(args, flag, None)
     }
+    if not participating_scopes:
+        try:
+            return _find_current_record_location(record_id).vault_root
+        except record_store_mod.RecordNotFoundError:
+            pass
     chosen = vault_resolve_mod.resolve_vault(participating_scopes, kind, vaults)
     return str(chosen.path)
 
@@ -609,6 +621,13 @@ def _find_current_record_location(record_id: str):
     is found — config-driven, index-independent, and with no circular dependence on
     the sidecar's own scope fields. Falls back to the active vault when no config
     exists (vanilla, Axiom 3).
+
+    Shared by ``record update`` (always — its scope flags are destination-only)
+    and, via :func:`_resolve_record_op_vault`, ``record show``/``record delete``
+    when no scope flag is supplied — so all three locate an EXISTING record the
+    same way, and a record ``create`` routed to a non-default vault (an explicit
+    flag or a camp group default) stays reachable everywhere without re-supplying
+    that routing.
 
     Raises :class:`record_store.RecordNotFoundError` when no configured vault holds
     the record.
