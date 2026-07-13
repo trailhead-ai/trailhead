@@ -66,6 +66,14 @@ class MergeConfigError(Exception):
     """Raised when merge_order names a member not in the manifest."""
 
 
+class AutoMergeDisabledError(Exception):
+    """Raised when auto_merge is absent or false in the [release] block.
+
+    Fail-closed default: existing installs that never opted into auto_merge
+    must not silently keep merging once this gate lands.
+    """
+
+
 class InvalidInputError(Exception):
     """Raised on option-injection attack vectors (pr_number / branch validation)."""
 
@@ -572,6 +580,22 @@ def _load_merge_order(toml_path: str | None) -> list[str] | None:
     return None
 
 
+def _load_auto_merge(toml_path: str | None) -> bool:
+    if not toml_path:
+        return False
+    p = Path(toml_path)
+    if not p.is_file():
+        return False
+    try:
+        raw = tomllib.loads(p.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return False
+    release = raw.get("release")
+    if not isinstance(release, dict):
+        return False
+    return release.get("auto_merge") is True
+
+
 def validate_pr_number(pr_number: str) -> None:
     """Validate ``pr_number`` is all-digits; raise InvalidInputError otherwise.
 
@@ -671,6 +695,14 @@ def _merge_prs(
     member_names = {m["name"] for m in manifest_data.get("members", [])}
 
     merge_order = _load_merge_order(toml_path)
+
+    # auto_merge gate — fail-closed: refuse before any subprocess call unless
+    # [release].auto_merge is explicitly true.
+    if not _load_auto_merge(toml_path):
+        raise AutoMergeDisabledError(
+            "refusing to merge — auto_merge is unset/false — "
+            "add `[release] auto_merge = true` to the group TOML to merge automatically."
+        )
 
     # Merge safety gate
     if len(pr_pairs) > 1 and not merge_order:

@@ -30,6 +30,7 @@ ensure_trailhead_importable()
 
 from trailhead.vcs import get_provider  # noqa: E402
 from trailhead.vcs.github import (  # noqa: E402
+    AutoMergeDisabledError,
     InvalidInputError,
     ManifestReadError,
     MergeConfigError,
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             toml_path=args.toml,
         )
     except (
+        AutoMergeDisabledError,
         InvalidInputError,
         ManifestReadError,
         MergeOrderRequiredError,

@@ -161,6 +161,17 @@ If >1 PR is queued and no `merge_order` is declared, `merge_prs.py` refuses with
 honor that exit code and surface it as
 `BLOCKED: merge_prs.py requires merge_order configured in [release] of the group TOML`.
 
+`merge_prs.py` also reads `auto_merge` from the same `[release]` block. **Fail-closed default:**
+when `auto_merge` is unset or `false`, `merge_prs.py` refuses to merge anything — before any `gh`
+call — regardless of how many PRs are queued or how clean they are. Don't re-check `auto_merge`
+yourself before calling `merge_prs.py`; it's the structural backstop. When all PRs report `done`,
+call `merge_prs.py` as usual and honor its exit code:
+
+- Exit 2 with `auto_merge` unset/false: every PR is ready to merge, but `merge_prs.py` refused.
+  Stop here — do **not** retry or bypass it — and report:
+  `STOPPED: all PRs are ready to merge, but auto_merge is unset/false — add [release] auto_merge = true to the group TOML to merge automatically.`
+- Exit 0/1: proceed as below (all merged, or partial-merge failure).
+
 `merge_prs.py` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
 parsing, to detect failure.
 
@@ -188,14 +199,14 @@ external_tracker = { kind = "...", ... }  # optional
 
 ## Report structure
 
-When you finish (all merged, or blocked), return a short summary:
+When you finish (all merged, stopped ready-to-merge, or blocked), return a short summary:
 
 ```
-**Watch result:** merged | blocked after N cycles
+**Watch result:** merged | ready-to-merge (auto_merge disabled) | blocked after N cycles
 **Group/Slug:** <group>/<slug>
 **PRs:** <urls + final state>
 **Fix cycles run:** <count per PR>
-**Blocker (if any):** <one-line summary from summarizer>
+**Blocker (if any):** <one-line summary from summarizer, or the auto_merge remediation>
 ```
 
 ### Post-merge handoff marker
