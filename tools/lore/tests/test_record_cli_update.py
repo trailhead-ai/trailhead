@@ -360,6 +360,32 @@ def test_update_diff_stale_hunk_rejects_atomically(tmp_path):
     assert rows[0][1] == original
 
 
+def test_update_diff_bare_hunk_header_rejects_not_silent_noop(tmp_path):
+    """A bare ``@@`` hunk header must fail loudly, never a silent no-op success."""
+    vault, state = _make_vault(tmp_path)
+    original = "line one\nline two\nline three\n"
+    record_id = _create(vault, state, body=original)
+    kind, name = record_id.split("/", 1)
+
+    # No line ranges on the hunk header — previously parsed to zero hunks and
+    # silently "succeeded" with the body untouched.
+    bare_diff = "@@ @@\n-line two\n+line TWO\n"
+
+    r = _run(
+        ["record", "update", record_id, "--diff"],
+        vault=vault,
+        state_dir=state,
+        stdin_text=bare_diff,
+    )
+    assert r.returncode != 0
+    assert "unparseable diff" in r.stderr
+    # Body byte-for-byte unchanged; no index churn — same invariant as a reject.
+    assert _find_body(vault, record_id) == original
+    rows = _index_rows(state, vault, kind, name)
+    assert len(rows) == 1
+    assert rows[0][1] == original
+
+
 def test_update_diff_stale_hunk_parseable_rejected_line(tmp_path):
     """A rejected hunk is reported on stderr in a parseable one-line-per-hunk form."""
     vault, state = _make_vault(tmp_path)
@@ -809,6 +835,35 @@ class TestApplierTrailingNewline:
         # difflib concatenates the two no-newline lines → ambiguous → format error.
         with pytest.raises(rs.DiffFormatError):
             rs.apply_unified_diff(body_no_nl, diff)
+
+
+class TestApplierBareHunkHeader:
+    """A hunk header lacking line ranges must raise, never silently no-op."""
+
+    def test_bare_at_at_header_is_format_error(self, rs):
+        body = "line one\nline two\nline three\n"
+        # No "-start,count +start,count" — the exact shape reported in the bug.
+        bare_diff = "@@ @@\n-line two\n+line TWO\n"
+        with pytest.raises(rs.DiffFormatError):
+            rs.apply_unified_diff(body, bare_diff)
+
+    def test_bare_header_leaves_body_unchanged_when_caught(self, rs):
+        body = "line one\nline two\nline three\n"
+        bare_diff = "@@ @@\n-line two\n+line TWO\n"
+        try:
+            rs.apply_unified_diff(body, bare_diff)
+        except rs.DiffFormatError:
+            pass
+        # The applier never had a chance to mutate the caller's body — it isn't
+        # mutated in place — but assert byte-for-byte identity for good measure.
+        assert body == "line one\nline two\nline three\n"
+
+    def test_valid_hunk_after_bare_hunk_still_raises(self, rs):
+        """A well-formed hunk later in the diff must not mask the earlier bare one."""
+        body = "line one\nline two\nline three\n"
+        mixed_diff = "@@ @@\n-line one\n+line ONE\n@@ -3,1 +3,1 @@\n-line three\n+line THREE\n"
+        with pytest.raises(rs.DiffFormatError):
+            rs.apply_unified_diff(body, mixed_diff)
 
 
 class TestApplierAdjacentHunks:
