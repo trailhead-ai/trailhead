@@ -32,8 +32,9 @@ source.
 - `trailhead/harness/` — the harness seam (`base.py`) + per-harness impls
   (`claude_code.py` today). Adding a harness = implement the interface + register
   it; zero changes to the shared install/compose/wire path (Axiom 1).
-- `tools/<name>/` — the five plugins: `lore`, `camp`, `craft`, `portage`
-  (+ `outpost` is forward-declared, not wired).
+- `tools/<name>/` — the five plugins: `lore`, `camp`, `craft`, `portage`,
+  and `outpost` (the cockpit review-loop skill; wired into the compose/marketplace
+  path and installed by default).
 - `bin/trailhead` — git-only entry point (puts repo root on `sys.path`, no pip needed).
 - `trailhead/docs/` — authoritative prose specs per seam. `docs/vision.md` — the axioms.
 

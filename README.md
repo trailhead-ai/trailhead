@@ -100,11 +100,11 @@ install_camp_cli = true
 install_lore_cli = false
 
 # Top-level default plugin set, applied to every detected/--harness harness.
-plugins = ["camp", "lore", "craft", "portage"]
+plugins = ["camp", "lore", "craft", "portage", "outpost"]
 
 [[harness]]
 name = "claude_code"
-plugins = ["camp", "lore", "craft", "portage"]
+plugins = ["camp", "lore", "craft", "portage", "outpost"]
 
 [[harness]]
 name = "codex"

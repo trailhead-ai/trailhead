@@ -52,7 +52,7 @@ _TRAILHEAD_ERRORS = (
 )
 
 _CURATED_HELP = """\
-trailhead {version} — install and manage the lore/camp/craft/portage plugins.
+trailhead {version} — install and manage the lore/camp/craft/portage/outpost plugins.
 
 Commands:
   install     Install agent-plugins into your code harness(es) + the camp/lore CLIs.
@@ -129,7 +129,7 @@ def _cmd_outpost(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trailhead",
-        description="trailhead — install and manage the lore/camp/craft/portage plugins.",
+        description="trailhead — install and manage the lore/camp/craft/portage/outpost plugins.",
         add_help=True,
     )
     parser.add_argument("--version", action="version", version=f"trailhead {__version__}")

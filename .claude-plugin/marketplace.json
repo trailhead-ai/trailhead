@@ -24,6 +24,11 @@
       "name": "portage",
       "source": "./tools/portage/plugins/portage",
       "description": "Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group, on the trailhead.vcs provider library."
+    },
+    {
+      "name": "outpost",
+      "source": "./tools/outpost/plugins/outpost",
+      "description": "Close the human→agent review loop: pick up the diff reviews Tom authored in the outpost cockpit and act on them over HTTP."
     }
   ]
 }
