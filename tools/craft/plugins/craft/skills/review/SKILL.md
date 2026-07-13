@@ -14,9 +14,10 @@ Dispatch code-reviewer subagent to catch issues before they cascade. The reviewe
 ## When to Request Review
 
 **Mandatory:**
-- After each task in subagent-driven development
-- After completing major feature
+- After completing a whole plan or feature, before merge
 - Before merge to main
+
+Per-slice conformance during execute is `drift-gate`'s job, not this skill's — see Integration with Workflows below.
 
 **Optional but valuable:**
 - When stuck (fresh perspective)
@@ -83,13 +84,8 @@ You: [Fix progress indicators]
 ## Integration with Workflows
 
 **Execute (slice-by-slice subagent development):**
-- Review after EACH task
-- Catch issues before they compound
-- Fix before moving to next task
-
-**Executing Plans:**
-- Review after each batch (3 tasks)
-- Get feedback, apply, continue
+- Per-slice conformance is handled inside execute's own step 4, which dispatches `drift-gate` (not this skill) after each medium+ slice — see the execute skill.
+- Dispatch `code-reviewer` here once the plan's slices are all built, for the whole-change/PR pass against the full `base..HEAD` diff.
 
 **Ad-Hoc Development:**
 - Review before merge

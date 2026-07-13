@@ -1,12 +1,16 @@
-"""Contract pins for the review-altitude split (slice 1).
+"""Contract pins for the review-altitude split (slices 1-2).
 
 `drift-gate` replaces `code-reviewer` as execute's per-slice conformance gate;
-`code-reviewer` itself is untouched in this slice (it keeps its combined
-charter until a later slice recharters it as the whole-change reviewer). These
-tests pin the shape of the new agent and the boundary of what changed in
-execute's skill text — string-pin/structural checks, not runtime behavior,
-consistent with this suite's existing style (see test_craft_skills_generic.py,
-test_agents_generic.py).
+`code-reviewer` is rechartered (slice 2) as the whole-change/PR adversarial
+reviewer — fresh-context review of the full `base..HEAD` diff against the
+spec and plan, correctness/requirements only (style out of scope). Its name,
+Opus/high pinning, explicit tools list, and SHIP/FIX_FIRST/BLOCK verdict
+vocabulary are portage-compat pins that must never weaken (portage's
+green-driver dispatches this exact contract). These tests pin the shape of
+the new agent, the boundary of what changed in execute's skill text, and the
+recharter of code-reviewer.md + review/SKILL.md — string-pin/structural
+checks, not runtime behavior, consistent with this suite's existing style
+(see test_craft_skills_generic.py, test_agents_generic.py).
 """
 
 from pathlib import Path
@@ -15,7 +19,9 @@ AGENTS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "agents"
 SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 
 DRIFT_GATE_MD = AGENTS_DIR / "drift-gate.md"
+CODE_REVIEWER_MD = AGENTS_DIR / "code-reviewer.md"
 EXECUTE_SKILL_MD = SKILLS_DIR / "execute" / "SKILL.md"
+REVIEW_SKILL_MD = SKILLS_DIR / "review" / "SKILL.md"
 
 
 def _frontmatter(text: str) -> str:
@@ -166,4 +172,98 @@ def test_execute_skill_reassures_quality_review_deferred_not_dropped():
         "execute/SKILL.md step 4 must reassure that quality/style review is "
         "deferred to the whole-change phases (a later slice), not dropped "
         "entirely."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Slice 2: code-reviewer rechartered as the whole-change/PR reviewer
+# ---------------------------------------------------------------------------
+
+
+def test_code_reviewer_has_no_word_cap():
+    text = CODE_REVIEWER_MD.read_text()
+    assert "600" not in text, (
+        "code-reviewer.md must no longer carry the 600-word hard cap — a "
+        "whole-change review's findings can legitimately run longer."
+    )
+
+
+def test_code_reviewer_charter_requires_base_head_diff_and_intent_context():
+    text = CODE_REVIEWER_MD.read_text()
+    assert "base..HEAD" in text, (
+        "code-reviewer.md must state it reviews the full `base..HEAD` diff, "
+        "not a single slice."
+    )
+    lowered = text.lower()
+    assert "spec" in lowered and "plan" in lowered, (
+        "code-reviewer.md must name the spec and the plan as required intent "
+        "context the caller provides."
+    )
+
+
+def test_code_reviewer_charter_states_style_out_of_scope():
+    text = CODE_REVIEWER_MD.read_text()
+    assert "style" in text.lower() and "out of scope" in text.lower(), (
+        "code-reviewer.md must explicitly state that style is out of scope — "
+        "not merely omit it from the checklist."
+    )
+
+
+def test_code_reviewer_good_fits_drop_per_slice_framing():
+    text = CODE_REVIEWER_MD.read_text()
+    assert "Slice N" not in text, (
+        "code-reviewer.md's description must drop the old per-slice "
+        "'Review Slice N of plan X' good-fit example — that's drift-gate's "
+        "job now."
+    )
+
+
+def test_code_reviewer_retains_verdict_vocabulary():
+    text = CODE_REVIEWER_MD.read_text()
+    for verdict in ["SHIP", "FIX_FIRST", "BLOCK"]:
+        assert verdict in text, (
+            f"code-reviewer.md must retain the {verdict!r} verdict — portage's "
+            "green-driver depends on this exact vocabulary."
+        )
+
+
+def test_code_reviewer_retains_security_auditor_escalation():
+    text = CODE_REVIEWER_MD.read_text()
+    assert "security-auditor" in text, (
+        "code-reviewer.md must retain the security-auditor escalation clause."
+    )
+
+
+def test_code_reviewer_frontmatter_still_opus_high_explicit_tools():
+    text = CODE_REVIEWER_MD.read_text()
+    frontmatter = _frontmatter(text)
+    assert _field(frontmatter, "model") == "opus", (
+        "code-reviewer.md must stay pinned to `model: opus` — portage-compat."
+    )
+    assert _field(frontmatter, "effort") == "high", (
+        "code-reviewer.md must stay pinned to `effort: high` — portage-compat."
+    )
+    tools = _tools_line(frontmatter)
+    assert tools is not None, "code-reviewer.md frontmatter must carry an explicit `tools:` line"
+    declared = [t.strip() for t in tools.split(",") if t.strip()]
+    assert declared == ["Read", "Grep", "Glob", "Bash"], (
+        f"code-reviewer.md `tools:` must stay exactly Read, Grep, Glob, Bash, got {tools!r}"
+    )
+
+
+def test_review_skill_no_longer_frames_code_reviewer_as_per_slice():
+    text = REVIEW_SKILL_MD.read_text()
+    assert "Review after EACH task" not in text, (
+        "review/SKILL.md's execute-integration section still frames "
+        "code-reviewer as the per-slice reviewer — retarget to the "
+        "drift-gate/step-4 flow execute now uses."
+    )
+
+
+def test_review_skill_retargets_execute_integration_to_drift_gate():
+    text = REVIEW_SKILL_MD.read_text()
+    assert "drift-gate" in text, (
+        "review/SKILL.md must point to `drift-gate` as execute's per-slice "
+        "conformance gate, distinguishing it from this skill's whole-change/"
+        "ad-hoc dispatch of code-reviewer."
     )
