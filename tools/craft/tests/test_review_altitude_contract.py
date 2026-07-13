@@ -12,11 +12,16 @@ recharter of code-reviewer.md + review/SKILL.md — string-pin/structural
 checks, not runtime behavior, consistent with this suite's existing style
 (see test_craft_skills_generic.py, test_agents_generic.py).
 
-Slice 3 adds `simplifier` — the whole-change simplify mutation phase agent.
-It is not yet wired into execute's After-All-Slices pipeline (a later slice's
-scope); these tests only pin the agent charter's shape and its mechanically
-enforced write-scope story (footprint_guard.py, tested separately in
-test_footprint_guard.py).
+Slice 3 adds `simplifier` — the whole-change simplify mutation phase agent —
+pinning the agent charter's shape and its mechanically enforced write-scope
+story (footprint_guard.py, tested separately in test_footprint_guard.py).
+
+Slice 4 wires the whole-change phase pipeline into execute's After All Slices
+section: simplify → correctness → conditional-security → flow-out → close.
+These tests pin the phase ordering, the fail-closed security trigger, the
+one-re-review cap, the guard-failure→revert mapping, the credential scrub, the
+completion-report enumeration + worked example, and the `## End Phases`
+resumability contract.
 """
 
 from pathlib import Path
@@ -121,13 +126,25 @@ def test_execute_skill_verdict_vocabulary_pinned():
         )
 
 
-def test_execute_skill_has_no_code_reviewer_per_slice_reference():
+def test_execute_skill_per_slice_review_does_not_name_code_reviewer():
+    """The per-slice loop must not name `code-reviewer` (retargeted to `drift-gate`).
+
+    Scoped to the region BEFORE `## After All Slices` — the per-slice loop.
+    Slice 4 legitimately reintroduces `code-reviewer` as the whole-change
+    correctness-phase dispatch inside After All Slices, so a blanket file-wide
+    absence would now be wrong. This narrower pin still catches a regression of
+    the per-slice retargeting (role table, step 4, absorption line) while
+    allowing the whole-change reference.
+    """
     text = EXECUTE_SKILL_MD.read_text()
-    assert "code-reviewer" not in text, (
-        "execute/SKILL.md must not reference `code-reviewer` anywhere — every "
-        "per-slice-review reference (role table, step 4, absorption line, "
-        "model-selection table, Red Flags) must retarget to `drift-gate` in "
-        "this slice. code-reviewer itself is untouched elsewhere in the repo."
+    marker = "## After All Slices"
+    assert marker in text, "execute/SKILL.md must retain the After All Slices section"
+    per_slice_region = text[: text.index(marker)]
+    assert "code-reviewer" not in per_slice_region, (
+        "execute/SKILL.md's per-slice loop (everything before `## After All "
+        "Slices`) must not reference `code-reviewer` — the per-slice conformance "
+        "gate is `drift-gate`. The whole-change correctness phase may reference "
+        "`code-reviewer`, but only inside After All Slices."
     )
 
 
@@ -361,10 +378,211 @@ def test_simplifier_charter_retains_executor_status_vocabulary():
         )
 
 
-def test_simplifier_not_in_execute_dispatched_agents_yet():
+def test_execute_skill_wires_simplifier():
     text = EXECUTE_SKILL_MD.read_text()
-    assert "simplifier" not in text, (
-        "simplifier is not yet wired into execute's After-All-Slices pipeline "
-        "— that's a later slice's scope. execute/SKILL.md must not reference "
-        "it yet."
+    assert "simplifier" in text, (
+        "simplifier must now be wired into execute's After All Slices simplify "
+        "phase — slice 4 dispatches it as the whole-change simplify pass."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Slice 4: After All Slices phase pipeline
+# ---------------------------------------------------------------------------
+
+
+def _after_all_slices(text: str) -> str:
+    """The After All Slices section body — the phase-pipeline scope."""
+    marker = "## After All Slices"
+    assert marker in text, "execute/SKILL.md must retain the After All Slices section"
+    return text[text.index(marker):]
+
+
+def _phase_section(text: str, start: str, end: str | None) -> str:
+    assert start in text, f"expected phase header {start!r} in execute/SKILL.md"
+    lo = text.index(start)
+    hi = text.index(end, lo) if end and end in text[lo:] else len(text)
+    return text[lo:hi]
+
+
+def test_after_all_slices_phase_ordering():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    simplify = text.index("Phase 2: Simplify")
+    correctness = text.index("Phase 3: Correctness")
+    security = text.index("Phase 4: Security")
+    assert simplify < correctness < security, (
+        "After All Slices phases must run simplify → correctness → security in "
+        "that order."
+    )
+
+
+def test_after_all_slices_simplify_dispatches_simplifier():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 2: Simplify", "Phase 3: Correctness")
+    assert "`simplifier`" in section, (
+        "the simplify phase must dispatch `simplifier` (base SHA + pre-simplify SHA)."
+    )
+    assert "pre-simplify" in section.lower()
+
+
+def test_after_all_slices_guard_failure_maps_to_revert():
+    """Any non-zero footprint_guard exit — including post-commit — reverts."""
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 2: Simplify", "Phase 3: Correctness")
+    lowered = section.lower()
+    assert "footprint_guard.py" in section, (
+        "the simplify phase must re-run footprint_guard.py after simplifier returns."
+    )
+    assert "revert the simplify commit" in lowered, (
+        "any non-zero guard exit must map to reverting the simplify commit."
+    )
+    # Both exit codes named, and the wording distinguishes them.
+    assert "exit 1" in lowered and "exit 2" in lowered, (
+        "the guard-failure mapping must name both exit 1 and exit 2."
+    )
+    assert "violation" in lowered and "guard error" in lowered, (
+        "exit 1 must be reported as a violation, exit 2 as a guard error — "
+        "distinct wording even though remediation is identical."
+    )
+
+
+def test_after_all_slices_correctness_dispatches_code_reviewer_whole_change():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 3: Correctness", "Phase 4: Security")
+    assert "`code-reviewer`" in section, "the correctness phase must dispatch `code-reviewer`."
+    assert "base..HEAD" in section, (
+        "the correctness dispatch must pass the whole-change base..HEAD diff."
+    )
+
+
+def test_after_all_slices_correctness_directs_simplify_commit_auth_scrutiny():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 3: Correctness", "Phase 4: Security")
+    lowered = section.lower()
+    assert "scrutin" in lowered and "simplify commit" in lowered, (
+        "the correctness dispatch must direct explicit scrutiny at the simplify commit."
+    )
+    assert "control-flow" in lowered, (
+        "the scrutiny must target control-flow changes."
+    )
+    for surface in ["auth", "session", "permission"]:
+        assert surface in lowered, (
+            f"the simplify-commit scrutiny must name the {surface!r} surface."
+        )
+
+
+def test_after_all_slices_correctness_names_receiving_code_review_binding():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 3: Correctness", "Phase 4: Security")
+    assert "receiving-code-review" in section, (
+        "the correctness-fix triage must be governed by the receiving-code-review pattern."
+    )
+    assert "binding" in section.lower(), (
+        "receiving-code-review must be named as BINDING for the triage step."
+    )
+
+
+def test_after_all_slices_correctness_one_re_review_cap():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 3: Correctness", "Phase 4: Security")
+    lowered = section.lower()
+    assert "at most one re-review" in lowered, (
+        "the correctness phase must cap re-review at one round."
+    )
+    assert "never just the fix commits" in lowered, (
+        "the re-review must re-diff the full base..HEAD, never just the fix commits."
+    )
+    assert "surface" in lowered and "user" in lowered, (
+        "survivors after the one round must surface to the user, not loop further."
+    )
+
+
+def test_after_all_slices_security_trigger_categories():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 4: Security", "Phase 5: Flow-out")
+    lowered = section.lower()
+    for category in ["auth", "crypto", "secret", "session", "token", "permission"]:
+        assert category in lowered, (
+            f"the deterministic security-trigger list must enumerate {category!r}."
+        )
+    assert "security-surface:" in lowered, (
+        "the security trigger must union the accumulated drift-gate Security-surface flags."
+    )
+
+
+def test_after_all_slices_security_fail_closed():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 4: Security", "Phase 5: Flow-out")
+    lowered = section.lower()
+    assert "fail-closed" in lowered, "the security trigger must be fail-closed."
+    assert "ambiguity" in lowered, (
+        "fail-closed wording: any ambiguity about whether the trigger fires → run the audit."
+    )
+    assert "`security-auditor`" in section, (
+        "fail-closed remediation must run `security-auditor`."
+    )
+    assert "final form" in lowered, (
+        "the security audit runs on the final form, after correctness fixes settle."
+    )
+
+
+def test_after_all_slices_flow_out_credential_scrub():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 5: Flow-out", "Phase 6: Close")
+    lowered = section.lower()
+    assert "credential-pattern scrub" in lowered, (
+        "the flow-out step must run a mechanical credential-pattern scrub before "
+        "any finding text enters a session candidate."
+    )
+    assert "regex" in lowered, "the scrub must document a regex list."
+    for shape in ["bearer", "api-key", "high-entropy"]:
+        assert shape in lowered, (
+            f"the scrub regex list must describe the {shape!r} token shape."
+        )
+    assert "never" in lowered and "verbatim" in lowered, (
+        "report bodies must be summarized, never captured verbatim."
+    )
+
+
+def test_after_all_slices_completion_report_enumeration_and_example():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 6: Close", None)
+    lowered = section.lower()
+    assert "enumerate every phase" in lowered, (
+        "the completion report must enumerate every phase's outcome explicitly."
+    )
+    assert "skipped" in lowered, (
+        "the enumeration requirement must cover clean/empty/skipped phases."
+    )
+    assert "simplify: no changes; correctness: SHIP, 0 findings; security: skipped — no trigger" in text, (
+        "the completion-report worked example must appear verbatim in the skill text."
+    )
+
+
+def test_after_all_slices_completion_report_per_finding_citation():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    section = _phase_section(text, "Phase 6: Close", None)
+    lowered = section.lower()
+    assert "local-to-one-slice" in lowered and "cross-slice" in lowered, (
+        "each finding must be classified local-to-one-slice vs cross-slice."
+    )
+    assert "plan section" in lowered and "cited" in lowered, (
+        "each Critical/Important finding must be cited against its plan section."
+    )
+    assert "5" in section and "restore" in lowered, (
+        "the 5-plan measurement revisit condition must be stated."
+    )
+
+
+def test_after_all_slices_end_phases_checklist_and_clean_tree_resume():
+    text = _after_all_slices(EXECUTE_SKILL_MD.read_text())
+    assert "## End Phases" in text, (
+        "phase progress must be recorded as an `## End Phases` checklist on the parent."
+    )
+    lowered = text.lower()
+    assert "clean-working-tree precondition" in lowered, (
+        "re-entering any end phase on resume requires a clean-working-tree precondition."
+    )
+    assert "phase boundary" in lowered, (
+        "a dirty tree on resume must be reverted to the last recorded phase boundary."
     )

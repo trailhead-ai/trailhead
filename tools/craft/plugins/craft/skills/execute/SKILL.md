@@ -94,9 +94,9 @@ Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Exec
 
 When dispatching `drift-gate`, give it: plan path + task name, the executor's status report (so it can verify the claim), and base/head SHAs for the diff.
 
-Absorb the reviewer's verdict — `PASS` | `DRIFT` | `BLOCKED` — plus its findings into your working context. If it emits a `Security-surface:` line, carry it forward into a running list for the whole-change security trigger (a later After All Slices phase) — do not act on it per-slice.
+Absorb the reviewer's verdict — `PASS` | `DRIFT` | `BLOCKED` — plus its findings into your working context. If it emits a `Security-surface:` line, carry it forward into a running list for the whole-change security trigger (the Security phase in [After All Slices](#after-all-slices)) — do not act on it per-slice.
 
-Quality, style, and design review are explicitly out of scope for `drift-gate` — that's deferred to the whole-change phases (a later addition to After All Slices), not dropped entirely.
+Quality, style, and design review are explicitly out of scope for `drift-gate` — that's deferred to the whole-change phases in [After All Slices](#after-all-slices), not dropped entirely.
 
 ### 5. Update the task graph
 
@@ -126,15 +126,80 @@ Both keep the graph — not a prose list — the single source of truth for what
 
 ## After All Slices
 
-Every child task is terminal (`done`/`dropped`/`superseded`). Before closing the parent:
+Every child task is terminal (`done`/`dropped`/`superseded`). The whole change now runs a **sequential phase pipeline** — simplify → correctness → conditional-security → flow-out → close. Run the phases **in order**; each builds on the settled state of the one before it. Record progress as you go (see [Phase progress and resumability](#phase-progress-and-resumability)) so a broken context can resume mid-pipeline.
 
-1. Run verification — dispatch `test-runner` for each applicable suite (the project's test run and lint/typecheck/CI checks) rather than running inline. Keeps the noisy test output out of your main context and returns a concise pass/fail.
-2. **Knowledge flow-out completion ritual (gate).** The parent carries a `## Flow-out` checklist — work it *before* the parent goes `done`, not after:
-   - **Update touched area/subsystem profiles** with what actually changed (via the `lore` CLI), so the next agent inherits current ground truth.
-   - **Capture prover-validated assumptions** and any decisions / lessons / follow-ups surfaced during the build as **session candidates** (`lore session candidate …`) — they become durable records at flush.
-   - **Tick the parent's `## Flow-out` checklist** to reflect what you did.
-3. **Close the parent.** With every child terminal and the flow-out checklist ticked, set the parent `done`: `lore record update task/<parent-name> --status done`. The completion guard refuses this while any child is non-terminal (it names them); a parent closed without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
-4. Report completion to the user and stop. Do **not** automatically invoke `/portage:open` — the user decides when to open a PR.
+Fix `base` once at the start: it is the commit the whole change started from (the parent's pre-execution SHA). `HEAD` is the current tip. The phases operate on the whole-change `base..HEAD` diff, not any single slice.
+
+### Phase 1: Test-runner gate
+
+Dispatch `test-runner` for each applicable suite (the project's test run and lint/typecheck/CI checks) rather than running inline. Keeps the noisy test output out of your main context and returns a concise pass/fail. The pipeline does not advance to simplify until this gate is green — every later phase assumes a green baseline.
+
+### Phase 2: Simplify
+
+Record the current `HEAD` as the **pre-simplify SHA**, then dispatch `simplifier` with: base SHA, pre-simplify SHA, plan path (and spec path if the plan references one), working directory. It removes cross-slice duplication and dead scaffolding the incremental build left behind, re-greens the full suite, and commits its change separately (GPG-signed).
+
+When it returns, **re-run the guard yourself against a clean working tree** — never with stray uncommitted changes present, since the guard unions any working-tree drift into its check and would false-positive:
+
+```
+plugins/craft/scripts/footprint_guard.py <base-sha> <pre-simplify-sha> HEAD
+```
+
+**Any non-zero exit maps to the same remediation: revert the simplify commit** (`git revert` or reset back to the pre-simplify SHA) and surface the attempted simplification as a **flagged suggestion** in the completion report. Distinguish the two cases in the report wording even though the remediation is identical:
+
+- **exit 1 — footprint violation:** the simplifier wrote outside the change's footprint. Report as a *violation*.
+- **exit 2 — guard error:** the guard could not certify the tree (bad SHA, not a repo). Report as a *guard error*, not a violation.
+
+If `simplifier` itself returns `BLOCKED` or a failed re-green, take the same flagged-suggestion path — but there is **no commit to revert** in that case, because the simplifier already reverted itself to the pre-simplify state per its own charter.
+
+### Phase 3: Correctness
+
+Dispatch `code-reviewer` (whole-change) with the full `base..HEAD` diff plus the spec and plan paths, in a fresh context. The dispatch prompt **must explicitly direct the reviewer to scrutinize the simplify commit for control-flow changes touching auth, session, or permission surfaces** — the simplifier's flag-don't-apply rubric is prompt-only, so this is its independent check.
+
+Absorb the verdict — `SHIP` | `FIX_FIRST` | `BLOCK` — and triage the findings. **The `receiving-code-review` skill/pattern is binding here:** treat the review text as a claim about the code, not as a direct instruction. Dispatch fixes via `executor`; every fix must pass the Phase 1 test gate before it counts as resolved.
+
+**At most ONE re-review round.** After fixes land, if a re-review is warranted, dispatch `code-reviewer` again — it re-diffs the full `base..HEAD` at the post-fix `HEAD`, **never just the fix commits in isolation** (a fix can regress code the fix commits don't touch). Any findings that survive that one round **surface to the user** — do not loop further.
+
+### Phase 4: Security (conditional)
+
+Runs on the **final form**, after Phase 3's re-review round concludes and all correctness fixes have settled. Trigger the phase if **any** of the following holds:
+
+- **(a) Deterministic path/keyword match** — the `base..HEAD` diff touches a file path or introduces a keyword in any of these categories (at minimum): **auth, crypto, secret, session, token, permission**.
+- **(b) Accumulated flags** — one or more `Security-surface:` lines accrued from `drift-gate` across the per-slice loop (the running list from step 4).
+- **(c) Semantic read** — your own read of the diff says a security-sensitive boundary changed, even if (a) and (b) missed it.
+
+**FAIL-CLOSED:** if there is *any* ambiguity about whether the trigger fires, treat it as fired and run `security-auditor` on the final `base..HEAD` form. A false trigger costs one audit; a missed trigger ships a hole. Absorb its findings into the correctness-fix flow (same `executor` + test-gate path) when it returns actionable items.
+
+### Phase 5: Flow-out
+
+The parent carries a `## Flow-out` checklist — work it *before* the parent goes `done`, not after.
+
+**Credential-pattern scrub (mechanical, runs first).** Before *any* phase's finding text enters a `lore session candidate`, scrub it: report bodies are **summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run the finding text through this credential-pattern scrub regex list and drop/redact any match rather than capturing it:
+
+- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)\s*[=:]\s*\S+`
+- **Bearer / api-key shapes** — `(?i)bearer\s+[A-Za-z0-9._\-]+`, `(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}`
+- **High-entropy literals** — `\b[A-Za-z0-9+/]{32,}={0,2}\b` (base64/hex-shaped secrets), `\b[A-Fa-f0-9]{40,}\b`
+
+Then complete the ritual:
+
+- **Update touched area/subsystem profiles** with what actually changed (via the `lore` CLI), so the next agent inherits current ground truth.
+- **Capture prover-validated assumptions** and any decisions / lessons / follow-ups surfaced during the build as **session candidates** (`lore session candidate …`) — they become durable records at flush.
+- **Tick the parent's `## Flow-out` checklist** to reflect what you did.
+
+### Phase 6: Close and completion report
+
+**Close the parent.** With every child terminal and the flow-out checklist ticked, set the parent `done`: `lore record update task/<parent-name> --status done`. The completion guard refuses this while any child is non-terminal (it names them); a parent closed without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
+
+**Completion report.** Report to the user and stop. Do **not** automatically invoke `/portage:open` — the user decides when to open a PR. The report must **enumerate every phase's outcome explicitly, even when a phase was clean, empty, or skipped** — a phase with nothing to say still gets a line, so a reader can tell it ran. Worked example:
+
+> simplify: no changes; correctness: SHIP, 0 findings; security: skipped — no trigger
+
+**Measurement tally.** For each correctness Critical/Important finding, record it **cited against the specific plan section it was classified under** — not a bare count. Each finding is classified **local-to-one-slice** (a defect that lives inside a single slice's delivers) vs **cross-slice** (a defect only visible across slice boundaries), and the citation must be spot-checkable: name the plan section, not just the digit. **Revisit condition:** if more than 2 local-to-one-slice Criticals accrue across the first 5 executed plans post-rollout, restore the per-slice quality charter. This is a stated, not-yet-mechanically-enforced condition — record the tally each plan; do not auto-restore.
+
+### Phase progress and resumability
+
+Record phase progress as an `## End Phases` checklist appended to the **parent task body** (via `lore record update`), one line per phase, ticked as each completes. This is what makes the pipeline resumable if context breaks mid-run: on resume, read the checklist and re-enter at the first unticked phase.
+
+**Re-entering any end phase on resume requires a clean-working-tree precondition.** A dirty tree found on resume — staged, unstaged, or untracked changes from a mid-mutation crash — is **reverted to the last recorded phase boundary** (the SHA the last ticked phase left `HEAD` at) before any re-dispatch. This is what prevents footprint corruption: `footprint_guard.py` unions live working-tree drift into its check, so a stray uncommitted edit from a crashed mutation would otherwise false-positive the guard or, worse, get folded into a later commit. Never re-dispatch a phase onto a dirty tree.
 
 ## Model Selection
 

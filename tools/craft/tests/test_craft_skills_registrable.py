@@ -65,6 +65,8 @@ _EXECUTE_DISPATCHED_AGENTS: list[str] = [
     "drift-gate",
     "test-runner",
     "troubleshooter",
+    "simplifier",
+    "security-auditor",
 ]
 
 
