@@ -430,7 +430,7 @@ class TestPrMerge:
                 {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
             ],
         )
-        toml = _write_toml(tmp_path, '[release]\nmerge_order = ["beta", "alpha"]\n')
+        toml = _write_toml(tmp_path, '[release]\nauto_merge = true\nmerge_order = ["beta", "alpha"]\n')
         merge_calls: list[str] = []
 
         def stub(cmd, **kwargs):
@@ -486,7 +486,7 @@ class TestPrMerge:
                 {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
             ],
         )
-        toml = _write_toml(tmp_path, "[group]\nname = 'grp'\n")
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
         provider = get_provider("github", runner=lambda cmd, **kw: None)
         pr_pairs = [
             PRPair(repo_path=str(wt_a), pr_number="1", member_name="alpha"),
@@ -507,7 +507,9 @@ class TestPrMerge:
                 {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
             ],
         )
-        toml = _write_toml(tmp_path, '[release]\nmerge_order = ["alpha", "nonexistent"]\n')
+        toml = _write_toml(
+            tmp_path, '[release]\nauto_merge = true\nmerge_order = ["alpha", "nonexistent"]\n'
+        )
         provider = get_provider("github", runner=lambda cmd, **kw: None)
         pr_pairs = [PRPair(repo_path=str(wt), pr_number="1", member_name="alpha")]
         with pytest.raises(MergeConfigError) as exc_info:
@@ -526,7 +528,7 @@ class TestPrMerge:
                 {"name": "beta", "repo_root": str(tmp_path), "worktree_path": str(wt_b)},
             ],
         )
-        toml = _write_toml(tmp_path, '[release]\nmerge_order = ["alpha", "beta"]\n')
+        toml = _write_toml(tmp_path, '[release]\nauto_merge = true\nmerge_order = ["alpha", "beta"]\n')
         provider = get_provider(
             "github",
             runner=_make_pr_stub(
@@ -556,7 +558,7 @@ class TestPrMerge:
                 {"name": "c", "repo_root": str(tmp_path), "worktree_path": str(wt_c)},
             ],
         )
-        toml = _write_toml(tmp_path, '[release]\nmerge_order = ["a", "b", "c"]\n')
+        toml = _write_toml(tmp_path, '[release]\nauto_merge = true\nmerge_order = ["a", "b", "c"]\n')
         provider = get_provider(
             "github",
             runner=_make_pr_stub({"1": "BLOCKED", "2": "MERGEABLE_CLEAN", "3": "MERGEABLE_CLEAN"}),
@@ -580,7 +582,7 @@ class TestPrMerge:
                 {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
             ],
         )
-        toml = _write_toml(tmp_path, "[group]\nname = 'grp'\n")
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
         merge_call_count = [0]
 
         def stub(cmd, **kwargs):
@@ -636,7 +638,7 @@ class TestPrMerge:
                 {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
             ],
         )
-        toml = _write_toml(tmp_path, "[group]\nname='g'\n")
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
         delete_calls: list[list[str]] = []
 
         def stub(cmd, **kwargs):

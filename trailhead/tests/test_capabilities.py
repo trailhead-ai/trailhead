@@ -191,9 +191,11 @@ class TestOtherInventories:
         assert m.skills == {}
 
     def test_portage_inventory(self):
+        # The four legacy skills (open/update/monitor/merge) collapsed into one
+        # verb-dispatched pull_request skill.
         m = load_manifest(_PORTAGE_MANIFEST)
-        assert set(m.subagents) == {"monitor", "summarizer", "updater"}
-        assert set(m.skills) == {"merge", "monitor", "open", "update"}
+        assert set(m.subagents) == {"green-driver", "monitor", "summarizer", "updater"}
+        assert set(m.skills) == {"pull_request"}
 
     def test_landing_inventory(self):
         m = load_manifest(_LANDING_MANIFEST)

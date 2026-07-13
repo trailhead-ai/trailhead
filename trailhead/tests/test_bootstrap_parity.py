@@ -20,7 +20,7 @@ _BOOTSTRAP_PATHS = {
     "camp": _REPO_ROOT / "tools/camp/plugins/camp/_bootstrap.py",
     "lore": _REPO_ROOT / "tools/lore/plugins/lore/_bootstrap.py",
     "landing": _REPO_ROOT / "tools/landing/plugins/landing/scripts/_bootstrap.py",
-    "portage": _REPO_ROOT / "tools/portage/plugins/portage/scripts/_bootstrap.py",
+    "portage": _REPO_ROOT / "tools/portage/plugins/portage/_bootstrap.py",
 }
 
 # 0-based line indices that legitimately differ per copy: the docstring's

@@ -294,25 +294,7 @@ source = "craft"
 [[claim]]
 kind = "skill"
 tool = "portage"
-ref = "skills/open"
-source = "portage"
-
-[[claim]]
-kind = "skill"
-tool = "portage"
-ref = "skills/update"
-source = "portage"
-
-[[claim]]
-kind = "skill"
-tool = "portage"
-ref = "skills/monitor"
-source = "portage"
-
-[[claim]]
-kind = "skill"
-tool = "portage"
-ref = "skills/merge"
+ref = "skills/pull_request"
 source = "portage"
 
 # ---------------------------------------------------------------------------
