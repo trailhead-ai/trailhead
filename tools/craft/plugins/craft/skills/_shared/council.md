@@ -136,11 +136,11 @@ is the wrong problem" belongs to that pass and should not be raised here.
 - The spec depends on a capability that does not exist and does not name it as a dependency
 - The spec requires a new subsystem where an existing one already covers the need
 
-*Reliability — spec review:*
-- An acceptance criterion has no observable pass/fail — nothing distinguishes met from unmet
-- An objective has no acceptance criterion covering it
+*Reliability — spec review:* (criterion **testability** and objective **coverage** belong to the `consistency-auditor` pass — do not raise them here; stay on failure behavior)
 - A failure mode named in the Problem has no criterion proving it is addressed
 - The spec commits to something irreversible (a migration, a deletion, a published contract) without naming the rollback or migration path
+- The spec defines no behavior for a state the system will certainly reach — empty, partial, concurrent, or interrupted — so the build will invent one
+- When this fails in production, the spec names no signal a human would see; the first reporter is a user
 
 *Security — spec review:*
 - The spec introduces a trust boundary it never names

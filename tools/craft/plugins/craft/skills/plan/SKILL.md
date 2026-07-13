@@ -118,7 +118,7 @@ directory in your vault manually, mirroring the template shapes.
 
 **Populate `related-subsystems:` frontmatter** on the parent task from your vault's subsystem profiles, if present — so the plan is linked to the areas it touches. List every subsystem the plan touches, not just the primary one.
 
-If an upstream spec exists, link the parent task to it with `lore record update <parent-id> --related spec=<spec-name>` and advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
+If an upstream spec exists, link the parent task to it with `lore record update <parent-id> --related spec=<spec-name>`. Then advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written — but **only if the spec is already `ready`**, i.e. it has passed the gauntlet. A spec still at `draft` must be left at `draft`: advancing it to `planned` would carry it *past* `ready` and imply a freeze the gauntlet never granted, which is the same bypass by another door. You should not be here at all with a `draft` spec (step 1 routes it to `/craft:gauntlet`); if you are, stop and route it. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
 
 The parent-task body template (`templates/plan.md`) carries these canonical sections — fill each in:
 

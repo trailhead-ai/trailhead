@@ -23,6 +23,7 @@ gauntlet's flip, not merely forgetting a step.
 gauntlet is optional again, whatever the prose says.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ import pytest
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SKILLS_DIR = CRAFT / "skills"
 AGENTS_DIR = CRAFT / "agents"
+TEMPLATES_DIR = CRAFT / "templates"
 
 GAUNTLET = SKILLS_DIR / "gauntlet" / "SKILL.md"
 BRAINSTORM = SKILLS_DIR / "brainstorm" / "SKILL.md"
@@ -37,9 +39,34 @@ PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 SHARED_COUNCIL = SKILLS_DIR / "_shared" / "council.md"
 PLANNER = AGENTS_DIR / "planner.md"
 
-# The lore CLI invocation that freezes a spec. Pinned as a literal because the
-# whole mandate rests on exactly one file being allowed to contain it.
-SPEC_FREEZE = "<spec-id> --status ready"
+# Any forward advance of a SPEC's status, in any craft prose. Matched as a regex
+# rather than a fixed literal because the invariant is about the *transition*, not
+# about one phrasing: `--status ready` is the freeze, but `--status planned` carries
+# a spec past `ready` to the same effect, so a test that greps only for `ready`
+# leaves a second unguarded door (it did — see git history).
+_SPEC_ADVANCE_RE = re.compile(r"<spec-id>\s+--status\s+(\w+)")
+
+# States that imply the spec is frozen (gauntlet-passed). `draft` and `superseded`
+# are not advances — brainstorm creates at `draft`, and a reframed spec is superseded.
+_FROZEN_STATES = {"ready", "planned", "complete"}
+
+# `planned` / `complete` may be written by a planning path, but ONLY behind this
+# guard — the phrase is the behavior, so it is pinned verbatim.
+_ADVANCE_GUARD = "only if the spec is already `ready`"
+
+
+def _craft_prose_files() -> list[Path]:
+    """Every markdown surface craft ships — skills (incl. _shared), agents, templates.
+
+    Globbed broadly on purpose: an earlier version scanned only `skills/*/SKILL.md`
+    and `agents/*.md`, which left `_shared/`, nested skill docs, and `templates/`
+    invisible to the invariant.
+    """
+    files: list[Path] = []
+    for root in (SKILLS_DIR, AGENTS_DIR, TEMPLATES_DIR):
+        if root.is_dir():
+            files.extend(sorted(root.rglob("*.md")))
+    return files
 
 # The passes the gauntlet dispatches. Kept explicit (not prose-parsed) to avoid
 # false positives on ordinary words, mirroring _EXECUTE_DISPATCHED_AGENTS in
@@ -73,25 +100,57 @@ def test_gauntlet_skill_ships():
 # --- the mandate: exactly one file may freeze a spec ---
 
 
-def test_only_gauntlet_freezes_a_spec():
-    """The `draft` -> `ready` spec flip appears in gauntlet/SKILL.md and NOWHERE else.
-
-    This is the structural form of "mandatory, no skip flag". Any other skill or
-    agent carrying the freeze command is a bypass: it can hand planning a spec that
-    was never adversarially reviewed.
-    """
-    assert SPEC_FREEZE in GAUNTLET.read_text(), (
+def test_gauntlet_owns_the_freeze():
+    assert "<spec-id> --status ready" in GAUNTLET.read_text(), (
         "gauntlet/SKILL.md must carry the spec-freeze command "
-        f"(`lore record update {SPEC_FREEZE}`) — it owns the draft -> ready edge"
+        "(`lore record update <spec-id> --status ready`) — it owns the draft -> ready edge"
     )
 
-    others = [p for p in [*SKILLS_DIR.glob("*/SKILL.md"), *AGENTS_DIR.glob("*.md")] if p != GAUNTLET]
-    offenders = [p for p in others if SPEC_FREEZE in p.read_text()]
+
+def test_only_gauntlet_freezes_a_spec():
+    """No craft file except the gauntlet may advance a spec to `ready`.
+
+    This is the structural form of "mandatory, no skip flag". Any other skill or
+    agent carrying the freeze is a bypass: it can hand planning a spec that was
+    never adversarially reviewed.
+    """
+    offenders = [
+        p
+        for p in _craft_prose_files()
+        if p != GAUNTLET and "ready" in _SPEC_ADVANCE_RE.findall(p.read_text())
+    ]
     assert not offenders, (
         "these craft files can freeze a spec, bypassing the gauntlet: "
         f"{[str(p.relative_to(CRAFT)) for p in offenders]}. The draft -> ready edge "
         "belongs to the gauntlet alone — if a spec can reach `ready` without it, the "
         "review is optional in practice no matter what the prose claims."
+    )
+
+
+def test_advancing_a_spec_past_ready_is_guarded():
+    """`--status planned` is the *second* door to the same room, and it must be barred.
+
+    A planning path that advances `draft` -> `planned` carries the spec past `ready`
+    without stopping there — implying a freeze the gauntlet never granted. Planning
+    may only advance a spec that is ALREADY `ready`, and every file that writes such
+    an advance must say so verbatim.
+
+    This is the finding that a `ready`-only grep missed: the invariant is about the
+    transition, not about one word.
+    """
+    violations = []
+    for p in _craft_prose_files():
+        if p == GAUNTLET:
+            continue
+        text = p.read_text()
+        advances = {s for s in _SPEC_ADVANCE_RE.findall(text) if s in _FROZEN_STATES}
+        if advances and _ADVANCE_GUARD not in text:
+            violations.append(f"{p.relative_to(CRAFT)}: advances spec to {sorted(advances)}")
+    assert not violations, (
+        "these craft files advance a spec into a frozen state without the guard "
+        f"{_ADVANCE_GUARD!r}:\n  " + "\n  ".join(violations) + "\n"
+        "An unguarded advance lets a `draft` spec reach `planned` without ever passing "
+        "the gauntlet — the same bypass the freeze rule exists to close."
     )
 
 

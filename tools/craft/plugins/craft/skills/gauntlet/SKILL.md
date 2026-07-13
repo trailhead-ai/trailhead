@@ -48,10 +48,15 @@ premise pass most often reframes.
 
 ### 1. Resolve and read the spec
 
-Take the spec record id from the invocation, or — when brainstorming dispatches this at its exit
-gate — the spec it just wrote. Read it **in full** (`lore record show <spec-id>`). Confirm its status
-is `draft`; a `ready` spec is frozen and is not re-gauntleted (see brainstorm's Status Lifecycle —
-new thinking creates a new spec instead).
+Take the spec record id from the invocation, or — when brainstorming hands off at its exit gate —
+the spec it just wrote. Read it **in full** (`lore record show <spec-id>`). Confirm its status is
+`draft`; a `ready` spec is frozen and is not re-gauntleted (see brainstorm's Status Lifecycle — new
+thinking creates a new spec instead).
+
+**Resolve its absolute path too** (`lore record show <spec-id> --json` carries it; `lore search`
+prints it). The passes run in isolated contexts and most of them have no `Bash` — they open the spec
+with `Read`, so an absolute `<spec-path>` is what you hand them, exactly as planning's Council Review
+hands the council its `Spec:` pointer. Never ship a bare record id to a pass that cannot resolve it.
 
 ### 2. Decompose the claims (main session, mechanical)
 
@@ -81,6 +86,12 @@ isolated context and sees only what its prompt points it at.
 | 3–6 | The four lenses | `builder`, `breaker`, `attacker`, `advocate` | Per `_shared/council.md` |
 | 7 | Consistency audit | `consistency-auditor` | The spec path |
 | 8 | Divergence probe | `divergence-prober` | The spec path |
+
+**All eight passes are required.** If any pass agent is not installed (craft's subagents are
+selectable by name, so a hand-picked install can omit one), **say which one and stop** — do not
+quietly run seven and present the result as a gauntlet. A review that silently lost its premise
+pass is worse than no review, because it still ends in a `ready` spec. Name the missing agent, tell
+the user to install it, and leave the spec at `draft`.
 
 **Pass 1 — fact verification.** Dispatch `Explore` with the Fact claims and this instruction:
 
