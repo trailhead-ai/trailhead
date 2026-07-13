@@ -13,7 +13,9 @@ description: >
 **Recommended tier:** Sonnet/medium — most work is dispatched to subagents.
 
 **Agents:** `updater` (push orchestration), `monitor` (background watch + merge loop)
-**CLI:** `portage` (subcommands `detect-repos`, `merge`, `sidecar`) — on `$PATH` when the plugin is enabled
+**CLI:** `portage` (subcommands `detect-repos`, `check-status`, `evaluate-status`,
+`summarize`, `merge`, `wait-for-actionable`, `sidecar` — run `portage --help` for
+the full list) — on `$PATH` when the plugin is enabled
 
 ## Verb parsing
 
@@ -222,6 +224,12 @@ Every camp group member is a peer — there is no privileged member.
    For >1 PR without `merge_order` declared, the command refuses with a named error —
    honor that exit code:
    `BLOCKED: portage merge requires merge_order configured in [release] of the group TOML`
+
+   `portage merge` also reads `auto_merge` from the same `[release]` block and
+   refuses (exit 2) unless it is explicitly `true` — fail-closed by default. Honor
+   that exit code the same way; the refusal message names the remediation:
+   `refusing to merge — auto_merge is unset/false — add [release] auto_merge = true
+   to the group TOML to merge automatically.`
 
 3. **Report results.** If any failed, surface the reason and suggest next steps.
 
