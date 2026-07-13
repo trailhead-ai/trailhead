@@ -744,6 +744,71 @@ def test_scoped_record_updatable_and_deletable_with_same_flags(tmp_path):
     assert not list((pe_path / "blob").glob("*.md")), "scoped record not deleted"
 
 
+def test_colliding_record_disambiguated_by_flag(tmp_path):
+    """The same ``<kind>/<name>`` created in two different vaults is ambiguous to
+    the no-flag scan (first configured match wins); an explicit scope flag must
+    still pick out the specific copy in that vault — the escape hatch
+    ``_resolve_record_op_vault``'s docstring promises for this exact case.
+    """
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    _write_config(config_home, _spec_config_vaults(state))
+
+    # Same kind + title → same slug ("blob/grape") in two different vaults.
+    r_default = _run_with_config(
+        ["record", "create", "--kind", "blob", "--title", "Grape", "--keyword", "foo"],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+        stdin_text="default vault body\n",
+    )
+    assert r_default.returncode == 0, r_default.stderr
+    record_id = r_default.stdout.strip()
+
+    r_team = _run_with_config(
+        [
+            "record",
+            "create",
+            "--kind",
+            "blob",
+            "--title",
+            "Grape",
+            "--keyword",
+            "foo",
+            "--team",
+            "product-engineering",
+        ],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+        stdin_text="team vault body\n",
+    )
+    assert r_team.returncode == 0, r_team.stderr
+    assert r_team.stdout.strip() == record_id, "expected the same slug in both vaults"
+
+    # No-flag show hits the scan's first configured match (default vault, per
+    # _spec_config_vaults' ordering) — not a contract this test locks in beyond
+    # "some deterministic copy", but assert it for documentation.
+    r_scan = _run_with_config(
+        ["record", "show", record_id],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+    )
+    assert r_scan.returncode == 0, r_scan.stderr
+    assert "default vault body" in r_scan.stdout
+
+    # The explicit --team flag disambiguates to the team-vault copy.
+    r_flag = _run_with_config(
+        ["record", "show", record_id, "--team", "product-engineering"],
+        vault=vault,
+        state=state,
+        config_home=config_home,
+    )
+    assert r_flag.returncode == 0, r_flag.stderr
+    assert "team vault body" in r_flag.stdout
+
+
 def test_scoped_record_show_reachable_without_flags(tmp_path):
     """``record show`` on a record ``create`` routed to a non-default vault must
     find it WITHOUT re-supplying the routing flag — the bug this test guards:

@@ -50,25 +50,19 @@ def _resolve_group_scopes(
 def _resolve_record_op_vault(record_id: str, args) -> str:
     """Resolve the vault root that ``record show``/``record delete`` should act on.
 
-    Two paths:
+    No scope flags (the common case) → :func:`_find_current_record_location`'s
+    config-driven scan, passing the config this function already loaded so the
+    scan doesn't re-read/re-parse ``config.json``. See that function's docstring
+    for why the scan (not a routing computation) is what "locate an EXISTING
+    record" means here. Falls through to the routing resolution below when the
+    scan finds nothing, so a genuinely nonexistent record still gets a clean
+    not-found rather than a scan failure.
 
-      - **No scope flags** (the common case — a caller read ``record_id`` off
-        ``lore search`` or another record's ``--related`` and has no idea which
-        vault it lives in): locate the record's CURRENT vault via
-        :func:`_find_current_record_location` — the SAME config-driven scan
-        ``record update`` uses — so a record ``create`` auto-routed elsewhere (an
-        explicit flag or a camp group ``[[lore_scopes]]`` default) stays reachable
-        without the caller re-supplying that routing on every subsequent op. This
-        is symmetric with ``update``: create/update/show/delete all locate an
-        EXISTING record the same way. Falls through to the default-floor
-        resolution below when the scan finds nothing (a genuinely nonexistent
-        record), so the caller still gets a clean not-found rather than a scan
-        failure.
-      - **Explicit scope flag(s)** (``--repo/--product/--suite/--team``, kept for
-        the rare case where the same ``<kind>/<name>`` collides across more than
-        one configured vault and the scan's first-match would be ambiguous):
-        resolved via ``vault_resolve.resolve_vault`` — the same routing ``create``
-        uses — so an explicit flag always wins over the scan.
+    Explicit scope flag(s) (``--repo/--product/--suite/--team``) skip the scan
+    and resolve via ``vault_resolve.resolve_vault`` instead — the same routing
+    ``create`` uses. Kept as an escape hatch for the rare case where the same
+    ``<kind>/<name>`` collides across more than one configured vault and the
+    scan's first-match would be ambiguous.
 
     When **no** config exists, fall back to the config-resolved active vault
     (``vault_config.resolve_active_vault()`` → the floor) — vanilla usage is
@@ -90,7 +84,7 @@ def _resolve_record_op_vault(record_id: str, args) -> str:
     }
     if not participating_scopes:
         try:
-            return _find_current_record_location(record_id).vault_root
+            return _find_current_record_location(record_id, loaded=loaded).vault_root
         except record_store_mod.RecordNotFoundError:
             pass
     chosen = vault_resolve_mod.resolve_vault(participating_scopes, kind, vaults)
@@ -387,10 +381,11 @@ def _cmd_record_delete(args) -> int:
     if record_id is None:
         return 1
 
-    # Resolve the target vault via config (symmetric with `record create`) when a
-    # config exists, else the active vault (vanilla). A record whose vault was
-    # removed from config resolves to the default floor and surfaces a clean
-    # RecordNotFoundError below rather than acting on an orphaned target.
+    # Resolve the target vault: see _resolve_record_op_vault for the two-path
+    # contract (config-driven scan when no scope flag is given, explicit-flag
+    # routing otherwise). A record whose vault was removed from config resolves
+    # to the default floor and surfaces a clean RecordNotFoundError below rather
+    # than acting on an orphaned target.
     vault_root = _resolve_record_op_vault(record_id, args)
 
     # Dependent-warning: deleting a task that others depend-on is allowed (delete
@@ -611,7 +606,7 @@ def _cmd_record_create(args) -> int:
     return 0
 
 
-def _find_current_record_location(record_id: str):
+def _find_current_record_location(record_id: str, loaded=None):
     """Locate the record's CURRENT vault, independent of the new scope-flag values.
 
     The scope flags (``--team`` etc.) now mean **destination**, so the
@@ -621,6 +616,10 @@ def _find_current_record_location(record_id: str):
     is found — config-driven, index-independent, and with no circular dependence on
     the sidecar's own scope fields. Falls back to the active vault when no config
     exists (vanilla, Axiom 3).
+
+    ``loaded`` accepts an already-resolved :func:`_load_vault_config` result so a
+    caller that loaded config for its own purposes doesn't trigger a second
+    read+parse of ``config.json``; omit it to load fresh.
 
     Shared by ``record update`` (always — its scope flags are destination-only)
     and, via :func:`_resolve_record_op_vault`, ``record show``/``record delete``
@@ -635,7 +634,8 @@ def _find_current_record_location(record_id: str):
     from ..record import store as record_store_mod
     from ..vault import config as vault_config_mod
 
-    loaded = _load_vault_config()
+    if loaded is None:
+        loaded = _load_vault_config()
     if loaded is None:
         root = str(vault_config_mod.resolve_active_vault())
         return record_store_mod.locate_record(record_id, vault_root=root)

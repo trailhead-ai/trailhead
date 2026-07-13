@@ -232,12 +232,8 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     Uses ``diff.splitlines(keepends=True)`` so each hunk line retains its original
     line ending (``\\n`` / ``\\r\\n`` / none). File-header (``--- ``/``+++ ``) lines
     are skipped. Raises :class:`DiffFormatError` on the concatenated-no-newline
-    edge case (via :func:`_validate_hunk_counts`) and on a **bare hunk header** — a
-    line starting with ``@@`` that fails :data:`_HUNK_HEADER_RE` because it lacks
-    the ``-old_start,old_count +new_start,new_count`` line ranges. Without this
-    check a bare ``@@`` is silently invisible to the parser (it matches neither the
-    header regex nor a marker-prefixed content line), so the hunk is dropped
-    without a trace and the diff applies as a no-op.
+    edge case (via :func:`_validate_hunk_counts`) and on a bare hunk header — see
+    :class:`DiffFormatError` for both triggers.
     """
     hunks: list[_Hunk] = []
     current: Optional[_Hunk] = None
