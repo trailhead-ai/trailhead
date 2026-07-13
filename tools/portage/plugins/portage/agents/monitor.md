@@ -10,8 +10,8 @@ description: |
   TOP-LEVEL session (nested background agents lose their notification channel).
 
   Good fits:
-  - `/portage:monitor` — this agent is the full implementation
-  - Tail end of `/portage:open` and `/portage:update` after `updater` returns `pr_pairs`
+  - `/portage:pull_request monitor` — this agent is the full implementation
+  - Tail end of `/portage:pull_request create` and `/portage:pull_request update` after `updater` returns `pr_pairs`
   - "Watch the PRs", "monitor CI until mergeable", "wait for checks and merge"
 
   Bad fits:

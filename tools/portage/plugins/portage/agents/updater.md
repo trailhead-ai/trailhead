@@ -12,8 +12,8 @@ description: |
   on orchestration.
 
   Good fits:
-  - `/portage:update` — this agent is the full implementation; the skill is the dispatch wrapper.
-  - Tail end of `/portage:open` — once interactive review is done and the diff is clean,
+  - `/portage:pull_request update` — this agent is the full implementation; the skill is the dispatch wrapper.
+  - Tail end of `/portage:pull_request create` — once interactive review is done and the diff is clean,
     dispatch this agent to handle the mechanical push + PR-open tail.
   - "Push these changes and watch until mergeable"
 
