@@ -33,7 +33,9 @@ _MARKER_CLOSE = "</untrusted-content>"
 def _xml_escape(text: str) -> str:
     """Encode ``& < >`` so the text cannot break out of or spoof the marker.
 
-    ``&`` first (so entities are not double-encoded), then ``<`` and ``>``.
+    ``&`` first (so entities are not double-encoded), then ``<`` and ``>``. For body
+    text — not attribute values, which also need ``"`` escaped (see
+    ``_xml_attr_escape``).
     """
     text = text.replace("&", "&amp;")
     text = text.replace("<", "&lt;")
@@ -41,12 +43,23 @@ def _xml_escape(text: str) -> str:
     return text
 
 
+def _xml_attr_escape(text: str) -> str:
+    """Encode ``& < > "`` for use inside a double-quoted attribute value.
+
+    Extends ``_xml_escape`` with ``"`` encoding: an unescaped quote in an
+    attribute value would let a mis-sourced literal close the attribute early and
+    inject a forged pseudo-attribute into the same opening tag.
+    """
+    return _xml_escape(text).replace('"', "&quot;")
+
+
 def wrap_untrusted(text: str, *, source: str) -> str:
     """Wrap free-text ``text`` in the escaped ``<untrusted-content>`` marker.
 
     ``source`` is a short, caller-supplied provenance label (e.g. ``ci-annotation``,
-    ``bot-review``, ``pr-diff``) — it is escaped too, so even a mis-sourced literal
-    can never break the tag structure. The body is XML-character-escaped so a literal
+    ``bot-review``, ``pr-diff``) — it is attribute-escaped too (including the
+    delimiting ``"``), so even a mis-sourced literal can never break the tag
+    structure. The body is XML-character-escaped so a literal
     ``</untrusted-content>`` or ``<untrusted-content …>`` inside it is rendered inert.
     """
-    return f"{_MARKER_OPEN.format(source=_xml_escape(source))}{_xml_escape(text)}{_MARKER_CLOSE}"
+    return f"{_MARKER_OPEN.format(source=_xml_attr_escape(source))}{_xml_escape(text)}{_MARKER_CLOSE}"

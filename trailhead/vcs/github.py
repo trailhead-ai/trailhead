@@ -318,6 +318,26 @@ def _check_status(
     return result
 
 
+def _wrap_status_check_rollup(rollup: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Marker-wrap the free-text ``description`` subfield of ``statusCheckRollup``
+    entries.
+
+    ``statusCheckRollup`` is a union of GitHub's ``CheckRun`` and ``StatusContext``
+    types. ``StatusContext.description`` is free text set by whoever posts the
+    commit status (``POST /repos/{owner}/{repo}/statuses/{sha}``) — attacker-postable
+    by any CI Action with default ``statuses: write``, or any third-party
+    status-posting integration. ``CheckRun`` entries carry no ``description`` key and
+    pass through unchanged. ``context``/``name``/``state`` are structural identifiers
+    the rollup is keyed on for display and matching, and stay untouched.
+    """
+    wrapped = []
+    for entry in rollup:
+        if isinstance(entry.get("description"), str):
+            entry = {**entry, "description": wrap_untrusted(entry["description"], source="status-check")}
+        wrapped.append(entry)
+    return wrapped
+
+
 def _summary_inputs(
     repo_path: str,
     pr_number: str,
@@ -329,9 +349,11 @@ def _summary_inputs(
     Consolidates the three direct-``gh`` reads a PR summary otherwise makes — ``pr
     view`` (metadata), ``pr diff`` (the diff), and the inline review comments API —
     behind the VCS boundary so the untrusted-content marker covers them. The
-    attacker-influenced free-text (``title``/``body``/``diff``/each comment ``body``)
-    is wrapped; structural metadata (``state``/``mergeable``/``statusCheckRollup``,
-    each comment's ``path``/``line``/``author``) passes through unwrapped.
+    attacker-influenced free-text (``title``/``body``/``diff``/each comment
+    ``body``/each ``statusCheckRollup`` entry's ``description``) is wrapped;
+    structural metadata (``state``/``mergeable``, each rollup entry's
+    ``context``/``name``/``state``, each comment's ``path``/``line``/``author``)
+    passes through unwrapped.
     """
     validate_pr_number(pr_number)
     view = _gh(
@@ -372,7 +394,7 @@ def _summary_inputs(
         "body": wrap_untrusted(view.get("body") or "", source="pr-metadata"),
         "state": view.get("state"),
         "mergeable": view.get("mergeable"),
-        "statusCheckRollup": view.get("statusCheckRollup", []),
+        "statusCheckRollup": _wrap_status_check_rollup(view.get("statusCheckRollup", [])),
         "diff": wrap_untrusted(diff, source="pr-diff"),
         "comments": comments,
     }

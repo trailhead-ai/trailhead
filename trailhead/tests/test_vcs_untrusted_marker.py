@@ -16,7 +16,13 @@ Contract:
       "wrap every text field" would silently break;
   (d) the summarizer's ingested PR text (title/body/diff/review-comments) comes
       back marker-wrapped through ``pr.summary_inputs`` and summarizer.md carries
-      no direct-``gh`` PR-read bypass.
+      no direct-``gh`` PR-read bypass;
+  (e) each ``statusCheckRollup`` entry's ``description`` (the free-text subfield of
+      GitHub's ``StatusContext`` union member, attacker-postable via the commit
+      statuses API) comes back marker-wrapped, while ``context``/``name``/``state``
+      stay structural;
+  (f) ``wrap_untrusted``'s ``source`` attribute is escaped including the delimiting
+      ``"``, so a mis-sourced literal can never inject a forged pseudo-attribute.
 """
 
 from __future__ import annotations
@@ -114,6 +120,15 @@ class TestWrapUntrusted:
         # A pre-existing entity must not be double-encoded into &amp;lt;.
         out = wrap_untrusted("a & b &lt; c", source="ci-annotation")
         assert "a &amp; b &amp;lt; c" in out
+
+    def test_source_attribute_quote_is_escaped(self) -> None:
+        # An unescaped `"` in `source` would let a mis-sourced literal inject a
+        # forged pseudo-attribute into the opening tag. `hello` has no quotes, so
+        # the only quotes in the output are the two delimiting the attribute value.
+        out = wrap_untrusted("hello", source='trusted"><forged>')
+        assert out.count('"') == 2
+        assert '"><forged>' not in out
+        assert "&quot;" in out
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +296,72 @@ class TestSummaryInputsWrapping:
         assert inputs["state"] == "OPEN"
         assert inputs["mergeable"] == "MERGEABLE"
         assert inputs["statusCheckRollup"] == [{"name": "ruff", "state": "SUCCESS"}]
+
+
+class TestSummaryInputsWrapsStatusContextDescription:
+    """`statusCheckRollup` is a union of `CheckRun` and `StatusContext` (GitHub's
+    GraphQL schema). `StatusContext.description` is free text set by whoever posts
+    the commit status (`POST /repos/{o}/{r}/statuses/{sha}`) — attacker-composable
+    by any CI Action with default `statuses: write`. `context`/`name`/`state` are
+    structural identifiers the rollup is keyed on and must stay untouched.
+    """
+
+    _STATUS_CONTEXT_ENTRY = {
+        "__typename": "StatusContext",
+        "context": "ci/circleci: build",
+        "state": "FAILURE",
+        "targetUrl": "https://circleci.com/build/1",
+        "startedAt": "2026-06-26T23:07:30Z",
+        "description": _HOSTILE,
+    }
+    _CHECK_RUN_ENTRY = {
+        "__typename": "CheckRun",
+        "name": "ruff",
+        "workflowName": "tests",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "startedAt": "2026-06-26T23:07:30Z",
+        "completedAt": "2026-06-26T23:08:00Z",
+        "detailsUrl": "https://github.com/o/r/actions/runs/1/job/2",
+    }
+
+    def _inputs(self):
+        runner = _summary_runner(
+            view={
+                "number": 1,
+                "title": "some title",
+                "body": "some body",
+                "state": "OPEN",
+                "mergeable": "MERGEABLE",
+                "statusCheckRollup": [self._STATUS_CONTEXT_ENTRY, self._CHECK_RUN_ENTRY],
+            },
+            comments=[],
+            diff="",
+        )
+        return get_provider("github", runner=runner).pr.summary_inputs("some/repo", "1")
+
+    def test_status_context_description_is_wrapped(self) -> None:
+        rollup = self._inputs()["statusCheckRollup"]
+        description = rollup[0]["description"]
+        assert description.startswith("<untrusted-content")
+        assert description.endswith(_MARKER_CLOSE)
+
+    def test_status_context_description_breakout_neutralized(self) -> None:
+        rollup = self._inputs()["statusCheckRollup"]
+        description = rollup[0]["description"]
+        assert description.count(_MARKER_CLOSE) == 1
+        assert "&lt;/untrusted-content&gt;" in description
+
+    def test_status_context_structural_fields_untouched(self) -> None:
+        rollup = self._inputs()["statusCheckRollup"]
+        entry = rollup[0]
+        assert entry["context"] == "ci/circleci: build"
+        assert entry["state"] == "FAILURE"
+        assert entry["targetUrl"] == "https://circleci.com/build/1"
+
+    def test_check_run_entry_without_description_untouched(self) -> None:
+        rollup = self._inputs()["statusCheckRollup"]
+        assert rollup[1] == self._CHECK_RUN_ENTRY
 
 
 class TestSummarizerHasNoDirectGhBypass:
