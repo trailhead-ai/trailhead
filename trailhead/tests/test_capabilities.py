@@ -182,7 +182,7 @@ class TestOtherInventories:
 
     def test_portage_inventory(self):
         m = load_manifest(_PORTAGE_MANIFEST)
-        assert set(m.subagents) == {"monitor", "summarizer", "updater"}
+        assert set(m.subagents) == {"green-driver", "monitor", "summarizer", "updater"}
         assert set(m.skills) == {"merge", "monitor", "open", "update"}
 
     def test_landing_inventory(self):
