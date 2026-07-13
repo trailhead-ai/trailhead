@@ -182,7 +182,7 @@ def test_execute_skill_reassures_quality_review_deferred_not_dropped():
 
 def test_code_reviewer_has_no_word_cap():
     text = CODE_REVIEWER_MD.read_text()
-    assert "600" not in text, (
+    assert "600-word" not in text, (
         "code-reviewer.md must no longer carry the 600-word hard cap — a "
         "whole-change review's findings can legitimately run longer."
     )

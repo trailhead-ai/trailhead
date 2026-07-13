@@ -30,7 +30,7 @@ Per-slice conformance during execute is `drift-gate`'s job, not this skill's —
 
 **2. Get git SHAs:**
 ```bash
-BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
+BASE_SHA=$(git merge-base origin/main HEAD)  # whole-change base — where this plan's work diverged
 HEAD_SHA=$(git rev-parse HEAD)
 ```
 
@@ -56,29 +56,27 @@ Use Task tool with code-reviewer type, fill template at `code-reviewer.md`
 ## Example
 
 ```
-[Just completed Task 2: Add verification function]
+[All slices of the plan are built; ready for the whole-change pass before merge]
 
-You: Let me request code review before proceeding.
+You: Let me request code review before merge.
 
-BASE_SHA=$(git log --oneline | grep "Task 1" | head -1 | awk '{print $1}')
+BASE_SHA=$(git merge-base origin/main HEAD)
 HEAD_SHA=$(git rev-parse HEAD)
 
 [Dispatch code-reviewer subagent]
-  WHAT_WAS_IMPLEMENTED: Verification and repair functions for conversation index
-  PLAN_OR_REQUIREMENTS: Task 2 from the plan/requirements the caller provides
+  WHAT_WAS_IMPLEMENTED: Full plan — conversation index verification and repair
+  PLAN_OR_REQUIREMENTS: the plan/requirements the caller provides
   BASE_SHA: a7981ec
   HEAD_SHA: 3df7661
-  DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
+  DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types, across N slices
 
 [Subagent returns]:
-  Strengths: Clean architecture, real tests
-  Issues:
-    Important: Missing progress indicators
-    Minor: Magic number (100) for reporting interval
-  Assessment: Ready to proceed
+  Verdict: FIX_FIRST
+  Important: Missing progress indicators
+  Minor: Magic number (100) for reporting interval
 
 You: [Fix progress indicators]
-[Continue to Task 3]
+[Re-review or proceed to merge per the verdict]
 ```
 
 ## Integration with Workflows
