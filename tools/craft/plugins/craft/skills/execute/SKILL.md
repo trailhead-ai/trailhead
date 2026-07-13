@@ -23,7 +23,7 @@ Execute a plan slice-by-slice. For each slice, resolve unknowns first, then buil
 |------|-------|---------|
 | Resolve unknowns | `assumption-prover` | Writes a TDD test that proves or disproves an assumption |
 | Build slices | `executor` | Writes tests first, implements, self-reviews, commits |
-| Review work | `code-reviewer` | Spec compliance + code quality in one pass |
+| Review work | `drift-gate` | Per-slice conformance only — plan delivered, status claim holds, next slice unblocked |
 
 The controller decides which to dispatch and absorbs findings between iterations.
 
@@ -89,12 +89,14 @@ Returns: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED. See [Handling Exec
 | Change Size | Review Approach |
 |-------------|----------------|
 | **Small** (≤30 lines, 1-2 files) | Skip formal review. Review inline or one quick check. |
-| **Medium** (30-200 lines, 3-5 files) | Dispatch `code-reviewer` for combined spec + quality pass. |
-| **Large** (200+ lines or 5+ files) | Dispatch `code-reviewer` for a single combined spec + quality pass. Dispatch a second pass only when the first returns saturated/over-length. |
+| **Medium** (30-200 lines, 3-5 files) | Dispatch `drift-gate` for a conformance pass. |
+| **Large** (200+ lines or 5+ files) | Dispatch `drift-gate` for a conformance pass. Dispatch a second pass only when the first returns saturated/over-length. |
 
-When dispatching `code-reviewer`, give it: plan path + task name, the executor's status report (so it can verify the claim), and base/head SHAs for the diff.
+When dispatching `drift-gate`, give it: plan path + task name, the executor's status report (so it can verify the claim), and base/head SHAs for the diff.
 
-Absorb only the reviewer's verdict + Critical findings into your working context. Important and Minor findings are in the review tail — read them only if a Critical is ambiguous or you need to understand scope.
+Absorb the reviewer's verdict — `PASS` | `DRIFT` | `BLOCKED` — plus its findings into your working context. If it emits a `Security-surface:` line, carry it forward into a running list for the whole-change security trigger (a later After All Slices phase) — do not act on it per-slice.
+
+Quality, style, and design review are explicitly out of scope for `drift-gate` — that's deferred to the whole-change phases (a later addition to After All Slices), not dropped entirely.
 
 ### 5. Update the task graph
 
@@ -142,7 +144,7 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 |------|---------|-------------|
 | `assumption-prover` | Sonnet | Sonnet/high if the unknown spans multiple subsystems or needs deeper code exploration |
 | `executor` | Sonnet | `model: "opus"` per-dispatch for integration-heavy slices |
-| `code-reviewer` | Opus/high | (already pinned, no override needed) |
+| `drift-gate` | Sonnet/high | (already pinned, no override needed) |
 
 **Escalation signals:**
 
