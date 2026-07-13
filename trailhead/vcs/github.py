@@ -318,16 +318,27 @@ def _check_status(
     return result
 
 
-_STATUS_CONTEXT_FREE_TEXT_FIELDS = ("context", "targetUrl", "description")
+_ROLLUP_FREE_TEXT_FIELDS = (
+    # StatusContext (commit-status API)
+    "context",
+    "targetUrl",
+    "description",
+    # CheckRun (GitHub Actions / Checks API)
+    "name",
+    "workflowName",
+    "detailsUrl",
+)
 
 
 def _wrap_status_check_rollup(rollup: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Marker-wrap the free-text ``StatusContext`` subfields of ``statusCheckRollup``
-    entries.
+    """Marker-wrap the free-text subfields of ``statusCheckRollup`` entries.
 
     ``statusCheckRollup`` is a union of GitHub's ``CheckRun`` and ``StatusContext``
     GraphQL types; ``gh pr view --json statusCheckRollup`` projects each union member
-    to a disjoint field set (verified against ``cli/cli``'s ``api/export_pr.go``):
+    to a disjoint field set (verified against ``cli/cli``'s ``api/export_pr.go``).
+    Every free-text field either member exposes is attacker-composable and wrapped;
+    dispatch is by field presence (the two members' field sets are disjoint), not by
+    trusting the ``__typename`` discriminator.
 
     - ``StatusContext`` (commit-status API entries — ``context``, ``state``,
       ``targetUrl``, ``startedAt``): ``context``, ``targetUrl``, and ``description``
@@ -340,23 +351,27 @@ def _wrap_status_check_rollup(rollup: list[dict[str, Any]]) -> list[dict[str, An
       structural.
     - ``CheckRun`` (native GitHub Actions / Checks-API entries — ``name``,
       ``workflowName``, ``status``, ``conclusion``, ``startedAt``, ``completedAt``,
-      ``detailsUrl``): every field ``gh`` exports here is sourced from the base
-      repo's own workflow run, not the attacker-postable status API. ``name`` /
-      ``workflowName`` come from the workflow YAML's ``name:`` (and any matrix
-      values) — for ``pull_request``-triggered workflows GitHub runs the workflow
-      file version pinned to the base branch, not a fork PR's edits, so a PR author
-      cannot rewrite them via their own workflow-file changes. ``status`` /
-      ``conclusion`` are Checks-API enums; ``startedAt`` / ``completedAt`` /
-      ``detailsUrl`` are GitHub-generated (timestamps and the run's own URL, not
-      workflow-YAML-settable content). The whole entry passes through unchanged;
-      dispatch is by field presence (``StatusContext`` fields are simply absent from
-      ``CheckRun`` entries), not by trusting the ``__typename`` discriminator.
+      ``detailsUrl``): ``name`` (the job name) and ``workflowName`` (the workflow's
+      top-level ``name:``) come straight from the workflow YAML. A ``pull_request``
+      workflow runs in the context of the PR *merge commit* (``refs/pull/N/merge``),
+      i.e. the workflow file **from the PR head** — so a fork PR that adds or edits a
+      ``.github/workflows/*.yml`` ``name:`` composes these fields directly. (Only the
+      separate ``pull_request_target`` trigger pins to the base-branch workflow file,
+      and it does so to grant elevated permissions/secrets safely — a different
+      concern, not a trust guarantee for plain ``pull_request``.) Both are wrapped.
+      ``detailsUrl`` is a URL rendered as a clickable link that an agent still reads
+      as a raw string, and for third-party Checks-API apps it is app-settable to an
+      arbitrary value (the ``details_url`` the app supplies), so it is wrapped for
+      the same reason as ``StatusContext.targetUrl``. ``status`` / ``conclusion`` are
+      Checks-API-validated enums and ``startedAt`` / ``completedAt`` are
+      runtime-generated timestamps — none is workflow-YAML free text, so all stay
+      structural.
     """
     wrapped = []
     for entry in rollup:
         patch = {
             field: wrap_untrusted(entry[field], source="status-check")
-            for field in _STATUS_CONTEXT_FREE_TEXT_FIELDS
+            for field in _ROLLUP_FREE_TEXT_FIELDS
             if isinstance(entry.get(field), str)
         }
         if patch:
@@ -377,12 +392,13 @@ def _summary_inputs(
     view`` (metadata), ``pr diff`` (the diff), and the inline review comments API —
     behind the VCS boundary so the untrusted-content marker covers them. The
     attacker-influenced free-text (``title``/``body``/``diff``/each comment
-    ``body``/each ``statusCheckRollup`` ``StatusContext`` entry's
-    ``context``/``targetUrl``/``description`` — see ``_wrap_status_check_rollup``
-    for the full per-union-member field breakdown) is wrapped; structural metadata
-    (``state``/``mergeable``, each rollup ``StatusContext`` entry's ``state`` and
-    every ``CheckRun`` entry's fields, each comment's ``path``/``line``/``author``)
-    passes through unwrapped.
+    ``body``/each ``statusCheckRollup`` entry's free-text fields — a
+    ``StatusContext``'s ``context``/``targetUrl``/``description`` and a ``CheckRun``'s
+    ``name``/``workflowName``/``detailsUrl``; see ``_wrap_status_check_rollup`` for
+    the full per-union-member field breakdown) is wrapped; structural metadata
+    (``state``/``mergeable``, each rollup entry's validated enums
+    (``state``/``status``/``conclusion``) and runtime timestamps, each comment's
+    ``path``/``line``/``author``) passes through unwrapped.
     """
     validate_pr_number(pr_number)
     view = _gh(
