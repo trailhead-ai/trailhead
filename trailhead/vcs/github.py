@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from trailhead.vcs import runner as rp
+from trailhead.vcs.untrusted import wrap_untrusted
 from trailhead.vcs.interface import (
     CISurface,
     DeploySurface,
@@ -63,6 +64,14 @@ class MergeOrderRequiredError(Exception):
 
 class MergeConfigError(Exception):
     """Raised when merge_order names a member not in the manifest."""
+
+
+class AutoMergeDisabledError(Exception):
+    """Raised when auto_merge is absent or false in the [release] block.
+
+    Fail-closed default: existing installs that never opted into auto_merge
+    must not silently keep merging once this gate lands.
+    """
 
 
 class InvalidInputError(Exception):
@@ -243,6 +252,12 @@ def _fetch_annotations(
     if not raw:
         return []
     annotations = raw[:max_annotations]
+    # `message` is the one attacker-influenced free-text field on an annotation;
+    # wrap it at the boundary. `path`/`start_line` are structural — `_evaluate`
+    # gates on `path`'s truthiness, so wrapping it would flip classification.
+    for ann in annotations:
+        if isinstance(ann.get("message"), str):
+            ann["message"] = wrap_untrusted(ann["message"], source="ci-annotation")
     if len(raw) > max_annotations:
         annotations.append({"truncated": True, "total": len(raw)})
     return annotations
@@ -300,9 +315,142 @@ def _check_status(
             if r.get("author", {}).get("login") == review_bot_login
             and (not since or r.get("submittedAt", "") > since)
         ]
+        # `body` is the attacker-influenced free-text field; wrap it in place on the
+        # (otherwise unprojected) review dict. `state`/`author`/`submittedAt` are
+        # structural — `_bot_review_action` keys on `state`, so it stays untouched.
+        for review in bot_reviews:
+            if isinstance(review.get("body"), str):
+                review["body"] = wrap_untrusted(review["body"], source="bot-review")
         result["botReviews"] = bot_reviews
 
     return result
+
+
+_ROLLUP_FREE_TEXT_FIELDS = (
+    # StatusContext (commit-status API)
+    "context",
+    "targetUrl",
+    "description",
+    # CheckRun (GitHub Actions / Checks API)
+    "name",
+    "workflowName",
+    "detailsUrl",
+)
+
+
+def _wrap_status_check_rollup(rollup: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Marker-wrap the free-text subfields of ``statusCheckRollup`` entries.
+
+    ``statusCheckRollup`` is a union of GitHub's ``CheckRun`` and ``StatusContext``
+    GraphQL types; ``gh pr view --json statusCheckRollup`` projects each union member
+    to a disjoint field set (verified against ``cli/cli``'s ``api/export_pr.go``).
+    Every free-text field either member exposes is attacker-composable and wrapped;
+    dispatch is by field presence (the two members' field sets are disjoint), not by
+    trusting the ``__typename`` discriminator.
+
+    - ``StatusContext`` (commit-status API entries — ``context``, ``state``,
+      ``targetUrl``, ``startedAt``): ``context``, ``targetUrl``, and ``description``
+      (not currently emitted by ``gh``, wrapped anyway as defense-in-depth — see
+      commit history) are all set by whoever posts the commit status (``POST
+      /repos/{owner}/{repo}/statuses/{sha}``) — attacker-postable by any CI Action
+      with default ``statuses: write``, or any third-party status-posting
+      integration. All three are wrapped. ``state`` is a GitHub-validated enum
+      (``error|failure|pending|success``, rejected server-side otherwise) and stays
+      structural.
+    - ``CheckRun`` (native GitHub Actions / Checks-API entries — ``name``,
+      ``workflowName``, ``status``, ``conclusion``, ``startedAt``, ``completedAt``,
+      ``detailsUrl``): ``name`` (the job name) and ``workflowName`` (the workflow's
+      top-level ``name:``) come straight from the workflow YAML. A ``pull_request``
+      workflow runs in the context of the PR *merge commit* (``refs/pull/N/merge``),
+      i.e. the workflow file **from the PR head** — so a fork PR that adds or edits a
+      ``.github/workflows/*.yml`` ``name:`` composes these fields directly. (Only the
+      separate ``pull_request_target`` trigger pins to the base-branch workflow file,
+      and it does so to grant elevated permissions/secrets safely — a different
+      concern, not a trust guarantee for plain ``pull_request``.) Both are wrapped.
+      ``detailsUrl`` is a URL rendered as a clickable link that an agent still reads
+      as a raw string, and for third-party Checks-API apps it is app-settable to an
+      arbitrary value (the ``details_url`` the app supplies), so it is wrapped for
+      the same reason as ``StatusContext.targetUrl``. ``status`` / ``conclusion`` are
+      Checks-API-validated enums and ``startedAt`` / ``completedAt`` are
+      runtime-generated timestamps — none is workflow-YAML free text, so all stay
+      structural.
+    """
+    wrapped = []
+    for entry in rollup:
+        patch = {
+            field: wrap_untrusted(entry[field], source="status-check")
+            for field in _ROLLUP_FREE_TEXT_FIELDS
+            if isinstance(entry.get(field), str)
+        }
+        if patch:
+            entry = {**entry, **patch}
+        wrapped.append(entry)
+    return wrapped
+
+
+def _summary_inputs(
+    repo_path: str,
+    pr_number: str,
+    *,
+    runner: rp.Runner,
+) -> dict[str, Any]:
+    """Fetch the PR reads a summarizer needs, marker-wrapping every free-text field.
+
+    Consolidates the three direct-``gh`` reads a PR summary otherwise makes — ``pr
+    view`` (metadata), ``pr diff`` (the diff), and the inline review comments API —
+    behind the VCS boundary so the untrusted-content marker covers them. The
+    attacker-influenced free-text (``title``/``body``/``diff``/each comment
+    ``body``/each ``statusCheckRollup`` entry's free-text fields — a
+    ``StatusContext``'s ``context``/``targetUrl``/``description`` and a ``CheckRun``'s
+    ``name``/``workflowName``/``detailsUrl``; see ``_wrap_status_check_rollup`` for
+    the full per-union-member field breakdown) is wrapped; structural metadata
+    (``state``/``mergeable``, each rollup entry's validated enums
+    (``state``/``status``/``conclusion``) and runtime timestamps, each comment's
+    ``path``/``line``/``author``) passes through unwrapped.
+    """
+    validate_pr_number(pr_number)
+    view = _gh(
+        ["pr", "view", pr_number, "--json", "number,title,body,state,mergeable,statusCheckRollup"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if not view:
+        raise RuntimeError(f"summary_inputs: could not fetch PR #{pr_number} in {repo_path}")
+
+    owner_repo = _get_owner_repo(repo_path, runner)
+    raw_comments = (
+        _gh(
+            ["api", f"repos/{owner_repo}/pulls/{pr_number}/comments", "--paginate"],
+            cwd=repo_path,
+            runner=runner,
+        )
+        if owner_repo
+        else None
+    ) or []
+
+    diff_r = rp.run(["gh", "pr", "diff", pr_number], cwd=repo_path, runner=runner)
+    diff = diff_r.stdout if diff_r.returncode == 0 else ""
+
+    comments = [
+        {
+            "path": c.get("path"),
+            "line": c.get("line"),
+            "author": c.get("user", {}).get("login"),
+            "body": wrap_untrusted(c.get("body") or "", source="pr-review-comment"),
+        }
+        for c in raw_comments
+    ]
+
+    return {
+        "number": view.get("number"),
+        "title": wrap_untrusted(view.get("title") or "", source="pr-metadata"),
+        "body": wrap_untrusted(view.get("body") or "", source="pr-metadata"),
+        "state": view.get("state"),
+        "mergeable": view.get("mergeable"),
+        "statusCheckRollup": _wrap_status_check_rollup(view.get("statusCheckRollup", [])),
+        "diff": wrap_untrusted(diff, source="pr-diff"),
+        "comments": comments,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -432,11 +580,27 @@ def _load_merge_order(toml_path: str | None) -> list[str] | None:
     return None
 
 
+def _load_auto_merge(toml_path: str | None) -> bool:
+    if not toml_path:
+        return False
+    p = Path(toml_path)
+    if not p.is_file():
+        return False
+    try:
+        raw = tomllib.loads(p.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return False
+    release = raw.get("release")
+    if not isinstance(release, dict):
+        return False
+    return release.get("auto_merge") is True
+
+
 def validate_pr_number(pr_number: str) -> None:
     """Validate ``pr_number`` is all-digits; raise InvalidInputError otherwise.
 
     Public (not underscore-prefixed) so callers outside this module — e.g.
-    ``tools/portage``'s ``_pr_pair.py`` — can share this one validation rule
+    ``tools/portage``'s ``portage.pairs`` — can share this one validation rule
     instead of re-deriving their own digit regex.
     """
     if not re.fullmatch(r"\d+", pr_number):
@@ -531,6 +695,14 @@ def _merge_prs(
     member_names = {m["name"] for m in manifest_data.get("members", [])}
 
     merge_order = _load_merge_order(toml_path)
+
+    # auto_merge gate — fail-closed: refuse before any subprocess call unless
+    # [release].auto_merge is explicitly true.
+    if not _load_auto_merge(toml_path):
+        raise AutoMergeDisabledError(
+            "refusing to merge — auto_merge is unset/false — "
+            "add `[release] auto_merge = true` to the group TOML to merge automatically."
+        )
 
     # Merge safety gate
     if len(pr_pairs) > 1 and not merge_order:
@@ -696,6 +868,9 @@ class _GitHubPR(PRSurface):
         fail_count: int = 0,
     ) -> dict[str, Any]:
         return _evaluate(status, review_bot_login=review_bot_login, fail_count=fail_count)
+
+    def summary_inputs(self, repo_path: str, pr_number: str) -> dict[str, Any]:
+        return _summary_inputs(repo_path, pr_number, runner=self._runner)
 
     def merge(
         self,

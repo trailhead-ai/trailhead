@@ -1,16 +1,17 @@
-"""Shared `repo:pr_number[:extra]` pair parsing for portage thin scripts.
+"""Shared `repo:pr_number[:extra]` pair parsing for the portage CLI.
 
-wait_for_actionable.py and merge_prs.py both take positional `repo:pr_number`
-tokens on argv (merge_prs.py additionally accepts an optional third
-`:member_name` field). Both validate the same rule -- at least a repo and a
-pr_number field, pr_number all-digits -- and both exit 2 with a clean stderr
-message on malformity rather than raising a raw exception. This module is the
-single place that shared rule lives; the field count differs per caller via
-`max_parts`, and any extra fields beyond repo/pr_number are the caller's to
+The ``wait-for-actionable`` and ``merge`` subcommands both take positional
+``repo:pr_number`` tokens on argv (``merge`` additionally accepts an optional
+third ``:member_name`` field). Both validate the same rule -- at least a repo
+and a pr_number field, pr_number all-digits -- and both exit 2 with a clean
+stderr message on malformity rather than raising a raw exception. This module is
+the single place that shared rule lives; the field count differs per caller via
+``max_parts``, and any extra fields beyond repo/pr_number are the caller's to
 interpret. The digit check itself delegates to
-`trailhead.vcs.github.validate_pr_number` (imported lazily inside `split_pair`,
-since callers import this module before `trailhead` is guaranteed importable)
-so there is one place that defines "what a valid pr_number looks like".
+``trailhead.vcs.github.validate_pr_number`` (imported lazily inside
+``split_pair``, since the CLI imports this module before ``trailhead`` is
+guaranteed importable) so there is one place that defines "what a valid
+pr_number looks like".
 """
 
 from __future__ import annotations

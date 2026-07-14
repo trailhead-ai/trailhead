@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# bin/portage — PATH wrapper for the portage CLI.
+#
+# Claude Code auto-adds a plugin's bin/ directory to Bash PATH when the plugin
+# is enabled, so this wrapper makes bare `portage` resolve for any install.
+#
+# Resolution order:
+#   1. ${CLAUDE_PLUGIN_ROOT}/cli/portage  — set by Claude Code at plugin load time
+#   2. Self-relative (macOS-safe, no GNU readlink -f): resolve symlinks via a
+#      while loop, then find cli/portage as a sibling of bin/
+#
+# bin/ and cli/ are siblings under plugins/portage/, so cli/portage is at
+# <plugin_root>/cli/portage regardless of how this wrapper was invoked.
+
+set -euo pipefail
+
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "${CLAUDE_PLUGIN_ROOT}/cli/portage" ]; then
+    CLI="${CLAUDE_PLUGIN_ROOT}/cli/portage"
+else
+    # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
+    SOURCE="${BASH_SOURCE[0]}"
+    while [ -L "$SOURCE" ]; do
+        DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+        SOURCE="$(readlink "$SOURCE")"
+        # Handle relative symlinks.
+        [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+    done
+    BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    PLUGIN_DIR="$(cd -P "$BIN_DIR/.." && pwd)"
+    CLI="$PLUGIN_DIR/cli/portage"
+fi
+
+exec python3 "$CLI" "$@"

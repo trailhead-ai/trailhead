@@ -1,23 +1,15 @@
-"""Thin-script delegation tests: each portage script calls trailhead.vcs and
-reproduces the craft CLI's argv + output shape.
+"""CLI dispatch contract tests for the unified `portage` command.
 
-The portage scripts are thin: bootstrap → from trailhead.vcs import get_provider
-→ call the matching provider method → print the same JSON / exit code the old
-craft script did. These tests inject a fake provider (monkeypatching the script's
-get_provider) so no network/gh/git is touched, and assert:
+These port the exit-code / delegation / error-message contracts that used to
+live in ``test_portage_thin_scripts.py`` (one thin script per file) onto the
+single ``portage.cli.dispatch`` router. Each subcommand parses its args and
+invokes the matching ``trailhead.vcs`` provider method; the router owns the
+JSON output shape and exit codes (0 / 1 / 2) the old scripts owned.
 
-  - the right provider method is invoked with the right args (delegation), and
-  - the CLI prints the same JSON shape and returns the same exit code.
-
-Scripts under test (CLI contract ported verbatim from craft):
-  detect_repos.py        → provider.repos.detect(manifest)
-  check_pr_status.py     → provider.pr.status(...)
-  pr_evaluate_status.py  → provider.pr.evaluate(provider.pr.status(...))
-  merge_prs.py           → provider.pr.merge(pairs, manifest, toml=...)  [merge_order gate]
-  wait_for_actionable.py → provider.ci.wait(pairs, ...)
-  release_prs_sidecar.py → provider.pr.open(...) / provider.pr.read_sidecar(...)
-
-Unique basename — no collision with craft's per-script tests.
+A fake provider is injected (monkeypatching ``get_provider`` in the command
+modules) so no network / gh / git is touched. The tests drive the real
+``dispatch.main(argv)`` entry point so argparse routing and the handler's
+exit code are proven together.
 """
 
 from __future__ import annotations
@@ -25,7 +17,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from _script_loader import load_script
+import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
+
+from portage.cli import ci as ci_cli
+from portage.cli import dispatch
+from portage.cli import pr as pr_cli
+from portage.cli import repos as repos_cli
 
 
 class _FakeRepos:
@@ -50,6 +47,16 @@ class _FakePR:
         self.evaluate_result = {"action": "done", "reason": "clean", "details": {}}
         self.merge_result = {"merged": ["a:1"], "failed": {}, "skipped": {}}
         self.sidecar = {"schema_version": 1, "prs": [], "external_tracker": None}
+        self.summary_result = {
+            "number": 1,
+            "title": '<untrusted-content source="pr-metadata">t</untrusted-content>',
+            "body": '<untrusted-content source="pr-metadata">b</untrusted-content>',
+            "state": "OPEN",
+            "mergeable": "MERGEABLE",
+            "statusCheckRollup": [],
+            "diff": '<untrusted-content source="pr-diff">d</untrusted-content>',
+            "comments": [],
+        }
 
     def status(self, repo_path, pr_number, *, since=None, review_bot_login=None):
         self.calls.append(("status", repo_path, pr_number, since, review_bot_login))
@@ -62,6 +69,10 @@ class _FakePR:
     def merge(self, pr_pairs, manifest_path, *, toml_path=None):
         self.calls.append(("merge", list(pr_pairs), manifest_path, toml_path))
         return self.merge_result
+
+    def summary_inputs(self, repo_path, pr_number):
+        self.calls.append(("summary_inputs", repo_path, pr_number))
+        return self.summary_result
 
     def open(self, sidecar_path, prs):
         self.calls.append(("open", str(sidecar_path), prs))
@@ -88,8 +99,10 @@ class _FakeProvider:
         self.ci = _FakeCI()
 
 
-def _patch_provider(mod, monkeypatch, provider):
-    monkeypatch.setattr(mod, "get_provider", lambda *a, **k: provider)
+def _install(monkeypatch, provider):
+    """Point every command module's get_provider at the injected fake."""
+    for mod in (repos_cli, pr_cli, ci_cli):
+        monkeypatch.setattr(mod, "get_provider", lambda *a, **k: provider)
 
 
 def _make_manifest(tmp_path: Path) -> Path:
@@ -99,7 +112,7 @@ def _make_manifest(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# detect_repos.py
+# detect-repos
 # ---------------------------------------------------------------------------
 
 
@@ -107,46 +120,54 @@ class TestDetectRepos:
     def test_delegates_to_repos_detect_and_prints_json(self, tmp_path, monkeypatch, capsys):
         active = [{"repo": "api", "path": "/x", "branch": "feat", "ahead": 1, "dirty": 0}]
         provider = _FakeProvider(repos_result=active)
-        mod = load_script("detect_repos")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
 
-        rc = mod.main(["--manifest", str(manifest)])
+        rc = dispatch.main(["detect-repos", "--manifest", str(manifest)])
         assert rc == 0
         assert provider.repos.calls == [("detect", str(manifest))]
         out = json.loads(capsys.readouterr().out)
         assert out == active
 
+    def test_manifest_read_error_exits_2(self, tmp_path, monkeypatch, capsys):
+        from trailhead.vcs.github import ManifestReadError
+
+        provider = _FakeProvider()
+
+        def raising_detect(manifest_path):
+            raise ManifestReadError("manifest.json: malformed")
+
+        provider.repos.detect = raising_detect
+        _install(monkeypatch, provider)
+        rc = dispatch.main(["detect-repos", "--manifest", str(tmp_path / "manifest.json")])
+        assert rc == 2
+        assert "malformed" in capsys.readouterr().err
+
 
 # ---------------------------------------------------------------------------
-# check_pr_status.py
+# check-status
 # ---------------------------------------------------------------------------
 
 
-class TestCheckPrStatus:
+class TestCheckStatus:
     def test_delegates_to_pr_status_and_prints_json(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = load_script("check_pr_status")
-        _patch_provider(mod, monkeypatch, provider)
-        repo = tmp_path  # must be a directory (CLI guard)
+        _install(monkeypatch, provider)
 
-        rc = mod.main([str(repo), "42"])
+        rc = dispatch.main(["check-status", str(tmp_path), "42"])
         assert rc == 0
-        assert provider.pr.calls[0][:3] == ("status", str(repo), "42")
+        assert provider.pr.calls[0][:3] == ("status", str(tmp_path), "42")
         out = json.loads(capsys.readouterr().out)
         assert out["mergeable"] == "MERGEABLE"
 
     def test_not_a_directory_exits_1(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = load_script("check_pr_status")
-        _patch_provider(mod, monkeypatch, provider)
-        rc = mod.main([str(tmp_path / "nope"), "42"])
+        _install(monkeypatch, provider)
+        rc = dispatch.main(["check-status", str(tmp_path / "nope"), "42"])
         assert rc == 1
         assert "not a directory" in capsys.readouterr().out
 
     def test_invalid_pr_number_exits_1_with_clean_error(self, tmp_path, monkeypatch, capsys):
-        """A flag-injection-shaped pr_number surfaces provider.pr.status's
-        InvalidInputError as a clean JSON error, never a raw traceback."""
         from trailhead.vcs.github import InvalidInputError
 
         provider = _FakeProvider()
@@ -155,27 +176,52 @@ class TestCheckPrStatus:
             raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
 
         provider.pr.status = raising_status
-        mod = load_script("check_pr_status")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
 
-        rc = mod.main([str(tmp_path), "abc"])
+        rc = dispatch.main(["check-status", str(tmp_path), "abc"])
         assert rc == 1
         out = json.loads(capsys.readouterr().out)
         assert "must be all digits" in out["error"]
 
 
 # ---------------------------------------------------------------------------
-# pr_evaluate_status.py
+# summarize
 # ---------------------------------------------------------------------------
 
 
-class TestPrEvaluate:
+class TestSummarize:
+    def test_delegates_to_pr_summary_inputs_and_prints_wrapped_json(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        provider = _FakeProvider()
+        _install(monkeypatch, provider)
+
+        rc = dispatch.main(["summarize", str(tmp_path), "42"])
+        assert rc == 0
+        assert provider.pr.calls[0] == ("summary_inputs", str(tmp_path), "42")
+        out = json.loads(capsys.readouterr().out)
+        assert out["title"].startswith("<untrusted-content")
+        assert out["diff"].startswith("<untrusted-content")
+
+    def test_not_a_directory_exits_1(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+        _install(monkeypatch, provider)
+        rc = dispatch.main(["summarize", str(tmp_path / "nope"), "42"])
+        assert rc == 1
+        assert "not a directory" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# evaluate-status
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateStatus:
     def test_delegates_status_then_evaluate(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = load_script("pr_evaluate_status")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
 
-        rc = mod.main([str(tmp_path), "7"])
+        rc = dispatch.main(["evaluate-status", str(tmp_path), "7"])
         assert rc == 0
         kinds = [c[0] for c in provider.pr.calls]
         assert "status" in kinds and "evaluate" in kinds
@@ -183,8 +229,6 @@ class TestPrEvaluate:
         assert out["action"] == "done"
 
     def test_invalid_pr_number_exits_1_with_clean_error(self, tmp_path, monkeypatch, capsys):
-        """A flag-injection-shaped pr_number surfaces provider.pr.status's
-        InvalidInputError as a clean JSON error, never a raw traceback."""
         from trailhead.vcs.github import InvalidInputError
 
         provider = _FakeProvider()
@@ -193,37 +237,33 @@ class TestPrEvaluate:
             raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
 
         provider.pr.status = raising_status
-        mod = load_script("pr_evaluate_status")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
 
-        rc = mod.main([str(tmp_path), "abc"])
+        rc = dispatch.main(["evaluate-status", str(tmp_path), "abc"])
         assert rc == 1
         out = json.loads(capsys.readouterr().out)
         assert "must be all digits" in out["reason"]
 
 
 # ---------------------------------------------------------------------------
-# merge_prs.py — preserve merge_order gate + BLOCKED message
+# merge — preserve merge_order gate + BLOCKED message
 # ---------------------------------------------------------------------------
 
 
-class TestMergePrs:
+class TestMerge:
     def test_delegates_to_pr_merge_and_prints_json(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = load_script("merge_prs")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
 
-        rc = mod.main(["--manifest", str(manifest), f"{tmp_path}:1:api"])
+        rc = dispatch.main(["merge", "--manifest", str(manifest), f"{tmp_path}:1:api"])
         assert rc == 0
         merge_calls = [c for c in provider.pr.calls if c[0] == "merge"]
-        assert merge_calls, "merge_prs.py must delegate to provider.pr.merge"
+        assert merge_calls, "merge must delegate to provider.pr.merge"
         out = json.loads(capsys.readouterr().out)
         assert out["merged"] == ["a:1"]
 
-    def test_r6_gate_message_preserved(self, tmp_path, monkeypatch, capsys):
-        """>1 PR with no --toml → provider.pr.merge raises MergeOrderRequiredError;
-        the CLI must surface the BLOCKED-style named error and exit 2."""
+    def test_merge_order_gate_message_preserved(self, tmp_path, monkeypatch, capsys):
         from trailhead.vcs.github import MergeOrderRequiredError
 
         provider = _FakeProvider()
@@ -235,36 +275,35 @@ class TestMergePrs:
             )
 
         provider.pr.merge = raising_merge
-        mod = load_script("merge_prs")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
 
-        rc = mod.main(["--manifest", str(manifest), f"{tmp_path}:1:api", f"{tmp_path}:2:web"])
+        rc = dispatch.main(
+            ["merge", "--manifest", str(manifest), f"{tmp_path}:1:api", f"{tmp_path}:2:web"]
+        )
         assert rc == 2
-        err = capsys.readouterr().err
-        assert "merge_order" in err
+        assert "merge_order" in capsys.readouterr().err
 
     def test_bad_pair_format_exits_2(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = load_script("merge_prs")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
         manifest = _make_manifest(tmp_path)
-        rc = mod.main(["--manifest", str(manifest), "no-colon-here"])
+        rc = dispatch.main(["merge", "--manifest", str(manifest), "no-colon-here"])
         assert rc == 2
+        assert not [c for c in provider.pr.calls if c[0] == "merge"]
 
 
 # ---------------------------------------------------------------------------
-# wait_for_actionable.py
+# wait-for-actionable
 # ---------------------------------------------------------------------------
 
 
 class TestWaitForActionable:
     def test_delegates_to_ci_wait_and_prints_json(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = load_script("wait_for_actionable")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
 
-        rc = mod.main([f"{tmp_path}:1"])
+        rc = dispatch.main(["wait-for-actionable", f"{tmp_path}:1"])
         assert rc == 0
         assert provider.ci.calls[0][0] == "wait"
         out = json.loads(capsys.readouterr().out)
@@ -273,50 +312,41 @@ class TestWaitForActionable:
     def test_timeout_exits_1(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
         provider.ci.wait_result = {"timeout": True, "elapsed_seconds": 1800}
-        mod = load_script("wait_for_actionable")
-        _patch_provider(mod, monkeypatch, provider)
-        rc = mod.main([f"{tmp_path}:1"])
+        _install(monkeypatch, provider)
+        rc = dispatch.main(["wait-for-actionable", f"{tmp_path}:1"])
         assert rc == 1
 
     def test_bad_pair_format_exits_2_with_clean_message(self, monkeypatch, capsys):
-        """A malformed repo:pr pair (no colon) must exit 2 with a clear stderr
-        message, not raise a raw ValueError traceback from the unguarded split."""
         provider = _FakeProvider()
-        mod = load_script("wait_for_actionable")
-        _patch_provider(mod, monkeypatch, provider)
-        rc = mod.main(["no-colon-here"])
+        _install(monkeypatch, provider)
+        rc = dispatch.main(["wait-for-actionable", "no-colon-here"])
         assert rc == 2
         assert provider.ci.calls == []
-        err = capsys.readouterr().err
-        assert "no-colon-here" in err
+        assert "no-colon-here" in capsys.readouterr().err
 
     def test_non_digit_pr_number_exits_2_with_clean_message(self, monkeypatch, capsys):
-        """A repo:pr pair whose pr half isn't all digits must exit 2 cleanly,
-        matching merge_prs.py's guard rather than reaching ci.wait unvalidated."""
         provider = _FakeProvider()
-        mod = load_script("wait_for_actionable")
-        _patch_provider(mod, monkeypatch, provider)
-        rc = mod.main(["some/path:--repo=owner/other"])
+        _install(monkeypatch, provider)
+        rc = dispatch.main(["wait-for-actionable", "some/path:--repo=owner/other"])
         assert rc == 2
         assert provider.ci.calls == []
-        err = capsys.readouterr().err
-        assert "--repo=owner/other" in err
+        assert "--repo=owner/other" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
-# release_prs_sidecar.py — record/read via provider.pr
+# sidecar — record/read via provider.pr
 # ---------------------------------------------------------------------------
 
 
 class TestSidecar:
     def test_write_delegates_to_pr_open(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
-        mod = load_script("release_prs_sidecar")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
         sidecar = tmp_path / "prs.json"
 
-        rc = mod.main(
+        rc = dispatch.main(
             [
+                "sidecar",
                 "write",
                 "--sidecar",
                 str(sidecar),
@@ -326,7 +356,7 @@ class TestSidecar:
         )
         assert rc == 0
         open_calls = [c for c in provider.pr.calls if c[0] == "open"]
-        assert open_calls, "write subcommand must delegate to provider.pr.open"
+        assert open_calls, "sidecar write must delegate to provider.pr.open"
         _, _, prs = open_calls[0]
         assert prs == [
             {
@@ -337,6 +367,16 @@ class TestSidecar:
             }
         ]
 
+    def test_write_bad_token_exits_2(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+        _install(monkeypatch, provider)
+        sidecar = tmp_path / "prs.json"
+        rc = dispatch.main(
+            ["sidecar", "write", "--sidecar", str(sidecar), "--pr", "not-enough-fields"]
+        )
+        assert rc == 2
+        assert not [c for c in provider.pr.calls if c[0] == "open"]
+
     def test_read_delegates_to_pr_read_sidecar(self, tmp_path, monkeypatch, capsys):
         provider = _FakeProvider()
         provider.pr.sidecar = {
@@ -344,13 +384,12 @@ class TestSidecar:
             "prs": [{"repo": "api", "pr_number": "1", "url": "u", "branch": "b"}],
             "external_tracker": None,
         }
-        mod = load_script("release_prs_sidecar")
-        _patch_provider(mod, monkeypatch, provider)
+        _install(monkeypatch, provider)
         sidecar = tmp_path / "prs.json"
 
-        rc = mod.main(["read", "--sidecar", str(sidecar)])
+        rc = dispatch.main(["sidecar", "read", "--sidecar", str(sidecar)])
         assert rc == 0
         read_calls = [c for c in provider.pr.calls if c[0] == "read_sidecar"]
-        assert read_calls, "read subcommand must delegate to provider.pr.read_sidecar"
+        assert read_calls, "sidecar read must delegate to provider.pr.read_sidecar"
         out = json.loads(capsys.readouterr().out)
         assert out["prs"][0]["repo"] == "api"

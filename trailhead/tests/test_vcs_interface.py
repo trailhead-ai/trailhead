@@ -88,7 +88,7 @@ class TestProviderShape:
 
     def test_pr_methods(self) -> None:
         provider = get_provider("github")
-        for m in ("open", "read_sidecar", "status", "evaluate", "merge"):
+        for m in ("open", "read_sidecar", "status", "evaluate", "merge", "summary_inputs"):
             assert hasattr(provider.pr, m), f"pr.{m} missing"
 
     def test_ci_methods(self) -> None:
@@ -117,6 +117,7 @@ _INTERFACE_METHODS = [
     "pr.status",
     "pr.evaluate",
     "pr.merge",
+    "pr.summary_inputs",
     "ci.checks",
     "ci.wait",
     "deploy.workflow_runs",

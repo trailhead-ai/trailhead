@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""The `portage` CLI entry point — a thin shim over ``portage.cli.dispatch``.
+
+Puts the plugin root (this file's ``../``) on ``sys.path`` so the sibling
+``portage`` package — and the plugin-root-level ``_bootstrap`` module its
+dispatch lazy-imports — are importable whether run from the repo or an installed
+plugin (``${CLAUDE_PLUGIN_ROOT}/cli/portage``). All command logic lives in
+``portage.cli.*`` (one module per command group); keeping this shim minimal
+keeps that logic unit-testable and the ``bin/portage`` wrapper's exec target
+stable.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# cli/portage → parent is cli/ → parent is plugins/portage/ (the plugin root).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from portage.cli import dispatch  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(dispatch.main())
