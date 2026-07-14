@@ -1,13 +1,12 @@
-"""Provider-agnostic VCS interface (the seam portage/landing build on).
+"""Provider-agnostic VCS interface (the seam portage builds on).
 
-A ``Provider`` exposes four namespaced surfaces:
+A ``Provider`` exposes three namespaced surfaces:
 
 - ``repos`` — camp-manifest-driven active-repo detection.
 - ``pr``    — open / status / evaluate / merge a pull/merge request.
 - ``ci``    — CI checks read + poll-to-actionable.
-- ``deploy``— workflow-run + deployment status + log interrogation.
 
-All four surfaces are declared here so the interface shape is stable and a
+All three surfaces are declared here so the interface shape is stable and a
 second backend maps onto the same method set; ``GitHubProvider`` implements
 them against GitHub.
 
@@ -120,30 +119,9 @@ class CISurface(ABC):
         """Poll until at least one PR reaches an actionable state, or timeout."""
 
 
-class DeploySurface(ABC):
-    """Workflow-run + deployment status + log interrogation.
-
-    Implemented by ``GitHubProvider``; the interface is provider-agnostic so
-    a second backend (GitLab via ``glab``/REST) maps onto the same method set.
-    """
-
-    @abstractmethod
-    def workflow_runs(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        """List GitHub-Actions workflow runs."""
-
-    @abstractmethod
-    def status(self, repo_path: str, **kwargs: Any) -> list[dict]:
-        """List deployment statuses."""
-
-    @abstractmethod
-    def logs(self, repo_path: str, *, job_id: str, **kwargs: Any) -> list[dict]:
-        """Fetch failure annotations for a check run — the doctor signal."""
-
-
 class Provider(ABC):
-    """Provider-agnostic VCS backend with four namespaced surfaces."""
+    """Provider-agnostic VCS backend with three namespaced surfaces."""
 
     repos: ReposSurface
     pr: PRSurface
     ci: CISurface
-    deploy: DeploySurface

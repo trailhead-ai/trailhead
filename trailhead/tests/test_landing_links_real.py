@@ -418,7 +418,7 @@ class TestForwardCheckOverRealClaims:
 # ---------------------------------------------------------------------------
 
 # The READMEs the gate scans (sorted for determinism).
-# Includes tools/portage/README.md and tools/landing/README.md.
+# Includes tools/portage/README.md.
 README_INDEX: list[Path] = sorted(
     [
         _REPO_ROOT / "README.md",
@@ -426,12 +426,11 @@ README_INDEX: list[Path] = sorted(
         _REPO_ROOT / "tools" / "craft" / "README.md",
         _REPO_ROOT / "tools" / "camp" / "README.md",
         _REPO_ROOT / "tools" / "portage" / "README.md",
-        _REPO_ROOT / "tools" / "landing" / "README.md",
     ]
 )
 
 # Tools whose fenced-block commands the gate tracks.
-_TRACKED_TOOLS = frozenset({"trailhead", "lore", "craft", "camp", "portage", "landing"})
+_TRACKED_TOOLS = frozenset({"trailhead", "lore", "craft", "camp", "portage"})
 
 # Fenced sh/bash block pattern (bounded to fenced blocks only).
 _FENCED_BLOCK_RE = re.compile(r"```(?:sh|bash)\n(.*?)```", re.DOTALL)
@@ -1046,14 +1045,13 @@ class TestRootReadmeStructuralGuard:
 # ---------------------------------------------------------------------------
 
 # The landing-surface files the gate must certify as clean.
-# Includes tools/portage/README.md and tools/landing/README.md.
+# Includes tools/portage/README.md.
 _LANDING_FILES: list[Path] = [
     _REPO_ROOT / "README.md",
     _REPO_ROOT / "tools" / "lore" / "README.md",
     _REPO_ROOT / "tools" / "craft" / "README.md",
     _REPO_ROOT / "tools" / "camp" / "README.md",
     _REPO_ROOT / "tools" / "portage" / "README.md",
-    _REPO_ROOT / "tools" / "landing" / "README.md",
     _REPO_ROOT / "trailhead" / "landing_claims.toml",
 ]
 
@@ -1131,7 +1129,6 @@ def _copy_landing_files_to_dir(dest: Path) -> Path:
         (_REPO_ROOT / "tools" / "craft" / "README.md", "craft-README.md"),
         (_REPO_ROOT / "tools" / "camp" / "README.md", "camp-README.md"),
         (_REPO_ROOT / "tools" / "portage" / "README.md", "portage-README.md"),
-        (_REPO_ROOT / "tools" / "landing" / "README.md", "landing-README.md"),
         (_REPO_ROOT / "trailhead" / "landing_claims.toml", "landing_claims.toml"),
     ]
     for src, dst_name in name_map:

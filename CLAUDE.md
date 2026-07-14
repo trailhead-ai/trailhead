@@ -22,7 +22,7 @@ let tests/experiments touch the live install.
 ## What this repo is
 
 `trailhead` is a **monorepo** shipping a harness-agnostic Python management CLI plus
-six agent-plugins. The CLI *composes* and *wires* selected plugin capabilities into
+five agent-plugins. The CLI *composes* and *wires* selected plugin capabilities into
 whatever AI code harness you use; the plugins themselves are the agent-facing
 product (skills, subagents, hooks). **install = clone the repo** — there is no
 remote fetch, no SHA-pinning manifest, no pip step required: the checkout IS the
@@ -32,16 +32,16 @@ source.
 - `trailhead/harness/` — the harness seam (`base.py`) + per-harness impls
   (`claude_code.py` today). Adding a harness = implement the interface + register
   it; zero changes to the shared install/compose/wire path (Axiom 1).
-- `tools/<name>/` — the six plugins: `lore`, `camp`, `craft`, `portage`, `landing`
+- `tools/<name>/` — the five plugins: `lore`, `camp`, `craft`, `portage`
   (+ `outpost` is forward-declared, not wired).
 - `bin/trailhead` — git-only entry point (puts repo root on `sys.path`, no pip needed).
 - `trailhead/docs/` — authoritative prose specs per seam. `docs/vision.md` — the axioms.
 
 User-facing framing (README): **lore** (agent project memory) is the entry point;
 **camp** (multi-repo worktree orchestration) and **craft** (dev rituals: plan / TDD
-execute / review / council) are siblings; **portage** (PR lifecycle) and **landing**
-(deploy soak) depend on the `trailhead.vcs` library. `camp` and `lore` also ship
-standalone CLIs so they work outside a full install (Axiom 3).
+execute / review / council) are siblings; **portage** (PR lifecycle) depends on the
+`trailhead.vcs` library. `camp` and `lore` also ship standalone CLIs so they work
+outside a full install (Axiom 3).
 
 ## Commands
 
@@ -102,9 +102,9 @@ harness **compose + wire** the selection under the wire lock → build the camp/
   (never create dirs — use `ensure_dir`); honor `XDG_*` and per-app
   `<APP>_STATE_DIR`-style overrides; full basedir/XDG on every OS incl. macOS —
   unconditionally, never `~/Library` (Axiom 4; see `trailhead/docs/paths.md`).
-- **`vcs/`** — provider-agnostic VCS seam (`repos`/`pr`/`ci`/`deploy` surfaces) that
-  portage and landing build on. GitHub-backed today; designed so a GitLab backend
-  maps onto the same method set.
+- **`vcs/`** — provider-agnostic VCS seam (`repos`/`pr`/`ci` surfaces) that portage
+  builds on. GitHub-backed today; designed so a GitLab backend maps onto the same
+  method set.
 
 Error hygiene (CLI-wide): named errors → clean `trailhead: <message>` on stderr +
 nonzero exit (never a raw traceback); normal output → stdout; no ANSI/color.

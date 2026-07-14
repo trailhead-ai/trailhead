@@ -21,7 +21,6 @@ testpaths = [
     "tools/craft/tests",
     "tools/camp/tests",
     "tools/portage/tests",
-    "tools/landing/tests",
 ]
 
 [tool.ruff]

@@ -24,11 +24,6 @@
       "name": "portage",
       "source": "./tools/portage/plugins/portage",
       "description": "Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group, on the trailhead.vcs provider library."
-    },
-    {
-      "name": "landing",
-      "source": "./tools/landing/plugins/landing",
-      "description": "Get it deployed: post-merge deploy soak and deploy-health incident handling for a camp group, on the trailhead.vcs provider library."
     }
   ]
 }

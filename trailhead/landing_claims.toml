@@ -8,9 +8,9 @@
 #   kind    — one of: command | skill | agent | doc-link
 #             prose-assertion exceptions (not resolved by the gate):
 #               positioning | allowlisted-example
-#   tool    — trailhead | lore | craft | camp | portage | landing
+#   tool    — trailhead | lore | craft | camp | portage
 #   ref     — the anchor to resolve (subcommand name, path, etc.)
-#   source  — which README/surface makes this claim: root | lore | craft | camp | portage | landing
+#   source  — which README/surface makes this claim: root | lore | craft | camp | portage
 #
 # The capability-GROUP and install-PRESET concepts were removed: install is now
 # config-driven and selects subagents/skills by name. Skill/agent anchors resolve
@@ -167,7 +167,7 @@ tool = "trailhead"
 ref = "trailhead/install_config.py"
 source = "root"
 
-# Root README links to the five tool READMEs (relative doc-links)
+# Root README links to the four tool READMEs (relative doc-links)
 [[claim]]
 kind = "doc-link"
 tool = "trailhead"
@@ -191,22 +191,6 @@ kind = "doc-link"
 tool = "trailhead"
 ref = "tools/portage/README.md"
 source = "root"
-
-[[claim]]
-kind = "doc-link"
-tool = "trailhead"
-ref = "tools/landing/README.md"
-source = "root"
-
-# ---------------------------------------------------------------------------
-# portage MANUAL-SMOKE.md (parity gate doc-link)
-# ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "doc-link"
-tool = "portage"
-ref = "tools/portage/MANUAL-SMOKE.md"
-source = "portage"
 
 # ---------------------------------------------------------------------------
 # lore tool README anchors — skills (kind=skill)
@@ -318,35 +302,3 @@ kind = "agent"
 tool = "portage"
 ref = "agents/summarizer.md"
 source = "portage"
-
-# ---------------------------------------------------------------------------
-# landing tool README anchors — skills (kind=skill)
-# ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "skill"
-tool = "landing"
-ref = "skills/soak"
-source = "landing"
-
-[[claim]]
-kind = "skill"
-tool = "landing"
-ref = "skills/resolve"
-source = "landing"
-
-# ---------------------------------------------------------------------------
-# landing tool README anchors — agents (kind=agent)
-# ---------------------------------------------------------------------------
-
-[[claim]]
-kind = "agent"
-tool = "landing"
-ref = "agents/soaker.md"
-source = "landing"
-
-[[claim]]
-kind = "agent"
-tool = "landing"
-ref = "agents/doctor.md"
-source = "landing"

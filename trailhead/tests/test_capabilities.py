@@ -30,7 +30,6 @@ _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
 _CRAFT_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 _PORTAGE_MANIFEST = _REPO_ROOT / "tools" / "portage" / "capabilities.toml"
-_LANDING_MANIFEST = _REPO_ROOT / "tools" / "landing" / "capabilities.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +175,7 @@ class TestCraftInventory:
 
 
 # ---------------------------------------------------------------------------
-# camp / portage / landing
+# camp / portage
 # ---------------------------------------------------------------------------
 
 
@@ -196,11 +195,6 @@ class TestOtherInventories:
         m = load_manifest(_PORTAGE_MANIFEST)
         assert set(m.subagents) == {"green-driver", "monitor", "summarizer", "updater"}
         assert set(m.skills) == {"pull_request"}
-
-    def test_landing_inventory(self):
-        m = load_manifest(_LANDING_MANIFEST)
-        assert set(m.subagents) == {"doctor", "soaker"}
-        assert set(m.skills) == {"resolve", "soak"}
 
 
 # ---------------------------------------------------------------------------
