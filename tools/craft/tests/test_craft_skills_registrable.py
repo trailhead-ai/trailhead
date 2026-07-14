@@ -62,9 +62,12 @@ AGENTS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "agents"
 _EXECUTE_DISPATCHED_AGENTS: list[str] = [
     "assumption-prover",
     "executor",
-    "code-reviewer",
+    "drift-gate",
     "test-runner",
     "troubleshooter",
+    "simplifier",
+    "security-auditor",
+    "code-reviewer",
 ]
 
 
