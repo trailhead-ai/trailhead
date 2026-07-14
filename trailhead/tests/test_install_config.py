@@ -133,7 +133,7 @@ class TestPluginExpansion:
         path = _write(tmp_path, "install_camp_cli = true\n")  # no plugins key
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "landing"]
+        assert names == ["camp", "lore", "craft", "portage"]
 
     def test_per_harness_plugins_override_top_level(self, tmp_path):
         path = _write(
@@ -177,16 +177,16 @@ class TestPluginExpansion:
         path = _write(
             tmp_path,
             '[[harness]]\nname="claude_code"\n'
-            '  [[harness.plugins]]\n  name="landing"\n'
-            '    [[harness.plugins.subagents]]\n    name="doctor"\n'
-            '    file_path="/custom/doctor.md"\n'
-            '    [[harness.plugins.skills]]\n    name="resolve"\n'
+            '  [[harness.plugins]]\n  name="portage"\n'
+            '    [[harness.plugins.subagents]]\n    name="updater"\n'
+            '    file_path="/custom/updater.md"\n'
+            '    [[harness.plugins.skills]]\n    name="pull_request"\n'
             '    file_path="/custom/SKILL.md"\n',
         )
         cfg = resolve_config(config_path=path, detected_harnesses=[])
-        landing = cfg.harnesses[0].plugins[0]
-        assert landing.subagents["doctor"] == "/custom/doctor.md"
-        assert landing.skills["resolve"] == "/custom/SKILL.md"
+        portage = cfg.harnesses[0].plugins[0]
+        assert portage.subagents["updater"] == "/custom/updater.md"
+        assert portage.skills["pull_request"] == "/custom/SKILL.md"
 
 
 # ---------------------------------------------------------------------------
@@ -256,4 +256,4 @@ class TestShippedDefault:
         assert cfg.install_camp_cli is True
         assert cfg.install_lore_cli is True
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "landing"]
+        assert names == ["camp", "lore", "craft", "portage"]

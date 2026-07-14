@@ -1,7 +1,0 @@
-# landing — get it deployed. Thin consumer of trailhead/vcs/ (deploy) + soak probe.
-# tool.name MUST equal the plugins/<name>/ dir ("landing").
-# Selectable skills (skills/*/ with SKILL.md) and subagents (agents/*.md) are
-# discovered on disk; no always-on base.
-
-[tool]
-name = "landing"

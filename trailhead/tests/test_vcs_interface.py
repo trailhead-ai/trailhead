@@ -6,8 +6,7 @@ Contract:
   - get_provider("gitlab") (or any unregistered name) raises a legible error
     that names the documented extension point.
   - The injectable runner threads through get_provider(name, runner=...).
-  - The Provider interface exposes namespaced surfaces repos/pr/ci and a
-    deploy surface.
+  - The Provider interface exposes namespaced surfaces repos/pr/ci.
   - vcs-provider.md exists and names every repos/pr/ci interface method.
 """
 
@@ -80,7 +79,6 @@ class TestProviderShape:
         assert hasattr(provider, "repos")
         assert hasattr(provider, "pr")
         assert hasattr(provider, "ci")
-        assert hasattr(provider, "deploy")
 
     def test_repos_methods(self) -> None:
         provider = get_provider("github")
@@ -96,11 +94,6 @@ class TestProviderShape:
         for m in ("checks", "wait"):
             assert hasattr(provider.ci, m), f"ci.{m} missing"
 
-    def test_deploy_methods(self) -> None:
-        provider = get_provider("github")
-        for m in ("workflow_runs", "status", "logs"):
-            assert hasattr(provider.deploy, m), f"deploy.{m} missing"
-
 
 # ---------------------------------------------------------------------------
 # Doc test: vcs-provider.md names every repos/pr/ci method
@@ -109,7 +102,7 @@ class TestProviderShape:
 
 _DOC_PATH = Path(__file__).resolve().parent.parent / "docs" / "vcs-provider.md"
 
-# The repos/pr/ci/deploy surface — every method here must appear in the doc.
+# The repos/pr/ci surface — every method here must appear in the doc.
 _INTERFACE_METHODS = [
     "repos.detect",
     "pr.open",
@@ -120,9 +113,6 @@ _INTERFACE_METHODS = [
     "pr.summary_inputs",
     "ci.checks",
     "ci.wait",
-    "deploy.workflow_runs",
-    "deploy.status",
-    "deploy.logs",
 ]
 
 

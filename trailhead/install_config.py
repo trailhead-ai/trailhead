@@ -19,7 +19,7 @@ Config TOML schema
 
     [[harness]]                        # optional per-harness override
     name = "claude_code"
-    plugins = ["camp", "lore", "craft", "portage", "landing"]
+    plugins = ["camp", "lore", "craft", "portage"]
 
     [[harness]]
     name = "codex"
@@ -29,7 +29,7 @@ Config TOML schema
         skills = ["execute"]
             # override form (file_path points at a custom md file OR a skill dir):
             # [[harness.plugins.subagents]]
-            # name = "doctor"
+            # name = "updater"
             # file_path = "/abs/path/custom.md"
 
 Expansion rules
@@ -61,7 +61,7 @@ from trailhead.harness import canonical_name, known_harness_names
 from trailhead.wire import default_manifest_paths
 
 # Canonical display/install order for the agent-plugins.
-KNOWN_PLUGIN_ORDER = ["camp", "lore", "craft", "portage", "landing"]
+KNOWN_PLUGIN_ORDER = ["camp", "lore", "craft", "portage"]
 
 
 class ConfigResolveError(Exception):

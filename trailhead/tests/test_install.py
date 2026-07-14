@@ -71,7 +71,7 @@ class TestDetectionDrivenInstall:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         selection = m["wire"].call_args[0][0]
-        assert set(selection) == {"camp", "lore", "craft", "portage", "landing"}
+        assert set(selection) == {"camp", "lore", "craft", "portage"}
 
     def test_clis_installed(self, tmp_path):
         with _patched(detected=True) as m:
@@ -202,9 +202,9 @@ def _write_override_config(tmp_path: Path) -> Path:
     path = tmp_path / "override.toml"
     path.write_text(
         '[[harness]]\nname="claude_code"\n'
-        '  [[harness.plugins]]\n  name="landing"\n'
-        '    [[harness.plugins.subagents]]\n    name="doctor"\n'
-        '    file_path="/custom/doctor.md"\n'
+        '  [[harness.plugins]]\n  name="portage"\n'
+        '    [[harness.plugins.subagents]]\n    name="updater"\n'
+        '    file_path="/custom/updater.md"\n'
     )
     return path
 
@@ -215,7 +215,7 @@ class TestOverrideDisclosure:
         with _patched(detected=True):
             run_install(env=_env(tmp_path), config_arg=str(cfg_path), quiet=True)
         out = capsys.readouterr().out
-        assert "/custom/doctor.md" in out
+        assert "/custom/updater.md" in out
         assert "overrides" in out.lower()
 
     def test_json_summary_lists_active_override(self, tmp_path, capsys):
@@ -225,12 +225,12 @@ class TestOverrideDisclosure:
         with _patched(detected=True):
             run_install(env=_env(tmp_path), config_arg=str(cfg_path), as_json=True, quiet=True)
         data = _json.loads(capsys.readouterr().out)
-        assert any(o["file_path"] == "/custom/doctor.md" for o in data["overrides"])
-        entry = next(o for o in data["overrides"] if o["file_path"] == "/custom/doctor.md")
+        assert any(o["file_path"] == "/custom/updater.md" for o in data["overrides"])
+        entry = next(o for o in data["overrides"] if o["file_path"] == "/custom/updater.md")
         assert entry["harness"] == "claude_code"
-        assert entry["plugin"] == "landing"
+        assert entry["plugin"] == "portage"
         assert entry["kind"] == "subagent"
-        assert entry["name"] == "doctor"
+        assert entry["name"] == "updater"
 
     def test_human_summary_omits_overrides_section_when_none_active(self, tmp_path, capsys):
         with _patched(detected=True):

@@ -82,10 +82,6 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "Portable software-development plugin: general-purpose dev agents and dev-ritual skills."
     ),
     "portage": ("Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group."),
-    "landing": (
-        "Get it deployed: post-merge deploy soak and deploy-health "
-        "incident handling for a camp group."
-    ),
 }
 
 

@@ -79,7 +79,6 @@ Optional keys in `[release]` of the group TOML:
 [release]
 merge_order = ["alpha", "beta"]          # PR merge order
 review_bot_login = "my-review-bot"       # optional review bot
-# soak_health_command = "curl -f ..."    # soak probe (see landing's soak rituals)
 # external_tracker = { kind = "..." }    # reserved; no connector
 ```
 

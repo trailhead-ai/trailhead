@@ -12,11 +12,10 @@ codebase they're in.
 ## What craft covers
 
 craft's agents and skills organize into six areas. craft owns the
-**plan → execute → review** development loop; shipping (PR lifecycle) and deploy
-(post-merge soak) live in the sibling [portage](../portage) and
-[landing](../landing) plugins. (These are conceptual areas, not install units —
-`trailhead install` selects individual subagents and skills, named below, by
-name; the default installs them all.)
+**plan → execute → review** development loop; shipping (PR lifecycle) lives in
+the sibling [portage](../portage) plugin. (These are conceptual areas, not
+install units — `trailhead install` selects individual subagents and skills,
+named below, by name; the default installs them all.)
 
 | Area | What it covers |
 |---|---|
@@ -74,10 +73,9 @@ membership is single-sourced from `skills/_shared/council.md`.
 
 **Review:** `/craft:review`
 
-## Related plugins — PR lifecycle & deploy
+## Related plugin — PR lifecycle
 
-PR lifecycle and post-merge soak live in the sibling [portage](../portage)
-(get it merged) and [landing](../landing) (get it deployed) plugins:
+PR lifecycle lives in the sibling [portage](../portage) (get it merged) plugin:
 
 | Task | Command |
 |---|---|
@@ -85,8 +83,6 @@ PR lifecycle and post-merge soak live in the sibling [portage](../portage)
 | Update a PR | `/portage:update` |
 | Merge a PR | `/portage:merge` |
 | Watch CI to green | `/portage:monitor` |
-| Soak a deploy | `/landing:soak` |
-| Resolve a post-merge incident | `/landing:resolve` |
 | Resume a shelved session | camp session-resume (`claude -r <slug>`) |
 
 ## Layout

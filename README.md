@@ -1,8 +1,8 @@
 # trailhead
 
 An AI-native installer for a suite of agent-plugins — **lore** (project memory),
-**camp** (worktree orchestration), **craft** (dev rituals), **portage** (PR
-lifecycle), and **landing** (deploy soak) — into your AI code harness.
+**camp** (worktree orchestration), **craft** (dev rituals), and **portage** (PR
+lifecycle) — into your AI code harness.
 
 trailhead is designed to be driven by an agent. There is no package to download:
 you clone the repo and run one command (or hand the repo to your agent and point
@@ -100,11 +100,11 @@ install_camp_cli = true
 install_lore_cli = false
 
 # Top-level default plugin set, applied to every detected/--harness harness.
-plugins = ["camp", "lore", "craft", "portage", "landing"]
+plugins = ["camp", "lore", "craft", "portage"]
 
 [[harness]]
 name = "claude_code"
-plugins = ["camp", "lore", "craft", "portage", "landing"]
+plugins = ["camp", "lore", "craft", "portage"]
 
 [[harness]]
 name = "codex"
@@ -117,13 +117,13 @@ name = "codex"
 
     # Override form: point a subagent/skill at your own file or directory.
     [[harness.plugins]]
-    name = "landing"
+    name = "portage"
         [[harness.plugins.subagents]]
-        name = "doctor"
-        file_path = "/path/to/custom/doctor.md"
+        name = "updater"
+        file_path = "/path/to/custom/updater.md"
         [[harness.plugins.skills]]
-        name = "resolve"
-        file_path = "/path/to/custom/resolve"
+        name = "pull_request"
+        file_path = "/path/to/custom/pull_request"
 ```
 
 A plugin written as a bare string (`plugins = ["camp"]`) expands to **all** of its
@@ -140,7 +140,6 @@ subagents and skills. The full schema and resolution rules live in
 | `camp` | Worktree + group orchestration across repos |
 | `craft` | Dev rituals — planning, TDD execute, review, council |
 | `portage` | PR lifecycle — open, update, watch CI, merge |
-| `landing` | Post-merge deploy soak and deploy-health diagnosis |
 
 `camp` and `lore` also ship standalone CLIs (`camp`, `lore`) that trailhead puts
 on your PATH.
@@ -155,7 +154,6 @@ If you (or your agent) are contributing, read [`docs/vision.md`](docs/vision.md)
 - [craft](tools/craft/README.md) — agents and skills
 - [camp](tools/camp/README.md) — worktree commands, group config
 - [portage](tools/portage/README.md) — PR lifecycle agents and skills
-- [landing](tools/landing/README.md) — deploy soak and health-diagnosis agents and skills
 
 ## License
 

@@ -1,10 +1,10 @@
 """Cross-plugin `_bootstrap.py` parity test.
 
-Four independent copies of `_bootstrap.py` exist (camp, lore, portage, landing)
+Three independent copies of `_bootstrap.py` exist (camp, lore, portage)
 because each one must work *before* `sys.path` is set up — at that point none of
 them can import a shared helper (see each copy's own module docstring). That
-chicken-and-egg necessity means the 4 files can never be deduplicated via a
-shared import, so a bugfix applied to one copy and forgotten in the other three
+chicken-and-egg necessity means the 3 files can never be deduplicated via a
+shared import, so a bugfix applied to one copy and forgotten in the other two
 would otherwise drift silently. This test converts that silent drift into a
 caught failure: every copy must be byte-identical except for the handful of
 lines that legitimately reference the owning tool's own name.
@@ -19,7 +19,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BOOTSTRAP_PATHS = {
     "camp": _REPO_ROOT / "tools/camp/plugins/camp/_bootstrap.py",
     "lore": _REPO_ROOT / "tools/lore/plugins/lore/_bootstrap.py",
-    "landing": _REPO_ROOT / "tools/landing/plugins/landing/scripts/_bootstrap.py",
     "portage": _REPO_ROOT / "tools/portage/plugins/portage/_bootstrap.py",
 }
 

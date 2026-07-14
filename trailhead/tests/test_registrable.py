@@ -13,7 +13,7 @@ orphaned, nothing declared dangles). A malformed frontmatter block passes wiring
 but silently fails to register — this test is the only guard against that.
 
 Consolidated here, parametrized over every tool, so it replaces the per-tool
-copy-paste that landing/portage carried. Tools that layer *extra* assertions
+copy-paste that each tool carried. Tools that layer *extra* assertions
 (craft's execute-dispatch resolution, lore's injection-defense scans, …) keep
 their own files; this is the shared floor every tool stands on.
 """
@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TOOLS = ["lore", "camp", "craft", "portage", "landing"]
+_TOOLS = ["lore", "camp", "craft", "portage"]
 
 
 def _plugin_root(tool: str) -> Path:

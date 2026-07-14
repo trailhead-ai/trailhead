@@ -1,4 +1,4 @@
-"""Provider-agnostic VCS library for trailhead (repos/pr/ci/deploy).
+"""Provider-agnostic VCS library for trailhead (repos/pr/ci).
 
 ``get_provider(name="github")`` is the registry-backed factory. It defaults to
 GitHub and raises a legible error for any unregistered name, naming the
@@ -39,7 +39,7 @@ def get_provider(name: str = _DEFAULT_PROVIDER, *, runner=None) -> "Provider":
         runner: Optional injectable runner (tests pass a stub to avoid network).
 
     Returns:
-        A Provider instance with repos/pr/ci/deploy surfaces.
+        A Provider instance with repos/pr/ci surfaces.
 
     Raises:
         ValueError: If ``name`` is not a registered provider. The message names

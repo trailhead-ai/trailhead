@@ -37,8 +37,7 @@ so invoke it as bare `portage <subcommand>`.
 - `slug` — the worktree slug within the group
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
 - `group_toml_path` — absolute path to the group TOML file (used for `[release]` config including
-  `review_bot_login`, `soak_health_command`, `external_tracker`, `merge_order`, and
-  `green_driver_agent`)
+  `review_bot_login`, `external_tracker`, `merge_order`, and `green_driver_agent`)
 - `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
@@ -60,14 +59,13 @@ Build pairs as `<repo_path>:<pr_number>:<member_name>` using `members[].name` fr
 On launch, before entering the watch loop, emit a one-line summary of what's active vs inert:
 
 ```
-release config: review_bot=<login or none>, soak=<command or none>, tracker=<kind or none> — configure in [release] of the group TOML
+release config: review_bot=<login or none>, tracker=<kind or none> — configure in [release] of the group TOML
 ```
 
-Read `review_bot_login`, `soak_health_command`, and `external_tracker` from the `[release]` block
-of the group TOML (pass the TOML path as an explicit arg — read via stdlib `tomllib`). If the
-`[release]` block is absent or a key is missing, treat that key as `none`. When all three are
-absent, the summary reads:
-`release config: review_bot=none, soak=none, tracker=none — configure in [release] of the group TOML`
+Read `review_bot_login` and `external_tracker` from the `[release]` block of the group TOML (pass
+the TOML path as an explicit arg — read via stdlib `tomllib`). If the `[release]` block is absent
+or a key is missing, treat that key as `none`. When both are absent, the summary reads:
+`release config: review_bot=none, tracker=none — configure in [release] of the group TOML`
 
 ## Green-driver dispatch
 
@@ -209,34 +207,6 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
 **Fix cycles run:** <count per PR>
 **Blocker (if any):** <one-line summary from summarizer, or the auto_merge remediation>
 ```
-
-### Post-merge handoff marker
-
-After the report block, emit a **single JSON line** as the very last line of your completion
-summary. This line is parsed by the top-level session to dispatch the post-merge deploy soak
-(landing's `soak`) when the merge set warrants it.
-
-Format:
-
-```json
-{"post_merge_handoff": {"merge_pairs": [{"repo": "<repo-name>", "sha": "<full-sha>", "pr": <pr-number>}, ...], "manifest_path": "<abs-path-to-camp-manifest.json>", "sidecar_path": "<abs-path-to-prs.json>", "group_toml_path": "<abs-path-to-group.toml>"}}
-```
-
-Field notes:
-- `merge_pairs` — one entry per successfully merged repo.
-  Use the repo name only (e.g. `"api"`, `"web"`), not the full path.
-- `manifest_path` — absolute path to the camp manifest JSON for this worktree.
-- `sidecar_path` — absolute path to the `prs.json` sidecar alongside the manifest.
-- `group_toml_path` — absolute path to the group TOML file. Required by the deploy soak
-  to locate `[release].soak_health_command`. monitor already reads this TOML for its
-  config summary, so the path is always available at emit time.
-
-The top-level session locates this marker by reading the last non-empty line of the completion
-summary and attempting `json.loads`. If it parses and contains `post_merge_handoff`, the session
-dispatches the post-merge deploy soak in the background with the manifest and sidecar paths.
-
-Emit this marker even when the result is `blocked` — the deploy-soak gate will decide
-whether to run based on the merge set.
 
 ## Anti-patterns
 

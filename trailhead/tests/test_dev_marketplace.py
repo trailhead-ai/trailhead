@@ -2,10 +2,10 @@
 
 This test verifies:
   1. Root /.claude-plugin/marketplace.json exists, parses, name == "trailhead-local",
-     plugins[] has exactly 5 entries, every source starts with ./tools/ and resolves
+     plugins[] has exactly 4 entries, every source starts with ./tools/ and resolves
      to an existing plugins/<tool>/.claude-plugin/plugin.json under the repo root.
   2. No tools/*/.claude-plugin/marketplace.json remains.
-  3. Repo-wide grep guard: no trailhead-{lore,camp,craft,portage,landing} marketplace
+  3. Repo-wide grep guard: no trailhead-{lore,camp,craft,portage} marketplace
      names and no @trailhead-<tool> / <tool>-local install refs remain in source/docs
      (excluding trailhead/tests/).
 
@@ -19,7 +19,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _ROOT_MARKETPLACE = _REPO_ROOT / ".claude-plugin" / "marketplace.json"
-_TOOLS = ["lore", "camp", "craft", "portage", "landing"]
+_TOOLS = ["lore", "camp", "craft", "portage"]
 
 
 # ---------------------------------------------------------------------------
@@ -47,8 +47,8 @@ class TestRootMarketplaceShape:
     def test_root_marketplace_has_five_plugins(self):
         data = json.loads(_ROOT_MARKETPLACE.read_text())
         plugins = data.get("plugins", [])
-        assert len(plugins) == 5, (
-            f"Expected 5 plugin entries, got {len(plugins)}: {[p.get('name') for p in plugins]}"
+        assert len(plugins) == 4, (
+            f"Expected 4 plugin entries, got {len(plugins)}: {[p.get('name') for p in plugins]}"
         )
 
     def test_root_marketplace_plugin_names(self):
