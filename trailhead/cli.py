@@ -27,7 +27,7 @@ from trailhead.doctor import run_doctor
 from trailhead.harness import HarnessError
 from trailhead.install import run_install
 from trailhead.install_config import ConfigResolveError
-from trailhead.outpost_lifecycle import OutpostLifecycleError
+from trailhead.outpost_lifecycle import OutpostLifecycleError, start, status, stop
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
@@ -113,17 +113,13 @@ def _cmd_shellenv(args: argparse.Namespace) -> int:
 
 
 def _cmd_outpost(args: argparse.Namespace) -> int:
-    from trailhead import outpost_lifecycle
-
-    if args.outpost_command == "start":
-        return outpost_lifecycle.start()
-    if args.outpost_command == "stop":
-        return outpost_lifecycle.stop()
-    if args.outpost_command == "status":
-        return outpost_lifecycle.status()
-    # No subcommand given — print the group's help and signal misuse.
-    args.outpost_parser.print_help(file=sys.stderr)
-    return 2
+    dispatch = {"start": start, "stop": stop, "status": status}
+    handler = dispatch.get(args.outpost_command)
+    if handler is None:
+        # No subcommand given — print the group's help and signal misuse.
+        args.outpost_parser.print_help(file=sys.stderr)
+        return 2
+    return handler()
 
 
 def _build_parser() -> argparse.ArgumentParser:

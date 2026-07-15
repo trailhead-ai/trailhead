@@ -290,7 +290,7 @@ def status(
     *,
     env: dict[str, str] | None = None,
     port: int = DAEMON_PORT,
-    timeout: float = 2.0,
+    health_timeout: float = 2.0,
 ) -> int:
     """Report daemon liveness + /health, returning a structured exit code."""
     pidfile = _pidfile(env)
@@ -305,7 +305,7 @@ def status(
         print(f"outpost: stale (pid {pid} is dead; removed stale pidfile).")
         return EXIT_STALE
 
-    health = _probe_health(port, timeout)
+    health = _probe_health(port, health_timeout)
     if health is None:
         print(f"outpost: running (pid {pid}); /health unreachable on port {port}.")
         return EXIT_RUNNING
