@@ -61,7 +61,7 @@ from trailhead.harness import canonical_name, known_harness_names
 from trailhead.wire import default_manifest_paths
 
 # Canonical display/install order for the agent-plugins.
-KNOWN_PLUGIN_ORDER = ["camp", "lore", "craft", "portage"]
+KNOWN_PLUGIN_ORDER = ["camp", "lore", "craft", "portage", "outpost"]
 
 
 class ConfigResolveError(Exception):

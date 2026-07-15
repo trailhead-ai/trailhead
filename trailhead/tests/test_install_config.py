@@ -133,7 +133,7 @@ class TestPluginExpansion:
         path = _write(tmp_path, "install_camp_cli = true\n")  # no plugins key
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost"]
 
     def test_per_harness_plugins_override_top_level(self, tmp_path):
         path = _write(
@@ -256,4 +256,4 @@ class TestShippedDefault:
         assert cfg.install_camp_cli is True
         assert cfg.install_lore_cli is True
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost"]

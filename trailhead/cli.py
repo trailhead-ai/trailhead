@@ -27,6 +27,7 @@ from trailhead.doctor import run_doctor
 from trailhead.harness import HarnessError
 from trailhead.install import run_install
 from trailhead.install_config import ConfigResolveError
+from trailhead.outpost_lifecycle import OutpostLifecycleError, start, status, stop
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
@@ -47,10 +48,11 @@ _TRAILHEAD_ERRORS = (
     LockError,
     PathIntegrationError,
     PathResolutionError,
+    OutpostLifecycleError,
 )
 
 _CURATED_HELP = """\
-trailhead {version} — install and manage the lore/camp/craft/portage plugins.
+trailhead {version} — install and manage the lore/camp/craft/portage/outpost plugins.
 
 Commands:
   install     Install agent-plugins into your code harness(es) + the camp/lore CLIs.
@@ -110,10 +112,20 @@ def _cmd_shellenv(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_outpost(args: argparse.Namespace) -> int:
+    dispatch = {"start": start, "stop": stop, "status": status}
+    handler = dispatch.get(args.outpost_command)
+    if handler is None:
+        # No subcommand given — print the group's help and signal misuse.
+        args.outpost_parser.print_help(file=sys.stderr)
+        return 2
+    return handler()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trailhead",
-        description="trailhead — install and manage the lore/camp/craft/portage plugins.",
+        description="trailhead — install and manage the lore/camp/craft/portage/outpost plugins.",
         add_help=True,
     )
     parser.add_argument("--version", action="version", version=f"trailhead {__version__}")
@@ -215,6 +227,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Target shell. Default: detect from $SHELL.",
     )
 
+    outpost_p = subparsers.add_parser(
+        "outpost",
+        help="Manage the outpost daemon (start | stop | status).",
+    )
+    outpost_sub = outpost_p.add_subparsers(dest="outpost_command", metavar="<verb>")
+    outpost_sub.add_parser("start", help="Spawn the outpost daemon detached (idempotent).")
+    outpost_sub.add_parser("stop", help="Stop the outpost daemon and remove its pidfile.")
+    outpost_sub.add_parser("status", help="Report daemon liveness + /health (structured exit codes).")
+    # Carry the parser so the handler can print help when no verb is given.
+    outpost_p.set_defaults(outpost_parser=outpost_p)
+
     return parser
 
 
@@ -232,6 +255,7 @@ def main() -> int:
         "uninstall": _cmd_uninstall,
         "doctor": _cmd_doctor,
         "shellenv": _cmd_shellenv,
+        "outpost": _cmd_outpost,
     }
     handler = dispatch.get(args.command)
     if handler is None:
