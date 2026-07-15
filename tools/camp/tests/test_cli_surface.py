@@ -70,9 +70,18 @@ def test_camp_group_without_args_shows_usage() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_camp_new_dispatches_not_error() -> None:
-    """camp new <slug> dispatches to the new handler, not an unknown-command error."""
-    result = _run(["new", "my-feature"])
+def test_camp_new_dispatches_not_error(tmp_path: Path) -> None:
+    """camp new <slug> dispatches to the new handler, not an unknown-command error.
+
+    CAMP_CONFIG_DIR must point at an empty dir: this test runs from inside a real
+    trailhead camp worktree, so without isolation cwd resolves the REAL trailhead
+    group and this subprocess creates an actual 'my-feature' workspace on disk.
+    Pointing at an empty config dir means no group resolves, so the command falls
+    through to the spine's cmd_needs_group("new") — still exercising the "not an
+    unknown-command/bare-slug error" contract this test is about, with no group
+    handler ever invoked.
+    """
+    result = _run(["new", "my-feature"], env={"CAMP_CONFIG_DIR": str(tmp_path)})
     combined = result.stdout + result.stderr
     assert "unknown command" not in combined.lower(), (
         f"camp new should not show unknown-command error.\n"
