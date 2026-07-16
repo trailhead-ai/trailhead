@@ -120,17 +120,21 @@ class TestCliOverrides:
         assert "camp" in cli_tools
         assert "portage" in cli_tools
 
-    def test_no_camp_and_no_lore_skips_pathint_entirely(self, tmp_path):
-        # portage's CLI flag isn't exposed as a top-level --no-portage flag yet,
-        # so disabling it here goes through the config TOML it already supports.
-        cfg_path = tmp_path / "no_portage.toml"
-        cfg_path.write_text("install_portage_cli = false\n")
+    def test_no_portage_skips_portage_cli(self, tmp_path):
+        with _patched(detected=True) as m:
+            run_install(env=_env(tmp_path), no_portage=True, quiet=True)
+        cli_tools = m["pathint"].call_args[0][0]
+        assert "portage" not in cli_tools
+        assert "camp" in cli_tools
+        assert "lore" in cli_tools
+
+    def test_no_camp_no_lore_no_portage_skips_pathint_entirely(self, tmp_path):
         with _patched(detected=True) as m:
             run_install(
                 env=_env(tmp_path),
-                config_arg=str(cfg_path),
                 no_camp=True,
                 no_lore=True,
+                no_portage=True,
                 quiet=True,
             )
         m["pathint"].assert_not_called()

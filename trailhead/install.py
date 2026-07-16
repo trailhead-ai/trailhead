@@ -113,6 +113,7 @@ def run_install(
     plugins: list[str] | None = None,
     no_camp: bool = False,
     no_lore: bool = False,
+    no_portage: bool = False,
     env: dict[str, str] | None = None,
     quiet: bool = False,
     as_json: bool = False,
@@ -136,6 +137,7 @@ def run_install(
             cli_plugins=plugins,
             no_camp=no_camp,
             no_lore=no_lore,
+            no_portage=no_portage,
             detected_harnesses=detected,
         )
     except (ConfigResolveError, UnknownSubagentError, UnknownSkillError) as exc:

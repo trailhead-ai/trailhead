@@ -76,6 +76,18 @@ class TestFlagsAndDefaults:
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"], no_lore=True)
         assert cfg.cli_flags["lore"] is False
 
+    def test_no_portage_flag(self):
+        cfg = resolve_config(detected_harnesses=["claude_code"], no_portage=True)
+        assert cfg.cli_flags["portage"] is False
+        assert cfg.cli_flags["camp"] is True
+
+    def test_cli_no_portage_overrides_config_true(self, tmp_path):
+        path = _write(tmp_path, "install_portage_cli = true\nplugins=[]\n")
+        cfg = resolve_config(
+            config_path=path, detected_harnesses=["claude_code"], no_portage=True
+        )
+        assert cfg.cli_flags["portage"] is False
+
     def test_portage_cli_flag_defaults_true(self):
         cfg = resolve_config(detected_harnesses=["claude_code"])
         assert cfg.cli_flags["portage"] is True

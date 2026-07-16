@@ -51,7 +51,7 @@ class TestSubcommandHelp:
         ec, out, err = _run(["install", "--help"])
         assert ec == 0
         text = out + err
-        for flag in ("--harness", "--plugin", "--no-camp", "--no-lore", "--config"):
+        for flag in ("--harness", "--plugin", "--no-camp", "--no-lore", "--no-portage", "--config"):
             assert flag in text
 
     def test_uninstall_help_shows_yes_flag(self):

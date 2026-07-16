@@ -245,6 +245,7 @@ def resolve_config(
     cli_plugins: list[str] | None = None,
     no_camp: bool = False,
     no_lore: bool = False,
+    no_portage: bool = False,
     detected_harnesses: list[str] | None = None,
     manifest_paths: dict[str, Path] | None = None,
 ) -> ResolvedConfig:
@@ -255,7 +256,8 @@ def resolve_config(
                             (CLI/detection-only) resolution.
         cli_harnesses:      ``--harness`` values (override config + detection).
         cli_plugins:        ``--plugin`` values (REPLACE the per-harness plugin set).
-        no_camp / no_lore:  Force the camp/lore CLI install flag off.
+        no_camp / no_lore / no_portage:  Force the camp/lore/portage CLI
+                            install flag off.
         detected_harnesses: Harness names detected on the machine (fallback when
                             neither CLI nor config name a harness).
         manifest_paths:     Plugin inventory paths (defaults to the repo manifests).
@@ -273,6 +275,8 @@ def resolve_config(
         cli_flags["camp"] = False
     if no_lore and "lore" in cli_flags:
         cli_flags["lore"] = False
+    if no_portage and "portage" in cli_flags:
+        cli_flags["portage"] = False
 
     harness_blocks = data.get("harness", [])
     if not isinstance(harness_blocks, list):
