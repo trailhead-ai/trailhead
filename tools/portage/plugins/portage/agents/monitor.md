@@ -28,8 +28,9 @@ in a background session until every passed PR is merged (or blocked after 3 fix 
 session already returned — no one is waiting synchronously on you; when you finish, your completion
 notification reaches the top-level session the user sees.
 
-The `portage` CLI is on `$PATH` (Claude Code adds the plugin's `bin/` when the plugin is enabled),
-so invoke it as bare `portage <subcommand>`.
+The `portage` CLI is on `$PATH` via trailhead's CLI shim dir (same mechanism as
+`camp`/`lore`) once the user has run `eval "$(trailhead shellenv)"` in their shell
+profile, so invoke it as bare `portage <subcommand>`.
 
 ## Inputs (from the dispatch)
 

@@ -257,4 +257,5 @@ No issue tracker configured — status transitions skipped. Configure
   single-PR groups (no order needed); required for >1 PR to avoid silent mis-merges.
 - No issue tracker configured — status transitions skipped. Configure
   `[release].external_tracker` in the group TOML to wire a tracker.
-- The `portage` CLI is on `$PATH` when the plugin is enabled (Claude Code adds the plugin's `bin/`).
+- The `portage` CLI is on `$PATH` via trailhead's CLI shim dir (same mechanism as
+  `camp`/`lore`), once `eval "$(trailhead shellenv)"` is in the user's shell profile.
