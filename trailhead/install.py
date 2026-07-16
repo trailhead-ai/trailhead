@@ -4,11 +4,13 @@ Config-driven, non-interactive, multi-harness:
 
   1. Detect harnesses on the machine (e.g. ~/.claude → claude_code).
   2. Resolve the effective config (config file + CLI overrides) → which harnesses,
-     which plugins (subagents/skills + overrides), and the camp/lore CLI flags.
+     which plugins (subagents/skills + overrides), and the per-tool CLI flags.
   3. For each resolved harness: compose the selected plugins and install them via
      the harness (wire + harness registration tail), under the wire lock.
-  4. Build the camp/lore CLI shim dir (harness-independent, additive). trailhead
-     does NOT edit your shell rc — it tells you to add `eval "$(… shellenv)"`.
+  4. Build the CLI shim dir (harness-independent, additive) for every CLI-bearing
+     tool (any tool whose manifest declares `cli_bin`) whose flag is enabled.
+     trailhead does NOT edit your shell rc — it tells you to add
+     `eval "$(… shellenv)"`.
   5. Bootstrap the lore machine via `lore init` (non-interactive + idempotent):
      vault + global index + write-protection guardrail + agent rules. A failed
      bootstrap propagates as a non-zero install exit with the lore stderr — it is
@@ -34,6 +36,7 @@ import os
 import sys
 from pathlib import Path
 
+from trailhead.capabilities import cli_bearing_manifests
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
 from trailhead.harness import detect_harnesses, get_harness
 from trailhead.install_config import (
@@ -42,14 +45,30 @@ from trailhead.install_config import (
     resolve_config_path,
 )
 from trailhead.pathint import create_shims
-from trailhead.wire import LockError, WireError, wire, wire_lock
+from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 _REPO_ROOT = Path(__file__).parent.parent
 _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 
-# CLI binaries shipped by the camp/lore plugins, keyed by the install flag.
-_CAMP_BIN = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "bin" / "camp"
-_LORE_BIN = _REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "bin" / "lore"
+
+def _resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
+    """Resolve each enabled CLI-bearing tool to its shippable binary path.
+
+    ``cli_flags`` (from ``ResolvedConfig``) already only contains tools whose
+    manifest declares ``cli_bin`` (see ``install_config._resolve_cli_flags``);
+    this resolves each enabled one via its manifest's ``plugin_root / cli_bin``
+    and drops any whose binary doesn't actually exist on disk.
+    """
+    manifests = cli_bearing_manifests(default_manifest_paths())
+    tools: dict[str, Path] = {}
+    for name, enabled in cli_flags.items():
+        if not enabled:
+            continue
+        manifest = manifests[name]
+        bin_path = manifest.plugin_root / manifest.cli_bin
+        if bin_path.exists():
+            tools[name] = bin_path
+    return tools
 
 
 def run_lore_init(
@@ -94,6 +113,7 @@ def run_install(
     plugins: list[str] | None = None,
     no_camp: bool = False,
     no_lore: bool = False,
+    no_portage: bool = False,
     env: dict[str, str] | None = None,
     quiet: bool = False,
     as_json: bool = False,
@@ -117,6 +137,7 @@ def run_install(
             cli_plugins=plugins,
             no_camp=no_camp,
             no_lore=no_lore,
+            no_portage=no_portage,
             detected_harnesses=detected,
         )
     except (ConfigResolveError, UnknownSubagentError, UnknownSkillError) as exc:
@@ -148,14 +169,10 @@ def run_install(
             return 1
 
     # ------------------------------------------------------------------
-    # Build the camp/lore CLI shim dir (harness-independent, additive).
+    # Build the CLI shim dir (harness-independent, additive).
     # The shim dir's contents encode the selection; `shellenv` adds it to PATH.
     # ------------------------------------------------------------------
-    cli_tools: dict[str, Path] = {}
-    if cfg.install_camp_cli and _CAMP_BIN.exists():
-        cli_tools["camp"] = _CAMP_BIN
-    if cfg.install_lore_cli and _LORE_BIN.exists():
-        cli_tools["lore"] = _LORE_BIN
+    cli_tools = _resolve_cli_tools(cfg.cli_flags)
 
     shim_dir = None
     if cli_tools:
@@ -165,7 +182,7 @@ def run_install(
             # M1: a shim-dir failure is a warning — wiring succeeded.
             print(
                 f"trailhead: could not build the CLI shim dir: {exc}\n"
-                f"  (the plugins are installed; the camp/lore CLIs just aren't shimmed)",
+                f"  (the plugins are installed; the CLIs just aren't shimmed)",
                 file=sys.stderr,
             )
 
@@ -174,8 +191,8 @@ def run_install(
     # `lore init` is non-interactive + idempotent; a failed bootstrap must
     # surface as a non-zero install exit with the lore stderr — never swallowed.
     # ------------------------------------------------------------------
-    if cfg.install_lore_cli and _LORE_BIN.exists():
-        rc, lore_stderr = run_lore_init(_LORE_BIN, env=_env, runner=runner)
+    if "lore" in cli_tools:
+        rc, lore_stderr = run_lore_init(cli_tools["lore"], env=_env, runner=runner)
         if rc != 0:
             if lore_stderr:
                 print(lore_stderr.rstrip(), file=sys.stderr)
@@ -245,11 +262,7 @@ def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
             lines.append(f"  {harness_name}: {plugin_name}/{kind} {name} -> {file_path}")
         lines.append("")
 
-    clis = []
-    if cfg.install_camp_cli:
-        clis.append("camp")
-    if cfg.install_lore_cli:
-        clis.append("lore")
+    clis = sorted(name for name, enabled in cfg.cli_flags.items() if enabled)
     if shim_dir is not None and clis:
         lines.append(f"CLIs ({', '.join(clis)}): shims in {shim_dir}")
         lines.append("  to put them on your PATH, add this to your shell profile:")
@@ -266,8 +279,7 @@ def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
 def _print_json_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
     data = {
         "harnesses": wired,
-        "install_camp_cli": cfg.install_camp_cli,
-        "install_lore_cli": cfg.install_lore_cli,
+        "cli_flags": dict(cfg.cli_flags),
         "shim_dir": str(shim_dir) if shim_dir else None,
         "shellenv": f'eval "$({_TRAILHEAD_BIN} shellenv)"',
         "no_harness": no_harness,

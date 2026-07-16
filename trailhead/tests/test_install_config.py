@@ -53,28 +53,60 @@ class TestFlagsAndDefaults:
     def test_defaults_true_with_no_config(self):
         cfg = resolve_config(detected_harnesses=["claude_code"])
         assert isinstance(cfg, ResolvedConfig)
-        assert cfg.install_camp_cli is True
-        assert cfg.install_lore_cli is True
+        assert cfg.cli_flags["camp"] is True
+        assert cfg.cli_flags["lore"] is True
 
     def test_no_camp_flag(self):
         cfg = resolve_config(detected_harnesses=["claude_code"], no_camp=True)
-        assert cfg.install_camp_cli is False
-        assert cfg.install_lore_cli is True
+        assert cfg.cli_flags["camp"] is False
+        assert cfg.cli_flags["lore"] is True
 
     def test_no_lore_flag(self):
         cfg = resolve_config(detected_harnesses=["claude_code"], no_lore=True)
-        assert cfg.install_lore_cli is False
+        assert cfg.cli_flags["lore"] is False
 
     def test_config_can_set_install_flags(self, tmp_path):
         path = _write(tmp_path, "install_camp_cli = true\ninstall_lore_cli = false\nplugins=[]\n")
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
-        assert cfg.install_camp_cli is True
-        assert cfg.install_lore_cli is False
+        assert cfg.cli_flags["camp"] is True
+        assert cfg.cli_flags["lore"] is False
 
     def test_cli_no_lore_overrides_config_true(self, tmp_path):
         path = _write(tmp_path, "install_lore_cli = true\nplugins=[]\n")
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"], no_lore=True)
-        assert cfg.install_lore_cli is False
+        assert cfg.cli_flags["lore"] is False
+
+    def test_no_portage_flag(self):
+        cfg = resolve_config(detected_harnesses=["claude_code"], no_portage=True)
+        assert cfg.cli_flags["portage"] is False
+        assert cfg.cli_flags["camp"] is True
+
+    def test_cli_no_portage_overrides_config_true(self, tmp_path):
+        path = _write(tmp_path, "install_portage_cli = true\nplugins=[]\n")
+        cfg = resolve_config(
+            config_path=path, detected_harnesses=["claude_code"], no_portage=True
+        )
+        assert cfg.cli_flags["portage"] is False
+
+    def test_portage_cli_flag_defaults_true(self):
+        cfg = resolve_config(detected_harnesses=["claude_code"])
+        assert cfg.cli_flags["portage"] is True
+
+    def test_config_can_set_install_portage_cli(self, tmp_path):
+        path = _write(tmp_path, "install_portage_cli = false\nplugins=[]\n")
+        cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
+        assert cfg.cli_flags["portage"] is False
+
+    def test_all_three_cli_flags_resolve_together(self, tmp_path):
+        path = _write(
+            tmp_path,
+            "install_camp_cli = false\n"
+            "install_lore_cli = true\n"
+            "install_portage_cli = false\n"
+            "plugins=[]\n",
+        )
+        cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
+        assert cfg.cli_flags == {"camp": False, "lore": True, "portage": False}
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +285,8 @@ class TestShippedDefault:
             config_path=_REPO_ROOT / "config" / "default.toml",
             detected_harnesses=["claude_code"],
         )
-        assert cfg.install_camp_cli is True
-        assert cfg.install_lore_cli is True
+        assert cfg.cli_flags["camp"] is True
+        assert cfg.cli_flags["lore"] is True
+        assert cfg.cli_flags["portage"] is True
         names = [p.name for p in cfg.harnesses[0].plugins]
         assert names == ["camp", "lore", "craft", "portage", "outpost"]

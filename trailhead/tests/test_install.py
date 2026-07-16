@@ -77,7 +77,7 @@ class TestDetectionDrivenInstall:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
-        assert set(cli_tools) == {"camp", "lore"}
+        assert set(cli_tools) == {"camp", "lore", "portage"}
 
     def test_summary_prints_shellenv_hint(self, tmp_path, capsys):
         with _patched(detected=True):
@@ -110,6 +110,7 @@ class TestCliOverrides:
         cli_tools = m["pathint"].call_args[0][0]
         assert "camp" not in cli_tools
         assert "lore" in cli_tools
+        assert "portage" in cli_tools
 
     def test_no_lore_skips_lore_cli(self, tmp_path):
         with _patched(detected=True) as m:
@@ -117,10 +118,25 @@ class TestCliOverrides:
         cli_tools = m["pathint"].call_args[0][0]
         assert "lore" not in cli_tools
         assert "camp" in cli_tools
+        assert "portage" in cli_tools
 
-    def test_no_camp_and_no_lore_skips_pathint_entirely(self, tmp_path):
+    def test_no_portage_skips_portage_cli(self, tmp_path):
         with _patched(detected=True) as m:
-            run_install(env=_env(tmp_path), no_camp=True, no_lore=True, quiet=True)
+            run_install(env=_env(tmp_path), no_portage=True, quiet=True)
+        cli_tools = m["pathint"].call_args[0][0]
+        assert "portage" not in cli_tools
+        assert "camp" in cli_tools
+        assert "lore" in cli_tools
+
+    def test_no_camp_no_lore_no_portage_skips_pathint_entirely(self, tmp_path):
+        with _patched(detected=True) as m:
+            run_install(
+                env=_env(tmp_path),
+                no_camp=True,
+                no_lore=True,
+                no_portage=True,
+                quiet=True,
+            )
         m["pathint"].assert_not_called()
 
 
@@ -181,7 +197,7 @@ class TestJsonOutput:
         data = _json.loads(capsys.readouterr().out)
         assert data["no_harness"] is False
         assert set(data["harnesses"]) == {"claude_code"}
-        assert data["install_camp_cli"] is True
+        assert data["cli_flags"] == {"camp": True, "lore": True, "portage": True}
 
     def test_json_no_harness_flag(self, tmp_path, capsys):
         import json as _json

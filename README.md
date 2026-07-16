@@ -15,7 +15,7 @@ exactly the pieces you want, into exactly the harness you use.
 
 Clone the repo and run the installer. It auto-detects your harness (e.g. a
 `~/.claude` directory → Claude Code), installs every agent-plugin, and puts the
-`camp` and `lore` CLIs on your PATH — no prompts:
+`camp`, `lore`, and `portage` CLIs on your PATH — no prompts:
 
 ```sh
 git clone <this-repo> trailhead
@@ -26,7 +26,7 @@ cd trailhead
 `bin/trailhead` runs straight from the checkout — no `pip install` needed
 (Python ≥ 3.11, zero third-party dependencies).
 
-After install, **restart your shell** (so `camp`/`lore` resolve) and **start a
+After install, **restart your shell** (so `camp`/`lore`/`portage` resolve) and **start a
 fresh Claude Code session** (so the plugins load).
 
 If trailhead can't find any harness, it still installs the CLIs, warns you, and
@@ -57,7 +57,7 @@ hidden interactive steps.
 ## CLI
 
 ```sh
-trailhead install      # install plugins into your harness(es) + the camp/lore CLIs
+trailhead install      # install plugins into your harness(es) + the camp/lore/portage CLIs
 trailhead uninstall    # remove the ENTIRE install (all plugins + CLIs); keeps your data
 trailhead doctor       # read-only report of what's installed
 ```
@@ -68,7 +68,7 @@ trailhead doctor       # read-only report of what's installed
 |---|---|
 | `--harness <name>` | Target a harness explicitly (repeatable). Default: auto-detect. |
 | `--plugin <name>` | Install only these agent-plugins (repeatable). Default: all. |
-| `--no-camp` / `--no-lore` | Skip installing/updating that CLI onto PATH. |
+| `--no-camp` / `--no-lore` / `--no-portage` | Skip installing/updating that CLI onto PATH. |
 | `--config <path>` | Drive the install from a TOML config (absolute, or relative to the repo `config/` dir). Default: `config/default.toml`. |
 | `--quiet` / `--json` | Suppress progress / emit a machine-readable summary. |
 
@@ -80,7 +80,7 @@ from your config never removes it from the install. To remove pieces, run
 `uninstall` and re-install with a narrower config.
 
 **`uninstall` is all-or-nothing.** It removes every plugin from every harness and
-both CLIs. Your data is kept (the lore vault, camp groups, and each plugin's
+all three CLIs. Your data is kept (the lore vault, camp groups, and each plugin's
 harness data dir survive a later re-install).
 
 ---
@@ -98,6 +98,7 @@ exact subagents/skills per plugin, plus local file overrides:
 ```toml
 install_camp_cli = true
 install_lore_cli = false
+install_portage_cli = true
 
 # Top-level default plugin set, applied to every detected/--harness harness.
 plugins = ["camp", "lore", "craft", "portage", "outpost"]

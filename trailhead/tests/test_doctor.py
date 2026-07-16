@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from trailhead.doctor import run_doctor
+from trailhead.wire import default_manifest_paths
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -68,6 +69,17 @@ class TestReport:
         r = run_doctor(env=_env(tmp_path), which_runner=which, python_version_runner=_fake_py)
         assert r.data["clis"]["camp"] == "/shim/camp"
         assert r.data["clis"]["lore"] is None
+
+    def test_portage_cli_reported_from_which(self, tmp_path):
+        # portage is CLI-bearing (its manifest declares cli_bin) just like
+        # camp/lore, discovered generically rather than off a hardcoded list.
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: f"/shim/{n}" if n == "portage" else None,
+            python_version_runner=_fake_py,
+        )
+        assert set(r.data["clis"]) == {"camp", "lore", "portage"}
+        assert r.data["clis"]["portage"] == "/shim/portage"
 
     def test_python_version_reported(self, tmp_path):
         r = run_doctor(
@@ -130,3 +142,36 @@ class TestMalformedManifest:
         )
         assert "marketplace: (none)" in r.human_output
         assert "marketplace: (unreadable)" not in r.human_output
+
+
+class TestBrokenCliManifest:
+    def test_broken_manifest_does_not_crash_doctor(self, tmp_path):
+        broken = tmp_path / "broken_capabilities.toml"
+        broken.write_text("this is not valid toml [[[")
+        manifest_paths = {
+            "lore": default_manifest_paths()["lore"],
+            "broken": broken,
+        }
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: None,
+            python_version_runner=_fake_py,
+            manifest_paths=manifest_paths,
+        )
+        assert r.exit_code == 0
+        assert "broken" not in r.data["clis"]
+
+    def test_other_cli_bearing_tools_still_reported(self, tmp_path):
+        broken = tmp_path / "broken_capabilities.toml"
+        broken.write_text("this is not valid toml [[[")
+        manifest_paths = {
+            "lore": default_manifest_paths()["lore"],
+            "broken": broken,
+        }
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: None,
+            python_version_runner=_fake_py,
+            manifest_paths=manifest_paths,
+        )
+        assert "lore" in r.data["clis"]
