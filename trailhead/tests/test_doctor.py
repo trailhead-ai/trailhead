@@ -69,6 +69,17 @@ class TestReport:
         assert r.data["clis"]["camp"] == "/shim/camp"
         assert r.data["clis"]["lore"] is None
 
+    def test_portage_cli_reported_from_which(self, tmp_path):
+        # portage is CLI-bearing (its manifest declares cli_bin) just like
+        # camp/lore, discovered generically rather than off a hardcoded list.
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: f"/shim/{n}" if n == "portage" else None,
+            python_version_runner=_fake_py,
+        )
+        assert set(r.data["clis"]) == {"camp", "lore", "portage"}
+        assert r.data["clis"]["portage"] == "/shim/portage"
+
     def test_python_version_reported(self, tmp_path):
         r = run_doctor(
             env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py

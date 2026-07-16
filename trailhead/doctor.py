@@ -5,7 +5,8 @@ doing — there are no install-validity checks).  It simply reports what trailhe
 has installed, discovered from on-disk state:
 
   - per harness: the registered marketplace + the installed tools (markers),
-  - the camp/lore CLI shim dir and whether `camp`/`lore` resolve on PATH,
+  - the CLI shim dir and whether each CLI-bearing tool (any tool whose manifest
+    declares `cli_bin`) resolves on PATH,
   - the python3 version on PATH (informational).
 
 ``exit_code`` is always 0 unless the report itself crashes.
@@ -23,11 +24,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from trailhead.capabilities import load_manifest
 from trailhead.harness import HarnessError, get_harness
 from trailhead.pathint import resolve_shim_dir
 from trailhead.paths import state_dir
+from trailhead.wire import default_manifest_paths
 
-_CLI_NAMES = ("camp", "lore")
+
+def _discover_cli_names() -> list[str]:
+    """Every CLI-bearing tool name — discovered from each tool's manifest.
+
+    Not gated by any install config flag: doctor reports on-disk/PATH reality
+    regardless of what a config would install.
+    """
+    return [
+        name
+        for name, path in default_manifest_paths().items()
+        if load_manifest(path).cli_bin is not None
+    ]
 
 
 @dataclass
@@ -102,7 +116,7 @@ def run_doctor(
     harnesses = _discover_harnesses(composed_base)
 
     shim_dir = resolve_shim_dir(env=_env)
-    clis = {name: _which(name) for name in _CLI_NAMES}
+    clis = {name: _which(name) for name in _discover_cli_names()}
 
     data = {
         "harnesses": harnesses,
