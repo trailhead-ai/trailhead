@@ -223,6 +223,10 @@ def test_second_start_is_idempotent_noop(outpost):
     assert _start(outpost) == 0
     first_pid = _pid(outpost)
     assert _wait_until(lambda: _pid_alive(first_pid), timeout=3.0)
+    # start()'s idempotency check requires /health to answer, not just a live
+    # pid — wait for it the same way test_stop_terminates_and_removes_pidfile
+    # does, or the second start races the daemon's own startup and respawns.
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
 
     assert _start(outpost) == 0
     # No respawn: same pid, still the original live process.
