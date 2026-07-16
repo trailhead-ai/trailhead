@@ -15,7 +15,13 @@ Config TOML schema
 ------------------
     install_camp_cli = true            # default true
     install_lore_cli = true            # default true
+    install_portage_cli = true         # default true
     plugins = ["camp", "lore", ...]    # top-level default plugin set (optional)
+
+Each ``install_<name>_cli`` key is generic: it exists for every tool whose
+``capabilities.toml`` declares a ``cli_bin`` (see ``capabilities.py``), not a
+hand-maintained list. A future CLI-bearing tool gets its own
+``install_<name>_cli`` key for free — no change to this module.
 
     [[harness]]                        # optional per-harness override
     name = "claude_code"
@@ -47,6 +53,8 @@ Resolution order
 * Per-harness plugin set: ``--plugin`` (REPLACES) → else that harness's
   ``[[harness]].plugins`` → else the top-level ``plugins`` default → else ALL.
 * ``--no-camp`` / ``--no-lore`` force the corresponding CLI flag off.
+* ``ResolvedConfig.cli_flags`` maps every CLI-bearing tool name (any tool whose
+  manifest declares ``cli_bin``) to whether its CLI should be installed.
 """
 
 from __future__ import annotations
@@ -98,8 +106,7 @@ class ResolvedHarness:
 class ResolvedConfig:
     """Fully resolved install/uninstall configuration."""
 
-    install_camp_cli: bool
-    install_lore_cli: bool
+    cli_flags: dict[str, bool]
     harnesses: list[ResolvedHarness] = field(default_factory=list)
 
 
@@ -212,6 +219,20 @@ def _find_harness_block(blocks: list[dict], canonical: str) -> dict | None:
     return None
 
 
+def _resolve_cli_flags(data: dict, manifest_paths: dict[str, Path]) -> dict[str, bool]:
+    """Resolve each CLI-bearing tool's install flag from the config TOML.
+
+    A tool is CLI-bearing when its manifest declares ``cli_bin``. Its flag is
+    read from ``install_<name>_cli`` in *data*, defaulting to ``True``.
+    """
+    flags: dict[str, bool] = {}
+    for name, path in manifest_paths.items():
+        manifest = load_manifest(path)
+        if manifest.cli_bin is not None:
+            flags[name] = bool(data.get(f"install_{name}_cli", True))
+    return flags
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -247,12 +268,11 @@ def resolve_config(
     _manifest_paths = manifest_paths or default_manifest_paths()
     data = _parse_toml(config_path) if config_path is not None else {}
 
-    install_camp_cli = bool(data.get("install_camp_cli", True))
-    install_lore_cli = bool(data.get("install_lore_cli", True))
-    if no_camp:
-        install_camp_cli = False
-    if no_lore:
-        install_lore_cli = False
+    cli_flags = _resolve_cli_flags(data, _manifest_paths)
+    if no_camp and "camp" in cli_flags:
+        cli_flags["camp"] = False
+    if no_lore and "lore" in cli_flags:
+        cli_flags["lore"] = False
 
     harness_blocks = data.get("harness", [])
     if not isinstance(harness_blocks, list):
@@ -303,7 +323,6 @@ def resolve_config(
         resolved_harnesses.append(ResolvedHarness(hname, plugins))
 
     return ResolvedConfig(
-        install_camp_cli=install_camp_cli,
-        install_lore_cli=install_lore_cli,
+        cli_flags=cli_flags,
         harnesses=resolved_harnesses,
     )
