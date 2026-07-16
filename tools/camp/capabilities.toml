@@ -3,3 +3,4 @@
 
 [tool]
 name = "camp"
+cli_bin = "bin/camp"

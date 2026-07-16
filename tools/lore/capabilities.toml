@@ -6,3 +6,4 @@
 [tool]
 name = "lore"
 base = []
+cli_bin = "bin/lore"

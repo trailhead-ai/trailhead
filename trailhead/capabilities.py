@@ -17,6 +17,7 @@ manifest only needs to declare what always ships::
     name = "lore"                       # MUST equal the plugins/<name>/ dir
     base = ["skills/_shared"]           # always-on, NON-selectable dirs
     hooks_json = "hooks/hooks.json"     # optional; the whole containing dir ships
+    cli_bin = "bin/lore"                # optional; path to a shippable CLI binary
     validate = true                     # optional, default true
 
 Convention-based inventory
@@ -33,7 +34,7 @@ include) is therefore never selectable; list it in ``base`` so it still ships.
 
 Confinement guarantee (D-F)
 ---------------------------
-``base`` and ``hooks_json`` entries are confined to the tool's plugin root
+``base``, ``hooks_json``, and ``cli_bin`` entries are confined to the tool's plugin root
 (``<manifest_dir>/plugins/<tool.name>/``) BEFORE any stat/existence call, using::
 
     candidate = (plugin_root.resolve() / entry).resolve()
@@ -48,6 +49,7 @@ Type conventions
 ----------------
 * ``base`` entries must resolve to **directories** (when ``validate``).
 * ``hooks_json`` must resolve to a **file** (when ``validate``).
+* ``cli_bin`` must resolve to a **file** (when ``validate``).
 """
 
 import tomllib
@@ -69,7 +71,7 @@ class ConfineError(Exception):
 
     Attributes:
         tool:    Tool name (or None if tool name could not be determined).
-        context: ``"base"`` or ``"hooks_json"``.
+        context: ``"base"``, ``"hooks_json"``, or ``"cli_bin"``.
         entry:   The raw string entry that failed confinement.
     """
 
@@ -97,6 +99,7 @@ class Manifest:
         base:        Always-on, non-selectable relative dirs (e.g. ``skills/_shared``).
         hooks_json:  Optional relative path to the hooks JSON; the whole containing
                      dir is wired by the composer so sibling scripts ship too.
+        cli_bin:     Optional relative path to a shippable CLI binary.
         validate:    Whether existence/type checks ran (default True).
         subagents:   ``{name: "agents/<name>.md"}`` — discovered, selectable.
         skills:      ``{name: "skills/<name>"}`` — discovered (SKILL.md dirs minus base).
@@ -106,6 +109,7 @@ class Manifest:
     plugin_root: Path
     base: list[str]
     hooks_json: str | None
+    cli_bin: str | None
     validate: bool
     subagents: dict[str, str]
     skills: dict[str, str]
@@ -198,14 +202,14 @@ def load_manifest(manifest_path: Path) -> Manifest:
     1. Parse TOML; wrap ``TOMLDecodeError`` as ``ManifestError``.
     2. Validate required ``[tool]`` fields.
     3. Derive ``plugin_root = manifest_path.parent / "plugins" / tool_name``.
-    4. Confine ``base`` + ``hooks_json`` (D-F) before any stat call.
-    5. If ``validate``, assert ``base`` dirs and ``hooks_json`` exist with the
-       right type.
+    4. Confine ``base`` + ``hooks_json`` + ``cli_bin`` (D-F) before any stat call.
+    5. If ``validate``, assert ``base`` dirs, ``hooks_json``, and ``cli_bin``
+       exist with the right type.
     6. Discover the selectable subagent + skill inventory by convention.
 
     Raises:
         ManifestError: Structural/missing-field/validation failure.
-        ConfineError:  A ``base`` / ``hooks_json`` path escapes the plugin root.
+        ConfineError:  A ``base`` / ``hooks_json`` / ``cli_bin`` path escapes the plugin root.
     """
     try:
         with open(manifest_path, "rb") as fh:
@@ -226,6 +230,7 @@ def load_manifest(manifest_path: Path) -> Manifest:
 
     base: list[str] = list(tool_data.get("base", []))
     hooks_json: str | None = tool_data.get("hooks_json")
+    cli_bin: str | None = tool_data.get("cli_bin")
     should_validate: bool = tool_data.get("validate", True)
 
     # ------------------------------------------------------------------
@@ -237,6 +242,8 @@ def load_manifest(manifest_path: Path) -> Manifest:
         _confine(plugin_root, entry, tool_name, "base")
     if hooks_json is not None:
         _confine(plugin_root, hooks_json, tool_name, "hooks_json")
+    if cli_bin is not None:
+        _confine(plugin_root, cli_bin, tool_name, "cli_bin")
 
     # ------------------------------------------------------------------
     # Existence + type validation (only when validate=true)
@@ -248,6 +255,9 @@ def load_manifest(manifest_path: Path) -> Manifest:
         if hooks_json is not None:
             candidate = _confine(plugin_root, hooks_json, tool_name, "hooks_json")
             _validate_path(candidate, hooks_json, tool_name, "hooks_json", must_be_file=True)
+        if cli_bin is not None:
+            candidate = _confine(plugin_root, cli_bin, tool_name, "cli_bin")
+            _validate_path(candidate, cli_bin, tool_name, "cli_bin", must_be_file=True)
 
     # ------------------------------------------------------------------
     # Convention-based selectable inventory
@@ -260,6 +270,7 @@ def load_manifest(manifest_path: Path) -> Manifest:
         plugin_root=plugin_root,
         base=base,
         hooks_json=hooks_json,
+        cli_bin=cli_bin,
         validate=should_validate,
         subagents=subagents,
         skills=skills,

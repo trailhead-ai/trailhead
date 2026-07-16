@@ -287,6 +287,20 @@ class TestConfinement:
         with pytest.raises(ConfineError):
             load_manifest(_write_manifest(tmp_path, content))
 
+    def test_cli_bin_traversal_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "badtool")
+        content = '[tool]\nname = "badtool"\ncli_bin = "../../../etc/passwd"\nvalidate = false\n'
+        with pytest.raises(ConfineError) as exc_info:
+            load_manifest(_write_manifest(tmp_path, content))
+        assert exc_info.value.context == "cli_bin"
+
+    def test_absolute_cli_bin_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "badtool")
+        content = '[tool]\nname = "badtool"\ncli_bin = "/etc/passwd"\nvalidate = false\n'
+        with pytest.raises(ConfineError) as exc_info:
+            load_manifest(_write_manifest(tmp_path, content))
+        assert exc_info.value.context == "cli_bin"
+
 
 # ---------------------------------------------------------------------------
 # Validate: existence + type
@@ -326,3 +340,44 @@ class TestValidate:
         content = '[tool]\nname = "mytool"\nbase = ["skills/nope"]\nvalidate = false\n'
         # Must not raise even though skills/nope is missing.
         load_manifest(_write_manifest(tmp_path, content))
+
+    def test_missing_cli_bin_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "mytool")
+        content = '[tool]\nname = "mytool"\ncli_bin = "bin/mytool"\n'
+        with pytest.raises(ManifestError, match="mytool"):
+            load_manifest(_write_manifest(tmp_path, content))
+
+
+# ---------------------------------------------------------------------------
+# cli_bin
+# ---------------------------------------------------------------------------
+
+
+class TestCliBin:
+    def test_cli_bin_parses(self, tmp_path):
+        root = _make_plugin_dir(tmp_path, "mytool")
+        (root / "bin").mkdir()
+        (root / "bin" / "mytool").write_text("#!/usr/bin/env bash\n")
+        content = '[tool]\nname = "mytool"\ncli_bin = "bin/mytool"\n'
+        m = load_manifest(_write_manifest(tmp_path, content))
+        assert m.cli_bin == "bin/mytool"
+
+    def test_cli_bin_absent_is_none(self, tmp_path):
+        _make_plugin_dir(tmp_path, "mytool")
+        m = load_manifest(_write_manifest(tmp_path, '[tool]\nname = "mytool"\n'))
+        assert m.cli_bin is None
+
+    def test_camp_cli_bin(self):
+        m = load_manifest(_CAMP_MANIFEST)
+        assert m.cli_bin == "bin/camp"
+        assert (m.plugin_root / m.cli_bin).is_file()
+
+    def test_lore_cli_bin(self):
+        m = load_manifest(_LORE_MANIFEST)
+        assert m.cli_bin == "bin/lore"
+        assert (m.plugin_root / m.cli_bin).is_file()
+
+    def test_portage_cli_bin(self):
+        m = load_manifest(_PORTAGE_MANIFEST)
+        assert m.cli_bin == "bin/portage"
+        assert (m.plugin_root / m.cli_bin).is_file()

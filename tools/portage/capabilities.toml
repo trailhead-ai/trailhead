@@ -5,3 +5,4 @@
 
 [tool]
 name = "portage"
+cli_bin = "bin/portage"
