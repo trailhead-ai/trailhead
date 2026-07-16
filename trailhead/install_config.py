@@ -63,7 +63,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from trailhead.capabilities import Manifest, load_manifest
+from trailhead.capabilities import Manifest, cli_bearing_manifests, load_manifest
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
 from trailhead.harness import canonical_name, known_harness_names
 from trailhead.wire import default_manifest_paths
@@ -225,12 +225,10 @@ def _resolve_cli_flags(data: dict, manifest_paths: dict[str, Path]) -> dict[str,
     A tool is CLI-bearing when its manifest declares ``cli_bin``. Its flag is
     read from ``install_<name>_cli`` in *data*, defaulting to ``True``.
     """
-    flags: dict[str, bool] = {}
-    for name, path in manifest_paths.items():
-        manifest = load_manifest(path)
-        if manifest.cli_bin is not None:
-            flags[name] = bool(data.get(f"install_{name}_cli", True))
-    return flags
+    return {
+        name: bool(data.get(f"install_{name}_cli", True))
+        for name in cli_bearing_manifests(manifest_paths)
+    }
 
 
 # ---------------------------------------------------------------------------

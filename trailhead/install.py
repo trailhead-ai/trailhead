@@ -36,7 +36,7 @@ import os
 import sys
 from pathlib import Path
 
-from trailhead.capabilities import load_manifest
+from trailhead.capabilities import cli_bearing_manifests
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
 from trailhead.harness import detect_harnesses, get_harness
 from trailhead.install_config import (
@@ -59,12 +59,12 @@ def _resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
     this resolves each enabled one via its manifest's ``plugin_root / cli_bin``
     and drops any whose binary doesn't actually exist on disk.
     """
-    manifest_paths = default_manifest_paths()
+    manifests = cli_bearing_manifests(default_manifest_paths())
     tools: dict[str, Path] = {}
     for name, enabled in cli_flags.items():
         if not enabled:
             continue
-        manifest = load_manifest(manifest_paths[name])
+        manifest = manifests[name]
         bin_path = manifest.plugin_root / manifest.cli_bin
         if bin_path.exists():
             tools[name] = bin_path

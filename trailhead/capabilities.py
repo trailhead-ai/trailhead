@@ -275,3 +275,20 @@ def load_manifest(manifest_path: Path) -> Manifest:
         subagents=subagents,
         skills=skills,
     )
+
+
+def cli_bearing_manifests(manifest_paths: dict[str, Path]) -> dict[str, Manifest]:
+    """Load the manifests of every CLI-bearing tool in *manifest_paths*.
+
+    A tool is *CLI-bearing* when its ``capabilities.toml`` declares ``cli_bin``.
+    This is the single predicate defining that set — shared by install-config
+    resolution, shim building, and doctor's PATH report — so "which tools ship a
+    CLI" is decided in one place rather than reimplemented per caller.
+
+    Returns ``{name: Manifest}`` preserving *manifest_paths* iteration order.
+    """
+    return {
+        name: manifest
+        for name, path in manifest_paths.items()
+        if (manifest := load_manifest(path)).cli_bin is not None
+    }

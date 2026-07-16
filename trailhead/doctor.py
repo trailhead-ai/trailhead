@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from trailhead.capabilities import load_manifest
+from trailhead.capabilities import cli_bearing_manifests
 from trailhead.harness import HarnessError, get_harness
 from trailhead.pathint import resolve_shim_dir
 from trailhead.paths import state_dir
@@ -37,11 +37,7 @@ def _discover_cli_names() -> list[str]:
     Not gated by any install config flag: doctor reports on-disk/PATH reality
     regardless of what a config would install.
     """
-    return [
-        name
-        for name, path in default_manifest_paths().items()
-        if load_manifest(path).cli_bin is not None
-    ]
+    return list(cli_bearing_manifests(default_manifest_paths()))
 
 
 @dataclass
