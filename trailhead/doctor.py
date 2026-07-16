@@ -24,20 +24,33 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from trailhead.capabilities import cli_bearing_manifests
+from trailhead.capabilities import ConfineError, ManifestError, cli_bearing_manifests
 from trailhead.harness import HarnessError, get_harness
 from trailhead.pathint import resolve_shim_dir
 from trailhead.paths import state_dir
 from trailhead.wire import default_manifest_paths
 
 
-def _discover_cli_names() -> list[str]:
+def _discover_cli_names(manifest_paths: dict[str, Path] | None = None) -> list[str]:
     """Every CLI-bearing tool name — discovered from each tool's manifest.
 
     Not gated by any install config flag: doctor reports on-disk/PATH reality
     regardless of what a config would install.
+
+    Each tool's manifest is loaded independently, so a single broken manifest
+    (malformed TOML, a confinement violation, a missing required field) only
+    drops that one tool from the CLI list rather than crashing the report —
+    doctor's contract is to always exit 0.
     """
-    return list(cli_bearing_manifests(default_manifest_paths()))
+    paths = manifest_paths if manifest_paths is not None else default_manifest_paths()
+    names: list[str] = []
+    for name, path in paths.items():
+        try:
+            bearing = cli_bearing_manifests({name: path})
+        except (ManifestError, ConfineError):
+            continue
+        names.extend(bearing)
+    return names
 
 
 @dataclass
@@ -102,6 +115,7 @@ def run_doctor(
     env: dict[str, str] | None = None,
     which_runner: Callable[[str], Optional[str]] | None = None,
     python_version_runner: Callable | None = None,
+    manifest_paths: dict[str, Path] | None = None,
 ) -> DoctorResult:
     """Build a read-only report of what trailhead has installed. exit_code is 0."""
     _env = env if env is not None else dict(os.environ)
@@ -112,7 +126,7 @@ def run_doctor(
     harnesses = _discover_harnesses(composed_base)
 
     shim_dir = resolve_shim_dir(env=_env)
-    clis = {name: _which(name) for name in _discover_cli_names()}
+    clis = {name: _which(name) for name in _discover_cli_names(manifest_paths)}
 
     data = {
         "harnesses": harnesses,
