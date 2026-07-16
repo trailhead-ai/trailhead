@@ -86,8 +86,11 @@ harness **compose + wire** the selection under the wire lock → build the camp/
 - **`capabilities.py`** — per-tool `capabilities.toml` loader. The capability-GROUP
   concept is **gone**: selection is per-subagent/per-skill by NAME, and the
   selectable inventory is **discovered on disk by convention** (`agents/<name>.md`,
-  `skills/<name>/SKILL.md`), never hand-listed. The manifest only declares the
-  always-on set: `base` dirs + optional `hooks_json`.
+  `skills/<name>/SKILL.md`), never hand-listed. The manifest declares the
+  always-on set (`base` dirs + optional `hooks_json`) plus an optional `cli_bin`
+  (a tool's CLI binary, confined + validated the same way as `hooks_json`) —
+  `install.py`/`doctor.py` derive the CLI shim/report set generically from
+  whichever tools declare `cli_bin`, rather than naming tools by hand.
 - **`compose.py`** — pure planner (`compose_plan`, stats override paths but writes
   nothing) + sole writer (`apply_plan`). Composing = copying selected sources into a
   dest plugin dir. Always includes `.claude-plugin/`, every `base` dir, and the
