@@ -152,7 +152,10 @@ review, across all vault layers.
 - Empty `reviews` → report **"no pending spec reviews"** and stop. (Done.)
 - Scoped to one spec (Tom named a vault/slug or review id) → filter this list
   to the matching entry/entries before proceeding; report "no pending review
-  for that spec" if none match.
+  for that spec" if none match. If Tom named only a title (no vault/slug), call
+  `GET /api/specs` first to resolve it to a `(vault, slug)` pair before
+  filtering — that route lists spec metadata (title, vault, slug) across all
+  vault layers precisely for this kind of lookup.
 - Otherwise, process every entry in turn.
 
 ### 2. Pick up and read each review
@@ -182,11 +185,16 @@ The spec's `status` (from `GET /api/specs/:vault/:slug`) gates whether you may
 touch the body at all:
 
 - **`draft`** → you may edit the body in place per the write path below (§4).
-- **Any frozen status** — `ready`, `planned`, `complete`, `superseded`,
-  `dropped` — → **never edit that body.** There is no exception. Instead:
+  `draft` is the **only** editable status.
+- **Any other status is frozen** — this includes the known values `ready`,
+  `planned`, `complete`, `superseded`, `dropped`, and any status value you do
+  not recognize — → **never edit that body.** There is no exception. Instead:
   - Route the feedback to a successor spec (if one exists or should be
     started) or to a follow-up task record — created or updated via the same
     `lore record` CLI used for edits, never by writing spec content directly.
+    **The same verify-by-re-read discipline in §4 applies here too:** after
+    creating or updating the successor/follow-up record, read it back and
+    confirm the content actually landed before reporting it as done.
   - **Say so explicitly** in your reply to each affected comment (or a
     review-level reply): state plainly that the spec is frozen, that you are
     not editing it, and where the feedback is being routed instead. A silent
