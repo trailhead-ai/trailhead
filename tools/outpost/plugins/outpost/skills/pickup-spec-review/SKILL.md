@@ -206,19 +206,32 @@ The HTTP contract has **no endpoint that mutates a spec body** — the daemon is
 read-only on every vault path, full stop. Every agreed edit on a `draft` spec
 goes through the `lore` CLI, run by you, never through the daemon:
 
-1. **Re-read the body immediately before editing — never trust an earlier
-   snapshot in this session.** See the Gauntlet write-precedence note below;
-   this re-read is not optional busywork, it is how concurrent edits are
-   absorbed.
-2. **Cross-vault collision check.** `lore record show <kind>/<slug>` has no
-   vault selector — given only `spec/<slug>`, it resolves to the first
-   configured vault (in `lore vault ls` order) that contains that slug. Because
-   slugs are only unique **within** a vault, a same-slug record can exist in a
-   different vault layer. Before writing, run
-   `lore record show spec/<slug> --json` and confirm its `body`/`title` matches
-   what you just read from `GET /api/specs/:vault/:slug` (the vault the review
-   is actually against). If they don't match, **stop, do not write**, and
-   report the ambiguity to Tom instead of guessing which vault to target.
+1. **Re-read the body AND status immediately before editing — never trust an
+   earlier snapshot in this session, including the `draft` status check in
+   §3.** Time can pass between when you evaluated a comment and when you
+   actually write (working through other comments, other reviews, a pause) —
+   a spec can transition `draft` → frozen in that window (Tom or the gauntlet
+   finalizing it mid-drain). Re-running `GET /api/specs/:vault/:slug` here
+   must show `status: "draft"` again; if it now reports any other status,
+   treat it exactly as §3's frozen case — stop, do not write, route the
+   feedback to a successor/follow-up instead, and say so. See the Gauntlet
+   write-precedence note below; this re-read is not optional busywork, it is
+   how concurrent edits (and concurrent freezes) are absorbed.
+2. **Cross-vault collision check — exact comparison, not a judgment call.**
+   `lore record show <kind>/<slug>` has no vault selector — given only
+   `spec/<slug>`, it resolves to the first configured vault (in `lore vault ls`
+   order) that contains that slug. Because slugs are only unique **within** a
+   vault, a same-slug record can exist in a different vault layer. Before
+   writing, run `lore record show spec/<slug> --json` and compare its `body`
+   **character-for-character** against what you just re-read from
+   `GET /api/specs/:vault/:slug` (the vault the review is actually against) —
+   not "looks similar," an exact string match. **A short or template-like
+   draft body is exactly the case where a wrong-vault same-slug collision can
+   look like a match at a glance and isn't** — if the body is trivially short
+   or boilerplate, treat that as insufficient assurance on its own and fail
+   closed. If the bodies don't match exactly, or you're not confident the
+   match rules out a wrong-vault collision, **stop, do not write**, and report
+   the ambiguity to Tom instead of guessing which vault to target.
 3. **Full-body replace is preferred over `--diff`.** Compose the complete new
    body (starting from the just-reread current body, applying your edit) and
    pipe it whole to:
