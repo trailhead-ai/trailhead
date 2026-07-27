@@ -6,7 +6,14 @@ import os
 import sys
 from pathlib import Path
 
-from .common import _add_session_selectors, _git, _vault_is_git_toplevel
+from .common import (
+    DRIFT_SYNC_FIXABLE,
+    _add_session_selectors,
+    _git,
+    _resolve_all_vaults,
+    _vault_drift,
+    _vault_is_git_toplevel,
+)
 from .session import _open_session_index, _resolve_session_key
 
 
@@ -85,6 +92,50 @@ def _flush_push(vault: Path) -> int:
     return 0
 
 
+def _report_unsynced_vaults() -> None:
+    """Print a notice naming every configured vault left holding uncommitted work.
+
+    `_flush_commit` stages the flushed session record's EXPLICIT paths and nothing
+    else — deliberately, so unrelated dirty files are never swept into a session
+    commit. The consequence is that the RECORDS a flush produces are not committed
+    by the flush: the evaluation step creates them with `lore record create`, which
+    routes by scope, so they can land in a product/repo vault while the session
+    record commits in `default`. A flush that printed "Committed" and stopped
+    therefore read as "everything is saved" while the records it existed to durably
+    capture sat untracked.
+
+    Reporting rather than committing keeps the explicit-paths guarantee intact: the
+    flush still touches only what it staged, and the operator gets the one command
+    that covers the rest.
+
+    **Only ``DRIFT_SYNC_FIXABLE`` findings are reported**, because the notice's
+    whole payload is "run `lore sync`". A standing condition sync cannot fix — a
+    vault with no origin remote, which is a legitimate deliberate configuration —
+    would otherwise attach that remedy to every flush forever, and a notice that
+    fires unconditionally with a no-op remedy is one the operator learns to skip.
+    ``lore status`` is the surface that reports standing conditions, with the
+    remedy that actually applies. Silent when nothing is sync-fixable.
+    """
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"notice: cannot check vault sync state — {error}", file=sys.stderr)
+        return
+
+    drifted = []
+    for name, path in vaults:
+        actionable = [
+            desc for code, desc in _vault_drift(Path(path)) if code in DRIFT_SYNC_FIXABLE
+        ]
+        if actionable:
+            drifted.append((name, actionable))
+    if not drifted:
+        return
+
+    print("notice: vault(s) still holding unsynced work — run `lore sync`:")
+    for name, descriptions in drifted:
+        print(f"  {name}: {'; '.join(descriptions)}")
+
+
 # The literal reserved scope token. It is unambiguous against a KQL
 # query because real KQL queries are field-qualified (e.g. `status:dirty`) — a bare
 # `all` is never a valid scoping query, so it is reclaimed as the all-sessions verb.
@@ -117,13 +168,22 @@ def cmd_flush(args) -> int:
 
     No code path writes `status: complete` / `active` — that vocab was retired;
     a session status is only ever `dirty` / `clean`.
+
+    Every scope ends with `_report_unsynced_vaults`, which names the vaults the
+    flush's own commit does not cover. It runs on the failure path too: a flush
+    that exits non-zero is exactly when knowing what is still uncommitted matters,
+    and the notice never changes the exit code.
     """
     scope = getattr(args, "scope", None)
     if scope == FLUSH_SCOPE_ALL:
-        return _flush_batch(args, query=_FLUSH_ALL_QUERY, scope_label="all")
-    if scope:
-        return _flush_batch(args, query=scope, scope_label=f"<search> {scope!r}")
-    return _flush_current_session(args)
+        rc = _flush_batch(args, query=_FLUSH_ALL_QUERY, scope_label="all")
+    elif scope:
+        rc = _flush_batch(args, query=scope, scope_label=f"<search> {scope!r}")
+    else:
+        rc = _flush_current_session(args)
+
+    _report_unsynced_vaults()
+    return rc
 
 
 def _flush_current_session(args) -> int:

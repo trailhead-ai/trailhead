@@ -29,17 +29,30 @@ def write_default_config(config_home: Path, vault_path: Path) -> None:
     Config is the only resolution path — ``LORE_VAULT`` is not injected by
     the harnesses, so this seeding is what points the CLI at the test vault.
     """
+    write_vault_config(config_home, [("default", "default", vault_path)])
+
+
+def write_vault_config(config_home: Path, vaults) -> None:
+    """Seed config.json under config_home with an arbitrary set of vaults.
+
+    ``vaults`` is an iterable of ``(name, scope, path)`` triples written in order.
+    The multi-vault counterpart to :func:`write_default_config`, for tests that
+    exercise whole-install behavior — a ``lore sync`` covering every vault, a
+    ``lore status`` drift report — where a single-vault config cannot distinguish
+    "covered every vault" from "covered the default one".
+
+    The caller owns validity: ``load_config`` still requires exactly one
+    ``default``-scope vault, so a test that wants a *rejected* config passes a set
+    that deliberately violates that.
+    """
     lore_cfg = config_home / "lore"
     lore_cfg.mkdir(parents=True, exist_ok=True)
     (lore_cfg / "config.json").write_text(
         json.dumps(
             {
                 "vaults": [
-                    {
-                        "name": "default",
-                        "scope": "default",
-                        "path": str(vault_path),
-                    }
+                    {"name": name, "scope": scope, "path": str(path)}
+                    for name, scope, path in vaults
                 ]
             },
             indent=2,
