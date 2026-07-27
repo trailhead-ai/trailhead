@@ -1,11 +1,16 @@
-"""``lore init`` / ``lore status`` — machine bootstrap + ruleset drift report."""
+"""``lore init`` / ``lore status`` — machine bootstrap + ruleset/vault drift report."""
 from __future__ import annotations
 
 import json
 import sys
 from pathlib import Path
 
-from .common import _resolve_config_path, _resolve_lore_state_dir
+from .common import (
+    _resolve_all_vaults,
+    _resolve_config_path,
+    _resolve_lore_state_dir,
+    _vault_drift,
+)
 
 # Finds its sibling plugin root (and the plugin-root-level _bootstrap module) so
 # the ``PreToolUse`` guard command carries an absolute, install-independent path.
@@ -233,8 +238,40 @@ def cmd_init(args) -> int:
     return 0
 
 
+def _report_vault_drift() -> None:
+    """Report every configured vault whose records are not fully backed up.
+
+    The second drift surface ``lore status`` owns, alongside the ruleset report.
+    A vault that is uncommitted, never committed, unpushed, or remote-less holds
+    records that exist in exactly one place — the same class of coverage hole as
+    a missing ruleset, and one no other command reports standing. It is checked
+    per-vault precisely because record writes route by scope: the ``default``
+    vault being clean says nothing about the product vault the session actually
+    wrote to.
+
+    Findings are observations (see ``_vault_drift``); the remedy — ``lore sync``,
+    or wiring a remote — is attached here.
+    """
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"lore: vault config unreadable — {error}", file=sys.stderr)
+        return
+
+    for name, path in vaults:
+        findings = _vault_drift(Path(path))
+        if not findings:
+            print(f"lore: vault {name}: synced")
+            continue
+        remedy = (
+            "add an origin remote"
+            if findings == ["no origin remote — nothing is backed up off-disk"]
+            else f"run `lore sync --vault {name}`"
+        )
+        print(f"lore: vault {name}: {'; '.join(findings)} — {remedy}")
+
+
 def cmd_status(args) -> int:
-    """Report the lore user-level ruleset status for every detected harness.
+    """Report lore's drift surfaces: harness rulesets, then vault sync state.
 
     For each detected harness, compares the installed ruleset against lore's
     rendered content via the seam (``user_ruleset_status``) and reports one of
@@ -245,6 +282,11 @@ def cmd_status(args) -> int:
     The ruleset is the Bash/shell write-prohibition gap protection (the
     PreToolUse guardrail does not cover Bash-mediated writes), so a missing or
     stale ruleset is a real coverage hole worth surfacing.
+
+    Then :func:`_report_vault_drift` reports each configured vault's backup state.
+
+    Exit code stays 0 for drift: this is a report, and both sections print their
+    own remedy. Only an unreadable config downgrades a section to a stderr line.
     """
     from ..config import agent_ruleset as agent_ruleset_mod
 
@@ -264,6 +306,7 @@ def cmd_status(args) -> int:
                 f"— re-run `lore init` to install it"
             )
 
+    _report_vault_drift()
     return 0
 
 

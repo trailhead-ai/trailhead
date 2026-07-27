@@ -20,9 +20,17 @@ discards the noise). The flow:
    record via `lore record create`.
 4. Call `lore flush` (the CLI verb) to flip the session `clean`, stamp the new
    `flushed-at` watermark, and commit.
+5. Call `lore sync` to commit the records step 3 created.
 
 The **CLI** (`lore flush`) carries the mechanical flip; this **skill** carries the
 judgment (candidate evaluation).
+
+**Step 5 is not optional.** `lore flush` commits the session record's own paths and
+nothing else, so the records step 3 created are still uncommitted when it returns —
+and they routinely live in a *different vault*, since `lore record create` routes by
+scope while the session record lives in `default`. `lore flush` ends by naming any
+vault still holding unsynced work; `lore sync` (which covers every configured
+vault) is what actually commits it.
 
 ## Scoping
 
@@ -119,7 +127,8 @@ For each outstanding candidate, apply agent judgment:
   conversation context is available for judgment.
 
 If no outstanding candidates exist (all already evaluated), proceed directly
-to Step 4.
+to Step 4. Still run Step 5 — a clean session says nothing about whether the
+vaults themselves are committed.
 
 ### Step 4 — Flip the session clean
 
@@ -128,16 +137,36 @@ lore flush
 ```
 
 This stamps `status: clean`, records the new `flushed-at` watermark in
-`annotations`, and commits the vault. Relay any
+`annotations`, and commits the **session record's own paths only**. Relay any
 notices it prints (e.g. non-git vault, push failure).
 
-### Step 5 — Report to the user
+It ends by naming any vault still holding unsynced work:
+
+```
+notice: vault(s) still holding unsynced work — run `lore sync`:
+  trailhead: 12 uncommitted change(s); no origin remote — nothing is backed up off-disk
+```
+
+### Step 5 — Sync the records this flush created
+
+```bash
+lore sync
+```
+
+The records created in Step 3 are NOT committed by `lore flush` — it stages the
+session record's explicit paths and nothing else, and those records usually live in
+a different, scope-routed vault. `lore sync` covers every configured vault.
+
+Relay its per-vault outcomes, especially any vault reporting "No origin remote" —
+those records exist only on this disk.
+
+### Step 6 — Report to the user
 
 ```
 Flushed session `<key>` (status: clean).
 
 Evaluated N candidate(s) → M record(s) created, K discarded.
-Committed the vault.
+Synced: <per-vault outcomes>.
 ```
 
 ## Edge cases

@@ -56,7 +56,7 @@ with `lore search`.
 | `/lore:search` | Query the vault (KQL-subset) — the read path |
 | `/lore:research` | Dispatch the `investigator` (deep) or `researcher` (light) agent |
 | `/lore:flush` | Evaluate outstanding session candidates into records and wrap the session (`dirty → clean`) |
-| `/lore:sync` | Commit and push the vault |
+| `/lore:sync` | Commit and push every configured vault |
 
 ## The `lore` CLI
 
@@ -66,7 +66,8 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
 ```
 lore init                 Scaffold the default vault
 lore flush                Evaluate session candidates and wrap the session (dirty → clean), then commit
-lore sync                 Stage, commit, and push the vault
+lore sync                 Stage, commit, and push every configured vault (--vault <name> for one)
+lore status               Report ruleset drift and any vault holding unsynced records
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)
 lore areas                List the area profiles in the vault

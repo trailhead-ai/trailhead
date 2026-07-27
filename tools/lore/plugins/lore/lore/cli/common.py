@@ -9,8 +9,11 @@ the command modules stay free of cross-imports for generic plumbing:
     lazy-import ``_bootstrap`` + ``trailhead.paths`` and fall back to the XDG
     default so the CLI works in a vanilla checkout;
   - ``_load_vault_config`` — the single gate for config-driven behavior;
+  - ``_resolve_all_vaults`` — the whole-install vault enumeration used by ``sync``
+    and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view;
   - the git primitives (``_git`` / ``_vault_is_git_toplevel``) shared by ``sync``
-    and ``flush``;
+    and ``flush``, plus ``_vault_drift`` — the "is this vault actually backed up?"
+    probe shared by ``status`` and ``flush``;
   - the shared ``--session-id`` / ``--worktree`` subparser selectors;
   - the shared stdin read (``_read_stdin_body``).
 """
@@ -124,6 +127,40 @@ def _load_vault_config():
     return config_path, vaults
 
 
+def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
+    """Return ``([(name, path), …], error)`` covering EVERY configured vault.
+
+    The whole-install counterpart to ``vault_config.resolve_active_vault``, which
+    resolves the ``default``-scope vault alone. Record writes route by scope — a
+    product-scope vault takes every record created from a bound repo — so any
+    operation that means "the vault" in the whole-install sense (``lore sync``'s
+    commit+push, ``lore status``'s drift report) must enumerate all of them.
+    Covering only ``default`` lets a product vault accumulate records that are
+    never committed while the tooling still reports success.
+
+    Three cases:
+
+    - **No ``config.json``** (vanilla usage, Axiom 3) → the single floor vault
+      ``[("default", state_dir("lore")/vaults/default)]`` and ``error is None``.
+    - **Config present but unparseable/invalid** → the same single-element floor
+      list, plus a non-``None`` ``error`` naming the problem. Callers MUST surface
+      it: degrading silently to one vault is precisely the failure mode this
+      function exists to prevent, so unlike ``_load_vault_config`` (best-effort,
+      returns ``None``) the breakage is reported rather than swallowed.
+    - **Valid config** → one ``(name, path)`` pair per vault, in config order,
+      names already normalized by ``load_config``.
+    """
+    config_path = _resolve_config_path()
+    floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
+    if not config_path.exists():
+        return floor, None
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (vault_config_mod.VaultConfigError, OSError, ValueError) as exc:
+        return floor, f"cannot read {config_path}: {exc}"
+    return [(v.name, Path(v.path)) for v in vaults], None
+
+
 def _git(vault: Path, *args: str) -> tuple[int, str, str]:
     """Run a git command in the vault. Returns (returncode, stdout, stderr)."""
     try:
@@ -144,6 +181,61 @@ def _vault_is_git_toplevel(vault: Path) -> bool:
         return Path(out).resolve() == vault.resolve()
     except Exception:
         return False
+
+
+def _vault_unpushed(vault: Path) -> bool:
+    """Return ``True`` iff the vault has local commits its upstream lacks.
+
+    Purely local — reads ``@{u}`` from the ref database, never contacts the
+    remote. A branch with **no** configured upstream counts as unpushed: its
+    commits exist nowhere else, which is the state this predicate is asked about.
+    """
+    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", "HEAD")
+    if rc != 0:
+        return False  # no commits at all — "unpushed" is not the useful finding
+    rc, _, _ = _git(vault, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if rc != 0:
+        return True
+    rc, count, _ = _git(vault, "rev-list", "--count", "@{u}..HEAD")
+    return rc == 0 and count.strip() not in ("", "0")
+
+
+def _vault_drift(vault: Path) -> list[str]:
+    """Return human-readable findings for anything unsynced about ``vault``.
+
+    An empty list means the vault is committed, pushed, and backed by a remote —
+    i.e. the state every "Committed / Pushed to origin" message implies. Each
+    finding is one phrase naming a way the vault's records exist in fewer places
+    than the operator believes.
+
+    Ordered most- to least-severe, and **short-circuiting**: a vault that is not
+    a git repo has no meaningful commit/remote state to report, so that finding
+    is returned alone rather than followed by derivative noise.
+
+    The findings are deliberately phrased as observations, not remedies — callers
+    (``status``, ``flush``) attach the remedy that fits their own context.
+    """
+    if not vault.exists():
+        return ["directory does not exist"]
+    if not _vault_is_git_toplevel(vault):
+        return ["not a git repo (or not its own toplevel) — records have no history"]
+
+    findings: list[str] = []
+    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", "HEAD")
+    if rc != 0:
+        findings.append("never committed — zero commits")
+
+    rc, status_out, _ = _git(vault, "status", "--porcelain")
+    if rc == 0 and status_out.strip():
+        findings.append(f"{len(status_out.splitlines())} uncommitted change(s)")
+
+    rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
+    if rc_remote != 0 or not remote_url:
+        findings.append("no origin remote — nothing is backed up off-disk")
+    elif _vault_unpushed(vault):
+        findings.append("unpushed commits")
+
+    return findings
 
 
 def _add_session_selectors(p) -> None:
