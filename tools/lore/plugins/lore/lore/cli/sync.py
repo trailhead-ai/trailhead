@@ -23,7 +23,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .common import _git, _resolve_all_vaults, _vault_is_git_toplevel, _vault_unpushed
+from .common import (
+    _git,
+    _resolve_all_vaults,
+    _vault_has_upstream,
+    _vault_head_branch,
+    _vault_is_git_toplevel,
+    _vault_unpushed,
+)
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
 
@@ -63,6 +70,13 @@ def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
     push would spend one network round-trip per vault to say "Everything
     up-to-date". ``_vault_unpushed`` answers that from the local ref database.
 
+    **A branch with no upstream is pushed with ``--set-upstream``.** A bare
+    ``git push origin`` refuses outright in that state ("The current branch has no
+    upstream branch", exit 128) and, crucially, never sets one either — so
+    without this the vault would fail identically on every future sync while the
+    error text blamed the network. Setting upstream on the first push is what
+    makes the condition converge.
+
     A missing origin is reported only when this run committed something, so the
     per-vault line names the vault whose new commit is now unbacked; a clean
     remote-less vault stays quiet rather than re-reporting a standing condition on
@@ -77,7 +91,17 @@ def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
     if not committed and not _vault_unpushed(vault):
         return 0
 
-    rc_push, _, stderr_push = _git(vault, "push", "origin")
+    push_args = ["push", "origin"]
+    if not _vault_has_upstream(vault):
+        branch = _vault_head_branch(vault)
+        if branch is None:
+            # Detached HEAD: there is no branch to track, and guessing a refspec
+            # would push to a name the operator never chose. Report, don't guess.
+            say_err("notice: detached HEAD — skipping push; check out a branch and re-run")
+            return 0
+        push_args = ["push", "--set-upstream", "origin", branch]
+
+    rc_push, _, stderr_push = _git(vault, *push_args)
     if rc_push != 0:
         say_err("notice: committed locally; push failed — re-run `lore sync` when online")
         say_err(f"  push error: {stderr_push}")

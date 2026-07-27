@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .common import (
+    DRIFT_SYNC_FIXABLE,
     _add_session_selectors,
     _git,
     _resolve_all_vaults,
@@ -105,21 +106,34 @@ def _report_unsynced_vaults() -> None:
 
     Reporting rather than committing keeps the explicit-paths guarantee intact: the
     flush still touches only what it staged, and the operator gets the one command
-    that covers the rest. Silent when every vault is committed and pushed.
+    that covers the rest.
+
+    **Only ``DRIFT_SYNC_FIXABLE`` findings are reported**, because the notice's
+    whole payload is "run `lore sync`". A standing condition sync cannot fix — a
+    vault with no origin remote, which is a legitimate deliberate configuration —
+    would otherwise attach that remedy to every flush forever, and a notice that
+    fires unconditionally with a no-op remedy is one the operator learns to skip.
+    ``lore status`` is the surface that reports standing conditions, with the
+    remedy that actually applies. Silent when nothing is sync-fixable.
     """
     vaults, error = _resolve_all_vaults()
     if error is not None:
         print(f"notice: cannot check vault sync state — {error}", file=sys.stderr)
         return
 
-    drifted = [(name, _vault_drift(Path(path))) for name, path in vaults]
-    drifted = [(name, findings) for name, findings in drifted if findings]
+    drifted = []
+    for name, path in vaults:
+        actionable = [
+            desc for code, desc in _vault_drift(Path(path)) if code in DRIFT_SYNC_FIXABLE
+        ]
+        if actionable:
+            drifted.append((name, actionable))
     if not drifted:
         return
 
     print("notice: vault(s) still holding unsynced work — run `lore sync`:")
-    for name, findings in drifted:
-        print(f"  {name}: {'; '.join(findings)}")
+    for name, descriptions in drifted:
+        print(f"  {name}: {'; '.join(descriptions)}")
 
 
 # The literal reserved scope token. It is unambiguous against a KQL

@@ -74,11 +74,19 @@ def _make_bare_remote(path: Path) -> Path:
     return path
 
 
-def _wire_remote(vault: Path, remote: Path) -> None:
-    """Attach ``remote`` as origin and push, so the vault has a real upstream."""
+def _wire_remote(vault: Path, remote: Path, *, track: bool = True) -> None:
+    """Attach ``remote`` as origin.
+
+    ``track=True`` pushes with ``-u`` so the branch has an upstream. ``track=False``
+    attaches the remote and stops — the origin-without-upstream state, which a bare
+    ``git push origin`` refuses outright (exit 128) rather than treating as a first
+    push. Tests must be able to construct it: it is the state a freshly wired vault
+    is in, and covering only the tracked case is what let that bug ship.
+    """
     _git(vault, "remote", "add", "origin", str(remote))
-    branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    _git(vault, "push", "-u", "origin", branch)
+    if track:
+        branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        _git(vault, "push", "-u", "origin", branch)
 
 
 def _commit_count(vault: Path) -> int:
@@ -294,6 +302,87 @@ def test_sync_pushes_a_clean_but_unpushed_vault(tmp_path):
     assert _commit_count(Path(remote)) == _commit_count(default)
 
 
+def test_sync_sets_upstream_on_a_remote_without_a_tracking_branch(tmp_path):
+    """A wired-but-never-pushed vault must converge, not fail forever.
+
+    A bare ``git push origin`` refuses with exit 128 when the branch has no
+    upstream, AND does not set one — so without ``--set-upstream`` this vault fails
+    identically on every future sync while the error text blames the network.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote, track=False)
+
+    assert _git(default, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode != 0
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Pushed to origin." in r.stdout, (
+        f"push must succeed on a first push; stdout={r.stdout!r} stderr={r.stderr!r}"
+    )
+    assert _commit_count(Path(remote)) == _commit_count(default)
+
+    # Upstream is now set, so the condition has actually cleared — the second sync
+    # is a silent no-op rather than a repeat of the same doomed push.
+    assert _git(default, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0
+    r2 = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r2.returncode == 0, r2.stderr
+    assert "Pushed to origin." not in r2.stdout
+
+
+def test_status_flags_a_remote_without_an_upstream_as_never_pushed(tmp_path):
+    """The no-upstream state is its own finding, distinct from 'unpushed commits'."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    _wire_remote(default, _make_bare_remote(tmp_path / "remote.git"), track=False)
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["status"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "never pushed — no upstream branch set" in r.stdout
+    # Sync-fixable, so the remedy must be the one that clears it.
+    assert "lore sync --vault default" in r.stdout
+
+
+def test_sync_soft_push_failure_does_not_fail_the_run_or_block_other_vaults(tmp_path):
+    """An unreachable remote is soft: exit 0, and later vaults still commit."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    broken = _make_vault(tmp_path / "v-broken")
+    _git(broken, "remote", "add", "origin", str(tmp_path / "does-not-exist.git"))
+    later = _make_vault(tmp_path / "v-later")
+    write_vault_config(
+        config_home, [("default", "default", broken), ("later", "product", later)]
+    )
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, (
+        f"a push failure is soft — the commit is durable; stderr={r.stderr!r}"
+    )
+    assert "push failed" in r.stderr
+    assert _commit_count(broken) == 2, "the commit must land before the push is attempted"
+    assert _commit_count(later) == 2, "a push failure must not skip later vaults"
+
+
+def test_sync_message_applies_to_every_vault(tmp_path):
+    config_home, state_dir, vaults = _three_vaults(tmp_path)
+
+    r = run_cli(
+        ["sync", "--message", "custom msg"], config_home=config_home, state_dir=state_dir
+    )
+    assert r.returncode == 0, r.stderr
+    for name, vault in vaults.items():
+        subject = _git(vault, "log", "-1", "--pretty=%s").stdout.strip()
+        assert subject == "custom msg", f"{name} got {subject!r}"
+
+
 def test_sync_skips_push_when_clean_and_in_sync(tmp_path):
     """Nothing to commit and nothing ahead → no push, no round-trip."""
     config_home = tmp_path / "config"
@@ -379,3 +468,48 @@ def test_flush_names_vaults_still_holding_unsynced_work(tmp_path):
     # a clean/absent session says nothing about whether the vaults are committed.
     assert "run `lore sync`" in r.stdout
     assert "trailhead:" in r.stdout
+
+
+def test_flush_is_silent_when_nothing_is_sync_fixable(tmp_path):
+    """A remote-less but fully committed vault must NOT trigger the flush notice.
+
+    "No origin remote" is a legitimate deliberate configuration that `lore sync`
+    cannot fix. Attaching "run `lore sync`" to it would fire on every flush forever
+    with a no-op remedy — the cry-wolf failure this reporting exists to prevent.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    # Committed and clean, but no remote at all.
+    remoteless = _make_vault(tmp_path / "v-remoteless", dirty=False)
+    write_vault_config(config_home, [("default", "default", remoteless)])
+
+    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    assert "run `lore sync`" not in r.stdout, (
+        f"flush must stay silent when sync cannot help; stdout={r.stdout!r}"
+    )
+
+    # ...but `lore status` still reports it standing, with the remedy that applies.
+    s = run_cli(["status"], config_home=config_home, state_dir=state_dir)
+    assert "no origin remote" in s.stdout
+    assert "add an origin remote" in s.stdout
+
+
+def test_status_remedy_for_a_missing_vault_directory_is_not_lore_sync(tmp_path):
+    """`lore sync` cannot create a vault, so it must not be the offered remedy."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    _wire_remote(default, _make_bare_remote(tmp_path / "remote.git"))
+    write_vault_config(
+        config_home,
+        [("default", "default", default), ("ghost", "product", tmp_path / "nope")],
+    )
+
+    r = run_cli(["status"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    ghost_line = next(ln for ln in r.stdout.splitlines() if "vault ghost:" in ln)
+    assert "directory does not exist" in ghost_line
+    assert "lore sync" not in ghost_line, f"unactionable remedy offered: {ghost_line!r}"
+    assert "config.json" in ghost_line

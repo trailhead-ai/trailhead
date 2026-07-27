@@ -183,57 +183,108 @@ def _vault_is_git_toplevel(vault: Path) -> bool:
         return False
 
 
+#: Drift codes returned by :func:`_vault_drift`. Callers branch on these STABLE
+#: tokens, never on the human phrasing beside them — the prose is free to be
+#: reworded without silently changing which remedy a caller prints.
+DRIFT_MISSING = "missing"
+DRIFT_NOT_GIT = "not-git"
+DRIFT_NEVER_COMMITTED = "never-committed"
+DRIFT_UNCOMMITTED = "uncommitted"
+DRIFT_NO_REMOTE = "no-remote"
+DRIFT_NO_UPSTREAM = "no-upstream"
+DRIFT_UNPUSHED = "unpushed"
+
+#: The drift codes ``lore sync`` can actually resolve. A caller that offers
+#: "run `lore sync`" as its remedy MUST filter on this set: proposing it for a
+#: condition sync cannot fix (no remote, a missing directory) trains the operator
+#: to ignore the notice, which is the failure this drift reporting exists to
+#: prevent.
+DRIFT_SYNC_FIXABLE = frozenset(
+    {DRIFT_NEVER_COMMITTED, DRIFT_UNCOMMITTED, DRIFT_NO_UPSTREAM, DRIFT_UNPUSHED}
+)
+
+
+def _vault_head_branch(vault: Path) -> "str | None":
+    """Return the checked-out branch name, or ``None`` if detached / pre-commit."""
+    rc, out, _ = _git(vault, "rev-parse", "--abbrev-ref", "HEAD")
+    if rc != 0 or not out or out == "HEAD":
+        return None
+    return out
+
+
+def _vault_has_commits(vault: Path) -> bool:
+    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", "HEAD")
+    return rc == 0
+
+
+def _vault_has_upstream(vault: Path) -> bool:
+    """Return ``True`` iff the current branch has a configured upstream."""
+    rc, _, _ = _git(vault, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    return rc == 0
+
+
 def _vault_unpushed(vault: Path) -> bool:
-    """Return ``True`` iff the vault has local commits its upstream lacks.
+    """Return ``True`` iff the vault holds commits that exist nowhere else.
 
     Purely local — reads ``@{u}`` from the ref database, never contacts the
     remote. A branch with **no** configured upstream counts as unpushed: its
-    commits exist nowhere else, which is the state this predicate is asked about.
+    commits exist only here, which is the state this predicate is asked about.
+    Callers that must distinguish "ahead of upstream" from "has no upstream at
+    all" — because the two need different git invocations to resolve — pair this
+    with :func:`_vault_has_upstream` rather than re-deriving it.
     """
-    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", "HEAD")
-    if rc != 0:
+    if not _vault_has_commits(vault):
         return False  # no commits at all — "unpushed" is not the useful finding
-    rc, _, _ = _git(vault, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    if rc != 0:
+    if not _vault_has_upstream(vault):
         return True
     rc, count, _ = _git(vault, "rev-list", "--count", "@{u}..HEAD")
     return rc == 0 and count.strip() not in ("", "0")
 
 
-def _vault_drift(vault: Path) -> list[str]:
-    """Return human-readable findings for anything unsynced about ``vault``.
+def _vault_drift(vault: Path) -> list:
+    """Return ``[(code, description), …]`` for anything unsynced about ``vault``.
 
     An empty list means the vault is committed, pushed, and backed by a remote —
     i.e. the state every "Committed / Pushed to origin" message implies. Each
-    finding is one phrase naming a way the vault's records exist in fewer places
-    than the operator believes.
+    finding names one way the vault's records exist in fewer places than the
+    operator believes: a stable ``DRIFT_*`` code for callers to branch on, and a
+    human phrase for them to print.
 
-    Ordered most- to least-severe, and **short-circuiting**: a vault that is not
-    a git repo has no meaningful commit/remote state to report, so that finding
-    is returned alone rather than followed by derivative noise.
+    Ordered most- to least-severe, and **short-circuiting**: a vault that is
+    absent or not a git repo has no meaningful commit/remote state to report, so
+    that finding is returned alone rather than followed by derivative noise.
 
-    The findings are deliberately phrased as observations, not remedies — callers
-    (``status``, ``flush``) attach the remedy that fits their own context.
+    ``DRIFT_NO_UPSTREAM`` is kept distinct from ``DRIFT_UNPUSHED`` because the two
+    do not resolve the same way — an ahead-of-upstream branch is fixed by a plain
+    push, while a branch with no upstream needs ``--set-upstream`` and would
+    otherwise fail every attempt with a misleading network-sounding error.
+
+    Findings are deliberately observations, not remedies — callers (``status``,
+    ``flush``) attach the remedy that fits their own context.
     """
     if not vault.exists():
-        return ["directory does not exist"]
+        return [(DRIFT_MISSING, "directory does not exist")]
     if not _vault_is_git_toplevel(vault):
-        return ["not a git repo (or not its own toplevel) — records have no history"]
+        return [
+            (DRIFT_NOT_GIT, "not a git repo (or not its own toplevel) — records have no history")
+        ]
 
-    findings: list[str] = []
-    rc, _, _ = _git(vault, "rev-parse", "--verify", "--quiet", "HEAD")
-    if rc != 0:
-        findings.append("never committed — zero commits")
+    findings = []
+    if not _vault_has_commits(vault):
+        findings.append((DRIFT_NEVER_COMMITTED, "never committed — zero commits"))
 
     rc, status_out, _ = _git(vault, "status", "--porcelain")
     if rc == 0 and status_out.strip():
-        findings.append(f"{len(status_out.splitlines())} uncommitted change(s)")
+        n = len(status_out.splitlines())
+        findings.append((DRIFT_UNCOMMITTED, f"{n} uncommitted change(s)"))
 
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
-        findings.append("no origin remote — nothing is backed up off-disk")
+        findings.append((DRIFT_NO_REMOTE, "no origin remote — nothing is backed up off-disk"))
+    elif _vault_has_commits(vault) and not _vault_has_upstream(vault):
+        findings.append((DRIFT_NO_UPSTREAM, "never pushed — no upstream branch set"))
     elif _vault_unpushed(vault):
-        findings.append("unpushed commits")
+        findings.append((DRIFT_UNPUSHED, "unpushed commits"))
 
     return findings
 

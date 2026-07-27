@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 
 from .common import (
+    DRIFT_MISSING,
+    DRIFT_NOT_GIT,
+    DRIFT_NO_REMOTE,
+    DRIFT_SYNC_FIXABLE,
     _resolve_all_vaults,
     _resolve_config_path,
     _resolve_lore_state_dir,
@@ -262,12 +266,32 @@ def _report_vault_drift() -> None:
         if not findings:
             print(f"lore: vault {name}: synced")
             continue
-        remedy = (
-            "add an origin remote"
-            if findings == ["no origin remote — nothing is backed up off-disk"]
-            else f"run `lore sync --vault {name}`"
-        )
-        print(f"lore: vault {name}: {'; '.join(findings)} — {remedy}")
+        codes = {code for code, _ in findings}
+        descriptions = "; ".join(desc for _, desc in findings)
+        print(f"lore: vault {name}: {descriptions} — {_drift_remedy(name, codes)}")
+
+
+def _drift_remedy(name: str, codes: set) -> str:
+    """Return the remedy line for a vault's drift ``codes``.
+
+    Keyed on the stable ``DRIFT_*`` tokens, never on the human phrasing, so
+    rewording a finding cannot silently mis-route its remedy.
+
+    Ordered by what actually unblocks the operator: if ANY finding is one
+    ``lore sync`` resolves, that is the remedy even when a standing condition
+    (no remote) sits beside it — committing the records is the step that reduces
+    the exposure. Only when nothing is sync-fixable does the standing condition
+    become the ask, and a remedy is never offered that would simply fail.
+    """
+    if codes & DRIFT_SYNC_FIXABLE:
+        return f"run `lore sync --vault {name}`"
+    if DRIFT_MISSING in codes:
+        return "create the directory, or correct its path in config.json"
+    if DRIFT_NOT_GIT in codes:
+        return "run `git init` in the vault directory"
+    if DRIFT_NO_REMOTE in codes:
+        return "add an origin remote"
+    return "inspect the vault"
 
 
 def cmd_status(args) -> int:
