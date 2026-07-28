@@ -189,10 +189,12 @@ provenance to the spec's `Related` section (or a `## Gauntlet` section), then fl
 ```
 
 Then `lore record update <spec-id> --status ready` and hand off to planning. Do not enter planning
-from inside the gauntlet — let the user invoke `/craft:plan` so it loads cleanly.
+from inside the gauntlet — let the user invoke `/craft:plan` so it loads cleanly. End the wrap-up
+with the handoff command **fully formed** — the real spec-id, never a `<placeholder>` (e.g.
+`/craft:plan spec/streaming-export`) — so the user can paste it into a fresh session as-is.
 
 If any Critical was dispositioned `reframed`, the spec instead goes `superseded` and the handoff is
-back to brainstorming, not forward to planning.
+back to brainstorming, not forward to planning — end with `/craft:brainstorm` instead.
 
 ## Calibration
 
