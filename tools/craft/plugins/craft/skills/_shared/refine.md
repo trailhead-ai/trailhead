@@ -32,10 +32,24 @@ Read the task record's status before anything else.
 | `ready` | Re-refine. Update the existing sections in place (see [Re-refine](#re-refine)). |
 | `in-progress`, `done`, `dropped`, `superseded` | Refuse. Say which status was found and stop. |
 
-One more refusal, independent of status:
-**any task with children — refuse and route to `/craft:plan`**. Refine
-promotes a leaf; a task that already has children is a plan, and reshaping a plan is
-planning's job, not refine's.
+Then check the task's **shape**, independent of status — mechanically, not by reading
+the prose. Mirror execute's shape detection so the two callers cannot disagree about
+what standalone means: run `lore task graph <name>` and read the record's sidecar.
+
+- **The render shows more than one line** → the task has children, and
+  **any task with children — refuse and route to `/craft:plan`**. Refine
+  promotes a leaf; a task that already has children is a plan, and reshaping a plan is
+  planning's job, not refine's.
+- **The sidecar carries a `parent` key** → the task is already a slice of someone
+  else's plan. Refuse and redirect to that parent: a child slice's payload is the parent
+  plan's to shape, and `/craft:execute` already walks it. Name the parent in the refusal
+  so the operator can re-root there.
+- **One line and no `parent` key** → standalone. Proceed.
+
+A single-line render *with* a `parent` key is the same ambiguous case execute names: do
+not classify it silently. Resolve the `parent` value first — if it names a real task,
+this is a child slice (redirect to the parent); if it resolves to nothing, report the
+suspected mis-wired edge rather than treating the task as standalone.
 
 ## Step 1 — Triage is the draft attempt
 
@@ -151,8 +165,16 @@ and then renders as a detached node.
 
 ## Step 5 — Escalation
 
-Only a gap that survived both self-serve passes reaches here: a genuine operator
-preference among valid alternatives, with no recorded precedent.
+Two outcomes reach here, and they escalate the same way but hold different questions:
+
+- **A surviving gap** (Step 1, outcome 2) — a gap that got through both self-serve
+  passes: a genuine operator preference among valid alternatives, with no recorded
+  precedent. The **Question** field holds that decision.
+- **A route outcome** (Step 1, outcome 3) — the work is not a leaf at all. Nothing in
+  the payload is unresolved; what is unsettled is whether to cut the work up (two or
+  more independently-committable cuts) or to reopen the what/why. Here
+  the **Question** field holds the routing question itself — "this needs N separately
+  committable cuts; route it to planning?" — and the `Route:` line names where it goes.
 
 ### Unattended escalation
 
@@ -168,13 +190,14 @@ single section:
 
 **Recommended answer:** <your best call, and why>
 
-Route: /craft:plan
+[Route: /craft:plan — ROUTE OUTCOMES ONLY; delete this whole line otherwise]
 ```
 
-The `Route:` line appears **only** for a route outcome (outcome 3 in Step 1): use
-`Route: /craft:plan` when the work needs two or more independently-committable cuts,
-or `/craft:brainstorm` when the what/why itself is unsettled. Omit the line for an
-ordinary surviving question.
+The last line is a placeholder, not part of the template body: it appears **only** for a
+route outcome (outcome 3 in Step 1), and then as a bare `Route: /craft:plan` line with
+the bracket and the note stripped. Use `Route: /craft:plan` when the work needs two or
+more independently-committable cuts, or `/craft:brainstorm` when the what/why itself is
+unsettled. For an ordinary surviving question the line is not written at all.
 
 Then stop: **status stays `open`**. **Never invent** an answer to an operator
 decision — the entire safety case for dispatching refine as a subagent with no
@@ -195,6 +218,12 @@ reshapes the drafting that follows it, so batching questions wastes the later on
 - **A defer** ("skip it", "not now", no answer) falls back to the unattended
   escalation behavior for that task: record the question in the section above, leave
   the task `open`, and move on.
+- **A route outcome** is asked the same way, because
+  the routing recommendation *is* the question ("this looks like two separately
+  committable cuts; route it to `/craft:plan`?"), pre-loaded with the evidence behind
+  that read. An answer settles the route; a defer falls back to the unattended
+  escalation for it — `Route:` line included, so the recommendation is not lost along
+  with the question.
 
 ### Promotion clears the escalation
 

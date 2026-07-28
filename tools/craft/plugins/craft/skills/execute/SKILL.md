@@ -56,8 +56,9 @@ handle, not a unit of work.
 
 ### Determine the task shape
 
-Before walking the loop, determine the task's shape. Run `lore task graph <parent-name>`
-first and read both the render and the record's sidecar:
+Before walking the loop, determine the task's shape. Run `lore task graph <task-name>`
+against the task you were pointed at — it may have no parent, so `<task-name>` is the
+task itself — and read both the render and the record's sidecar:
 
 - **Standalone.** The graph renders exactly one line for the task AND the record's
   sidecar carries no `parent` edge. There is no child to descend into — the task is the
@@ -65,25 +66,58 @@ first and read both the render and the record's sidecar:
 - **Parent-with-children.** The graph renders more than one line. Proceed with the Loop
   exactly as written below (steps 1-6) — unchanged.
 - **Ambiguous.** A single-line render **with** a `parent` edge present matches neither
-  case above and is never classified silently — most often a mis-wired parent edge (a
-  `parent` value that wasn't passed as a bare task name silently renders as a detached
-  node; see [[lesson/lore-task-graph-parent-depends-on-require-bare-task-names]]).
-  Stop and report the suspected mis-wired parent edge, citing that lesson.
+  case above and is never classified silently. Disambiguate first —
+  **resolve the `parent` value** (`lore record show task/<parent-value>`), because the
+  two causes have opposite remediations:
+  - **It resolves to a real task** — the ordinary cause: you rooted the run at a child
+    slice of a live plan, not at the plan. Tell the operator to
+    re-root the run at that parent and stop. The graph is healthy; the entry point was
+    wrong. Never fall through to the standalone branch — a child slice is not standalone.
+  - **It does not resolve** — now the edge is the suspect (a `parent` value that wasn't
+    passed as a bare task name silently renders as a detached node; see
+    [[lesson/lore-task-graph-parent-depends-on-require-bare-task-names]]).
+    Stop and report the suspected mis-wired parent edge, citing that lesson.
 
 **Standalone branch:**
+
+**The task record is the intent document.** There is no plan, so wherever a step or
+phase below asks for the *plan path*, a standalone run passes the standalone task record
+itself — its captured prose is the why and its `**Delivers:**` / `**Test contract:**` /
+`**Files:**` payload is the what. Pass a linked spec alongside it when the task names
+one; when it names none, the task record is the whole intent input. State that
+substitution in the dispatch prompt so the agent isn't left hunting for a plan.
+
+This one rule covers every dispatch on a standalone run: step 3's `executor` dispatch,
+step 4's `drift-gate` dispatch, Phase 2's `simplifier` dispatch, and
+Phase 3's whole-change correctness-review dispatch.
 
 - **`ready`** — dispatch only when the node carries the `(runnable)` marker. A
   standalone node rendered without the marker has an unmet `depends-on` edge — report it
   and stop rather than guessing. When runnable, treat the task itself as the one slice:
   run step 3 (dispatch `executor`) and step 4 (review, scaled to the size table) below
   against it, then skip straight to [After All Slices](#after-all-slices) — there is no
-  next leaf to pick and no parent-lifecycle flip to perform.
+  next leaf to pick.
 - **`open`** — run the `_shared/refine.md` procedure inline. Pass `--interactive` only
   when execute itself has a human channel to a live operator right now; otherwise run it
   unattended. Refine promotes cleanly → proceed as the `ready` case above. Refine
   escalates (writes `## Refine — unresolved`) or routes to `/craft:plan` /
   `/craft:brainstorm` → stop and report the refine outcome; do not dispatch an executor
   against a task that did not promote.
+- **`blocked`** — report the blocking condition recorded on the task and stop. `blocked`
+  encodes an external condition execute can neither observe nor clear.
+- **`in-progress`** — a run already started against this task. Resume rather than
+  re-dispatching from the top: resume it at the first unticked `## End Phases` line, per
+  [Phase progress and resumability](#phase-progress-and-resumability) (including its
+  clean-working-tree precondition).
+- **`done`, `dropped`, `superseded`** — terminal. Report there is nothing to do and stop.
+
+**Status walk.** The standalone task is its own lifecycle handle, so it walks the status
+a parent otherwise would — there is no second record to flip. Refine's promotion takes it
+`open → ready` (the `open` case above). Then
+flip it `ready → in-progress` at the **first executor dispatch**
+(`lore record update task/<name> --status in-progress`), the same point at which a plan
+run flips its parent. Phase 6 takes it `in-progress → done`, where "close the parent"
+means close the task itself.
 
 ### Resuming a run
 
@@ -210,8 +244,13 @@ Fix `base` once at the start: it is the commit the whole change started from (th
 When the task shape (above) was standalone, this phase pipeline still runs — adapted to
 operate on the task record itself rather than a parent:
 
+- The **plan-path substitution** stated once in the Loop's standalone branch above
+  governs this pipeline too — Phase 2 and Phase 3 name a plan path in their dispatch
+  lists, and a standalone run passes the task record there.
 - The task carries its own `## Flow-out` checklist — refine wrote it when the task
   promoted to `ready` — so Phase 5 works that checklist directly.
+- Phase 6 closes the **task itself**, per the status walk above — "close the parent"
+  reads as "close the standalone task" on this path.
 - **`## End Phases` is created at the first executor dispatch** on a standalone task, not
   deferred until pipeline entry — this widens its normal end-pipeline-only lifecycle so
   the dispatch-count note (below) has somewhere to live from the start, even before the

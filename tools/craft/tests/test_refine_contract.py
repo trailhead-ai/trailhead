@@ -102,8 +102,10 @@ def test_self_serve_pass_reads_code_and_searches_the_vault():
         "_shared/refine.md must run a vault search as the second self-serve pass — a "
         "recorded decision that already settles the gap must not be re-asked"
     )
-    assert "read the" in text.lower() and "code" in text.lower(), (
-        "_shared/refine.md must run a code read as the first self-serve pass"
+    assert "Read the touched code" in text, (
+        "_shared/refine.md must run a code read as the first self-serve pass. Pinned on "
+        "the pass's own phrasing: a looser 'read'+'code' probe is satisfied by half the "
+        "document and would stay green with the pass deleted"
     )
 
 
@@ -147,9 +149,11 @@ def test_every_citation_must_resolve_before_promotion():
 
 
 def test_unresolvable_citation_is_a_gap():
-    assert "is a gap" in SHARED_REFINE.read_text(), (
+    assert "A citation that fails to resolve **is a gap**" in SHARED_REFINE.read_text(), (
         "_shared/refine.md must route a citation that fails to resolve back through "
-        "the gap path (escalate), not merely warn about it"
+        "the gap path (escalate), not merely warn about it. Pinned on the whole "
+        "sentence: a bare 'is a gap' probe is already satisfied by the unrelated "
+        "empty-test-contract rule, so it would stay green with this step deleted"
     )
 
 
@@ -160,6 +164,39 @@ def test_procedure_carries_the_escalation_heading():
     assert ESCALATION_HEADING in SHARED_REFINE.read_text(), (
         f"_shared/refine.md must name {ESCALATION_HEADING!r} verbatim — it is the "
         "canonical handle a later sweep or operator scan finds escalated drafts by"
+    )
+
+
+def test_route_outcome_escalates_with_the_routing_question():
+    """Step 1's outcome 3 lands in Step 5 too — not only a survived gap.
+
+    A Step 5 that opens by describing survived gaps alone leaves the route outcome
+    with no stated payload: the drafter has to invent what the Question field holds
+    when nothing about the payload is actually unresolved.
+    """
+    assert "the **Question** field holds the routing question itself" in (
+        SHARED_REFINE.read_text()
+    ), (
+        "_shared/refine.md's escalation step must say what a route outcome puts in the "
+        "Question field — the routing question itself, not a payload gap"
+    )
+
+
+def test_route_line_is_optional_inside_the_escalation_template():
+    """The fenced template is copied literally; an unconditional line gets emitted."""
+    assert "[Route: /craft:plan" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md must mark the `Route:` line optional *inside* the fenced "
+        "escalation template (a bracketed placeholder), not only in the prose after "
+        "it — a bare literal in the fence is emitted on every escalation, including "
+        "the ordinary surviving-question ones the prose says to omit it for"
+    )
+
+
+def test_interactive_mode_covers_the_route_outcome():
+    assert "the routing recommendation *is* the question" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md's interactive escalation must cover the route outcome too: "
+        "present the routing recommendation as the question, and fall back to the "
+        "unattended escalation (Route line included) on a defer"
     )
 
 
@@ -230,6 +267,25 @@ def test_task_with_children_is_refused_toward_planning():
     ), (
         "_shared/refine.md must refuse a task that already has children and point at "
         "/craft:plan — refine promotes leaves, and a parent is a plan"
+    )
+
+
+def test_shape_refusals_are_a_mechanical_check():
+    """Childless-and-parentless is refine's precondition, so it gets checked, not eyeballed.
+
+    Mirrors execute's shape detection deliberately: same command, same sidecar key, so
+    the two callers cannot disagree about what "standalone" means.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "lore task graph <name>" in text, (
+        "_shared/refine.md must check for children mechanically (the same "
+        "`lore task graph <name>` render execute's shape detection uses) — 'a task with "
+        "children' is otherwise a judgment call made from the prose"
+    )
+    assert "carries a `parent` key" in text, (
+        "_shared/refine.md must also refuse a task that already has a parent — refine "
+        "promotes a *parentless* leaf, and a child slice's payload belongs to the "
+        "parent plan; the sidecar's `parent` key is how that is detected"
     )
 
 

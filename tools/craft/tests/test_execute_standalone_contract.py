@@ -50,6 +50,14 @@ def test_detection_requires_exactly_one_line_render():
     )
 
 
+def test_shape_detection_renders_the_task_not_a_parent():
+    assert "`lore task graph <task-name>`" in _execute_text(), (
+        "execute/SKILL.md's shape-detection step must render the task under "
+        "examination, not `<parent-name>` — the whole point of the step is that the "
+        "task may have no parent at all"
+    )
+
+
 def test_detection_requires_no_parent_edge():
     assert "no `parent` edge" in _execute_text(), (
         "execute/SKILL.md must state the standalone detection's second condition: "
@@ -65,6 +73,25 @@ def test_ambiguous_case_is_never_classified_silently():
     assert "never classified silently" in _execute_text(), (
         "execute/SKILL.md must state that a single-line render WITH a `parent` edge "
         "present is never silently classified as either standalone or a plan"
+    )
+
+
+def test_ambiguous_case_resolves_the_parent_value_before_diagnosing():
+    """The ordinary cause is rooting the run at a child slice, not a broken edge.
+
+    Reporting "suspected mis-wired edge" first sends the operator to debug a healthy
+    graph. Resolving the `parent` value separates the two: it names a real task (wrong
+    root) or it names nothing (mis-wired edge).
+    """
+    text = _execute_text()
+    assert "resolve the `parent` value" in text, (
+        "execute/SKILL.md's ambiguous branch must disambiguate first by resolving the "
+        "`parent` value — the two causes have opposite remediations"
+    )
+    assert "re-root the run at that parent" in text, (
+        "execute/SKILL.md must tell the operator to re-root at the resolved parent "
+        "when the `parent` value names a real task — that is a live plan being entered "
+        "at the wrong node, not a broken edge"
     )
 
 
@@ -115,6 +142,69 @@ def test_execute_names_the_refine_escalation_outcome():
         f"execute/SKILL.md must name {ESCALATION_HEADING!r} as the outcome that stops "
         "the loop rather than proceeding to dispatch — an escalated task never reaches "
         "executor dispatch"
+    )
+
+
+# --- the plan-path substitution: the task record IS the intent document ---
+
+
+def test_standalone_substitutes_the_task_record_for_the_plan_path():
+    """Every dispatch downstream of the branch still asks for a plan path.
+
+    Without one stated substitution rule the controller has to re-derive, at four
+    separate dispatch sites, what to pass when no plan exists.
+    """
+    text = _execute_text()
+    assert "The task record is the intent document" in text, (
+        "execute/SKILL.md must state once, in the standalone branch, that the "
+        "standalone task record substitutes for the plan path"
+    )
+    # Phase 3 is named by role rather than by agent on purpose: the per-slice region of
+    # this file may not carry the `code-reviewer` token (test_review_altitude_contract).
+    dispatch_sites = (
+        "step 3's `executor` dispatch",
+        "step 4's `drift-gate` dispatch",
+        "Phase 2's `simplifier` dispatch",
+        "Phase 3's whole-change correctness-review dispatch",
+    )
+    for site in dispatch_sites:
+        assert site in text, (
+            f"execute/SKILL.md's substitution rule must name {site!r} among the sites "
+            "it covers — that step asks for a plan path in its own input list, and a "
+            "rule that does not reach it leaves the dispatch dead-ending"
+        )
+
+
+# --- the standalone task's own status walk ---
+
+
+def test_standalone_task_walks_its_own_status():
+    text = _execute_text()
+    assert "flip it `ready → in-progress` at the **first executor dispatch**" in text, (
+        "execute/SKILL.md must state the standalone task's own status walk — with no "
+        "parent to carry the lifecycle, the task is its own lifecycle handle"
+    )
+    assert "means close the task itself" in text, (
+        "execute/SKILL.md must say that Phase 6's 'close the parent' means closing the "
+        "standalone task itself — otherwise the run ends with the task still "
+        "`in-progress` and no parent to close"
+    )
+
+
+def test_standalone_branch_covers_the_remaining_statuses():
+    """`ready` and `open` are two of six; the rest must not fall through silently."""
+    text = _execute_text()
+    assert "report the blocking condition" in text, (
+        "execute/SKILL.md's standalone branch must handle `blocked` — report the "
+        "blocking condition and stop; execute cannot clear an external condition"
+    )
+    assert "resume it at the first unticked" in text, (
+        "execute/SKILL.md's standalone branch must handle `in-progress` as a resume, "
+        "not a fresh dispatch"
+    )
+    assert "nothing to do" in text, (
+        "execute/SKILL.md's standalone branch must handle the terminal statuses "
+        "(`done`/`dropped`/`superseded`) — report there is nothing to do and stop"
     )
 
 

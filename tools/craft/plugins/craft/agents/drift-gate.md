@@ -42,9 +42,9 @@ Rules:
 
 ## What you check
 
-1. **Plan delivery** — read the slice's *delivers*, *test contract*, and *expected files* from the plan. Does the diff actually deliver them? Do the tests the test contract describes exist and pass (re-run them if the executor's report doesn't already show a clean run)?
+1. **Payload delivery** — read the slice's `**Delivers:**`, `**Test contract:**`, and `**Files:**` from the plan (a standalone leaf carries the same three labels in its own body). Does the diff actually deliver them? Do the tests the test contract describes exist and pass (re-run them if the executor's report doesn't already show a clean run)?
 2. **Status claim** — does the executor's reported status (DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED) match what you find in the diff? A DONE claim with a missing delivered item is drift, not a pass with a caveat.
-3. **Next-slice readiness** — does anything in this diff block a subsequent slice from building on it (a missing interface, a broken contract, an inconsistent file layout)?
+3. **Next-slice readiness** — does anything in this diff block a subsequent slice from building on it (a missing interface, a broken contract, an inconsistent file layout)? **On a standalone leaf there is no subsequent slice, so this check does not apply** — say so in the report (`next-slice readiness: N/A — standalone leaf`) rather than letting it pass silently, so a reader can tell the check was considered and not just skipped.
 
 ## What you do NOT check
 
@@ -56,6 +56,6 @@ If the diff touches a security-sensitive surface — auth, input validation, cry
 
 ## Reading the plan
 
-Use `Read` to load the plan file the caller provides. Read only the slice's section (delivers, test contract, expected files) and enough of the parent's goal/architecture for intent — you need the target, not the full plan.
+Use `Read` to load the plan file the caller provides. Read only the slice's section (its `**Delivers:**` / `**Test contract:**` / `**Files:**` payload) and enough of the parent's goal/architecture for intent — you need the target, not the full plan.
 
 **Standalone leaf:** for a task with no parent plan, there is no parent goal/architecture to read — the task's own context block serves for intent instead: its captured prose plus its `**Delivers:**` / `**Test contract:**` / `**Files:**` payload. Check the diff against that in place of a plan section.

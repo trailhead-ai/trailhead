@@ -55,6 +55,37 @@ def test_code_reviewer_accepts_refined_standalone_task_body_as_intent_document()
     )
 
 
+def test_code_reviewer_frontmatter_and_rules_cover_both_intent_shapes():
+    """The description drives dispatch selection; Scope and Rules drive the review.
+
+    A body that accepts a standalone task record, wrapped in a frontmatter and a rules
+    list that both say "spec and plan", is a self-contradicting agent definition — and
+    the frontmatter is the half a caller reads when deciding whether to dispatch.
+    """
+    text = _text("code-reviewer.md")
+    frontmatter = text.split("---")[1]
+    assert "standalone" in frontmatter.lower(), (
+        "code-reviewer.md's frontmatter description must name the standalone-leaf case "
+        "— it is what a caller matches against when choosing this agent"
+    )
+    assert "against its spec and plan, in a fresh context" not in text, (
+        "code-reviewer.md's description still frames spec+plan as the only intent "
+        "input; relax it to name the refined-standalone-body alternative"
+    )
+    assert "does the diff do what the spec asked and what the plan committed to" not in (
+        text
+    ), (
+        "code-reviewer.md's Scope still frames spec+plan as the only intent input; "
+        "relax it to name the intent document in either shape"
+    )
+    assert "does the diff satisfy the spec's requirements and the plan's intent" not in (
+        text
+    ), (
+        "code-reviewer.md's Rules checklist bullet still frames spec+plan as the only "
+        "intent input; relax it to name the intent document in either shape"
+    )
+
+
 def test_code_reviewer_spot_checks_standalone_body_citations():
     text = _text("code-reviewer.md")
     assert "spot-check" in text.lower(), (
@@ -92,6 +123,31 @@ def test_drift_gate_own_context_block_serves_for_intent():
     )
 
 
+def test_drift_gate_uses_the_converged_payload_labels():
+    """`expected files` is a fourth spelling of a field the templates call `Files`."""
+    text = _text("drift-gate.md")
+    for label in ("**Delivers:**", "**Test contract:**", "**Files:**"):
+        assert label in text, (
+            f"drift-gate.md must name the payload field {label!r} as the templates and "
+            "refine spell it — a gate looking for a differently-named field reports "
+            "drift against a body that is actually conformant."
+        )
+    assert "expected files" not in text.lower(), (
+        "drift-gate.md still says 'expected files'; the converged spelling is "
+        "`**Files:**` (templates/task.md, and refine's promoted payload)."
+    )
+
+
+def test_drift_gate_next_slice_readiness_is_explicit_na_on_a_standalone_leaf():
+    """A vacuously-passing check reads identically to a check that found nothing."""
+    text = _text("drift-gate.md")
+    assert "next-slice readiness: N/A — standalone leaf" in text, (
+        "drift-gate.md must make check 3 explicitly N/A-with-a-note on a standalone "
+        "leaf — there is no next slice, and a silent pass hides which of the three "
+        "checks actually ran."
+    )
+
+
 # ---------------------------------------------------------------------------
 # executor.md
 # ---------------------------------------------------------------------------
@@ -108,4 +164,31 @@ def test_executor_covers_no_earlier_or_next_slices():
     text = _text("executor.md")
     assert "no earlier or next slices" in text, (
         "executor.md must say a standalone leaf has no earlier or next slices."
+    )
+
+
+def test_executor_accepts_a_standalone_task_record_as_intent_document():
+    """A relaxed opening line over an unrelaxed input list is still a dead end.
+
+    executor's own rule is "if an input is missing, report NEEDS_CONTEXT and do not
+    guess" — so an input list that requires a plan path makes every standalone
+    dispatch terminate in NEEDS_CONTEXT, however widely the prose above it is framed.
+    """
+    text = _text("executor.md")
+    assert "- **plan path** — the plan file the caller provides" not in text, (
+        "executor.md's input list still requires a plan path unconditionally, which "
+        "its own NEEDS_CONTEXT rule then turns into a dead end for every standalone "
+        "dispatch."
+    )
+    assert "refined standalone task record" in text, (
+        "executor.md's input list must accept a refined standalone task record as the "
+        "intent document in place of a plan path + task name."
+    )
+    assert "Read the intent document" in text, (
+        "executor.md's Step 1 must read 'the intent document' and branch, rather than "
+        "instructing 'Read the plan file' on a run where no plan exists."
+    )
+    assert "Do not guess." in text, (
+        "executor.md must keep the NEEDS_CONTEXT rule for genuinely missing or "
+        "ambiguous inputs — relaxing the shape must not relax the requirement."
     )
