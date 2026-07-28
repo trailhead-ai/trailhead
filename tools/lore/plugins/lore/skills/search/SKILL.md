@@ -19,7 +19,21 @@ The query is a facet-filter string. The supported facets and operators:
 - `kind:<kind>` — restrict to a record kind (e.g. `kind:spec`, `kind:decision`,
   `kind:lesson`, `kind:area`).
 - `area:<name>` — restrict to records whose area facet includes `<name>`.
+- `label.<key>:<value>` — exact match on an indexed label (e.g.
+  `label.worktree:s5`). `has:label.<key>` checks the key exists, with no
+  value match (e.g. `has:label.worktree`).
 - boolean `and` / `or` — combine facets, e.g. `kind:spec and area:penny`.
+
+A namespaced label key is queried with the **dot-for-slash** convention: a key
+stored as `claude-code/model` is queried as `label.claude-code.model:opus` —
+the `.` in the selector stands in for the `/` in the stored key. This is not
+guessable from the stored key alone, and it's what makes a namespaced label
+(the escape route for a reserved label key — see `/lore:record`) actually
+retrievable rather than write-only.
+
+Annotations deliberately have **no** query selector — there is no
+`annotation.<key>:` facet. That's the tradeoff of choosing `--annotation` over
+a namespaced label: the value is stored on the record but not searchable by key.
 
 Run:
 

@@ -73,6 +73,24 @@ lore record create --kind decision --title "Use frontmatter for session status" 
 Run `lore record create --help` for the full flag set. Related sub-actions:
 `lore record update`, `lore record delete`, `lore record blob`.
 
+## Choosing a flag for a value: edge, label, or reserved
+
+A sidecar value falls into one of three shapes — pick the flag by shape, not by
+habit:
+
+- **The value names another record** — a task, a decision, an area — it's an
+  **edge**, not an attribute. Use `--related KIND=NAME`.
+- **The value is a free attribute** with no natural-key collision (e.g.
+  `worktree=s5`, `claude-code/model=opus`) — it's a **label**. Use
+  `--label KEY=VALUE`.
+- **The natural key is itself a record kind or a query field name** (e.g.
+  `area`, `phase`, `status`, `kind`) — the write is **refused**. A `labels` key
+  may not shadow a first-class record concept. The refusal names a runnable
+  fix: `--annotation KEY=VALUE` for a free attribute whose natural name is
+  taken, or a namespaced key (`<ns>/<key>`, e.g. `craft/subsystems`) to keep it
+  queryable as a label. Already storing the reserved key on an existing
+  record? `--unset-label <key>` clears it.
+
 ## Choosing the surface
 
 - An incidental finding that arose during work (a decision, lesson, dead-end,
