@@ -767,7 +767,15 @@ def _every_refusable_label_key() -> list[str]:
     The derived set is enumerated (not sampled) so a future record kind or query
     field cannot land without a message that names an alternative.
     """
-    extra = {"related-subsystems", "related-file", "related-url", "related-task"}
+    extra = {
+        "related-subsystems",
+        "related-file",
+        "related-url",
+        "related-task",
+        "related-phases",
+        "related-files-or-folders",
+        "related-urls",
+    }
     return sorted(rm().RESERVED_LABEL_KEYS | extra)
 
 
@@ -777,6 +785,38 @@ def test_no_refusal_is_a_dead_end():
         msg = _label_key_error(key)
         assert any(alt in msg for alt in _EXECUTABLE_ALTERNATIVES), (
             f"refusal for {key!r} names no runnable alternative: {msg}"
+        )
+
+
+def test_a_key_with_a_dedicated_setter_is_never_routed_to_annotation():
+    """Routing a key that has a real setter to a free attribute would store it
+    where nothing reads it, so those messages must name the setter alone.
+
+    The load-bearing domain comes from the CLI applier's own flag→field map
+    (``record/fields.py``), so a refused sidecar field whose setter the
+    classifier forgets fails here without touching this test. The classifier's
+    two internal maps are swept as well so every entry they add is covered.
+    """
+    mod = rm()
+    fields_mod = load_script("lore.record.fields")
+    for flag_attr, field_name in fields_mod._LIST_FIELD_FLAGS.items():
+        if not mod._is_reserved_label_key(field_name):
+            continue
+        flag = "--" + flag_attr.replace("_", "-")
+        msg = _label_key_error(field_name)
+        assert flag in msg, (
+            f"{field_name!r} is set by `{flag}` but its refusal never names it: {msg}"
+        )
+        assert "--annotation" not in msg, (
+            f"{field_name!r} has a dedicated setter but is routed to a free"
+            f" attribute: {msg}"
+        )
+    with_setters = [f"related-{suffix}" for suffix in mod._RELATED_SUFFIX_FLAGS]
+    with_setters += list(mod._SETTABLE_FIELD_FLAGS)
+    for key in with_setters:
+        msg = _label_key_error(key)
+        assert "--annotation" not in msg, (
+            f"{key!r} has a dedicated setter but is routed to a free attribute: {msg}"
         )
 
 
@@ -800,6 +840,9 @@ def test_related_prefixed_list_field_names_its_own_flag():
     them to a free attribute would store a relation where nothing reads it."""
     for key, flag in (
         ("related-phases", "--related-phase"),
+        ("related-files-or-folders", "--related-file"),
+        ("related-urls", "--related-url"),
+        ("related-phase", "--related-phase"),
         ("related-file", "--related-file"),
         ("related-url", "--related-url"),
     ):

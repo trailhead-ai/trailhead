@@ -378,13 +378,18 @@ def _is_reserved_label_key(map_key: str) -> bool:
     return map_key.startswith(_RELATED_KEY_PREFIX) or map_key in RESERVED_LABEL_KEYS
 
 #: ``related-<suffix>`` keys whose suffix names no record kind but does have a
-#: dedicated repeatable setter. Source of truth: the flag registrations in
-#: ``cli/record.py::_add_record_field_flags``. Mirrored rather than imported —
-#: this module is pure and must not reach into the CLI layer — so a flag renamed
-#: there has to be renamed here too.
+#: dedicated repeatable setter. Source of truth: the flag→field map in
+#: ``record/fields.py`` (``_LIST_FIELD_FLAGS``). Mirrored rather than imported —
+#: this module is pure and must not reach into the applier layer — so a field
+#: renamed there has to be renamed here too. Each field appears under its real
+#: sidecar suffix (what ``lore record show --json`` displays) *and* its flag
+#: spelling (what an operator reasoning from ``--help`` writes).
 _RELATED_SUFFIX_FLAGS = {
     "phases": "--related-phase",
+    "phase": "--related-phase",
+    "files-or-folders": "--related-file",
     "file": "--related-file",
+    "urls": "--related-url",
     "url": "--related-url",
 }
 
