@@ -7,7 +7,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .common import _load_vault_config, _read_stdin_body, _resolve_groups_dir
+from .common import (
+    _load_vault_config,
+    _read_stdin_body,
+    _resolve_config_path,
+    _resolve_groups_dir,
+)
 
 # The scope flags a record can carry, in resolution-precedence order. Does not
 # include "default" -- that's a vault-routing fallback (see
@@ -606,6 +611,42 @@ def _cmd_record_create(args) -> int:
     return 0
 
 
+def _resolve_named_vault(name: str):
+    """Resolve ``--vault NAME`` to its configured :class:`vault_config.Vault`.
+
+    A distinct *locate-by-vault* path for ``record update``, sibling to ``lore
+    task list --vault``'s name lookup (``cli/task.py:_cmd_task_list``): loads
+    ``config.json`` via :func:`vault_config.load_config` and matches on the
+    normalized name. An unreadable config or a name absent from it prints
+    ``lore: <msg>`` to stderr and returns ``None`` — the caller treats ``None``
+    as "stop, nothing located, nothing written" (never a silent fall-through to
+    ``_find_current_record_location``'s scan).
+
+    This is deliberately NOT the same lookup ``_resolve_destination_root`` uses
+    (``explain_resolution``'s scope+precedence routing) — ``--vault`` names a
+    vault directly, with no scope/precedence involved, because it answers
+    "where is the record RIGHT NOW", not "where should it be routed".
+    """
+    from ..vault import config as vault_config_mod
+
+    config_path = _resolve_config_path()
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (OSError, ValueError) as exc:
+        print(f"lore: cannot read config: {exc}", file=sys.stderr)
+        return None
+    except vault_config_mod.VaultConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return None
+
+    normalized = vault_config_mod.normalize_vault_name(name)
+    vault = next((v for v in vaults if v.name == normalized), None)
+    if vault is None:
+        print(f"lore: vault {normalized!r} is not configured", file=sys.stderr)
+        return None
+    return vault
+
+
 def _find_current_record_location(record_id: str, loaded=None):
     """Locate the record's CURRENT vault, independent of the new scope-flag values.
 
@@ -695,6 +736,18 @@ def _cmd_record_update(args) -> int:
         unchanged, metadata-only update`` is printed to **stderr** (exit stays 0)
         so an agent that *forgot* to pipe a body can detect the mode.
 
+    **``--vault NAME`` — explicit current-location targeting.** Locates the
+    record in exactly the named configured vault (:func:`_resolve_named_vault`)
+    instead of :func:`_find_current_record_location`'s config-order first-match
+    scan — the fix for a same-named record colliding across more than one
+    configured vault, where the scan's first match may not be the vault the
+    caller means. An unknown ``--vault`` name, or a named vault that does not
+    hold the record, errors plainly (``lore: <msg>``, nonzero) and never falls
+    back to the scan. Orthogonal to the destination re-routing flags below:
+    omitting ``--vault`` preserves the scan exactly as before, and ``--vault``
+    composes with ``--repo/--product/--suite/--team`` (current location vs.
+    re-routed destination are independent concerns).
+
     **Scope flags drive automatic relocation.**
     ``--team/--suite/--product/--repo`` are field-setters that also re-resolve the
     destination vault from the **merged scope** (existing sidecar scope fields
@@ -732,6 +785,17 @@ def _cmd_record_update(args) -> int:
     if record_id is None:
         return 1
 
+    # --vault NAME: resolve up front (no I/O against the record itself yet) so
+    # an unknown name or an unreadable config fails before the index
+    # transaction opens below — see _resolve_named_vault's docstring for why
+    # this is a distinct locate-by-vault path from the scan.
+    vault_name = getattr(args, "vault", None)
+    named_vault = None
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+
     use_diff = bool(getattr(args, "diff", False))
 
     # stdin detection: a TTY is never "piped"; otherwise read what's there. An
@@ -747,7 +811,15 @@ def _cmd_record_update(args) -> int:
         with record_store_mod.index_transaction() as conn:
             # (1) Resolve the CURRENT location, decoupled from the scope flags
             # (which now mean destination); a missing record → RecordNotFoundError.
-            location = _find_current_record_location(record_id)
+            # --vault skips the scan entirely and locates ONLY in the named
+            # vault — a record absent there is a RecordNotFoundError too, never
+            # a fall-through to the other configured vaults.
+            if named_vault is not None:
+                location = record_store_mod.locate_record(
+                    record_id, vault_root=str(named_vault.path)
+                )
+            else:
+                location = _find_current_record_location(record_id)
 
             # Load the existing sidecar so the field flags mutate the live record.
             existing_sidecar: dict = {}
@@ -890,8 +962,11 @@ def _cmd_record_update(args) -> int:
     ) as exc:
         # Update-specific: only update locates an existing record, so this
         # not-found/invalid-id clause is NOT part of the shared write-error
-        # handler and is caught before it.
-        print(f"error: {exc}", file=sys.stderr)
+        # handler and is caught before it. A --vault miss gets the "lore: "
+        # prefix (the explicit-targeting error convention — see
+        # _resolve_named_vault) rather than the scan's plain "error: ".
+        prefix = "lore: " if named_vault is not None else "error: "
+        print(f"{prefix}{exc}", file=sys.stderr)
         return 1
     except Exception as exc:
         return _handle_write_error(exc, "update")
@@ -980,6 +1055,13 @@ def add_record_subparser(sub) -> None:
         help="Treat piped stdin as a unified diff applied to the existing body. "
              "On any non-applying hunk the record is left byte-for-byte "
              "unmodified and the rejected hunks print to stderr.",
+    )
+    p_record_update.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Locate the record in exactly this configured vault by name, "
+             "instead of scanning every vault in config order. Current-location "
+             "targeting only — combine with --repo/--product/--suite/--team to "
+             "also re-route the record's destination.",
     )
     # Scope flags: dual field-setter +
     # routing on update too. Each writes its namesake sidecar field AND re-resolves
