@@ -78,7 +78,10 @@ _MAX_FAILURE_CHARS = 200
 #: is rendered verbatim into a shell command the report tells an operator to
 #: paste, so every character outside this set is one the operator's shell
 #: could interpret rather than read.
-_RECORD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+#: ``\Z`` (not ``$``) anchors the END OF STRING: ``$`` also matches just
+#: before a trailing newline, which would let an id like ``"task/foo\n"``
+#: slip through and carry that newline into the pasted command.
+_RECORD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 
 #: Agent return tokens that carry a mandatory argument (target / reason).
 _TOKENS_WITH_ARGUMENT = ("ROUTED", "SKIPPED", "FAILED")
@@ -342,11 +345,13 @@ def _cmd_sweep_record(args) -> int:
         # - `SKIPPED <reason>` likewise;
         # - `ESCALATED` means the ritual just wrote a fresh question into the
         #   record, and the escalated line's question text plus its answer
-        #   command are the operator's only handle on it.
+        #   command are the operator's only handle on it;
+        # - `ROUTED <target>` likewise carries the routing target, which is
+        #   the one datum no other line in the report holds.
         #
         # Reported under the queue bucket instead, each of those renders a bare
         # id under "Blocked — answered" — a line that reads as *handled* while
-        # the reason, or the question, is dropped.
+        # the reason, question, or target is dropped.
         token, argument = parse_outcome(args.outcome)
         if token is None or token == "FAILED":
             report_mod.append_failed(report_path, task_id, argument)
@@ -356,15 +361,15 @@ def _cmd_sweep_record(args) -> int:
             _append_question_line(
                 report_path, task_id, status="open", bucket="escalated-awaiting-operator"
             )
+        elif token == "ROUTED":
+            report_mod.append_routed(report_path, task_id, argument)
         # Only then does a previously-blocked task keep its own bucket: for
-        # `PROMOTED` and `ROUTED` the return drives the loop's status write,
-        # not a further bucket split.
+        # `PROMOTED` the return drives the loop's status write, not a further
+        # bucket split.
         elif queue_bucket == "blocked-answered":
             report_mod.append_blocked_answered(report_path, task_id)
-        elif token == "PROMOTED":
-            report_mod.append_promoted(report_path, task_id)
         else:
-            report_mod.append_routed(report_path, task_id, argument)
+            report_mod.append_promoted(report_path, task_id)
     except (report_mod.ReportError, queue_mod.QueueDeriveError) as exc:
         return _fail(str(exc))
     return 0

@@ -41,25 +41,35 @@ waiting line is built from that raw text, so the extracted question, and the
 answer command built from it, never transit the dispatched agent's one-line
 return or the coordinating session's context.
 
-**Credential-pattern scrub, always.** Every bucket line is scrubbed
+**Credential-pattern scrub, always — on the untrusted field, not the
+rendered line.** Every ``append_*`` function funnels through ``_append``
 (ported from craft execute's Phase 5 five-category regex list, upgraded per
 the qualifier-text/vendor-prefix lesson so compound names like
-``STRIPE_SECRET_KEY=`` are caught) at the one place all of them funnel
-through — ``_append`` — rather than at each caller. A skipped/failed/routed
-line's `reason`/`target` text is exactly as untrusted as the escalated
-question: it originates from the dispatched agent's free-text return line,
-authored over the same record bodies. Scrubbing at ``_append`` means no
-future bucket-writer can bypass it by forgetting to scrub its own text first.
-The answer command's diff carries **no context lines at all** — it is a pure
-positional insertion (``old_count=0``) that names only the line number to
-insert after, never the original line's text — so the one place a raw,
-unscrubbed secret could otherwise leak (the diff needing to quote the
-surrounding line verbatim to satisfy the applier's context check) never
-arises. The tradeoff: a positional insert cannot detect drift the way a
-context-checked hunk would, so a record edited between report generation and
-the operator's paste could land the ``**Answer:**`` line in a slightly
-different spot in the section — accepted, since the alternative is writing
-the secret into a git-backed report.
+``STRIPE_SECRET_KEY=`` are caught), and ``_append`` is the one place any of
+them scrubs. A skipped/failed/routed line's `reason`/`target` text is exactly
+as untrusted as the escalated question: it originates from the dispatched
+agent's free-text return line, authored over the same record bodies. But
+``_append`` scrubs only the caller's *untrusted* argument, never the fully
+assembled line: the high-entropy base64 pattern matches any 32+ character
+alnum run with no separator required, and a task id or the answer command's
+own fixed ``lore record update ... --diff`` syntax can be exactly that long
+— scrubbing the whole rendered line would occasionally redact the id itself
+or the runnable command around it, not just the secret sitting next to them.
+Each ``append_*`` function hands ``_append`` a ``render`` callable plus its
+one untrusted string; ``_append`` scrubs the string and calls ``render`` with
+the scrubbed result, so trusted structural text (the task id, the backticks,
+the command syntax) never passes through the scrubber at all, and a future
+bucket-writer still cannot land raw untrusted text in a bucket without
+routing it through this same funnel. The answer command's diff carries **no
+context lines at all** — it is a pure positional insertion (``old_count=0``)
+that names only the line number to insert after, never the original line's
+text — so the one place a raw, unscrubbed secret could otherwise leak (the
+diff needing to quote the surrounding line verbatim to satisfy the applier's
+context check) never arises. The tradeoff: a positional insert cannot detect
+drift the way a context-checked hunk would, so a record edited between
+report generation and the operator's paste could land the ``**Answer:**``
+line in a slightly different spot in the section — accepted, since the
+alternative is writing the secret into a git-backed report.
 """
 
 from __future__ import annotations
@@ -68,6 +78,7 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -256,9 +267,18 @@ def _load_state(report_path: Path) -> dict:
         # this sweep has already written, so a fresh state would re-append
         # every task recorded from here on and double-count the report's own
         # buckets. Refusing by name leaves both files exactly as found.
+        #
+        # `finish` calls this before it ever reaches `lock_mod.release` (see
+        # `_cmd_sweep_finish`), so a corrupt state file raised here always
+        # means the sweep's vault lock is still held — naming only "start a
+        # new sweep" would wedge the operator against a lock nothing tells
+        # them still exists.
         raise ReportError(
             f"report state at {state_path} is unreadable JSON ({e}); this sweep cannot be "
-            "resumed — start a new sweep, and keep this report for the lines it already holds"
+            "resumed — start a new sweep, and keep this report for the lines it already holds; "
+            "this failure happens before the sweep's vault lock is released, so also clear "
+            "that lock (`ranger sweep start` reports it as stale, with the exact removal "
+            "command, once its holder is gone) before starting the new one"
         )
 
 
@@ -323,15 +343,48 @@ def _write_report(report_path: Path, state: dict) -> None:
     _write_0600(Path(report_path), _render(state))
 
 
+def _cleanup_orphaned_temp_files(reports_dir: Path, *, before: float) -> None:
+    """Best-effort removal of leftover ``.*.tmp`` files in *reports_dir*.
+
+    ``_write_0600`` writes by ``mkstemp`` then ``os.replace``; a process
+    killed in that window leaks the temp file, and nothing else in this
+    module ever revisits the reports directory to find it — a report is
+    addressed by the path ``start`` returned, never rediscovered by listing.
+    Left alone, every crash between those two calls adds one more file that
+    sits in the reports directory forever. Only files whose mtime predates
+    *before* (the sweep about to start) are removed, so a temp file from a
+    write genuinely in flight — from a sweep starting concurrently against a
+    different vault in the same group — is never touched. Every failure is
+    swallowed: this is housekeeping, not the sweep's own write path, and must
+    never turn `start` into a refusal over a file it doesn't otherwise care
+    about.
+    """
+    try:
+        candidates = list(reports_dir.glob(".*.tmp"))
+    except OSError:
+        return
+    for candidate in candidates:
+        try:
+            if candidate.stat().st_mtime < before:
+                candidate.unlink()
+        except OSError:
+            continue
+
+
 def start(group: str, vault: str, queue_size: int, *, env: dict[str, str] | None = None) -> Path:
     """Create the report + state files for a fresh sweep, return the report path.
 
     The report is created 0600 with the header and all seven bucket headings
-    rendered before any task is appended.
+    rendered before any task is appended. Also sweeps the group's reports
+    directory for orphaned temp files a prior crashed write left behind (see
+    `_cleanup_orphaned_temp_files`) — cheap, best-effort hygiene that never
+    blocks this sweep from starting.
     """
     _validate_group(group)
     reports_dir = ensure_dir(state_dir("ranger", env=env) / _REPORTS_SUBDIR / group, mode=0o700)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    now = datetime.now(timezone.utc)
+    _cleanup_orphaned_temp_files(reports_dir, before=now.timestamp())
+    timestamp = now.strftime("%Y%m%dT%H%M%S%fZ")
     report_path = reports_dir / f"{timestamp}.md"
 
     state = {
@@ -378,51 +431,76 @@ def finish(report_path: Path) -> None:
     _write_report(report_path, state)
 
 
-def _append(report_path: Path, bucket: str, task_id: str, entry: str) -> None:
-    """Append one already-rendered bucket line, scrubbed, and persist both files.
+def _append(
+    report_path: Path,
+    bucket: str,
+    task_id: str,
+    render: Callable[[str], str],
+    untrusted: str = "",
+) -> None:
+    """Render one bucket line from *render* + *untrusted*, scrubbed, and persist.
 
-    This is the sole place any text reaches a bucket — every ``append_*``
-    function funnels through it — so scrubbing here, rather than at each
-    caller, is what makes the scrub bypass-proof: a future bucket-writer
-    cannot forget to scrub its own free text, because it never gets a chance
-    to write unscrubbed text in the first place. ``entry`` already contains
-    scrubbed text in the escalated/blocked-still-waiting case (the question
-    is scrubbed before the line is rendered), so scrubbing the whole rendered
-    line again here is a no-op for those and the first pass for every other
-    bucket's `reason`/`target` text.
+    This is the sole place any bucket-writer's free text reaches a bucket —
+    every ``append_*`` function funnels through it — so scrubbing here,
+    rather than at each caller, is what makes the scrub bypass-proof: a
+    future bucket-writer cannot forget to scrub its own free text, because
+    ``render`` is only ever called with the already-scrubbed string, never
+    the raw one. ``render`` must build the line using only that scrubbed
+    string plus fixed/trusted text (the task id, backticks, command syntax)
+    — never close over unscrubbed free text of its own, or it defeats the
+    funnel this function exists to be.
+
+    Scrubbing is applied to *untrusted* alone, not to ``render``'s output —
+    see the module docstring for why: the high-entropy pattern matches any
+    32+ character alnum run, and a task id or the answer command's own fixed
+    syntax can be exactly that long, so scrubbing the assembled line would
+    occasionally redact trusted text along with any real secret next to it.
     """
     state = _load_state(report_path)
     if task_id in state["appended_task_ids"]:
         return
     state["appended_task_ids"].append(task_id)
-    state["buckets"][bucket].append(scrub_credentials(entry))
+    state["buckets"][bucket].append(render(scrub_credentials(untrusted)))
     _write_state(report_path, state)
     _write_report(report_path, state)
 
 
 def append_promoted(report_path: Path, task_id: str) -> None:
-    _append(report_path, "promoted", task_id, f"- `{task_id}`\n")
+    _append(report_path, "promoted", task_id, lambda _safe: f"- `{task_id}`\n")
 
 
 def append_routed(report_path: Path, task_id: str, target: str) -> None:
-    _append(report_path, "routed", task_id, f"- `{task_id}` — routed to {target}\n")
+    _append(
+        report_path, "routed", task_id,
+        lambda safe_target: f"- `{task_id}` — routed to {safe_target}\n",
+        target,
+    )
 
 
 def append_blocked_answered(report_path: Path, task_id: str) -> None:
-    _append(report_path, "blocked-answered", task_id, f"- `{task_id}`\n")
+    _append(report_path, "blocked-answered", task_id, lambda _safe: f"- `{task_id}`\n")
 
 
 def append_skipped(report_path: Path, task_id: str, reason: str) -> None:
-    _append(report_path, "skipped", task_id, f"- `{task_id}` — {reason}\n")
+    _append(
+        report_path, "skipped", task_id,
+        lambda safe_reason: f"- `{task_id}` — {safe_reason}\n",
+        reason,
+    )
 
 
 def append_failed(report_path: Path, task_id: str, reason: str) -> None:
-    entry = f"- `{task_id}` — {reason} {_FAILED_RETRY_SENTENCE}\n"
-    _append(report_path, "failed", task_id, entry)
+    _append(
+        report_path, "failed", task_id,
+        lambda safe_reason: f"- `{task_id}` — {safe_reason} {_FAILED_RETRY_SENTENCE}\n",
+        reason,
+    )
 
 
-def _render_question_entry(task_id: str, record_body: str, vault: str, *, near_miss: bool) -> str:
-    """Render one bucket line carrying a task's question and its answer command.
+def _question_entry(
+    task_id: str, record_body: str, vault: str, *, near_miss: bool
+) -> tuple[Callable[[str], str], str]:
+    """Return the ``(render, untrusted)`` pair ``_append`` needs for a question line.
 
     Two shapes, and which one is used is decided by the record, not the
     caller. A parseable question renders the question plus the exact
@@ -431,6 +509,11 @@ def _render_question_entry(task_id: str, record_body: str, vault: str, *, near_m
     fatal here — the sweep's rule that an unparseable outcome buckets rather
     than raises applies just as much to an unparseable record body, and a
     sweep that exits on one bad record leaves every task behind it undrained.
+
+    The question text is the only untrusted piece — the task id, the answer
+    command's syntax, and the near-miss hint are all fixed/trusted, so
+    ``render`` closes over them directly and only ever receives the
+    (already-scrubbed) question as its argument.
 
     **The invocation renders at column 0**, outside the bullet's indentation,
     because the operator copies it out of the raw markdown: a heredoc whose
@@ -441,43 +524,49 @@ def _render_question_entry(task_id: str, record_body: str, vault: str, *, near_m
     try:
         question, line_no = extract_question(record_body)
     except QuestionExtractionError:
-        lines = [f"- `{task_id}` — {_MISSING_QUESTION_LINE}\n"]
+        def render(_safe: str) -> str:
+            lines = [f"- `{task_id}` — {_MISSING_QUESTION_LINE}\n"]
+            if near_miss:
+                lines.append(f"\n{_NEAR_MISS_LINE}\n")
+            lines.append("\n")
+            return "".join(lines)
+
+        return render, ""
+
+    answer_command = _build_answer_command(task_id, line_no, vault)
+
+    def render(safe_question: str) -> str:
+        lines = [
+            f"- `{task_id}` — {safe_question}\n\n",
+            "Answer with:\n\n",
+            "```\n",
+            *(f"{line}\n" for line in answer_command.splitlines()),
+            "```\n",
+        ]
         if near_miss:
             lines.append(f"\n{_NEAR_MISS_LINE}\n")
         lines.append("\n")
         return "".join(lines)
 
-    scrubbed_question = scrub_credentials(question)
-    answer_command = _build_answer_command(task_id, line_no, vault)
-    lines = [
-        f"- `{task_id}` — {scrubbed_question}\n\n",
-        "Answer with:\n\n",
-        "```\n",
-        *(f"{line}\n" for line in answer_command.splitlines()),
-        "```\n",
-    ]
-    if near_miss:
-        lines.append(f"\n{_NEAR_MISS_LINE}\n")
-    lines.append("\n")
-    return "".join(lines)
+    return render, question
 
 
 def append_escalated(
     report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
-    entry = _render_question_entry(
+    render, untrusted = _question_entry(
         task_id, record_body, elected_vault(report_path), near_miss=near_miss
     )
-    _append(report_path, "escalated-awaiting-operator", task_id, entry)
+    _append(report_path, "escalated-awaiting-operator", task_id, render, untrusted)
 
 
 def append_blocked_still_waiting(
     report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
-    entry = _render_question_entry(
+    render, untrusted = _question_entry(
         task_id, record_body, elected_vault(report_path), near_miss=near_miss
     )
-    _append(report_path, "blocked-still-waiting", task_id, entry)
+    _append(report_path, "blocked-still-waiting", task_id, render, untrusted)
 
 
 def append_unreadable_record(report_path: Path, bucket: str, task_id: str) -> None:
@@ -487,4 +576,7 @@ def append_unreadable_record(report_path: Path, bucket: str, task_id: str) -> No
     either from — but keeps the task's line in the bucket its derivation put it
     in, so the report still accounts for every task the sweep touched.
     """
-    _append(report_path, bucket, task_id, f"- `{task_id}` — {_UNREADABLE_RECORD_LINE}\n\n")
+    _append(
+        report_path, bucket, task_id,
+        lambda _safe: f"- `{task_id}` — {_UNREADABLE_RECORD_LINE}\n\n",
+    )

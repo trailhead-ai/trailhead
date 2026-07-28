@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import stat
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,36 @@ def test_start_creates_header_and_all_seven_bucket_headings(tmp_path):
     assert "**Queue size:** 3 tasks derived" in text
     for bucket in report.BUCKETS:
         assert f"## {report._BUCKET_HEADINGS[bucket]}" in text
+
+
+def test_start_cleans_up_a_leftover_temp_file_from_a_crashed_write(tmp_path):
+    """A kill between `mkstemp` and `os.replace` leaks a `.*.tmp` file that
+    nothing else in this module ever revisits — `start` sweeps the group's
+    reports dir for orphaned temp files older than the sweep it is about to
+    start, so they don't accumulate forever."""
+    env = _env(tmp_path)
+    reports_dir = tmp_path / "state" / "reports" / "mygroup"
+    reports_dir.mkdir(parents=True)
+    orphan = reports_dir / ".20200101T000000000000Z.md.deadbeef.tmp"
+    orphan.write_text("half-written", encoding="utf-8")
+    old = (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp()
+    os.utime(orphan, (old, old))
+
+    report.start("mygroup", "myvault", 0, env=env)
+
+    assert not orphan.exists()
+
+
+def test_start_leaves_an_unrelated_file_alone(tmp_path):
+    env = _env(tmp_path)
+    reports_dir = tmp_path / "state" / "reports" / "mygroup"
+    reports_dir.mkdir(parents=True)
+    keep = reports_dir / "not-a-tmp-file.md"
+    keep.write_text("a real report", encoding="utf-8")
+
+    report.start("mygroup", "myvault", 0, env=env)
+
+    assert keep.exists()
 
 
 def test_start_creates_report_and_state_files_0600(tmp_path):
@@ -181,6 +212,10 @@ def test_unparseable_state_is_a_named_error_and_never_a_silent_reset(tmp_path):
     assert str(state_path) in message
     assert "unreadable JSON" in message
     assert "start a new sweep" in message, "the refusal must carry a remediation"
+    assert "lock" in message, (
+        "finish() raises this before it ever reaches lock release, so the remediation must "
+        "say the vault lock is still held rather than leaving the operator wedged"
+    )
     assert state_path.read_text() == "{ truncated", "corrupt state must never be overwritten"
     assert "task/a" in report_path.read_text()
 
@@ -439,6 +474,51 @@ def test_routed_target_scrubbed_of_credentials(tmp_path):
     assert _COMPOUND_SECRET not in state_text
 
 
+# ---------------------------------------------------------------------------
+# The scrub must land on the untrusted field it is meant to catch, not on the
+# fully-rendered line — a long unhyphenated task id or the answer command's
+# own fixed syntax can accidentally look like the high-entropy base64
+# pattern, and scrubbing the whole line eats trusted text along with it.
+# ---------------------------------------------------------------------------
+
+_LONG_TASK_NAME = "task/" + "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"  # 32 alnum chars, no hyphens
+
+
+def test_long_task_id_renders_intact_in_escalated_line_and_answer_command(tmp_path):
+    """A task id long enough to look like base64 must survive the scrub.
+
+    The scrub exists to catch untrusted question/reason/target text, not the
+    trusted task id or the fixed `lore record update ... --diff` syntax — both
+    of those must render byte-for-byte, or the operator is handed a bucket
+    line naming `[REDACTED]` and an answer command that can't be run.
+    """
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+    body = _unresolved_body(f"Should we rotate {_COMPOUND_SECRET}?")
+
+    report.append_escalated(report_path, _LONG_TASK_NAME, body)
+
+    text = report_path.read_text()
+    assert f"- `{_LONG_TASK_NAME}`" in text, "the task id must render intact, not [REDACTED]"
+    assert (
+        f"lore record update {_LONG_TASK_NAME} --vault myvault --diff" in text
+    ), "the answer command must stay runnable, not [REDACTED]"
+    assert _COMPOUND_SECRET not in text, "a real seeded credential in the question must still redact"
+    assert "[REDACTED]" in text
+
+
+def test_long_task_id_renders_intact_in_skipped_line(tmp_path):
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+
+    report.append_skipped(report_path, _LONG_TASK_NAME, f"blocked on {_COMPOUND_SECRET}")
+
+    text = report_path.read_text()
+    assert f"- `{_LONG_TASK_NAME}`" in text
+    assert _COMPOUND_SECRET not in text
+    assert "[REDACTED]" in text
+
+
 def test_extract_question_raises_on_missing_section():
     with pytest.raises(report.QuestionExtractionError):
         report.extract_question("# task\n\nno unresolved section here\n")
@@ -554,8 +634,13 @@ def test_start_refuses_bad_group_before_filesystem_access(tmp_path, bad_group):
 
 @pytest.mark.parametrize(
     "bad_group",
-    ["prod`touch pwn`", "prod$(id)", "prod;id", "prod name", "prod'quote", "prod\nline"],
-    ids=["backtick", "dollar-paren", "semicolon", "space", "quote", "newline"],
+    [
+        "prod`touch pwn`", "prod$(id)", "prod;id", "prod name", "prod'quote", "prod\nline",
+        "prod\n",
+    ],
+    ids=[
+        "backtick", "dollar-paren", "semicolon", "space", "quote", "newline", "trailing-newline",
+    ],
 )
 def test_start_refuses_shell_metacharacters_in_group(tmp_path, bad_group):
     env = _env(tmp_path)

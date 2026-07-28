@@ -197,8 +197,11 @@ _HOSTILE_VAULT_NAMES = [
     "prod name",
     "prod'quote",
     "prod\nline",
+    "prod\n",
 ]
-_HOSTILE_VAULT_IDS = ["backtick", "dollar-paren", "semicolon", "space", "quote", "newline"]
+_HOSTILE_VAULT_IDS = [
+    "backtick", "dollar-paren", "semicolon", "space", "quote", "newline", "trailing-newline",
+]
 
 
 @pytest.mark.parametrize("bad_name", _HOSTILE_VAULT_NAMES, ids=_HOSTILE_VAULT_IDS)
@@ -272,3 +275,25 @@ def test_release_refuses_when_there_is_no_lock(tmp_path):
 
     with pytest.raises(lock.LockError):
         lock.release("myvault", token="0" * 32, env=env)
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores dir modes")
+def test_release_wraps_an_unlink_failure_as_a_lock_error(tmp_path):
+    """`release`'s filesystem call must fail the same way `acquire`'s does.
+
+    `acquire` wraps every filesystem refusal in `LockError` (see the
+    unwritable-dir test above); an unwrapped `OSError` out of `release`
+    instead reaches `finish`'s caller as a raw traceback with no remediation.
+    """
+    env = _env(tmp_path)
+    path, token = lock.acquire("myvault", "mygroup", holder_pid=os.getpid(), env=env)
+    path.parent.chmod(0o500)  # read+execute, no write — unlink needs write on the dir
+
+    try:
+        with pytest.raises(lock.LockError) as exc_info:
+            lock.release("myvault", token=token, env=env)
+    finally:
+        path.parent.chmod(0o700)
+
+    assert str(path) in str(exc_info.value)
+    assert path.exists()

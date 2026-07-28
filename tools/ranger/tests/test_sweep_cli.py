@@ -435,8 +435,13 @@ def test_start_refuses_a_dangling_binding_naming_the_binding(tmp_path):
 
 @pytest.mark.parametrize(
     "bad_vault",
-    ["prod`touch pwn`", "prod$(id)", "prod;id", "prod name", "prod'quote", "prod\nline"],
-    ids=["backtick", "dollar-paren", "semicolon", "space", "quote", "newline"],
+    [
+        "prod`touch pwn`", "prod$(id)", "prod;id", "prod name", "prod'quote", "prod\nline",
+        "prod\n",
+    ],
+    ids=[
+        "backtick", "dollar-paren", "semicolon", "space", "quote", "newline", "trailing-newline",
+    ],
 )
 def test_start_refuses_a_vault_name_carrying_shell_metacharacters(tmp_path, bad_vault):
     sweep = _sweep(tmp_path)
@@ -867,6 +872,30 @@ def test_record_failure_tokens_outrank_the_blocked_answered_bucket(
     assert "task/t1" not in answered
 
 
+def test_record_routed_outranks_the_blocked_answered_bucket(tmp_path):
+    """A `ROUTED` return out of `blocked-answered` keeps its target.
+
+    The target is the one datum no other line in the report carries — the
+    same reasoning that makes `FAILED`/`SKIPPED`/`ESCALATED` outrank the
+    queue bucket applies here too. Reported under "Blocked — answered"
+    instead, the line renders as a bare id and drops the routing target.
+    """
+    sweep = _sweep(tmp_path)
+    sweep.set_tasks([_task("t1", status="blocked")])
+    sweep.set_bodies({"t1": _ANSWERED_BODY})
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--queue-bucket", "blocked-answered", "--outcome", "ROUTED /craft:plan")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    routed = text.split("## Routed")[1].split("## Blocked — answered")[0]
+    assert "- `task/t1` — routed to /craft:plan" in routed
+    answered = text.split("## Blocked — answered")[1].split("## Blocked — still waiting")[0]
+    assert "task/t1" not in answered
+
+
 def test_record_degrades_when_the_record_left_the_elected_vault(tmp_path):
     """A record that vanished between derivation and recording is never fatal.
 
@@ -915,7 +944,10 @@ def test_record_degrades_for_a_still_waiting_record_that_left_the_vault(tmp_path
 
 @pytest.mark.parametrize(
     "task",
-    ["task/t1; rm -rf /", "task/$(whoami)", "t1 && echo pwned", "task/`id`", "task/../escape"],
+    [
+        "task/t1; rm -rf /", "task/$(whoami)", "t1 && echo pwned", "task/`id`",
+        "task/../escape", "task/foo\n",
+    ],
 )
 def test_record_refuses_a_task_id_carrying_shell_metacharacters(tmp_path, task):
     """The id is embedded verbatim into a copy-pasteable shell command.

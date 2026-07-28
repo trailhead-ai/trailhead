@@ -204,4 +204,7 @@ def release(vault_name: str, *, token: str, env: dict[str, str] | None = None) -
             f"lock file {path} was acquired by a different sweep run; "
             "refusing to release a lock this run doesn't hold"
         )
-    path.unlink()
+    try:
+        path.unlink()
+    except OSError as e:
+        raise LockError(f"could not remove the lock file {path}: {e}")

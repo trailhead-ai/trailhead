@@ -30,7 +30,11 @@ import re
 #: ``;``, newline, or anything else outside the set), and no ``..`` segment
 #: (its leading ``.`` can never match the required alphanumeric first
 #: character).
-SHELL_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: ``\Z`` (not ``$``) anchors the END OF STRING: ``$`` also matches just
+#: before a trailing newline, which would let a name like ``"prod\n"`` slip
+#: through and carry that newline into the operator-facing ``rm``/
+#: ``lore record update`` strings this allowlist exists to keep clean.
+SHELL_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
 def validate_shell_safe_name(name: str, *, what: str) -> None:
@@ -43,8 +47,15 @@ def validate_shell_safe_name(name: str, *, what: str) -> None:
     if not name:
         raise ValueError(f"{what} must not be empty")
     if not SHELL_SAFE_NAME_RE.match(name):
+        remedy = (
+            f" — rename it: `lore vault delete {name!r}` then `lore vault add "
+            "<new-name> --scope <scope> --path <path>` to re-register the "
+            "same on-disk vault under a shell-safe name"
+            if what == "vault name"
+            else ""
+        )
         raise ValueError(
             f"{what} {name!r} contains characters outside the allowed set "
             f"({SHELL_SAFE_NAME_RE.pattern}) — refusing to use it in a path "
-            "or an operator-facing command"
+            f"or an operator-facing command{remedy}"
         )
