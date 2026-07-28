@@ -18,8 +18,13 @@ Test contract:
   exactly the contracted JSON keys plus a report-path breadcrumb on stderr.
 - ``record`` with an unparseable outcome line buckets ``failed`` and exits 0,
   so a bad agent return never stops the sweep.
-- Lock contention during ``start`` surfaces the lock module's own
-  holder/stale message and writes no report.
+- Lock contention during ``start`` surfaces the lock module's own message and
+  writes no report — and distinguishes the two cases that matter: a sweep
+  whose holder is alive refuses as ALREADY RUNNING (never as stale, which
+  would invite removing a live sweep's lock), while a dead holder is reported
+  as stale with the exact ``rm`` command and the file left in place.
+- The lock records the supplied holder pid, not the ephemeral ``start``
+  subprocess's, and ``finish`` releases only for the token ``start`` returned.
 - Crash recovery: a sweep killed mid-task leaves a partial report and a held
   lock; clearing the stale lock with the command the refusal prints and
   re-running start→record×N→finish reaches the same net state as an
@@ -222,8 +227,16 @@ class Sweep:
             cwd=str(cwd or self.cwd),
         )
 
-    def start(self, *extra: str) -> subprocess.CompletedProcess:
-        return self.run("sweep", "start", *extra)
+    def start(self, *extra: str, holder_pid: int | None = None) -> subprocess.CompletedProcess:
+        """Start a sweep held by *holder_pid*.
+
+        Defaults to this pytest process, which stands in for the coordinator:
+        a long-lived process distinct from the ephemeral `ranger sweep start`
+        subprocess — the real architecture, where the acquiring process is
+        always already gone by the time anyone reads the lock.
+        """
+        pid = os.getpid() if holder_pid is None else holder_pid
+        return self.run("sweep", "start", "--holder-pid", str(pid), *extra)
 
     # --- inspection ----------------------------------------------------
 
@@ -244,6 +257,13 @@ def _sweep(tmp_path: Path, *, with_craft: bool = True) -> Sweep:
     if with_craft:
         sweep.install_craft()
     return sweep
+
+
+def _dead_pid() -> int:
+    """A pid guaranteed to be dead: spawn a trivial subprocess and reap it."""
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
 
 
 # ---------------------------------------------------------------------------
@@ -282,22 +302,25 @@ def test_start_finds_the_procedure_under_any_harness(tmp_path):
 def test_start_refuses_when_cwd_resolves_to_no_camp_group(tmp_path):
     sweep = _sweep(tmp_path)
 
-    res = sweep.run("sweep", "start", cwd=sweep.outside)
+    res = sweep.run("sweep", "start", "--holder-pid", str(os.getpid()), cwd=sweep.outside)
 
     assert res.returncode != 0
     assert res.stderr.startswith("ranger: ")
-    assert "--group" in res.stderr
     assert str(sweep.outside) in res.stderr
+    assert "member repos" in res.stderr, "the remediation is to move, not to pass a flag"
     sweep.assert_nothing_created()
 
 
-def test_start_accepts_an_explicit_group_when_cwd_cannot_resolve_one(tmp_path):
+def test_start_offers_no_group_override(tmp_path):
+    """A --group flag could only relabel the report — the vault election
+    still follows cwd — so the flag must not exist to be reached for."""
     sweep = _sweep(tmp_path)
 
     res = sweep.run("sweep", "start", "--group", _GROUP, cwd=sweep.outside)
 
-    assert res.returncode == 0, res.stderr
-    assert json.loads(res.stdout)["group"] == _GROUP
+    assert res.returncode != 0
+    assert "unrecognized arguments: --group" in res.stderr
+    sweep.assert_nothing_created()
 
 
 # ---------------------------------------------------------------------------
@@ -370,8 +393,10 @@ def test_start_emits_exactly_the_contracted_json_keys(tmp_path):
         "procedure_path",
         "templates_root",
         "report_path",
+        "lock_token",
         "queue",
     }
+    assert payload["lock_token"], "finish needs a token to prove the lock is this run's"
     assert payload["group"] == _GROUP
     assert payload["vault"] == _VAULT
     assert payload["vault_path"] == "/vaults/testvault"
@@ -404,26 +429,75 @@ def test_start_holds_the_lock_and_seeds_the_report(tmp_path):
     assert "**Queue size:** 3 tasks derived" in report
 
 
-def test_start_refuses_lock_contention_verbatim_and_writes_no_report(tmp_path):
+def test_start_records_the_holder_pid_not_the_starting_subprocess(tmp_path):
+    """The `ranger sweep start` process exits immediately; if the lock named
+    it, every live sweep would read as stale and invite its own removal."""
     sweep = _sweep(tmp_path)
-    sweep.lock_file.parent.mkdir(parents=True)
-    sweep.lock_file.write_text(
-        json.dumps(
-            {
-                "group": "othergroup",
-                "pid": os.getpid(),
-                "host": "somehost",
-                "started_at": "2026-01-01T00:00:00Z",
-            }
-        )
-    )
 
     res = sweep.start()
 
-    assert res.returncode != 0
-    assert "a sweep is already running for group 'othergroup'" in res.stderr
-    assert f"pid {os.getpid()}" in res.stderr
-    assert not (sweep.ranger_state / "reports").exists()
+    assert res.returncode == 0, res.stderr
+    assert json.loads(sweep.lock_file.read_text())["pid"] == os.getpid()
+
+
+def test_start_defaults_the_holder_to_its_parent_process(tmp_path):
+    sweep = _sweep(tmp_path)
+
+    res = sweep.run("sweep", "start")
+
+    assert res.returncode == 0, res.stderr
+    # This test process spawned the CLI directly, so its parent is us.
+    assert json.loads(sweep.lock_file.read_text())["pid"] == os.getpid()
+
+
+def test_a_second_start_during_a_live_sweep_refuses_as_already_running(tmp_path):
+    """The defining contention case: the first sweep's `start` subprocess is
+    long gone, but its holder is alive — that must read as ALREADY RUNNING,
+    never as stale, or an operator is invited to clear a live sweep's lock."""
+    sweep = _sweep(tmp_path)
+    first = sweep.start()
+    assert first.returncode == 0, first.stderr
+    reports_before = sweep.reports()
+
+    second = sweep.start()
+
+    assert second.returncode != 0
+    assert f"a sweep is already running for group {_GROUP!r}" in second.stderr
+    assert f"pid {os.getpid()}" in second.stderr
+    assert "stale" not in second.stderr
+    assert "rm " not in second.stderr, "a live sweep's lock must never be offered for removal"
+    assert sweep.reports() == reports_before, "a refused start must not create a report"
+
+
+def test_a_second_start_after_the_holder_died_reports_a_stale_lock(tmp_path):
+    sweep = _sweep(tmp_path)
+    first = sweep.start(holder_pid=_dead_pid())
+    assert first.returncode == 0, first.stderr
+    before = sweep.lock_file.read_text()
+    reports_before = sweep.reports()
+
+    second = sweep.start()
+
+    assert second.returncode != 0
+    assert "stale lock" in second.stderr
+    assert f"rm {sweep.lock_file}" in second.stderr
+    assert sweep.lock_file.read_text() == before, "a stale lock is reported, never auto-reaped"
+    assert sweep.reports() == reports_before
+
+
+def test_finish_with_a_token_from_another_run_refuses_and_leaves_the_lock(tmp_path):
+    sweep = _sweep(tmp_path)
+    res = sweep.start()
+    assert res.returncode == 0, res.stderr
+    report = json.loads(res.stdout)["report_path"]
+    before = sweep.lock_file.read_text()
+
+    finished = sweep.run("sweep", "finish", "--report", report, "--vault", _VAULT,
+                         "--token", "0" * 32)
+
+    assert finished.returncode != 0
+    assert sweep.lock_file.exists()
+    assert sweep.lock_file.read_text() == before
 
 
 # ---------------------------------------------------------------------------
@@ -460,10 +534,17 @@ def test_derive_does_not_touch_the_lock_or_the_report(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _start_and_report(sweep: Sweep) -> str:
-    res = sweep.start()
+def _start_sweep(sweep: Sweep, **kwargs) -> tuple[str, str]:
+    """Start a sweep, returning ``(report_path, lock_token)``."""
+    res = sweep.start(**kwargs)
     assert res.returncode == 0, res.stderr
-    return json.loads(res.stdout)["report_path"]
+    payload = json.loads(res.stdout)
+    return payload["report_path"], payload["lock_token"]
+
+
+def _start_and_report(sweep: Sweep, **kwargs) -> str:
+    """Start a sweep whose token the caller won't need (it never finishes)."""
+    return _start_sweep(sweep, **kwargs)[0]
 
 
 def test_record_buckets_promoted_routed_and_skipped(tmp_path):
@@ -595,13 +676,13 @@ def test_record_requires_an_outcome_for_a_dispatched_task(tmp_path):
 
 
 def _uninterrupted_sweep(sweep: Sweep) -> Path:
-    report = _start_and_report(sweep)
+    report, token = _start_sweep(sweep)
     assert sweep.lock_file.exists(), "the lock must be held for the sweep's duration"
     for name, outcome in (("t1", "PROMOTED"), ("t2", "ESCALATED"), ("t3", "ROUTED /craft:plan")):
         res = sweep.run("sweep", "record", "--report", report, "--task", f"task/{name}",
                         "--outcome", outcome)
         assert res.returncode == 0, res.stderr
-    res = sweep.run("sweep", "finish", "--report", report, "--vault", _VAULT)
+    res = sweep.run("sweep", "finish", "--report", report, "--vault", _VAULT, "--token", token)
     assert res.returncode == 0, res.stderr
     return Path(report)
 
@@ -652,9 +733,10 @@ def test_crash_recovery_rerun_reaches_the_same_net_state(tmp_path):
     sweep = _sweep(tmp_path / "crashed")
     sweep.set_bodies({"t2": _QUESTION_BODY})
 
-    # A sweep killed mid-task: the first task was recorded, then the process
-    # died before `finish` — the lock is still held and the report is partial.
-    partial = Path(_start_and_report(sweep))
+    # A sweep killed mid-task: the first task was recorded, then the whole
+    # sweep — coordinator included — died before `finish`. The lock is still
+    # held by a pid that no longer exists, and the report is partial.
+    partial = Path(_start_and_report(sweep, holder_pid=_dead_pid()))
     sweep.run("sweep", "record", "--report", str(partial), "--task", "task/t1",
               "--outcome", "PROMOTED")
     assert sweep.lock_file.exists()
@@ -672,7 +754,8 @@ def test_crash_recovery_rerun_reaches_the_same_net_state(tmp_path):
     assert match, refused.stderr
     Path(match.group(1)).unlink()
 
-    rerun = Path(_start_and_report(sweep))
+    rerun_path, rerun_token = _start_sweep(sweep)
+    rerun = Path(rerun_path)
     for name, outcome in (("t1", "PROMOTED"), ("t2", "ESCALATED"), ("t3", "ROUTED /craft:plan")):
         assert sweep.run("sweep", "record", "--report", str(rerun), "--task", f"task/{name}",
                          "--outcome", outcome).returncode == 0
@@ -680,8 +763,8 @@ def test_crash_recovery_rerun_reaches_the_same_net_state(tmp_path):
     # report's dedupe keeps the net state identical to an uninterrupted sweep.
     assert sweep.run("sweep", "record", "--report", str(rerun), "--task", "task/t1",
                      "--outcome", "PROMOTED").returncode == 0
-    assert sweep.run("sweep", "finish", "--report", str(rerun),
-                     "--vault", _VAULT).returncode == 0
+    assert sweep.run("sweep", "finish", "--report", str(rerun), "--vault", _VAULT,
+                     "--token", rerun_token).returncode == 0
 
     assert _normalized(rerun) == baseline
     assert not sweep.lock_file.exists()

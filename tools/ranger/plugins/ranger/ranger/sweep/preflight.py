@@ -104,15 +104,16 @@ def _import_camp() -> tuple[Any, Any]:
     return camp_config, camp_resolve
 
 
-def resolve_group(
-    *, cwd: Path, group: str | None = None, env: dict[str, str] | None = None
-) -> str:
-    """Return the camp group this sweep belongs to.
+def resolve_group(*, cwd: Path, env: dict[str, str] | None = None) -> str:
+    """Return the camp group this sweep belongs to, resolved from ``cwd``.
 
-    ``group`` names it explicitly (validated against the configured groups);
-    otherwise it is resolved from ``cwd`` the same way the camp CLI resolves
-    it — a workspace worktree under camp's state dir, or a member repo the
-    cwd sits inside.
+    Cwd is the only input on purpose. The group determines where the report is
+    filed and which vault the sweep drains, and the vault half of that comes
+    from ``lore vault resolve``, which reads the current directory's binding
+    and takes no group argument. A flag naming a different group could
+    therefore only relabel the report while the sweep still drained cwd's
+    vault — a mismatch with no honest use, so the remediation for "no group
+    here" is to move, not to override.
     """
     camp_config, camp_resolve = _import_camp()
     groups_dir = config_dir("camp", env=env) / "groups"
@@ -121,13 +122,6 @@ def resolve_group(
         configs = camp_config.load_all_groups(groups_dir)
     except camp_config.GroupConfigError as exc:
         raise PreflightError(f"camp group config is unreadable: {exc}") from exc
-
-    if group is not None:
-        try:
-            camp_resolve.resolve_group_override(group, configs)
-        except camp_resolve.GroupResolutionError as exc:
-            raise PreflightError(str(exc)) from exc
-        return group
 
     try:
         name, _slug = camp_resolve.resolve_from_cwd(
@@ -139,8 +133,9 @@ def resolve_group(
         # reporting the error.
         detail = str(exc).removeprefix("camp: ")
         raise PreflightError(
-            f"no camp group resolves from {cwd} ({detail}); run the sweep from inside a "
-            "camp group's workspace or member repo, or name it with --group <name>"
+            f"no camp group resolves from {cwd} ({detail}); run the sweep from inside the "
+            "camp group's workspace or one of its member repos — the group and its vault "
+            "are both read from the current directory"
         ) from exc
     return name
 

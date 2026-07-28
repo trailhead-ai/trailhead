@@ -17,6 +17,23 @@ partial-but-valid report on disk and a lock naming the dead holder, and the
 next ``start`` reports both. Nothing is held in memory between verbs — the
 report's state file and the lock file *are* the sweep's state.
 
+**What identifies a sweep across those processes.** None of these processes
+outlives the sweep, so two values must be supplied rather than inferred.
+``--holder-pid`` names the long-lived process whose liveness *is* the sweep's
+liveness; without it the lock would record a pid that dies immediately and
+every running sweep would read as abandoned. ``start`` returns a
+``lock_token`` in its JSON, and ``finish`` must present it to release the
+lock — the vault name alone identifies the *lock*, not the *run*, so a
+mistyped or out-of-order ``finish`` would otherwise release a sweep that is
+still running. Both are the sweep's identity papers; the skill carries them
+from ``start`` to ``finish``.
+
+**No ``--group`` flag.** The group and the elected vault are both read from
+the current directory (``lore vault resolve`` takes no group argument), so a
+group override could only relabel the report while the sweep drained cwd's
+vault. Running from the wrong directory is a refusal, not something to
+override.
+
 **Why the record bodies are read here.** ``record`` reads the task record to
 extract an escalated question, so the question text (and the answer command
 built from it) is composed in this process and written straight to the report
@@ -78,16 +95,19 @@ def add_sweep_subparser(sub) -> None:
         help="Check preconditions, lock the vault, seed the report, print the sweep's JSON",
     )
     p_start.add_argument(
-        "--group", metavar="NAME",
-        help="Camp group to sweep; defaults to the group the current directory resolves to",
+        "--holder-pid", type=int, metavar="PID",
+        help=(
+            "Pid of the long-lived process that constitutes this sweep — the coordinator "
+            "session or scheduler wrapper. Recorded in the lock, and its liveness is what "
+            "tells a running sweep from an abandoned one. Defaults to this process's parent, "
+            "which is correct only when that parent drives the sweep to completion; any "
+            "interposed shell (a `sh -c` per verb, a pipeline) makes the default wrong, so "
+            "coordinators should pass their own pid explicitly."
+        ),
     )
 
     p_derive = p_sweep_sub.add_parser(
         "derive", help="Re-derive and print the elected vault's queue classification"
-    )
-    p_derive.add_argument(
-        "--group", metavar="NAME",
-        help="Camp group to derive for; defaults to the group the current directory resolves to",
     )
     p_derive.add_argument("--json", action="store_true", help="Emit the queue as a JSON array")
 
@@ -106,6 +126,10 @@ def add_sweep_subparser(sub) -> None:
     p_finish = p_sweep_sub.add_parser("finish", help="Write the report footer, release the lock")
     p_finish.add_argument("--report", required=True, metavar="PATH", help="Report to finish")
     p_finish.add_argument("--vault", required=True, metavar="NAME", help="The locked vault")
+    p_finish.add_argument(
+        "--token", required=True, metavar="TOKEN",
+        help="The `lock_token` this sweep's `start` returned; proves the lock is this run's",
+    )
 
     p_start.set_defaults(func=cmd_sweep)
     p_derive.set_defaults(func=cmd_sweep)
@@ -128,12 +152,12 @@ def _record_id(task: str) -> str:
     return task if task.startswith("task/") else f"task/{task}"
 
 
-def _resolve_target(group: str | None):
+def _resolve_target():
     """Run the group + vault preconditions, returning ``(group, resolution)``."""
     from ..sweep import preflight
 
-    resolved_group = preflight.resolve_group(cwd=Path.cwd(), group=group)
-    return resolved_group, preflight.resolve_vault(resolved_group)
+    group = preflight.resolve_group(cwd=Path.cwd())
+    return group, preflight.resolve_vault(group)
 
 
 def _cmd_sweep_start(args) -> int:
@@ -144,13 +168,18 @@ def _cmd_sweep_start(args) -> int:
 
     try:
         procedure_path, templates_root = preflight.find_refine_procedure()
-        group, resolution = _resolve_target(args.group)
+        group, resolution = _resolve_target()
     except (preflight.PreflightError, queue_mod.QueueDeriveError) as exc:
         return _fail(str(exc))
 
+    # This process exits as soon as the JSON is printed, so its own pid would
+    # mark the lock stale for the whole of the sweep it just started. The
+    # holder is the caller's long-lived process instead.
+    holder_pid = args.holder_pid if args.holder_pid is not None else os.getppid()
+
     vault = resolution["vault"]
     try:
-        lock_mod.acquire(vault, group)
+        _path, token = lock_mod.acquire(vault, group, holder_pid=holder_pid)
     except lock_mod.LockError as exc:
         return _fail(str(exc))
 
@@ -160,7 +189,7 @@ def _cmd_sweep_start(args) -> int:
         entries = queue_mod.derive_queue(vault)
         report_path = report_mod.start(group, vault, len(entries))
     except (queue_mod.QueueDeriveError, report_mod.ReportError) as exc:
-        lock_mod.release_recorded(vault)
+        lock_mod.release(vault, token=token)
         return _fail(str(exc))
 
     print(
@@ -172,6 +201,7 @@ def _cmd_sweep_start(args) -> int:
                 "procedure_path": str(procedure_path),
                 "templates_root": str(templates_root),
                 "report_path": str(report_path),
+                "lock_token": token,
                 "queue": entries,
             }
         )
@@ -188,7 +218,7 @@ def _cmd_sweep_derive(args) -> int:
     from .queue import print_queue
 
     try:
-        _group, resolution = _resolve_target(args.group)
+        _group, resolution = _resolve_target()
         entries = queue_mod.derive_queue(resolution["vault"])
     except (preflight.PreflightError, queue_mod.QueueDeriveError) as exc:
         return _fail(str(exc))
@@ -293,7 +323,7 @@ def _cmd_sweep_finish(args) -> int:
         return _fail(str(exc))
 
     try:
-        lock_mod.release_recorded(args.vault)
+        lock_mod.release(args.vault, token=args.token)
     except lock_mod.LockError as exc:
         return _fail(str(exc))
     return 0

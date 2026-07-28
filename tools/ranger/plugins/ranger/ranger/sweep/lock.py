@@ -4,8 +4,28 @@ Guarantees at most one sweep runs against a given vault at a time. The lock
 file lives at ``state_dir("ranger")/locks/<vault_name>.lock`` and is created
 with ``O_CREAT | O_EXCL`` — the OS atomically decides the race, so two
 processes racing ``acquire`` can never both believe they hold the lock. Its
-body is JSON: ``{"group", "pid", "host", "started_at"}``, enough for a human
-to identify (and, if needed, manually kill) the holder.
+body is JSON: ``{"group", "pid", "host", "started_at", "token"}`` — the first
+four identify the holder to a human (and, if needed, let them kill it); the
+fifth is how a later process proves it owns the lock.
+
+**``pid`` is the sweep's holder, not the caller.** ``acquire`` records the pid
+its caller supplies, never ``os.getpid()``. A sweep is not one process: it is
+a coordinator driving a series of short-lived CLI invocations. Recording the
+acquiring process's own pid would make the lock read as *stale* for the entire
+lifetime of a live sweep — the acquiring process exits within milliseconds —
+which invites an operator or scheduler to remove a running sweep's lock and
+start a second one against the same vault. That is precisely the concurrency
+this module exists to prevent, so the holder pid must name the long-lived
+process that constitutes the sweep.
+
+**``token`` is how ownership survives process boundaries.** ``acquire`` mints
+a random token, writes it into the payload, and returns it; ``release``
+removes the lock only for a caller that presents the matching token. Pid
+equality cannot serve here (the releasing process is never the acquiring one)
+and the vault name alone is not proof of anything — an out-of-order or
+mistyped ``finish`` would otherwise tear down a different sweep's lock. The
+token is unguessable and travels only through the sweep that minted it, so a
+release is authorized by the run that took the lock or not at all.
 
 Security posture — vault names become a path segment (the lock filename), so
 every entry point validates confinement (no separators, no ``..``, non-empty)
@@ -24,18 +44,16 @@ payload enough to delete it) is exactly the kind of silent takeover that
 turns a mutex into a race; forcing every removal through an operator's own
 ``rm`` keeps this module from ever creating that race itself.
 
-The two release paths are the only ones that *do* remove the file, and both
-are owner-side rather than contender-side: ``release`` proves the caller is
-the recorded holder (pid match), and ``release_recorded`` — for a sweep whose
-start and finish are separate CLI processes — relies instead on the lock's
-per-vault ``O_EXCL`` uniqueness, so there is no other holder's lock it could
-take. Neither is reachable from ``acquire``.
+``release`` is the one path that *does* remove the file, and it is owner-side
+rather than contender-side: it removes only a lock whose recorded token the
+caller can present. It is not reachable from ``acquire``.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +61,7 @@ from pathlib import Path
 from trailhead.paths import ensure_dir, state_dir
 
 _LOCKS_SUBDIR = "locks"
+_TOKEN_BYTES = 16
 
 
 class LockError(Exception):
@@ -102,20 +121,36 @@ def _raise_for_existing_lock(path: Path) -> None:
     )
 
 
-def acquire(vault_name: str, group: str, *, env: dict[str, str] | None = None) -> Path:
+def acquire(
+    vault_name: str, group: str, *, holder_pid: int, env: dict[str, str] | None = None
+) -> tuple[Path, str]:
     """Create and hold the lock for vault_name, or raise LockError.
 
-    Returns the lock path on success. Never overwrites or removes an existing
-    lock file — see the module docstring for why.
+    Args:
+        holder_pid: The pid of the long-lived process that constitutes the
+            sweep — the coordinator, not whatever short-lived process happens
+            to be calling this. Liveness of *this* pid is what later callers
+            test to tell a running sweep from an abandoned one, so a
+            wrong value here is what turns the mutex into a race (see the
+            module docstring).
+
+    Returns ``(lock_path, token)``; the token is the caller's only means of
+    releasing the lock later. Never overwrites or removes an existing lock
+    file.
     """
+    if not isinstance(holder_pid, int) or holder_pid <= 0:
+        raise LockError(f"holder_pid must be a positive process id, got {holder_pid!r}")
+
     path = lock_path(vault_name, env=env)
     ensure_dir(path.parent, mode=0o700)
 
+    token = secrets.token_hex(_TOKEN_BYTES)
     payload = {
         "group": group,
-        "pid": os.getpid(),
+        "pid": holder_pid,
         "host": socket.gethostname(),
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "token": token,
     }
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -123,14 +158,17 @@ def acquire(vault_name: str, group: str, *, env: dict[str, str] | None = None) -
         _raise_for_existing_lock(path)
     with os.fdopen(fd, "w") as f:
         json.dump(payload, f)
-    return path
+    return path, token
 
 
-def release(vault_name: str, *, env: dict[str, str] | None = None) -> None:
-    """Remove the lock for vault_name, but only if it records the caller's own pid.
+def release(vault_name: str, *, token: str, env: dict[str, str] | None = None) -> None:
+    """Remove the lock for vault_name, but only for the run that acquired it.
 
-    Raises LockError if the lock is missing, unreadable, or held by a
-    different pid — release never removes a lock it can't prove is its own.
+    The caller proves ownership by presenting the token ``acquire`` returned.
+    Raises LockError if the lock is missing, unreadable, or records a
+    different token — release never removes a lock it can't prove belongs to
+    the caller's own run, so an out-of-order or mistyped release cannot tear
+    down a sweep that is still running.
     """
     path = lock_path(vault_name, env=env)
     try:
@@ -140,46 +178,13 @@ def release(vault_name: str, *, env: dict[str, str] | None = None) -> None:
 
     try:
         payload = json.loads(text)
-        pid = payload["pid"]
+        recorded = payload["token"]
     except (ValueError, KeyError, TypeError):
         raise LockError(f"lock file {path} has an unreadable payload; refusing to release it")
 
-    if pid != os.getpid():
+    if not secrets.compare_digest(str(recorded), str(token)):
         raise LockError(
-            f"lock file {path} is held by pid {pid}, not the calling process ({os.getpid()}); "
-            "refusing to release a lock this process doesn't hold"
+            f"lock file {path} was acquired by a different sweep run; "
+            "refusing to release a lock this run doesn't hold"
         )
-    path.unlink()
-
-
-def release_recorded(vault_name: str, *, env: dict[str, str] | None = None) -> None:
-    """Remove the lock for vault_name whichever process recorded it.
-
-    ``release``'s pid proof is the right guard for a sweep that lives inside a
-    single process. A sweep driven through the CLI does not: ``ranger sweep
-    start`` and ``ranger sweep finish`` are separate invocations, so the
-    recorded pid is never the finishing process's and a pid-matched release
-    could never succeed.
-
-    Dropping that proof is safe *here and only here*: the lock is keyed by
-    vault and created ``O_EXCL``, so at most one sweep exists for a vault at a
-    time — there is no second holder whose lock this could take, which is the
-    race ``acquire`` refuses to create. The residual is an operator finishing
-    a sweep that is still running; that is a deliberate act against their own
-    vault, not a silent takeover.
-
-    Still refuses when the lock is missing or its payload is unreadable: a
-    file this module can't recognize as one of its own locks is never
-    unlinked.
-    """
-    path = lock_path(vault_name, env=env)
-    try:
-        payload = json.loads(path.read_text())
-    except OSError as e:
-        raise LockError(f"no lock file at {path} to release: {e}")
-    except ValueError as e:
-        raise LockError(f"lock file {path} has an unreadable payload; refusing to release it: {e}")
-
-    if not isinstance(payload, dict) or "pid" not in payload:
-        raise LockError(f"lock file {path} has an unreadable payload; refusing to release it")
     path.unlink()
