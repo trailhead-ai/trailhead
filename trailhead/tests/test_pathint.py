@@ -146,9 +146,12 @@ class TestCampWrapperPosix:
         # Both the capture (new) and the passthrough branch must call `command camp`.
         assert 'command camp "$@"' in out
 
-    def test_cds_only_on_the_new_branch(self, out):
-        assert '[ "$1" = "new" ]' in out
-        # Exactly one cd — guarded inside the `new` branch, not the passthrough.
+    def test_cds_only_on_the_intercepted_verbs(self, out):
+        # new enters a workspace; remove/rm (both spellings — aliasing happens
+        # inside the CLI, the wrapper sees the raw token) exit one.
+        assert 'case "$1" in' in out
+        assert "new|remove|rm)" in out
+        # Exactly one cd — guarded inside the intercepted branch, not the passthrough.
         assert out.count("cd -- ") == 1
 
     def test_cd_is_quote_safe(self, out):
@@ -181,8 +184,9 @@ class TestCampWrapperFish:
     def test_uses_command_camp_to_avoid_path_recursion(self, out):
         assert "command camp $argv" in out
 
-    def test_cds_only_on_the_new_branch(self, out):
-        assert 'test "$argv[1]" = new' in out
+    def test_cds_only_on_the_intercepted_verbs(self, out):
+        assert 'switch "$argv[1]"' in out
+        assert "case new remove rm" in out
         assert out.count("cd -- ") == 1
 
     def test_cd_is_quote_safe(self, out):
@@ -235,6 +239,98 @@ class TestCampWrapperBehavior:
         assert proc.returncode == 0, proc.stderr
         # Last line of stdout is the cwd after the wrapper cd'd us in.
         assert proc.stdout.strip().splitlines()[-1] == str(target)
+
+    def test_rm_cds_back_to_the_printed_repo_root(self, tmp_path):
+        # `camp rm` from inside a workspace prints the group's first-member
+        # repo_root on stdout; the wrapper must land the shell there.
+        home = tmp_path / "repo home"  # spaces: cd must stay quote-safe
+        home.mkdir()
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text(
+            "#!/usr/bin/env bash\n"
+            'if [ "$1" = "rm" ] || [ "$1" = "remove" ]; then\n'
+            '  printf "%s\\n" "$HOME_REPO"\n'
+            "fi\n"
+        )
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = (
+            f"{wrapper}\n"
+            f'export PATH="{fakebin}:$PATH"\n'
+            "camp rm\n"
+            "pwd\n"
+        )
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env={"HOME_REPO": str(home), "PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip().splitlines()[-1] == str(home)
+
+    def test_rm_with_empty_stdout_stays_put(self, tmp_path):
+        # remove run OUTSIDE the workspace (or any no-path case) prints nothing
+        # on stdout — the wrapper must not cd anywhere.
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text("#!/usr/bin/env bash\nexit 0\n")
+        fake_camp.chmod(0o755)
+
+        start = tmp_path / "start"
+        start.mkdir()
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = (
+            f"{wrapper}\n"
+            f'export PATH="{fakebin}:$PATH"\n'
+            "camp rm --name other\n"
+            "pwd\n"
+        )
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(start),
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip().splitlines()[-1] == str(start)
+
+    def test_rm_failure_propagates_exit_and_stays_put(self, tmp_path):
+        # A failed removal exits nonzero with empty stdout: the wrapper must
+        # surface that exit code and leave the shell where it was.
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text("#!/usr/bin/env bash\nexit 3\n")
+        fake_camp.chmod(0o755)
+
+        start = tmp_path / "start"
+        start.mkdir()
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = (
+            f"{wrapper}\n"
+            f'export PATH="{fakebin}:$PATH"\n'
+            "camp rm\n"
+            'printf "rc=%s\\n" "$?"\n'
+            "pwd\n"
+        )
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(start),
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        lines = proc.stdout.strip().splitlines()
+        assert "rc=3" in lines
+        assert lines[-1] == str(start)
 
     def test_other_verbs_pass_through_without_cd(self, tmp_path):
         fakebin = tmp_path / "fakebin"

@@ -224,6 +224,28 @@ class TestCampRemoveSuccess:
         assert (repo_a / "README.md").is_file(), "canonical repo_a must be untouched"
         assert (repo_b / "README.md").is_file(), "canonical repo_b must be untouched"
 
+    def test_remove_group_flag_without_positional_resolves_slug_from_cwd(self, remove_env):
+        """`camp rm --group <name>` with NO positional slug must not eat the
+        `--group` flag as the slug — it resolves the slug from cwd instead
+        (run from inside a member worktree of the workspace)."""
+        wt_a = remove_env["ws_dir"] / "repo_a"
+        assert wt_a.is_dir(), "provisioned member worktree should exist"
+        env = {**remove_env["env"]}
+        r = subprocess.run(
+            [sys.executable, str(_CLI_CAMP), "rm", "--group", "rmgroup"],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(wt_a),
+        )
+        assert r.returncode == 0, (
+            f"camp rm --group <name> from inside the workspace should exit 0.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert not _manifest_path(remove_env).exists(), (
+            "the cwd-resolved workspace should have been removed"
+        )
+
     def test_remove_name_flag_resolves_slug(self, remove_env):
         """camp remove --name <slug> uses the --name flag to resolve the slug."""
         r = _camp(remove_env, "remove", "--name", "ws-slug", "--group", "rmgroup")
@@ -658,7 +680,121 @@ class TestRemoveExitCode:
         # No SystemExit on the happy path.
         cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         captured = capsys.readouterr()
-        assert "removed worktree 'feat-x'" in captured.out
+        assert "removed worktree 'feat-x'" in captured.err
+
+
+# ===========================================================================
+# Output contract: stdout carries the return path (first member repo_root)
+# ONLY when the invoking cwd was inside the removed workspace
+# ===========================================================================
+
+
+class TestRemoveReturnPath:
+    """`camp remove` mirrors `camp new`'s stdout contract so the shellenv
+    `camp()` wrapper can `cd "$(camp rm)"`: at most one stdout line — the first
+    member's repo_root — emitted only on full success from inside the removed
+    workspace. Everything else goes to stderr."""
+
+    def _patch_ok_break(self, monkeypatch):
+        import camp.provision.reconcile as reconcile
+
+        def fake_break(group, slug, *, env=None, force=False):
+            return {"status": "ok", "slug": slug, "removed": ["repo_a", "repo_b"], "errors": []}
+
+        monkeypatch.setattr(reconcile, "reconcile_break", fake_break)
+
+    def _ws_dir(self, g, slug="feat-x"):
+        from camp.group.manifest import workspace_dir
+
+        ws = workspace_dir("removegroup", slug, env=g["env"])
+        ws.mkdir(parents=True, exist_ok=True)
+        return ws
+
+    def test_outside_workspace_stdout_is_empty(self, inproc_group, monkeypatch, capsys):
+        """Removal from OUTSIDE the workspace prints no stdout path — the
+        wrapper must not teleport a shell that was never inside it."""
+        self._patch_ok_break(monkeypatch)
+        cli = _load_cli_module()
+        g = inproc_group
+
+        monkeypatch.chdir(g["tmp_path"])
+        cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        captured = capsys.readouterr()
+        assert captured.out == "", "no return path when cwd was outside the workspace"
+        assert "removed worktree 'feat-x'" in captured.err
+
+    def test_inside_workspace_stdout_is_first_member_repo_root(
+        self, inproc_group, monkeypatch, capsys
+    ):
+        """Removal from INSIDE the workspace prints exactly one stdout line:
+        the group's first-member repo_root."""
+        self._patch_ok_break(monkeypatch)
+        cli = _load_cli_module()
+        g = inproc_group
+
+        monkeypatch.chdir(self._ws_dir(g))
+        cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        captured = capsys.readouterr()
+        assert captured.out == f"{g['repo_a']}\n", (
+            "stdout must be exactly the first member's repo_root, one line"
+        )
+
+    def test_inside_workspace_subdir_also_emits_path(self, inproc_group, monkeypatch, capsys):
+        """A cwd deeper inside the workspace (a member worktree subdir) still
+        counts as inside."""
+        self._patch_ok_break(monkeypatch)
+        cli = _load_cli_module()
+        g = inproc_group
+
+        sub = self._ws_dir(g) / "repo_a" / "src"
+        sub.mkdir(parents=True)
+        monkeypatch.chdir(sub)
+        cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        captured = capsys.readouterr()
+        assert captured.out == f"{g['repo_a']}\n"
+
+    def test_marker_set_suppresses_shellenv_tip(self, inproc_group, monkeypatch, capsys):
+        """With the wrapper active (CAMP_SHELL_INTEGRATION set) no tip is
+        printed; without it, the nudge names `trailhead shellenv`."""
+        self._patch_ok_break(monkeypatch)
+        cli = _load_cli_module()
+        g = inproc_group
+
+        monkeypatch.chdir(self._ws_dir(g))
+        monkeypatch.setenv("CAMP_SHELL_INTEGRATION", "1")
+        cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        captured = capsys.readouterr()
+        assert "shellenv" not in captured.err
+        assert captured.out == f"{g['repo_a']}\n"
+
+    def test_no_marker_prints_shellenv_tip(self, inproc_group, monkeypatch, capsys):
+        self._patch_ok_break(monkeypatch)
+        cli = _load_cli_module()
+        g = inproc_group
+
+        monkeypatch.chdir(self._ws_dir(g))
+        monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
+        cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        captured = capsys.readouterr()
+        assert "trailhead shellenv" in captured.err
+
+    def test_failed_removal_from_inside_emits_no_path(self, inproc_group, monkeypatch, capsys):
+        """On failure the workspace may still exist — stdout must stay EMPTY so
+        the wrapper leaves the shell where it is."""
+        import camp.provision.reconcile as reconcile
+
+        cli = _load_cli_module()
+        g = inproc_group
+
+        def fake_break(group, slug, *, env=None, force=False):
+            return {"status": "ok_with_errors", "slug": slug, "removed": [], "errors": ["boom"]}
+
+        monkeypatch.setattr(reconcile, "reconcile_break", fake_break)
+        monkeypatch.chdir(self._ws_dir(g))
+        with pytest.raises(SystemExit):
+            cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        captured = capsys.readouterr()
+        assert captured.out == "", "failed removal must not emit a return path"
 
 
 # ===========================================================================

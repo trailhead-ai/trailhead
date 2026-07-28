@@ -7,6 +7,7 @@ workspaces: run the per-member provisioner (``setup``, plus its read-only
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -171,15 +172,36 @@ def _cmd_remove_group_cli(
     precondition — there is no session lock. Confinement and the dirty-tree
     block live in reconcile_break, which also serializes concurrent same-slug
     removals on the slug reconcile lock.
+
+    Output contract (mirrors `camp new`): stdout carries AT MOST one line — the
+    absolute repo_root of the group's FIRST member, emitted only when removal
+    fully succeeded AND the invoking cwd was inside the removed workspace, so
+    the shellenv `camp()` wrapper can `cd "$(camp rm)"` out of the deleted
+    directory. Every confirmation and diagnostic goes to stderr. On any failure
+    (including partial removal) stdout is EMPTY and the exit is nonzero — the
+    wrapper stays put.
     """
+    from ..group.manifest import workspace_dir
     from ..provision.reconcile import reconcile_break
-    from ..spine import _die
+    from ..spine import _consume_flag_value, _die
 
     force = "--force" in args
     filtered = [a for a in args if a != "--force"]
+    _consume_flag_value(filtered, "--group")  # already resolved upstream; drop it
     slug = _slug_from_args_or_cwd(
         filtered, group, verb="remove", consume_positional=True, env=env
     )
+
+    # Classify the cwd BEFORE teardown: afterwards the cwd inode may no longer
+    # exist (Path.cwd() raises), and the answer decides whether stdout carries
+    # the return path. Only a removal that pulls the directory out from under
+    # the caller warrants teleporting their shell; `camp rm --name other` run
+    # from elsewhere must leave the shell where it is.
+    ws_dir = workspace_dir(group["group"]["name"], slug, env=env)
+    try:
+        cwd_inside_ws = Path.cwd().resolve().is_relative_to(ws_dir.resolve())
+    except OSError:
+        cwd_inside_ws = False
 
     if dry_run:
         print(f"[dry-run] would remove worktree {slug!r} for group {group['group']['name']!r}",
@@ -212,7 +234,23 @@ def _cmd_remove_group_cli(
             print(f"  {e}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"camp remove: removed worktree {slug!r} ({', '.join(removed)})")
+    print(
+        f"camp remove: removed worktree {slug!r} ({', '.join(removed)})",
+        file=sys.stderr,
+    )
+
+    # The caller's shell is now sitting in a deleted directory — hand it the
+    # first member's repo_root as the ONLY stdout line so the shellenv wrapper
+    # can cd there. Without the wrapper active (no CAMP_SHELL_INTEGRATION
+    # marker) the printed path is inert; nudge once, same as `camp new`.
+    if cwd_inside_ws and group["members"]:
+        if "CAMP_SHELL_INTEGRATION" not in os.environ:
+            print(
+                '  tip: run eval "$(trailhead shellenv)" so `camp remove` returns '
+                "you to the group repo automatically",
+                file=sys.stderr,
+            )
+        print(str(group["members"][0]["repo_root"]))
 
 
 def _cmd_rebase_group_cli(
