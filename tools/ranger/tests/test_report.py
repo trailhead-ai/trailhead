@@ -113,6 +113,78 @@ def test_report_files_are_0600_from_the_creating_syscall_not_a_later_chmod(tmp_p
     assert _mode(report_path.with_suffix(".state.json")) == 0o600
 
 
+def test_a_write_that_fails_mid_flight_leaves_the_previous_report_intact(tmp_path, monkeypatch):
+    """Every re-render lands by rename, so a failed write is a no-op.
+
+    The report is a partial durable artifact: an operator reads it after a
+    sweep dies, and everything already recorded must still be there. Rendering
+    the whole file over itself in place would mean a crash inside the write
+    window truncates it and destroys every line recorded before this one.
+    Renaming a fully-written temp file over it makes that window unobservable
+    — the reader sees either the old file or the new one, never a half of one.
+    """
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 2, env=env)
+    report.append_promoted(report_path, "task/a")
+    state_path = report_path.with_suffix(".state.json")
+    report_before = report_path.read_text()
+    state_before = state_path.read_text()
+
+    def crash(*args, **kwargs):
+        raise OSError("simulated crash inside the write window")
+
+    monkeypatch.setattr(report.os, "replace", crash)
+    with pytest.raises(OSError):
+        report.append_promoted(report_path, "task/b")
+    monkeypatch.undo()
+
+    assert report_path.read_text() == report_before
+    assert state_path.read_text() == state_before
+    assert sorted(p.name for p in report_path.parent.iterdir()) == sorted(
+        [report_path.name, state_path.name]
+    ), "a failed write must leave no temp file behind"
+
+
+def test_rewrites_keep_both_files_0600(tmp_path):
+    """The rename must carry the temp file's own 0600, not the process umask."""
+    env = _env(tmp_path)
+    previous_umask = os.umask(0o000)
+    try:
+        report_path = report.start("mygroup", "myvault", 1, env=env)
+        report.append_promoted(report_path, "task/a")
+        report.finish(report_path)
+    finally:
+        os.umask(previous_umask)
+
+    assert _mode(report_path) == 0o600
+    assert _mode(report_path.with_suffix(".state.json")) == 0o600
+
+
+def test_unparseable_state_is_a_named_error_and_never_a_silent_reset(tmp_path):
+    """Corrupt state refuses by name; it does not start a fresh state file.
+
+    Resetting would un-dedupe the sweep: `appended_task_ids` is the only
+    record of what has already been written, so a fresh state re-appends every
+    task the coordinator records from there on, and the operator reads a
+    report that double-counts its own buckets.
+    """
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 2, env=env)
+    report.append_promoted(report_path, "task/a")
+    state_path = report_path.with_suffix(".state.json")
+    state_path.write_text("{ truncated", encoding="utf-8")
+
+    with pytest.raises(report.ReportError) as exc_info:
+        report.append_promoted(report_path, "task/b")
+
+    message = str(exc_info.value)
+    assert str(state_path) in message
+    assert "unreadable JSON" in message
+    assert "start a new sweep" in message, "the refusal must carry a remediation"
+    assert state_path.read_text() == "{ truncated", "corrupt state must never be overwritten"
+    assert "task/a" in report_path.read_text()
+
+
 def test_append_promoted_is_idempotent_per_task_id(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)

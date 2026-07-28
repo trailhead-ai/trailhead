@@ -177,6 +177,23 @@ def test_skill_keeps_an_attempted_this_sweep_set():
     )
 
 
+def test_skill_records_the_never_dispatched_buckets_once_up_front():
+    """*When* they are recorded is as load-bearing as *that* they are.
+
+    Neither never-dispatched bucket is ever drained, so both persist across
+    every re-derivation of the sweep. Prose that says only "record from the
+    bucket alone" leaves the loop free to record them per iteration — the
+    report's dedupe absorbs the duplicates silently, so the cost shows up as N
+    wasted record calls per task, each one re-reading a record body.
+    """
+    _pin(
+        SKILL,
+        "Record both never-dispatched buckets once, at the first derivation, before the dispatch loop starts",
+        "The two never-dispatched buckets persist across every re-derivation; without "
+        "a stated point at which they are recorded, the loop re-records them each pass.",
+    )
+
+
 def test_skill_exits_on_the_filtered_actionable_set():
     """The exit condition must name the *filtered* set, not the raw derivation.
 
@@ -381,6 +398,28 @@ def test_agent_pins_the_one_line_return_contract():
 @pytest.mark.parametrize("token", RETURN_TOKENS)
 def test_agent_names_every_return_token(token: str):
     _pin(AGENT, token, "The agent's vocabulary must match the loop's, token for token.")
+
+
+def test_agent_returns_promoted_whatever_the_records_status_is():
+    """`PROMOTED` is about the draft, not about the status field.
+
+    Defining it as "the task is now `ready`" leaves a `blocked` task with no
+    token at all: the agent is forbidden to flip that status (the loop owns
+    the exit edge), so a successful draft on a blocked task would have to be
+    reported as something it is not — or not reported at all.
+    """
+    _pin(
+        AGENT,
+        "returns `PROMOTED` regardless of the record's current status",
+        "A `blocked-answered` task the agent drafts successfully must still return "
+        "`PROMOTED`; the agent never writes that task's status.",
+    )
+    _pin(
+        AGENT,
+        "the status write is the loop's job, never the agent's",
+        "Naming the owner is what stops the definition being read as a licence to "
+        "flip the status the loop is the sole writer of.",
+    )
 
 
 # --- agent: explicit-vault writes --------------------------------------------

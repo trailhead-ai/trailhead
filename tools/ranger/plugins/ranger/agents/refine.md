@@ -96,7 +96,7 @@ command assembled out of it is command injection with extra steps.
 **Return exactly one line, and nothing else** — no preamble, no summary, no file list, no
 explanation of what you did:
 
-- `PROMOTED` — the payload was appended and the task is now `ready`.
+- `PROMOTED` — the payload was drafted and written. A successful draft returns `PROMOTED` regardless of the record's current status: on an `open` task the procedure's own flip to `ready` is part of that write, and on a `blocked` one no status is written at all — the status write is the loop's job, never the agent's.
 - `ESCALATED` — a partial payload was written and the surviving question recorded.
 - `ROUTED <target>` — the work is not a standalone leaf; `<target>` names the destination
   (`/craft:plan`, `/craft:brainstorm`, or the parent record).

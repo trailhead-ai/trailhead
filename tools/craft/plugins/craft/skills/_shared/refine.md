@@ -292,6 +292,7 @@ label strings (`**Delivers:**`, `**Test contract:**`, `**Files:**`) **and** on t
 `## Refine — unresolved` heading:
 
 - Found once → **update in place**. Never append a second set.
+  Re-escalation replaces the section's content entirely, including any prior `**Answer:**` line — an answer left behind belongs to the question you just replaced, and an unattended sweep reads it as an answer to the new one.
 - Found twice (a hand-edited body drifted) → **report the conflict** and stop.
   Guessing which set is canonical is how the wrong payload reaches an executor.
 - Not found → append, per Step 4.

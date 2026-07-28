@@ -12,7 +12,13 @@ is what makes re-appends idempotent (a task id already recorded in
 off. ``start`` creates both files 0600 with the header and all seven bucket
 headings rendered up front — a fresh report is a valid, parseable partial
 report even before any task is appended, and stays parseable if the sweep never
-reaches ``finish`` (no footer is simply absent, not a corrupt file).
+reaches ``finish`` (no footer is simply absent, not a corrupt file). Because
+every write re-renders the whole file, each one lands by writing a complete
+temp file alongside and renaming it into place: the report is a partial durable
+artifact an operator reads precisely *because* a sweep died, so no write may
+leave it truncated. A state file that stops parsing is refused by name rather
+than reset — resetting would un-dedupe the sweep and duplicate every line
+recorded after it.
 
 Bucket set is fixed by the spec this module implements: ``promoted``,
 ``escalated-awaiting-operator``, ``routed``, ``blocked-answered``,
@@ -55,6 +61,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,6 +104,14 @@ _NEAR_MISS_LINE = (
 #: line to build one around.
 _MISSING_QUESTION_LINE = "question could not be extracted — open the record"
 
+#: Rendered in place of the question when the record itself could not be read
+#: back from the elected vault — deleted, renamed, or moved between the
+#: derivation that queued it and the read that would lift its question. Same
+#: shape as the unparseable-body line above, and for the same reason: the
+#: operator keeps a handle on the task, and one unreadable record never ends a
+#: sweep that still has tasks behind it.
+_UNREADABLE_RECORD_LINE = "record could not be read from the elected vault"
+
 _FAILED_RETRY_SENTENCE = (
     "The task record was left untouched and will be retried automatically next sweep."
 )
@@ -126,8 +141,9 @@ _REDACTED = "[REDACTED]"
 
 
 class ReportError(Exception):
-    """Raised for report-writer failures: no report started at a given path,
-    or a group name that fails path-segment confinement."""
+    """Raised for report-writer failures: no report started at a given path, a
+    state file that no longer parses as JSON, or a group name that fails
+    path-segment confinement."""
 
 
 class QuestionExtractionError(ReportError):
@@ -223,24 +239,53 @@ def _state_path(report_path: Path) -> Path:
 def _load_state(report_path: Path) -> dict:
     state_path = _state_path(report_path)
     try:
-        return json.loads(state_path.read_text(encoding="utf-8"))
+        text = state_path.read_text(encoding="utf-8")
     except OSError as e:
         raise ReportError(f"no report started at {report_path}: {e}")
+    try:
+        return json.loads(text)
+    except ValueError as e:
+        # Never a silent reset: `appended_task_ids` is the only record of what
+        # this sweep has already written, so a fresh state would re-append
+        # every task recorded from here on and double-count the report's own
+        # buckets. Refusing by name leaves both files exactly as found.
+        raise ReportError(
+            f"report state at {state_path} is unreadable JSON ({e}); this sweep cannot be "
+            "resumed — start a new sweep, and keep this report for the lines it already holds"
+        )
 
 
 def _write_0600(path: Path, text: str) -> None:
-    """Write *text* to *path*, owner-readable from the creating syscall on.
+    """Write *text* to *path* atomically, owner-only from the creating syscall on.
 
-    The mode is an argument to ``open(2)``, not a ``chmod`` afterwards: a
-    report written at the process umask and tightened a moment later is a file
-    whose question text — scrubbed of credential shapes, but still the
-    operator's private backlog — was world-readable for that moment. Matches
-    the lock's creation pattern; ``O_TRUNC`` rather than ``O_EXCL`` because
-    every append re-renders the whole file over itself.
+    Two properties, both load-bearing:
+
+    **Owner-only from creation.** The mode is an argument to ``open(2)``, not a
+    ``chmod`` afterwards: a report written at the process umask and tightened a
+    moment later is a file whose question text — scrubbed of credential shapes,
+    but still the operator's private backlog — was world-readable for that
+    moment. ``mkstemp`` creates at 0600 and ``os.replace`` carries that mode
+    onto the destination.
+
+    **Atomic replacement.** Every append re-renders the whole file, so an
+    in-place truncating write would put the entire report at risk on each one:
+    a crash inside that window leaves a truncated file, and the report is a
+    *partial durable artifact* — an operator reads it precisely when the sweep
+    died. Writing a complete temp file in the same directory and renaming it
+    over the destination makes the window unobservable (``rename(2)`` is atomic
+    on POSIX), and a failed write leaves the previous contents intact and no
+    temp file behind.
     """
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
+    path = Path(path)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _write_state(report_path: Path, state: dict) -> None:
@@ -414,3 +459,13 @@ def append_blocked_still_waiting(
         task_id, record_body, elected_vault(report_path), near_miss=near_miss
     )
     _append(report_path, "blocked-still-waiting", task_id, entry)
+
+
+def append_unreadable_record(report_path: Path, bucket: str, task_id: str) -> None:
+    """Report a task whose record could not be read back from the vault.
+
+    Carries no question and no answer command — there is no body to lift
+    either from — but keeps the task's line in the bucket its derivation put it
+    in, so the report still accounts for every task the sweep touched.
+    """
+    _append(report_path, bucket, task_id, f"- `{task_id}` — {_UNREADABLE_RECORD_LINE}\n\n")

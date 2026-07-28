@@ -65,8 +65,9 @@ _TOKEN_BYTES = 16
 
 
 class LockError(Exception):
-    """Raised for any sweep-lock failure: invalid vault name, contention, or
-    a release attempted against a lock the caller doesn't hold."""
+    """Raised for any sweep-lock failure: invalid vault name, contention, a
+    filesystem refusal to create the lock, or a release attempted against a
+    lock the caller doesn't hold."""
 
 
 def _validate_vault_name(name: str) -> None:
@@ -142,7 +143,14 @@ def acquire(
         raise LockError(f"holder_pid must be a positive process id, got {holder_pid!r}")
 
     path = lock_path(vault_name, env=env)
-    ensure_dir(path.parent, mode=0o700)
+    # The filesystem's own refusals (an unwritable state dir, a name the OS
+    # rejects) are lock failures like any other: `start` prints a LockError as
+    # its one-line refusal, so an OSError escaping here reaches an unattended
+    # operator as a traceback carrying no remediation.
+    try:
+        ensure_dir(path.parent, mode=0o700)
+    except OSError as e:
+        raise LockError(f"could not create the lock directory {path.parent}: {e}")
 
     token = secrets.token_hex(_TOKEN_BYTES)
     payload = {
@@ -156,6 +164,8 @@ def acquire(
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         _raise_for_existing_lock(path)
+    except OSError as e:
+        raise LockError(f"could not create the lock file {path}: {e}")
     with os.fdopen(fd, "w") as f:
         json.dump(payload, f)
     return path, token

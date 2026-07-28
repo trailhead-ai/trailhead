@@ -416,6 +416,25 @@ def test_rerefine_is_idempotent_on_labels_and_the_escalation_heading():
     )
 
 
+def test_reescalation_clears_a_prior_operator_answer():
+    """An updated-in-place escalation section must not keep the old answer.
+
+    The answered predicate a sweep applies is "a `**Answer:**` line inside the
+    section" — nothing about which question it answers. A re-escalation that
+    writes a new question but leaves the previous answer in place therefore
+    reads as already answered, and the task is dispatched again on every sweep
+    with the churn guard doing nothing.
+    """
+    assert (
+        "Re-escalation replaces the section's content entirely, including any prior "
+        "`**Answer:**` line" in SHARED_REFINE.read_text()
+    ), (
+        "_shared/refine.md must state that re-escalation replaces the whole "
+        "`## Refine — unresolved` section, prior `**Answer:**` line included — a "
+        "stale answer makes a freshly re-escalated task read as answered"
+    )
+
+
 def test_append_never_overwrite():
     assert "Append, never overwrite" in SHARED_REFINE.read_text(), (
         "_shared/refine.md must preserve the captured prose — it is the task's why, "

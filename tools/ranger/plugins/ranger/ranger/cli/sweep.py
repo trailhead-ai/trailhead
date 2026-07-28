@@ -48,16 +48,20 @@ the agent returned). A task derivation never dispatched — churn-guarded or
 still waiting on an operator — is reported from its queue bucket alone and
 takes no outcome; a dispatched task is reported from its outcome, except that
 a previously-``blocked`` task keeps the ``blocked-answered`` bucket its
-history earns it. The one exception to that exception is ``ESCALATED``, which
-outranks the queue bucket entirely: the ritual has just written a fresh
-question into the record, and only the escalated line carries that question
-and the command that answers it.
+history earns it — but only where the outcome carries nothing the bucket
+would lose. ``ESCALATED``, ``SKIPPED``, ``FAILED``, and an unparseable return
+all outrank the queue bucket, because each carries something no other line in
+the report holds: the question the ritual just wrote and the command that
+answers it, or the reason the task was skipped or failed. Reported as a bare
+id under "Blocked — answered", every one of those reads as *handled*.
 
 **Nothing here is fatal to the sweep.** An outcome that doesn't parse buckets
 ``failed`` and exits 0; a record body whose unresolved section carries no
-parseable question renders a fixed placeholder and exits 0. One confused
-agent return, or one malformed record, must not end a sweep that still has
-tasks to drain.
+parseable question renders a fixed placeholder and exits 0; a record that has
+left the elected vault since it was queued renders its own fixed note, in the
+bucket the derivation put it in, and exits 0. One confused agent return, one
+malformed record, or one record deleted mid-sweep must not end a sweep that
+still has tasks to drain.
 """
 
 from __future__ import annotations
@@ -285,7 +289,15 @@ def _append_question_line(report_path: Path, task_id: str, *, status: str, bucke
     from ..sweep import report as report_mod
 
     vault = report_mod.elected_vault(report_path)
-    body = queue_mod.read_body(task_id.split("/", 1)[1], vault=vault, runner=None)
+    try:
+        body = queue_mod.read_body(task_id.split("/", 1)[1], vault=vault, runner=None)
+    except queue_mod.QueueDeriveError:
+        # The record left the elected vault between the derivation that queued
+        # it and this read — deleted, renamed, or moved. Nothing here is fatal
+        # to the sweep (see the module docstring), and refusing would lose this
+        # task's report line as well as every task still behind it.
+        report_mod.append_unreadable_record(report_path, bucket, task_id)
+        return
     _bucket, near_miss = queue_mod.classify(status, body)
     append = (
         report_mod.append_blocked_still_waiting
@@ -321,31 +333,38 @@ def _cmd_sweep_record(args) -> int:
                 f"--outcome is required for a dispatched task (--queue-bucket {queue_bucket})"
             )
 
+        # Outcome first, queue bucket second. Every outcome that carries
+        # information the queue bucket cannot express outranks it:
+        #
+        # - an unparseable return, and `FAILED <reason>` (which the loop
+        #   synthesizes for a dispatch that errored or timed out), carry a
+        #   reason the `failed` bucket exists to show the operator;
+        # - `SKIPPED <reason>` likewise;
+        # - `ESCALATED` means the ritual just wrote a fresh question into the
+        #   record, and the escalated line's question text plus its answer
+        #   command are the operator's only handle on it.
+        #
+        # Reported under the queue bucket instead, each of those renders a bare
+        # id under "Blocked — answered" — a line that reads as *handled* while
+        # the reason, or the question, is dropped.
         token, argument = parse_outcome(args.outcome)
-        if token is None:
+        if token is None or token == "FAILED":
             report_mod.append_failed(report_path, task_id, argument)
-        # ESCALATED outranks the queue bucket. The ritual just wrote a fresh
-        # question into this record, and the operator's only handle on it is
-        # the escalated line's question text plus its answer command — a
-        # previously-blocked task reported as a bare id under its own bucket
-        # would strand a question nothing else in the sweep surfaces.
+        elif token == "SKIPPED":
+            report_mod.append_skipped(report_path, task_id, argument)
         elif token == "ESCALATED":
             _append_question_line(
                 report_path, task_id, status="open", bucket="escalated-awaiting-operator"
             )
-        # Otherwise a previously-blocked task keeps its own bucket whatever
-        # the ritual returned: the return drives the loop's status write, not
-        # a further bucket split.
+        # Only then does a previously-blocked task keep its own bucket: for
+        # `PROMOTED` and `ROUTED` the return drives the loop's status write,
+        # not a further bucket split.
         elif queue_bucket == "blocked-answered":
             report_mod.append_blocked_answered(report_path, task_id)
         elif token == "PROMOTED":
             report_mod.append_promoted(report_path, task_id)
-        elif token == "ROUTED":
-            report_mod.append_routed(report_path, task_id, argument)
-        elif token == "SKIPPED":
-            report_mod.append_skipped(report_path, task_id, argument)
         else:
-            report_mod.append_failed(report_path, task_id, argument)
+            report_mod.append_routed(report_path, task_id, argument)
     except (report_mod.ReportError, queue_mod.QueueDeriveError) as exc:
         return _fail(str(exc))
     return 0

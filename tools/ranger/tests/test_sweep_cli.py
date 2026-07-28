@@ -119,6 +119,10 @@ _FAKE_LORE_SCRIPT = textwrap.dedent(
             print(f"fake lore: wrong vault: {argv!r}", file=sys.stderr)
             sys.exit(2)
         name = argv[2].split("/", 1)[1]
+        # A record that left the elected vault between derivation and the read.
+        if name in fixture.get("unreadable", []):
+            print(f"fake lore: no record {name!r} in this vault", file=sys.stderr)
+            sys.exit(1)
         print(json.dumps({
             "record_id": argv[2],
             "kind": "task",
@@ -230,6 +234,12 @@ class Sweep:
         fixture["tasks"] = tasks
         self.fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
 
+    def set_unreadable(self, names: list[str]) -> None:
+        """Make `record show` fail for *names* — the record left the vault."""
+        fixture = json.loads(self.fixture_path.read_text())
+        fixture["unreadable"] = names
+        self.fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
     # --- running -------------------------------------------------------
 
     @property
@@ -243,14 +253,28 @@ class Sweep:
         env["PATH"] = f"{self.bin_dir}{os.pathsep}{env.get('PATH', '')}"
         return env
 
-    def run(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    def run(
+        self, *args: str, cwd: Path | None = None, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, str(CLI_PATH), *args],
             capture_output=True,
             text=True,
-            env=self.env,
+            env=env or self.env,
             cwd=str(cwd or self.cwd),
         )
+
+    def run_without_lore(self, *args: str) -> subprocess.CompletedProcess:
+        """Run a verb with a PATH that carries no `lore` executable at all.
+
+        The CLI is invoked by absolute path, so an empty PATH changes exactly
+        one thing: whether the `lore` the sweep shells out to can be found.
+        """
+        empty_bin = self.tmp / "empty-bin"
+        empty_bin.mkdir(exist_ok=True)
+        env = self.env
+        env["PATH"] = str(empty_bin)
+        return self.run(*args, env=env)
 
     def start(self, *extra: str, holder_pid: int | None = None) -> subprocess.CompletedProcess:
         """Start a sweep held by *holder_pid*.
@@ -428,6 +452,26 @@ def test_start_emits_exactly_the_contracted_json_keys(tmp_path):
     assert payload["templates_root"].endswith("/plugins/craft/templates")
     assert [e["name"] for e in payload["queue"]] == ["t1", "t2", "t3"]
     assert all(e["bucket"] == "dispatchable" for e in payload["queue"])
+
+
+def test_start_names_a_missing_lore_cli_instead_of_tracebacking(tmp_path):
+    """`lore` absent from PATH is a refusal, not a stack trace.
+
+    Runtime startup checks are the sweep's only dependency guard — nothing
+    enforces plugin dependencies at install time — so the one dependency every
+    check itself shells out to must fail with the same one-line, remediable
+    message shape as the checks it powers.
+    """
+    sweep = _sweep(tmp_path)
+
+    res = sweep.run_without_lore("sweep", "start", "--holder-pid", str(os.getpid()))
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+    assert "Traceback" not in res.stderr
+    assert "lore CLI not found on PATH" in res.stderr
+    assert "install lore or adjust PATH" in res.stderr
+    sweep.assert_nothing_created()
 
 
 def test_start_echoes_the_report_path_on_stderr(tmp_path):
@@ -728,6 +772,88 @@ def test_record_escalated_out_of_the_blocked_answered_bucket_carries_the_questio
     assert "lore record update task/t1 --vault testvault --diff" in escalated
     answered = text.split("## Blocked — answered")[1].split("## Blocked — still waiting")[0]
     assert "task/t1" not in answered
+
+
+@pytest.mark.parametrize(
+    "outcome,heading,line",
+    [
+        ("FAILED dispatch timed out after 10 minutes", "## Failed", "dispatch timed out"),
+        ("SKIPPED not a standalone task", "## Skipped", "not a standalone task"),
+    ],
+    ids=["failed", "skipped"],
+)
+def test_record_failure_tokens_outrank_the_blocked_answered_bucket(
+    tmp_path, outcome, heading, line
+):
+    """A `FAILED`/`SKIPPED` return out of `blocked-answered` keeps its reason.
+
+    The loop synthesizes `FAILED <reason>` for a dispatch that times out, and
+    that dispatch is just as likely to have been of a `blocked-answered` task
+    as of any other. Bucketing it by the task's history instead of its outcome
+    renders a bare id under "Blocked — answered" and drops the reason on the
+    floor — the failure never reaches the bucket an operator reads for
+    failures, and the report claims the task was handled.
+    """
+    sweep = _sweep(tmp_path)
+    sweep.set_tasks([_task("t1", status="blocked")])
+    sweep.set_bodies({"t1": _ANSWERED_BODY})
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--queue-bucket", "blocked-answered", "--outcome", outcome)
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    section = text.split(heading)[1]
+    assert f"- `task/t1` — {line}" in section
+    answered = text.split("## Blocked — answered")[1].split("## Blocked — still waiting")[0]
+    assert "task/t1" not in answered
+
+
+def test_record_degrades_when_the_record_left_the_elected_vault(tmp_path):
+    """A record that vanished between derivation and recording is never fatal.
+
+    `record` reads the body to lift the question; a record deleted, renamed, or
+    moved out of the elected vault mid-sweep makes that read fail. Exiting
+    nonzero there loses the task's report line *and* stops a sweep that still
+    has tasks to drain — the same never-fatal rule the malformed-question path
+    already follows.
+    """
+    sweep = _sweep(tmp_path)
+    sweep.set_tasks([_task("t1"), _task("t2")])
+    sweep.set_bodies({"t1": _QUESTION_BODY, "t2": _QUESTION_BODY})
+    report = _start_and_report(sweep)
+    sweep.set_unreadable(["t1"])
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--queue-bucket", "escalated-awaiting-operator")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    escalated = text.split("## Escalated — awaiting operator")[1].split("## Routed")[0]
+    assert "- `task/t1` — record could not be read from the elected vault" in escalated
+    assert "lore record update task/t1" not in escalated
+
+    # The sweep continues: the next task records normally.
+    nxt = sweep.run("sweep", "record", "--report", report, "--task", "task/t2",
+                    "--queue-bucket", "escalated-awaiting-operator")
+    assert nxt.returncode == 0, nxt.stderr
+    assert "Which queue should this drain?" in Path(report).read_text()
+
+
+def test_record_degrades_for_a_still_waiting_record_that_left_the_vault(tmp_path):
+    sweep = _sweep(tmp_path)
+    sweep.set_tasks([_task("t1", status="blocked")])
+    sweep.set_bodies({"t1": _QUESTION_BODY})
+    report = _start_and_report(sweep)
+    sweep.set_unreadable(["t1"])
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--queue-bucket", "blocked-still-waiting")
+
+    assert res.returncode == 0, res.stderr
+    waiting = Path(report).read_text().split("## Blocked — still waiting")[1].split("## Skipped")[0]
+    assert "- `task/t1` — record could not be read from the elected vault" in waiting
 
 
 @pytest.mark.parametrize(

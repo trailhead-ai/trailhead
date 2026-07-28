@@ -82,8 +82,9 @@ _ANSWER_NEAR_MISS_RE = re.compile(r"^\*{0,2}answer:", re.IGNORECASE)
 
 
 class QueueDeriveError(Exception):
-    """Raised when a `lore` CLI call the derivation depends on fails, or emits
-    output the derivation can't parse as JSON."""
+    """Raised when a `lore` CLI call the derivation depends on cannot be run at
+    all (no `lore` on PATH), fails, or emits output the derivation can't parse
+    as JSON."""
 
 
 def _default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
@@ -102,7 +103,21 @@ def run_lore(argv: list[str], *, runner: Runner | None) -> Any:
     """
     effective = runner if runner is not None else _default_runner
     cmd = ["lore", *argv]
-    result = effective(cmd)
+    # An absent (or unexecutable) `lore` is a dependency failure, not a bug:
+    # nothing enforces plugin dependencies at install time, so these runtime
+    # calls are the sweep's only guard, and they must refuse in the same named,
+    # remediable shape every startup check uses rather than surface the
+    # subprocess layer's own exception to an unattended operator.
+    try:
+        result = effective(cmd)
+    except FileNotFoundError as exc:
+        raise QueueDeriveError(
+            "lore CLI not found on PATH — install lore or adjust PATH"
+        ) from exc
+    except OSError as exc:
+        raise QueueDeriveError(
+            f"lore CLI could not be run ({exc}) — install lore or adjust PATH"
+        ) from exc
     if result.returncode != 0:
         raise QueueDeriveError(
             f"lore {' '.join(argv)} failed: {result.stderr.strip()}"

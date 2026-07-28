@@ -133,10 +133,12 @@ ranger sweep record --report "<report_path>" --task "task/<name>" --queue-bucket
 ```
 
 Use `--queue-bucket blocked-answered` for a task that came out of that bucket; the report
-keeps the bucket the task's history earns it — except on `ESCALATED`, where the CLI reports
-the fresh question and its answer command instead, because a bare id would strand the
-question the ritual just wrote. Pass the return line as one quoted argument, exactly as
-received — never build a larger command string around it.
+keeps the bucket the task's history earns it on `PROMOTED` and `ROUTED`. Every other return
+outranks that bucket, because each carries something a bare id under "Blocked — answered"
+would drop: `ESCALATED` carries the question the ritual just wrote and the command that
+answers it, and `SKIPPED`, `FAILED`, and an unparseable return each carry their reason.
+Pass the return line as one quoted argument, exactly as received — never build a larger
+command string around it.
 
 Add the task id to the attempted-this-sweep set (§2.7) as you record it.
 
@@ -172,6 +174,12 @@ ranger sweep record --report "<report_path>" --task "task/<name>" --queue-bucket
 
 The CLI reads the record itself to lift the question and build the operator's answer
 command. That is why you do not open the record.
+
+**Record both never-dispatched buckets once, at the first derivation, before the dispatch loop starts.**
+They are reported, never drained, so every later derivation still carries them — and
+recording them again each pass re-reads a record body per task for a line the report
+already holds. Add each id to the attempted-this-sweep set (§2.7) as you record it, so
+the filter drops them from every derivation that follows.
 
 ### 2.6 When a dispatch goes wrong
 

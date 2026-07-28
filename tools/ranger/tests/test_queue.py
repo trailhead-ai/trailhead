@@ -385,6 +385,36 @@ def test_lore_task_list_failure_raises_named_error_not_a_crash():
         queue.derive_queue(_VAULT, runner=runner)
 
 
+def test_absent_lore_cli_raises_a_named_error_with_remediation(monkeypatch, tmp_path):
+    """`lore` missing from PATH must name itself, not raise FileNotFoundError.
+
+    The sweep's runtime startup checks are its only dependency guard, and every
+    one of them shells out through here — so an uninstalled (or unreachable)
+    `lore` has to arrive at the CLI as a named error with a remediation, the
+    same shape as every other precondition failure, rather than as a traceback.
+    """
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    with pytest.raises(queue.QueueDeriveError) as exc:
+        queue.derive_queue(_VAULT)
+
+    assert "lore CLI not found on PATH" in str(exc.value)
+    assert "install lore or adjust PATH" in str(exc.value)
+
+
+def test_unrunnable_lore_cli_raises_a_named_error_not_a_crash(monkeypatch, tmp_path):
+    """A `lore` on PATH that the OS refuses to exec is the same class of failure."""
+    fake = tmp_path / "lore"
+    fake.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake.chmod(0o600)  # present, but not executable
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    with pytest.raises(queue.QueueDeriveError) as exc:
+        queue.derive_queue(_VAULT)
+
+    assert "lore CLI could not be run" in str(exc.value)
+
+
 def test_lore_record_show_failure_raises_named_error_not_a_crash():
     entries = [_task_entry("t1", "open")]
     runner = _make_runner(

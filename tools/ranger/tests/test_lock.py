@@ -132,6 +132,39 @@ def test_acquire_reports_stale_for_corrupt_payload(tmp_path):
     assert path.read_text() == before
 
 
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores dir modes")
+def test_acquire_reports_an_unwritable_locks_dir_as_a_lock_error(tmp_path):
+    """Every acquire failure is a LockError, including the filesystem's own.
+
+    `start` catches `LockError` and prints it as `ranger: <message>`; an
+    `OSError` escaping from the lock creation instead reaches an unattended
+    operator as a traceback with no remediation in it.
+    """
+    state = tmp_path / "state"
+    state.mkdir()
+    state.chmod(0o500)
+    env = {"RANGER_STATE_DIR": str(state)}
+
+    try:
+        with pytest.raises(lock.LockError) as exc_info:
+            lock.acquire("myvault", "mygroup", holder_pid=os.getpid(), env=env)
+    finally:
+        state.chmod(0o700)
+
+    assert "Permission denied" in str(exc_info.value)
+    assert str(state / "locks") in str(exc_info.value)
+
+
+def test_acquire_reports_a_lock_path_the_os_rejects_as_a_lock_error(tmp_path):
+    """A name the filesystem refuses (too long here) is still a named refusal."""
+    env = _env(tmp_path)
+
+    with pytest.raises(lock.LockError) as exc_info:
+        lock.acquire("v" * 300, "mygroup", holder_pid=os.getpid(), env=env)
+
+    assert "could not create the lock file" in str(exc_info.value)
+
+
 @pytest.mark.parametrize("bad_name", ["../x", "a/b", ""])
 def test_acquire_refuses_bad_vault_name_before_filesystem_access(tmp_path, bad_name):
     env = _env(tmp_path)
