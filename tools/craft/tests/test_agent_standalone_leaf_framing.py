@@ -138,6 +138,31 @@ def test_drift_gate_uses_the_converged_payload_labels():
     )
 
 
+def test_drift_gate_verdict_definitions_cover_the_standalone_leaf():
+    """The verdict rules are what the gate actually emits against; the checks feed them.
+
+    Relaxing check 1 to a standalone payload and making check 3 N/A, while `PASS` still
+    requires "nothing blocks the next slice" and `DRIFT` still measures against "the
+    slice's plan section", leaves no verdict a standalone leaf can satisfy as written.
+    """
+    text = _text("drift-gate.md")
+    assert "or, for a standalone leaf, the task's payload" in text, (
+        "drift-gate.md's verdict definitions must name the standalone leaf's payload as "
+        "the thing the diff is measured against when there is no plan section"
+    )
+    assert "N/A on a standalone leaf" in text, (
+        "drift-gate.md's `PASS` definition must qualify the next-slice clause — check 3 "
+        "is already N/A for a standalone leaf, so a verdict that still requires it "
+        "contradicts the check list above it"
+    )
+    assert "read the same severity bar against the change itself" in text, (
+        "drift-gate.md's `BLOCKED` definition sets its severity bar as 'building the "
+        "next slice on this one would be unsafe' — on a standalone leaf that bar can "
+        "never be met, so the most severe verdict becomes unreachable unless it is "
+        "restated against the change itself"
+    )
+
+
 def test_drift_gate_next_slice_readiness_is_explicit_na_on_a_standalone_leaf():
     """A vacuously-passing check reads identically to a check that found nothing."""
     text = _text("drift-gate.md")

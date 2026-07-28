@@ -1,21 +1,24 @@
 ---
 name: execute
 description: >
-  Use when executing an approved implementation plan slice-by-slice, dispatching `assumption-prover`
-  and `executor` subagents for each slice rather than building inline. The controller (you)
-  orchestrates; subagents do the work.
+  Use when executing an approved implementation plan slice-by-slice — or a single standalone task
+  record as the whole unit of work — dispatching `assumption-prover` and `executor` subagents
+  rather than building inline. The controller (you) orchestrates; subagents do the work.
   TRIGGER when: user says "execute", "execute the plan", "start building", "let's build", "build it",
   "implement this", "run the plan", "work the slices", "start the slices", "go" (following plan approval),
   "ship it", or resumes a plan with unfinished slices. Also triggers as the natural
-  handoff after `/planning` when the user approves the written plan.
-  DO NOT TRIGGER when: no plan exists yet (use `/planning` or `planner` first), the plan has ≤2 slices
-  with no unknowns and small scope (just build it yourself), or the user is debugging rather than
-  executing.
+  handoff after `/planning` when the user approves the written plan, and when the user hands over a
+  standalone (childless, parentless) task record to run — `ready` to dispatch straight away, `open`
+  and execute refines it inline first.
+  DO NOT TRIGGER when: there is neither a plan nor a task record to execute yet (use `/planning`
+  or `planner` first), the plan has ≤2 slices with no unknowns and small scope (just build it
+  yourself), or the user is debugging rather than executing.
 ---
 
 # Execute
 
-Execute a plan slice-by-slice. For each slice, resolve unknowns first, then build.
+Execute a plan slice-by-slice — or a standalone task as its own single slice. For each slice,
+resolve unknowns first, then build.
 Every status write below follows the task-status ownership contract in
 `../_shared/status-ownership.md` — the single source of truth for who writes each
 status value, `done`'s push guarantee, and `blocked` semantics; read it before
@@ -33,7 +36,9 @@ The controller decides which to dispatch and absorbs findings between iterations
 
 ## When to Use
 
-- You have an approved implementation plan with slices and known unknowns
+- You have an approved implementation plan with slices and known unknowns, **or** a
+  standalone task record that is itself the whole unit of work (`ready`, or `open` and
+  refinable — see the standalone branch below)
 - You want to execute in the current session
 
 ## Skip Gate
@@ -43,6 +48,13 @@ The controller decides which to dispatch and absorbs findings between iterations
 - You'd spend more time writing prompts and absorbing reports than just building it
 
 In those cases, build it yourself following TDD and verification. Subagent overhead isn't free.
+
+**On a standalone task this gate is an explicit judgment, never an automatic one.** A single
+leaf trivially satisfies the ≤2-slices bar, so read literally this gate would fire on every
+standalone run and swallow the branch below. The escape stays available — a small
+standalone task **MAY be built inline** under the same TDD discipline — but
+the standalone branch below is the default, and taking the inline route is a call you
+state, not one you drift into.
 
 ## The Loop
 
@@ -64,7 +76,10 @@ task itself — and read both the render and the record's sidecar:
   sidecar carries no `parent` edge. There is no child to descend into — the task is the
   whole unit of work. See the standalone branch below.
 - **Parent-with-children.** The graph renders more than one line. Proceed with the Loop
-  exactly as written below (steps 1-6) — unchanged.
+  exactly as written below (steps 1-6) — unchanged. **One check first:** if the root you
+  rendered itself carries a `parent` edge, you rooted the run at a sub-plan, not at the plan —
+  confirm the intended root with the operator (or re-root at the top-level parent) before
+  walking it.
 - **Ambiguous.** A single-line render **with** a `parent` edge present matches neither
   case above and is never classified silently. Disambiguate first —
   **resolve the `parent` value** (`lore record show task/<parent-value>`), because the
@@ -106,9 +121,19 @@ Phase 3's whole-change correctness-review dispatch.
 - **`blocked`** — report the blocking condition recorded on the task and stop. `blocked`
   encodes an external condition execute can neither observe nor clear.
 - **`in-progress`** — a run already started against this task. Resume rather than
-  re-dispatching from the top: resume it at the first unticked `## End Phases` line, per
-  [Phase progress and resumability](#phase-progress-and-resumability) (including its
-  clean-working-tree precondition).
+  re-dispatching from the top, and read `## End Phases` to decide *where* — it exists from the
+  first executor dispatch, so its presence proves nothing about how far the run got:
+  - **No ticked phase line** (only the dispatch-count note, or nothing) — the build itself
+    may be incomplete, so re-enter the Loop: verify the working tree and the last commit
+    against the task's payload, then re-dispatch `executor` for whatever is missing —
+    the dispatch count continues from what the notes record, it never restarts at zero.
+    Enter the end pipeline only once the build is complete.
+  - **At least one ticked phase line** — the build is complete and the end pipeline is
+    underway. Re-enter it at the first unticked phase line.
+
+  Either way the clean-working-tree precondition in
+  [Phase progress and resumability](#phase-progress-and-resumability) applies before any
+  re-dispatch.
 - **`done`, `dropped`, `superseded`** — terminal. Report there is nothing to do and stop.
 
 **Status walk.** The standalone task is its own lifecycle handle, so it walks the status
@@ -247,8 +272,13 @@ operate on the task record itself rather than a parent:
 - The **plan-path substitution** stated once in the Loop's standalone branch above
   governs this pipeline too — Phase 2 and Phase 3 name a plan path in their dispatch
   lists, and a standalone run passes the task record there.
-- The task carries its own `## Flow-out` checklist — refine wrote it when the task
-  promoted to `ready` — so Phase 5 works that checklist directly.
+- **Phase 5 works the task's own `## Flow-out` checklist — after making sure it has one.**
+  Refine writes that checklist when it promotes a task to `ready`, but a standalone `ready`
+  task can arrive from elsewhere (a `/craft:polish` brief, a hand-captured record) carrying
+  no such section, and the Red Flag below refuses to close a task without a ticked one. So
+  Phase 5 checks first: if the task body carries no `## Flow-out`, then
+  append the three items from `${CLAUDE_PLUGIN_ROOT}/templates/plan.md` via `lore record update`
+  — the same checklist a planned parent carries — before working it.
 - Phase 6 closes the **task itself**, per the status walk above — "close the parent"
   reads as "close the standalone task" on this path.
 - **`## End Phases` is created at the first executor dispatch** on a standalone task, not

@@ -83,6 +83,18 @@ def test_procedure_appends_the_flow_out_checklist():
     )
 
 
+def test_flow_out_copy_names_its_canonical_source():
+    """The three checklist items are inlined here and also live in templates/plan.md.
+
+    Two copies with no stated authority drift silently: a reader who edits one has no
+    way to know the other exists.
+    """
+    assert "canonical source for those three items" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md must name `templates/plan.md` as the canonical source of "
+        "the inlined `## Flow-out` items, so the copy is known to be a copy"
+    )
+
+
 # --- the gap definition and the self-serve resolution passes ---
 
 
@@ -148,6 +160,25 @@ def test_every_citation_must_resolve_before_promotion():
     )
 
 
+def test_user_stated_constraint_citations_have_a_defined_resolution():
+    """Arm (c) has no external target, so "every citation must resolve" strands it.
+
+    Read literally, a gate defining resolution only for `file:line` and `[[record]]`
+    makes every interactively-answered question unresolvable — which routes it back to
+    Step 2, then to escalation, defeating the interactive promote path entirely.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "is self-resolving" in text, (
+        "_shared/refine.md's resolution gate must define the arm-(c) case: a "
+        "user-stated constraint has no external target to check against"
+    )
+    assert "that record *is* the citation" in text, (
+        "_shared/refine.md must say how an arm-(c) citation resolves — by the payload "
+        "recording the question and the user's answer; a constraint cited with no such "
+        "record written down still fails the gate"
+    )
+
+
 def test_unresolvable_citation_is_a_gap():
     assert "A citation that fails to resolve **is a gap**" in SHARED_REFINE.read_text(), (
         "_shared/refine.md must route a citation that fails to resolve back through "
@@ -209,6 +240,20 @@ def test_escalation_carries_a_route_line():
     assert "/craft:brainstorm" in text, (
         "_shared/refine.md must offer /craft:brainstorm as the route when the "
         "what/why itself is unsettled, not only /craft:plan"
+    )
+
+
+def test_route_outcome_states_what_gets_written():
+    """"Write the drafted partial payload" is ambiguous when nothing was unresolved.
+
+    On a route outcome the payload is not a promotion candidate at all — it is context
+    for whoever picks the work up in planning, and saying so stops a drafter from
+    filling in fields to make the write look complete.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "not a promotion candidate" in text, (
+        "_shared/refine.md must say a route outcome's payload is informational for the "
+        "planner rather than a candidate for promotion"
     )
 
 
@@ -286,6 +331,42 @@ def test_shape_refusals_are_a_mechanical_check():
         "_shared/refine.md must also refuse a task that already has a parent — refine "
         "promotes a *parentless* leaf, and a child slice's payload belongs to the "
         "parent plan; the sidecar's `parent` key is how that is detected"
+    )
+
+
+def test_parent_refusal_waits_for_the_parent_value_to_resolve():
+    """An unresolvable `parent` value must never be redirected to.
+
+    A refusal bullet that fires on the presence of the key alone sends the operator to
+    re-root at a parent that does not exist — the mis-wired-edge case, whose whole
+    point is that the value names nothing.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "do not redirect before the value resolves" in text, (
+        "_shared/refine.md's parent-key refusal must be gated on resolving the value "
+        "first — the disambiguation cannot sit after an unconditional refusal"
+    )
+    assert "never redirect to a parent that does not exist" in text, (
+        "_shared/refine.md must state the unresolvable-parent outcome explicitly: "
+        "report the suspected mis-wired edge, never redirect, never fall through to "
+        "standalone"
+    )
+
+
+def test_shape_check_pins_the_same_parent_resolution_command_execute_does():
+    """Two callers claiming to agree on "standalone" must agree on "resolves"."""
+    text = SHARED_REFINE.read_text()
+    command = "lore record show task/<parent-value>"
+    assert command in text, (
+        f"_shared/refine.md must name {command!r} — execute pins that exact command "
+        "for resolving a `parent` value, and a shape check that only says 'resolve it' "
+        "lets the two callers disagree about what resolution means"
+    )
+    execute_skill = CRAFT / "skills" / "execute" / "SKILL.md"
+    assert command in execute_skill.read_text(), (
+        f"execute/SKILL.md must keep {command!r} — _shared/refine.md mirrors it "
+        "deliberately, so a rename in one file has to fail here rather than silently "
+        "split the two shape checks"
     )
 
 

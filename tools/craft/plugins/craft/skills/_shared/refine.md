@@ -34,22 +34,26 @@ Read the task record's status before anything else.
 
 Then check the task's **shape**, independent of status — mechanically, not by reading
 the prose. Mirror execute's shape detection so the two callers cannot disagree about
-what standalone means: run `lore task graph <name>` and read the record's sidecar.
+what standalone means: run `lore task graph <name>`, read the record's sidecar, and
+resolve any `parent` value with `lore record show task/<parent-value>` — the same
+command execute pins, so the two callers agree on what *resolves* means too.
 
 - **The render shows more than one line** → the task has children, and
   **any task with children — refuse and route to `/craft:plan`**. Refine
   promotes a leaf; a task that already has children is a plan, and reshaping a plan is
   planning's job, not refine's.
-- **The sidecar carries a `parent` key** → the task is already a slice of someone
-  else's plan. Refuse and redirect to that parent: a child slice's payload is the parent
-  plan's to shape, and `/craft:execute` already walks it. Name the parent in the refusal
-  so the operator can re-root there.
 - **One line and no `parent` key** → standalone. Proceed.
-
-A single-line render *with* a `parent` key is the same ambiguous case execute names: do
-not classify it silently. Resolve the `parent` value first — if it names a real task,
-this is a child slice (redirect to the parent); if it resolves to nothing, report the
-suspected mis-wired edge rather than treating the task as standalone.
+- **One line and the sidecar carries a `parent` key** → the same ambiguous case execute
+  names. Do not classify it silently, and **do not redirect before the value resolves**
+  — run `lore record show task/<parent-value>` first, because the two causes have
+  opposite remediations:
+  - **It resolves to a real task** → the task is already a slice of someone else's plan.
+    Refuse and redirect to that parent: a child slice's payload is the parent plan's to
+    shape, and `/craft:execute` already walks it. Name the parent in the refusal so the
+    operator can re-root there.
+  - **It resolves to nothing** → the edge itself is the suspect. Report the suspected
+    mis-wired edge and stop — **never redirect to a parent that does not exist**, and
+    never fall through to the standalone case either.
 
 ## Step 1 — Triage is the draft attempt
 
@@ -110,7 +114,12 @@ Every citation in the drafted payload **must resolve before** any status flip to
 `ready` — mechanically, not by eye:
 
 - a cited `file:line` names a file that exists, with the line number in range;
-- a cited `[[record]]` resolves through the lore CLI (`lore record show <id>`).
+- a cited `[[record]]` resolves through the lore CLI (`lore record show <id>`);
+- a cited **user-stated constraint** (arm (c)) **is self-resolving** — there is no
+  external target to check. It resolves by the payload recording the question that was
+  asked and the answer that was given: that record *is* the citation. A constraint
+  cited without that record written into the body has nothing to resolve to, and fails
+  this gate like any other dangling pointer.
 
 A citation that fails to resolve **is a gap** — take it back to Step 2, and if it
 survives, escalate it in Step 5. It never promotes. A fabricated pointer reads
@@ -144,6 +153,10 @@ without a parent plan:
 - [ ] Prover-validated assumptions captured as session candidates (durable at flush)
 - [ ] New decisions / lessons / follow-ups surfaced during the build recorded
 ```
+
+`${CLAUDE_PLUGIN_ROOT}/templates/plan.md` is the **canonical source for those three items**;
+the block above is a copy for reading convenience and must track it. Read the template
+when the two disagree — it wins.
 
 **Test contract on a non-test surface.** A change with no automated test surface
 still states its verification explicitly: a command plus its expected output, or
@@ -198,6 +211,12 @@ route outcome (outcome 3 in Step 1), and then as a bare `Route: /craft:plan` lin
 the bracket and the note stripped. Use `Route: /craft:plan` when the work needs two or
 more independently-committable cuts, or `/craft:brainstorm` when the what/why itself is
 unsettled. For an ordinary surviving question the line is not written at all.
+
+**What a route outcome writes** is exactly two things: whatever payload fields you had
+already drafted — there may be none, and you do not fill more in to round the write out
+— plus this section carrying the routing question and its `Route:` line. That payload is
+**informational for whoever picks the work up in planning, not a promotion candidate**;
+the route, not the payload, is the outcome.
 
 Then stop: **status stays `open`**. **Never invent** an answer to an operator
 decision — the entire safety case for dispatching refine as a subagent with no

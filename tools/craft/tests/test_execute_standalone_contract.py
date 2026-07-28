@@ -40,6 +40,79 @@ def _execute_text() -> str:
     return EXECUTE_SKILL.read_text()
 
 
+def _execute_frontmatter() -> str:
+    text = _execute_text()
+    assert text.startswith("---\n"), "execute/SKILL.md must open with a frontmatter block"
+    end = text.index("\n---", 3)
+    return text[3:end]
+
+
+def _section(heading: str) -> str:
+    """The body of a `##` section, up to the next `##` heading."""
+    text = _execute_text()
+    assert heading in text, f"execute/SKILL.md must carry the {heading!r} section"
+    start = text.index(heading) + len(heading)
+    rest = text[start:]
+    nxt = rest.find("\n## ")
+    return rest if nxt < 0 else rest[:nxt]
+
+
+# --- the entry contract admits both shapes ---
+
+
+def test_frontmatter_does_not_deny_the_standalone_entry():
+    """The body supports a standalone task; a frontmatter that denies it never gets read.
+
+    Frontmatter is what the harness matches on to select the skill at all, so a
+    DO-NOT-TRIGGER clause that reads "no plan exists yet" routes every standalone
+    task away from the one skill that now knows how to run it.
+    """
+    frontmatter = _execute_frontmatter()
+    assert "no plan exists yet" not in frontmatter, (
+        "execute/SKILL.md's frontmatter still denies triggering when no plan exists — "
+        "the body's standalone branch runs on a task record with no plan at all"
+    )
+    assert "neither a plan nor a task record" in frontmatter, (
+        "execute/SKILL.md's frontmatter must keep the deny for the genuinely empty "
+        "case (no plan AND no task record), rather than dropping it entirely"
+    )
+
+
+def test_frontmatter_names_the_standalone_task_entry():
+    frontmatter = _execute_frontmatter()
+    assert "standalone" in frontmatter.lower(), (
+        "execute/SKILL.md's frontmatter must name the standalone task entry — it is "
+        "the half a caller (and refine's own DO-NOT-TRIGGER clause, which points "
+        "standalone tasks here) matches against"
+    )
+
+
+def test_when_to_use_admits_a_standalone_task():
+    section = _section("## When to Use")
+    assert "standalone task record" in section, (
+        "execute/SKILL.md's When to Use must admit a standalone task record alongside "
+        "an approved plan — otherwise the section contradicts the Loop's own branch"
+    )
+
+
+def test_skip_gate_is_an_explicit_judgment_on_a_standalone_task():
+    """A single leaf always reads as "≤2 slices", so the escape would fire every time.
+
+    The escape stays available — but as a stated call, not an accidental stall that
+    silently swallows the standalone branch.
+    """
+    section = _section("## Skip Gate")
+    assert "MAY be built inline" in section, (
+        "execute/SKILL.md's Skip Gate must keep the build-it-yourself escape available "
+        "for a small standalone task as an explicit MAY, not an implied default"
+    )
+    assert "the standalone branch below is the default" in section, (
+        "execute/SKILL.md's Skip Gate must name the standalone branch as the default "
+        "path — a single leaf trivially satisfies the ≤2-slices bar, so without this "
+        "the gate fires on every standalone run"
+    )
+
+
 # --- standalone detection ---
 
 
@@ -106,6 +179,19 @@ def test_ambiguous_case_reports_the_miswired_edge_and_stops():
         f"{MISWIRED_LESSON_LINK!r} when reporting the ambiguous case — the lesson that "
         "graph edges require bare task names is exactly why a mis-wired edge renders "
         "as a lone node"
+    )
+
+
+def test_multi_line_render_rooted_mid_tree_is_confirmed_before_walking():
+    """The parent-edge check is only applied to the single-line render.
+
+    A run rooted at a sub-plan renders many lines and passes straight into the
+    parent-with-children path, silently executing a fragment of someone else's plan.
+    """
+    assert "you rooted the run at a sub-plan" in _execute_text(), (
+        "execute/SKILL.md's parent-with-children branch must flag the mid-tree root: a "
+        "multi-line render whose root itself carries a `parent` edge is a sub-plan, and "
+        "the intended root gets confirmed with the operator before the walk"
     )
 
 
@@ -198,13 +284,74 @@ def test_standalone_branch_covers_the_remaining_statuses():
         "execute/SKILL.md's standalone branch must handle `blocked` — report the "
         "blocking condition and stop; execute cannot clear an external condition"
     )
-    assert "resume it at the first unticked" in text, (
+    assert "Resume rather than" in text, (
         "execute/SKILL.md's standalone branch must handle `in-progress` as a resume, "
         "not a fresh dispatch"
     )
     assert "nothing to do" in text, (
         "execute/SKILL.md's standalone branch must handle the terminal statuses "
         "(`done`/`dropped`/`superseded`) — report there is nothing to do and stop"
+    )
+
+
+def test_standalone_resume_defines_the_zero_phase_line_case():
+    """`## End Phases` exists from the first executor dispatch, holding no phase line.
+
+    "Re-enter at the first unticked phase line" is undefined for a crash during the
+    build itself: there are no phase lines at all, ticked or unticked, so the resume
+    either stalls or silently skips straight into the end pipeline on an unfinished
+    build.
+    """
+    text = _execute_text()
+    assert "no ticked phase line" in text.lower(), (
+        "execute/SKILL.md must define the standalone resume for an `## End Phases` "
+        "section carrying no ticked phase line — the state a crash during the build "
+        "leaves behind"
+    )
+    assert "re-enter the loop" in text.lower(), (
+        "execute/SKILL.md must send a resume with no ticked phase line back into the "
+        "Loop (verify the tree against the payload, re-dispatch `executor` as needed) "
+        "rather than into the end pipeline — the build itself may be incomplete"
+    )
+    assert "the dispatch count continues" in text, (
+        "execute/SKILL.md must state that a re-dispatch on resume continues the "
+        "recorded dispatch count — restarting it at zero silently disarms the "
+        "repeated-dispatch simplify trigger the notes exist to preserve"
+    )
+    assert "at the first unticked phase line" in text, (
+        "execute/SKILL.md must keep the end-pipeline entry rule for the other case: "
+        "once at least one phase line is ticked, the build is complete and the resume "
+        "re-enters the pipeline at its first unticked phase line"
+    )
+
+
+# --- Phase 5 on a standalone task ---
+
+
+def test_phase_5_does_not_assume_refine_wrote_the_flow_out_checklist():
+    """A standalone `ready` task can arrive from anywhere, not only from refine.
+
+    `/craft:polish` creates its briefs `--kind task --status ready` with no
+    `## Flow-out` section at all, and the Red Flag forbids closing without a ticked
+    checklist — so Phase 5 and Phase 6 are undefined for those tasks.
+    """
+    text = _execute_text()
+    assert "The task carries its own `## Flow-out` checklist — refine wrote it" not in text, (
+        "execute/SKILL.md still asserts unconditionally that refine wrote the "
+        "standalone task's `## Flow-out` checklist"
+    )
+    assert "if the task body carries no `## Flow-out`" in text, (
+        "execute/SKILL.md's Phase 5 adaptation must check for the checklist before "
+        "working it — a standalone `ready` task promoted by something other than "
+        "refine carries none"
+    )
+    assert (
+        "append the three items from `${CLAUDE_PLUGIN_ROOT}/templates/plan.md` via "
+        "`lore record update`" in text
+    ), (
+        "execute/SKILL.md's Phase 5 adaptation must append the missing checklist from "
+        "the canonical template through the lore CLI — the same three items a planned "
+        "parent carries, and never a direct vault-file edit"
     )
 
 

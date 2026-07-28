@@ -33,9 +33,9 @@ Security-surface: file:line — one-line description
 ```
 
 Rules:
-- `PASS` — the diff delivers the slice's plan section, the executor's status claim holds, and nothing blocks the next slice.
-- `DRIFT` — the diff diverges from the plan section, or the executor's status claim doesn't hold (e.g. claimed DONE but a delivered item is missing, or a test-contract item isn't actually met). Name what drifted and from what.
-- `BLOCKED` — the divergence is severe enough that building the next slice on this one would be unsafe or nonsensical (e.g. an expected file doesn't exist, or the claimed tests don't actually run).
+- `PASS` — the diff delivers the slice's plan section (or, for a standalone leaf, the task's payload), the executor's status claim holds, and nothing blocks the next slice (N/A on a standalone leaf — there is no next slice, so that clause cannot withhold a `PASS`).
+- `DRIFT` — the diff diverges from the plan section — or, for a standalone leaf, the task's payload — or the executor's status claim doesn't hold (e.g. claimed DONE but a delivered item is missing, or a test-contract item isn't actually met). Name what drifted and from what.
+- `BLOCKED` — the divergence is severe enough that building the next slice on this one would be unsafe or nonsensical (e.g. an expected file doesn't exist, or the claimed tests don't actually run). On a standalone leaf, read the same severity bar against the change itself: the work cannot be trusted as delivered, so nothing should be built on top of it.
 - Each finding: `file:line — one-line description`. No code blocks inside findings.
 - Omit the `Findings` section entirely if there are none (never write "none").
 - Omit the `Security-surface:` line entirely if the diff touches no security-sensitive surface.
