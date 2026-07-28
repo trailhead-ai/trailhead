@@ -57,16 +57,21 @@ handle, not a unit of work.
 ### Resuming a run
 
 Invoking execute against a task already `in-progress` **resumes** it — never refuses, never
-restarts from scratch. Locate the existing work via the `craft/branch` label
-(`lore search 'label.craft.branch:<name>'`) or a locally-present branch matching the task
-name, then pick up wherever the graph and workspace show the run left off.
+restarts from scratch. You already have the task in hand and need its branch, so read the
+`craft/branch` label straight off the task record, falling back to a locally-present branch
+matching the task name; then pick up wherever the graph and workspace show the run left off.
+(The `label.craft.branch:` search query runs the other direction — branch to tasks — and
+belongs to the operator sweep in `../_shared/status-ownership.md`, not here.)
 
 If the task's workspace no longer exists, reconcile before resuming: the task is resumed
 when its branch is recoverable (check out the branch named by `craft/branch` and continue
 from the first-dispatch claim in step 3 onward) or released back to `ready` when it isn't —
 **except** a task carrying `craft/push=failed`, which is skipped and reported rather than
-silently re-run. Whichever path is taken, leave a one-line breadcrumb in the task body:
-`reconciled: resumed from <branch>` / `reconciled: released to ready`.
+silently re-run. Whichever path is taken, append a one-line breadcrumb to the task body —
+`reconciled: resumed from <branch>` / `reconciled: released to ready` — with
+`lore record update task/<name> --diff`, piping a unified diff whose only hunk adds that
+line. Use the `--diff` form, not a bare `lore record update`: bare stdin is a **full-body
+replace**, so writing the breadcrumb that way destroys everything else in the record.
 
 Every execute exit path — [Phase 6](#phase-6-close-and-completion-report)'s `done`, each
 escalation site's `blocked` write, or an answered-and-continuing escalation — moves the task
@@ -92,7 +97,8 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 
 ### 3. Dispatch `executor`
 
-**Before the first dispatch of this run**, claim the plan in one command: flip the parent
+**Before this run's first dispatch of any agent** — the step-1 `assumption-prover` counts
+just as much as the `executor` here — claim the plan in one command: flip the parent
 off `ready` and write its branch label together —
 `lore record update task/<parent-name> --status in-progress --label craft/branch=<bare-branch>`
 (bump `updated:` to today). Write both at dispatch, not only at close — `craft/branch`'s
@@ -134,7 +140,7 @@ Quality, style, and design review are explicitly out of scope for `drift-gate` �
 After each child task completes (or each unknown resolves), record the state on the graph — the task graph is the source of truth for what's done and what's left, so the run stays resumable if context breaks (handoff, new session):
 
 - **Task status.** Set the child task you just built to `done`: `lore record update task/<name> --status done`. Advancing a task off `ready` is what makes its dependents runnable. A child's `done` here is bookkeeping only — committed on the task branch; the push guarantee that makes `done` mean "committed and pushed" attaches to the run's close (see [Phase 6](#phase-6-close-and-completion-report) and `../_shared/status-ownership.md`), not this step.
-- **Parent lifecycle.** The parent already flipped `ready → in-progress` at the first dispatch (step 3) — that's what keeps the task graph honest from the moment code starts shipping against it, rather than waiting for a child to land first. Nothing to write here; if the parent still reads `ready` this far into the run, that's a sign step 3's claim was skipped and should be run now.
+- **Parent lifecycle.** The parent already flipped `ready → in-progress` at the run's first dispatch (the claim documented in step 3) — that's what keeps the task graph honest from the moment code starts shipping against it, rather than waiting for a child to land first. Nothing to write here; if the parent still reads `ready` this far into the run, that's a sign step 3's claim was skipped and should be run now.
 - **Unknowns.** Check off resolved unknowns in the parent's Known Unknowns block; add any new unknown discovered during the slice, noting which child task it blocks.
 - **Design changes.** Note any design change a finding forced — in the parent body, and by re-shaping child tasks per the split/append ritual below.
 
@@ -217,13 +223,17 @@ Then complete the ritual:
 
 ### Phase 6: Close and completion report
 
-**Push before close.** Before the close phase of a run writes `done`, every member repo carrying commits on the task branch must be pushed. Detection is a named inline mandate, not an inference: per repo, run `git log origin/<branch>..HEAD --oneline` — a branch with no upstream counts as unpushed. Empty output means nothing to push in that repo; non-empty means push is required there.
+**Push before close.** Before the close phase of a run writes `done`, every member repo carrying commits on the task branch must be pushed. Enumerate the repos from the workspace, don't guess at them: in a camp workspace they are the member worktrees of the current workspace as listed in its camp manifest (`manifest.json`, the same set `camp status` reports); in vanilla usage the set is the single current repo. Detection is then a named inline mandate, not an inference: per repo, run `git log origin/<branch>..HEAD --oneline`. Empty output means nothing to push in that repo. Non-empty output means push is required — and so does an **error**, since `git log` fails outright rather than printing nothing when `origin/<branch>` doesn't exist as a remote-tracking ref; a branch with no upstream counts as unpushed either way.
+
+**Auto-push covers task branches only.** If the run is sitting on the repo's default branch — a run that started on `main`/`master` with explicit user consent — do not auto-push it. Name the branch and its unpushed commits in the completion report and leave the push to the user.
 
 Before pushing a repo with unpushed commits, run the pre-push secret scan: check `git log origin/<branch>..HEAD -p` for that repo against the credential-pattern scrub list ([Phase 5](#phase-5-flow-out)). On a match, do **not** push that repo — take the blocked path instead, naming the remediation in the report: rotate the credential, then rewrite history before attempting the push again.
 
+**This scan gates every push, the blocked path's included.** Each escalation site's "(if commits exist)" push routes through this phase, so it inherits the scan: a run blocked *because* the scan hit stays unpushed until the credential is rotated and the history rewritten. Going `blocked` never licenses shipping the flagged commits.
+
 For every repo that clears the scan, push with `git push --set-upstream origin HEAD` (verbatim — a bare `git push` never converges without an upstream). Push is idempotent: an already-up-to-date branch counts as success, so retrying after a failed status write is safe — the status write is the completion signal, the push is its precondition.
 
-On push failure (auth, no remote, rejection): the task stays `in-progress` — the honest state — and the session writes `lore record update task/<name> --label craft/push=failed`. The completion report names the failure **and the remediation**, distinguishing a non-fast-forward rejection (needs reconciliation with the remote, not credentials) from an auth/no-remote failure (needs credentials or a configured remote, not reconciliation). Run any raw git stderr through the credential-pattern scrub before it enters report or record text.
+On push failure (auth, no remote, rejection): the task stays `in-progress` — the honest state — and the session labels **the run's task record**, `task/<parent-name>` on this pathway: `lore record update task/<parent-name> --label craft/push=failed`. That record is the one holding `in-progress` and the one resume logic reads; a child slice's record is bookkeeping, not the run's lifecycle handle, so labelling it would leave the guard where nothing looks for it. The completion report names the failure **and the remediation**, distinguishing a non-fast-forward rejection (needs reconciliation with the remote, not credentials) from an auth/no-remote failure (needs credentials or a configured remote, not reconciliation). Run any raw git stderr through the credential-pattern scrub before it enters report or record text.
 
 **Close the run.** With every child terminal, the flow-out checklist ticked, and every repo's push settled, set the parent `done`: `lore record update task/<parent-name> --status done`, re-asserting `--label craft/branch=<bare-branch>` at close. The completion guard refuses this while any child is non-terminal (it names them); a parent closed without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
 
@@ -299,6 +309,6 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 - Skip review for medium+ changes
 - Dispatch multiple *executor* subagents in parallel on the same slice (they'll conflict on the same files). Parallel dispatch is fine when the agents operate on independent scopes — e.g. one checker per repo.
 - Dispatch the parent task as if it were a slice — it is the container and lifecycle handle, never a unit of work.
-- Close the parent `done` with non-terminal children or an un-ticked `## Flow-out` checklist — the completion guard blocks the former; skipping the latter traps knowledge.
+- Close the parent `done` with non-terminal children, an un-ticked `## Flow-out` checklist, or a task-branch repo still carrying unpushed commits — the completion guard blocks the first; skipping the second traps knowledge; skipping the third breaks what `done` means, which is *committed and pushed*.
 - Ignore subagent questions or surprises
 - Start on main/master without explicit user consent

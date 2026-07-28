@@ -63,8 +63,9 @@ status is validated against the kind's vocab):
 lore record update task/<name> --status in-progress
 ```
 
-This covers a child task's `ready → in-progress → done` walk and the parent's `ready →
-in-progress → done` lifecycle. Setting a parent `--status done` while it still has
+This covers the parent plan task's `ready → in-progress → done` lifecycle. Child slices
+under a plan walk `ready → done` — `in-progress` is the run's claim on the parent, not a
+per-slice value. Setting a parent `--status done` while it still has
 non-terminal children is refused (the children are named in the error); a parent completed
 without a `## Flow-out` section gets a non-blocking flow-out reminder.
 

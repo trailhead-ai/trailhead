@@ -38,9 +38,11 @@ high-water mark instead of current state.
 - **`open → ready`** — writer: the refine ritual (standalone tasks) or the
   planning ritual (child tasks under a plan). Exit owner: the execute dispatch
   step, which picks up `ready` leaves and moves them off this value.
-- **`ready → in-progress`** — writer: the orchestrating session, at first
-  dispatch. Exit owner: every execute exit path below (done, blocked, or
-  answered-and-continuing), plus reconciliation on resume.
+- **`ready → in-progress`** — writer: the orchestrating session, at the run's
+  first dispatch. This value belongs to the **run's task** — a plan's parent, or
+  a standalone leaf run on its own; child slices under a plan walk
+  `ready → done` and never take it. Exit owner: every execute exit path below
+  (done, blocked, or answered-and-continuing), plus reconciliation on resume.
 - **`in-progress → done`** — writer: the orchestrating session at close,
   **after push succeeds** (see push guarantee below). `done` is terminal for
   craft; there is no further exit edge to own.
@@ -80,18 +82,21 @@ Craft owns the `craft/` label-key namespace for its own lifecycle facts.
   `origin/worktree-foo`). Written when the task branch is cut / at first
   dispatch (not only at close — its primary reader is crash-resume logic, which
   runs on tasks that never reached close) and re-asserted at close. Queried as
-  `label.craft.branch:<name>` — dot-for-slash spelling, exact-match; a literal
-  `/` in a KQL query is a lexer error.
+  `label.craft.branch:<name>` — the **key** takes the dot-for-slash spelling,
+  since an unquoted `/` is a lexer error; the match is exact on the value, and a
+  value containing `/` is fine as long as it is quoted
+  (`label.craft.branch:"feat/foo"`).
 - **`craft/push=failed`** — written when a push attempt fails at close or at a
   `blocked` transition with unpushed commits. Lets resume logic distinguish
   "un-pushable" from "crashed" and skip-and-report instead of re-running the
   build.
-- Both are **single-valued, last-write-wins**: `--label` on `lore record update`
-  is a repeatable upsert, and a later write silently replaces the prior value —
-  there is no history. This applies to `craft/push` too: a subsequent label
-  write clears a `craft/push=failed` skip guard with no trace that it was ever
-  set, so don't re-assert `craft/branch` on a task carrying `craft/push=failed`
-  without deliberately deciding whether that guard should still hold.
+- Both are **single-valued, last-write-wins**, and last-write-wins applies **per
+  key**: `--label` on `lore record update` is a repeatable upsert that mutates
+  only the keys it names, leaving every other key untouched. Re-asserting
+  `craft/branch` therefore cannot disturb `craft/push` — only another
+  `craft/push=…` write, or an explicit `--unset-label craft/push`, replaces a
+  `craft/push=failed` skip guard, and it does so with no trace that the guard was
+  ever set.
 
 ## `in-progress` is a lease stand-in, not final storage
 
@@ -127,6 +132,13 @@ task goes `blocked`, they are pushed on the task's branch (same
 `--set-upstream` rule as `done`) and `craft/branch` is (re-)written, so parked
 work resumes from the remote rather than restarting from zero.
 
+That push carries the same precondition as `done`'s: the outgoing commits are
+scanned against the credential-pattern scrub list in `execute/SKILL.md`'s
+flow-out phase first, and on a hit the repo is not pushed. A task blocked
+*because* that scan hit is therefore **never** pushed — the credential is
+rotated and the history rewritten before any push is attempted. Going `blocked`
+is not a licence to ship flagged commits.
+
 Every status-related body write — blocked reasons, report text captured into
 records — runs through the credential-pattern scrub already mandated at the
 close phase in `execute/SKILL.md` before it lands in the git-backed vault: raw
@@ -145,4 +157,7 @@ lore search 'label.craft.branch:<name>'
 
 # find every task carrying a craft push label (failed pushes to triage)
 lore search 'has:label.craft.push'
+
+# clear the skip guard once a failed push has been settled by hand
+lore record update task/<name> --unset-label craft/push
 ```
