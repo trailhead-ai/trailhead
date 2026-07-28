@@ -54,6 +54,37 @@ per-task status, and marks the runnable leaves; use it to pick the next task and
 progress. **Never dispatch the parent task itself** — it is the container and the lifecycle
 handle, not a unit of work.
 
+### Determine the task shape
+
+Before walking the loop, determine the task's shape. Run `lore task graph <parent-name>`
+first and read both the render and the record's sidecar:
+
+- **Standalone.** The graph renders exactly one line for the task AND the record's
+  sidecar carries no `parent` edge. There is no child to descend into — the task is the
+  whole unit of work. See the standalone branch below.
+- **Parent-with-children.** The graph renders more than one line. Proceed with the Loop
+  exactly as written below (steps 1-6) — unchanged.
+- **Ambiguous.** A single-line render **with** a `parent` edge present matches neither
+  case above and is never classified silently — most often a mis-wired parent edge (a
+  `parent` value that wasn't passed as a bare task name silently renders as a detached
+  node; see [[lesson/lore-task-graph-parent-depends-on-require-bare-task-names]]).
+  Stop and report the suspected mis-wired parent edge, citing that lesson.
+
+**Standalone branch:**
+
+- **`ready`** — dispatch only when the node carries the `(runnable)` marker. A
+  standalone node rendered without the marker has an unmet `depends-on` edge — report it
+  and stop rather than guessing. When runnable, treat the task itself as the one slice:
+  run step 3 (dispatch `executor`) and step 4 (review, scaled to the size table) below
+  against it, then skip straight to [After All Slices](#after-all-slices) — there is no
+  next leaf to pick and no parent-lifecycle flip to perform.
+- **`open`** — run the `_shared/refine.md` procedure inline. Pass `--interactive` only
+  when execute itself has a human channel to a live operator right now; otherwise run it
+  unattended. Refine promotes cleanly → proceed as the `ready` case above. Refine
+  escalates (writes `## Refine — unresolved`) or routes to `/craft:plan` /
+  `/craft:brainstorm` → stop and report the refine outcome; do not dispatch an executor
+  against a task that did not promote.
+
 ### Resuming a run
 
 Invoking execute against a task already `in-progress` **resumes** it — never refuses, never
@@ -96,7 +127,6 @@ primary reader is crash-resume logic, which runs on tasks that never reached clo
 the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if it's
 `in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above instead
 of re-dispatching from scratch.
-
 For each runnable child task (a slice):
 
 ### 1. Does this slice have an unresolved unknown?
@@ -174,6 +204,32 @@ Both keep the graph — not a prose list — the single source of truth for what
 Every child task is terminal (`done`/`dropped`/`superseded`). The whole change now runs a **sequential phase pipeline** — simplify → correctness → conditional-security → flow-out → close. Run the phases **in order**; each builds on the settled state of the one before it. Record progress as you go (see [Phase progress and resumability](#phase-progress-and-resumability)) so a broken context can resume mid-pipeline.
 
 Fix `base` once at the start: it is the commit the whole change started from (the parent's pre-execution SHA). `HEAD` is the current tip. The phases operate on the whole-change `base..HEAD` diff, not any single slice.
+
+### Standalone task adaptations
+
+When the task shape (above) was standalone, this phase pipeline still runs — adapted to
+operate on the task record itself rather than a parent:
+
+- The task carries its own `## Flow-out` checklist — refine wrote it when the task
+  promoted to `ready` — so Phase 5 works that checklist directly.
+- **`## End Phases` is created at the first executor dispatch** on a standalone task, not
+  deferred until pipeline entry — this widens its normal end-pipeline-only lifecycle so
+  the dispatch-count note (below) has somewhere to live from the start, even before the
+  phase pipeline itself begins.
+- Phase 6's completion guard passes trivially: a standalone task has no children, so
+  there is nothing non-terminal to block the close.
+- **Simplify (Phase 2) skips by default.** Run it anyway when any of:
+  - (a) the change hits the existing Large bar (200+ lines or 5+ files);
+  - (b) the executor was dispatched more than once on the task —
+    record the running dispatch count in the task's `## End Phases` notes as it
+    happens, so the trigger survives a resumed run;
+  - (c) the executor returned `DONE_WITH_CONCERNS` naming duplication/scaffolding/structure.
+
+  The completion report names the fired trigger, or says exactly
+  "skipped — single leaf, no trigger" when none fired.
+
+Phases 1, 3, 4, 5, 6 are otherwise unchanged; the parent-with-children path is untouched
+beyond the task-shape branch above.
 
 ### Phase 1: Test-runner gate
 
