@@ -179,33 +179,3 @@ def test_interactive_flag_matches_between_execute_and_refine():
         "string is renamed without the other, execute's inline invocation silently "
         "stops opting into interactive mode"
     )
-
-
-# --- existing guards this slice must not break ---
-
-
-def test_inlined_review_threshold_values_still_present():
-    text = _execute_text()
-    for value in ("30", "200", "5+"):
-        assert value in text, (
-            f"execute/SKILL.md must retain the inlined review-threshold value {value!r} "
-            "(see test_craft_skills_generic.py's _INLINED_VALUES guard)"
-        )
-
-
-def test_dispatched_agents_still_named():
-    text = _execute_text()
-    for agent in (
-        "assumption-prover",
-        "executor",
-        "drift-gate",
-        "test-runner",
-        "troubleshooter",
-        "simplifier",
-        "security-auditor",
-        "code-reviewer",
-    ):
-        assert agent in text, (
-            f"execute/SKILL.md must retain the {agent!r} dispatch (see "
-            "test_craft_skills_registrable.py's _EXECUTE_DISPATCHED_AGENTS guard)"
-        )
