@@ -126,6 +126,20 @@ class TestCraftInventory:
     def test_base_is_shared_and_templates(self):
         assert load_manifest(_CRAFT_MANIFEST).base == ["skills/_shared", "templates"]
 
+    def test_doc_worked_example_matches_the_real_manifest(self):
+        """capability-manifest.md quotes craft's manifest as a worked example.
+
+        A worked example that has drifted from the file it quotes teaches the wrong
+        shape to every reader who trusts it — and reads as authoritative while doing so.
+        """
+        doc = _REPO_ROOT / "trailhead" / "docs" / "capability-manifest.md"
+        base = load_manifest(_CRAFT_MANIFEST).base
+        expected = "base = [" + ", ".join(f'"{entry}"' for entry in base) + "]"
+        assert expected in doc.read_text(), (
+            f"capability-manifest.md's craft example must show {expected!r} — it "
+            "currently quotes a stale base list"
+        )
+
     def test_council_subagents_discovered(self):
         m = load_manifest(_CRAFT_MANIFEST)
         for name in ("advocate", "builder", "breaker", "attacker"):
