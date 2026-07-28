@@ -784,7 +784,8 @@ def test_create_label_reserved_key_nonzero_names_key(tmp_path):
     )
     assert r.returncode != 0
     assert "area" in r.stderr
-    assert "--annotation" in r.stderr
+    # 'area' is a record kind, so the refusal points at the edge setter.
+    assert "--related area=<name>" in r.stderr
     assert list(vault.glob("**/*.md")) == []
 
 

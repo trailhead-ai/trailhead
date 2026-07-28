@@ -31,10 +31,13 @@ Invariants:
   to exist (a dangling ``{"task": ["nope"]}`` validates clean — existence is
   enforced nowhere; the index materializes whatever edges exist).
 - A ``labels`` key may not shadow a first-class record concept: exact matches
-  against ``RESERVED_LABEL_KEYS`` and any ``related-`` prefixed key are refused,
-  naming ``--annotation`` and the namespaced form as the way through. Reservation
-  is exact, so ``hm/area`` and ``craft/subsystems`` stay legal. ``annotations``
-  are exempt. This binds every caller of ``validate()`` — i.e. every
+  against ``RESERVED_LABEL_KEYS`` and any ``related-`` prefixed key are refused.
+  The refusal is classified (``_reserved_key_alternative``) so it names the one
+  alternative that stores what the key meant — an edge, the field's own flag, or
+  a free attribute — and always names ``--unset-label`` for a record that already
+  carries the key. Reservation is exact, so ``hm/area`` and ``craft/subsystems``
+  stay legal. ``annotations`` are exempt. This binds every caller of
+  ``validate()`` — i.e. every
   ``lore record create``/``update`` — and nothing else: ``search.index``'s
   ``upsert_row`` (reached from the session store and ``rebuild``) writes label
   rows without consulting this module.
@@ -363,6 +366,80 @@ def _derive_reserved_label_keys() -> frozenset[str]:
 #: with no change here. Exact match only: ``hm/area`` is fine, ``area`` is not.
 RESERVED_LABEL_KEYS: frozenset[str] = _derive_reserved_label_keys()
 
+#: ``related-<suffix>`` keys whose suffix names no record kind but does have a
+#: dedicated repeatable setter. Source of truth: the flag registrations in
+#: ``cli/record.py::_add_record_field_flags``. Mirrored rather than imported —
+#: this module is pure and must not reach into the CLI layer — so a flag renamed
+#: there has to be renamed here too.
+_RELATED_SUFFIX_FLAGS = {
+    "phases": "--related-phase",
+    "file": "--related-file",
+    "url": "--related-url",
+}
+
+#: Reserved keys naming a field an operator can actually set, and the flag that
+#: sets it. Not 1:1 with the field name: ``keywords`` and its ``keyword`` query
+#: alias share ``--keyword``, and ``phase`` is set by ``--related-phase``.
+#: Deliberately partial — the rest of ``RESERVED_LABEL_KEYS`` is either
+#: system-managed (``kind`` and the timestamps have no setter) or a scope flag
+#: (``repo``/``product``/``suite``/``team``), whose flags **relocate the record to
+#: a different vault** and so must never be offered as the fix for a label.
+_SETTABLE_FIELD_FLAGS = {
+    "status": "--status",
+    "keywords": "--keyword",
+    "keyword": "--keyword",
+    "phase": "--related-phase",
+}
+
+
+def _reserved_key_alternative(map_key: str) -> str:
+    """Name the one-step alternative that stores what a reserved key meant.
+
+    Classified in this order, because ``related-area`` and ``related-phases``
+    belong to *both* reservation sources and the prefix reading is the one that
+    names a flag an operator can run:
+
+    1. ``related-<suffix>`` — an edge (``--related``), a dedicated list flag, or
+       (no such field exists) a free attribute.
+    2. a record kind — an edge.
+    3. a settable field — the flag that sets it.
+    4. anything else — a free attribute, with no flag named.
+    """
+    free_attribute = (
+        f"use `--annotation {map_key}=<value>` for a free attribute, or a"
+        f" namespaced key (`<ns>/{map_key}`)"
+    )
+    if map_key.startswith(_RELATED_KEY_PREFIX):
+        suffix = map_key[len(_RELATED_KEY_PREFIX):]
+        if is_valid_kind(suffix):
+            return f"`{map_key}` names a relation — use `--related {suffix}=<name>`."
+        flag = _RELATED_SUFFIX_FLAGS.get(suffix)
+        if flag is not None:
+            return f"`{map_key}` names a relation — use `{flag} <value>`."
+        return (
+            f"`{map_key}` reads as a relation but names no field — {free_attribute}."
+        )
+    if is_valid_kind(map_key):
+        return f"`{map_key}` is a record kind — use `--related {map_key}=<name>`."
+    flag = _SETTABLE_FIELD_FLAGS.get(map_key)
+    if flag is not None:
+        return f"`{map_key}` is a settable record field — use `{flag} <value>`."
+    return f"`{map_key}` is a reserved field name — {free_attribute}."
+
+
+def _reserved_label_key_error(field: str, map_key: str) -> str:
+    """The full refusal for one reserved ``labels`` key.
+
+    ``--unset-label`` rides along on every branch: ``validate()`` is pure and
+    cannot tell a key being added from one the record already carries, and a
+    stored reserved key fails the record's *next* write whatever that write
+    changes — so the message has to carry its own repair.
+    """
+    return (
+        f"{field}: {_reserved_key_alternative(map_key)} Already storing it?"
+        f" `--unset-label {map_key}` clears the key."
+    )
+
 
 def _check_map_str_str(key: str, value: object) -> list[str]:
     """Validate a ``map[str,str]`` sidecar field (``labels`` or ``annotations``).
@@ -372,7 +449,8 @@ def _check_map_str_str(key: str, value: object) -> list[str]:
     ends with alphanumeric) with an optional single namespace prefix + ``/``.
 
     ``labels`` additionally refuse a **reserved** key — one in
-    ``RESERVED_LABEL_KEYS`` or carrying the ``related-`` prefix. The check runs
+    ``RESERVED_LABEL_KEYS`` or carrying the ``related-`` prefix — with the
+    classified message :func:`_reserved_label_key_error` builds. The check runs
     after the charset match in the same loop, so a malformed key reports as
     malformed and anything echoed into the refusal is already charset-clean.
     ``annotations`` are exempt by field name, not by a separate validator: they
@@ -403,11 +481,7 @@ def _check_map_str_str(key: str, value: object) -> list[str]:
         if key == "labels" and (
             map_key.startswith(_RELATED_KEY_PREFIX) or map_key in RESERVED_LABEL_KEYS
         ):
-            errors.append(
-                f"{key}: `{map_key}` is a reserved field name — use"
-                f" `--annotation {map_key}=<value>` for a free attribute, or a"
-                f" namespaced key (`<ns>/{map_key}`)"
-            )
+            errors.append(_reserved_label_key_error(key, map_key))
     return errors
 
 

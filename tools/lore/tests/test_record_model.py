@@ -648,17 +648,6 @@ def test_every_kql_field_is_reserved_as_a_label_key():
         assert any(field in e for e in result.errors), f"field {field!r} not reserved"
 
 
-def test_reserved_label_key_error_points_at_annotation_and_a_namespace():
-    """The refusal names an executable alternative, not just the problem."""
-    result = rm().validate(_base_sidecar_with(labels={"area": "home-manager"}))
-    reserved = [e for e in result.errors if "reserved" in e]
-    assert len(reserved) == 1
-    assert reserved[0] == (
-        "labels: `area` is a reserved field name — use `--annotation area=<value>`"
-        " for a free attribute, or a namespaced key (`<ns>/area`)"
-    )
-
-
 def test_related_prefixed_label_key_rejected():
     """``related-<suffix>`` is refused — the edge fields are their own concept."""
     result = rm().validate(_base_sidecar_with(labels={"related-subsystems": "x"}))
@@ -745,6 +734,150 @@ def test_a_new_kql_field_is_reserved_without_touching_the_guard():
     finally:
         kql.VALID_FIELDS = original
         rm()
+
+
+# --- reserved label key refusal messages ---------------------------------
+#
+# A refusal an agent cannot act on is a dead end, so each reserved key is
+# classified into the alternative that actually stores what the author meant:
+# an edge (``--related``), a dedicated list flag, a first-class setter, or —
+# when the name is system-managed or would relocate the record — a free
+# attribute. Every message also names ``--unset-label`` so a record that
+# already carries a reserved key can be repaired from the message alone.
+
+
+def _label_key_error(map_key: str) -> str:
+    """The single refusal ``validate`` emits for one reserved ``labels`` key."""
+    result = rm().validate(_base_sidecar_with(labels={map_key: "x"}))
+    assert len(result.errors) == 1, result.errors
+    return result.errors[0]
+
+
+#: Alternatives an agent can run in one step. A refusal naming none of these is
+#: a dead end regardless of how well it explains the problem.
+_EXECUTABLE_ALTERNATIVES = (
+    "--related ",
+    "--related-phase ",
+    "--related-file ",
+    "--related-url ",
+    "--status ",
+    "--keyword ",
+    "--annotation ",
+)
+
+
+def _every_refusable_label_key() -> list[str]:
+    """Every key the guard refuses: the derived set plus ``related-`` samples.
+
+    The derived set is enumerated (not sampled) so a future record kind or query
+    field cannot land without a message that names an alternative.
+    """
+    extra = {"related-subsystems", "related-file", "related-url", "related-task"}
+    return sorted(rm().RESERVED_LABEL_KEYS | extra)
+
+
+def test_no_refusal_is_a_dead_end():
+    """Every refusable key's message names at least one runnable alternative."""
+    for key in _every_refusable_label_key():
+        msg = _label_key_error(key)
+        assert any(alt in msg for alt in _EXECUTABLE_ALTERNATIVES), (
+            f"refusal for {key!r} names no runnable alternative: {msg}"
+        )
+
+
+def test_every_refusal_names_the_unset_escape():
+    """``validate`` cannot tell a new key from a stored one, so every message
+    carries the removal that unblocks a record already holding the key."""
+    for key in _every_refusable_label_key():
+        assert f"--unset-label {key}" in _label_key_error(key)
+
+
+def test_related_prefixed_kind_suffix_points_at_the_related_flag():
+    """``related-<kind>`` names the edge map, whose setter is ``--related``."""
+    assert _label_key_error("related-area") == (
+        "labels: `related-area` names a relation — use `--related area=<name>`."
+        " Already storing it? `--unset-label related-area` clears the key."
+    )
+
+
+def test_related_prefixed_list_field_names_its_own_flag():
+    """``related-`` keys with a dedicated setter point at that setter — routing
+    them to a free attribute would store a relation where nothing reads it."""
+    for key, flag in (
+        ("related-phases", "--related-phase"),
+        ("related-file", "--related-file"),
+        ("related-url", "--related-url"),
+    ):
+        msg = _label_key_error(key)
+        assert msg == (
+            f"labels: `{key}` names a relation — use `{flag} <value>`."
+            f" Already storing it? `--unset-label {key}` clears the key."
+        )
+        assert "--annotation" not in msg
+
+
+def test_related_prefixed_key_with_no_field_falls_through_to_annotation():
+    """``related-subsystems`` names no real field, so a free attribute is the fix."""
+    assert _label_key_error("related-subsystems") == (
+        "labels: `related-subsystems` reads as a relation but names no field —"
+        " use `--annotation related-subsystems=<value>` for a free attribute, or"
+        " a namespaced key (`<ns>/related-subsystems`)."
+        " Already storing it? `--unset-label related-subsystems` clears the key."
+    )
+
+
+def test_record_kind_label_key_points_at_the_related_flag():
+    """A bare kind name is an edge the author meant to draw."""
+    assert _label_key_error("area") == (
+        "labels: `area` is a record kind — use `--related area=<name>`."
+        " Already storing it? `--unset-label area` clears the key."
+    )
+
+
+def test_every_record_kind_message_names_the_related_flag():
+    """The kind branch covers all eight kinds, not just the overlapping one."""
+    for kind in sorted(rm().KINDS):
+        assert f"--related {kind}=<name>" in _label_key_error(kind)
+
+
+def test_settable_field_label_key_names_the_flag_that_sets_it():
+    """Field-to-flag is not 1:1 — ``keywords`` and its ``keyword`` query alias
+    share ``--keyword``, and ``phase`` is set by ``--related-phase``."""
+    for key, flag in (
+        ("status", "--status"),
+        ("keywords", "--keyword"),
+        ("keyword", "--keyword"),
+        ("phase", "--related-phase"),
+    ):
+        assert _label_key_error(key) == (
+            f"labels: `{key}` is a settable record field — use `{flag} <value>`."
+            f" Already storing it? `--unset-label {key}` clears the key."
+        )
+
+
+def test_scope_routing_label_key_does_not_name_its_flag():
+    """``--repo``/``--product``/``--suite``/``--team`` relocate a record to a
+    different vault scope, so naming them would be worse advice than none."""
+    for key in ("repo", "product", "suite", "team"):
+        msg = _label_key_error(key)
+        assert msg == (
+            f"labels: `{key}` is a reserved field name — use"
+            f" `--annotation {key}=<value>` for a free attribute, or a namespaced"
+            f" key (`<ns>/{key}`)."
+            f" Already storing it? `--unset-label {key}` clears the key."
+        )
+        assert f"--{key}" not in msg
+
+
+def test_system_managed_field_label_key_has_no_flag_to_name():
+    """``kind`` and the three timestamps have no setter at all."""
+    for key in ("kind", "created-at", "updated-at", "last-referenced-at"):
+        assert _label_key_error(key) == (
+            f"labels: `{key}` is a reserved field name — use"
+            f" `--annotation {key}=<value>` for a free attribute, or a namespaced"
+            f" key (`<ns>/{key}`)."
+            f" Already storing it? `--unset-label {key}` clears the key."
+        )
 
 
 # --- kind-gated fields: depends-on / parent (task-only graph edges) --------
