@@ -269,6 +269,28 @@ def test_unattended_escalation_never_invents():
     )
 
 
+def test_operator_answer_slot_is_documented():
+    """The `**Answer:**` line is how an operator answers an escalated question offline.
+
+    Pinned as a single physical line in the source (lesson: phrase-pinned prose
+    contracts break on line wraps), with the escalation heading spelled out exactly
+    (em dash included) since a later refine run keys off both together.
+    """
+    text = SHARED_REFINE.read_text()
+    assert (
+        "adding a line beginning `**Answer:**` inside the `## Refine — unresolved` "
+        "section" in text
+    ), (
+        "_shared/refine.md must document the `**Answer:**` slot: an operator answers "
+        "an escalated question by adding a line beginning `**Answer:**` inside the "
+        "`## Refine — unresolved` section"
+    )
+    assert "operator-stated, citable constraint" in text, (
+        "_shared/refine.md must state that refine treats an `**Answer:**` line as an "
+        "operator-stated, citable constraint (arm (c) of the citation rule)"
+    )
+
+
 def test_promotion_removes_the_escalation_section():
     assert f"On promotion, remove the `{ESCALATION_HEADING}` section" in (
         SHARED_REFINE.read_text()
@@ -517,6 +539,20 @@ def test_scrub_names_executes_phase_5_as_the_canonical_pattern_set():
         "execute/SKILL.md must keep its Phase 5 credential-pattern scrub — "
         "_shared/refine.md names it as canonical, so removing it there has to fail "
         "here rather than silently strand the pointer"
+    )
+
+
+def test_scrub_scope_covers_the_escalated_question_text():
+    """An operator's `**Answer:**` line answers the `**Question:**` field directly.
+
+    The scrub scope previously named only the payload and the Evidence/Recommended
+    answer free-text fields — a credential typed into the question or its answer had
+    no equivalent gate.
+    """
+    assert "question text" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md's credential-pattern scrub scope must name the escalated "
+        "question text as in scope, alongside the payload and the escalation "
+        "section's other free-text fields"
     )
 
 

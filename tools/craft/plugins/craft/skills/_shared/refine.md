@@ -184,9 +184,11 @@ no mandate to rewrite it. Refine adds its sections below what is already there.
 update` — Step 4's payload and Step 5's escalation section alike — run the drafted
 text through the same credential-pattern scrub execute's Phase 5 runs before a `lore
 session candidate`, and drop or redact every match rather than writing it. In scope:
-the payload fields *and* the escalation section's free-text ones (`**Evidence
-gathered:**`, `**Recommended answer:**`), which the pointer-only citation rule does
-not constrain. Quote only a `file:line` pointer for anything caught. The four
+the payload fields, the escalation section's free-text ones (`**Evidence
+gathered:**`, `**Recommended answer:**`), and the escalated question text itself
+(`**Question:**` and any `**Answer:**` an operator adds) — none of which the
+pointer-only citation rule constrains. Quote only a `file:line` pointer for anything
+caught. The four
 categories are key-like `name=value` tokens, bearer/api-key shapes, high-entropy
 base64/hex literals, and PEM private-key headers — but
 **execute's Phase 5 regex list is the canonical set**; the categories named here are a
@@ -253,6 +255,8 @@ human channel rests on that one rule.
 `## Refine — unresolved` is the canonical discovery handle: any later sweep or
 operator scan finds escalated drafts by that heading, and a task carrying payload
 fields while still `open` is by definition an escalated draft.
+
+An operator answers an escalated question by adding a line beginning `**Answer:**` inside the `## Refine — unresolved` section, and refine treats that answer as an operator-stated, citable constraint (arm (c) of the citation rule) on the next run.
 
 ### Interactive escalation
 
