@@ -266,9 +266,14 @@ def test_standalone_substitutes_the_task_record_for_the_plan_path():
 
 def test_standalone_task_walks_its_own_status():
     text = _execute_text()
-    assert "flip it `ready → in-progress` at the **first executor dispatch**" in text, (
+    assert "claim it at the **first executor dispatch**" in text, (
         "execute/SKILL.md must state the standalone task's own status walk — with no "
         "parent to carry the lifecycle, the task is its own lifecycle handle"
+    )
+    assert "--status in-progress --label craft/branch=<bare-branch>" in text, (
+        "execute/SKILL.md's standalone claim must write status and branch label in one "
+        "command — a bare status flip leaves no craft/branch label for crash-resume "
+        "to read on a standalone run"
     )
     assert "means close the task itself" in text, (
         "execute/SKILL.md must say that Phase 6's 'close the parent' means closing the "

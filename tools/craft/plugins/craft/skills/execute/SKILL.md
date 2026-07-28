@@ -138,11 +138,12 @@ Phase 3's whole-change correctness-review dispatch.
 
 **Status walk.** The standalone task is its own lifecycle handle, so it walks the status
 a parent otherwise would — there is no second record to flip. Refine's promotion takes it
-`open → ready` (the `open` case above). Then
-flip it `ready → in-progress` at the **first executor dispatch**
-(`lore record update task/<name> --status in-progress`), the same point at which a plan
-run flips its parent. Phase 6 takes it `in-progress → done`, where "close the parent"
-means close the task itself.
+`open → ready` (the `open` case above). Then claim it at the **first executor dispatch**
+exactly as [Claiming the run](#claiming-the-run-at-first-dispatch) prescribes for a parent —
+status and branch label in one command
+(`lore record update task/<name> --status in-progress --label craft/branch=<bare-branch>`),
+so crash-resume can find the branch on a standalone run too. Phase 6 takes it
+`in-progress → done`, where "close the parent" means close the task itself.
 
 ### Resuming a run
 
