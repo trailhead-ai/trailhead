@@ -954,6 +954,99 @@ def test_vault_flag_omitted_preserves_scan_behavior(tmp_path):
     assert _find_sidecar(beta_vault, record_id)["status"] == "open"
 
 
+# ---------------------------------------------------------------------------
+# --vault + scope-less sidecar: destination is the named vault, no move
+# ---------------------------------------------------------------------------
+#
+# A record whose sidecar carries no repo/product/suite/team field (e.g. a
+# legacy or externally-authored record) re-resolves its destination from an
+# EMPTY merged scope, which always lands on the default vault (see
+# vault/resolve.py's totality floor). Without a fix, ``--vault <elected>
+# --status ready`` on such a record would silently MOVE it out of the elected
+# vault into the default vault, even though no destination scope flag was
+# given. These tests pin: when --vault is passed and no explicit destination
+# scope flag (--repo/--product/--suite/--team) accompanies it, the
+# destination is the named vault itself -- no re-resolution, no move.
+
+
+def _elected_vault_config(tmp_path):
+    """A default vault and a separately-rooted ``elected`` team vault."""
+    default_vault, state = _make_vault(tmp_path)
+    elected_vault = tmp_path / "vault_elected"
+    elected_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "elected", "scope": "team", "path": str(elected_vault)},
+        ],
+    )
+    return default_vault, elected_vault, state, config_home
+
+
+def _create_scopeless_in_elected(default_vault, elected_vault, state, config_home, *, body="orig body\n"):
+    """Create a task physically in ``elected_vault``, then strip its scope field.
+
+    Routes the create with ``--team elected`` (the only way to place it there),
+    then rewrites the on-disk sidecar to drop the ``team`` key -- simulating a
+    record whose sidecar was never scope-stamped (the exact shape the finding
+    describes), without which the CLI's own create routing would never produce
+    a scope-less record outside the default vault.
+    """
+    r = _run_cfg(
+        ["record", "create", "--kind", "task", "--title", "Elected Task",
+         "--team", "elected", "--status", "open"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text=body,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    sidecar_path = elected_vault / kind / f"{name}.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    del sidecar["team"]
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+    return record_id
+
+
+def test_vault_flag_scopeless_sidecar_status_update_stays_no_move(tmp_path):
+    """``--vault elected --status ready`` on a scope-less record stays in elected."""
+    default_vault, elected_vault, state, config_home = _elected_vault_config(tmp_path)
+    record_id = _create_scopeless_in_elected(default_vault, elected_vault, state, config_home)
+    kind, name = record_id.split("/", 1)
+    assert "team" not in _find_sidecar(elected_vault, record_id)
+
+    r = _run_cfg(
+        ["record", "update", record_id, "--vault", "elected", "--status", "ready"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert _find_sidecar(elected_vault, record_id)["status"] == "ready"
+    assert not (default_vault / kind / f"{name}.json").exists()
+    assert "moved:" not in r.stdout
+
+
+def test_vault_flag_scopeless_sidecar_diff_body_stays_no_move(tmp_path):
+    """Same, with a ``--diff`` body update instead of a metadata-only one."""
+    default_vault, elected_vault, state, config_home = _elected_vault_config(tmp_path)
+    record_id = _create_scopeless_in_elected(
+        default_vault, elected_vault, state, config_home, body="orig body\n"
+    )
+    kind, name = record_id.split("/", 1)
+
+    diff = _make_diff("orig body\n", "elected body\n")
+    r = _run_cfg(
+        ["record", "update", record_id, "--vault", "elected", "--diff"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text=diff,
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert _find_body(elected_vault, record_id) == "elected body\n"
+    assert not (default_vault / kind / f"{name}.json").exists()
+    assert "moved:" not in r.stdout
+
+
 # ===========================================================================
 # Unit tests for apply_unified_diff — adversarial cases
 # ===========================================================================

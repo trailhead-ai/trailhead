@@ -300,16 +300,21 @@ def cmd_record(args) -> int:
     return 1
 
 
-def _render_record(record_id: str, vault_root: str, as_json: bool) -> int:
+def _render_record(
+    record_id: str, vault_root: str, as_json: bool, *, error_prefix: str = "error: "
+) -> int:
     """Locate ``record_id`` in ``vault_root`` and print it; shared by the readers.
 
     Plain: writes the body (``.md``) to stdout. ``--json``: emits
     ``{record_id, kind, name, sidecar, body}`` — the ``sidecar`` dict is how
     callers read the un-indexed annotations (e.g. flush's ``flushed-at``
     watermark, which is sidecar-only and never lands in the index). A nonexistent
-    or malformed record → non-zero + stderr. Backs both ``lore record show``
-    (caller-supplied ``<kind>/<name>``) and ``lore session show`` (the resolved
-    session record id), so the output shape is identical for both.
+    or malformed record → non-zero + stderr (``error_prefix``-ed — ``record
+    show --vault`` passes ``"lore: "`` to match its explicit-targeting error
+    convention, mirroring ``record update --vault``; every other caller keeps
+    the default ``"error: "``). Backs both ``lore record show`` (caller-supplied
+    ``<kind>/<name>``) and ``lore session show`` (the resolved session record
+    id), so the output shape is identical for both.
     """
     from ..record import store as record_store_mod
 
@@ -319,7 +324,7 @@ def _render_record(record_id: str, vault_root: str, as_json: bool) -> int:
         record_store_mod.RecordNotFoundError,
         record_store_mod.InvalidRecordIdError,
     ) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"{error_prefix}{exc}", file=sys.stderr)
         return 1
     except Exception as exc:
         print(f"error: record show failed: {exc}", file=sys.stderr)
@@ -352,18 +357,43 @@ def _render_record(record_id: str, vault_root: str, as_json: bool) -> int:
 
 
 def _cmd_record_show(args) -> int:
-    """``lore record show <kind>/<name> [--json]`` — the canonical record reader.
+    """``lore record show <kind>/<name> [--json] [--vault NAME]`` — the canonical
+    record reader.
 
     The CLI-only way to read a record so agents and skills never poke at vault
     files directly. RECORD_ID must be ``<kind>/<name>``; a malformed ID or a
     nonexistent record → non-zero + stderr. To read THIS worktree's live session
     record (resolved by session-id / worktree, not a fixed name), use the
     dedicated ``lore session show``.
+
+    ``--vault NAME`` mirrors ``record update --vault`` exactly: resolved via
+    :func:`_resolve_named_vault`, then a direct
+    ``record_store.locate_record(vault_root=...)`` in exactly that vault — no
+    :func:`_resolve_record_op_vault` scan fallback. This is the read-side fix
+    for the same collision ``update --vault`` addresses: a same-named record
+    across more than one configured vault, where the cwd-blind scan's first
+    match may not be the vault the caller means (e.g. ranger's queue
+    classification and question extraction, which must read a specific vault's
+    body, not whichever vault happens to sort first in config). An unknown
+    ``--vault`` name, or a named vault that does not hold the record, errors
+    ``lore: <msg>`` + nonzero — the same explicit-targeting convention
+    ``update`` uses. Omitting ``--vault`` preserves
+    :func:`_resolve_record_op_vault`'s scan exactly as before.
     """
     record_id = _require_record_id(args)
     if record_id is None:
         return 1
     as_json = bool(getattr(args, "json", False))
+
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        return _render_record(
+            record_id, str(named_vault.path), as_json, error_prefix="lore: "
+        )
+
     vault_root = _resolve_record_op_vault(record_id, args)
     return _render_record(record_id, vault_root, as_json)
 
@@ -750,6 +780,15 @@ def _cmd_record_update(args) -> int:
     composes with ``--repo/--product/--suite/--team`` (current location vs.
     re-routed destination are independent concerns).
 
+    **``--vault`` alone pins the destination too.** When ``--vault`` is given
+    and NO explicit destination scope flag (``--repo/--product/--suite/--team``)
+    accompanies it, the destination is the named vault itself — the merged-scope
+    re-resolution below is skipped entirely, so a record whose sidecar carries
+    no scope field at all (a legacy/unstamped record) is never silently moved to
+    the default vault just because its empty scope resolves fresh there. An
+    explicit destination scope flag alongside ``--vault`` still means "re-route"
+    exactly as before — the two concerns compose, they don't gate each other.
+
     **Scope flags drive automatic relocation.**
     ``--team/--suite/--product/--repo`` are field-setters that also re-resolve the
     destination vault from the **merged scope** (existing sidecar scope fields
@@ -782,6 +821,7 @@ def _cmd_record_update(args) -> int:
     from ..record import fields as fields_mod
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
+    from ..vault import config as vault_config_mod
 
     record_id = _require_record_id(args)
     if record_id is None:
@@ -907,8 +947,25 @@ def _cmd_record_update(args) -> int:
             if guard_errors:
                 return _fail(guard_errors)
 
-            # (3) re-resolve the DESTINATION (root + shared trust) from the merged scope.
-            dest_root, dest_shared = _resolve_destination_root(sidecar, location.kind)
+            # (3) re-resolve the DESTINATION (root + shared trust). When --vault named
+            # the current location AND no explicit destination scope flag was given on
+            # this call, the destination IS that named vault -- skip the merged-scope
+            # re-resolution entirely. Without this, a record whose sidecar carries no
+            # repo/product/suite/team scope field (e.g. a legacy/unstamped record)
+            # would resolve fresh off an EMPTY scope, which always lands on the default
+            # vault (vault/resolve.py's totality floor), silently moving it OUT of the
+            # vault the caller explicitly targeted with --vault, even though nothing
+            # asked for a re-route. An explicit scope flag still means "re-route",
+            # --vault or not, so it takes the merged-scope resolution below exactly
+            # as before.
+            explicit_destination_flag = any(
+                getattr(args, flag, None) for flag in _SCOPE_FLAGS
+            )
+            if named_vault is not None and not explicit_destination_flag:
+                dest_root = str(named_vault.path)
+                dest_shared = vault_config_mod.shared_flag(named_vault)
+            else:
+                dest_root, dest_shared = _resolve_destination_root(sidecar, location.kind)
             same_vault = (
                 Path(dest_root).resolve() == Path(location.vault_root).resolve()
             )
@@ -1129,6 +1186,11 @@ def add_record_subparser(sub) -> None:
         action="store_true",
         default=False,
         help="Emit {record_id, kind, name, sidecar, body} as JSON",
+    )
+    p_record_show.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Read the record from exactly this configured vault by name, "
+             "instead of scanning every vault in config order.",
     )
     # Routing flags (symmetric with delete): select which vault a scoped record
     # lives in. Suppressed from help.

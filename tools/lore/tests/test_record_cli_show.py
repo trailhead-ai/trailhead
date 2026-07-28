@@ -16,6 +16,14 @@ separate ``lore session show`` subcommand (see test_session_cli.py), so the
     - a malformed RECORD_ID (no '/') → non-zero + stderr.
     - a bare ``session`` (no '/') is NOT special-cased — same malformed error.
     - a nonexistent record → non-zero + stderr.
+  --vault NAME:
+    - locates the record in exactly the named configured vault (mirrors
+      ``record update --vault``), instead of the cwd-blind config-order scan —
+      the read-side fix for a same-named record colliding across vaults.
+    - an unknown vault name, or a named vault lacking the record, errors
+      ``lore: <msg>`` + nonzero, never falling back to the scan.
+    - composes with ``--json``; omitting the flag preserves scan behavior
+      byte-for-byte.
 
 Tests run the CLI as a subprocess via CLI_PATH (conftest pattern). Never writes
 to the real vault: the CLI resolves the test vault from a seeded config.json
@@ -24,6 +32,7 @@ to the real vault: the CLI resolves the test vault from a seeded config.json
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from conftest import make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
 
@@ -96,3 +105,150 @@ def test_show_nonexistent_record(tmp_path):
     r = _run(["record", "show", "spec/does-not-exist"], vault=vault, state_dir=state)
     assert r.returncode != 0
     assert r.stderr.strip()
+
+
+# ---------------------------------------------------------------------------
+# --vault: explicit current-location targeting (read-side collision hazard)
+# ---------------------------------------------------------------------------
+#
+# Without a vault-targeting flag, ``record show`` locates a record via
+# ``_find_current_record_location``'s cwd-blind config-order scan -- on a
+# same-named record colliding across more than one configured vault, the scan
+# returns the first configured match, which may not be the vault the caller
+# means. ``--vault NAME`` mirrors ``record update --vault``'s semantics
+# exactly: resolved via ``_resolve_named_vault``, located directly in that
+# vault only, ``lore: <msg>`` + nonzero on an unknown vault name or a record
+# absent there, and never a fallback to the scan.
+
+
+def _write_config(config_home: Path, vaults: list) -> Path:
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    cfg_path = lore_cfg / "config.json"
+    cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
+    return cfg_path
+
+
+def _run_cfg(args, *, vault, state, config_home, stdin_text=None):
+    return _run(
+        args, vault=vault, state_dir=state, stdin_text=stdin_text,
+        env_extra={"XDG_CONFIG_HOME": str(config_home)},
+    )
+
+
+def _duplicate_named_task_two_vaults(tmp_path, *, title="Dup Task"):
+    """Two team vaults (config order alpha, beta), each holding an
+    independently-created task record of the same name -- the collision case
+    the cwd-blind scan cannot disambiguate."""
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    for team, vault, body in (("alpha", alpha_vault, "alpha body\n"), ("beta", beta_vault, "beta body\n")):
+        r = _run_cfg(
+            ["record", "create", "--kind", "task", "--title", title, "--team", team],
+            vault=default_vault, state=state, config_home=config_home, stdin_text=body,
+        )
+        assert r.returncode == 0, r.stderr
+    return default_vault, alpha_vault, beta_vault, state, config_home
+
+
+def test_show_vault_flag_targets_named_vault_on_collision(tmp_path):
+    """``show --vault beta`` returns beta's body, not alpha's (config-order-first)."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    record_id = "task/dup-task"
+
+    r = _run_cfg(
+        ["record", "show", record_id, "--vault", "beta"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "beta body\n"
+
+
+def test_show_vault_flag_record_absent_in_named_vault_errors_without_scan_fallback(tmp_path):
+    """``--vault`` naming a vault that lacks the record errors plainly -- it
+    never falls back to scanning the other configured vaults."""
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    r = _run_cfg(
+        ["record", "create", "--kind", "task", "--title", "Solo", "--team", "alpha"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="solo body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = "task/solo"
+
+    r = _run_cfg(
+        ["record", "show", record_id, "--vault", "beta"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+
+
+def test_show_vault_flag_unknown_name_errors(tmp_path):
+    """An unconfigured ``--vault`` name errors with ``lore: <msg>`` -- nonzero."""
+    vault, state = _make_vault(tmp_path)
+    rid = _create_record(vault, state, body="body\n")
+
+    r = _run(["record", "show", rid, "--vault", "nope"], vault=vault, state_dir=state)
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+    assert "nope" in r.stderr
+
+
+def test_show_vault_flag_works_with_json(tmp_path):
+    """``--vault`` composes with ``--json``, reading the named vault's copy."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    record_id = "task/dup-task"
+
+    r = _run_cfg(
+        ["record", "show", record_id, "--vault", "beta", "--json"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    payload = json.loads(r.stdout)
+    assert payload["record_id"] == record_id
+    assert "beta body" in payload["body"]
+
+
+def test_show_vault_flag_omitted_preserves_scan_behavior(tmp_path):
+    """Omitting ``--vault`` still scans config order and returns the first
+    match -- unchanged from pre-existing behavior."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    record_id = "task/dup-task"
+
+    r = _run_cfg(
+        ["record", "show", record_id],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "alpha body\n"
