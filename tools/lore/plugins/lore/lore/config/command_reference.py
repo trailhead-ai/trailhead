@@ -6,6 +6,7 @@ subcommands an agent is expected to drive directly.
 block per covered leaf: the exact command name, its mechanically-derived
 required arguments (never hand-maintained — read straight off the parser so
 it can't drift), a purpose one-liner, a thin curated list of common optional
+flags, an optional one-clause hint disambiguating two easily-confused curated
 flags, and — where the command reads its payload from stdin rather than an
 argparse argument — a stdin hint.
 
@@ -147,12 +148,15 @@ class _LeafSpec:
     ``extras`` is a thin allowlist of the common optional flags worth
     surfacing (existence-validated against the live parser, never a source of
     routing/mirror noise like ``--unset-*`` or the scope-routing flags).
+    ``flags_hint`` is set only where two curated flags are easy to confuse and
+    need a one-clause disambiguation beyond their bracketed rendering.
     ``stdin_hint`` is set only for the leaves that read their payload from
     stdin as a convention rather than an argparse argument.
     """
 
     purpose: str
     extras: "tuple[str, ...]" = field(default_factory=tuple)
+    flags_hint: "str | None" = None
     stdin_hint: "str | None" = None
 
 
@@ -165,7 +169,8 @@ _LEAF_SPECS: "dict[str, _LeafSpec]" = {
     ),
     "record create": _LeafSpec(
         purpose="Create a new vault record.",
-        extras=("--status", "--keyword", "--label"),
+        extras=("--status", "--keyword", "--label", "--related"),
+        flags_hint="--related links to another record; --label is a free attribute",
         stdin_hint=(
             "the record body, read verbatim — a leading '---' is never parsed "
             "as frontmatter"
@@ -173,7 +178,7 @@ _LEAF_SPECS: "dict[str, _LeafSpec]" = {
     ),
     "record update": _LeafSpec(
         purpose="Update an existing vault record (a scope flag auto-moves it).",
-        extras=("--status", "--title", "--diff"),
+        extras=("--status", "--title", "--diff", "--related"),
         stdin_hint=(
             "full-replace body (default), a unified diff applied to the "
             "existing body with --diff, or omit stdin entirely for a "
@@ -235,6 +240,8 @@ def build_reference(parser: argparse.ArgumentParser) -> str:
                 _extra_action_descriptor(leaf_parser, flag) for flag in spec.extras
             )
             lines.append(f"    optional: {rendered_extras}")
+        if spec.flags_hint:
+            lines.append(f"    flags: {spec.flags_hint}")
         if spec.stdin_hint:
             lines.append(f"    stdin: {spec.stdin_hint}")
         blocks.append("\n".join(lines))

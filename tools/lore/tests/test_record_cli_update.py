@@ -1021,6 +1021,84 @@ def test_update_label_bad_key_nonzero(tmp_path):
     assert "BadKey" in r.stderr
 
 
+def test_update_label_reserved_key_nonzero(tmp_path):
+    """update --label kind=x → non-zero; a label may not shadow a record kind."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--label", "kind=x"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "kind" in r.stderr
+
+
+def test_update_label_namespaced_reserved_name_succeeds(tmp_path):
+    """update --label craft/subsystems=x → accepted; namespacing is the escape route."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--label", "craft/subsystems=pr-dashboard"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["labels"]["craft/subsystems"] == "pr-dashboard"
+
+
+def _inject_label(vault: Path, record_id: str, key: str, value: str) -> None:
+    """Write a labels key straight into the sidecar, bypassing the CLI.
+
+    The validator refuses to produce this state through ``record create``, so a
+    record predating a name's reservation has to be manufactured on disk. Only
+    ever the ``make_vault`` test vault — never a live one.
+    """
+    kind, name = record_id.split("/", 1)
+    path = vault / kind / f"{name}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar.setdefault("labels", {})[key] = value
+    path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+def test_update_unset_label_clears_a_reserved_key_the_record_already_carries(tmp_path):
+    """The escape the refusal names: a record already holding a reserved key can
+    drop it in one metadata-only update, leaving the body byte-identical."""
+    vault, state = _make_vault(tmp_path)
+    body = "original line one\noriginal line two\n"
+    record_id = _create(vault, state, body=body)
+    _inject_label(vault, record_id, "area", "home-manager")
+
+    r = _run(
+        ["record", "update", record_id, "--unset-label", "area"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "area" not in _find_sidecar(vault, record_id).get("labels", {})
+    assert _find_body(vault, record_id) == body
+
+
+def test_update_label_refusal_stderr_names_the_unset_escape(tmp_path):
+    """End to end: the refusal an agent reads carries the command that clears it,
+    and the refused write leaves the stored label untouched."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+    _inject_label(vault, record_id, "area", "home-manager")
+
+    r = _run(
+        ["record", "update", record_id, "--label", "area=elsewhere"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode != 0, r.stdout
+    assert "--unset-label area" in r.stderr
+    assert _find_sidecar(vault, record_id)["labels"] == {"area": "home-manager"}
+
+
 # ===========================================================================
 # Group-default scope routing is create-only: update must NOT seed scopes from
 # a camp group, so an unscoped update inside a bound workspace never relocates a

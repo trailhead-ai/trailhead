@@ -920,7 +920,18 @@ def add_record_subparser(sub) -> None:
     )
     p_record_sub = p_record.add_subparsers(dest="record_action", required=True)
 
-    p_record_create = p_record_sub.add_parser("create", help="Create a new vault record")
+    p_record_create = p_record_sub.add_parser(
+        "create", help="Create a new vault record",
+        epilog="Choosing a labels flag: a value naming another record — a task, a "
+               "decision, an area — is a relation, not an attribute; use --related "
+               "KIND=NAME instead of a label. A free attribute is a label; use "
+               "--label KEY=VALUE. A labels key that shadows a record kind or a "
+               "query field name (e.g. 'area', 'phase', 'status', 'kind') is refused "
+               "at write time; the refusal names a runnable fix — --annotation "
+               "KEY=VALUE for a free attribute whose natural name is taken, or a "
+               "namespaced key (<ns>/<key>, e.g. craft/subsystems) to keep it "
+               "queryable as a label.",
+    )
     p_record_create.add_argument(
         "--kind", required=True,
         help="Record kind (one of: area, blob, collaboration, decision, lesson, "

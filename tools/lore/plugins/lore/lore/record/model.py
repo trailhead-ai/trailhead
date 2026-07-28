@@ -11,6 +11,12 @@ pre-commit `status_validator.py` that has since been retired. Nothing here reads
 files or touches the search index — the validator operates on an already-parsed
 dict and is shared verbatim by the `lore record` CLI and the migration.
 
+It does, however, depend on `search.kql` for one thing: the set of queryable
+field names. `RESERVED_LABEL_KEYS` is derived from `KINDS | kql.VALID_FIELDS` at
+import, so the names an operator can *query by* and the names an operator may not
+*label with* cannot drift apart. The import is data-only and acyclic (`kql`
+imports nothing from this package).
+
 Invariants:
 - The kind set is closed: exactly the 8 kinds in ``KINDS``; any other ``kind`` is
   rejected.
@@ -24,6 +30,17 @@ Invariants:
   be valid kinds and values ``list[str]``, but referenced names are *not* verified
   to exist (a dangling ``{"task": ["nope"]}`` validates clean — existence is
   enforced nowhere; the index materializes whatever edges exist).
+- A ``labels`` key may not shadow a first-class record concept: exact matches
+  against ``RESERVED_LABEL_KEYS`` and any ``related-`` prefixed key are refused.
+  The refusal is classified (``_reserved_key_alternative``) so it names the one
+  alternative that stores what the key meant — an edge, the field's own flag, or
+  a free attribute — and always names ``--unset-label`` for a record that already
+  carries the key. Reservation is exact, so ``hm/area`` and ``craft/subsystems``
+  stay legal. ``annotations`` are exempt. This binds every caller of
+  ``validate()`` — i.e. every
+  ``lore record create``/``update`` — and nothing else: ``search.index``'s
+  ``upsert_row`` (reached from the session store and ``rebuild``) writes label
+  rows without consulting this module.
 - ``created-by``/``updated-by`` are plaintext provenance PII (e.g. a git email),
   git-tracked, exactly as the legacy YAML frontmatter already stored. They are
   **never** an authz/authn signal — self-asserted and spoofable. Data
@@ -41,6 +58,8 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import NamedTuple
+
+from ..search import kql
 
 # --- Canonical declarative model --------------------------------------------
 
@@ -325,6 +344,118 @@ _KEBAB_SEGMENT = r"[a-z0-9]([a-z0-9-]*[a-z0-9])?"
 # admit keys like "foo\n" into the index.
 _MAP_KEY_RE = re.compile(rf"^{_KEBAB_SEGMENT}(/{_KEBAB_SEGMENT})?\Z")
 
+#: Every ``related-*`` sidecar field is an edge/list concept with its own setter,
+#: so a bare label key under this prefix reads as one of them while being stored
+#: where none of them is read from. Reserved as a prefix, not by enumeration:
+#: ``related-subsystems`` names no real field yet still misleads.
+_RELATED_KEY_PREFIX = "related-"
+
+
+def _derive_reserved_label_keys() -> frozenset[str]:
+    """Union the two exact-match reservation sources.
+
+    Kept callable so what a test exercises when a source grows is the derivation
+    itself rather than a hand-maintained copy of its result.
+    """
+    return KINDS | frozenset(kql.VALID_FIELDS)
+
+
+#: Bare ``labels`` keys that shadow a first-class record concept: every record
+#: kind and every queryable KQL field name (22 keys today). Derived at import from
+#: the two authoritative sets — adding a kind or a query field reserves its name
+#: with no change here. Exact match only: ``hm/area`` is fine, ``area`` is not.
+RESERVED_LABEL_KEYS: frozenset[str] = _derive_reserved_label_keys()
+
+
+def _is_reserved_label_key(map_key: str) -> bool:
+    """Whether a ``labels`` key shadows a first-class record concept.
+
+    The union of both reservation sources — the ``related-`` prefix and the
+    derived exact-match set — as a single predicate, so the validator and any
+    other reader of the rule (e.g. a doc audit) test the same condition rather
+    than each restating it.
+    """
+    return map_key.startswith(_RELATED_KEY_PREFIX) or map_key in RESERVED_LABEL_KEYS
+
+#: ``related-<suffix>`` keys whose suffix names no record kind but does have a
+#: dedicated repeatable setter. Source of truth: the flag→field map in
+#: ``record/fields.py`` (``_LIST_FIELD_FLAGS``). Mirrored rather than imported —
+#: this module is pure and must not reach into the applier layer — so a field
+#: renamed there has to be renamed here too. Each field appears under its real
+#: sidecar suffix (what ``lore record show --json`` displays) *and* its flag
+#: spelling (what an operator reasoning from ``--help`` writes).
+_RELATED_SUFFIX_FLAGS = {
+    "phases": "--related-phase",
+    "phase": "--related-phase",
+    "files-or-folders": "--related-file",
+    "file": "--related-file",
+    "urls": "--related-url",
+    "url": "--related-url",
+}
+
+#: Reserved keys naming a field an operator can actually set, and the flag that
+#: sets it. Not 1:1 with the field name: ``keywords`` and its ``keyword`` query
+#: alias share ``--keyword``, and ``phase`` is set by ``--related-phase``.
+#: Deliberately partial — the rest of ``RESERVED_LABEL_KEYS`` is either
+#: system-managed (``kind`` and the timestamps have no setter) or a scope flag
+#: (``repo``/``product``/``suite``/``team``), whose flags **relocate the record to
+#: a different vault** and so must never be offered as the fix for a label.
+_SETTABLE_FIELD_FLAGS = {
+    "status": "--status",
+    "keywords": "--keyword",
+    "keyword": "--keyword",
+    "phase": "--related-phase",
+}
+
+
+def _reserved_key_alternative(map_key: str) -> str:
+    """Name the one-step alternative that stores what a reserved key meant.
+
+    Classified in this order, because ``related-area`` and ``related-phases``
+    belong to *both* reservation sources and the prefix reading is the one that
+    names a flag an operator can run:
+
+    1. ``related-<suffix>`` — an edge (``--related``), a dedicated list flag, or
+       (no such field exists) a free attribute.
+    2. a record kind — an edge.
+    3. a settable field — the flag that sets it.
+    4. anything else — a free attribute, with no flag named.
+    """
+    free_attribute = (
+        f"use `--annotation {map_key}=<value>` for a free attribute, or a"
+        f" namespaced key (`<ns>/{map_key}`)"
+    )
+    if map_key.startswith(_RELATED_KEY_PREFIX):
+        suffix = map_key[len(_RELATED_KEY_PREFIX):]
+        if is_valid_kind(suffix):
+            return f"`{map_key}` names a relation — use `--related {suffix}=<name>`."
+        flag = _RELATED_SUFFIX_FLAGS.get(suffix)
+        if flag is not None:
+            return f"`{map_key}` names a relation — use `{flag} <value>`."
+        return (
+            f"`{map_key}` reads as a relation but names no field — {free_attribute}."
+        )
+    if is_valid_kind(map_key):
+        return f"`{map_key}` is a record kind — use `--related {map_key}=<name>`."
+    flag = _SETTABLE_FIELD_FLAGS.get(map_key)
+    if flag is not None:
+        return f"`{map_key}` is a settable record field — use `{flag} <value>`."
+    return f"`{map_key}` is a reserved field name — {free_attribute}."
+
+
+def _reserved_label_key_error(field: str, map_key: str) -> str:
+    """The full refusal for one reserved ``labels`` key.
+
+    ``--unset-label`` rides along on every branch: ``validate()`` is pure and
+    cannot tell a key being added from one the record already carries, and a
+    stored reserved key fails the record's *next* write whatever that write
+    changes — so the message has to carry its own repair.
+    """
+    return (
+        f"{field}: {_reserved_key_alternative(map_key)} Already storing it?"
+        f" `--unset-label {map_key}` clears the key."
+    )
+
 
 def _check_map_str_str(key: str, value: object) -> list[str]:
     """Validate a ``map[str,str]`` sidecar field (``labels`` or ``annotations``).
@@ -333,10 +464,19 @@ def _check_map_str_str(key: str, value: object) -> list[str]:
     ``[namespace/]name`` — a lowercase kebab segment (``[a-z0-9-]``, begins and
     ends with alphanumeric) with an optional single namespace prefix + ``/``.
 
+    ``labels`` additionally refuse a **reserved** key — one in
+    ``RESERVED_LABEL_KEYS`` or carrying the ``related-`` prefix — with the
+    classified message :func:`_reserved_label_key_error` builds. The check runs
+    after the charset match in the same loop, so a malformed key reports as
+    malformed and anything echoed into the refusal is already charset-clean.
+    ``annotations`` are exempt by field name, not by a separate validator: they
+    are the sanctioned carrier for a free attribute whose natural name is taken.
+
     SECURITY NOTE: map values are untrusted free-form strings supplied by callers.
     Any future read path that echoes them into a prompt or a fenced channel MUST
     escape them before output. No such path exists in v1; this note is the standing
-    guard for when one is added.
+    guard for when one is added. The reserved-key refusal echoes the map *key*
+    only, and only once it has matched ``_MAP_KEY_RE``.
     """
     if not isinstance(value, dict):
         return [f"key {key!r} must be a map of string keys to string values"]
@@ -353,6 +493,9 @@ def _check_map_str_str(key: str, value: object) -> list[str]:
                 " [namespace/]name (lowercase kebab, begins/ends alphanumeric,"
                 " at most one namespace segment)"
             )
+            continue
+        if key == "labels" and _is_reserved_label_key(map_key):
+            errors.append(_reserved_label_key_error(key, map_key))
     return errors
 
 
