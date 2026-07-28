@@ -108,13 +108,20 @@ Phase 3's whole-change correctness-review dispatch.
 
 - **`ready`** — dispatch only when the node carries the `(runnable)` marker. A
   standalone node rendered without the marker has an unmet `depends-on` edge — report it
-  and stop rather than guessing. When runnable, treat the task itself as the one slice:
-  run step 3 (dispatch `executor`) and step 4 (review, scaled to the size table) below
-  against it, then skip straight to [After All Slices](#after-all-slices) — there is no
-  next leaf to pick.
-- **`open`** — run the `_shared/refine.md` procedure inline. Pass `--interactive` only
+  and stop rather than guessing. When runnable, first re-run `../_shared/refine.md`'s
+  citation-resolution gate against the task's payload: its verdict was
+  stamped at promotion time, and commits landing since can slide a cited line onto
+  different-but-existing content. A citation that no longer resolves is a gap again —
+  stop and report rather than dispatching against it. Then treat the task itself as
+  the one slice: run step 3 (dispatch `executor`) and step 4 (review, scaled to the
+  size table) below against it, then skip straight to
+  [After All Slices](#after-all-slices) — there is no next leaf to pick.
+- **`open`** — run the `../_shared/refine.md` procedure inline. Pass `--interactive` only
   when execute itself has a human channel to a live operator right now; otherwise run it
-  unattended. Refine promotes cleanly → proceed as the `ready` case above. Refine
+  unattended. Refine promotes cleanly → report the promotion first — the fields
+  filled, any folded-in scope delta, any judgment call made — then proceed as the
+  `ready` case above; the promote path is the one with no human between refine and
+  an `executor` dispatch, so its report must not be skipped. Refine
   escalates (writes `## Refine — unresolved`) or routes to `/craft:plan` /
   `/craft:brainstorm` → stop and report the refine outcome; do not dispatch an executor
   against a task that did not promote.

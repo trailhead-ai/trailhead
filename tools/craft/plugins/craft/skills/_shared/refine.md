@@ -80,6 +80,18 @@ two or more materially different fills remain defensible, that field is a gap.
 the whole bar. A task that drafts cleanly is a leaf however large it is, and a task
 whose payload will not resolve is not a leaf however small it looks.
 
+**Discovered scope folds narrowly.** The draft attempt routinely finds adjacent
+defects the capture did not name. A discovery folds **silently** only when it is
+the **same defect class** in files the task already touches — one committable cut
+either way. Anything wider — a different file, a different defect class, its own
+test surface — re-asks outcome 3's routing question **after the expansion**, not
+only against the captured scope, and that answer decides: grown scope that still
+reads as one independently-committable cut may fold; a task that grew into two or
+more routes, it does not promote. Every fold-in — silent or re-asked — is named in
+the outcome report as a delta against the captured claim ("captured: X;
+also folded in: Y") so the operator can audit the growth without diffing the prose
+against the payload by hand.
+
 Three outcomes:
 
 1. **Drafts cleanly** → append the payload, promote to `ready` (Steps 3-4).
@@ -107,6 +119,24 @@ A gap is not an escalation until both passes have run:
 
 A derived answer is **cited in the drafted body**. An answer you cannot cite is not
 derived — it escalates.
+
+### A resolved hedge is a judgment call
+
+Captured prose that hedges — "consider whether…", "maybe also…", "we could…" — is
+proposing **optional work**, not stating a requirement. Code convention settles
+*mechanical* questions: where a thing goes, what it is named, which pattern the
+surface already uses. It cannot settle **whether optional work is *wanted*** — that
+is a policy preference, and using convention to promote it is laundering a policy
+question as a code fact. The line in practice: a hedged
+"consider adding a pinning test" backed by an existing pinning test on the same
+kind of surface resolves — the
+repo has already made that policy call once; a hedged "consider a caching layer"
+with no precedent is a gap, however reasonable it sounds.
+
+When prior art is strong enough to resolve the hedge without escalating, the
+resolution is still a **judgment call**: cite the prior art in the payload as usual,
+*and* name the call in the outcome report so the operator can audit what was decided
+for them. A hedge with no such prior art escalates like any other gap.
 
 ### The citation rule
 
@@ -140,6 +170,14 @@ survives, escalate it in Step 5. It never promotes. A fabricated pointer reads
 exactly like a real one to every downstream consumer, so this is the only place it
 can be caught.
 
+**The verdict is stamped at promotion time**, against the worktree refine ran in —
+it is not permanent. Line numbers rot: a commit landing between promotion and
+dispatch can slide a cited line onto different-but-existing content, which still
+reads as resolving. Execute therefore re-runs this gate on a standalone task's
+citations immediately before its first dispatch; a citation that no longer resolves
+there is a gap again, and execute stops and reports rather than dispatching
+against it.
+
 ## Step 4 — Write the payload
 
 Append the payload in the **bold inline label** form of
@@ -171,6 +209,12 @@ without a parent plan:
 `${CLAUDE_PLUGIN_ROOT}/templates/plan.md` is the **canonical source for those three items**;
 the block above is a copy for reading convenience and must track it. Read the template
 when the two disagree — it wins.
+
+**A Delivers spanning more than one distinct fix is bulleted** — one bullet per fix,
+each carrying its own citations. A single paragraph bundling two fixes makes the
+executor parse rationale to extract the work list; the bullets keep the citations
+and drop the bundling, matching how planning's Given Axioms render citable facts as
+a list rather than prose.
 
 **Test contract on a non-test surface.** A change with no automated test surface
 still states its verification explicitly: a command plus its expected output, or
@@ -284,12 +328,25 @@ heading or a stale `Route:` line. Leaving it behind hands the next reader two
 authoritative-looking statements of intent that disagree, with no way to tell which
 one is current.
 
+## Outcome report
+
+Whichever outcome lands — promoted, escalated, or routed — the report ends by
+printing `lore record show <record-id>` for the task, so the drafted payload, or
+the escalated question and its evidence, is one command away without the reader
+needing to know the CLI. A promotion's report also names the fields filled, the
+citations behind derived answers, any folded-in scope delta (Step 1), and any
+judgment call made (Step 2). This binds **both callers**: the `/craft:refine`
+wrapper's outcome section restates it, and execute's inline run owes the same
+report before it proceeds to dispatch.
+
 ## Re-refine
 
 Running refine on a task that already carries a payload is normal — `ready` tasks and
 escalated `open` drafts both come back through here. Idempotency keys on the three
 label strings (`**Delivers:**`, `**Test contract:**`, `**Files:**`) **and** on the
-`## Refine — unresolved` heading:
+`## Refine — unresolved` heading. A key counts only where it **begins a line**,
+outside fenced code blocks — the same strings quoted mid-prose, in backticks, or
+inside a fence are content, not payload structure, and never move the count:
 
 - Found once → **update in place**. Never append a second set.
   Re-escalation replaces the section's content entirely, including any prior `**Answer:**` line — an answer left behind belongs to the question you just replaced, and an unattended sweep reads it as an answer to the new one.
