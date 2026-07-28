@@ -49,6 +49,10 @@ high-water mark instead of current state.
   dispatched agent. Exit owner: the operator's recorded answer, acted on by a
   sweep (a future ranger refine loop) or, until that ships, by hand — the
   by-hand path is the sufficient interim exit owner.
+- **`blocked → open` / `blocked → ready`** — writer: whoever acts on the
+  operator's answer (interim: the operator by hand). `ready` when the answer
+  makes the task workable as-is; `open` when the answer changes its shape enough
+  to need re-refinement first.
 
 ## `done` = committed and pushed
 
