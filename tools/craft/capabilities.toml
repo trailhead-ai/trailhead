@@ -14,9 +14,11 @@
 #     polish, and agents/planner.md). It has no SKILL.md, so it is never selectable.
 #   - templates — the spec/plan/task body templates, resolved at runtime through
 #     ${CLAUDE_PLUGIN_ROOT}/templates/<name>.md by brainstorm (spec.md), plan
-#     (plan.md + task.md), and refine (task.md's payload labels + plan.md's Flow-out
-#     checklist). They are runtime inputs to those skills, not install-time
-#     scaffolding, which is why selection cannot drop them.
+#     (plan.md + task.md), agents/planner.md (all three — it covers the whole
+#     brainstorm-through-plan arc on its own), execute (plan.md's Flow-out checklist,
+#     appended to a standalone task that lacks one), and refine (task.md's payload
+#     labels + plan.md's Flow-out checklist). They are runtime inputs to those skills
+#     and agents, not install-time scaffolding, which is why selection cannot drop them.
 #
 # Dependency worth knowing when hand-picking a selection: the `gauntlet` skill owns
 # the spec's draft -> ready edge (brainstorm and plan deliberately cannot freeze a
