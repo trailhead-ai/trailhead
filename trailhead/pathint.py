@@ -145,16 +145,23 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 # ---------------------------------------------------------------------------
 #
 # shellenv emits a `camp()` shell function so `camp new <slug>` drops the parent
-# shell into the workspace dir with NO subshell. Design notes (binding):
+# shell into the workspace dir — and `camp remove`/`camp rm` (run from inside a
+# workspace) drops it back into the group's first-member repo — with NO subshell.
+# Design notes (binding):
 #   - `command camp` (not bare `camp`) avoids PATH recursion into this wrapper.
 #   - The function runs in the CURRENT shell (brace body, not a `( … )` subshell),
 #     so the `cd` reaches the user's interactive shell. Only the stdout capture
 #     `$( … )` runs in a subshell; the `cd` itself does not.
 #   - cd is quote-safe: bash/zsh `cd -- "$p"`; fish `cd -- $p` (fish cmd-sub splits
 #     on newlines, not spaces, so a one-line path-with-spaces is a single element).
-#   - The CAMP_SHELL_INTEGRATION marker is exported ONLY around the `camp new`
-#     invocation so the handler suppresses its bare-binary shellenv nudge; every
-#     other verb passes through with NO marker.
+#   - The intercepted verbs are new|remove|rm — BOTH remove spellings, because the
+#     wrapper sees the raw token; alias→canonical resolution happens inside the
+#     CLI. Each such command prints a cd target as its ONLY stdout line (or, for
+#     remove outside the workspace / any failure, nothing — empty capture means
+#     no cd, so the shell stays put).
+#   - The CAMP_SHELL_INTEGRATION marker is exported ONLY around the intercepted
+#     invocations so the handlers suppress their bare-binary shellenv nudges;
+#     every other verb passes through with NO marker.
 #   - fish MUST use function-scoped `set -lx` — `env VAR=val command camp` breaks
 #     (env tries to exec a binary literally named `command`).
 #
@@ -162,32 +169,36 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 
 _CAMP_WRAPPER_POSIX = """\
 camp() {
-    if [ "$1" = "new" ]; then
-        local p
-        p="$(CAMP_SHELL_INTEGRATION=1 command camp "$@")" || return $?
-        if [ -n "$p" ]; then
-            cd -- "$p" || return $?
-        fi
-    else
-        command camp "$@"
-    fi
+    case "$1" in
+        new|remove|rm)
+            local p
+            p="$(CAMP_SHELL_INTEGRATION=1 command camp "$@")" || return $?
+            if [ -n "$p" ]; then
+                cd -- "$p" || return $?
+            fi
+            ;;
+        *)
+            command camp "$@"
+            ;;
+    esac
 }
 """
 
 _CAMP_WRAPPER_FISH = """\
 function camp
-    if test "$argv[1]" = new
-        set -lx CAMP_SHELL_INTEGRATION 1
-        set -l p (command camp $argv)
-        set -l rc $status
-        if test $rc -ne 0
-            return $rc
-        end
-        if test -n "$p"
-            cd -- $p
-        end
-    else
-        command camp $argv
+    switch "$argv[1]"
+        case new remove rm
+            set -lx CAMP_SHELL_INTEGRATION 1
+            set -l p (command camp $argv)
+            set -l rc $status
+            if test $rc -ne 0
+                return $rc
+            end
+            if test -n "$p"
+                cd -- $p
+            end
+        case '*'
+            command camp $argv
     end
 end
 """
