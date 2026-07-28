@@ -123,8 +123,8 @@ class TestCraftInventory:
     def test_no_hooks_json(self):
         assert load_manifest(_CRAFT_MANIFEST).hooks_json is None
 
-    def test_base_is_shared_only(self):
-        assert load_manifest(_CRAFT_MANIFEST).base == ["skills/_shared"]
+    def test_base_is_shared_and_templates(self):
+        assert load_manifest(_CRAFT_MANIFEST).base == ["skills/_shared", "templates"]
 
     def test_council_subagents_discovered(self):
         m = load_manifest(_CRAFT_MANIFEST)

@@ -8,6 +8,7 @@ subdir referenced by `source: "./plugins/craft"`.
 """
 
 import json
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -29,3 +30,27 @@ def test_plugin_json_parses_and_has_required_keys():
 # dev marketplace consolidated into the repo-root `trailhead-local` marketplace.
 # The marketplace shape and the `source: "."` regression guard now live in
 # trailhead/tests/test_dev_marketplace.py at the monorepo level.
+
+
+def test_capabilities_toml_base_includes_templates():
+    """`templates` ships in craft's always-on base set.
+
+    Without it, `${CLAUDE_PLUGIN_ROOT}/templates/*.md` never lands in the
+    installed plugin, so every runtime reference to it (planning, refine)
+    resolves to a missing path.
+    """
+    path = REPO_ROOT / "capabilities.toml"
+    data = tomllib.loads(path.read_text())
+    assert "templates" in data["tool"]["base"]
+
+
+def test_task_template_names_standalone_leaf_usage():
+    """task.md's docstring names the standalone-leaf reuse of its payload shape."""
+    path = PLUGIN_ROOT / "templates" / "task.md"
+    assert "standalone" in path.read_text().lower()
+
+
+def test_plan_template_names_standalone_leaf_usage():
+    """plan.md's docstring names the standalone reuse of its Flow-out checklist."""
+    path = PLUGIN_ROOT / "templates" / "plan.md"
+    assert "standalone" in path.read_text().lower()

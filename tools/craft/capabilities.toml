@@ -21,4 +21,4 @@
 
 [tool]
 name = "craft"
-base = ["skills/_shared"]
+base = ["skills/_shared", "templates"]

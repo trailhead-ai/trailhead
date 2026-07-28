@@ -23,7 +23,9 @@ so it can be ticked as resolved; note which child task it blocks. -->
 ## Flow-out
 
 <!-- The knowledge-flow-out completion gate. Tick every item before setting this parent task
-`done` — a parent completed without this section gets a flow-out reminder from the CLI. -->
+`done` — a parent completed without this section gets a flow-out reminder from the CLI. This
+checklist is also appended to a standalone (childless, parentless) task promoted by refine, so
+it can be its own lifecycle handle without a parent plan. -->
 
 - [ ] Touched area/subsystem profiles updated with what changed
 - [ ] Prover-validated assumptions captured as session candidates (durable at flush)
