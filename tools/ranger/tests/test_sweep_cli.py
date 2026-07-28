@@ -17,7 +17,16 @@ Test contract:
   duration, releases it at finish, writes a complete report, and prints
   exactly the contracted JSON keys plus a report-path breadcrumb on stderr.
 - ``record`` with an unparseable outcome line buckets ``failed`` and exits 0,
-  so a bad agent return never stops the sweep.
+  so a bad agent return never stops the sweep; likewise a record body whose
+  unresolved section carries no parseable question renders a placeholder and
+  exits 0.
+- An ``ESCALATED`` outcome renders the question and its answer command
+  whatever bucket the task was derived into, so a mid-sweep escalation out of
+  ``blocked-answered`` is never reported as a bare id.
+- ``--task`` is validated before it reaches the report, because the report
+  embeds it in a shell command the operator is told to paste.
+- Every ``lore`` read names the elected vault: the fake ``lore`` below exits
+  nonzero on a ``task list`` or ``record show`` that omits ``--vault``.
 - Lock contention during ``start`` surfaces the lock module's own message and
   writes no report — and distinguishes the two cases that matter: a sweep
   whose holder is alive refuses as ALREADY RUNNING (never as stale, which
@@ -41,6 +50,8 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "ranger" / "plugins" / "ranger"
@@ -88,11 +99,25 @@ _FAKE_LORE_SCRIPT = textwrap.dedent(
         print(json.dumps(fixture["vault_resolve"]))
         sys.exit(0)
 
+    # Every read names the vault the sweep elected. A bare `task list` or
+    # `record show` is located by a cwd-blind scan across configured vaults in
+    # declaration order, so a colliding task name would be listed, classified,
+    # and quoted from another camp group's vault entirely.
+    def elected_vault(argv):
+        if "--vault" not in argv:
+            print(f"fake lore: read without --vault: {argv!r}", file=sys.stderr)
+            sys.exit(2)
+        return argv[argv.index("--vault") + 1]
+
     if argv[:2] == ["task", "list"]:
+        elected_vault(argv)
         print(json.dumps(fixture["tasks"]))
         sys.exit(0)
 
     if argv[:2] == ["record", "show"]:
+        if elected_vault(argv) != fixture["vault_resolve"]["vault"]:
+            print(f"fake lore: wrong vault: {argv!r}", file=sys.stderr)
+            sys.exit(2)
         name = argv[2].split("/", 1)[1]
         print(json.dumps({
             "record_id": argv[2],
@@ -658,6 +683,82 @@ def test_record_reports_an_unrecognized_answer_as_a_near_miss(tmp_path):
               "--queue-bucket", "escalated-awaiting-operator")
 
     assert "answer detected but not recognized" in Path(report).read_text()
+
+
+def test_record_of_a_body_without_a_parseable_question_still_exits_zero(tmp_path):
+    """A record whose section carries no `**Question:**` must not end the sweep.
+
+    An outcome that doesn't parse buckets `failed` and exits 0; a record body
+    that doesn't parse is the same case one layer down. Raising here would
+    abandon every task still queued behind this one.
+    """
+    sweep = _sweep(tmp_path)
+    sweep.set_tasks([_task("t1")])
+    sweep.set_bodies({"t1": "# A task\n\n## Refine — unresolved\n\nProse, but no question.\n"})
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--queue-bucket", "escalated-awaiting-operator")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    assert "- `task/t1` — question could not be extracted — open the record" in text
+
+
+def test_record_escalated_out_of_the_blocked_answered_bucket_carries_the_question(tmp_path):
+    """A mid-sweep escalation is an escalation, whatever the task's history.
+
+    The dispatched ritual just wrote a fresh question into a task that entered
+    the queue `blocked-answered`. Reporting it as a bare id under "Blocked —
+    answered" strands the operator: the new question is not in the report, and
+    neither is the command that answers it.
+    """
+    sweep = _sweep(tmp_path)
+    sweep.set_tasks([_task("t1", status="blocked")])
+    sweep.set_bodies({"t1": _QUESTION_BODY})
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--queue-bucket", "blocked-answered", "--outcome", "ESCALATED")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    escalated = text.split("## Escalated — awaiting operator")[1].split("## Routed")[0]
+    assert "Which queue should this drain?" in escalated
+    assert "lore record update task/t1 --diff" in escalated
+    answered = text.split("## Blocked — answered")[1].split("## Blocked — still waiting")[0]
+    assert "task/t1" not in answered
+
+
+@pytest.mark.parametrize(
+    "task",
+    ["task/t1; rm -rf /", "task/$(whoami)", "t1 && echo pwned", "task/`id`", "task/../escape"],
+)
+def test_record_refuses_a_task_id_carrying_shell_metacharacters(tmp_path, task):
+    """The id is embedded verbatim into a copy-pasteable shell command.
+
+    The report tells the operator to run `lore record update <id> --diff …`;
+    an id carrying shell metacharacters turns that instruction into arbitrary
+    command execution in the operator's own shell.
+    """
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", task, "--outcome", "PROMOTED")
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+    assert task not in Path(report).read_text()
+
+
+def test_record_accepts_ordinary_record_id_shapes(tmp_path):
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+
+    for task in ("task/a-b_c.d", "plain-name", "task/nested/name"):
+        res = sweep.run("sweep", "record", "--report", report, "--task", task,
+                        "--outcome", "PROMOTED")
+        assert res.returncode == 0, res.stderr
 
 
 def test_record_requires_an_outcome_for_a_dispatched_task(tmp_path):

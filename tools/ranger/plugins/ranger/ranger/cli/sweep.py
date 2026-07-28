@@ -48,19 +48,33 @@ the agent returned). A task derivation never dispatched — churn-guarded or
 still waiting on an operator — is reported from its queue bucket alone and
 takes no outcome; a dispatched task is reported from its outcome, except that
 a previously-``blocked`` task keeps the ``blocked-answered`` bucket its
-history earns it. An outcome that doesn't parse is never fatal: it buckets
-``failed`` and exits 0, because one confused agent return must not end a
-sweep that still has tasks to drain.
+history earns it. The one exception to that exception is ``ESCALATED``, which
+outranks the queue bucket entirely: the ritual has just written a fresh
+question into the record, and only the escalated line carries that question
+and the command that answers it.
+
+**Nothing here is fatal to the sweep.** An outcome that doesn't parse buckets
+``failed`` and exits 0; a record body whose unresolved section carries no
+parseable question renders a fixed placeholder and exits 0. One confused
+agent return, or one malformed record, must not end a sweep that still has
+tasks to drain.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 _MAX_FAILURE_CHARS = 200
+
+#: The record-name shape ``--task`` must match. Deliberately narrow — the id
+#: is rendered verbatim into a shell command the report tells an operator to
+#: paste, so every character outside this set is one the operator's shell
+#: could interpret rather than read.
+_RECORD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
 #: Agent return tokens that carry a mandatory argument (target / reason).
 _TOKENS_WITH_ARGUMENT = ("ROUTED", "SKIPPED", "FAILED")
@@ -140,13 +154,26 @@ def _fail(message: str) -> int:
 
 
 def _record_id(task: str) -> str:
-    """Normalize ``--task`` to a full ``task/<name>`` record id.
+    """Normalize ``--task`` to a full ``task/<name>`` record id, or reject it.
 
     Report lines embed the id verbatim into a copy-pasteable
     ``lore record update <id>`` command, so a bare name would produce a
-    command the operator cannot run.
+    command the operator cannot run — and a name carrying shell
+    metacharacters would produce one that runs *more* than the operator
+    intends, in the operator's own shell. The name is therefore validated to
+    the record-name shape before it is ever written, rather than escaped at
+    each of the places it is rendered.
+
+    Raises ``ValueError`` on anything else; the caller turns that into the
+    CLI's ``ranger: <message>`` refusal.
     """
-    return task if task.startswith("task/") else f"task/{task}"
+    name = task[len("task/"):] if task.startswith("task/") else task
+    if not _RECORD_NAME_RE.match(name):
+        raise ValueError(
+            f"--task {task!r} is not a valid record id — expected `task/<name>` with "
+            f"<name> matching {_RECORD_NAME_RE.pattern}"
+        )
+    return f"task/{name}"
 
 
 def _resolve_target():
@@ -248,11 +275,17 @@ def _append_question_line(report_path: Path, task_id: str, *, status: str, bucke
     it, so a report can say "an answer was attempted but not recognized"
     instead of the ambiguous "never answered" without the coordinator having
     to carry that flag back.
+
+    The read names the vault the sweep elected at ``start``, taken from the
+    report's own state rather than re-resolved from cwd: an unvaulted
+    ``record show`` is a cwd-blind scan in config order, which would quote a
+    colliding task name out of a vault this sweep never touched.
     """
     from ..sweep import queue as queue_mod
     from ..sweep import report as report_mod
 
-    body = queue_mod.read_body(task_id.split("/", 1)[1], runner=None)
+    vault = report_mod.elected_vault(report_path)
+    body = queue_mod.read_body(task_id.split("/", 1)[1], vault=vault, runner=None)
     _bucket, near_miss = queue_mod.classify(status, body)
     append = (
         report_mod.append_blocked_still_waiting
@@ -267,7 +300,10 @@ def _cmd_sweep_record(args) -> int:
     from ..sweep import report as report_mod
 
     report_path = Path(args.report)
-    task_id = _record_id(args.task)
+    try:
+        task_id = _record_id(args.task)
+    except ValueError as exc:
+        return _fail(str(exc))
     queue_bucket = args.queue_bucket
 
     try:
@@ -288,17 +324,22 @@ def _cmd_sweep_record(args) -> int:
         token, argument = parse_outcome(args.outcome)
         if token is None:
             report_mod.append_failed(report_path, task_id, argument)
-        # A previously-blocked task keeps its own bucket whatever the ritual
-        # returned: the return drives the loop's status write, not a further
-        # bucket split.
-        elif queue_bucket == "blocked-answered":
-            report_mod.append_blocked_answered(report_path, task_id)
-        elif token == "PROMOTED":
-            report_mod.append_promoted(report_path, task_id)
+        # ESCALATED outranks the queue bucket. The ritual just wrote a fresh
+        # question into this record, and the operator's only handle on it is
+        # the escalated line's question text plus its answer command — a
+        # previously-blocked task reported as a bare id under its own bucket
+        # would strand a question nothing else in the sweep surfaces.
         elif token == "ESCALATED":
             _append_question_line(
                 report_path, task_id, status="open", bucket="escalated-awaiting-operator"
             )
+        # Otherwise a previously-blocked task keeps its own bucket whatever
+        # the ritual returned: the return drives the loop's status write, not
+        # a further bucket split.
+        elif queue_bucket == "blocked-answered":
+            report_mod.append_blocked_answered(report_path, task_id)
+        elif token == "PROMOTED":
+            report_mod.append_promoted(report_path, task_id)
         elif token == "ROUTED":
             report_mod.append_routed(report_path, task_id, argument)
         elif token == "SKIPPED":

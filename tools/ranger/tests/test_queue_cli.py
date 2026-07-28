@@ -13,6 +13,8 @@ Test contract:
   its bucket.
 - A ``lore`` CLI failure (nonzero exit) surfaces as ``ranger: <message>`` on
   stderr, nonzero exit — never a traceback.
+- Both lore reads name the vault explicitly; the stub exits nonzero on a
+  ``record show`` that omits ``--vault``.
 """
 
 from __future__ import annotations
@@ -56,6 +58,12 @@ _FAKE_LORE_SCRIPT = textwrap.dedent(
         sys.exit(0)
 
     if argv[:2] == ["record", "show"]:
+        # A bare `record show` scans configured vaults in declaration order,
+        # cwd-blind — so a task name present in two vaults would be read from
+        # the wrong one. Every ranger read names its vault.
+        if "--vault" not in argv:
+            print(f"fake lore: record show without --vault: {argv!r}", file=sys.stderr)
+            sys.exit(2)
         name = argv[2].split("/", 1)[1]
         print(json.dumps({
             "record_id": argv[2],

@@ -19,9 +19,14 @@ Bucket set is fixed by the spec this module implements: ``promoted``,
 ``blocked-still-waiting``, ``skipped``, ``failed``. ``blocked-answered`` covers a
 previously-``blocked`` task whose recorded answer let it dispatch this sweep —
 its ritual outcome already flows into a status write, not a further bucket
-split, so no question accompanies that line. ``escalated-awaiting-operator``
-and ``blocked-still-waiting`` are the two "still needs an operator" buckets, and
-both carry the task's one-line question plus a ready-to-paste answer command.
+split, so no question accompanies that line. (A task that *re-escalates* mid-
+sweep is the exception: it is reported as an escalation, question and all,
+because a bare id would strand the question the ritual just wrote.)
+``escalated-awaiting-operator`` and ``blocked-still-waiting`` are the two
+"still needs an operator" buckets, and both carry the task's one-line question
+plus a ready-to-paste answer command — or, when the record's section carries
+no parseable question, a fixed placeholder naming the record instead, since a
+malformed record must not be able to end a sweep.
 
 **Reading record bodies stays here, not in the coordinator.** Per the package
 docstring, the CLI (this module, driven by the future ``ranger sweep record``
@@ -55,6 +60,8 @@ from pathlib import Path
 
 from trailhead.paths import ensure_dir, state_dir
 
+from .queue import UNRESOLVED_HEADING, unresolved_section_bounds
+
 _REPORTS_SUBDIR = "reports"
 
 BUCKETS = (
@@ -77,13 +84,18 @@ _BUCKET_HEADINGS = {
     "failed": "Failed",
 }
 
-_UNRESOLVED_HEADING = "## Refine — unresolved"
 _QUESTION_PREFIX = "**Question:**"
 
 _NEAR_MISS_LINE = (
     "answer detected but not recognized — expected `**Answer:**` inside "
     "`## Refine — unresolved`"
 )
+
+#: Rendered in place of the question when a record's unresolved section cannot
+#: be parsed. The bucket line still names the record, so the operator keeps a
+#: handle on it; the answer command is omitted because there is no insertion
+#: line to build one around.
+_MISSING_QUESTION_LINE = "question could not be extracted — open the record"
 
 _FAILED_RETRY_SENTENCE = (
     "The task record was left untouched and will be retried automatically next sweep."
@@ -143,23 +155,29 @@ def extract_question(record_body: str) -> tuple[str, int]:
     line_number is the 1-based line the ``**Question:**`` line occupies in
     record_body, matching unified-diff hunk-header conventions — callers use
     it to place the answer insertion.
+
+    The scan is bounded by the section — it shares
+    :func:`queue.unresolved_section_bounds` with the classifier rather than
+    reading to the end of the body — so the two never disagree about where the
+    section ends. That agreement is load-bearing twice over: a
+    ``**Question:**`` in some later section is not this section's question, and
+    the insertion line this returns always lands inside the bounds the
+    answered predicate checks, so the answer an operator pastes actually
+    satisfies it.
     """
     lines = record_body.splitlines(keepends=True)
-    heading_idx = None
-    for i, line in enumerate(lines):
-        if line.rstrip("\n") == _UNRESOLVED_HEADING:
-            heading_idx = i
-            break
-    if heading_idx is None:
-        raise QuestionExtractionError(f"record body has no {_UNRESOLVED_HEADING!r} section")
+    bounds = unresolved_section_bounds(lines)
+    if bounds is None:
+        raise QuestionExtractionError(f"record body has no {UNRESOLVED_HEADING!r} section")
 
-    for i in range(heading_idx + 1, len(lines)):
+    start, end = bounds
+    for i in range(start, end):
         stripped = lines[i].rstrip("\n")
         if stripped.startswith(_QUESTION_PREFIX):
             return stripped[len(_QUESTION_PREFIX):].strip(), i + 1
 
     raise QuestionExtractionError(
-        f"no {_QUESTION_PREFIX!r} line found inside the {_UNRESOLVED_HEADING!r} section"
+        f"no {_QUESTION_PREFIX!r} line found inside the {UNRESOLVED_HEADING!r} section"
     )
 
 
@@ -200,10 +218,23 @@ def _load_state(report_path: Path) -> dict:
         raise ReportError(f"no report started at {report_path}: {e}")
 
 
+def _write_0600(path: Path, text: str) -> None:
+    """Write *text* to *path*, owner-readable from the creating syscall on.
+
+    The mode is an argument to ``open(2)``, not a ``chmod`` afterwards: a
+    report written at the process umask and tightened a moment later is a file
+    whose question text — scrubbed of credential shapes, but still the
+    operator's private backlog — was world-readable for that moment. Matches
+    the lock's creation pattern; ``O_TRUNC`` rather than ``O_EXCL`` because
+    every append re-renders the whole file over itself.
+    """
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
 def _write_state(report_path: Path, state: dict) -> None:
-    state_path = _state_path(report_path)
-    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
-    state_path.chmod(0o600)
+    _write_0600(_state_path(report_path), json.dumps(state, indent=2, sort_keys=True))
 
 
 def _render(state: dict) -> str:
@@ -227,8 +258,7 @@ def _render(state: dict) -> str:
 
 
 def _write_report(report_path: Path, state: dict) -> None:
-    Path(report_path).write_text(_render(state), encoding="utf-8")
-    Path(report_path).chmod(0o600)
+    _write_0600(Path(report_path), _render(state))
 
 
 def start(group: str, vault: str, queue_size: int, *, env: dict[str, str] | None = None) -> Path:
@@ -254,6 +284,17 @@ def start(group: str, vault: str, queue_size: int, *, env: dict[str, str] | None
     _write_state(report_path, state)
     _write_report(report_path, state)
     return report_path
+
+
+def elected_vault(report_path: Path) -> str:
+    """Return the vault name the sweep that owns *report_path* elected.
+
+    Pinned at ``start`` and read back per verb, because each verb is its own
+    process and the election is cwd-driven: re-resolving it in ``record``
+    would let a verb run from a different directory read and quote a different
+    vault than the one the sweep is draining and holds the lock on.
+    """
+    return _load_state(report_path)["vault"]
 
 
 def finish(report_path: Path) -> None:
@@ -302,18 +343,42 @@ def append_failed(report_path: Path, task_id: str, reason: str) -> None:
 
 
 def _render_question_entry(task_id: str, record_body: str, *, near_miss: bool) -> str:
-    question, line_no = extract_question(record_body)
+    """Render one bucket line carrying a task's question and its answer command.
+
+    Two shapes, and which one is used is decided by the record, not the
+    caller. A parseable question renders the question plus the exact
+    invocation that answers it; an unparseable one renders
+    ``_MISSING_QUESTION_LINE`` and no command. A malformed record is never
+    fatal here — the sweep's rule that an unparseable outcome buckets rather
+    than raises applies just as much to an unparseable record body, and a
+    sweep that exits on one bad record leaves every task behind it undrained.
+
+    **The invocation renders at column 0**, outside the bullet's indentation,
+    because the operator copies it out of the raw markdown: a heredoc whose
+    ``EOF`` terminator carries the list item's two-space indent is a terminator
+    the shell never recognizes, and an indented diff body is a hunk that no
+    longer applies.
+    """
+    try:
+        question, line_no = extract_question(record_body)
+    except QuestionExtractionError:
+        lines = [f"- `{task_id}` — {_MISSING_QUESTION_LINE}\n"]
+        if near_miss:
+            lines.append(f"\n{_NEAR_MISS_LINE}\n")
+        lines.append("\n")
+        return "".join(lines)
+
     scrubbed_question = scrub_credentials(question)
     answer_command = _build_answer_command(task_id, line_no)
     lines = [
         f"- `{task_id}` — {scrubbed_question}\n\n",
-        "  Answer with:\n\n",
-        "  ```\n",
-        *(f"  {line}\n" for line in answer_command.splitlines()),
-        "  ```\n",
+        "Answer with:\n\n",
+        "```\n",
+        *(f"{line}\n" for line in answer_command.splitlines()),
+        "```\n",
     ]
     if near_miss:
-        lines.append(f"  {_NEAR_MISS_LINE}\n")
+        lines.append(f"\n{_NEAR_MISS_LINE}\n")
     lines.append("\n")
     return "".join(lines)
 

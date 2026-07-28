@@ -158,6 +158,39 @@ def test_skill_re_derives_between_tasks():
     )
 
 
+# --- skill: the loop terminates ----------------------------------------------
+
+
+def test_skill_keeps_an_attempted_this_sweep_set():
+    """Re-derivation alone cannot terminate the loop.
+
+    `SKIPPED` and a failed dispatch both leave the task record byte-identical,
+    so the next derivation classifies that task exactly as it did before. Only
+    a set of what this sweep has already attempted distinguishes "still
+    actionable" from "already tried and unchanged".
+    """
+    _pin(
+        SKILL,
+        "attempted-this-sweep set",
+        "Without a record of what this sweep already dispatched, a task whose "
+        "outcome left the record unchanged is re-derived as actionable forever.",
+    )
+
+
+def test_skill_exits_on_the_filtered_actionable_set():
+    """The exit condition must name the *filtered* set, not the raw derivation.
+
+    An exit test written against the raw derivation never fires while any
+    unchanged task remains in it — which is precisely the non-terminating case.
+    """
+    _pin(
+        SKILL,
+        "Exit when the filtered actionable set is empty",
+        "The loop's only termination condition is the derivation minus what this "
+        "sweep already attempted; an unfiltered test never becomes true.",
+    )
+
+
 # --- skill: the blocked exit edge is the loop's, and only the loop's ----------
 
 
@@ -360,6 +393,22 @@ def test_agent_writes_with_an_explicit_vault():
         "`lore record update` locates a record by a cwd-blind first-match scan across "
         "configured vaults; a dispatched agent's cwd is not the coordinator's, so a "
         "colliding task name silently writes into the wrong vault.",
+    )
+
+
+def test_agent_reads_with_an_explicit_vault():
+    """Reads are as vault-sensitive as writes, and were the later fix.
+
+    `lore record show` locates a record by the same cwd-blind config-order
+    scan `update` does, so an unvaulted read hands the agent another vault's
+    body to refine from — the wrong prose, the wrong citations, and a payload
+    written back over a record it never read.
+    """
+    _pin(
+        AGENT,
+        "lore record show <task-id> --vault <elected-vault>",
+        "Naming the vault on writes but not on reads still refines the wrong "
+        "record; both directions go through the same first-match scan.",
     )
 
 

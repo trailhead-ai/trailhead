@@ -133,9 +133,12 @@ ranger sweep record --report "<report_path>" --task "task/<name>" --queue-bucket
 ```
 
 Use `--queue-bucket blocked-answered` for a task that came out of that bucket; the report
-keeps the bucket the task's history earns it, whatever the agent returned. Pass the return
-line as one quoted argument, exactly as received — never build a larger command string
-around it.
+keeps the bucket the task's history earns it — except on `ESCALATED`, where the CLI reports
+the fresh question and its answer command instead, because a bare id would strand the
+question the ritual just wrote. Pass the return line as one quoted argument, exactly as
+received — never build a larger command string around it.
+
+Add the task id to the attempted-this-sweep set (§2.7) as you record it.
 
 ### 2.4 The blocked exit edge — yours, and only yours
 
@@ -184,7 +187,11 @@ Feed the CLI what you actually got — it truncates to one line, buckets `failed
 ranger sweep record --report "<report_path>" --task "task/<name>" --outcome "FAILED dispatch timed out after 10 minutes"
 ```
 
-### 2.7 Re-derive, then take the next task
+### 2.7 Re-derive, filter, then take the next task
+
+Keep an **attempted-this-sweep set**: every task id you have dispatched or recorded during
+this sweep. It starts empty at `start`, gains an id the moment you dispatch or record that
+task, and never loses one.
 
 After each return, re-derive the queue:
 
@@ -192,13 +199,19 @@ After each return, re-derive the queue:
 ranger sweep derive --json
 ```
 
-The fresh derivation is authoritative — never the list you started with. A task promoted
-this sweep drops out; a task that just gained an unanswered question is churn-guarded out
-of dispatch. Record each never-dispatched task exactly once per sweep.
+The fresh derivation is authoritative — never the list you started with. Then **drop every
+entry whose id is already in the attempted-this-sweep set**; the `dispatchable` and
+`blocked-answered` entries that survive are the actionable set, and the next task is the
+first of them.
 
-**Exit when a fresh derivation leaves nothing actionable** — no `dispatchable` or
-`blocked-answered` entry remains. The never-dispatched buckets persist by design; they are
-reported, not drained, and must not keep the loop spinning.
+Filtering is what ends the loop, and derivation alone cannot. A promoted task drops out of
+the derivation on its own, but a `SKIPPED` return and a failed dispatch both leave the
+record byte-identical — so the next derivation classifies that task exactly as it did
+before, and an unfiltered loop dispatches it again, and again, forever.
+
+**Exit when the filtered actionable set is empty.** The never-dispatched buckets persist by
+design; they are recorded exactly once per sweep, reported rather than drained, and the
+filter is what stops them keeping the loop spinning.
 
 ## 3. Finish
 

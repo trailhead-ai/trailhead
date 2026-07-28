@@ -52,7 +52,7 @@ a decision that survives its self-serve passes is *recorded* as an escalation in
 record, never asked. There is no channel back to a human from here, so a question you ask
 is a run that hangs.
 
-## Step 3: write through the elected vault
+## Step 3: read and write through the elected vault
 
 The procedure owns every record write — the payload, the unresolved section, and the
 `open` → `ready` flip. Perform them exactly as it specifies, with one rule binding on
@@ -64,6 +64,13 @@ Your working directory is not the coordinator's. Without an explicit vault,
 configured vaults in declaration order, so a task name that exists in two vaults is
 written to whichever one lore's config lists first — and cwd-based routing in a dispatched
 context degrades to the default vault rather than erroring.
+
+**Your reads carry the same flag.** Read the task record with
+`lore record show <task-id> --vault <elected-vault>`, never a bare `show`: reads go through
+that identical scan, so an unvaulted read hands you another vault's body to refine from —
+the wrong prose, the wrong citations, and a payload written back over a record you never
+read. An unknown vault name, or a vault that does not hold the record, is a clean error
+rather than a fall-through to some other vault; on either, return `SKIPPED <reason>`.
 
 You never flip a `blocked` task's status. That exit edge belongs to the sweep loop that
 dispatched you, acting on the operator's recorded answer; write it here and one status has

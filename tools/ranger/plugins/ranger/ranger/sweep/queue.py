@@ -72,7 +72,11 @@ BUCKETS = (
 )
 
 _TASK_KIND = "task"
-_UNRESOLVED_HEADING = "## Refine — unresolved"
+
+#: The one spelling of the escalation heading, shared with the report writer
+#: so the classifier and the question extractor can never disagree about which
+#: heading opens the section or where it ends.
+UNRESOLVED_HEADING = "## Refine — unresolved"
 _ANSWER_PREFIX = "**Answer:**"
 _ANSWER_NEAR_MISS_RE = re.compile(r"^\*{0,2}answer:", re.IGNORECASE)
 
@@ -133,23 +137,40 @@ def _list_standalone_candidates(vault: str, *, runner: Runner | None) -> list[di
     return standalone
 
 
-def read_body(name: str, *, runner: Runner | None) -> str:
-    """Read a task record's raw body via `lore record show`, read-only."""
-    payload = run_lore(["record", "show", f"{_TASK_KIND}/{name}", "--json"], runner=runner)
+def read_body(name: str, *, vault: str, runner: Runner | None) -> str:
+    """Read a task record's raw body from *vault* via `lore record show`, read-only.
+
+    `--vault` is not optional. Without it `record show` locates the record by
+    a cwd-blind first-match scan across the configured vaults in declaration
+    order, so a task name that exists in more than one vault is read from
+    whichever one lore's config lists first — and this body is what decides
+    the task's bucket and supplies the escalated question the report hands the
+    operator. Naming the elected vault is what keeps both of those about the
+    vault the sweep is actually draining.
+    """
+    payload = run_lore(
+        ["record", "show", f"{_TASK_KIND}/{name}", "--vault", vault, "--json"],
+        runner=runner,
+    )
     return payload.get("body", "")
 
 
-def _section_bounds(lines: list[str]) -> tuple[int, int] | None:
+def unresolved_section_bounds(lines: list[str]) -> tuple[int, int] | None:
     """Return the (start, end) line-index range of the unresolved section's
     body, exclusive of the heading itself, or None if the heading is absent.
 
-    The heading must match `_UNRESOLVED_HEADING` exactly on a single physical
+    The heading must match `UNRESOLVED_HEADING` exactly on a single physical
     line — a wrapped heading or a different dash character never matches.
     The section ends at the next `## ` heading, or at the end of the body.
+
+    Shared with the report writer's question extractor: the line the answer
+    command inserts at has to fall inside the same bounds the answered
+    predicate below checks, or an operator's pasted answer would never be
+    recognized as one.
     """
     heading_idx = None
     for i, line in enumerate(lines):
-        if line.rstrip("\n") == _UNRESOLVED_HEADING:
+        if line.rstrip("\n") == UNRESOLVED_HEADING:
             heading_idx = i
             break
     if heading_idx is None:
@@ -170,7 +191,7 @@ def classify(status: str, body: str) -> tuple[str, bool]:
     predicate, and the near-miss signal's three trigger cases.
     """
     lines = body.splitlines(keepends=True)
-    bounds = _section_bounds(lines)
+    bounds = unresolved_section_bounds(lines)
     answered = False
     near_miss = False
 
@@ -212,7 +233,7 @@ def derive_queue(vault: str, *, runner: Runner | None = None) -> list[dict]:
     candidates = _list_standalone_candidates(vault, runner=runner)
     queue: list[dict] = []
     for entry in candidates:
-        body = read_body(entry["name"], runner=runner)
+        body = read_body(entry["name"], vault=vault, runner=runner)
         bucket, near_miss = classify(entry["status"], body)
         queue.append({**entry, "bucket": bucket, "answer_near_miss": near_miss})
     return queue

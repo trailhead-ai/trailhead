@@ -20,6 +20,9 @@ Test contract:
 - The lore CLI runner is injectable, and a nonzero exit from either `lore
   task list` or `lore record show` surfaces as `queue.QueueDeriveError`, not
   a crash.
+- Every lore read names the elected vault explicitly: the stub runner below
+  refuses a `record show` that omits `--vault <elected>`, so no test can
+  pass while the derivation reads whichever vault lore's config lists first.
 """
 
 from __future__ import annotations
@@ -67,19 +70,30 @@ def _make_runner(*, entries=None, bodies=None, list_rc=0, list_stderr="", show_r
     """A fake `lore` CLI runner: dispatches on argv shape, ignores real subprocess.
 
     `entries` backs `lore task list --vault ... --json`; `bodies` (a
-    name -> body-text map) backs `lore record show task/<name> --json`.
-    `show_rc_overrides` (name -> (rc, stderr)) lets a test force one
+    name -> body-text map) backs `lore record show task/<name> --vault ...
+    --json`. `show_rc_overrides` (name -> (rc, stderr)) lets a test force one
     `record show` call to fail without touching the others.
+
+    Both lore reads must name the elected vault, and the stub enforces it: a
+    bare `record show` is located by a cwd-blind first-match scan across the
+    configured vaults in declaration order, so a task name that collides
+    across two vaults would be classified from the wrong body entirely.
     """
     entries = entries if entries is not None else []
     bodies = bodies if bodies is not None else {}
     show_rc_overrides = show_rc_overrides or {}
 
+    def _assert_targets_the_elected_vault(cmd):
+        assert "--vault" in cmd, f"lore read must target a vault explicitly: {cmd!r}"
+        assert cmd[cmd.index("--vault") + 1] == _VAULT, f"wrong vault targeted: {cmd!r}"
+
     def runner(cmd, **kwargs):
         if cmd[:3] == ["lore", "task", "list"]:
+            _assert_targets_the_elected_vault(cmd)
             stdout = json.dumps(entries) if list_rc == 0 else ""
             return subprocess.CompletedProcess(cmd, list_rc, stdout=stdout, stderr=list_stderr)
         if cmd[:3] == ["lore", "record", "show"]:
+            _assert_targets_the_elected_vault(cmd)
             record_id = cmd[3]
             name = record_id.split("/", 1)[1]
             rc, stderr = show_rc_overrides.get(name, (0, ""))
@@ -342,6 +356,26 @@ def test_ordering_is_stable_regardless_of_raw_listing_order():
 # ---------------------------------------------------------------------------
 # Runner injection + error surfacing
 # ---------------------------------------------------------------------------
+
+
+def test_read_body_targets_the_named_vault_explicitly():
+    """`lore record show` without `--vault` scans vaults in config order.
+
+    The scan is cwd-blind, so a task name present in two configured vaults is
+    read from whichever one lore's config happens to declare first — and the
+    sweep would then classify, and extract an escalated question from, a
+    record belonging to someone else's camp group.
+    """
+    calls = []
+
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        payload = {"record_id": cmd[3], "kind": "task", "name": "t1", "sidecar": {}, "body": ""}
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+
+    queue.read_body("t1", vault=_VAULT, runner=runner)
+
+    assert calls == [["lore", "record", "show", "task/t1", "--vault", _VAULT, "--json"]]
 
 
 def test_lore_task_list_failure_raises_named_error_not_a_crash():

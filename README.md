@@ -99,6 +99,7 @@ exact subagents/skills per plugin, plus local file overrides:
 install_camp_cli = true
 install_lore_cli = false
 install_portage_cli = true
+install_ranger_cli = true
 
 # Top-level default plugin set, applied to every detected/--harness harness.
 plugins = ["camp", "lore", "craft", "portage", "outpost", "ranger"]
