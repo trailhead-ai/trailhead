@@ -141,6 +141,10 @@ def lock_path_for(ws_dir: Path) -> Path:
 
     ws_dir is central_state_dir(group)/worktrees/<slug>, so ws_dir.name is the
     slug and ws_dir.parent is the worktrees root.
+
+    Lifecycle: created on first acquire (reconcile_lock), reaped by
+    reconcile_break (reap_lock_unlocked) once the slug is fully torn down — a
+    lockfile with no live slug is a leak, not a fixture.
     """
     ws_dir = Path(ws_dir)
     return ws_dir.parent / f"{ws_dir.name}.lock"
@@ -160,12 +164,36 @@ def reconcile_lock(ws_dir: Path):
     lock_path_for) so reconcile_break's rmtree of ws_dir cannot delete the held
     lock inode. Only the worktrees root is mkdir'd here — locking a slug
     never pre-creates that slug's workspace dir.
+
+    Acquisition validates inode identity: reconcile_break reaps the lockfile
+    (via reap_lock_unlocked, while still holding the flock) once a slug is fully
+    torn down. A waiter that blocked on the reaped inode wakes up holding a lock
+    no newcomer can see — zero exclusion — so after every flock we re-check that
+    the inode we hold is still the inode at lock_path, and retry on the current
+    file if not. This is what makes the reap safe.
     """
     lock_path = lock_path_for(ws_dir)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(str(lock_path), "w")
+    while True:
+        lock_fd = open(str(lock_path), "w")
+        try:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            try:
+                path_stat = os.stat(lock_path)
+            except FileNotFoundError:
+                # Reaped while we blocked — the fd guards an orphaned inode.
+                lock_fd.close()
+                continue
+            fd_stat = os.fstat(lock_fd.fileno())
+            if (path_stat.st_dev, path_stat.st_ino) != (fd_stat.st_dev, fd_stat.st_ino):
+                # Reaped and re-created — same orphan problem, fresh file wins.
+                lock_fd.close()
+                continue
+        except BaseException:
+            lock_fd.close()
+            raise
+        break
     try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
         yield
     finally:
         try:
@@ -173,6 +201,20 @@ def reconcile_lock(ws_dir: Path):
         except OSError:
             pass
         lock_fd.close()
+
+
+def reap_lock_unlocked(ws_dir: Path) -> None:
+    """Unlink the slug-scoped lockfile. The caller MUST hold its flock.
+
+    Unlinking while HOLDING the exclusive flock is what makes removal safe: a
+    waiter blocked on the unlinked inode wakes, fails reconcile_lock's inode
+    identity re-check, and retries on the current file — it can never proceed
+    on the orphaned inode. Unlinking without the lock held would hand two
+    processes the "same" lock on different inodes.
+
+    Silently succeeds if the lockfile is already gone.
+    """
+    lock_path_for(ws_dir).unlink(missing_ok=True)
 
 
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:

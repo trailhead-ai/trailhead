@@ -29,6 +29,9 @@ dirty-check and race the manifest write (there is no session lock serializing
 removal). The lockfile lives OUTSIDE the workspace dir at
 <worktrees-root>/<slug>.lock (manifest.lock_path_for) so reconcile_break's
 teardown rmtree of the workspace dir cannot delete the held lock inode.
+reconcile_break reaps that lockfile (while still holding the flock) once the
+slug is fully torn down; reconcile_lock's inode identity re-check makes the
+reap safe for concurrent waiters.
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ from ..group.manifest import (
     ManifestError,
     manifest_path_for,
     read_central_manifest,
+    reap_lock_unlocked,
     reconcile_lock,
     remove_central_manifest,
     workspace_dir,
@@ -675,6 +679,9 @@ def reconcile_break(
       4. Remove each member worktree via git worktree remove.
       5. Remove the central manifest ONLY if all removals succeeded (break
          atomicity symmetry — never leave a manifest listing a removed member).
+      6. On full teardown, reap the slug lockfile while still holding its flock
+         (reap_lock_unlocked) — a partial removal keeps both the manifest and
+         the lockfile, since the slug is still live.
 
     Returns a result dict with status, removed members, and any errors.
 
@@ -705,8 +712,15 @@ def reconcile_break(
     lock = _slug_lock(f"{group_name}/{slug}")
     with lock, reconcile_lock(mpath.parent):
         # Authoritative read under the lock (a concurrent break may have already
-        # removed it — ManifestError then surfaces cleanly).
-        manifest_data = read_central_manifest(mpath)
+        # removed it — ManifestError then surfaces cleanly). In that case our
+        # own acquire just re-created the lockfile for a slug that no longer
+        # exists — reap it before surfacing, or it leaks forever.
+        try:
+            manifest_data = read_central_manifest(mpath)
+        except ManifestError:
+            if not mpath.exists() and not ws_dir.exists():
+                reap_lock_unlocked(ws_dir)
+            raise
         member_entries = manifest_data.get("members", [])
 
         # Confinement pre-check FIRST: validate all paths BEFORE touching any of
@@ -799,6 +813,11 @@ def reconcile_break(
                         f"root {worktrees_root} — refusing removal"
                     )
                 shutil.rmtree(ws_resolved)
+            # Slug fully torn down (manifest and workspace dir both gone) —
+            # reap the slug lockfile while STILL HOLDING its flock. Waiters
+            # blocked on this inode re-validate identity on wake (see
+            # reconcile_lock), which is what makes the unlink race-free.
+            reap_lock_unlocked(ws_dir)
             status = "ok"
         else:
             # Some removals failed. Update the manifest to reflect reality:

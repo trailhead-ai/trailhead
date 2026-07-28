@@ -607,6 +607,165 @@ class TestReconcileBreakHoldsLock:
         )
 
 
+class TestSlugLockReap:
+    """A slug's lockfile must not outlive the slug. reconcile_break reaps
+    <worktrees-root>/<slug>.lock on full teardown, while STILL HOLDING the
+    flock — reconcile_lock's inode identity re-check is what keeps concurrent
+    waiters correct across the unlink. A partial removal keeps the lockfile:
+    the slug is still live."""
+
+    def test_break_reaps_lockfile_on_full_teardown(self, inproc_group):
+        from camp.group.manifest import manifest_path_for, lock_path_for
+        from camp.provision.reconcile import reconcile_break
+
+        g = inproc_group
+        _provision_inproc(g, "feat-reap")
+        mpath = manifest_path_for("removegroup", "feat-reap", env=g["env"])
+        lock_path = lock_path_for(mpath.parent)
+        assert lock_path.exists(), "provisioning should have created the slug lockfile"
+
+        result = reconcile_break(g["group"], "feat-reap", env=g["env"])
+
+        assert result["status"] == "ok"
+        assert not lock_path.exists(), (
+            "full teardown must reap the slug lockfile — it must not leak"
+        )
+
+    def test_partial_failure_keeps_lockfile(self, inproc_group, monkeypatch):
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import manifest_path_for, lock_path_for
+        from camp.provision.reconcile import reconcile_break
+
+        g = inproc_group
+        _provision_inproc(g, "feat-partial")
+        mpath = manifest_path_for("removegroup", "feat-partial", env=g["env"])
+        lock_path = lock_path_for(mpath.parent)
+
+        orig = reconcile._remove_worktree_for_member
+
+        def fail_repo_b(member, *args, **kwargs):
+            if member["name"] == "repo_b":
+                raise RuntimeError("simulated removal failure")
+            return orig(member, *args, **kwargs)
+
+        monkeypatch.setattr(reconcile, "_remove_worktree_for_member", fail_repo_b)
+
+        result = reconcile_break(g["group"], "feat-partial", env=g["env"])
+
+        assert result["status"] == "ok_with_errors"
+        assert lock_path.exists(), (
+            "a partial removal leaves the slug live (manifest still lists the "
+            "failed member) — the lockfile must stay"
+        )
+
+    def test_concurrent_break_reaps_stray_lock(self, inproc_group, monkeypatch):
+        """Two racing removes: the loser passes the pre-lock exists() check,
+        then finds the manifest gone once it acquires the lock. Its own acquire
+        just re-created the lockfile for a dead slug — the ManifestError path
+        must reap it, not leak it."""
+        import shutil
+
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import ManifestError, manifest_path_for, lock_path_for
+        from camp.provision.reconcile import reconcile_break
+
+        g = inproc_group
+        _provision_inproc(g, "feat-race")
+        mpath = manifest_path_for("removegroup", "feat-race", env=g["env"])
+        ws_dir = mpath.parent
+        lock_path = lock_path_for(ws_dir)
+
+        def winner_finished_first(path):
+            # Simulate the winning break completing between our exists() check
+            # and our lock acquisition: manifest and workspace dir both gone.
+            shutil.rmtree(ws_dir)
+            raise ManifestError(f"camp: cannot read manifest at {path}: no such file")
+
+        monkeypatch.setattr(reconcile, "read_central_manifest", winner_finished_first)
+
+        with pytest.raises(ManifestError):
+            reconcile_break(g["group"], "feat-race", env=g["env"])
+
+        assert not lock_path.exists(), (
+            "the losing break must reap the lockfile its own acquire re-created"
+        )
+
+
+class TestReconcileLockInodeRecheck:
+    """reconcile_lock must re-validate inode identity after every flock: a
+    waiter that blocked on an inode reconcile_break reaped holds a lock no
+    newcomer can see, and must retry on the current file instead of
+    proceeding."""
+
+    def test_acquire_retries_when_lockfile_unlinked_while_blocked(
+        self, tmp_path, monkeypatch
+    ):
+        import fcntl as fcntl_mod
+
+        from camp.group import manifest
+
+        ws_dir = tmp_path / "worktrees" / "slug-x"
+        lock_path = manifest.lock_path_for(ws_dir)
+
+        real_flock = fcntl_mod.flock
+        ex_calls: list[int] = []
+
+        def flock_simulating_reap(fd, op):
+            real_flock(fd, op)
+            if op == fcntl_mod.LOCK_EX:
+                ex_calls.append(op)
+                if len(ex_calls) == 1:
+                    # As if the previous holder reaped the lockfile just before
+                    # our flock returned: the fd now guards an orphaned inode.
+                    lock_path.unlink()
+
+        monkeypatch.setattr(manifest.fcntl, "flock", flock_simulating_reap)
+
+        entered = False
+        with manifest.reconcile_lock(ws_dir):
+            entered = True
+
+        assert entered
+        assert len(ex_calls) == 2, (
+            "acquire must detect the unlinked inode and retry on a fresh file"
+        )
+        assert lock_path.exists(), "the retry must have re-created the lockfile"
+
+    def test_acquire_retries_when_lockfile_replaced_while_blocked(
+        self, tmp_path, monkeypatch
+    ):
+        import fcntl as fcntl_mod
+
+        from camp.group import manifest
+
+        ws_dir = tmp_path / "worktrees" / "slug-y"
+        lock_path = manifest.lock_path_for(ws_dir)
+
+        real_flock = fcntl_mod.flock
+        ex_calls: list[int] = []
+
+        def flock_simulating_reap_and_recreate(fd, op):
+            real_flock(fd, op)
+            if op == fcntl_mod.LOCK_EX:
+                ex_calls.append(op)
+                if len(ex_calls) == 1:
+                    # Reaped AND re-created by a newcomer: the path now points
+                    # at a different inode than the one our fd holds.
+                    lock_path.unlink()
+                    lock_path.touch()
+
+        monkeypatch.setattr(manifest.fcntl, "flock", flock_simulating_reap_and_recreate)
+
+        entered = False
+        with manifest.reconcile_lock(ws_dir):
+            entered = True
+
+        assert entered
+        assert len(ex_calls) == 2, (
+            "acquire must detect the inode swap and retry on the current file"
+        )
+
+
 class TestRemoveExitCode:
     """The remove handler must wire reconcile_break's status. Per-member
     removal failures return status='ok_with_errors'; reporting success + exit 0
