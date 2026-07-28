@@ -232,3 +232,62 @@ def test_every_leaf_command_name_appears_in_output():
         "session candidate", "session referenced", "session show",
     ):
         assert f"lore {name}" in text
+
+
+# ---------------------------------------------------------------------------
+# `--related` is named in the reference: the surface that changes what an
+# agent reaches for when it wants to link one record to another.
+# ---------------------------------------------------------------------------
+
+def _block_for(text: str, leaf_name: str) -> str:
+    """Return just the rendered block whose invocation line starts with
+    ``lore {leaf_name} `` — blocks are separated by blank lines."""
+    prefix = f"lore {leaf_name} "
+    exact = f"lore {leaf_name}"
+    for block in text.split("\n\n"):
+        first_line = block.split("\n", 1)[0]
+        if first_line == exact or first_line.startswith(prefix):
+            return block
+    raise AssertionError(f"no rendered block found for leaf {leaf_name!r}")
+
+
+def test_record_create_entry_names_related():
+    parser = build_parser()
+    text = cr.build_reference(parser)
+    assert "--related" in _block_for(text, "record create")
+
+
+def test_record_update_entry_names_related():
+    parser = build_parser()
+    text = cr.build_reference(parser)
+    assert "--related" in _block_for(text, "record update")
+
+
+def test_record_create_names_label_and_related_with_distinguishing_hint():
+    parser = build_parser()
+    text = cr.build_reference(parser)
+    block = _block_for(text, "record create")
+    assert "--label" in block
+    assert "--related" in block
+    assert "flags:" in block
+    assert "edge" in block or "link" in block
+
+
+def test_leaf_with_no_flags_hint_renders_no_flags_line():
+    parser = build_parser()
+    text = cr.build_reference(parser)
+    block = _block_for(text, "record delete")
+    assert "flags:" not in block
+
+
+def test_line_ordering_is_invocation_purpose_optional_flags_stdin():
+    parser = build_parser()
+    text = cr.build_reference(parser)
+    block = _block_for(text, "record create")
+    lines = block.split("\n")
+    assert lines[0].startswith("lore record create")
+    assert lines[1].strip().startswith("Create a new vault record.")
+    optional_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("optional:"))
+    flags_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("flags:"))
+    stdin_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("stdin:"))
+    assert optional_idx < flags_idx < stdin_idx
