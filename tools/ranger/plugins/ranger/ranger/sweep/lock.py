@@ -24,9 +24,12 @@ payload enough to delete it) is exactly the kind of silent takeover that
 turns a mutex into a race; forcing every removal through an operator's own
 ``rm`` keeps this module from ever creating that race itself.
 
-``release`` is the one path that *does* remove the file, and only because it
-first proves the caller is the recorded holder (pid match) — it never
-removes a lock recorded under a different pid.
+The two release paths are the only ones that *do* remove the file, and both
+are owner-side rather than contender-side: ``release`` proves the caller is
+the recorded holder (pid match), and ``release_recorded`` — for a sweep whose
+start and finish are separate CLI processes — relies instead on the lock's
+per-vault ``O_EXCL`` uniqueness, so there is no other holder's lock it could
+take. Neither is reachable from ``acquire``.
 """
 
 from __future__ import annotations
@@ -146,4 +149,37 @@ def release(vault_name: str, *, env: dict[str, str] | None = None) -> None:
             f"lock file {path} is held by pid {pid}, not the calling process ({os.getpid()}); "
             "refusing to release a lock this process doesn't hold"
         )
+    path.unlink()
+
+
+def release_recorded(vault_name: str, *, env: dict[str, str] | None = None) -> None:
+    """Remove the lock for vault_name whichever process recorded it.
+
+    ``release``'s pid proof is the right guard for a sweep that lives inside a
+    single process. A sweep driven through the CLI does not: ``ranger sweep
+    start`` and ``ranger sweep finish`` are separate invocations, so the
+    recorded pid is never the finishing process's and a pid-matched release
+    could never succeed.
+
+    Dropping that proof is safe *here and only here*: the lock is keyed by
+    vault and created ``O_EXCL``, so at most one sweep exists for a vault at a
+    time — there is no second holder whose lock this could take, which is the
+    race ``acquire`` refuses to create. The residual is an operator finishing
+    a sweep that is still running; that is a deliberate act against their own
+    vault, not a silent takeover.
+
+    Still refuses when the lock is missing or its payload is unreadable: a
+    file this module can't recognize as one of its own locks is never
+    unlinked.
+    """
+    path = lock_path(vault_name, env=env)
+    try:
+        payload = json.loads(path.read_text())
+    except OSError as e:
+        raise LockError(f"no lock file at {path} to release: {e}")
+    except ValueError as e:
+        raise LockError(f"lock file {path} has an unreadable payload; refusing to release it: {e}")
+
+    if not isinstance(payload, dict) or "pid" not in payload:
+        raise LockError(f"lock file {path} has an unreadable payload; refusing to release it")
     path.unlink()

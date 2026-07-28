@@ -90,8 +90,12 @@ def _default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProces
     return subprocess.run(cmd, **kwargs)
 
 
-def _run_lore(argv: list[str], *, runner: Runner | None) -> Any:
-    """Run `lore <argv>` via the injectable runner and return its parsed JSON stdout."""
+def run_lore(argv: list[str], *, runner: Runner | None) -> Any:
+    """Run `lore <argv>` via the injectable runner and return its parsed JSON stdout.
+
+    Shared with `ranger.sweep.preflight`, which shells to `lore vault resolve`
+    through the same seam so a sweep's every lore call is stubbable at one point.
+    """
     effective = runner if runner is not None else _default_runner
     cmd = ["lore", *argv]
     result = effective(cmd)
@@ -114,7 +118,7 @@ def _list_standalone_candidates(vault: str, *, runner: Runner | None) -> list[di
     gate, applied here rather than trusted from the caller, since a plan
     slice can carry `open`/`blocked` status too and is never sweep-owned.
     """
-    entries = _run_lore(
+    entries = run_lore(
         [
             "task", "list",
             "--vault", vault,
@@ -129,9 +133,9 @@ def _list_standalone_candidates(vault: str, *, runner: Runner | None) -> list[di
     return standalone
 
 
-def _read_body(name: str, *, runner: Runner | None) -> str:
+def read_body(name: str, *, runner: Runner | None) -> str:
     """Read a task record's raw body via `lore record show`, read-only."""
-    payload = _run_lore(["record", "show", f"{_TASK_KIND}/{name}", "--json"], runner=runner)
+    payload = run_lore(["record", "show", f"{_TASK_KIND}/{name}", "--json"], runner=runner)
     return payload.get("body", "")
 
 
@@ -208,7 +212,7 @@ def derive_queue(vault: str, *, runner: Runner | None = None) -> list[dict]:
     candidates = _list_standalone_candidates(vault, runner=runner)
     queue: list[dict] = []
     for entry in candidates:
-        body = _read_body(entry["name"], runner=runner)
+        body = read_body(entry["name"], runner=runner)
         bucket, near_miss = classify(entry["status"], body)
         queue.append({**entry, "bucket": bucket, "answer_near_miss": near_miss})
     return queue

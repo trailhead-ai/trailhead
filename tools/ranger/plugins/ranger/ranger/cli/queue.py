@@ -1,12 +1,13 @@
 """``ranger queue`` — CLI surface for sweep queue derivation.
 
-Exists as its own verb, separate from the (not-yet-wired) `ranger sweep`
-orchestration verbs, purely for testability: `ranger queue derive --vault
-<name> --json` lets a caller (or a test) drive
-`ranger.sweep.queue.derive_queue` end-to-end through the CLI without needing
-the rest of the sweep orchestration built first. Stays thin — parse argv,
-call the domain function, print the agreed output — so the classification
-logic lives in and is tested against `ranger.sweep.queue` alone.
+Exists as its own verb, separate from the `ranger sweep` orchestration verbs,
+because it names its vault directly: `ranger queue derive --vault <name>
+--json` drives `ranger.sweep.queue.derive_queue` end-to-end without a camp
+group, a vault election, or a lock in the way — the diagnostic view of the
+queue, where `ranger sweep derive` is the sweep's own view of it. Stays thin
+— parse argv, call the domain function, print the agreed output — so the
+classification logic lives in and is tested against `ranger.sweep.queue`
+alone. `print_queue` is the shared rendering both verbs emit.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ def add_queue_subparser(sub) -> None:
     p_derive.set_defaults(func=cmd_queue)
 
 
-def _print_queue(entries: list[dict], *, as_json: bool) -> None:
+def print_queue(entries: list[dict], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(entries))
         return
@@ -55,7 +56,7 @@ def _cmd_queue_derive(args) -> int:
         print(f"ranger: {exc}", file=sys.stderr)
         return 1
 
-    _print_queue(entries, as_json=args.json)
+    print_queue(entries, as_json=args.json)
     return 0
 
 
