@@ -16,7 +16,7 @@ from pathlib import Path
 
 CONFTEST_DIR = Path(__file__).parent
 sys.path.insert(0, str(CONFTEST_DIR))
-from conftest import CLI_PATH, load_script, write_default_config  # noqa: E402
+from conftest import CLI_PATH, load_script, make_vault, run_cli, write_default_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +313,49 @@ def test_namespaced_label_eq_end_to_end(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "model-opus" in r.stdout
     assert "labelled-s5" not in r.stdout
+
+
+def test_cli_created_namespaced_label_is_searchable_via_dot_form(tmp_path):
+    """A record written via ``record create --label craft/subsystems=X`` (the
+    real write path, not a hand-written sidecar fixture) is returned by
+    ``search label.craft.subsystems:X`` — the dot-for-slash convention
+    round-trips through the CLI create path, the index, and the search CLI,
+    not just the KQL parser or a fixture (see
+    ``test_namespaced_label_eq_end_to_end`` above)."""
+    vault, state = make_vault(tmp_path)
+
+    create = run_cli(
+        [
+            "record",
+            "create",
+            "--kind",
+            "spec",
+            "--title",
+            "PR Dashboard Subsystem Label",
+            "--keyword",
+            "foo",
+            "--label",
+            "craft/subsystems=pr-dashboard",
+        ],
+        vault=vault,
+        state_dir=state,
+        stdin_text="body\n",
+    )
+    assert create.returncode == 0, create.stderr
+    record_id = create.stdout.strip()
+    assert record_id.startswith("spec/"), f"expected spec/<name>, got {record_id!r}"
+    name = record_id.split("/", 1)[1]
+
+    search = run_cli(
+        ["search", "label.craft.subsystems:pr-dashboard"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert search.returncode == 0, search.stderr
+    assert name in search.stdout, (
+        f"expected {name!r} in search output for label.craft.subsystems:pr-dashboard, "
+        f"got: {search.stdout!r}"
+    )
 
 
 def test_old_equals_label_form_errors_with_guidance(tmp_path):

@@ -59,7 +59,7 @@ Resolve the active session note (e.g. `lore current`) and read the plan task it 
 - **Multiple plan tasks** → ask the user which one these follow-ups apply to in your clarifying turn (step 2).
 - **No plan task OR session note missing** → either the user is doing fix-ups on work that didn't go through `/plan`, or this is a fresh session. Ask the user for the parent task name. If they say "none / standalone", proceed without a parent (`<parent-slug>` becomes the free-form `<feature-slug>` derived from conversation context, and the brief omits `followup-to`).
 
-Also capture the parent's `related-subsystems` from its frontmatter — you'll inherit those into the brief so the followup is associated with the right subsystems for recall.
+Also capture the parent's `craft/subsystems` label (`lore record show <parent-id> --json` → its JSON sidecar `labels` map, not frontmatter) — you'll inherit it into the brief so the followup stays associated with the same subsystem for recall.
 
 ### 2. Clarify (one consolidated turn, only if needed)
 
@@ -86,7 +86,7 @@ If items span multiple working directories, group them by directory. You will di
 
 ### 4. Write the brief
 
-Write one brief per working directory, persisting it with `lore record create` (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind task --title "<brief>" --status ready`:
+Write one brief per working directory, persisting it with `lore record create` (`../_shared/note-storage.md`) — `printf '%s' "$BODY" | lore record create --kind task --title "<brief>" --status ready --label craft/subsystems=<subsystem-from-parent>` (omit `--label` if step 1b found no parent subsystem; the label stays queryable as `label.craft.subsystems:<name>`):
 
 ```
 YYYY-MM-DD-<parent-slug-stripped>-followup-<n>
@@ -103,8 +103,6 @@ project: <derive from the vault/repo, or omit if not determinable>
 slug: YYYY-MM-DD-<parent-slug-stripped>-followup-<n>
 created: YYYY-MM-DD
 followup-to: <parent-task-name>           # omit if no parent
-related-subsystems:                      # inherit from parent
-  - <subsystem-from-parent>
 related-spec: [[specs/...]]              # optional, only if parent had one
 ---
 
