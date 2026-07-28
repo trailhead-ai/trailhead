@@ -600,7 +600,7 @@ def test_record_escalated_carries_the_question_and_answer_command(tmp_path):
     assert res.returncode == 0, res.stderr
     text = Path(report).read_text()
     assert "Which queue should this drain?" in text
-    assert "lore record update task/t1 --diff" in text
+    assert "lore record update task/t1 --vault testvault --diff" in text
 
 
 def test_record_scrubs_credentials_out_of_the_question(tmp_path):
@@ -725,7 +725,7 @@ def test_record_escalated_out_of_the_blocked_answered_bucket_carries_the_questio
     text = Path(report).read_text()
     escalated = text.split("## Escalated — awaiting operator")[1].split("## Routed")[0]
     assert "Which queue should this drain?" in escalated
-    assert "lore record update task/t1 --diff" in escalated
+    assert "lore record update task/t1 --vault testvault --diff" in escalated
     answered = text.split("## Blocked — answered")[1].split("## Blocked — still waiting")[0]
     assert "task/t1" not in answered
 

@@ -12,7 +12,9 @@ Test contract:
   update <id> --diff` invocation that is actually appliable against the
   original (unscrubbed) record body via lore's own unified-diff applier.
 - That invocation is rendered at column 0, byte-for-byte paste-able out of
-  the raw report — an indented heredoc terminator never closes the heredoc.
+  the raw report — an indented heredoc terminator never closes the heredoc —
+  and names the sweep's elected vault, because the operator's paste is a
+  write and an unvaulted `record update` routes by a cwd-blind scan.
 - A body whose unresolved section carries no parseable `**Question:**` still
   renders a line (a fixed placeholder naming the record), never an error.
 - The question scan stops at the next `## ` heading, exactly like the
@@ -172,7 +174,7 @@ def test_escalated_question_redacted_and_answer_command_is_appliable(tmp_path):
     assert secret not in text
     assert "[REDACTED]" in text
     assert "Which vendor key should replace" in text
-    assert "lore record update task/creds --diff" in text
+    assert "lore record update task/creds --vault myvault --diff" in text
 
     # The state file is the durable record of what was written — the raw
     # secret must never land there either.
@@ -209,12 +211,31 @@ def test_answer_command_block_is_paste_able_at_column_zero(tmp_path):
     report.append_escalated(report_path, "task/paste", _unresolved_body("Which one?"))
 
     text = report_path.read_text()
-    command_start = text.index("lore record update task/paste --diff")
+    command_start = text.index("lore record update task/paste --vault myvault --diff")
     command_end = text.index("EOF", command_start) + len("EOF")
     block = text[command_start:command_end]
     offenders = [line for line in block.splitlines() if line != line.lstrip()]
     assert not offenders, f"the answer command must be paste-able as-is; indented: {offenders}"
     assert "\nEOF" in text, "the heredoc terminator must sit alone at column 0"
+
+
+def test_answer_command_targets_the_reports_own_elected_vault(tmp_path):
+    """The pasted answer is a write, and writes route by vault or by luck.
+
+    Without `--vault`, `lore record update` locates the record by the same
+    cwd-blind first-match scan across configured vaults that the sweep's own
+    reads and writes were fixed to stop relying on — so on a cross-vault name
+    collision the operator's answer lands in a different group's record, and
+    the task they meant to unblock stays blocked. The vault comes from the
+    report's state, so it is the vault this sweep actually drained.
+    """
+    env = _env(tmp_path)
+    report_path = report.start("othergroup", "vault-b", 1, env=env)
+
+    report.append_escalated(report_path, "task/a", _unresolved_body("Which one?"))
+
+    text = report_path.read_text()
+    assert "lore record update task/a --vault vault-b --diff <<'EOF'" in text
 
 
 def test_near_miss_line_present_when_signalled(tmp_path):
@@ -249,7 +270,7 @@ def test_blocked_still_waiting_carries_question_and_answer_command(tmp_path):
 
     text = report_path.read_text()
     assert "What should unblock this?" in text
-    assert "lore record update task/blocked --diff" in text
+    assert "lore record update task/blocked --vault myvault --diff" in text
 
 
 def test_blocked_answered_carries_no_question(tmp_path):

@@ -24,9 +24,9 @@ sweep is the exception: it is reported as an escalation, question and all,
 because a bare id would strand the question the ritual just wrote.)
 ``escalated-awaiting-operator`` and ``blocked-still-waiting`` are the two
 "still needs an operator" buckets, and both carry the task's one-line question
-plus a ready-to-paste answer command — or, when the record's section carries
-no parseable question, a fixed placeholder naming the record instead, since a
-malformed record must not be able to end a sweep.
+plus a ready-to-paste answer command naming the elected vault — or, when the
+record's section carries no parseable question, a fixed placeholder naming the
+record instead, since a malformed record must not be able to end a sweep.
 
 **Reading record bodies stays here, not in the coordinator.** Per the package
 docstring, the CLI (this module, driven by the future ``ranger sweep record``
@@ -181,9 +181,19 @@ def extract_question(record_body: str) -> tuple[str, int]:
     )
 
 
-def _build_answer_command(task_id: str, question_line_no: int) -> str:
-    """Build the exact `lore record update <task_id> --diff` invocation that
-    inserts a `**Answer:**` line immediately after the question line.
+def _build_answer_command(task_id: str, question_line_no: int, vault: str) -> str:
+    """Build the exact `lore record update <task_id> --vault <vault> --diff`
+    invocation that inserts a `**Answer:**` line immediately after the question
+    line.
+
+    ``--vault`` is as mandatory here as on the sweep's own writes, and for the
+    same reason one step removed: this command is run by a human, in their own
+    shell, from a directory nobody here controls. Without it ``update`` locates
+    the record by a cwd-blind first-match scan across the configured vaults in
+    declaration order, so a task name that exists in two vaults takes the
+    operator's answer into whichever one lore's config lists first — leaving
+    the task they meant to unblock still waiting, and someone else's record
+    silently edited.
 
     The hunk is a pure positional insertion (old_count=0, no context/deletion
     lines) — see the module docstring for why it never quotes the original
@@ -196,7 +206,7 @@ def _build_answer_command(task_id: str, question_line_no: int) -> str:
         f"@@ -{insert_at},0 +{insert_at},1 @@\n"
         "+**Answer:** <your answer here>\n"
     )
-    return f"lore record update {task_id} --diff <<'EOF'\n{diff}EOF"
+    return f"lore record update {task_id} --vault {vault} --diff <<'EOF'\n{diff}EOF"
 
 
 def _validate_group(group: str) -> None:
@@ -293,6 +303,11 @@ def elected_vault(report_path: Path) -> str:
     process and the election is cwd-driven: re-resolving it in ``record``
     would let a verb run from a different directory read and quote a different
     vault than the one the sweep is draining and holds the lock on.
+
+    Two consumers: the record read that lifts a question (in the ``record``
+    verb), and the ``--vault`` the rendered answer command carries into the
+    operator's own shell. Both must name the drained vault, not whichever one
+    the reader's cwd or lore's config order would pick.
     """
     return _load_state(report_path)["vault"]
 
@@ -342,7 +357,7 @@ def append_failed(report_path: Path, task_id: str, reason: str) -> None:
     _append(report_path, "failed", task_id, entry)
 
 
-def _render_question_entry(task_id: str, record_body: str, *, near_miss: bool) -> str:
+def _render_question_entry(task_id: str, record_body: str, vault: str, *, near_miss: bool) -> str:
     """Render one bucket line carrying a task's question and its answer command.
 
     Two shapes, and which one is used is decided by the record, not the
@@ -369,7 +384,7 @@ def _render_question_entry(task_id: str, record_body: str, *, near_miss: bool) -
         return "".join(lines)
 
     scrubbed_question = scrub_credentials(question)
-    answer_command = _build_answer_command(task_id, line_no)
+    answer_command = _build_answer_command(task_id, line_no, vault)
     lines = [
         f"- `{task_id}` — {scrubbed_question}\n\n",
         "Answer with:\n\n",
@@ -386,12 +401,16 @@ def _render_question_entry(task_id: str, record_body: str, *, near_miss: bool) -
 def append_escalated(
     report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
-    entry = _render_question_entry(task_id, record_body, near_miss=near_miss)
+    entry = _render_question_entry(
+        task_id, record_body, elected_vault(report_path), near_miss=near_miss
+    )
     _append(report_path, "escalated-awaiting-operator", task_id, entry)
 
 
 def append_blocked_still_waiting(
     report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
-    entry = _render_question_entry(task_id, record_body, near_miss=near_miss)
+    entry = _render_question_entry(
+        task_id, record_body, elected_vault(report_path), near_miss=near_miss
+    )
     _append(report_path, "blocked-still-waiting", task_id, entry)
