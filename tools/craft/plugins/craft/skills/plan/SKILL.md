@@ -205,9 +205,11 @@ Share the plan path and a short summary, then wait for explicit user approval be
 
 End the presentation with an explicit handoff prompt so the trigger is unambiguous, e.g.:
 
-> "Plan is written to your vault. Reply **build** to hand off to `/craft:execute` and start building slice by slice, or call out anything that needs adjustment first."
+> "Plan is written to your vault. Reply **build** to hand off to `/craft:execute` and start building slice by slice, or run `/craft:execute task/<parent-name>` in a fresh session. Call out anything that needs adjustment first."
 
 The continuation verb (`build`, `start`, `go`, `ship it`) is what pulls in the `/craft:execute` skill — don't rely on implicit continuation. Use a verb here rather than the bare skill name so the trigger word stays distinct from the `/craft:execute` command itself.
+
+The fresh-session alternative must be printed **fully formed** — the real parent task id, never a `<placeholder>` (e.g. `/craft:execute task/streaming-export`) — so it can be pasted into a new session as-is. Execution commonly starts in a fresh session to give the build a clean context; the copy/pasteable command is what makes that handoff frictionless.
 
 ## Key Principles
 

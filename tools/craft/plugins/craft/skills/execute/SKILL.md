@@ -190,9 +190,11 @@ Then complete the ritual:
 
 **Close the parent.** With every child terminal and the flow-out checklist ticked, set the parent `done`: `lore record update task/<parent-name> --status done`. The completion guard refuses this while any child is non-terminal (it names them); a parent closed without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
 
-**Completion report.** Report to the user and stop. Do **not** automatically invoke `/portage:open` — the user decides when to open a PR. The report must **enumerate every phase's outcome explicitly, even when a phase was clean, empty, or skipped** — a phase with nothing to say still gets a line, so a reader can tell it ran. Worked example:
+**Completion report.** Report to the user and stop. Do **not** automatically invoke `/portage:pull_request create` — the user decides when to open a PR. The report must **enumerate every phase's outcome explicitly, even when a phase was clean, empty, or skipped** — a phase with nothing to say still gets a line, so a reader can tell it ran. End the report with the next-step command **fully formed** so it can be pasted into a fresh session as-is. Worked example:
 
 > simplify: no changes; correctness: SHIP, 0 findings; security: skipped — no trigger
+>
+> Next step (when ready): `/portage:pull_request create`
 
 **Measurement tally.** For each correctness Critical/Important finding, record it **cited against the specific plan section it was classified under** — not a bare count. Each finding is classified **local-to-one-slice** (a defect that lives inside a single slice's delivers) vs **cross-slice** (a defect only visible across slice boundaries), and the citation must be spot-checkable: name the plan section, not just the digit. **Revisit condition:** if more than 2 local-to-one-slice Criticals accrue across the first 5 executed plans post-rollout, restore the per-slice quality charter. This is a stated, not-yet-mechanically-enforced condition — record the tally each plan; do not auto-restore.
 

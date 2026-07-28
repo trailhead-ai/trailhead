@@ -79,10 +79,10 @@ PR lifecycle lives in the sibling [portage](../portage) (get it merged) plugin:
 
 | Task | Command |
 |---|---|
-| Open a PR | `/portage:open` |
-| Update a PR | `/portage:update` |
-| Merge a PR | `/portage:merge` |
-| Watch CI to green | `/portage:monitor` |
+| Open a PR | `/portage:pull_request create` |
+| Update a PR | `/portage:pull_request update` |
+| Merge a PR | `/portage:pull_request merge` |
+| Watch CI to green | `/portage:pull_request monitor` |
 | Resume a shelved session | camp session-resume (`claude -r <slug>`) |
 
 ## Layout

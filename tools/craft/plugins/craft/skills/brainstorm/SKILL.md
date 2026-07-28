@@ -206,6 +206,10 @@ every spec passes before it freezes:
 > the gauntlet flips it to `ready` once you've dispositioned what it finds. Run `/craft:gauntlet
 > <spec-id>`."
 
+**Print the handoff command fully formed** — substitute the real spec-id (e.g. `/craft:gauntlet
+spec/streaming-export`), never a `<placeholder>`, so the user can paste it into a fresh session
+as-is.
+
 **Do not flip the spec to `ready` yourself.** Brainstorm writes the spec at `draft` and stops there;
 the `gauntlet` skill owns the `ready`-flip (its step 6). That split is deliberate — it makes the
 review structurally unskippable rather than a checklist item to honor, because nothing else in the
