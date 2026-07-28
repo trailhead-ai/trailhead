@@ -17,8 +17,7 @@ import json
 import sys
 
 from ..record import guards as guards_mod
-from .common import _resolve_config_path
-from .record import _find_current_record_location
+from .record import _find_current_record_location, _resolve_named_vault
 
 
 def _render_task_graph(graph: dict, root: str) -> str:
@@ -139,28 +138,15 @@ def _cmd_task_list(args) -> int:
     Flat listing of every task record in the NAMED vault — the read surface a
     caller outside this repo (ranger's sweep) shells out to for a queue read,
     rather than importing ``record/tasks.py`` directly. ``--vault`` resolves
-    through ``vault_config.load_config`` exactly like ``lore vault delete``'s
-    name lookup; an unreadable ``config.json`` or a name absent from it is
-    ``lore: <msg>`` on stderr, nonzero — never a silent fall-through to some
-    other vault.
+    through the shared :func:`record._resolve_named_vault` lookup (the same
+    locate-by-vault path ``record update --vault`` uses); an unreadable
+    ``config.json`` or a name absent from it is ``lore: <msg>`` on stderr,
+    nonzero — never a silent fall-through to some other vault.
     """
     from ..record import tasks as tasks_mod
-    from ..vault import config as vault_config_mod
 
-    config_path = _resolve_config_path()
-    try:
-        vaults = vault_config_mod.load_config(str(config_path))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"lore: cannot read config: {exc}", file=sys.stderr)
-        return 1
-    except vault_config_mod.VaultConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-    normalized = vault_config_mod.normalize_vault_name(args.vault)
-    vault = next((v for v in vaults if v.name == normalized), None)
+    vault = _resolve_named_vault(args.vault)
     if vault is None:
-        print(f"lore: vault {normalized!r} is not configured", file=sys.stderr)
         return 1
 
     entries = tasks_mod.list_tasks(str(vault.path), statuses=args.status)

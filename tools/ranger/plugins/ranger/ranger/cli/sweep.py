@@ -65,15 +65,12 @@ _MAX_FAILURE_CHARS = 200
 #: Agent return tokens that carry a mandatory argument (target / reason).
 _TOKENS_WITH_ARGUMENT = ("ROUTED", "SKIPPED", "FAILED")
 
-#: Agent return token -> report bucket, for a task derivation marked
-#: ``dispatchable``.
-_OUTCOME_BUCKETS = {
-    "PROMOTED": "promoted",
-    "ESCALATED": "escalated-awaiting-operator",
-    "ROUTED": "routed",
-    "SKIPPED": "skipped",
-    "FAILED": "failed",
-}
+#: The agent's complete return vocabulary. Membership is the whole contract —
+#: which report bucket each token lands in is decided by ``_cmd_sweep_record``,
+#: because the bucket is not a function of the token alone (a
+#: previously-blocked task keeps its own bucket, and two of the buckets are
+#: rendered from the record body rather than the return line).
+_OUTCOME_TOKENS = frozenset({"PROMOTED", "ESCALATED", "ROUTED", "SKIPPED", "FAILED"})
 
 #: Queue buckets whose tasks were never dispatched, mapped to the report
 #: bucket they are reported in. Both carry the task's question, so the
@@ -238,7 +235,7 @@ def parse_outcome(line: str) -> tuple[str | None, str]:
     first_line = line.strip().splitlines()[0].strip() if line.strip() else ""
     token, _, argument = first_line.partition(" ")
     argument = argument.strip()
-    if token not in _OUTCOME_BUCKETS or (token in _TOKENS_WITH_ARGUMENT and not argument):
+    if token not in _OUTCOME_TOKENS or (token in _TOKENS_WITH_ARGUMENT and not argument):
         return None, first_line[:_MAX_FAILURE_CHARS]
     return token, argument
 

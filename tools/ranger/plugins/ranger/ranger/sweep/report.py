@@ -256,8 +256,13 @@ def start(group: str, vault: str, queue_size: int, *, env: dict[str, str] | None
     return report_path
 
 
-def finish(report_path: Path, *, env: dict[str, str] | None = None) -> None:
-    """Append the footer naming the report's own absolute path."""
+def finish(report_path: Path) -> None:
+    """Append the footer naming the report's own absolute path.
+
+    ``start`` is the only entry point that needs ``env`` — it is what resolves
+    the reports directory. Every later call is addressed by the report path
+    ``start`` returned, so none of them resolve a state dir at all.
+    """
     state = _load_state(report_path)
     state["finished"] = True
     state["report_path"] = str(Path(report_path).resolve())
@@ -275,31 +280,23 @@ def _append(report_path: Path, bucket: str, task_id: str, entry: str) -> None:
     _write_report(report_path, state)
 
 
-def append_promoted(report_path: Path, task_id: str, *, env: dict[str, str] | None = None) -> None:
+def append_promoted(report_path: Path, task_id: str) -> None:
     _append(report_path, "promoted", task_id, f"- `{task_id}`\n")
 
 
-def append_routed(
-    report_path: Path, task_id: str, target: str, *, env: dict[str, str] | None = None
-) -> None:
+def append_routed(report_path: Path, task_id: str, target: str) -> None:
     _append(report_path, "routed", task_id, f"- `{task_id}` — routed to {target}\n")
 
 
-def append_blocked_answered(
-    report_path: Path, task_id: str, *, env: dict[str, str] | None = None
-) -> None:
+def append_blocked_answered(report_path: Path, task_id: str) -> None:
     _append(report_path, "blocked-answered", task_id, f"- `{task_id}`\n")
 
 
-def append_skipped(
-    report_path: Path, task_id: str, reason: str, *, env: dict[str, str] | None = None
-) -> None:
+def append_skipped(report_path: Path, task_id: str, reason: str) -> None:
     _append(report_path, "skipped", task_id, f"- `{task_id}` — {reason}\n")
 
 
-def append_failed(
-    report_path: Path, task_id: str, reason: str, *, env: dict[str, str] | None = None
-) -> None:
+def append_failed(report_path: Path, task_id: str, reason: str) -> None:
     entry = f"- `{task_id}` — {reason} {_FAILED_RETRY_SENTENCE}\n"
     _append(report_path, "failed", task_id, entry)
 
@@ -322,24 +319,14 @@ def _render_question_entry(task_id: str, record_body: str, *, near_miss: bool) -
 
 
 def append_escalated(
-    report_path: Path,
-    task_id: str,
-    record_body: str,
-    *,
-    near_miss: bool = False,
-    env: dict[str, str] | None = None,
+    report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
     entry = _render_question_entry(task_id, record_body, near_miss=near_miss)
     _append(report_path, "escalated-awaiting-operator", task_id, entry)
 
 
 def append_blocked_still_waiting(
-    report_path: Path,
-    task_id: str,
-    record_body: str,
-    *,
-    near_miss: bool = False,
-    env: dict[str, str] | None = None,
+    report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
     entry = _render_question_entry(task_id, record_body, near_miss=near_miss)
     _append(report_path, "blocked-still-waiting", task_id, entry)

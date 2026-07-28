@@ -612,20 +612,22 @@ def _cmd_record_create(args) -> int:
 
 
 def _resolve_named_vault(name: str):
-    """Resolve ``--vault NAME`` to its configured :class:`vault_config.Vault`.
+    """Resolve a ``--vault NAME`` argument to its configured :class:`vault_config.Vault`.
 
-    A distinct *locate-by-vault* path for ``record update``, sibling to ``lore
-    task list --vault``'s name lookup (``cli/task.py:_cmd_task_list``): loads
-    ``config.json`` via :func:`vault_config.load_config` and matches on the
-    normalized name. An unreadable config or a name absent from it prints
-    ``lore: <msg>`` to stderr and returns ``None`` — the caller treats ``None``
-    as "stop, nothing located, nothing written" (never a silent fall-through to
-    ``_find_current_record_location``'s scan).
+    The single *locate-by-vault* path, shared by every verb that takes a
+    ``--vault NAME`` argument (``record update``'s current-location targeting
+    and ``lore task list``'s per-vault listing — see
+    ``cli/task.py:_cmd_task_list``): loads ``config.json`` via
+    :func:`vault_config.load_config` and matches on the normalized name. An
+    unreadable config or a name absent from it prints ``lore: <msg>`` to stderr
+    and returns ``None`` — callers treat ``None`` as "stop, nothing located,
+    nothing read or written" (never a silent fall-through to some other vault,
+    nor to ``_find_current_record_location``'s scan).
 
     This is deliberately NOT the same lookup ``_resolve_destination_root`` uses
     (``explain_resolution``'s scope+precedence routing) — ``--vault`` names a
     vault directly, with no scope/precedence involved, because it answers
-    "where is the record RIGHT NOW", not "where should it be routed".
+    "which vault is meant RIGHT NOW", not "where should a record be routed".
     """
     from ..vault import config as vault_config_mod
 

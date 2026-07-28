@@ -85,8 +85,8 @@ def test_append_promoted_is_idempotent_per_task_id(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)
 
-    report.append_promoted(report_path, "task/a", env=env)
-    report.append_promoted(report_path, "task/a", env=env)
+    report.append_promoted(report_path, "task/a")
+    report.append_promoted(report_path, "task/a")
 
     text = report_path.read_text()
     assert text.count("task/a") == 1
@@ -95,12 +95,12 @@ def test_append_promoted_is_idempotent_per_task_id(tmp_path):
 def test_appends_survive_simulated_process_restart(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 2, env=env)
-    report.append_promoted(report_path, "task/a", env=env)
+    report.append_promoted(report_path, "task/a")
 
     # Simulate a fresh process: nothing in-memory carries over, only the
     # files on disk. Re-append the same id (must stay a no-op) and a new one.
-    report.append_promoted(report_path, "task/a", env=env)
-    report.append_promoted(report_path, "task/b", env=env)
+    report.append_promoted(report_path, "task/a")
+    report.append_promoted(report_path, "task/b")
 
     text = report_path.read_text()
     assert text.count("task/a") == 1
@@ -110,7 +110,7 @@ def test_appends_survive_simulated_process_restart(tmp_path):
 def test_simulated_crash_leaves_parseable_partial_report(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)
-    report.append_promoted(report_path, "task/a", env=env)
+    report.append_promoted(report_path, "task/a")
     # No finish() call — simulates a crash mid-sweep.
 
     text = report_path.read_text()
@@ -124,7 +124,7 @@ def test_finish_appends_footer_naming_absolute_report_path(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 0, env=env)
 
-    report.finish(report_path, env=env)
+    report.finish(report_path)
 
     text = report_path.read_text()
     assert str(report_path.resolve()) in text
@@ -136,7 +136,7 @@ def test_escalated_question_redacted_and_answer_command_is_appliable(tmp_path):
     secret = "STRIPE_SECRET_KEY=sk_live_abcdefghijklmnopqrstuvwx"
     body = _unresolved_body(f"Which vendor key should replace {secret}?")
 
-    report.append_escalated(report_path, "task/creds", body, env=env)
+    report.append_escalated(report_path, "task/creds", body)
 
     text = report_path.read_text()
     assert secret not in text
@@ -169,7 +169,7 @@ def test_near_miss_line_present_when_signalled(tmp_path):
     report_path = report.start("mygroup", "myvault", 1, env=env)
     body = _unresolved_body("Is this answered?")
 
-    report.append_escalated(report_path, "task/near", body, near_miss=True, env=env)
+    report.append_escalated(report_path, "task/near", body, near_miss=True)
 
     text = report_path.read_text()
     assert "answer detected but not recognized" in text
@@ -181,7 +181,7 @@ def test_near_miss_line_absent_without_signal(tmp_path):
     report_path = report.start("mygroup", "myvault", 1, env=env)
     body = _unresolved_body("Is this answered?")
 
-    report.append_escalated(report_path, "task/nonear", body, env=env)
+    report.append_escalated(report_path, "task/nonear", body)
 
     text = report_path.read_text()
     assert "answer detected but not recognized" not in text
@@ -192,7 +192,7 @@ def test_blocked_still_waiting_carries_question_and_answer_command(tmp_path):
     report_path = report.start("mygroup", "myvault", 1, env=env)
     body = _unresolved_body("What should unblock this?")
 
-    report.append_blocked_still_waiting(report_path, "task/blocked", body, env=env)
+    report.append_blocked_still_waiting(report_path, "task/blocked", body)
 
     text = report_path.read_text()
     assert "What should unblock this?" in text
@@ -203,7 +203,7 @@ def test_blocked_answered_carries_no_question(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)
 
-    report.append_blocked_answered(report_path, "task/answered", env=env)
+    report.append_blocked_answered(report_path, "task/answered")
 
     text = report_path.read_text()
     assert "task/answered" in text
@@ -213,7 +213,7 @@ def test_routed_line_names_target(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)
 
-    report.append_routed(report_path, "task/route", "/craft:plan", env=env)
+    report.append_routed(report_path, "task/route", "/craft:plan")
 
     text = report_path.read_text()
     assert "task/route" in text
@@ -224,7 +224,7 @@ def test_skipped_line_carries_reason(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)
 
-    report.append_skipped(report_path, "task/skip", "not a standalone leaf", env=env)
+    report.append_skipped(report_path, "task/skip", "not a standalone leaf")
 
     text = report_path.read_text()
     assert "task/skip" in text
@@ -235,7 +235,7 @@ def test_failed_line_carries_auto_retry_sentence(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)
 
-    report.append_failed(report_path, "task/fail", "dispatch timed out", env=env)
+    report.append_failed(report_path, "task/fail", "dispatch timed out")
 
     text = report_path.read_text()
     assert "task/fail" in text

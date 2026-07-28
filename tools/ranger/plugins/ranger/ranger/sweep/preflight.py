@@ -183,5 +183,3 @@ def resolve_vault(group: str, *, runner: Runner | None = None) -> dict:
         f"binding naming a configured vault to the group's camp TOML, e.g. "
         f'[[lore_scopes]] scope = "team", name = "<vault>"'
     )
-
-
