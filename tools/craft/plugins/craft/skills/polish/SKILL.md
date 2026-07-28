@@ -117,14 +117,14 @@ Address <N> follow-up items raised after initial implementation of <feature>. Ea
 
 ## Slice 1: Follow-ups batch
 
-### Delivers
+**Delivers:**
 
 1. <Item 1 — concrete, actionable, references files/symbols>
 2. <Item 2 — ...>
 ...
 N. <Item N — ...>
 
-### Test contract
+**Test contract:**
 
 For each item that touches production code, the executor must add or update tests covering:
 
@@ -132,7 +132,7 @@ For each item that touches production code, the executor must add or update test
 - <test behavior for item 2, ...>
 ...
 
-### Expected files
+**Files:**
 
 - <file:line ranges where known; "TBD by executor" where not>
 
