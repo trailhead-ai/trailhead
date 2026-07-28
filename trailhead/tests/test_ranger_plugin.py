@@ -7,8 +7,9 @@ depends on — the manifest's ``cli_bin`` declaration, the ``bin/`` → ``cli/``
 wrapper pair, and the CLI's error hygiene — so a later edit cannot silently
 break discovery or turn a bad verb into a Python traceback.
 
-The sweep behaviour itself lives behind ``ranger.sweep``; that package is
-deliberately empty here and grows its own tests alongside the code.
+The sweep behaviour itself lives behind ``ranger.sweep``, growing module by
+module with its own tests alongside each addition; this file only pins the
+package's existence, not its contents.
 """
 
 from __future__ import annotations
@@ -77,11 +78,10 @@ class TestPluginAnatomy:
             "its own .claude-plugin/marketplace.json"
         )
 
-    def test_sweep_package_is_present_and_empty(self):
-        """Sweep behaviour lands later; the package exists so imports resolve."""
+    def test_sweep_package_exists(self):
+        """The package exists so imports resolve; its modules land incrementally."""
         sweep = _PLUGIN_ROOT / "ranger" / "sweep"
         assert (sweep / "__init__.py").is_file()
-        assert sorted(p.name for p in sweep.glob("*.py")) == ["__init__.py"]
 
 
 # ---------------------------------------------------------------------------
