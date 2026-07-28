@@ -69,7 +69,7 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 ### 2. Absorb findings
 
 - **VALIDATED:** update the plan, check off the unknown. Carry the **test files to clean up** from the prover's report into the executor dispatch so it removes them after building proper tests.
-- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status).
+- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status). **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they block the current slice or a future one.
 
 ### 3. Dispatch `executor`
@@ -226,7 +226,7 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 
 **Escalation signals:**
 
-- Executor returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the executor.
+- Executor returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the executor. **If the run ends here:** write `blocked` on the slice — `lore record update task/<name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
 - Executor returns `DONE_WITH_CONCERNS` repeatedly on the same slice → re-dispatch with `model: "opus"` or break the slice smaller.
 - Assumption-prover returns `NEEDS_CONTEXT` → it's not the model, it's the prompt. Give it more context and re-dispatch at the same tier.
 
@@ -241,11 +241,13 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 2. **Design change** — the invalidation affects multiple child tasks or the architecture. Re-enter planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline. Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
 3. **Drop the task** — the feature doesn't need this part. Reshape the child task record to `superseded` (or `dropped`) via `lore record update`, note why, continue with remaining tasks.
 
+**If the run ends here** (none of the above resolves it in-session): write `blocked` on the plan — `lore record update task/<parent-name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
+
 If the INVALIDATED result is surprising (behavior you thought was standard turns out to differ), that may also be a `troubleshooter` question: dispatch it to figure out *why* the assumption was wrong before reshaping the plan.
 
 **NEEDS_CONTEXT:** Provide missing context and re-dispatch.
 
-**BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user.
+**BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user. **If the run ends here:** write `blocked` on the slice — `lore record update task/<name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
 
 ## Handling Executor Status
 
@@ -259,8 +261,10 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 1. Context problem → provide more context, re-dispatch
 2. Needs more reasoning → re-dispatch with `model: "opus"`
 3. Slice too large → break into smaller pieces
-4. Plan is wrong → escalate to user
+4. Plan is wrong → escalate to user. **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
 5. Cause unclear → dispatch `troubleshooter` to diagnose before re-dispatching the executor. Don't keep re-dispatching the same prompt hoping for a different outcome.
+
+**If the run ends here** (1–3 or 5 above didn't resolve it): write `blocked` on the slice — `lore record update task/<name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
 
 ## Red Flags
 
