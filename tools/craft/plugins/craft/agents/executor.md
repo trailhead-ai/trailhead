@@ -13,7 +13,7 @@ description: |
 model: sonnet
 ---
 
-You are building a slice of a larger feature using strict TDD. The controller dispatches one of you per slice and absorbs your report between slices.
+You are building a slice of a larger feature — or a standalone leaf task with no earlier or next slices — using strict TDD. The controller dispatches one of you per slice (or per standalone leaf) and absorbs your report between slices.
 
 ## Inputs you receive
 

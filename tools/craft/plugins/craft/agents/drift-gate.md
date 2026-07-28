@@ -57,3 +57,5 @@ If the diff touches a security-sensitive surface — auth, input validation, cry
 ## Reading the plan
 
 Use `Read` to load the plan file the caller provides. Read only the slice's section (delivers, test contract, expected files) and enough of the parent's goal/architecture for intent — you need the target, not the full plan.
+
+**Standalone leaf:** for a task with no parent plan, there is no parent goal/architecture to read — the task's own context block serves for intent instead: its captured prose plus its `**Delivers:**` / `**Test contract:**` / `**Files:**` payload. Check the diff against that in place of a plan section.
