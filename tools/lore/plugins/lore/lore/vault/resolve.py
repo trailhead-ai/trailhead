@@ -69,11 +69,21 @@ class Resolution(NamedTuple):
                        reached with no higher match).
         skipped_reason: A human-readable reason the ``skipped`` vault was passed
                        over (``"kind not in allowlist"``), or ``None``.
+        unmatched:     ``[(scope, normalized_name), …]`` for every supplied scope
+                       whose name matched **no vault at all** in config — as
+                       opposed to ``skipped``, which names a vault that matched
+                       but was ineligible. Today this case is silently passed
+                       over (a binding pointing at a name absent from
+                       ``config.json``); ``unmatched`` exposes it for callers
+                       (``lore vault resolve --json``) that must report a
+                       binding whose target vault doesn't exist, without
+                       changing ``resolve_vault``'s selection behavior.
     """
 
     chosen: object
     skipped: object
     skipped_reason: str | None
+    unmatched: list
 
 
 # ---------------------------------------------------------------------------
@@ -143,11 +153,12 @@ def explain_resolution(participating_scopes: dict, kind: str, config: list) -> R
 
     skipped = None
     skipped_reason: str | None = None
+    unmatched: list = []
 
     for scope in _PRECEDENCE:
         if scope == "default":
             if default_vault is not None:
-                return Resolution(default_vault, skipped, skipped_reason)
+                return Resolution(default_vault, skipped, skipped_reason, unmatched)
             continue
 
         if scope not in normalized_participants:
@@ -156,10 +167,14 @@ def explain_resolution(participating_scopes: dict, kind: str, config: list) -> R
         supplied_name = normalized_participants[scope]
         vault = config_by_scope_name.get((scope, supplied_name))
         if vault is None:
+            # Supplied scope+name matches no configured vault at all — record
+            # it so a caller reporting on the binding (not just selecting a
+            # vault) can name the dangling reference, then fall through.
+            unmatched.append((scope, supplied_name))
             continue
 
         if _is_eligible(vault):
-            return Resolution(vault, skipped, skipped_reason)
+            return Resolution(vault, skipped, skipped_reason, unmatched)
 
         # Matched but ineligible — record the FIRST (highest-precedence) such vault
         # as the reported skip, then fall through to the next scope.
@@ -168,7 +183,7 @@ def explain_resolution(participating_scopes: dict, kind: str, config: list) -> R
             skipped_reason = "kind not in allowlist"
 
     if default_vault is not None:  # pragma: no cover - same guard as resolve_vault
-        return Resolution(default_vault, skipped, skipped_reason)
+        return Resolution(default_vault, skipped, skipped_reason, unmatched)
 
     raise RuntimeError(  # pragma: no cover
         "lore: explain_resolution found no eligible vault — config is missing a "
