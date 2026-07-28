@@ -68,6 +68,10 @@ in-progress → done` lifecycle. Setting a parent `--status done` while it still
 non-terminal children is refused (the children are named in the error); a parent completed
 without a `## Flow-out` section gets a non-blocking flow-out reminder.
 
+Under `execute`'s task-status contract, the parent's `ready → in-progress` write happens at
+the first dispatch, paired in the same command with `--label craft/branch=<bare-branch>` —
+see `_shared/status-ownership.md` for the full writer/exit-owner contract.
+
 ### `link(plan → spec)`
 
 Point the parent plan task at its upstream spec by adding the spec to the task's `related` map

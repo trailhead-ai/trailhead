@@ -54,6 +54,24 @@ per-task status, and marks the runnable leaves; use it to pick the next task and
 progress. **Never dispatch the parent task itself** — it is the container and the lifecycle
 handle, not a unit of work.
 
+### Resuming a run
+
+Invoking execute against a task already `in-progress` **resumes** it — never refuses, never
+restarts from scratch. Locate the existing work via the `craft/branch` label
+(`lore search 'label.craft.branch:<name>'`) or a locally-present branch matching the task
+name, then pick up wherever the graph and workspace show the run left off.
+
+If the task's workspace no longer exists, reconcile before resuming: the task is resumed
+when its branch is recoverable (check out the branch named by `craft/branch` and continue
+from the first-dispatch claim in step 3 onward) or released back to `ready` when it isn't —
+**except** a task carrying `craft/push=failed`, which is skipped and reported rather than
+silently re-run. Whichever path is taken, leave a one-line breadcrumb in the task body:
+`reconciled: resumed from <branch>` / `reconciled: released to ready`.
+
+Every execute exit path — [Phase 6](#phase-6-close-and-completion-report)'s `done`, each
+escalation site's `blocked` write, or an answered-and-continuing escalation — moves the task
+off `in-progress`; full writer and exit-owner rules live in `../_shared/status-ownership.md`.
+
 For each runnable child task (a slice):
 
 ### 1. Does this slice have an unresolved unknown?
@@ -73,6 +91,15 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they block the current slice or a future one.
 
 ### 3. Dispatch `executor`
+
+**Before the first dispatch of this run**, claim the plan in one command: flip the parent
+off `ready` and write its branch label together —
+`lore record update task/<parent-name> --status in-progress --label craft/branch=<bare-branch>`
+(bump `updated:` to today). Write both at dispatch, not only at close — `craft/branch`'s
+primary reader is crash-resume logic, which runs on tasks that never reached close. Skip if
+the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if it's
+`in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above instead
+of re-dispatching from scratch.
 
 The agent expects:
 - Plan path and task name
@@ -107,7 +134,7 @@ Quality, style, and design review are explicitly out of scope for `drift-gate` �
 After each child task completes (or each unknown resolves), record the state on the graph — the task graph is the source of truth for what's done and what's left, so the run stays resumable if context breaks (handoff, new session):
 
 - **Task status.** Set the child task you just built to `done`: `lore record update task/<name> --status done`. Advancing a task off `ready` is what makes its dependents runnable. A child's `done` here is bookkeeping only — committed on the task branch; the push guarantee that makes `done` mean "committed and pushed" attaches to the run's close (see [Phase 6](#phase-6-close-and-completion-report) and `../_shared/status-ownership.md`), not this step.
-- **Parent lifecycle.** After the **first** child task lands, flip the parent `ready → in-progress` (`lore record update task/<parent-name> --status in-progress`; bump `updated:` to today). This keeps the task graph honest — a plan with code shipped against it should not still read `ready`. Skip if the parent is already `in-progress`, `done`, `dropped`, or `superseded`.
+- **Parent lifecycle.** The parent already flipped `ready → in-progress` at the first dispatch (step 3) — that's what keeps the task graph honest from the moment code starts shipping against it, rather than waiting for a child to land first. Nothing to write here; if the parent still reads `ready` this far into the run, that's a sign step 3's claim was skipped and should be run now.
 - **Unknowns.** Check off resolved unknowns in the parent's Known Unknowns block; add any new unknown discovered during the slice, noting which child task it blocks.
 - **Design changes.** Note any design change a finding forced — in the parent body, and by re-shaping child tasks per the split/append ritual below.
 
