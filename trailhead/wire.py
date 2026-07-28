@@ -284,5 +284,5 @@ def _compose_tool(
 def default_manifest_paths() -> dict[str, Path]:
     """Return the default inventory paths relative to the repo root."""
     repo_root = Path(__file__).parent.parent
-    tools = ["lore", "camp", "craft", "portage", "outpost"]
+    tools = ["lore", "camp", "craft", "portage", "outpost", "ranger"]
     return {t: repo_root / "tools" / t / "capabilities.toml" for t in tools}

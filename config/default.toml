@@ -12,7 +12,8 @@
 install_camp_cli = true
 install_lore_cli = true
 install_portage_cli = true
+install_ranger_cli = true
 
 # Top-level default plugin set, applied to every detected/--harness harness.
 # A [[harness]] block (omitted here) can override this per harness.
-plugins = ["camp", "lore", "craft", "portage", "outpost"]
+plugins = ["camp", "lore", "craft", "portage", "outpost", "ranger"]

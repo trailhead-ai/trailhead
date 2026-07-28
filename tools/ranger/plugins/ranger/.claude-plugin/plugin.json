@@ -1,0 +1,5 @@
+{
+  "name": "ranger",
+  "version": "0.1.0",
+  "description": "Unattended refine sweep: drain a camp group's shaping queue task by task and report what stalled."
+}

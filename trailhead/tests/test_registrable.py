@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TOOLS = ["lore", "camp", "craft", "portage", "outpost"]
+_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "ranger"]
 
 
 def _plugin_root(tool: str) -> Path:

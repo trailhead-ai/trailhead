@@ -71,13 +71,13 @@ class TestDetectionDrivenInstall:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         selection = m["wire"].call_args[0][0]
-        assert set(selection) == {"camp", "lore", "craft", "portage", "outpost"}
+        assert set(selection) == {"camp", "lore", "craft", "portage", "outpost", "ranger"}
 
     def test_clis_installed(self, tmp_path):
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
-        assert set(cli_tools) == {"camp", "lore", "portage"}
+        assert set(cli_tools) == {"camp", "lore", "portage", "ranger"}
 
     def test_summary_prints_shellenv_hint(self, tmp_path, capsys):
         with _patched(detected=True):
@@ -128,10 +128,24 @@ class TestCliOverrides:
         assert "camp" in cli_tools
         assert "lore" in cli_tools
 
-    def test_no_camp_no_lore_no_portage_skips_pathint_entirely(self, tmp_path):
+    def test_config_can_drop_a_cli_with_no_matching_flag(self, tmp_path):
+        # ranger ships no --no-ranger flag; its install_<name>_cli key is
+        # resolved generically, so the config file is the only way to drop it.
+        cfg_path = tmp_path / "no-ranger.toml"
+        cfg_path.write_text("install_ranger_cli = false\n")
+        with _patched(detected=True) as m:
+            run_install(env=_env(tmp_path), config_arg=str(cfg_path), quiet=True)
+        cli_tools = m["pathint"].call_args[0][0]
+        assert "ranger" not in cli_tools
+        assert "camp" in cli_tools
+
+    def test_every_cli_disabled_skips_pathint_entirely(self, tmp_path):
+        cfg_path = tmp_path / "no-clis.toml"
+        cfg_path.write_text("install_ranger_cli = false\n")
         with _patched(detected=True) as m:
             run_install(
                 env=_env(tmp_path),
+                config_arg=str(cfg_path),
                 no_camp=True,
                 no_lore=True,
                 no_portage=True,
@@ -197,7 +211,12 @@ class TestJsonOutput:
         data = _json.loads(capsys.readouterr().out)
         assert data["no_harness"] is False
         assert set(data["harnesses"]) == {"claude_code"}
-        assert data["cli_flags"] == {"camp": True, "lore": True, "portage": True}
+        assert data["cli_flags"] == {
+            "camp": True,
+            "lore": True,
+            "portage": True,
+            "ranger": True,
+        }
 
     def test_json_no_harness_flag(self, tmp_path, capsys):
         import json as _json

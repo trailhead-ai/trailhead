@@ -97,16 +97,33 @@ class TestFlagsAndDefaults:
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
         assert cfg.cli_flags["portage"] is False
 
-    def test_all_three_cli_flags_resolve_together(self, tmp_path):
+    def test_every_cli_flag_resolves_together(self, tmp_path):
         path = _write(
             tmp_path,
             "install_camp_cli = false\n"
             "install_lore_cli = true\n"
             "install_portage_cli = false\n"
+            "install_ranger_cli = true\n"
             "plugins=[]\n",
         )
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
-        assert cfg.cli_flags == {"camp": False, "lore": True, "portage": False}
+        assert cfg.cli_flags == {
+            "camp": False,
+            "lore": True,
+            "portage": False,
+            "ranger": True,
+        }
+
+    def test_ranger_cli_flag_defaults_true(self):
+        # No --no-ranger CLI flag exists: the key is resolved generically off
+        # ranger's cli_bin declaration, so it defaults on with no config at all.
+        cfg = resolve_config(detected_harnesses=["claude_code"])
+        assert cfg.cli_flags["ranger"] is True
+
+    def test_config_can_set_install_ranger_cli(self, tmp_path):
+        path = _write(tmp_path, "install_ranger_cli = false\nplugins=[]\n")
+        cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
+        assert cfg.cli_flags["ranger"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +182,7 @@ class TestPluginExpansion:
         path = _write(tmp_path, "install_camp_cli = true\n")  # no plugins key
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger"]
 
     def test_per_harness_plugins_override_top_level(self, tmp_path):
         path = _write(
@@ -289,4 +306,4 @@ class TestShippedDefault:
         assert cfg.cli_flags["lore"] is True
         assert cfg.cli_flags["portage"] is True
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "ranger"]
