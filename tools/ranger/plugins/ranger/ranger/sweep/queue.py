@@ -1,0 +1,214 @@
+"""Sweep queue derivation and classification for an elected vault.
+
+Derives the candidate queue for a sweep by shelling out to `lore task list
+--vault <name> --status open --status blocked --json` (never importing
+lore's internals — the queue-read capability lives in lore, matching the
+`lore task list` verb's own docstring, and keeping ranger decoupled from
+lore's on-disk vault/record layout). Every lore invocation goes through the
+injectable `Runner` callable below, exactly like `trailhead.vcs.runner`'s
+seam: production code calls `derive_queue` with no `runner`, tests inject a
+stub to capture calls without touching a real `lore` install.
+
+**Shape gate.** Only standalone tasks (no `parent`, no `children`) are
+candidates for the sweep — the same gate refine's Step 1 applies before
+promoting a task, mirrored here because a task with a parent or children is
+either a plan slice (owned by `execute`, not the sweep) or a plan itself.
+
+**Classification.** Each candidate lands in exactly one of four buckets:
+
+- `dispatchable` — `open`, and either no `## Refine — unresolved` section at
+  all, or the section is present and answered (the answer re-entry path: an
+  operator answered a previously-escalated question, so the task is ready
+  to be picked up again).
+- `escalated-awaiting-operator` — `open` with an unanswered `## Refine —
+  unresolved` section. A churn guard: this task is never dispatched again
+  until an operator adds a `**Answer:**` line, however many times the sweep
+  re-derives the queue.
+- `blocked-answered` — `blocked`, and the section is answered. Also
+  dispatchable (the sweep re-attempts a previously-blocked task once
+  answered), but reported under its own bucket since it carries a different
+  history than a plain `dispatchable` task.
+- `blocked-still-waiting` — `blocked`, and the section is not answered.
+
+**Answered predicate (strict).** A line beginning with the literal,
+exact-case `**Answer:**` inside the `## Refine — unresolved` section, which
+itself is located by an exact, single-line, literal match of the heading
+(including the U+2014 em dash) — a wrapped heading or one using a different
+dash character is not recognized. This predicate is deliberately narrow:
+loosening it to fuzzy-match near-misses would let an operator's typo or a
+stray line elsewhere in the body silently promote a task that was never
+actually answered.
+
+**Near-miss signal (informational, never dispatch-affecting).** Because the
+predicate above is strict, `classify` also reports `answer_near_miss` when
+it detects a plausible-but-not-recognized answer attempt: a case/format
+variant of `**Answer:**` (e.g. `Answer:`, `**answer:**`) inside the section,
+or an exact `**Answer:**` line that landed outside the section. Either way
+the task is still routed to whichever "waiting" bucket its status implies —
+the flag exists purely so a report can say "an answer was attempted but not
+recognized" instead of the ambiguous "never answered".
+
+**Read-only.** This module never calls `lore record update` or otherwise
+mutates a record — it only lists and reads.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from typing import Any, Callable
+
+# Type alias for the injectable lore-CLI runner, matching
+# trailhead.vcs.runner's Runner protocol: runner(cmd, **kwargs) ->
+# subprocess.CompletedProcess, cmd always a list (shell=False).
+Runner = Callable[..., subprocess.CompletedProcess]
+
+BUCKETS = (
+    "dispatchable",
+    "escalated-awaiting-operator",
+    "blocked-answered",
+    "blocked-still-waiting",
+)
+
+_TASK_KIND = "task"
+_UNRESOLVED_HEADING = "## Refine — unresolved"
+_ANSWER_PREFIX = "**Answer:**"
+_ANSWER_NEAR_MISS_RE = re.compile(r"^\*{0,2}answer:", re.IGNORECASE)
+
+
+class QueueDeriveError(Exception):
+    """Raised when a `lore` CLI call the derivation depends on fails, or emits
+    output the derivation can't parse as JSON."""
+
+
+def _default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """Production runner: subprocess.run with shell=False, output captured as text."""
+    kwargs.setdefault("capture_output", True)
+    kwargs.setdefault("text", True)
+    kwargs.setdefault("check", False)
+    return subprocess.run(cmd, **kwargs)
+
+
+def _run_lore(argv: list[str], *, runner: Runner | None) -> Any:
+    """Run `lore <argv>` via the injectable runner and return its parsed JSON stdout."""
+    effective = runner if runner is not None else _default_runner
+    cmd = ["lore", *argv]
+    result = effective(cmd)
+    if result.returncode != 0:
+        raise QueueDeriveError(
+            f"lore {' '.join(argv)} failed: {result.stderr.strip()}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise QueueDeriveError(
+            f"lore {' '.join(argv)} emitted unparseable JSON: {exc}"
+        ) from exc
+
+
+def _list_standalone_candidates(vault: str, *, runner: Runner | None) -> list[dict]:
+    """Return every open/blocked standalone task in *vault*, oldest-first.
+
+    Standalone means no `parent` and no `children` — the containment shape
+    gate, applied here rather than trusted from the caller, since a plan
+    slice can carry `open`/`blocked` status too and is never sweep-owned.
+    """
+    entries = _run_lore(
+        [
+            "task", "list",
+            "--vault", vault,
+            "--status", "open",
+            "--status", "blocked",
+            "--json",
+        ],
+        runner=runner,
+    )
+    standalone = [e for e in entries if e.get("parent") is None and not e.get("children")]
+    standalone.sort(key=lambda e: (e.get("created-at") or "", e["name"]))
+    return standalone
+
+
+def _read_body(name: str, *, runner: Runner | None) -> str:
+    """Read a task record's raw body via `lore record show`, read-only."""
+    payload = _run_lore(["record", "show", f"{_TASK_KIND}/{name}", "--json"], runner=runner)
+    return payload.get("body", "")
+
+
+def _section_bounds(lines: list[str]) -> tuple[int, int] | None:
+    """Return the (start, end) line-index range of the unresolved section's
+    body, exclusive of the heading itself, or None if the heading is absent.
+
+    The heading must match `_UNRESOLVED_HEADING` exactly on a single physical
+    line — a wrapped heading or a different dash character never matches.
+    The section ends at the next `## ` heading, or at the end of the body.
+    """
+    heading_idx = None
+    for i, line in enumerate(lines):
+        if line.rstrip("\n") == _UNRESOLVED_HEADING:
+            heading_idx = i
+            break
+    if heading_idx is None:
+        return None
+
+    end = len(lines)
+    for i in range(heading_idx + 1, len(lines)):
+        if lines[i].rstrip("\n").startswith("## "):
+            end = i
+            break
+    return heading_idx + 1, end
+
+
+def classify(status: str, body: str) -> tuple[str, bool]:
+    """Classify a single candidate's (status, body) into (bucket, answer_near_miss).
+
+    See the module docstring for the bucket set, the strict answered
+    predicate, and the near-miss signal's three trigger cases.
+    """
+    lines = body.splitlines(keepends=True)
+    bounds = _section_bounds(lines)
+    answered = False
+    near_miss = False
+
+    if bounds is not None:
+        start, end = bounds
+        for i in range(start, end):
+            stripped = lines[i].rstrip("\n").strip()
+            if stripped.startswith(_ANSWER_PREFIX):
+                answered = True
+            elif _ANSWER_NEAR_MISS_RE.match(stripped):
+                near_miss = True
+
+        if not answered:
+            for i, line in enumerate(lines):
+                if start <= i < end:
+                    continue
+                if line.rstrip("\n").strip().startswith(_ANSWER_PREFIX):
+                    near_miss = True
+                    break
+
+    if status == "open":
+        bucket = "escalated-awaiting-operator" if (bounds is not None and not answered) else "dispatchable"
+    elif status == "blocked":
+        bucket = "blocked-answered" if answered else "blocked-still-waiting"
+    else:
+        raise QueueDeriveError(f"unexpected status {status!r} for a sweep queue candidate")
+
+    return bucket, near_miss
+
+
+def derive_queue(vault: str, *, runner: Runner | None = None) -> list[dict]:
+    """Derive and classify the sweep queue for *vault*.
+
+    Returns a list of dicts — each candidate's `lore task list` entry
+    (`name`, `status`, `created-at`, `updated-at`, `parent`, `depends-on`,
+    `children`) plus `bucket` and `answer_near_miss` — ordered oldest-first
+    by `created-at` with a record-name tiebreak.
+    """
+    candidates = _list_standalone_candidates(vault, runner=runner)
+    queue: list[dict] = []
+    for entry in candidates:
+        body = _read_body(entry["name"], runner=runner)
+        bucket, near_miss = classify(entry["status"], body)
+        queue.append({**entry, "bucket": bucket, "answer_near_miss": near_miss})
+    return queue
