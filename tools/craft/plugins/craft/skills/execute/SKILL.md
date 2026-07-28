@@ -16,6 +16,10 @@ description: >
 # Execute
 
 Execute a plan slice-by-slice. For each slice, resolve unknowns first, then build.
+Every status write below follows the task-status ownership contract in
+`../_shared/status-ownership.md` — the single source of truth for who writes each
+status value, `done`'s push guarantee, and `blocked` semantics; read it before
+touching status.
 
 **Three subagent roles** — all dedicated agents, no inline prompt templates:
 
