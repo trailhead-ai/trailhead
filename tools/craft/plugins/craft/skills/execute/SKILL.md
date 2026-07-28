@@ -140,8 +140,6 @@ After each child task completes (or each unknown resolves), record the state on 
 
 **Per-cycle working set:** the controller's working set is the current child task plus the parent's Known Unknowns block. The controller does not re-read the whole graph each cycle — it updates incrementally and re-reads only `lore task graph <parent-name>` to pick the next runnable leaf.
 
-(The parent's final `in-progress → done` flip is the flow-out completion gate — see [After All Slices](#after-all-slices). It does not happen here.)
-
 ### 6. Next task
 
 Re-run `lore task graph <parent-name>`, pick the next runnable leaf (topological order), and repeat from step 1. When no runnable leaf remains and every child is terminal, go to [After All Slices](#after-all-slices).
