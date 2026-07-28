@@ -157,7 +157,9 @@ class TestCraftInventory:
         # review that owns the spec's draft → ready edge, sitting between
         # brainstorm and plan. receiving-code-review is the
         # untrusted-content-framing reference skill for evaluating incoming
-        # review/CI-annotation feedback.
+        # review/CI-annotation feedback. refine is the self-serve promotion
+        # ritual that turns a captured standalone `open` task into a `ready`
+        # executor-runnable leaf.
         m = load_manifest(_CRAFT_MANIFEST)
         assert set(m.skills) == {
             "polish",
@@ -168,6 +170,7 @@ class TestCraftInventory:
             "brainstorm",
             "gauntlet",
             "receiving-code-review",
+            "refine",
         }
 
     def test_shared_not_selectable(self):
