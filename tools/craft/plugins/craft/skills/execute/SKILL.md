@@ -106,7 +106,7 @@ Quality, style, and design review are explicitly out of scope for `drift-gate` �
 
 After each child task completes (or each unknown resolves), record the state on the graph — the task graph is the source of truth for what's done and what's left, so the run stays resumable if context breaks (handoff, new session):
 
-- **Task status.** Set the child task you just built to `done`: `lore record update task/<name> --status done`. Advancing a task off `ready` is what makes its dependents runnable.
+- **Task status.** Set the child task you just built to `done`: `lore record update task/<name> --status done`. Advancing a task off `ready` is what makes its dependents runnable. A child's `done` here is bookkeeping only — committed on the task branch; the push guarantee that makes `done` mean "committed and pushed" attaches to the run's close (see [Phase 6](#phase-6-close-and-completion-report) and `../_shared/status-ownership.md`), not this step.
 - **Parent lifecycle.** After the **first** child task lands, flip the parent `ready → in-progress` (`lore record update task/<parent-name> --status in-progress`; bump `updated:` to today). This keeps the task graph honest — a plan with code shipped against it should not still read `ready`. Skip if the parent is already `in-progress`, `done`, `dropped`, or `superseded`.
 - **Unknowns.** Check off resolved unknowns in the parent's Known Unknowns block; add any new unknown discovered during the slice, noting which child task it blocks.
 - **Design changes.** Note any design change a finding forced — in the parent body, and by re-shaping child tasks per the split/append ritual below.
@@ -192,13 +192,19 @@ Then complete the ritual:
 
 ### Phase 6: Close and completion report
 
-**Close the parent.** With every child terminal and the flow-out checklist ticked, set the parent `done`: `lore record update task/<parent-name> --status done`. The completion guard refuses this while any child is non-terminal (it names them); a parent closed without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
+**Push before close.** Before the close phase of a run writes `done`, every member repo carrying commits on the task branch must be pushed. Detection is a named inline mandate, not an inference: per repo, run `git log origin/<branch>..HEAD --oneline` — a branch with no upstream counts as unpushed. Empty output means nothing to push in that repo; non-empty means push is required there.
 
-**Completion report.** Report to the user and stop. Do **not** automatically invoke `/portage:pull_request create` — the user decides when to open a PR. The report must **enumerate every phase's outcome explicitly, even when a phase was clean, empty, or skipped** — a phase with nothing to say still gets a line, so a reader can tell it ran. End the report with the next-step command **fully formed** so it can be pasted into a fresh session as-is. Worked example:
+Before pushing a repo with unpushed commits, run the pre-push secret scan: check `git log origin/<branch>..HEAD -p` for that repo against the credential-pattern scrub list ([Phase 5](#phase-5-flow-out)). On a match, do **not** push that repo — take the blocked path instead, naming the remediation in the report: rotate the credential, then rewrite history before attempting the push again.
 
-> simplify: no changes; correctness: SHIP, 0 findings; security: skipped — no trigger
->
-> Next step (when ready): `/portage:pull_request create`
+For every repo that clears the scan, push with `git push --set-upstream origin HEAD` (verbatim — a bare `git push` never converges without an upstream). Push is idempotent: an already-up-to-date branch counts as success, so retrying after a failed status write is safe — the status write is the completion signal, the push is its precondition.
+
+On push failure (auth, no remote, rejection): the task stays `in-progress` — the honest state — and the session writes `lore record update task/<name> --label craft/push=failed`. The completion report names the failure **and the remediation**, distinguishing a non-fast-forward rejection (needs reconciliation with the remote, not credentials) from an auth/no-remote failure (needs credentials or a configured remote, not reconciliation). Run any raw git stderr through the credential-pattern scrub before it enters report or record text.
+
+**Close the run.** With every child terminal, the flow-out checklist ticked, and every repo's push settled, set the parent `done`: `lore record update task/<parent-name> --status done`, re-asserting `--label craft/branch=<bare-branch>` at close. The completion guard refuses this while any child is non-terminal (it names them); a parent closed without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
+
+**Completion report.** Report to the user and stop. Do **not** automatically invoke `/portage:pull_request` — the user decides when to open a PR. The report must **enumerate every phase's outcome explicitly, even when a phase was clean, empty, or skipped** — a phase with nothing to say still gets a line, so a reader can tell it ran. Worked example:
+
+> simplify: no changes; correctness: SHIP, 0 findings; security: skipped — no trigger; push: 2 repos pushed, 1 already up to date
 
 **Measurement tally.** For each correctness Critical/Important finding, record it **cited against the specific plan section it was classified under** — not a bare count. Each finding is classified **local-to-one-slice** (a defect that lives inside a single slice's delivers) vs **cross-slice** (a defect only visible across slice boundaries), and the citation must be spot-checkable: name the plan section, not just the digit. **Revisit condition:** if more than 2 local-to-one-slice Criticals accrue across the first 5 executed plans post-rollout, restore the per-slice quality charter. This is a stated, not-yet-mechanically-enforced condition — record the tally each plan; do not auto-restore.
 
