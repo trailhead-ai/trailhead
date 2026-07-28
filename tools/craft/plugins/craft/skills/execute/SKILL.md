@@ -152,7 +152,7 @@ After each child task completes (or each unknown resolves), record the state on 
 - **Task status.** Set the child task you just built to `done`: `lore record update task/<name> --status done`. Advancing a task off `ready` is what makes its dependents runnable. A child's `done` here is bookkeeping only — committed on the task branch; the push guarantee that makes `done` mean "committed and pushed" attaches to the run's close (see [Phase 6](#phase-6-close-and-completion-report) and `../_shared/status-ownership.md`), not this step.
 - **Parent lifecycle.** The parent already flipped `ready → in-progress` at the run's first dispatch (see [Claiming the run](#claiming-the-run-at-first-dispatch)) — that's what keeps the task graph honest from the moment code starts shipping against it, rather than waiting for a child to land first. Nothing to write here; if the parent still reads `ready` this far into the run, that's a sign the claim was skipped and should be run now.
 - **Unknowns.** Check off resolved unknowns in the parent's Known Unknowns block; add any new unknown discovered during the slice, noting which child task it blocks.
-- **Design changes.** Note any design change a finding forced — in the parent body, and by re-shaping child tasks per the split/append ritual below.
+- **Design changes.** Note any design change a finding forced — in the parent body, and by re-shaping child tasks per the split/append ritual below. Body text written here is record text: run it through the [Phase 5](#phase-5-flow-out) credential scrub first, exactly as a session candidate would be.
 
 **Per-cycle working set:** the controller's working set is the current child task plus the parent's Known Unknowns block. The controller does not re-read the whole graph each cycle — it updates incrementally and re-reads only `lore task graph <parent-name>` to pick the next runnable leaf.
 
@@ -218,12 +218,15 @@ Runs on the **final form**, after Phase 3's re-review round concludes and all co
 
 The parent carries a `## Flow-out` checklist — work it *before* the parent goes `done`, not after.
 
-**Credential-pattern scrub (mechanical, runs first).** Before *any* phase's finding text enters a `lore session candidate`, scrub it: report bodies are **summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run the finding text through this credential-pattern scrub regex list and drop/redact any match rather than capturing it:
+**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run, not one phase's step: **any finding or note text entering a record body or a report — session candidates, `blocked` bodies, task-body notes from the per-slice loop, raw command stderr quoted into either — runs through this list first.** A vault is git-backed and has its own push path, so a credential transcribed into a task body ships as surely as one committed to code. Report bodies are **summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run the text through this credential-pattern scrub regex list and drop/redact any match rather than capturing it:
 
-- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)\s*[=:]\s*\S+`
+- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+` — the trailing character class is load-bearing: it lets the keyword carry qualifier text before the separator, which is what catches `SECRET_KEY=`, `AWS_SECRET_ACCESS_KEY=`, and `API_KEY_ID=`. A keyword anchored straight to `[=:]` walks past every compound name.
+- **Vendor fixed-prefix tokens** — `(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b` — issuer-shaped credentials identifiable on their own, with no `key=` preamble to trip the pattern above
 - **Bearer / api-key shapes** — `(?i)bearer\s+[A-Za-z0-9._\-]+`, `(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}`
 - **High-entropy literals** — `\b[A-Za-z0-9+/]{32,}={0,2}\b` (base64/hex-shaped secrets), `\b[A-Fa-f0-9]{40,}\b`
 - **PEM private-key blocks** — `-----BEGIN [A-Z ]*PRIVATE KEY-----` (the high-entropy pattern catches the body but not this header, so pin it separately)
+
+Prefer over-matching to under-matching: this list is a tripwire, and a false hit costs one manual look. **Known blind spot:** a binary file's diff renders as `Binary files … differ` rather than content, so a credential inside a binary artifact is invisible to every pattern above — a change that adds binary files needs a manual look regardless of what the patterns return.
 
 Then complete the ritual:
 
@@ -237,7 +240,11 @@ Then complete the ritual:
 
 **Auto-push covers task branches only.** If the run is sitting on the repo's default branch — a run that started on `main`/`master` with explicit user consent — do not auto-push it. Name the branch and its unpushed commits in the completion report and leave the push to the user.
 
-Before pushing a repo with unpushed commits, run the pre-push secret scan: check `git log origin/<branch>..HEAD -p` for that repo against the credential-pattern scrub list ([Phase 5](#phase-5-flow-out)). On a match, do **not** push that repo — take the blocked path instead, naming the remediation in the report: rotate the credential, then rewrite history before attempting the push again.
+Before pushing a repo with unpushed commits, run the pre-push secret scan: check `git log origin/<branch>..HEAD -p` for that repo against the credential-pattern scrub list ([Phase 5](#phase-5-flow-out)).
+
+**The scan is fail-closed: a command that errors is never a clean scan.** Empty output counts as "clean" only when the command also exited successfully. The trap is the first push of every task branch — until a `--set-upstream` push lands there is no `origin/<branch>` remote-tracking ref, so the scan command fails outright and prints *no diff at all*, which is indistinguishable from a clean result by output alone. When `origin/<branch>` does not exist, the entire branch is about to be published: scan everything not already on the remote instead, with `git log HEAD --not --remotes=origin -p`. That form needs no upstream, lists the full outgoing history, and goes empty on its own once the branch is pushed.
+
+On a match, do **not** push that repo. Take the blocked path instead — `lore record update task/<parent-name> --status blocked --diff`, piping a unified diff that **appends** the blocked note — and name the remediation in the report: rotate the credential, then rewrite history before attempting the push again.
 
 **This scan gates every push, the blocked path's included.** Each escalation site's "(if commits exist)" push routes through this phase, so it inherits the scan: a run blocked *because* the scan hit stays unpushed until the credential is rotated and the history rewritten. Going `blocked` never licenses shipping the flagged commits.
 
@@ -288,7 +295,7 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 **VALIDATED:** Proceed to build the slice.
 
 **INVALIDATED:** Do NOT build. Report to user with the evidence. Options:
-1. **Minor adjustment** — the design holds, just one child task changes. Update the affected child task record (`lore record update task/<name> …`), note what changed and why, continue.
+1. **Minor adjustment** — the design holds, just one child task changes. Update the affected child task record (`lore record update task/<name> …`), note what changed and why — running that note through the [Phase 5](#phase-5-flow-out) credential scrub, since it lands in a record body — and continue.
 2. **Design change** — the invalidation affects multiple child tasks or the architecture. Re-enter planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline. Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
 3. **Drop the task** — the feature doesn't need this part. Reshape the child task record to `superseded` (or `dropped`) via `lore record update`, note why, continue with remaining tasks.
 
