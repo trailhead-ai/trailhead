@@ -1021,6 +1021,35 @@ def test_update_label_bad_key_nonzero(tmp_path):
     assert "BadKey" in r.stderr
 
 
+def test_update_label_reserved_key_nonzero(tmp_path):
+    """update --label kind=x → non-zero; a label may not shadow a record kind."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--label", "kind=x"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "kind" in r.stderr
+
+
+def test_update_label_namespaced_reserved_name_succeeds(tmp_path):
+    """update --label craft/subsystems=x → accepted; namespacing is the escape route."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+
+    r = _run(
+        ["record", "update", record_id, "--label", "craft/subsystems=pr-dashboard"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["labels"]["craft/subsystems"] == "pr-dashboard"
+
+
 # ===========================================================================
 # Group-default scope routing is create-only: update must NOT seed scopes from
 # a camp group, so an unscoped update inside a bound workspace never relocates a

@@ -774,6 +774,33 @@ def test_create_label_bad_key_nonzero_names_key(tmp_path):
     assert list(vault.glob("**/*.md")) == []
 
 
+def test_create_label_reserved_key_nonzero_names_key(tmp_path):
+    """--label area=x → non-zero exit; 'area' shadows a kind and a query field."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--label", "area=x"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "area" in r.stderr
+    assert "--annotation" in r.stderr
+    assert list(vault.glob("**/*.md")) == []
+
+
+def test_create_annotation_reserved_key_succeeds(tmp_path):
+    """--annotation area=x → accepted; annotations carry names labels may not."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--annotation", "area=x"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar.get("annotations") == {"area": "x"}
+
+
 def test_create_label_value_with_equals_splits_on_first(tmp_path):
     """--annotation note=a=b → value is 'a=b' (split on first '=' only)."""
     vault, state = _make_vault(tmp_path)

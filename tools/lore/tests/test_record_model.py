@@ -607,6 +607,146 @@ def test_annotations_same_key_rules_as_labels():
         assert any(bad_key in e for e in result.errors), msg
 
 
+# --- reserved label keys ------------------------------------------------
+#
+# A ``labels`` key that shadows a first-class record concept — a record kind, a
+# KQL query field, or a ``related-`` edge field — is refused, because such a
+# label reads like the concept it names while being stored somewhere the concept
+# is never read from. ``annotations`` are exempt by field name: they are the
+# sanctioned carrier for a free attribute whose natural name is reserved.
+
+
+def _kql_module():
+    """The KQL parser module — the second source of the reserved key set.
+
+    Reached through the model's own binding rather than reloaded independently,
+    so a test observes the exact module object the derivation reads.
+    """
+    return rm().kql
+
+
+def test_reserved_label_keys_is_a_frozenset_union_of_both_sources():
+    """The reserved set is exactly ``KINDS | VALID_FIELDS`` — derived, not listed."""
+    mod = rm()
+    assert isinstance(mod.RESERVED_LABEL_KEYS, frozenset)
+    assert mod.RESERVED_LABEL_KEYS == mod.KINDS | frozenset(_kql_module().VALID_FIELDS)
+
+
+def test_every_record_kind_is_reserved_as_a_label_key():
+    """No record kind can be used as a bare label key; the error names the key."""
+    mod = rm()
+    for kind in sorted(mod.KINDS):
+        result = mod.validate(_base_sidecar_with(labels={kind: "x"}))
+        assert any(kind in e for e in result.errors), f"kind {kind!r} not reserved"
+
+
+def test_every_kql_field_is_reserved_as_a_label_key():
+    """No queryable field name can be used as a bare label key."""
+    mod = rm()
+    for field in _kql_module().VALID_FIELDS:
+        result = mod.validate(_base_sidecar_with(labels={field: "x"}))
+        assert any(field in e for e in result.errors), f"field {field!r} not reserved"
+
+
+def test_reserved_label_key_error_points_at_annotation_and_a_namespace():
+    """The refusal names an executable alternative, not just the problem."""
+    result = rm().validate(_base_sidecar_with(labels={"area": "home-manager"}))
+    reserved = [e for e in result.errors if "reserved" in e]
+    assert len(reserved) == 1
+    assert reserved[0] == (
+        "labels: `area` is a reserved field name — use `--annotation area=<value>`"
+        " for a free attribute, or a namespaced key (`<ns>/area`)"
+    )
+
+
+def test_related_prefixed_label_key_rejected():
+    """``related-<suffix>`` is refused — the edge fields are their own concept."""
+    result = rm().validate(_base_sidecar_with(labels={"related-subsystems": "x"}))
+    assert any("related-subsystems" in e for e in result.errors)
+
+
+def test_related_prefix_reserves_beyond_the_derived_set():
+    """``related-subsystems`` is in neither source, proving the prefix reserves alone."""
+    mod = rm()
+    assert "related-subsystems" not in mod.KINDS
+    assert "related-subsystems" not in _kql_module().VALID_FIELDS
+    assert "related-subsystems" not in mod.RESERVED_LABEL_KEYS
+    result = mod.validate(_base_sidecar_with(labels={"related-subsystems": "x"}))
+    assert any("related-subsystems" in e for e in result.errors)
+
+
+def test_annotations_accept_the_identical_reserved_key():
+    """The exemption is by sidecar field name — annotations keep charset-only rules."""
+    sidecar = _base_sidecar_with(
+        annotations={"area": "home-manager", "related-subsystems": "pr-dashboard"}
+    )
+    assert rm().validate(sidecar).errors == []
+
+
+def test_namespaced_label_key_shadowing_a_reserved_name_validates():
+    """Reservation is exact-match — a namespace prefix is the documented escape."""
+    sidecar = _base_sidecar_with(
+        labels={"hm/area": "home-manager", "craft/subsystems": "pr-dashboard"}
+    )
+    assert rm().validate(sidecar).errors == []
+
+
+def test_charset_invalid_reserved_label_key_emits_only_the_charset_error():
+    """Shape is enforced before reservation, so 'Area' reads as a malformed key."""
+    result = rm().validate(_base_sidecar_with(labels={"Area": "x"}))
+    assert any("invalid map key" in e and "Area" in e for e in result.errors)
+    assert not any("reserved" in e for e in result.errors)
+
+
+def test_charset_invalid_related_prefixed_label_key_emits_only_the_charset_error():
+    """The prefix source is also gated behind the charset check, not ahead of it."""
+    result = rm().validate(_base_sidecar_with(labels={"related-Foo": "x"}))
+    assert any("invalid map key" in e for e in result.errors)
+    assert not any("reserved" in e for e in result.errors)
+
+
+def test_reserved_label_key_check_reads_no_files():
+    """The guard is set membership — ``validate`` stays pure."""
+    import builtins
+
+    real_open = builtins.open
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("validate() must not open files")
+
+    builtins.open = _explode
+    try:
+        result = rm().validate(_base_sidecar_with(labels={"decision": "x"}))
+    finally:
+        builtins.open = real_open
+    assert any("decision" in e for e in result.errors)
+
+
+def test_a_new_record_kind_is_reserved_without_touching_the_guard(monkeypatch):
+    """Adding a kind reserves its name — the guard re-derives, it does not enumerate."""
+    mod = rm()
+    monkeypatch.setattr(mod, "KINDS", mod.KINDS | {"synthetic-kind"})
+    monkeypatch.setattr(mod, "RESERVED_LABEL_KEYS", mod._derive_reserved_label_keys())
+    result = mod.validate(_base_sidecar_with(labels={"synthetic-kind": "x"}))
+    assert any("synthetic-kind" in e for e in result.errors)
+
+
+def test_a_new_kql_field_is_reserved_without_touching_the_guard():
+    """Adding a queryable field reserves its name, via the same derivation."""
+    kql = _kql_module()
+    original = kql.VALID_FIELDS
+    kql.VALID_FIELDS = original + ("synthetic-field",)
+    try:
+        # Re-import so the import-time derivation reruns against the patched source.
+        mod = rm()
+        assert "synthetic-field" in mod.RESERVED_LABEL_KEYS
+        result = mod.validate(_base_sidecar_with(labels={"synthetic-field": "x"}))
+        assert any("synthetic-field" in e for e in result.errors)
+    finally:
+        kql.VALID_FIELDS = original
+        rm()
+
+
 # --- kind-gated fields: depends-on / parent (task-only graph edges) --------
 
 
