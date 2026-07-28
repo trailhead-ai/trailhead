@@ -183,6 +183,55 @@ def test_lock_path_refuses_bad_vault_name(tmp_path, bad_name):
         lock.lock_path(bad_name, env=env)
 
 
+# ---------------------------------------------------------------------------
+# Shell-safe allowlist — a vault name is rendered into operator-facing shell
+# commands (the answer command, the stale-lock removal message), so
+# separator/'..' confinement alone is not enough.
+# ---------------------------------------------------------------------------
+
+
+_HOSTILE_VAULT_NAMES = [
+    "prod`touch pwn`",
+    "prod$(id)",
+    "prod;id",
+    "prod name",
+    "prod'quote",
+    "prod\nline",
+]
+_HOSTILE_VAULT_IDS = ["backtick", "dollar-paren", "semicolon", "space", "quote", "newline"]
+
+
+@pytest.mark.parametrize("bad_name", _HOSTILE_VAULT_NAMES, ids=_HOSTILE_VAULT_IDS)
+def test_acquire_refuses_shell_metacharacters_in_vault_name(tmp_path, bad_name):
+    env = _env(tmp_path)
+
+    with pytest.raises(lock.LockError) as exc_info:
+        lock.acquire(bad_name, "group", holder_pid=os.getpid(), env=env)
+
+    # repr(), not the raw string, so a newline in the name renders visibly
+    # rather than splitting the operator-facing refusal across lines.
+    assert repr(bad_name) in str(exc_info.value)
+    assert not (tmp_path / "state").exists()
+
+
+@pytest.mark.parametrize("bad_name", _HOSTILE_VAULT_NAMES, ids=_HOSTILE_VAULT_IDS)
+def test_lock_path_refuses_shell_metacharacters_in_vault_name(tmp_path, bad_name):
+    env = _env(tmp_path)
+
+    with pytest.raises(lock.LockError):
+        lock.lock_path(bad_name, env=env)
+
+
+@pytest.mark.parametrize("good_name", ["ranger-loops", "my.vault_2"])
+def test_acquire_accepts_legitimate_vault_names(tmp_path, good_name):
+    env = _env(tmp_path)
+
+    path, token = lock.acquire(good_name, "group", holder_pid=os.getpid(), env=env)
+
+    assert path.exists()
+    assert token
+
+
 def test_release_removes_the_lock_for_a_matching_token(tmp_path):
     env = _env(tmp_path)
     path, token = lock.acquire("myvault", "mygroup", holder_pid=os.getpid(), env=env)

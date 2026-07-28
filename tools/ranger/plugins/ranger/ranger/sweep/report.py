@@ -41,19 +41,25 @@ waiting line is built from that raw text, so the extracted question, and the
 answer command built from it, never transit the dispatched agent's one-line
 return or the coordinating session's context.
 
-**Credential-pattern scrub, always.** The visible question text is scrubbed
-before it is written anywhere (ported from craft execute's Phase 5 five-
-category regex list, upgraded per the qualifier-text/vendor-prefix lesson so
-compound names like ``STRIPE_SECRET_KEY=`` are caught). The answer command's
-diff carries **no context lines at all** — it is a pure positional insertion
-(``old_count=0``) that names only the line number to insert after, never the
-original line's text — so the one place a raw, unscrubbed secret could
-otherwise leak (the diff needing to quote the surrounding line verbatim to
-satisfy the applier's context check) never arises. The tradeoff: a positional
-insert cannot detect drift the way a context-checked hunk would, so a record
-edited between report generation and the operator's paste could land the
-``**Answer:**`` line in a slightly different spot in the section — accepted,
-since the alternative is writing the secret into a git-backed report.
+**Credential-pattern scrub, always.** Every bucket line is scrubbed
+(ported from craft execute's Phase 5 five-category regex list, upgraded per
+the qualifier-text/vendor-prefix lesson so compound names like
+``STRIPE_SECRET_KEY=`` are caught) at the one place all of them funnel
+through — ``_append`` — rather than at each caller. A skipped/failed/routed
+line's `reason`/`target` text is exactly as untrusted as the escalated
+question: it originates from the dispatched agent's free-text return line,
+authored over the same record bodies. Scrubbing at ``_append`` means no
+future bucket-writer can bypass it by forgetting to scrub its own text first.
+The answer command's diff carries **no context lines at all** — it is a pure
+positional insertion (``old_count=0``) that names only the line number to
+insert after, never the original line's text — so the one place a raw,
+unscrubbed secret could otherwise leak (the diff needing to quote the
+surrounding line verbatim to satisfy the applier's context check) never
+arises. The tradeoff: a positional insert cannot detect drift the way a
+context-checked hunk would, so a record edited between report generation and
+the operator's paste could land the ``**Answer:**`` line in a slightly
+different spot in the section — accepted, since the alternative is writing
+the secret into a git-backed report.
 """
 
 from __future__ import annotations
@@ -67,6 +73,7 @@ from pathlib import Path
 
 from trailhead.paths import ensure_dir, state_dir
 
+from .names import validate_shell_safe_name
 from .queue import UNRESOLVED_HEADING, unresolved_section_bounds
 
 _REPORTS_SUBDIR = "reports"
@@ -226,10 +233,10 @@ def _build_answer_command(task_id: str, question_line_no: int, vault: str) -> st
 
 
 def _validate_group(group: str) -> None:
-    if not group:
-        raise ReportError("group must not be empty")
-    if "/" in group or "\\" in group or os.sep in group or ".." in group:
-        raise ReportError(f"group {group!r} must not contain path separators or '..'")
+    try:
+        validate_shell_safe_name(group, what="group")
+    except ValueError as exc:
+        raise ReportError(str(exc)) from exc
 
 
 def _state_path(report_path: Path) -> Path:
@@ -372,11 +379,23 @@ def finish(report_path: Path) -> None:
 
 
 def _append(report_path: Path, bucket: str, task_id: str, entry: str) -> None:
+    """Append one already-rendered bucket line, scrubbed, and persist both files.
+
+    This is the sole place any text reaches a bucket — every ``append_*``
+    function funnels through it — so scrubbing here, rather than at each
+    caller, is what makes the scrub bypass-proof: a future bucket-writer
+    cannot forget to scrub its own free text, because it never gets a chance
+    to write unscrubbed text in the first place. ``entry`` already contains
+    scrubbed text in the escalated/blocked-still-waiting case (the question
+    is scrubbed before the line is rendered), so scrubbing the whole rendered
+    line again here is a no-op for those and the first pass for every other
+    bucket's `reason`/`target` text.
+    """
     state = _load_state(report_path)
     if task_id in state["appended_task_ids"]:
         return
     state["appended_task_ids"].append(task_id)
-    state["buckets"][bucket].append(entry)
+    state["buckets"][bucket].append(scrub_credentials(entry))
     _write_state(report_path, state)
     _write_report(report_path, state)
 

@@ -389,6 +389,56 @@ def test_failed_line_carries_auto_retry_sentence(tmp_path):
     assert "will be retried automatically next sweep" in text
 
 
+# ---------------------------------------------------------------------------
+# Every string written into any bucket line is scrubbed — not just the
+# escalated/blocked-still-waiting question text. `reason`/`target` text
+# originates from the dispatched agent's free-text return line, authored
+# over untrusted record bodies, so it is exactly as credential-shaped a
+# source as the question text already scrubbed above.
+# ---------------------------------------------------------------------------
+
+_COMPOUND_SECRET = "STRIPE_SECRET_KEY=sk_live_abcdefghijklmnopqrstuvwx"
+
+
+def test_skipped_reason_scrubbed_of_credentials(tmp_path):
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+
+    report.append_skipped(report_path, "task/skip", f"blocked on {_COMPOUND_SECRET}")
+
+    text = report_path.read_text()
+    assert _COMPOUND_SECRET not in text
+    assert "[REDACTED]" in text
+    state_text = report_path.with_suffix(".state.json").read_text()
+    assert _COMPOUND_SECRET not in state_text
+
+
+def test_failed_reason_scrubbed_of_credentials(tmp_path):
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+
+    report.append_failed(report_path, "task/fail", f"dispatch used {_COMPOUND_SECRET}")
+
+    text = report_path.read_text()
+    assert _COMPOUND_SECRET not in text
+    assert "[REDACTED]" in text
+    state_text = report_path.with_suffix(".state.json").read_text()
+    assert _COMPOUND_SECRET not in state_text
+
+
+def test_routed_target_scrubbed_of_credentials(tmp_path):
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+
+    report.append_routed(report_path, "task/route", f"/craft:plan {_COMPOUND_SECRET}")
+
+    text = report_path.read_text()
+    assert _COMPOUND_SECRET not in text
+    assert "[REDACTED]" in text
+    state_text = report_path.with_suffix(".state.json").read_text()
+    assert _COMPOUND_SECRET not in state_text
+
+
 def test_extract_question_raises_on_missing_section():
     with pytest.raises(report.QuestionExtractionError):
         report.extract_question("# task\n\nno unresolved section here\n")
@@ -487,6 +537,27 @@ def test_question_only_in_a_later_section_is_treated_as_missing(tmp_path):
 
 @pytest.mark.parametrize("bad_group", ["../x", "a/b", ""])
 def test_start_refuses_bad_group_before_filesystem_access(tmp_path, bad_group):
+    env = _env(tmp_path)
+
+    with pytest.raises(report.ReportError):
+        report.start(bad_group, "myvault", 0, env=env)
+
+    assert not (tmp_path / "state").exists()
+
+
+# ---------------------------------------------------------------------------
+# Shell-safe allowlist — the group name is a path segment in the reports
+# directory, and shares its confinement definition with the vault-name check
+# used before lock paths, so it is held to the same allowlist.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_group",
+    ["prod`touch pwn`", "prod$(id)", "prod;id", "prod name", "prod'quote", "prod\nline"],
+    ids=["backtick", "dollar-paren", "semicolon", "space", "quote", "newline"],
+)
+def test_start_refuses_shell_metacharacters_in_group(tmp_path, bad_group):
     env = _env(tmp_path)
 
     with pytest.raises(report.ReportError):

@@ -8,6 +8,13 @@ queue, where `ranger sweep derive` is the sweep's own view of it. Stays thin
 — parse argv, call the domain function, print the agreed output — so the
 classification logic lives in and is tested against `ranger.sweep.queue`
 alone. `print_queue` is the shared rendering both verbs emit.
+
+`--vault` is validated against the same shell-safe allowlist `ranger.sweep`'s
+lock and report writers hold their own vault/group names to, before
+`derive_queue` ever shells out — the one entry point that names a vault
+without going through `sweep start`'s election (which validates it via the
+lock) must not become the one way to feed an unvalidated name deeper into
+the sweep's tooling.
 """
 
 from __future__ import annotations
@@ -49,6 +56,13 @@ def print_queue(entries: list[dict], *, as_json: bool) -> None:
 
 def _cmd_queue_derive(args) -> int:
     from ..sweep import queue as queue_mod
+    from ..sweep.names import validate_shell_safe_name
+
+    try:
+        validate_shell_safe_name(args.vault, what="vault name")
+    except ValueError as exc:
+        print(f"ranger: {exc}", file=sys.stderr)
+        return 1
 
     try:
         entries = queue_mod.derive_queue(args.vault)

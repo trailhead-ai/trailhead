@@ -27,9 +27,14 @@ mistyped ``finish`` would otherwise tear down a different sweep's lock. The
 token is unguessable and travels only through the sweep that minted it, so a
 release is authorized by the run that took the lock or not at all.
 
-Security posture — vault names become a path segment (the lock filename), so
-every entry point validates confinement (no separators, no ``..``, non-empty)
-before touching the filesystem at all.
+Security posture — a vault name becomes both a path segment (the lock
+filename) and, in ``_stale_removal_message``, part of an ``rm <path>``
+command this module tells an operator to paste into their own shell. So
+every entry point validates it against :mod:`ranger.sweep.names`'s
+shell-safe allowlist (shared with the report writer's group-name check)
+before touching the filesystem at all — separator/``..`` confinement alone
+would stop a path escape but not a name carrying a backtick, ``$()``, or a
+semicolon that only bites once the operator follows the rendered command.
 
 Contention handling is deliberately one-directional: this module never
 unlinks another process's lock and never reaps a stale one automatically.
@@ -60,6 +65,8 @@ from pathlib import Path
 
 from trailhead.paths import ensure_dir, state_dir
 
+from .names import validate_shell_safe_name
+
 _LOCKS_SUBDIR = "locks"
 _TOKEN_BYTES = 16
 
@@ -71,10 +78,10 @@ class LockError(Exception):
 
 
 def _validate_vault_name(name: str) -> None:
-    if not name:
-        raise LockError("vault name must not be empty")
-    if "/" in name or "\\" in name or os.sep in name or ".." in name:
-        raise LockError(f"vault name {name!r} must not contain path separators or '..'")
+    try:
+        validate_shell_safe_name(name, what="vault name")
+    except ValueError as exc:
+        raise LockError(str(exc)) from exc
 
 
 def lock_path(vault_name: str, *, env: dict[str, str] | None = None) -> Path:

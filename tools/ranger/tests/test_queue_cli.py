@@ -27,6 +27,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "ranger" / "plugins" / "ranger"
 CLI_PATH = _PLUGIN_DIR / "cli" / "ranger"
@@ -134,3 +136,17 @@ def test_queue_derive_surfaces_lore_failure_as_named_error(tmp_path):
     assert res.returncode != 0
     assert res.stderr.startswith("ranger: ")
     assert "missing-vault" in res.stderr
+
+
+@pytest.mark.parametrize(
+    "bad_vault",
+    ["prod`touch pwn`", "prod$(id)", "prod;id", "prod name", "prod'quote", "prod\nline"],
+    ids=["backtick", "dollar-paren", "semicolon", "space", "quote", "newline"],
+)
+def test_queue_derive_refuses_shell_metacharacters_in_vault(tmp_path, bad_vault):
+    """`--vault` is validated before `derive_queue` ever shells out to lore —
+    the same shell-safe allowlist `sweep start` holds its elected vault to."""
+    res = _run(["queue", "derive", "--vault", bad_vault, "--json"], tmp_path=tmp_path)
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")

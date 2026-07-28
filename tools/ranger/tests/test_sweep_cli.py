@@ -424,6 +424,43 @@ def test_start_refuses_a_dangling_binding_naming_the_binding(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Precondition 3b — the elected vault name is shell-safe, not just confined
+# ---------------------------------------------------------------------------
+#
+# A vault name is rendered into two operator-facing shell command strings the
+# design tells the operator to paste and run (the answer command, the
+# stale-lock removal message), so it is validated against a shell-safe
+# allowlist before start does anything else — no lock file, no report.
+
+
+@pytest.mark.parametrize(
+    "bad_vault",
+    ["prod`touch pwn`", "prod$(id)", "prod;id", "prod name", "prod'quote", "prod\nline"],
+    ids=["backtick", "dollar-paren", "semicolon", "space", "quote", "newline"],
+)
+def test_start_refuses_a_vault_name_carrying_shell_metacharacters(tmp_path, bad_vault):
+    sweep = _sweep(tmp_path)
+    sweep.set_resolution(vault=bad_vault, source={"team": bad_vault})
+
+    res = sweep.start()
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+    sweep.assert_nothing_created()
+
+
+@pytest.mark.parametrize("good_vault", ["ranger-loops", "my.vault_2"])
+def test_start_accepts_legitimate_vault_names(tmp_path, good_vault):
+    sweep = _sweep(tmp_path)
+    sweep.set_resolution(vault=good_vault, source={"team": good_vault})
+
+    res = sweep.start()
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout)["vault"] == good_vault
+
+
+# ---------------------------------------------------------------------------
 # start — the machine contract
 # ---------------------------------------------------------------------------
 
@@ -672,6 +709,26 @@ def test_record_with_an_unparseable_outcome_buckets_failed_and_exits_zero(tmp_pa
     text = Path(report).read_text()
     assert "## Failed\n\n- `task/t1` — I had a bit of trouble, sorry" in text
     assert "retried automatically next sweep" in text
+
+
+def test_record_scrubs_credentials_out_of_an_unparseable_outcome(tmp_path):
+    """`--outcome` is the agent's own free-text return line, unscrubbed until
+    it reaches the report writer — an unparseable line buckets `failed`
+    exactly like a synthesized `FAILED <reason>`, and must be scrubbed just
+    the same, not merely truncated."""
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+    secret = "STRIPE_SECRET_KEY=sk_live_abcdefghijklmnopqrstuvwx"
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome", f"I had a bit of trouble with {secret}, sorry")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    assert secret not in text
+    assert "[REDACTED]" in text
+    state_text = (Path(report).with_suffix(".state.json")).read_text()
+    assert secret not in state_text
 
 
 def test_record_truncates_a_multi_line_failure_to_one_line(tmp_path):
