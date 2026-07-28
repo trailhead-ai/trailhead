@@ -593,3 +593,199 @@ def test_wrapper_names_the_review_before_dispatch_workaround():
         "`/craft:refine --interactive` standalone first when you want to see the "
         "drafted payload before handing the task to execute"
     )
+
+
+# --- cross-skill pointers resolve from the file that carries them ---
+
+
+def test_shared_refine_references_resolve_relative_to_their_skill_dir():
+    """A bare `_shared/refine.md` read from skills/<name>/ names a nonexistent path.
+
+    The shared procedure is a sibling of the skill dirs, so the resolvable spelling
+    is `../_shared/refine.md` — the same form both files already use for
+    `../_shared/status-ownership.md`. Counted, not spot-checked: every bare
+    occurrence must sit inside an anchored one.
+    """
+    for skill_md in (REFINE_SKILL, CRAFT / "skills" / "execute" / "SKILL.md"):
+        text = skill_md.read_text()
+        assert text.count("_shared/refine.md") == text.count("../_shared/refine.md"), (
+            f"{skill_md} carries a bare `_shared/refine.md` reference that does not "
+            "resolve from the skill's own directory — spell it `../_shared/refine.md`"
+        )
+
+
+# --- discovered scope folds narrowly, and the route condition re-gates after ---
+
+
+def test_draft_attempt_bounds_adjacent_scope():
+    """The draft attempt routinely finds defects the capture did not name.
+
+    Without a stated boundary, how far a discovery may fold into the payload is a
+    judgment the unattended agent makes silently — and the route-to-plan condition
+    is only ever asked against the scope the task started with.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "same defect class" in text, (
+        "_shared/refine.md must bound what a discovery may fold into the payload — "
+        "same defect class in files the task already touches folds; anything wider "
+        "re-asks the routing question"
+    )
+    assert "after the expansion" in text, (
+        "_shared/refine.md must re-ask Step 1's outcome-3 route condition after a "
+        "scope expansion, not only against the captured scope — a task that grew "
+        "into two committable cuts must route, not promote"
+    )
+
+
+def test_folded_scope_is_named_in_the_outcome_report():
+    assert "also folded in" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md must require the outcome report to name any folded-in "
+        "scope as a delta against the captured claim — the operator cannot audit "
+        "silent growth by diffing prose against payload by hand"
+    )
+
+
+# --- a resolved hedge is a judgment call, and it is flagged ---
+
+
+def test_resolved_hedge_is_flagged_as_a_judgment_call():
+    """Convention answers mechanical questions; it does not decide wanted-ness.
+
+    Captured prose that hedges ("consider whether…") proposes optional work. Prior
+    art strong enough to resolve the hedge without escalating still leaves a call
+    that was made for the operator, and an unattended run must say so out loud.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "A resolved hedge is a judgment call" in text, (
+        "_shared/refine.md must name the hedge-resolution rule — resolving hedged "
+        "captured prose from prior art is a judgment call, not a derived fact"
+    )
+    assert "whether optional work is *wanted*" in text, (
+        "_shared/refine.md must draw the mechanical-vs-policy line: code convention "
+        "settles where/how questions, never whether optional work is wanted — using "
+        "convention to promote a policy preference launders it as a code fact"
+    )
+    assert "consider adding a pinning test" in text, (
+        "_shared/refine.md must keep the worked example — one hedge that resolves "
+        "(precedent exists for the same kind of surface) and one that escalates (no "
+        "precedent); the example is what makes the line drawable in practice"
+    )
+
+
+# --- the citation gate's verdict is stamped at promotion time, and re-checked ---
+
+
+def test_citation_gate_states_its_ref_point_and_decay():
+    text = SHARED_REFINE.read_text()
+    assert "at promotion time" in text, (
+        "_shared/refine.md must state when the resolution gate's verdict holds — "
+        "it proves resolution against the worktree refine ran in, not forever"
+    )
+    assert "Line numbers rot" in text, (
+        "_shared/refine.md must name the decay mode: commits landing after promotion "
+        "slide a cited line onto different-but-existing content, which still reads "
+        "as resolving"
+    )
+
+
+def test_execute_rechecks_citations_before_the_first_dispatch():
+    """The re-check has to live on the caller that dispatches, or it never runs.
+
+    Pinned on three phrases, not one: a rewrite that still mentions the gate but
+    drops the ordering or the stop behavior would otherwise stay green.
+    """
+    execute_text = (CRAFT / "skills" / "execute" / "SKILL.md").read_text()
+    assert "citation-resolution gate" in execute_text, (
+        "execute/SKILL.md must re-run the citation-resolution gate on a standalone "
+        "task's payload — the gate's verdict decays as commits land"
+    )
+    assert "stamped at promotion time" in execute_text, (
+        "execute/SKILL.md must say why the re-check exists — the gate's verdict was "
+        "stamped at promotion time, and the dispatch may come much later"
+    )
+    assert "stop and report rather than dispatching" in execute_text, (
+        "execute/SKILL.md must state the failure behavior: a citation that no longer "
+        "resolves stops the run — it never dispatches an executor at a rotted pointer"
+    )
+
+
+def test_execute_promote_branch_reports_the_promotion():
+    """The inline promote path has no human between refine and executor dispatch.
+
+    The escalate and route branches already stop and report; without a report step
+    on the promote branch, the folded-in-scope delta and judgment-call flags the
+    procedure mandates have no caller-side surface on exactly the path that needs
+    them most.
+    """
+    execute_text = (CRAFT / "skills" / "execute" / "SKILL.md").read_text()
+    assert "folded-in scope delta" in execute_text, (
+        "execute/SKILL.md's inline-refine promote branch must report the promotion "
+        "(fields filled, folded-in scope delta, judgment calls) before proceeding "
+        "to the ready case — a clean promotion is not a silent one"
+    )
+
+
+# --- payload legibility: one bullet per fix ---
+
+
+def test_delivers_spanning_multiple_fixes_is_bulleted():
+    assert "one bullet per fix" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md must bullet a Delivers that spans more than one distinct "
+        "fix — a single paragraph bundling two fixes makes the executor parse "
+        "rationale to extract the work list; plan.md's Given Axioms already render "
+        "citable facts as a list"
+    )
+
+
+# --- re-refine counting is line-anchored, not substring-matched ---
+
+
+def test_idempotency_count_is_line_anchored():
+    """A body that quotes the label strings in prose must not move the count.
+
+    The found-once/found-twice check is the one signal deciding update-in-place vs
+    stop-and-report; an unscoped substring count misfires in both directions.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "begins a line" in text, (
+        "_shared/refine.md must anchor the idempotency count to labels that begin a "
+        "line — the same strings quoted mid-prose or in backticks are content, not "
+        "payload structure"
+    )
+    assert "fenced code" in text, (
+        "_shared/refine.md must exclude fenced code blocks from the idempotency "
+        "count — a body quoting the payload template would otherwise read as a "
+        "second payload set"
+    )
+
+
+# --- the wrapper's outcome report carries the audit surface ---
+
+
+def test_promoted_report_names_folded_scope_and_judgment_calls():
+    text = REFINE_SKILL.read_text()
+    assert "folded in" in text, (
+        "refine/SKILL.md's Promoted outcome must name scope folded in beyond the "
+        "captured claim — silent growth is otherwise invisible until the diff lands"
+    )
+    assert "judgment call" in text, (
+        "refine/SKILL.md's Promoted outcome must name judgment calls — hedges in "
+        "the captured prose resolved from prior art rather than asked"
+    )
+
+
+def test_outcome_report_prints_the_record_show_command():
+    """Reviewing the draft must not require already knowing the lore CLI.
+
+    The rule lives in the shared procedure so execute's inline run owes the same
+    report; the wrapper restates it for the standalone caller.
+    """
+    assert "lore record show <record-id>" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md must require every outcome report to print the "
+        "`lore record show <record-id>` command — a wrapper-only rule leaves "
+        "execute's inline escalation and route reports without it"
+    )
+    assert "lore record show" in REFINE_SKILL.read_text(), (
+        "refine/SKILL.md's outcome report must print the `lore record show <id>` "
+        "command so the drafted payload or escalated evidence is one command away"
+    )
