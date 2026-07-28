@@ -33,18 +33,18 @@ Security-surface: file:line — one-line description
 ```
 
 Rules:
-- `PASS` — the diff delivers the slice's plan section, the executor's status claim holds, and nothing blocks the next slice.
-- `DRIFT` — the diff diverges from the plan section, or the executor's status claim doesn't hold (e.g. claimed DONE but a delivered item is missing, or a test-contract item isn't actually met). Name what drifted and from what.
-- `BLOCKED` — the divergence is severe enough that building the next slice on this one would be unsafe or nonsensical (e.g. an expected file doesn't exist, or the claimed tests don't actually run).
+- `PASS` — the diff delivers the slice's plan section (or, for a standalone leaf, the task's payload), the executor's status claim holds, and nothing blocks the next slice (N/A on a standalone leaf — there is no next slice, so that clause cannot withhold a `PASS`).
+- `DRIFT` — the diff diverges from the plan section — or, for a standalone leaf, the task's payload — or the executor's status claim doesn't hold (e.g. claimed DONE but a delivered item is missing, or a test-contract item isn't actually met). Name what drifted and from what.
+- `BLOCKED` — the divergence is severe enough that building the next slice on this one would be unsafe or nonsensical (e.g. an expected file doesn't exist, or the claimed tests don't actually run). On a standalone leaf, read the same severity bar against the change itself: the work cannot be trusted as delivered, so nothing should be built on top of it.
 - Each finding: `file:line — one-line description`. No code blocks inside findings.
 - Omit the `Findings` section entirely if there are none (never write "none").
 - Omit the `Security-surface:` line entirely if the diff touches no security-sensitive surface.
 
 ## What you check
 
-1. **Plan delivery** — read the slice's *delivers*, *test contract*, and *expected files* from the plan. Does the diff actually deliver them? Do the tests the test contract describes exist and pass (re-run them if the executor's report doesn't already show a clean run)?
+1. **Payload delivery** — read the slice's `**Delivers:**`, `**Test contract:**`, and `**Files:**` from the plan (a standalone leaf carries the same three labels in its own body). Does the diff actually deliver them? Do the tests the test contract describes exist and pass (re-run them if the executor's report doesn't already show a clean run)?
 2. **Status claim** — does the executor's reported status (DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED) match what you find in the diff? A DONE claim with a missing delivered item is drift, not a pass with a caveat.
-3. **Next-slice readiness** — does anything in this diff block a subsequent slice from building on it (a missing interface, a broken contract, an inconsistent file layout)?
+3. **Next-slice readiness** — does anything in this diff block a subsequent slice from building on it (a missing interface, a broken contract, an inconsistent file layout)? **On a standalone leaf there is no subsequent slice, so this check does not apply** — say so in the report (`next-slice readiness: N/A — standalone leaf`) rather than letting it pass silently, so a reader can tell the check was considered and not just skipped.
 
 ## What you do NOT check
 
@@ -56,4 +56,6 @@ If the diff touches a security-sensitive surface — auth, input validation, cry
 
 ## Reading the plan
 
-Use `Read` to load the plan file the caller provides. Read only the slice's section (delivers, test contract, expected files) and enough of the parent's goal/architecture for intent — you need the target, not the full plan.
+Use `Read` to load the plan file the caller provides. Read only the slice's section (its `**Delivers:**` / `**Test contract:**` / `**Files:**` payload) and enough of the parent's goal/architecture for intent — you need the target, not the full plan.
+
+**Standalone leaf:** for a task with no parent plan, there is no parent goal/architecture to read — the task's own context block serves for intent instead: its captured prose plus its `**Delivers:**` / `**Test contract:**` / `**Files:**` payload. Check the diff against that in place of a plan section.

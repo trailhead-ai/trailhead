@@ -10,9 +10,9 @@ lifecycle operations.
   `## Flow-out`; child task: Delivers / Test contract / Files; spec: Problem / Objectives /
   Acceptance Criteria …). Render the body, then pipe it to `lore record create`.
 - A **plan is a `task` record graph**, not a single document. The parent plan is one `task`
-  record (rendered from `templates/plan.md`); each slice is a child `task` record (rendered
-  from `templates/task.md`) wired to the parent with `--parent` and ordered against its
-  siblings with `--depends-on`. A **spec** is a `spec` record. `task` and `spec` each carry
+  record (rendered from `${CLAUDE_PLUGIN_ROOT}/templates/plan.md`); each slice is a child
+  `task` record (rendered from `${CLAUDE_PLUGIN_ROOT}/templates/task.md`) wired to the parent
+  with `--parent` and ordered against its siblings with `--depends-on`. A **spec** is a `spec` record. `task` and `spec` each carry
   their own status vocab (task: `open → ready → in-progress → done`, off-path `blocked` /
   `dropped` / `superseded`; spec: `draft → ready → planned → complete`). Persisting a plan or
   spec is `lore record create --kind task|spec` — **not** `lore new`.

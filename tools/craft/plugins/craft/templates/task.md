@@ -3,7 +3,8 @@
 <!-- This is a CHILD task body — one slice of a parent plan. It is a `task` record wired to
 its parent via `--parent <parent-name>` and ordered against its siblings with
 `--depends-on <task-name>`. A slice is a vertical cut of functionality that can be built,
-tested, and committed on its own. -->
+tested, and committed on its own. The same bold-label payload shape below also serves a
+standalone (childless, parentless) leaf task promoted by refine. -->
 
 **Delivers:** <!-- What is complete and testable once this task is done. -->
 

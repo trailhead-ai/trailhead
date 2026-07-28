@@ -71,6 +71,13 @@ membership is single-sourced from `skills/_shared/council.md`.
 
 **Execute:** `/craft:execute`
 
+**Refine:** `/craft:refine` — promote a standalone (childless, parentless) task
+from `open` to `ready`: draft its Delivers / Test contract / Files payload from
+the code and the vault, cite every derived answer, and escalate only an
+irreducible operator decision. A thin wrapper over
+`skills/_shared/refine.md`, the same procedure `/craft:execute` runs inline when
+it is handed a standalone `open` task.
+
 **Review:** `/craft:review`
 
 ## Related plugin — PR lifecycle
@@ -92,6 +99,8 @@ plugins/craft/
   .claude-plugin/plugin.json      # plugin manifest
   agents/                         # dispatchable subagents
   skills/                         # /craft: ritual skills
+  templates/                      # spec/plan/task body skeletons the skills
+                                  #   render at runtime via ${CLAUDE_PLUGIN_ROOT}
 tests/                            # packaging + registrability invariants
 ```
 

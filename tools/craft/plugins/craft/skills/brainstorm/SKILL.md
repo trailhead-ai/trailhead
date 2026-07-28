@@ -174,11 +174,13 @@ only once the playback lands cleanly.
 ### 6. Write the Spec
 
 Persist the spec with `lore record create` (`../_shared/note-storage.md`): render craft's
-spec body template (`templates/spec.md`), fill in the sections, then pipe the filled body to it
+spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`), fill in the sections, then
+pipe the filled body to it
 — `printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status
 draft`.
 
-The spec body template (`templates/spec.md`) carries these canonical sections — fill each in: **Problem**
+The spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`) carries these canonical
+sections — fill each in: **Problem**
 (situation / gap, why now) · **Objectives** (measurable, outcome-framed) · **Acceptance Criteria**
 (bulleted, testable) · **Non-Goals** (explicit scope bounds) · **Constraints** (technical / business /
 timing) · **UI Direction** (verbal, or `n/a`) · **Open Questions / Risks** · **Related** (prior

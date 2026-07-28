@@ -163,12 +163,13 @@ discovered from `agents/*.md` and `skills/*/`:
 name = "portage"
 ```
 
-A manifest with an always-on shared include (never independently selectable
-because it has no `SKILL.md`):
+A manifest with always-on includes — a shared skills dir (never independently
+selectable, because it has no `SKILL.md`) and a plain data dir the shipped
+skills read at runtime:
 
 ```toml
 # tools/craft/capabilities.toml
 [tool]
 name = "craft"
-base = ["skills/_shared"]
+base = ["skills/_shared", "templates"]
 ```

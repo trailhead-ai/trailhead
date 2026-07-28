@@ -99,13 +99,14 @@ A plan is persisted as a **`task` record graph** (`../_shared/note-storage.md`):
 `task` record for the plan as a whole, plus one child `task` record per slice, wired to the
 parent and ordered against each other with the graph edges.
 
-1. **Create the parent task.** Render craft's parent-task body template (`templates/plan.md`),
+1. **Create the parent task.** Render craft's parent-task body template
+   (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`),
    fill in the sections, then pipe it in — `printf '%s' "$BODY" | lore record create --kind
    task --title "<topic>" --status ready`. This stores the plan as a searchable lore `task`
    record, linkable from session notes and future planning.
 2. **Create a child task per slice.** Render craft's child-task body template
-   (`templates/task.md`) for each slice, then create it contained by the parent and ordered
-   after any slice it builds on — `printf '%s' "$SLICE_BODY" | lore record create --kind task
+   (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each slice, then create it contained by the
+   parent and ordered after any slice it builds on — `printf '%s' "$SLICE_BODY" | lore record create --kind task
    --title "<slice topic>" --status ready --parent <parent-name> --depends-on
    <earlier-slice-name>`. Create children at `ready`; the `depends-on` edges — not the status —
    gate which are runnable, so a later slice stays un-runnable until its dependencies are
@@ -120,7 +121,7 @@ directory in your vault manually, mirroring the template shapes.
 
 If an upstream spec exists, link the parent task to it with `lore record update <parent-id> --related spec=<spec-name>`. Then advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written — but **only if the spec is already `ready`**, i.e. it has passed the gauntlet. A spec still at `draft` must be left at `draft`: advancing it to `planned` would carry it *past* `ready` and imply a freeze the gauntlet never granted, which is the same bypass by another door. You should not be here at all with a `draft` spec (step 1 routes it to `/craft:gauntlet`); if you are, stop and route it. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
 
-The parent-task body template (`templates/plan.md`) carries these canonical sections — fill each in:
+The parent-task body template (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`) carries these canonical sections — fill each in:
 
 - **Goal** — one or two sentences
 - **Delta design** — 2-3 sentences about the approach to the change
@@ -128,7 +129,7 @@ The parent-task body template (`templates/plan.md`) carries these canonical sect
 - **Known Unknowns** — checkbox list; each notes which child task (slice) it blocks.
 - **`## Flow-out`** — the knowledge-flow-out completion gate (ticked at execution time before the parent goes `done`); leave the checklist unticked here.
 
-Each child-task body (`templates/task.md`) carries **Delivers / Test contract / Files**, plus "Unknown to resolve first" and "Depends on" noted in the body where applicable (the `depends-on` edge is the machine-checked form).
+Each child-task body (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) carries **Delivers / Test contract / Files**, plus "Unknown to resolve first" and "Depends on" noted in the body where applicable (the `depends-on` edge is the machine-checked form).
 
 Leave the `## Council Review` section for Step 8.5 to append to the parent task — do not pre-fill it.
 
