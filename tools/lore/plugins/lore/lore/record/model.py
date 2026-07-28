@@ -366,6 +366,17 @@ def _derive_reserved_label_keys() -> frozenset[str]:
 #: with no change here. Exact match only: ``hm/area`` is fine, ``area`` is not.
 RESERVED_LABEL_KEYS: frozenset[str] = _derive_reserved_label_keys()
 
+
+def _is_reserved_label_key(map_key: str) -> bool:
+    """Whether a ``labels`` key shadows a first-class record concept.
+
+    The union of both reservation sources — the ``related-`` prefix and the
+    derived exact-match set — as a single predicate, so the validator and any
+    other reader of the rule (e.g. a doc audit) test the same condition rather
+    than each restating it.
+    """
+    return map_key.startswith(_RELATED_KEY_PREFIX) or map_key in RESERVED_LABEL_KEYS
+
 #: ``related-<suffix>`` keys whose suffix names no record kind but does have a
 #: dedicated repeatable setter. Source of truth: the flag registrations in
 #: ``cli/record.py::_add_record_field_flags``. Mirrored rather than imported —
@@ -478,9 +489,7 @@ def _check_map_str_str(key: str, value: object) -> list[str]:
                 " at most one namespace segment)"
             )
             continue
-        if key == "labels" and (
-            map_key.startswith(_RELATED_KEY_PREFIX) or map_key in RESERVED_LABEL_KEYS
-        ):
+        if key == "labels" and _is_reserved_label_key(map_key):
             errors.append(_reserved_label_key_error(key, map_key))
     return errors
 

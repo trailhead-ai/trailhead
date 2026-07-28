@@ -648,14 +648,9 @@ def test_every_kql_field_is_reserved_as_a_label_key():
         assert any(field in e for e in result.errors), f"field {field!r} not reserved"
 
 
-def test_related_prefixed_label_key_rejected():
-    """``related-<suffix>`` is refused — the edge fields are their own concept."""
-    result = rm().validate(_base_sidecar_with(labels={"related-subsystems": "x"}))
-    assert any("related-subsystems" in e for e in result.errors)
-
-
 def test_related_prefix_reserves_beyond_the_derived_set():
-    """``related-subsystems`` is in neither source, proving the prefix reserves alone."""
+    """``related-<suffix>`` is refused on the prefix alone: ``related-subsystems``
+    is in neither exact-match source, so nothing but the prefix can catch it."""
     mod = rm()
     assert "related-subsystems" not in mod.KINDS
     assert "related-subsystems" not in _kql_module().VALID_FIELDS

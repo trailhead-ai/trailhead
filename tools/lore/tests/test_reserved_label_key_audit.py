@@ -19,8 +19,9 @@ Three shapes are scanned per line, each catching how a doc can name a label
 key: an explicit ``--label KEY=VALUE`` flag example; a backtick-quoted
 ``related-<suffix>`` mention (the shape the stale craft docs used); and a
 YAML-style ``key:`` line at the start of a line (the shape a frontmatter-style
-template block uses). A key is a violation if it is a member of
-``KINDS | kql.VALID_FIELDS`` or matches ``related-*``.
+template block uses). A key is a violation if the write-time guard would refuse
+it — the audit asks ``record/model.py`` itself rather than restating its rule,
+so the two can never drift.
 
 ``related-spec`` is allowlisted: it names the ``related`` edge-graph field
 (written via ``--related spec=<name>``, a different flag entirely), not a
@@ -58,14 +59,8 @@ def _scanned_files():
     yield from TOOLS_ROOT.glob("*/plugins/*/agents/*.md")
 
 
-def _is_reserved(key: str, reserved: frozenset[str]) -> bool:
-    return key in reserved or key.startswith("related-")
-
-
 def _scan() -> list[str]:
-    model = load_script("lore.record.model")
-    kql = load_script("lore.search.kql")
-    reserved = model.KINDS | set(kql.VALID_FIELDS)
+    is_reserved = load_script("lore.record.model")._is_reserved_label_key
 
     violations: list[str] = []
     for path in sorted(_scanned_files()):
@@ -79,7 +74,7 @@ def _scan() -> list[str]:
             if m:
                 keys.add(m.group(1))
             for key in keys:
-                if not _is_reserved(key, reserved):
+                if not is_reserved(key):
                     continue
                 if (rel, key) in _ALLOWLIST:
                     continue
