@@ -41,8 +41,10 @@ high-water mark instead of current state.
 - **`ready → in-progress`** — writer: the orchestrating session, at the run's
   first dispatch. This value belongs to the **run's task** — a plan's parent, or
   a standalone leaf run on its own; child slices under a plan walk
-  `ready → done` and never take it. Exit owner: every execute exit path below
-  (done, blocked, or answered-and-continuing), plus reconciliation on resume.
+  `ready → done` and never take it. Exit owner: the two execute exit writes
+  below (done and blocked), plus reconciliation on resume. An escalation
+  *answered* in-session writes no status — the run continues and the task holds
+  `in-progress` until one of those two writes lands.
 - **`in-progress → done`** — writer: the orchestrating session at close,
   **after push succeeds** (see push guarantee below). `done` is terminal for
   craft; there is no further exit edge to own.
@@ -65,6 +67,12 @@ every repo in the workspace carrying commits on the task branch (a bare
 succeed; push failure keeps the task `in-progress` — the honest state — with a
 `craft/push=failed` label (see Label conventions) so resume logic skips and
 reports rather than silently re-building.
+
+**Auto-push covers task branches only.** A run sitting on the repo's default
+branch — one started on `main`/`master` with explicit user consent — is not
+auto-pushed, so its `done` carries no push guarantee. The completion report must
+say so, naming the branch and its unpushed commits, so a `done` whose guarantee
+never applied is not mistaken for one whose guarantee held.
 
 A **child** task's `done` under a plan means only "committed on the task
 branch" — bookkeeping within the run, no durability claim. The push guarantee
@@ -127,10 +135,21 @@ VCS/portage query (or, later, the operational-state store), never a task label.
 ## `blocked` body content and the credential scrub
 
 A `blocked` body states: what happened, why it blocks, the specific question or
-condition that would clear it, and the next action. If commits exist when a
-task goes `blocked`, they are pushed on the task's branch (same
-`--set-upstream` rule as `done`) and `craft/branch` is (re-)written, so parked
-work resumes from the remote rather than restarting from zero.
+condition that would clear it, and the next action.
+
+**That text is appended, never substituted.** Write it with
+`lore record update task/<name> --status blocked --diff`, piping a unified diff
+whose hunks add it — the two flags combine in one invocation. Piping the note
+over bare stdin instead is a **full-body replace**: it silently destroys
+everything the task record already held.
+
+If commits exist when a task goes `blocked`, they are pushed on the task's
+branch (same `--set-upstream` rule as `done`) and `craft/branch` is (re-)written
+with its own `lore record update task/<name> --label craft/branch=<bare-branch>`
+— never the close command, which also writes `--status done` — so parked work
+resumes from the remote rather than restarting from zero. A push that fails here
+leaves the task `blocked` and adds `craft/push=failed`; the status is not
+reverted to `in-progress`.
 
 That push carries the same precondition as `done`'s: the outgoing commits are
 scanned against the credential-pattern scrub list in `execute/SKILL.md`'s

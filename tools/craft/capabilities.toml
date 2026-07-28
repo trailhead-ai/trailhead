@@ -7,7 +7,8 @@
 # read at runtime — council.md (the review-panel roster + dispatch contract, read by
 # plan, consult, and gauntlet), status-ownership.md (the task-status ownership
 # contract, read by execute), and note-storage.md (the plan/spec persistence seam,
-# read by brainstorm, plan, and polish). It has no SKILL.md so it is never selectable.
+# read by brainstorm, plan, polish, and agents/planner.md). It has no SKILL.md so it
+# is never selectable.
 #
 # Dependency worth knowing when hand-picking a selection: the `gauntlet` skill owns
 # the spec's draft -> ready edge (brainstorm and plan deliberately cannot freeze a

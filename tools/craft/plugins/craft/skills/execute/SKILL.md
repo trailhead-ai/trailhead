@@ -63,19 +63,39 @@ matching the task name; then pick up wherever the graph and workspace show the r
 (The `label.craft.branch:` search query runs the other direction — branch to tasks — and
 belongs to the operator sweep in `../_shared/status-ownership.md`, not here.)
 
-If the task's workspace no longer exists, reconcile before resuming: the task is resumed
-when its branch is recoverable (check out the branch named by `craft/branch` and continue
-from the first-dispatch claim in step 3 onward) or released back to `ready` when it isn't —
-**except** a task carrying `craft/push=failed`, which is skipped and reported rather than
-silently re-run. Whichever path is taken, append a one-line breadcrumb to the task body —
+**A task carrying `craft/push=failed` is never resumed** — workspace intact or not. The
+label means its commits are un-pushable, not that the run crashed, so re-running the build
+would paper over the real problem: skip it and report it. It keeps the status it was left
+with until the push is settled by hand and the guard cleared with
+`lore record update task/<name> --unset-label craft/push`.
+
+Otherwise, if the task's workspace no longer exists, reconcile before resuming: the task is
+resumed when its branch is recoverable (check out the branch named by `craft/branch` and
+continue from the claim in [Claiming the run](#claiming-the-run-at-first-dispatch) onward)
+or released back to `ready` when it isn't — `lore record update task/<name> --status ready`.
+Whichever path is taken, append a one-line breadcrumb to the task body —
 `reconciled: resumed from <branch>` / `reconciled: released to ready` — with
 `lore record update task/<name> --diff`, piping a unified diff whose only hunk adds that
 line. Use the `--diff` form, not a bare `lore record update`: bare stdin is a **full-body
 replace**, so writing the breadcrumb that way destroys everything else in the record.
 
-Every execute exit path — [Phase 6](#phase-6-close-and-completion-report)'s `done`, each
-escalation site's `blocked` write, or an answered-and-continuing escalation — moves the task
-off `in-progress`; full writer and exit-owner rules live in `../_shared/status-ownership.md`.
+Two writes move the task off `in-progress`: [Phase 6](#phase-6-close-and-completion-report)'s
+`done` and each escalation site's `blocked` write. An escalation *answered* in-session writes
+no status at all — the run simply continues, and the task legitimately holds `in-progress`
+until one of those two lands. Full writer and exit-owner rules live in
+`../_shared/status-ownership.md`.
+
+### Claiming the run at first dispatch
+
+**Before this run's first dispatch of any agent** — the `assumption-prover` in step 1 counts
+just as much as the `executor` in step 3 — claim the plan in one command: flip the parent
+off `ready` and write its branch label together —
+`lore record update task/<parent-name> --status in-progress --label craft/branch=<bare-branch>`
+(bump `updated:` to today). Write both at dispatch, not only at close — `craft/branch`'s
+primary reader is crash-resume logic, which runs on tasks that never reached close. Skip if
+the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if it's
+`in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above instead
+of re-dispatching from scratch.
 
 For each runnable child task (a slice):
 
@@ -92,20 +112,10 @@ It returns: VALIDATED / INVALIDATED / NEEDS_CONTEXT / BLOCKED, plus evidence, te
 ### 2. Absorb findings
 
 - **VALIDATED:** update the plan, check off the unknown. Carry the **test files to clean up** from the prover's report into the executor dispatch so it removes them after building proper tests.
-- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status). **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
+- **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status). **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they block the current slice or a future one.
 
 ### 3. Dispatch `executor`
-
-**Before this run's first dispatch of any agent** — the step-1 `assumption-prover` counts
-just as much as the `executor` here — claim the plan in one command: flip the parent
-off `ready` and write its branch label together —
-`lore record update task/<parent-name> --status in-progress --label craft/branch=<bare-branch>`
-(bump `updated:` to today). Write both at dispatch, not only at close — `craft/branch`'s
-primary reader is crash-resume logic, which runs on tasks that never reached close. Skip if
-the parent is already `in-progress`, `done`, `dropped`, or `superseded` — if it's
-`in-progress` from an earlier session, see [Resuming a run](#resuming-a-run) above instead
-of re-dispatching from scratch.
 
 The agent expects:
 - Plan path and task name
@@ -140,7 +150,7 @@ Quality, style, and design review are explicitly out of scope for `drift-gate` �
 After each child task completes (or each unknown resolves), record the state on the graph — the task graph is the source of truth for what's done and what's left, so the run stays resumable if context breaks (handoff, new session):
 
 - **Task status.** Set the child task you just built to `done`: `lore record update task/<name> --status done`. Advancing a task off `ready` is what makes its dependents runnable. A child's `done` here is bookkeeping only — committed on the task branch; the push guarantee that makes `done` mean "committed and pushed" attaches to the run's close (see [Phase 6](#phase-6-close-and-completion-report) and `../_shared/status-ownership.md`), not this step.
-- **Parent lifecycle.** The parent already flipped `ready → in-progress` at the run's first dispatch (the claim documented in step 3) — that's what keeps the task graph honest from the moment code starts shipping against it, rather than waiting for a child to land first. Nothing to write here; if the parent still reads `ready` this far into the run, that's a sign step 3's claim was skipped and should be run now.
+- **Parent lifecycle.** The parent already flipped `ready → in-progress` at the run's first dispatch (see [Claiming the run](#claiming-the-run-at-first-dispatch)) — that's what keeps the task graph honest from the moment code starts shipping against it, rather than waiting for a child to land first. Nothing to write here; if the parent still reads `ready` this far into the run, that's a sign the claim was skipped and should be run now.
 - **Unknowns.** Check off resolved unknowns in the parent's Known Unknowns block; add any new unknown discovered during the slice, noting which child task it blocks.
 - **Design changes.** Note any design change a finding forced — in the parent body, and by re-shaping child tasks per the split/append ritual below.
 
@@ -231,9 +241,15 @@ Before pushing a repo with unpushed commits, run the pre-push secret scan: check
 
 **This scan gates every push, the blocked path's included.** Each escalation site's "(if commits exist)" push routes through this phase, so it inherits the scan: a run blocked *because* the scan hit stays unpushed until the credential is rotated and the history rewritten. Going `blocked` never licenses shipping the flagged commits.
 
+**The blocked path pushes; it never closes.** Its `craft/branch` write is a standalone command against whichever record just took `blocked` — `lore record update task/<name> --label craft/branch=<bare-branch>`, or `task/<parent-name>` when the plan is what blocked — **not** the close command below, which also writes `--status done`. A slice-level block is never licence to close the parent.
+
 For every repo that clears the scan, push with `git push --set-upstream origin HEAD` (verbatim — a bare `git push` never converges without an upstream). Push is idempotent: an already-up-to-date branch counts as success, so retrying after a failed status write is safe — the status write is the completion signal, the push is its precondition.
 
-On push failure (auth, no remote, rejection): the task stays `in-progress` — the honest state — and the session labels **the run's task record**, `task/<parent-name>` on this pathway: `lore record update task/<parent-name> --label craft/push=failed`. That record is the one holding `in-progress` and the one resume logic reads; a child slice's record is bookkeeping, not the run's lifecycle handle, so labelling it would leave the guard where nothing looks for it. The completion report names the failure **and the remediation**, distinguishing a non-fast-forward rejection (needs reconciliation with the remote, not credentials) from an auth/no-remote failure (needs credentials or a configured remote, not reconciliation). Run any raw git stderr through the credential-pattern scrub before it enters report or record text.
+On push failure (auth, no remote, rejection) at close: the task stays `in-progress` — the honest state — and the session labels **the run's task record**, `task/<parent-name>` on this pathway: `lore record update task/<parent-name> --label craft/push=failed`. That record is the one holding `in-progress` and the one resume logic reads; a child slice's record is bookkeeping, not the run's lifecycle handle, so labelling it would leave the guard where nothing looks for it.
+
+**A blocked-path push failure gets the same label and no status reversion.** The record keeps the `blocked` just written for it — it does *not* revert to `in-progress` — and gains `craft/push=failed` alongside: `lore record update task/<name> --label craft/push=failed` (`task/<parent-name>` when the plan is what blocked). The label, not the status, is what tells resume logic the commits are un-pushable.
+
+Either way the completion report names the failure **and the remediation**, distinguishing a non-fast-forward rejection (needs reconciliation with the remote, not credentials) from an auth/no-remote failure (needs credentials or a configured remote, not reconciliation). The remediation is not finished when the push finally lands: nothing clears the guard automatically, so settling the push by hand also means `lore record update task/<name> --unset-label craft/push` — a stale guard makes every later resume skip-and-report. Run any raw git stderr through the credential-pattern scrub before it enters report or record text.
 
 **Close the run.** With every child terminal, the flow-out checklist ticked, and every repo's push settled, set the parent `done`: `lore record update task/<parent-name> --status done`, re-asserting `--label craft/branch=<bare-branch>` at close. The completion guard refuses this while any child is non-terminal (it names them); a parent closed without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
 
@@ -261,7 +277,7 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 
 **Escalation signals:**
 
-- Executor returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the executor. **If the run ends here:** write `blocked` on the slice — `lore record update task/<name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
+- Executor returns `BLOCKED` with unclear cause → dispatch `troubleshooter` (Opus/high) to diagnose before re-dispatching the executor. **If the run ends here:** write `blocked` on the slice — `lore record update task/<name> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
 - Executor returns `DONE_WITH_CONCERNS` repeatedly on the same slice → re-dispatch with `model: "opus"` or break the slice smaller.
 - Assumption-prover returns `NEEDS_CONTEXT` → it's not the model, it's the prompt. Give it more context and re-dispatch at the same tier.
 
@@ -276,13 +292,13 @@ Defaults are baked into each agent's frontmatter. Escalate when signals say you 
 2. **Design change** — the invalidation affects multiple child tasks or the architecture. Re-enter planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline. Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
 3. **Drop the task** — the feature doesn't need this part. Reshape the child task record to `superseded` (or `dropped`) via `lore record update`, note why, continue with remaining tasks.
 
-**If the run ends here** (none of the above resolves it in-session): write `blocked` on the plan — `lore record update task/<parent-name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
+**If the run ends here** (none of the above resolves it in-session): write `blocked` on the plan — `lore record update task/<parent-name> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
 
 If the INVALIDATED result is surprising (behavior you thought was standard turns out to differ), that may also be a `troubleshooter` question: dispatch it to figure out *why* the assumption was wrong before reshaping the plan.
 
 **NEEDS_CONTEXT:** Provide missing context and re-dispatch.
 
-**BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user. **If the run ends here:** write `blocked` on the slice — `lore record update task/<name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
+**BLOCKED:** Assess — provide more context, use a more capable model, or escalate to user. **If the run ends here:** write `blocked` on the slice — `lore record update task/<name> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
 
 ## Handling Executor Status
 
@@ -296,10 +312,10 @@ If the INVALIDATED result is surprising (behavior you thought was standard turns
 1. Context problem → provide more context, re-dispatch
 2. Needs more reasoning → re-dispatch with `model: "opus"`
 3. Slice too large → break into smaller pieces
-4. Plan is wrong → escalate to user. **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
+4. Plan is wrong → escalate to user. **If the run ends here:** write `blocked` on the plan — `lore record update task/<parent-name> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
 5. Cause unclear → dispatch `troubleshooter` to diagnose before re-dispatching the executor. Don't keep re-dispatching the same prompt hoping for a different outcome.
 
-**If the run ends here** (1–3 or 5 above didn't resolve it): write `blocked` on the slice — `lore record update task/<name> --status blocked` — with the body-content contract, the [Phase 5](#phase-5-flow-out) scrub, and (if commits exist) the [Phase 6](#phase-6-close-and-completion-report) push and `craft/branch` write; full rules in `../_shared/status-ownership.md`.
+**If the run ends here** (1–3 or 5 above didn't resolve it): write `blocked` on the slice — `lore record update task/<name> --status blocked --diff`, piping a unified diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the record) — plus the [Phase 5](#phase-5-flow-out) scrub and, if commits exist, the [Phase 6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write; body-content contract and full rules in `../_shared/status-ownership.md`.
 
 ## Red Flags
 
