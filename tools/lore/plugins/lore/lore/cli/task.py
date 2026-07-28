@@ -5,12 +5,19 @@ A thin renderer over ``record/graph.py`` (the pure edge-map/query module) and
 record locator — this module reuses all three rather than re-deriving graph
 traversal or vault resolution. It never writes; it is the read counterpart to
 the ``--parent``/``--depends-on`` write-time guards in ``record/guards.py``.
+
+``list`` is a second, sibling verb: a flat per-vault listing (built on
+``record/tasks.py``) rather than a containment-subtree render, for a caller
+(ranger's sweep) that wants every task in a NAMED vault rather than one
+task's subtree.
 """
 from __future__ import annotations
 
+import json
 import sys
 
 from ..record import guards as guards_mod
+from .common import _resolve_config_path
 from .record import _find_current_record_location
 
 
@@ -112,13 +119,64 @@ def _cmd_task_graph(args) -> int:
     return 0
 
 
+def _print_task_list(entries: list[dict], *, as_json: bool) -> None:
+    """Print *entries* as a JSON array, or one human-readable line per task."""
+    if as_json:
+        print(json.dumps(entries))
+        return
+    for e in entries:
+        deps = ",".join(e["depends-on"]) or "none"
+        children = ",".join(e["children"]) or "none"
+        print(
+            f"{e['name']} status={e['status']} created-at={e['created-at']} "
+            f"parent={e['parent'] or 'none'} depends-on={deps} children={children}"
+        )
+
+
+def _cmd_task_list(args) -> int:
+    """``lore task list --vault NAME [--status STATUS ...] [--json]``.
+
+    Flat listing of every task record in the NAMED vault — the read surface a
+    caller outside this repo (ranger's sweep) shells out to for a queue read,
+    rather than importing ``record/tasks.py`` directly. ``--vault`` resolves
+    through ``vault_config.load_config`` exactly like ``lore vault delete``'s
+    name lookup; an unreadable ``config.json`` or a name absent from it is
+    ``lore: <msg>`` on stderr, nonzero — never a silent fall-through to some
+    other vault.
+    """
+    from ..record import tasks as tasks_mod
+    from ..vault import config as vault_config_mod
+
+    config_path = _resolve_config_path()
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"lore: cannot read config: {exc}", file=sys.stderr)
+        return 1
+    except vault_config_mod.VaultConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    normalized = vault_config_mod.normalize_vault_name(args.vault)
+    vault = next((v for v in vaults if v.name == normalized), None)
+    if vault is None:
+        print(f"lore: vault {normalized!r} is not configured", file=sys.stderr)
+        return 1
+
+    entries = tasks_mod.list_tasks(str(vault.path), statuses=args.status)
+    _print_task_list(entries, as_json=args.json)
+    return 0
+
+
 def cmd_task(args) -> int:
-    """Dispatch ``lore task <action>`` — today, only ``graph``."""
+    """Dispatch ``lore task <action>`` — ``graph`` or ``list``."""
     action = getattr(args, "task_action", None)
     if action == "graph":
         return _cmd_task_graph(args)
+    if action == "list":
+        return _cmd_task_list(args)
     print(
-        f"lore task: unknown action {action!r}. Use 'lore task graph'.",
+        f"lore task: unknown action {action!r}. Use 'lore task graph' or 'lore task list'.",
         file=sys.stderr,
     )
     return 1
@@ -142,3 +200,21 @@ def add_task_subparser(sub) -> None:
         help="Task name to root the graph at (or an explicit <kind>/<name>)",
     )
     p_task_graph.set_defaults(func=cmd_task)
+
+    p_task_list = p_task_sub.add_parser(
+        "list",
+        help="Flat listing of every task record in a named vault",
+    )
+    p_task_list.add_argument(
+        "--vault", required=True, metavar="NAME",
+        help="Vault name to list (resolved through config.json)",
+    )
+    p_task_list.add_argument(
+        "--status", action="append", default=None, metavar="STATUS",
+        help="Keep only tasks with this status (repeatable)",
+    )
+    p_task_list.add_argument(
+        "--json", action="store_true",
+        help="Emit the listing as a JSON array",
+    )
+    p_task_list.set_defaults(func=cmd_task)
