@@ -228,9 +228,11 @@ no mandate to rewrite it. Refine adds its sections below what is already there.
 update` — Step 4's payload and Step 5's escalation section alike — run the drafted
 text through the same credential-pattern scrub execute's Phase 5 runs before a `lore
 session candidate`, and drop or redact every match rather than writing it. In scope:
-the payload fields *and* the escalation section's free-text ones (`**Evidence
-gathered:**`, `**Recommended answer:**`), which the pointer-only citation rule does
-not constrain. Quote only a `file:line` pointer for anything caught. The four
+the payload fields, the escalation section's free-text ones (`**Evidence
+gathered:**`, `**Recommended answer:**`), and the escalated question text itself
+(`**Question:**` and any `**Answer:**` an operator adds) — none of which the
+pointer-only citation rule constrains. Quote only a `file:line` pointer for anything
+caught. The four
 categories are key-like `name=value` tokens, bearer/api-key shapes, high-entropy
 base64/hex literals, and PEM private-key headers — but
 **execute's Phase 5 regex list is the canonical set**; the categories named here are a
@@ -298,6 +300,8 @@ human channel rests on that one rule.
 operator scan finds escalated drafts by that heading, and a task carrying payload
 fields while still `open` is by definition an escalated draft.
 
+An operator answers an escalated question by adding a line beginning `**Answer:**` inside the `## Refine — unresolved` section, and refine treats that answer as an operator-stated, citable constraint (arm (c) of the citation rule) on the next run.
+
 ### Interactive escalation
 
 Ask the user **one question at a time**, each pre-loaded with the evidence gathered
@@ -345,6 +349,7 @@ outside fenced code blocks — the same strings quoted mid-prose, in backticks, 
 inside a fence are content, not payload structure, and never move the count:
 
 - Found once → **update in place**. Never append a second set.
+  Re-escalation replaces the section's content entirely, including any prior `**Answer:**` line — an answer left behind belongs to the question you just replaced, and an unattended sweep reads it as an answer to the new one.
 - Found twice (a hand-edited body drifted) → **report the conflict** and stop.
   Guessing which set is canonical is how the wrong payload reaches an executor.
 - Not found → append, per Step 4.

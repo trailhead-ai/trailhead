@@ -78,7 +78,7 @@ class TestReport:
             which_runner=lambda n: f"/shim/{n}" if n == "portage" else None,
             python_version_runner=_fake_py,
         )
-        assert set(r.data["clis"]) == {"camp", "lore", "portage"}
+        assert set(r.data["clis"]) == {"camp", "lore", "portage", "ranger"}
         assert r.data["clis"]["portage"] == "/shim/portage"
 
     def test_python_version_reported(self, tmp_path):

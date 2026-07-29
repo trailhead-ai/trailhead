@@ -1,0 +1,8 @@
+# ranger — the unattended refine sweep over a camp group's task queue.
+# tool.name MUST equal the plugins/<name>/ dir ("ranger").
+# Selectable skills (skills/*/ with SKILL.md) and subagents (agents/*.md) are
+# discovered on disk; no always-on base. The product surface is the CLI.
+
+[tool]
+name = "ranger"
+cli_bin = "bin/ranger"

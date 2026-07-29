@@ -765,6 +765,289 @@ def test_update_move_to_flag_is_removed(tmp_path):
 
 
 # ===========================================================================
+# CLI: --vault explicit current-location targeting (U1 contingency)
+# ===========================================================================
+#
+# ``--vault NAME`` resolves the record's CURRENT location in exactly the named
+# configured vault (via ``vault_config.load_config``), instead of
+# ``_find_current_record_location``'s config-order first-match scan. This is
+# distinct from the destination re-routing flags (--repo/--product/--suite/
+# --team), which keep their existing meaning and can be combined with --vault.
+
+
+def _duplicate_named_task_two_vaults(tmp_path, title="Dup Task"):
+    """Two team vaults (config order alpha, beta), each holding an
+    independently-created task record of the same name — the collision case
+    ``_find_current_record_location``'s scan cannot disambiguate.
+    """
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    for team, vault in (("alpha", alpha_vault), ("beta", beta_vault)):
+        r = _run_cfg(
+            [
+                "record", "create", "--kind", "task", "--title", title,
+                "--team", team, "--status", "open",
+            ],
+            vault=default_vault, state=state, config_home=config_home, stdin_text="",
+        )
+        assert r.returncode == 0, r.stderr
+    return default_vault, alpha_vault, beta_vault, state, config_home
+
+
+def test_vault_flag_targets_named_vault_ignoring_config_order(tmp_path):
+    """``update --vault beta`` changes beta's record only; alpha (config-order-
+    first) is left untouched — the exact collision the prover reproduced."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    record_id = "task/dup-task"
+
+    r = _run_cfg(
+        ["record", "update", record_id, "--vault", "beta", "--status", "blocked"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert _find_sidecar(beta_vault, record_id)["status"] == "blocked"
+    assert _find_sidecar(alpha_vault, record_id)["status"] == "open"
+
+
+def test_vault_flag_record_absent_in_named_vault_errors_without_scan_fallback(tmp_path):
+    """``--vault`` naming a vault that lacks the record errors plainly — it never
+    falls back to scanning the other configured vaults, and nothing is written."""
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    r = _run_cfg(
+        [
+            "record", "create", "--kind", "task", "--title", "Solo",
+            "--team", "alpha", "--status", "open",
+        ],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = "task/solo"
+
+    r = _run_cfg(
+        ["record", "update", record_id, "--vault", "beta", "--status", "blocked"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+
+    # Untouched -- no fallback write to alpha (where the record actually lives).
+    assert _find_sidecar(alpha_vault, record_id)["status"] == "open"
+    # Nothing written into beta either.
+    assert not (beta_vault / "task" / "solo.json").exists()
+    assert not (beta_vault / "task" / "solo.md").exists()
+
+
+def test_vault_flag_unknown_name_errors(tmp_path):
+    """An unconfigured ``--vault`` name errors with ``lore: <msg>`` — nonzero."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state, body="body\n")
+
+    r = _run(
+        ["record", "update", record_id, "--vault", "nope", "--status", "blocked"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+    assert "nope" in r.stderr
+
+
+def test_vault_flag_composes_with_diff_and_labels(tmp_path):
+    """``--vault`` combined with ``--diff`` (body) and ``--label`` (map field)
+    both apply against the named vault's record."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    record_id = "task/dup-task"
+
+    diff = _make_diff("", "beta body\n")
+    r = _run_cfg(
+        [
+            "record", "update", record_id, "--vault", "beta", "--diff",
+            "--label", "priority=high",
+        ],
+        vault=default_vault, state=state, config_home=config_home, stdin_text=diff,
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert _find_body(beta_vault, record_id) == "beta body\n"
+    assert _find_sidecar(beta_vault, record_id)["labels"]["priority"] == "high"
+    # alpha's copy is untouched by either the body or the label change.
+    assert _find_body(alpha_vault, record_id) == ""
+    assert "labels" not in _find_sidecar(alpha_vault, record_id)
+
+
+def test_vault_flag_composes_with_team_destination_rerouting(tmp_path):
+    """``--vault`` (current-location) composes with ``--team`` (destination
+    re-routing): the record located via --vault in alpha auto-moves to the
+    vault --team elects, exactly as an update without --vault would."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    gamma_vault = tmp_path / "vault_gamma"
+    gamma_vault.mkdir(parents=True)
+    config_path = config_home / "lore" / "config.json"
+    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    cfg["vaults"].append({"name": "gamma", "scope": "team", "path": str(gamma_vault)})
+    config_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    record_id = "task/dup-task"
+
+    r = _run_cfg(
+        ["record", "update", record_id, "--vault", "alpha", "--team", "gamma"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert "moved:" in r.stdout
+
+    # alpha's ORIGINAL record is gone (moved away) to gamma; beta's separate
+    # duplicate is untouched throughout.
+    assert not (alpha_vault / "task" / "dup-task.json").exists()
+    assert _find_sidecar(gamma_vault, record_id)["team"] == "gamma"
+    assert _find_sidecar(beta_vault, record_id)["team"] == "beta"
+
+
+def test_vault_flag_omitted_preserves_scan_behavior(tmp_path):
+    """Omitting ``--vault`` still scans config order and updates the first
+    match — unchanged from pre-existing behavior."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    record_id = "task/dup-task"
+
+    r = _run_cfg(
+        ["record", "update", record_id, "--status", "blocked"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    # Config order is default, alpha, beta -- alpha is the first vault (after
+    # the default floor) holding a "dup-task" record, so the scan hits it.
+    assert _find_sidecar(alpha_vault, record_id)["status"] == "blocked"
+    assert _find_sidecar(beta_vault, record_id)["status"] == "open"
+
+
+# ---------------------------------------------------------------------------
+# --vault + scope-less sidecar: destination is the named vault, no move
+# ---------------------------------------------------------------------------
+#
+# A record whose sidecar carries no repo/product/suite/team field (e.g. a
+# legacy or externally-authored record) re-resolves its destination from an
+# EMPTY merged scope, which always lands on the default vault (see
+# vault/resolve.py's totality floor). Without a fix, ``--vault <elected>
+# --status ready`` on such a record would silently MOVE it out of the elected
+# vault into the default vault, even though no destination scope flag was
+# given. These tests pin: when --vault is passed and no explicit destination
+# scope flag (--repo/--product/--suite/--team) accompanies it, the
+# destination is the named vault itself -- no re-resolution, no move.
+
+
+def _elected_vault_config(tmp_path):
+    """A default vault and a separately-rooted ``elected`` team vault."""
+    default_vault, state = _make_vault(tmp_path)
+    elected_vault = tmp_path / "vault_elected"
+    elected_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "elected", "scope": "team", "path": str(elected_vault)},
+        ],
+    )
+    return default_vault, elected_vault, state, config_home
+
+
+def _create_scopeless_in_elected(default_vault, elected_vault, state, config_home, *, body="orig body\n"):
+    """Create a task physically in ``elected_vault``, then strip its scope field.
+
+    Routes the create with ``--team elected`` (the only way to place it there),
+    then rewrites the on-disk sidecar to drop the ``team`` key -- simulating a
+    record whose sidecar was never scope-stamped (the exact shape the finding
+    describes), without which the CLI's own create routing would never produce
+    a scope-less record outside the default vault.
+    """
+    r = _run_cfg(
+        ["record", "create", "--kind", "task", "--title", "Elected Task",
+         "--team", "elected", "--status", "open"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text=body,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    sidecar_path = elected_vault / kind / f"{name}.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    del sidecar["team"]
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+    return record_id
+
+
+def test_vault_flag_scopeless_sidecar_status_update_stays_no_move(tmp_path):
+    """``--vault elected --status ready`` on a scope-less record stays in elected."""
+    default_vault, elected_vault, state, config_home = _elected_vault_config(tmp_path)
+    record_id = _create_scopeless_in_elected(default_vault, elected_vault, state, config_home)
+    kind, name = record_id.split("/", 1)
+    assert "team" not in _find_sidecar(elected_vault, record_id)
+
+    r = _run_cfg(
+        ["record", "update", record_id, "--vault", "elected", "--status", "ready"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert _find_sidecar(elected_vault, record_id)["status"] == "ready"
+    assert not (default_vault / kind / f"{name}.json").exists()
+    assert "moved:" not in r.stdout
+
+
+def test_vault_flag_scopeless_sidecar_diff_body_stays_no_move(tmp_path):
+    """Same, with a ``--diff`` body update instead of a metadata-only one."""
+    default_vault, elected_vault, state, config_home = _elected_vault_config(tmp_path)
+    record_id = _create_scopeless_in_elected(
+        default_vault, elected_vault, state, config_home, body="orig body\n"
+    )
+    kind, name = record_id.split("/", 1)
+
+    diff = _make_diff("orig body\n", "elected body\n")
+    r = _run_cfg(
+        ["record", "update", record_id, "--vault", "elected", "--diff"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text=diff,
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert _find_body(elected_vault, record_id) == "elected body\n"
+    assert not (default_vault / kind / f"{name}.json").exists()
+    assert "moved:" not in r.stdout
+
+
+# ===========================================================================
 # Unit tests for apply_unified_diff — adversarial cases
 # ===========================================================================
 

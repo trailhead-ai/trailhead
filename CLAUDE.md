@@ -22,7 +22,7 @@ let tests/experiments touch the live install.
 ## What this repo is
 
 `trailhead` is a **monorepo** shipping a harness-agnostic Python management CLI plus
-five agent-plugins. The CLI *composes* and *wires* selected plugin capabilities into
+six agent-plugins. The CLI *composes* and *wires* selected plugin capabilities into
 whatever AI code harness you use; the plugins themselves are the agent-facing
 product (skills, subagents, hooks). **install = clone the repo** — there is no
 remote fetch, no SHA-pinning manifest, no pip step required: the checkout IS the
@@ -32,9 +32,9 @@ source.
 - `trailhead/harness/` — the harness seam (`base.py`) + per-harness impls
   (`claude_code.py` today). Adding a harness = implement the interface + register
   it; zero changes to the shared install/compose/wire path (Axiom 1).
-- `tools/<name>/` — the five plugins: `lore`, `camp`, `craft`, `portage`,
-  and `outpost` (the cockpit review-loop skill; wired into the compose/marketplace
-  path and installed by default).
+- `tools/<name>/` — the six plugins: `lore`, `camp`, `craft`, `portage`,
+  `outpost` (the cockpit review-loop skill; wired into the compose/marketplace
+  path and installed by default), and `ranger` (the unattended refine-sweep loop).
 - `bin/trailhead` — git-only entry point (puts repo root on `sys.path`, no pip needed).
 - `trailhead/docs/` — authoritative prose specs per seam. `docs/vision.md` — the axioms.
 

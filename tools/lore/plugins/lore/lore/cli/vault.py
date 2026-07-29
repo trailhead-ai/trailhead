@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .common import _resolve_config_path, _resolve_vaults_root
+from .common import _resolve_config_path, _resolve_groups_dir, _resolve_vaults_root
 
 
 def cmd_vault(args) -> int:
@@ -26,10 +26,12 @@ def cmd_vault(args) -> int:
         return _cmd_vault_ls(args)
     if action == "config":
         return _cmd_vault_config(args)
+    if action == "resolve":
+        return _cmd_vault_resolve(args)
     print(
         f"lore vault: unknown action {action!r}. "
         f"Use 'lore vault add', 'lore vault delete', 'lore vault ls', "
-        f"or 'lore vault config'.",
+        f"'lore vault config', or 'lore vault resolve'.",
         file=sys.stderr,
     )
     return 1
@@ -352,6 +354,116 @@ def _cmd_vault_config(args) -> int:
     return 0
 
 
+def _print_vault_resolution(result: dict, *, as_json: bool) -> None:
+    """Print *result* as JSON, or as the one-line human rendering."""
+    if as_json:
+        print(json.dumps(result))
+        return
+    source = ",".join(f"{s}:{n}" for s, n in result["source"].items()) or "none"
+    unmatched = ",".join(result["unmatched_scopes"]) or "none"
+    print(
+        f"kind={result['kind']} vault={result['vault'] or 'none'} "
+        f"path={result['path']} scope={result['scope']} source={source} "
+        f"skipped={result['skipped'] or 'none'} "
+        f"skipped_reason={result['skipped_reason'] or 'none'} "
+        f"unmatched_scopes={unmatched}"
+    )
+
+
+def _cmd_vault_resolve(args) -> int:
+    """``lore vault resolve --kind KIND [--json]`` — group-aware vault-resolution query.
+
+    Reports where a record of KIND would land right now from the CURRENT
+    working directory's camp-group binding — the same
+    ``_resolve_group_scopes`` (``cli/record.py``) + ``explain_resolution``
+    (``vault/resolve.py``) path ``record create`` uses for its own routing —
+    with no ``--repo``/``--team``/etc. flags of its own. This is a
+    deliberately minimal surface: it exists for the ranger sweep to shell out
+    to, not as a general routing-preview tool.
+
+    Always emits the fixed eight keys ``kind``/``vault``/``path``/``scope``/
+    ``source``/``skipped``/``skipped_reason``/``unmatched_scopes`` — as JSON
+    with ``--json``, or as one human-readable line otherwise. A resolution
+    that lands on the unconditional default floor — no camp-group binding, a
+    binding whose ``records`` allowlist excludes KIND, or a binding naming a
+    vault absent from ``config.json`` (today silently skipped by
+    ``explain_resolution``) — always reports ``scope: "default"`` and
+    ``vault: null`` as the single unbound signal, regardless of which of
+    those three reasons produced it; ``source`` (the scope bindings that fed
+    resolution), ``skipped``/``skipped_reason``, and ``unmatched_scopes``
+    carry the reason.
+
+    Exit 0 for any resolvable query — resolution is total (never raises for
+    "no match"), matching vanilla usage (Axiom 3) when no ``config.json``
+    exists at all. Only a bad ``--kind`` or an unreadable ``config.json`` is
+    an error: ``lore: <msg>`` on stderr, nonzero exit.
+    """
+    from ..record import model as record_model_mod
+    from ..vault import config as vault_config_mod
+    from ..vault import resolve as vault_resolve_mod
+    from .record import _resolve_group_scopes
+
+    kind = args.kind
+    if kind not in record_model_mod.KINDS:
+        print(
+            f"lore: --kind {kind!r} is not a valid record kind; "
+            f"valid kinds: {sorted(record_model_mod.KINDS)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    config_path = _resolve_config_path()
+    if not config_path.exists():
+        # Vanilla usage (Axiom 3): no config.json means no routing is even
+        # attempted (matching record create's degrade-to-vanilla path) — the
+        # only vault is the implicit default floor.
+        result = {
+            "kind": kind,
+            "vault": None,
+            "path": str(vault_config_mod.resolve_active_vault()),
+            "scope": "default",
+            "source": {},
+            "skipped": None,
+            "skipped_reason": None,
+            "unmatched_scopes": [],
+        }
+        _print_vault_resolution(result, as_json=args.json)
+        return 0
+
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"lore: cannot read config: {exc}", file=sys.stderr)
+        return 1
+    except vault_config_mod.VaultConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    try:
+        cwd = Path.cwd()
+    except OSError:
+        cwd = None
+    participating_scopes: dict = {}
+    if cwd is not None:
+        participating_scopes = _resolve_group_scopes(cwd=cwd, groups_dir=_resolve_groups_dir())
+
+    resolution = vault_resolve_mod.explain_resolution(participating_scopes, kind, vaults)
+    chosen = resolution.chosen
+    is_default = chosen.scope == "default"
+    result = {
+        "kind": kind,
+        "vault": None if is_default else chosen.name,
+        "path": str(chosen.path),
+        "scope": chosen.scope,
+        "source": dict(participating_scopes),
+        "skipped": resolution.skipped.name if resolution.skipped is not None else None,
+        "skipped_reason": resolution.skipped_reason,
+        "unmatched_scopes": [f"{s}:{n}" for s, n in resolution.unmatched],
+    }
+    _print_vault_resolution(result, as_json=args.json)
+    return 0
+
+
 def add_vault_subparser(sub) -> None:
     """Register the ``vault`` command parser and its add/delete/ls/config actions."""
     p_vault = sub.add_parser(
@@ -395,3 +507,17 @@ def add_vault_subparser(sub) -> None:
 
     p_vault_config = p_vault_sub.add_parser("config", help="Edit config.json in $EDITOR")
     p_vault_config.set_defaults(func=cmd_vault)
+
+    p_vault_resolve = p_vault_sub.add_parser(
+        "resolve",
+        help="Report where a record of --kind would resolve to right now (group-aware)",
+    )
+    p_vault_resolve.add_argument(
+        "--kind", required=True, metavar="KIND",
+        help="Record kind to resolve routing for",
+    )
+    p_vault_resolve.add_argument(
+        "--json", action="store_true",
+        help="Emit the fixed-key resolution object as JSON",
+    )
+    p_vault_resolve.set_defaults(func=cmd_vault)

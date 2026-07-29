@@ -30,6 +30,7 @@ _LORE_MANIFEST = _REPO_ROOT / "tools" / "lore" / "capabilities.toml"
 _CRAFT_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 _PORTAGE_MANIFEST = _REPO_ROOT / "tools" / "portage" / "capabilities.toml"
+_RANGER_MANIFEST = _REPO_ROOT / "tools" / "ranger" / "capabilities.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -397,4 +398,9 @@ class TestCliBin:
     def test_portage_cli_bin(self):
         m = load_manifest(_PORTAGE_MANIFEST)
         assert m.cli_bin == "bin/portage"
+        assert (m.plugin_root / m.cli_bin).is_file()
+
+    def test_ranger_cli_bin(self):
+        m = load_manifest(_RANGER_MANIFEST)
+        assert m.cli_bin == "bin/ranger"
         assert (m.plugin_root / m.cli_bin).is_file()
