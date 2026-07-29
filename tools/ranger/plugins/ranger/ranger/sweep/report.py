@@ -545,12 +545,38 @@ def append_promoted(report_path: Path, task_id: str) -> None:
     _append(report_path, "promoted", task_id, lambda _safe: f"- `{task_id}`\n")
 
 
+_ROUTED_FENCE_TARGETS = ("/craft:plan", "/craft:brainstorm")
+
+
 def append_routed(report_path: Path, task_id: str, target: str) -> None:
-    _append(
-        report_path, "routed", task_id,
-        lambda safe_target: f"- `{task_id}` — routed to {safe_target}\n",
-        target,
-    )
+    """Render the routed bullet, and — for the two recognized slash-command
+    targets only — a fenced code block with the fully-formed command below
+    it, at parity with the escalated bucket's "Answer with:" block.
+
+    The fence match is on the raw *target*, before it reaches ``_append``'s
+    scrub, and is decided once here as a fixed literal (``fence_target`` is
+    either ``None`` or one of the two tuple members) — never the scrubbed
+    ``safe_target`` the bullet uses. That is what keeps the fenced command
+    built entirely from trusted text (``task_id`` plus the matched literal),
+    never from unscrubbed input, while any other target — including the
+    "the parent record" case the agent contract also allows — keeps today's
+    flat bullet and no fence (fail-closed).
+    """
+    fence_target = target if target in _ROUTED_FENCE_TARGETS else None
+
+    def render(safe_target: str) -> str:
+        lines = [f"- `{task_id}` — routed to {safe_target}\n"]
+        if fence_target is not None:
+            lines += [
+                "\n",
+                "```\n",
+                f"{fence_target} {task_id}\n",
+                "```\n",
+                "\n",
+            ]
+        return "".join(lines)
+
+    _append(report_path, "routed", task_id, render, target)
 
 
 def append_blocked_answered(report_path: Path, task_id: str) -> None:
