@@ -309,3 +309,144 @@ def test_gauntlet_selects_spec_bars_not_plan_bars():
         "the plan bars yields findings that are all true and all useless ('this slice has "
         "no test contract' — there are no slices)"
     )
+
+
+# --- adr mode: adapted roster, direct freeze, annotation-borne provenance ---
+
+# The `## Reviewing an adr` heading scopes the adr-specific checks below to just
+# that section of the file, so a check for "divergence-prober absent" doesn't
+# also have to be true of the spec-mode section earlier in the same file.
+ADR_SECTION_HEADER = "## Reviewing an adr"
+
+_ADR_MODE_AGENTS: list[str] = [
+    "premise-attacker",
+    "consistency-auditor",
+    "builder",
+    "breaker",
+    "attacker",
+    "advocate",
+]
+
+# Mirrors `<spec-id> --status ready`: the gauntlet owns this edge too, and it is
+# the ONLY file allowed to carry it.
+_ADR_ADVANCE = "<adr-id> --status active"
+
+_ANNOTATION_PROVENANCE_SENTENCE = (
+    "Gauntlet provenance for an adr target goes to the record's annotations, "
+    "never the body"
+)
+
+_DISTILLED_SKIP_SENTENCE = (
+    "Distilled (backward) ADRs skip the gauntlet — the distill disposition owns "
+    "their flip"
+)
+
+
+def _adr_mode_section(text: str) -> str:
+    assert ADR_SECTION_HEADER in text, (
+        f"gauntlet/SKILL.md must carry a {ADR_SECTION_HEADER!r} section describing "
+        "adr-target mode"
+    )
+    return text[text.index(ADR_SECTION_HEADER):]
+
+
+def test_gauntlet_owns_the_adr_freeze():
+    assert _ADR_ADVANCE in GAUNTLET.read_text(), (
+        "gauntlet/SKILL.md must carry the adr-freeze command "
+        "(`lore record update <adr-id> --status active`) — it owns the "
+        "draft -> active edge, the adr equivalent of the spec `ready` guard"
+    )
+
+
+def test_only_gauntlet_flips_an_adr_active():
+    """No craft file except the gauntlet may advance an adr to `active`.
+
+    The same structural mandate as the spec freeze: a bypass here can hand an
+    unreviewed decision straight into the immutable, convention-enforced log.
+    """
+    offenders = [
+        p for p in _craft_prose_files()
+        if p != GAUNTLET and _ADR_ADVANCE in p.read_text()
+    ]
+    assert not offenders, (
+        "these craft files can flip an adr to `active`, bypassing the gauntlet: "
+        f"{[str(p.relative_to(CRAFT)) for p in offenders]}"
+    )
+
+
+@pytest.mark.parametrize("agent", _ADR_MODE_AGENTS)
+def test_adr_mode_roster_agents_resolve(agent: str):
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert agent in adr_section, (
+        f"gauntlet/SKILL.md's adr-mode section does not dispatch {agent!r}"
+    )
+    agent_file = AGENTS_DIR / f"{agent}.md"
+    assert agent_file.exists(), f"{agent_file} does not exist — a dispatch must not dead-end"
+
+
+def test_adr_mode_dispatches_fact_verification_too():
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert "Explore" in adr_section, (
+        "the adr roster keeps the fact-verification pass via the generic Explore agent"
+    )
+
+
+def test_adr_mode_drops_divergence_prober():
+    """The two-implementations method has no analogue for a decision document."""
+    text = GAUNTLET.read_text()
+    adr_section = _adr_mode_section(text)
+    assert "divergence-prober" not in adr_section, (
+        "divergence-prober must be absent from the adr roster"
+    )
+    assert "divergence-prober" in text, (
+        "divergence-prober must still be dispatched for the spec roster elsewhere "
+        "in the same file"
+    )
+
+
+def test_adr_mode_restates_all_passes_required():
+    adr_section = _adr_mode_section(GAUNTLET.read_text()).lower()
+    assert "name" in adr_section and "stop" in adr_section, (
+        "the 'all passes required — name the missing one and stop' rule must be "
+        "restated for the adr roster, not silently inherited from the spec section"
+    )
+
+
+def test_adr_gauntlet_owns_the_flip_directly_with_no_intermediate_state():
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert "no intermediate" in adr_section, (
+        "the adr-mode section must explain there is no intermediate "
+        "frozen-but-inactive state — the adr vocab has no `ready`, so the flip "
+        "goes straight to `active`"
+    )
+
+
+def test_adr_provenance_goes_to_annotations_never_body():
+    assert _ANNOTATION_PROVENANCE_SENTENCE in GAUNTLET.read_text(), (
+        "the annotation-provenance rule must be pinned verbatim in gauntlet/SKILL.md"
+    )
+
+
+def test_distilled_adrs_skip_the_gauntlet():
+    assert _DISTILLED_SKIP_SENTENCE in GAUNTLET.read_text(), (
+        "the 'distilled ADRs skip the gauntlet' sentence must be pinned verbatim"
+    )
+
+
+def test_gauntlet_selects_adr_bars_not_spec_or_plan_bars():
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert "Per-lens Critical bars — adr review" in adr_section, (
+        "gauntlet/SKILL.md's adr-mode section must point the lens dispatch at the "
+        "ADR bars, not the spec or plan bars"
+    )
+
+
+def test_adr_review_bars_live_in_shared_council():
+    text = SHARED_COUNCIL.read_text()
+    assert "Per-lens Critical bars — adr review" in text, (
+        "_shared/council.md must carry the adr-review bar set for the gauntlet's "
+        "adr-mode lens pass"
+    )
+    for lens in ("*Builder — adr review:*", "*Reliability — adr review:*",
+                 "*Security — adr review:*", "*Advocate — adr review:*"):
+        assert lens in text, f"_shared/council.md missing the {lens!r} bar block"

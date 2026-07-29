@@ -1,17 +1,21 @@
 ---
 name: gauntlet
 description: >
-  Run the adversarial spec review — the gauntlet — on a draft spec before it freezes. Eight parallel
-  passes attack the spec from independent angles: fact verification, premise attack, the four council
-  lenses, an internal-consistency audit, and a plan-divergence probe. The main session adjudicates,
-  the user dispositions every Critical, and the spec is stamped with review provenance before it
-  flips to `ready`.
+  Run the adversarial review — the gauntlet — on a draft spec or a draft adr before it freezes. For
+  a spec, eight parallel passes attack it from independent angles: fact verification, premise attack,
+  the four council lenses, an internal-consistency audit, and a plan-divergence probe. For an adr, the
+  same roster runs minus the divergence probe (no analogue for a decision document) — seven passes.
+  The main session adjudicates, the user dispositions every Critical, and the record is stamped with
+  review provenance before it flips (a spec to `ready`, an adr to `active`).
   TRIGGER when: brainstorming has produced a spec and is at its exit gate (the gauntlet is a
-  mandatory step there), or the user says "run the gauntlet", "gauntlet this spec", "adversarial
-  spec review", "review the spec before it freezes", or invokes /craft:gauntlet explicitly.
+  mandatory step there), a draft adr needs review before it flips to `active`, or the user says "run
+  the gauntlet", "gauntlet this spec", "gauntlet this adr", "adversarial spec review", "review the
+  spec/adr before it freezes", or invokes /craft:gauntlet explicitly.
   DO NOT TRIGGER when: reviewing an implementation plan (planning's Council Review step covers that),
-  reviewing written code (use review), or the spec is already `ready` — a frozen spec is not
-  re-gauntleted; new thinking creates a new spec.
+  reviewing written code (use review), the spec is already `ready`, or the adr is already `active` —
+  a frozen record is not re-gauntleted; new thinking creates a new spec, and a change in decision
+  creates a new, superseding adr. A distilled (backward) adr also never triggers this skill — the
+  distill disposition owns its flip.
 ---
 
 # The spec gauntlet
@@ -23,6 +27,10 @@ load-bearing. The gauntlet is the last point where the spec is still cheap to ch
 Eight passes attack the spec in parallel, each from an angle the others structurally cannot see. The
 main session adjudicates what comes back. Nothing freezes until the user has dispositioned every
 Critical.
+
+The same review runs against a draft **adr** with an adapted, seven-pass roster and a different
+freeze target — see "Reviewing an adr" below. Everything else in this document is written for the
+spec case; the adr section states only its deltas.
 
 ## Two independent failure axes
 
@@ -195,6 +203,65 @@ with the handoff command **fully formed** — the real spec-id, never a `<placeh
 
 If any Critical was dispositioned `reframed`, the spec instead goes `superseded` and the handoff is
 back to brainstorming, not forward to planning — end with `/craft:brainstorm` instead.
+
+## Reviewing an adr
+
+The gauntlet also runs against a draft `adr` record before it flips to `active` — same mandate,
+same "no skip flag," an adapted roster, and a different freeze target. Steps 1, 2, and 4 above carry
+over unchanged (resolve the record and its absolute path, decompose its claims, adjudicate in the
+main session); this section states only where an adr target changes the rest.
+
+**Resolving the record:** `lore record show <adr-id>` in place of `<spec-id>`. Confirm its status is
+`draft`; an `active` adr is frozen by convention (`templates/adr.md`) and is not re-gauntleted — a
+change in direction is a new, superseding ADR, not an edit to this one.
+
+### The adapted roster — 7 passes, no divergence probe
+
+| # | Pass | Agent | Give it |
+|---|---|---|---|
+| 1 | Fact verification | `Explore` | The adr path + the Fact claims |
+| 2 | Premise attack | `premise-attacker` | The adr path + the Premise claims |
+| 3–6 | The four lenses | `builder`, `breaker`, `attacker`, `advocate` | Per `_shared/council.md`, using **Per-lens Critical bars — adr review** for `<lens-critical-bars>` |
+| 7 | Consistency audit | `consistency-auditor` | The adr path |
+
+**The divergence probe is dropped.** Its method is constructing two materially different
+*implementations* that both satisfy the spec under review — a decision document has nothing to
+implement two versions of, so the pass has no analogue here. This is a roster change, not a corner
+cut: everything else that can attack an ADR still does.
+
+**All seven passes are required.** Same rule as the spec roster: if any pass agent is not installed,
+name it and stop — do not quietly run six and present the result as a gauntlet. Leave the adr at
+`draft`.
+
+### The gauntlet owns the flip, directly to `active`
+
+The adr vocab (`draft`, `active`, `superseded`, `dropped`) has no `ready` — there is no intermediate
+frozen-but-inactive state the way a spec has. Once every Critical is dispositioned, the gauntlet
+flips the record directly:
+
+```
+lore record update <adr-id> --status active
+```
+
+(A Critical dispositioned `reframed` routes the adr to `dropped`, not `superseded` — it never went
+`active`, so there is no predecessor decision for it to supersede.)
+
+### Provenance goes to annotations, never the body
+
+The four-section body contract (`templates/adr.md`) is exhaustive — Context, Decision, Consequences,
+Alternatives rejected, nothing else.
+
+Gauntlet provenance for an adr target goes to the record's annotations, never the body:
+
+```
+lore record update <adr-id> --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-accepted-as-risk,<n>-disputed --status active
+```
+
+### Distilled ADRs skip the gauntlet
+
+Distilled (backward) ADRs skip the gauntlet — the distill disposition owns their flip. An ADR that
+`/craft:distill` writes from an already-completed spec is authored and flipped by that ritual
+directly; it never routes through this skill.
 
 ## Calibration
 

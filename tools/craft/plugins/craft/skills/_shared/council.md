@@ -70,19 +70,24 @@ Required output format:
 
 ## Per-lens Critical bars
 
-Two sets ship. Pick by **what is under review**, and paste the matching block into
+Three sets ship. Pick by **what is under review**, and paste the matching block into
 each member's dispatch (the `<lens-critical-bars>` token):
 
 | Reviewing | Use |
 |---|---|
 | An implementation plan (`planning` step 8.5) | **Per-lens Critical bars** (below) — phrased at slice altitude |
 | A draft spec (`gauntlet` lens pass) | **Per-lens Critical bars — spec review** (further below) — phrased at spec altitude |
+| A draft adr (`gauntlet` lens pass, adr mode) | **Per-lens Critical bars — adr review** (further below) — phrased at decision altitude |
 | A standalone question (`consult`) | The plan bars, read as applying to the unit under review; skip any bar with no analogue |
 
-The two sets are **not** interchangeable. A spec has no slices, no test contracts,
-and no code paths yet — running the plan bars against a spec produces findings that
+The sets are **not** interchangeable. A spec has no slices, no test contracts, and
+no code paths yet — running the plan bars against a spec produces findings that
 are all technically true and all useless ("this slice has no test contract" — there
-are no slices). The spec bars fire on what a spec can actually get wrong.
+are no slices). The spec bars fire on what a spec can actually get wrong. Likewise
+an adr has no Problem, Objectives, Acceptance Criteria, or UI Direction section — its
+four sections are Context, Decision, Consequences, and Alternatives rejected
+(`templates/adr.md`) — so the spec bars misfire the same way in the other direction:
+they cite sections a decision record doesn't have.
 
 *Builder:*
 - Slice ordering creates a dependency that can't be tested
@@ -153,6 +158,39 @@ is the wrong problem" belongs to that pass and should not be raised here.
 - The spec names a user-facing surface but gives no direction for its error or empty states
 - Success is defined only in system terms, with no outcome a user would notice
 - The UI Direction contradicts an acceptance criterion
+
+## Per-lens Critical bars — adr review
+
+Used by the `gauntlet` skill's lens pass in adr mode. An `adr` record has exactly
+four sections — Context, Decision, Consequences, Alternatives rejected
+(`templates/adr.md`) — and no Problem, Objectives, Acceptance Criteria, or UI
+Direction. The bars below fire on what a decision record can actually get wrong;
+they do not cite sections it doesn't have.
+
+The four lenses accept the Decision as framed and review within it — attacking
+whether the Decision itself is the right one belongs to the `premise-attacker`
+pass, not a lens.
+
+*Builder — adr review:*
+- The Decision has no implementable reading — nothing a build could conform to as stated
+- The Decision contradicts a declared project axiom or a prior, not-yet-superseded ADR
+- The Decision depends on a capability that does not exist and the record does not name it as a dependency
+- Alternatives rejected omits an alternative that was clearly live, making the Decision look uncontested when it wasn't
+
+*Reliability — adr review:*
+- The Decision is framed as irreversible (immutable once `active`) but Consequences never names the supersession path for reversing course
+- Consequences omits a cost or constraint the Decision imposes that a later build will discover the hard way
+- Context doesn't establish why the Decision was necessary now — an unforced Decision invites relitigation later
+- Nothing in the record names a condition for when the Decision should be revisited
+
+*Security — adr review:*
+- The Decision introduces or shifts a trust boundary, authz model, or handling of sensitive data that Consequences never names
+- The Decision commits to storing, logging, or transmitting sensitive data without naming its classification or retention
+- The Decision assumes an existing security control still holds without Alternatives rejected having checked it
+
+*Advocate — adr review:*
+- The Decision changes a surface someone downstream will hit, but Consequences names no way they'd discover it happened
+- Consequences describes only system-internal effects with no outcome any downstream reader would notice
 
 ## Synthesis (main session, NOT a subagent)
 
