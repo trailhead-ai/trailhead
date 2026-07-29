@@ -66,7 +66,7 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
 ```
 lore init                 Scaffold the default vault
 lore flush                Evaluate session candidates and wrap the session (dirty → clean), then commit
-lore sync                 Stage, commit, and push every configured vault (--vault <name> for one)
+lore sync                 Stage, commit, pull, and push every configured vault (--vault <name> for one)
 lore status               Report ruleset drift and any vault holding unsynced records
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)

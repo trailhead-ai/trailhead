@@ -65,6 +65,22 @@ def cmd_reindex(args) -> int:
     — there is no path override, since the active vault is fully determined by
     scoping.
     """
+    count, error = run_reindex()
+    if error is not None:
+        print(f"error: reindex failed: {error}", file=sys.stderr)
+        return 1
+    print(count)
+    return 0
+
+
+def run_reindex() -> "tuple[int | None, str | None]":
+    """Rebuild the derived index; return ``(row_count, None)`` or ``(None, error)``.
+
+    The reusable core of :func:`cmd_reindex`, also called by ``lore sync`` after a
+    pull lands records this device has never indexed. Prints nothing — each caller
+    owns its own reporting, because the same rebuild is a whole command in one
+    place and a footnote to a sync in the other.
+    """
     from ..record import store as record_store_mod
     from ..search import index as index_store_mod
     from ..vault import config as vault_config_mod
@@ -98,10 +114,8 @@ def cmd_reindex(args) -> int:
                     pass
             conn.commit()
     except Exception as exc:
-        print(f"error: reindex failed: {exc}", file=sys.stderr)
-        return 1
-    print(count)
-    return 0
+        return None, str(exc)
+    return count, None
 
 
 def add_areas_subparsers(sub) -> None:
