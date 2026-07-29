@@ -14,8 +14,14 @@ dict and is shared verbatim by the `lore record` CLI and the migration.
 It does, however, depend on `search.kql` for one thing: the set of queryable
 field names. `RESERVED_LABEL_KEYS` is derived from `KINDS | kql.VALID_FIELDS` at
 import, so the names an operator can *query by* and the names an operator may not
-*label with* cannot drift apart. The import is data-only and acyclic (`kql`
-imports nothing from this package).
+*label with* cannot drift apart. This module's own import of `kql` is a plain,
+eager, module-level import — but `kql` derives its `related-<kind>` facet fields
+from `KINDS`, and does so with a LAZY import back into this module (inside a
+function, never at `kql`'s own module load) precisely to avoid a genuine cycle:
+this module imports `kql` before `KINDS` exists in some load orders, so an eager
+reach-back from `kql` into this module would find `KINDS` undefined. See
+`search/kql.py`'s "Kind-derived facet fields" module docstring section for the
+full reasoning.
 
 Invariants:
 - The kind set is closed: exactly the 9 kinds in ``KINDS``; any other ``kind`` is

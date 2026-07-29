@@ -358,6 +358,84 @@ def test_cli_created_namespaced_label_is_searchable_via_dot_form(tmp_path):
     )
 
 
+def test_related_kind_facet_finds_forward_edge_without_reindex(tmp_path):
+    """``kind:task related-spec:<name>`` returns exactly the tasks carrying a
+    forward ``related: spec=<name>`` edge, immediately after ``record create``
+    — NO ``lore reindex``/rebuild runs between the write and the query. The
+    forward ``related-<kind>`` facet row is written by the incremental
+    index-write path (``upsert_row`` → ``_project_record``, invoked by every
+    ``record create``), never the reindex-only reverse pass — this is the
+    proof the distill sweep-queue query needs freshly written edges for."""
+    vault, state = make_vault(tmp_path)
+
+    spec_create = run_cli(
+        ["record", "create", "--kind", "spec", "--title", "Distill Target Spec"],
+        vault=vault,
+        state_dir=state,
+        stdin_text="spec body\n",
+    )
+    assert spec_create.returncode == 0, spec_create.stderr
+    spec_name = spec_create.stdout.strip().split("/", 1)[1]
+
+    matching_task = run_cli(
+        [
+            "record",
+            "create",
+            "--kind",
+            "task",
+            "--title",
+            "Task Naming The Spec",
+            "--related",
+            f"spec={spec_name}",
+        ],
+        vault=vault,
+        state_dir=state,
+        stdin_text="task body\n",
+    )
+    assert matching_task.returncode == 0, matching_task.stderr
+    matching_task_name = matching_task.stdout.strip().split("/", 1)[1]
+
+    other_task = run_cli(
+        ["record", "create", "--kind", "task", "--title", "Unrelated Task"],
+        vault=vault,
+        state_dir=state,
+        stdin_text="other body\n",
+    )
+    assert other_task.returncode == 0, other_task.stderr
+    other_task_name = other_task.stdout.strip().split("/", 1)[1]
+
+    search = run_cli(
+        ["search", f"kind:task related-spec:{spec_name}"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert search.returncode == 0, search.stderr
+    assert matching_task_name in search.stdout, (
+        f"expected {matching_task_name!r} in results for "
+        f"'kind:task related-spec:{spec_name}', got: {search.stdout!r}"
+    )
+    assert other_task_name not in search.stdout
+
+
+def test_related_kind_field_query_prints_reindex_note(tmp_path):
+    """A query using a kind-derived ``related-<kind>`` field — not just the
+    hand-listed ``area``/``phase``/``keyword`` aliases — gets the reverse-edge
+    completeness footer, since the facet namespace may also carry reindex-only
+    reverse rows."""
+    personal, shared, state = _make_fixture(tmp_path)
+    r = run_cli(["search", "related-spec:anything"], vault=personal, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "reindex" in r.stdout.lower()
+
+
+def test_related_kind_field_json_reverse_edge_alias_true(tmp_path):
+    personal, shared, state = _make_fixture(tmp_path)
+    r = run_cli(["search", "related-spec:anything", "--json"], vault=personal, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    payload = json.loads(r.stdout)
+    assert payload["reverse_edge_alias"] is True
+
+
 def test_old_equals_label_form_errors_with_guidance(tmp_path):
     vault, state = _make_label_fixture(tmp_path)
     r = _run(["label:worktree=s5"], vault=vault, state=state)

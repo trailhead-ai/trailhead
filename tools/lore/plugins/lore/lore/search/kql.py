@@ -53,9 +53,29 @@ distributed over the OR. This is the simplest form for the compiler to pattern-m
 
 **Known fields (hard error on anything else):**
 - Facet aliases: ``area``, ``phase``, ``keyword``
-- Facet real keys: ``related-area``, ``related-phases``, ``keywords``
+- Facet real keys: ``related-area``, ``related-phases``, ``keywords``,
+  and ``related-<kind>`` for every kind in ``record.model.KINDS`` (``related-task``,
+  ``related-spec``, ``related-adr``, …) — see **Kind-derived facet fields** below.
 - Scalar direct: ``kind``, ``status``, ``repo``, ``team``, ``product``, ``suite``
 - Comparison: ``created-at``, ``updated-at``, ``last-referenced-at``
+
+**Kind-derived facet fields (lazy, to avoid a circular import):**
+``record.model`` imports this module for ``VALID_FIELDS`` (to derive
+``RESERVED_LABEL_KEYS``), so this module cannot import ``record.model`` at its own
+top level — whichever of the two loads first would find the other's needed
+attribute not yet defined (a genuine import cycle, not just an ordering
+inconvenience: the existing test suite loads this module standalone, with
+``record.model`` untouched, so an eager cross-import would break it outright).
+``_kind_related_fields()`` instead does the import **inside the function**, on
+first actual use (a ``parse()`` call or a ``VALID_FIELDS`` read) — by then both
+modules have had a chance to load independently, so the import is either a fast
+``sys.modules`` hit or an ordinary standalone import, never a nested one. The
+result is cached (``KINDS`` is a frozen constant, so it never changes mid-process).
+``VALID_FIELDS`` itself is computed the same way, exposed via a module-level
+``__getattr__`` (`PEP 562 <https://peps.python.org/pep-0562/>`_) so external
+reads (``kql.VALID_FIELDS``) stay a plain, lazily-computed attribute — and a
+direct assignment (as a test override does) still takes priority, since
+``__getattr__`` only fires when normal attribute lookup fails.
 
 **Hard errors → ``KqlParseError``:**
 - Unbalanced quotes / parentheses.
@@ -105,9 +125,63 @@ _COMPARE_FIELDS = frozenset(
     }
 )
 
-VALID_FIELDS = tuple(sorted(_FACET_ALIASES | _SCALAR_FIELDS | _COMPARE_FIELDS))
+_STATIC_FIELDS = _FACET_ALIASES | _SCALAR_FIELDS | _COMPARE_FIELDS
 
-_ALL_FIELDS = _FACET_ALIASES | _SCALAR_FIELDS | _COMPARE_FIELDS
+# Cache for the kind-derived `related-<kind>` facet field names — populated on
+# first call to `_kind_related_fields()`, never at module load (see the
+# "Kind-derived facet fields" module docstring section for why).
+_KIND_RELATED_FIELDS_CACHE: frozenset | None = None
+
+
+def _kind_related_fields():
+    """``related-<kind>`` facet field names, one per kind in ``record.model.KINDS``.
+
+    Imports ``record.model`` lazily, inside this function — never at module
+    load — to avoid a circular import (``record.model`` imports this module for
+    ``VALID_FIELDS``). Cached after the first successful call.
+    """
+    global _KIND_RELATED_FIELDS_CACHE
+    if _KIND_RELATED_FIELDS_CACHE is None:
+        from ..record import model as _record_model
+
+        _KIND_RELATED_FIELDS_CACHE = frozenset(
+            f"related-{kind}" for kind in _record_model.KINDS
+        )
+    return _KIND_RELATED_FIELDS_CACHE
+
+
+def kind_related_fields():
+    """Public accessor for the kind-derived ``related-<kind>`` field names.
+
+    Used by ``search.engine`` to fold these fields into the reverse-edge
+    staleness-footer alias set without ``engine`` needing its own import of
+    ``record.model``.
+    """
+    return _kind_related_fields()
+
+
+def _all_fields():
+    """The full set of parseable field names: static fields + kind-derived ones."""
+    return _STATIC_FIELDS | _kind_related_fields()
+
+
+def _valid_fields_tuple():
+    """Sorted tuple of every parseable field name — the ``VALID_FIELDS`` value."""
+    return tuple(sorted(_all_fields()))
+
+
+def __getattr__(name):
+    """PEP 562 module-level lazy attribute: computes ``VALID_FIELDS`` on first
+    external access instead of at import time (see the module docstring's
+    "Kind-derived facet fields" section). Only fires when normal attribute
+    lookup fails, so a direct assignment (``kql.VALID_FIELDS = ...``) always
+    wins from then on.
+    """
+    if name == "VALID_FIELDS":
+        value = _valid_fields_tuple()
+        globals()["VALID_FIELDS"] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -227,15 +301,19 @@ class KqlParseError(Exception):
 def _suggest_field(name):
     """Return a deterministic 'did you mean X?' error string for an unknown field name.
 
-    Uses ``difflib.get_close_matches`` over the *sorted* ``VALID_FIELDS`` tuple
+    Uses ``difflib.get_close_matches`` over the *sorted* valid-fields tuple
     (sorted so iteration order is stable regardless of Python version or set hashing).
-    On ties, the first candidate in lexicographic order wins (``VALID_FIELDS`` is
+    On ties, the first candidate in lexicographic order wins (the tuple is
     already sorted, so ``get_close_matches`` sees a stable input and returns a stable
-    result). ``n=1`` ensures at most one suggestion.
+    result). ``n=1`` ensures at most one suggestion. Calls ``_valid_fields_tuple()``
+    directly (not the module-level ``VALID_FIELDS`` name) so this stays correct
+    even when a caller has monkeypatched ``kql.VALID_FIELDS`` to something else —
+    that override is model.py's reserved-key derivation, not the parser's.
     """
-    matches = difflib.get_close_matches(name, VALID_FIELDS, n=1, cutoff=0.6)
+    valid_fields = _valid_fields_tuple()
+    matches = difflib.get_close_matches(name, valid_fields, n=1, cutoff=0.6)
     suggestion = f"did you mean '{matches[0]}'? " if matches else ""
-    all_fields = ", ".join(VALID_FIELDS)
+    all_fields = ", ".join(valid_fields)
     return f"unknown field '{name}': {suggestion}valid fields: {all_fields}"
 
 
@@ -515,8 +593,8 @@ class _Parser:
         """Parse the RHS of a field:value expression.
 
         Routes the indexed-label selectors (``label.<key>:<value>`` and
-        ``has:label.<key>``) to ``LabelEq`` / ``LabelExists`` BEFORE the static
-        ``_ALL_FIELDS`` guard — those fields are deliberately NOT in the static set.
+        ``has:label.<key>``) to ``LabelEq`` / ``LabelExists`` BEFORE the
+        ``_all_fields()`` guard — those fields are deliberately NOT in that set.
         Then validates the field name; emits FacetMembership for facet fields,
         FieldEq for scalar fields, and Compare for comparison fields (the latter
         only when the field name appears in _COMPARE_FIELDS).
@@ -545,10 +623,10 @@ class _Parser:
                     return LabelExists(key=key)
             raise KqlParseError("has: expects has:label.<key> (e.g. has:label.worktree)")
 
-        if field not in _ALL_FIELDS:
+        if field not in _all_fields():
             raise KqlParseError(_suggest_field(field))
 
-        is_facet = field in _FACET_ALIASES
+        is_facet = field in _FACET_ALIASES or field in _kind_related_fields()
 
         # field:(a or b) group — expanded to Or tree
         if self._at(_TK_LPAREN):
@@ -578,7 +656,7 @@ class _Parser:
 
     def _parse_compare_rhs(self, field, op):
         """Parse the RHS of a field <op> value comparison."""
-        if field not in _ALL_FIELDS:
+        if field not in _all_fields():
             raise KqlParseError(_suggest_field(field))
         if field not in _COMPARE_FIELDS and field not in _SCALAR_FIELDS:
             raise KqlParseError(

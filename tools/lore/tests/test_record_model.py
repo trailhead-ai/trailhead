@@ -665,6 +665,17 @@ def test_related_prefix_reserves_beyond_the_derived_set():
     assert any("related-subsystems" in e for e in result.errors)
 
 
+def test_related_spec_label_key_still_refused():
+    """``related-spec`` is now ALSO an exact-match member of ``VALID_FIELDS``
+    (it names a real KQL query field, ``search/kql.py``'s kind-derived
+    ``related-<kind>`` facet), not just caught by the ``related-`` prefix rule.
+    A ``--label related-spec=x`` must still be refused either way — this pins
+    the regression: growing ``VALID_FIELDS`` never legitimizes a label key the
+    prefix rule already rejected."""
+    result = rm().validate(_base_sidecar_with(labels={"related-spec": "x"}))
+    assert any("related-spec" in e for e in result.errors)
+
+
 def test_annotations_accept_the_identical_reserved_key():
     """The exemption is by sidecar field name — annotations keep charset-only rules."""
     sidecar = _base_sidecar_with(
