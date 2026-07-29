@@ -487,9 +487,11 @@ def _cmd_record_create(args) -> int:
     scanning the DESTINATION vault's ``adr/`` directory via
     :func:`record_store.next_adr_number`) before ``place_record`` derives the
     slug from it, and the write goes through
-    ``validate_and_write(require_new=True)`` so a computed-number collision —
-    a race or a stray pre-existing file — refuses cleanly instead of silently
-    suffixing or clobbering.
+    ``validate_and_write(require_new=True)``, which holds a lock on the number
+    itself for the write's duration. The scan only picks a candidate: two
+    concurrent creates read the same highest number, so it is that write-time
+    lock that makes exactly one of them win and the other refuse cleanly —
+    never a silent suffix, and never a clobber.
     """
     from ..record import fields as fields_mod
     from ..record import guards as guards_mod

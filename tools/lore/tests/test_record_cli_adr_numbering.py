@@ -5,20 +5,25 @@ Covers the test contract:
   - First adr in an empty vault gets ADR-001; second gets ADR-002.
   - Highest existing slug ``adr-007-*`` (with ``adr-003`` missing) yields
     ADR-008 — gaps are preserved, a dropped number is never reused.
-  - A pre-seeded collision on the computed number refuses the write with a
-    named error: nonzero exit, no file and no index row written
-    (transactionality).
+  - An orphaned half of an interrupted write still consumes its number.
+  - A number already carried by some other title refuses the write with a named
+    error: no file and no index row written (transactionality), and the CLI maps
+    that error onto a ``lore:`` refusal line.
+  - The per-number lock sidecar is not a record: it neither consumes a number
+    nor wedges one after a crash.
   - A user-supplied already-numbered title ("ADR-9: foo") is overridden — the
     CLI's computed number wins, deliberately.
   - Non-adr kinds are unaffected (regression: naming/collision-suffix
     behavior unchanged).
-  - Concurrency: two racing creates targeting the identical computed stem —
-    exactly one wins, the loser gets the named refusal, and the surviving
-    body is intact (no clobber, no partial write).
+  - Concurrency: two racing creates that computed the same number — whether
+    they carry the identical title (identical stem) or different titles
+    (different stems) — yield exactly one surviving record for that number,
+    the loser gets the named refusal, and the surviving body is intact (no
+    clobber, no partial write).
 
 The scan/rewrite/regression/collision tests run the CLI as a subprocess (the
 conftest pattern used across the record CLI suite) so they exercise the exact
-wiring an agent invokes. The concurrency test drives ``record_store``'s
+wiring an agent invokes. The concurrency tests drive ``record_store``'s
 ``place_record``/``validate_and_write`` directly — the same production
 functions the CLI's ``--kind adr`` create branch calls — synchronized with a
 ``threading.Barrier`` so both writers reach the exclusive-write call at the
@@ -29,16 +34,21 @@ subprocess launch timing cannot guarantee it deterministically.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
 
+import pytest
 from conftest import (  # noqa: F401
     load_script,
     make_vault as _make_vault,
     run_cli as _run,
     write_default_config,
 )
+
+
+def adr_records(vault: Path) -> list[Path]:
+    """Every record artifact in the vault's ``adr/`` dir (locks excluded)."""
+    return [p for p in (vault / "adr").glob("*") if p.suffix in (".md", ".json")]
 
 
 def _find_sidecar(vault: Path, record_id: str) -> dict:
@@ -106,45 +116,64 @@ def test_gap_preserved_next_is_highest_plus_one(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_precomputed_collision_refuses_write_transactionally(tmp_path):
-    """A stray sidecar (no matching body) already occupies the exact stem the
-    write-time claim will target → refusal, nothing new persisted.
+def test_orphaned_sidecar_still_occupies_its_number(tmp_path):
+    """An orphaned ``adr-001-*.json`` (no matching ``.md``) still consumes number
+    1, so the next create is ADR-002 rather than colliding on 1.
 
-    The scan only tallies existing ``.md`` stems (:func:`next_adr_number`), so
-    an orphaned ``.json`` with no matching ``.md`` — the same interrupted-write
-    shape ``_stem_occupied`` already treats as "occupied" elsewhere in this
-    module — is invisible to the scan and so reproduces a genuine collision on
-    the computed number without needing two real concurrent writers: the scan
-    computes number 1 (nothing counted), the body claim succeeds (no ``.md``
-    there yet), and then the sidecar claim collides with the orphan.
+    The interrupted-write shape ``_stem_occupied`` already treats as "occupied"
+    elsewhere: a crash between the body claim and the sidecar claim can strand
+    either half. A scan that tallied only ``.md`` stems would hand number 1 out
+    again and the write would then refuse on a collision the scan could have
+    seen for itself.
     """
     vault, state = _make_vault(tmp_path)
     adr_dir = vault / "adr"
     adr_dir.mkdir(parents=True)
-    (adr_dir / "adr-001-collision-test.json").write_text('{"pre": "existing"}')
+    (adr_dir / "adr-001-interrupted.json").write_text('{"pre": "existing"}')
 
-    r = _create_adr(vault, state, "Collision test")
-    assert r.returncode != 0
-    assert "lore:" in r.stderr
+    r = _create_adr(vault, state, "Next decision")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "adr/adr-002-next-decision"
+    # The orphan is left exactly as it was — the scan reads, never repairs.
+    assert (adr_dir / "adr-001-interrupted.json").read_text() == '{"pre": "existing"}'
 
-    # Nothing new persisted: the orphan sidecar is untouched, and the body
-    # claimed mid-write was rolled back rather than left standing.
-    assert (
-        adr_dir / "adr-001-collision-test.json"
-    ).read_text() == '{"pre": "existing"}'
-    assert not (adr_dir / "adr-001-collision-test.md").exists()
-    assert list(adr_dir.glob("*.tmp")) == []
 
-    mod = load_script("lore.search.index")
-    conn = mod.open_index(env={"XDG_STATE_HOME": str(state)})
-    try:
-        rows = conn.execute(
-            "SELECT name FROM records WHERE vault=? AND kind=? AND name=?",
-            (str(vault), "adr", "adr-001-collision-test"),
-        ).fetchall()
-    finally:
-        conn.close()
-    assert rows == []
+def test_stranded_number_lock_does_not_wedge_the_number(tmp_path):
+    """A lock sidecar left behind by an earlier write never blocks a later one.
+
+    The lock's exclusivity is the kernel-held ``flock``, not the file's
+    existence, so an already-present ``.adr-<n>.lock`` — the normal steady state
+    once a number has been issued, and what a crashed write leaves — is simply
+    re-locked. Pins the reason a released-on-close lock was chosen over an
+    unlink-on-exit claim artifact, which would have wedged its number on a crash.
+    """
+    vault, state = _make_vault(tmp_path)
+    adr_dir = vault / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / ".adr-1.lock").write_text("")
+
+    r = _create_adr(vault, state, "First decision")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "adr/adr-001-first-decision"
+
+
+def test_number_lock_is_not_counted_as_a_record(tmp_path):
+    """The lock sidecar is not a record: it never consumes a sequence number and
+    is not itself indexed or listed as an adr artifact."""
+    vault, state = _make_vault(tmp_path)
+    first = _create_adr(vault, state, "First decision")
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.strip() == "adr/adr-001-first-decision"
+
+    # The lock is a dotfile ending in .lock — never mistaken for a record half,
+    # so the next number is 002 rather than skipping over the lock.
+    assert [p.name for p in sorted(adr_records(vault))] == [
+        "adr-001-first-decision.json",
+        "adr-001-first-decision.md",
+    ]
+    second = _create_adr(vault, state, "Second decision")
+    assert second.returncode == 0, second.stderr
+    assert second.stdout.strip() == "adr/adr-002-second-decision"
 
 
 # ---------------------------------------------------------------------------
@@ -210,19 +239,13 @@ def test_non_adr_kind_collision_still_suffixes(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_concurrent_creates_same_stem_exactly_one_winner(tmp_path):
-    """Two racing creates targeting the identical computed stem: one winner,
-    one named refusal, no clobber."""
-    rs = load_script("lore.record.store")
-    index_mod = load_script("lore.search.index")
+def _race_two_creates(rs, index_mod, vault: Path, state: Path, titles: tuple[str, str]):
+    """Race two ``validate_and_write(require_new=True)`` adr creates.
 
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    state = tmp_path / "state"
-    state.mkdir()
-
-    os.environ["LORE_EMAIL"] = "tester@example.com"
-
+    Both writers are released from a shared ``threading.Barrier`` so they reach
+    the exclusive-claim syscall at the same instant. Returns the two outcomes as
+    ``("ok", record_id)`` / ``("error", exception)`` tuples, in writer order.
+    """
     barrier = threading.Barrier(2)
     results: dict[int, tuple] = {}
 
@@ -235,12 +258,12 @@ def test_concurrent_creates_same_stem_exactly_one_winner(tmp_path):
     warm_conn = index_mod.open_index(env={"XDG_STATE_HOME": str(state)})
     warm_conn.close()
 
-    def _racer(idx: int, body_text: str) -> None:
-        location = rs.place_record("ADR-001: Same Decision", "adr", None, str(vault))
+    def _racer(idx: int, title: str, body_text: str) -> None:
+        location = rs.place_record(title, "adr", None, str(vault))
         sidecar = {
             "version": "v1",
             "kind": "adr",
-            "title": "ADR-001: Same Decision",
+            "title": title,
             "status": "draft",
         }
         conn = index_mod.open_index(env={"XDG_STATE_HOME": str(state)})
@@ -260,20 +283,149 @@ def test_concurrent_creates_same_stem_exactly_one_winner(tmp_path):
         finally:
             conn.close()
 
-    t1 = threading.Thread(target=_racer, args=(1, "body one\n"))
-    t2 = threading.Thread(target=_racer, args=(2, "body two\n"))
+    t1 = threading.Thread(target=_racer, args=(1, titles[0], "body one\n"))
+    t2 = threading.Thread(target=_racer, args=(2, titles[1], "body two\n"))
     t1.start()
     t2.start()
     t1.join(timeout=15)
     t2.join(timeout=15)
+    return [results[1], results[2]]
 
-    outcomes = [results[1], results[2]]
+
+def _assert_one_winner(rs, outcomes) -> None:
+    """Exactly one writer succeeded; the loser got the named refusal."""
     oks = [o for o in outcomes if o[0] == "ok"]
     errors = [o for o in outcomes if o[0] == "error"]
     assert len(oks) == 1, outcomes
     assert len(errors) == 1, outcomes
     assert isinstance(errors[0][1], rs.RecordAlreadyExistsError), outcomes
 
+
+def test_concurrent_creates_same_stem_exactly_one_winner(tmp_path, monkeypatch):
+    """Two racing creates targeting the identical computed stem: one winner,
+    one named refusal, no clobber."""
+    rs = load_script("lore.record.store")
+    index_mod = load_script("lore.search.index")
+
+    vault, state = _make_vault(tmp_path)
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    outcomes = _race_two_creates(
+        rs,
+        index_mod,
+        vault,
+        state,
+        ("ADR-001: Same Decision", "ADR-001: Same Decision"),
+    )
+    _assert_one_winner(rs, outcomes)
+
     body_path = vault / "adr" / "adr-001-same-decision.md"
     assert body_path.read_text() in ("body one\n", "body two\n")
     assert list((vault / "adr").glob("*.tmp")) == []
+
+
+def test_concurrent_creates_same_number_different_titles_exactly_one_winner(
+    tmp_path, monkeypatch
+):
+    """Two racing creates that both computed number 001 but carry DIFFERENT
+    titles: exactly one ADR-001 survives, the loser gets the named refusal.
+
+    Different titles mean different stems, so a stem-scoped claim lets both
+    writers through and two records ship carrying the same number. The claim
+    has to be scoped to the NUMBER for this race to have a single winner.
+    """
+    rs = load_script("lore.record.store")
+    index_mod = load_script("lore.search.index")
+
+    vault, state = _make_vault(tmp_path)
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    outcomes = _race_two_creates(
+        rs,
+        index_mod,
+        vault,
+        state,
+        ("ADR-001: Decision A", "ADR-001: Decision B"),
+    )
+    _assert_one_winner(rs, outcomes)
+
+    adr_dir = vault / "adr"
+    bodies = sorted(p.name for p in adr_dir.glob("adr-001-*.md"))
+    sidecars = sorted(p.name for p in adr_dir.glob("adr-001-*.json"))
+    assert len(bodies) == 1, bodies
+    assert len(sidecars) == 1, sidecars
+    assert Path(bodies[0]).stem == Path(sidecars[0]).stem
+    assert (adr_dir / bodies[0]).read_text() in ("body one\n", "body two\n")
+    assert list(adr_dir.glob("*.tmp")) == []
+
+
+def test_number_occupied_by_other_title_refuses_transactionally(tmp_path, monkeypatch):
+    """An existing ``adr-001-*`` record refuses a second write on number 001
+    even under a different title — nothing written, no index row.
+
+    The single-writer form of the race above: the CLI's scan cannot hand out an
+    already-occupied number, so this drives the store directly to pin the
+    write-time guard the scan relies on.
+    """
+    rs = load_script("lore.record.store")
+    index_mod = load_script("lore.search.index")
+
+    vault, state = _make_vault(tmp_path)
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+    adr_dir = vault / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "adr-001-decision-a.md").write_text("first body")
+    (adr_dir / "adr-001-decision-a.json").write_text('{"pre": "existing"}')
+
+    location = rs.place_record("ADR-001: Decision B", "adr", None, str(vault))
+    conn = index_mod.open_index(env={"XDG_STATE_HOME": str(state)})
+    try:
+        with pytest.raises(rs.RecordAlreadyExistsError):
+            rs.validate_and_write(
+                location=location,
+                sidecar={
+                    "version": "v1",
+                    "kind": "adr",
+                    "title": "ADR-001: Decision B",
+                    "status": "draft",
+                },
+                body="second body",
+                conn=conn,
+                require_new=True,
+            )
+    finally:
+        conn.close()
+
+    assert (adr_dir / "adr-001-decision-a.md").read_text() == "first body"
+    assert not (adr_dir / "adr-001-decision-b.md").exists()
+    assert not (adr_dir / "adr-001-decision-b.json").exists()
+    assert list(adr_dir.glob("*.tmp")) == []
+
+    conn = index_mod.open_index(env={"XDG_STATE_HOME": str(state)})
+    try:
+        rows = conn.execute("SELECT COUNT(*) FROM records").fetchone()
+    finally:
+        conn.close()
+    assert rows[0] == 0
+
+
+def test_refusal_reaches_the_operator_as_a_named_lore_line(capsys):
+    """The refusal surfaces as a ``lore:`` line + nonzero exit, not a traceback.
+
+    Once the sequence scan sees both stems, a number the scan hands out is never
+    already occupied, so this refusal is reachable only from a genuine race —
+    which a single subprocess cannot stage. The CLI's mapping of the store's
+    typed error onto the operator-facing clean-refusal convention is asserted
+    directly instead.
+    """
+    record_cli = load_script("lore.cli.record")
+    rs = load_script("lore.record.store")
+
+    exc = rs.RecordAlreadyExistsError("an adr already carries number 1")
+    code = record_cli._handle_write_error(exc, "create")
+
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.err == "lore: an adr already carries number 1\n"
+    # Nothing on stdout: no RECORD_ID is printed for a write that did not happen.
+    assert captured.out == ""

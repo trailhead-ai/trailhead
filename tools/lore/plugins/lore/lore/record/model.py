@@ -369,7 +369,7 @@ def _derive_reserved_label_keys() -> frozenset[str]:
 
 
 #: Bare ``labels`` keys that shadow a first-class record concept: every record
-#: kind and every queryable KQL field name (23 keys today). Derived at import from
+#: kind and every queryable KQL field name. Derived at import from
 #: the two authoritative sets — adding a kind or a query field reserves its name
 #: with no change here. Exact match only: ``hm/area`` is fine, ``area`` is not.
 RESERVED_LABEL_KEYS: frozenset[str] = _derive_reserved_label_keys()
