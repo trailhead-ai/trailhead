@@ -1068,8 +1068,8 @@ def add_record_subparser(sub) -> None:
     )
     p_record_create.add_argument(
         "--kind", required=True,
-        help="Record kind (one of: area, blob, collaboration, decision, lesson, "
-             "session, spec, task)",
+        help="Record kind (one of: adr, area, blob, collaboration, decision, "
+             "lesson, session, spec, task)",
     )
     p_record_create.add_argument(
         "--title", required=True,
