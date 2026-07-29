@@ -83,11 +83,9 @@ each member's dispatch (the `<lens-critical-bars>` token):
 The sets are **not** interchangeable. A spec has no slices, no test contracts, and
 no code paths yet — running the plan bars against a spec produces findings that
 are all technically true and all useless ("this slice has no test contract" — there
-are no slices). The spec bars fire on what a spec can actually get wrong. Likewise
-an adr has no Problem, Objectives, Acceptance Criteria, or UI Direction section — its
-four sections are Context, Decision, Consequences, and Alternatives rejected
-(`templates/adr.md`) — so the spec bars misfire the same way in the other direction:
-they cite sections a decision record doesn't have.
+are no slices). The spec bars fire on what a spec can actually get wrong. An adr's
+sections are not a spec's either, so the spec bars misfire the same way in the other
+direction — the adr set below names the sections a decision record does have.
 
 *Builder:*
 - Slice ordering creates a dependency that can't be tested

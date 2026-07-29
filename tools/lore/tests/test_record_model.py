@@ -1121,12 +1121,9 @@ def test_adr_is_a_valid_kind():
     assert rm().is_valid_kind("adr") is True
 
 
-def test_adr_initial_status_is_draft():
-    assert rm().initial_status("adr") == "draft"
-
-
-def test_adr_status_vocab_order_draft_first():
-    assert rm().STATUS_VOCAB["adr"][0] == "draft"
+# `initial_status("adr") == "draft"` and `STATUS_VOCAB["adr"][0] == "draft"` are
+# asserted with every other kind in `test_initial_status_per_kind` and
+# `test_status_vocab_is_ordered_tuple_not_frozenset` above — not repeated here.
 
 
 @pytest.mark.parametrize("status", ["draft", "active", "superseded", "dropped"])

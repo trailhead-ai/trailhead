@@ -66,7 +66,7 @@ top level — whichever of the two loads first would find the other's needed
 attribute not yet defined (a genuine import cycle, not just an ordering
 inconvenience: the existing test suite loads this module standalone, with
 ``record.model`` untouched, so an eager cross-import would break it outright).
-``_kind_related_fields()`` instead does the import **inside the function**, on
+``kind_related_fields()`` instead does the import **inside the function**, on
 first actual use (a ``parse()`` call or a ``VALID_FIELDS`` read) — by then both
 modules have had a chance to load independently, so the import is either a fast
 ``sys.modules`` hit or an ordinary standalone import, never a nested one. The
@@ -128,17 +128,21 @@ _COMPARE_FIELDS = frozenset(
 _STATIC_FIELDS = _FACET_ALIASES | _SCALAR_FIELDS | _COMPARE_FIELDS
 
 # Cache for the kind-derived `related-<kind>` facet field names — populated on
-# first call to `_kind_related_fields()`, never at module load (see the
+# first call to `kind_related_fields()`, never at module load (see the
 # "Kind-derived facet fields" module docstring section for why).
 _KIND_RELATED_FIELDS_CACHE: frozenset | None = None
 
 
-def _kind_related_fields():
+def kind_related_fields():
     """``related-<kind>`` facet field names, one per kind in ``record.model.KINDS``.
 
     Imports ``record.model`` lazily, inside this function — never at module
     load — to avoid a circular import (``record.model`` imports this module for
     ``VALID_FIELDS``). Cached after the first successful call.
+
+    Public because ``search.engine`` reads it too, to fold these fields into the
+    reverse-edge staleness-footer alias set without needing its own import of
+    ``record.model``.
     """
     global _KIND_RELATED_FIELDS_CACHE
     if _KIND_RELATED_FIELDS_CACHE is None:
@@ -150,19 +154,9 @@ def _kind_related_fields():
     return _KIND_RELATED_FIELDS_CACHE
 
 
-def kind_related_fields():
-    """Public accessor for the kind-derived ``related-<kind>`` field names.
-
-    Used by ``search.engine`` to fold these fields into the reverse-edge
-    staleness-footer alias set without ``engine`` needing its own import of
-    ``record.model``.
-    """
-    return _kind_related_fields()
-
-
 def _all_fields():
     """The full set of parseable field names: static fields + kind-derived ones."""
-    return _STATIC_FIELDS | _kind_related_fields()
+    return _STATIC_FIELDS | kind_related_fields()
 
 
 def _valid_fields_tuple():
@@ -626,7 +620,7 @@ class _Parser:
         if field not in _all_fields():
             raise KqlParseError(_suggest_field(field))
 
-        is_facet = field in _FACET_ALIASES or field in _kind_related_fields()
+        is_facet = field in _FACET_ALIASES or field in kind_related_fields()
 
         # field:(a or b) group — expanded to Or tree
         if self._at(_TK_LPAREN):

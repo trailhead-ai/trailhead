@@ -47,11 +47,6 @@ def _find_sidecar(vault: Path, record_id: str) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _find_body(vault: Path, record_id: str) -> str:
-    kind, name = record_id.split("/", 1)
-    return (vault / kind / f"{name}.md").read_text(encoding="utf-8")
-
-
 def _create_adr(vault, state, title, stdin_text=""):
     return _run(
         ["record", "create", "--kind", "adr", "--title", title],
