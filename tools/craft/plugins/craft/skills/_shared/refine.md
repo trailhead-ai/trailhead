@@ -293,11 +293,14 @@ the bracket and the note stripped. Use `Route: /craft:plan` when the work needs 
 more independently-committable cuts, or `/craft:brainstorm` when the what/why itself is
 unsettled. For an ordinary surviving question the line is not written at all.
 
-**What a route outcome writes** is exactly two things: whatever payload fields you had
+**What a route outcome writes** is exactly three things: whatever payload fields you had
 already drafted — there may be none, and you do not fill more in to round the write out
-— plus this section carrying the routing question and its `Route:` line. That payload is
+— this section carrying the routing question and its `Route:` line, and a sidecar label
+naming the route. That payload is
 **informational for whoever picks the work up in planning, not a promotion candidate**;
 the route, not the payload, is the outcome.
+
+Write the sidecar label with `--label route=plan` or `--label route=brainstorm` on the same `lore record update` invocation as the body write — never a separate write, since a follow-up write could land on a record whose body has since changed shape.
 
 Then stop: **status stays `open`**. **Never invent** an answer to an operator
 decision — the entire safety case for dispatching refine as a subagent with no
@@ -325,13 +328,13 @@ reshapes the drafting that follows it, so batching questions wastes the later on
   committable cuts; route it to `/craft:plan`?"), pre-loaded with the evidence behind
   that read. An answer settles the route; a defer falls back to the unattended
   escalation for it — `Route:` line included, so the recommendation is not lost along
-  with the question.
+  with the question. An answer also writes the sidecar label (`--label route=plan` or `--label route=brainstorm`) on the same `lore record update` invocation as the body write, exactly as the unattended path does.
 
 ### Promotion clears the escalation
 
-**On promotion, remove the `## Refine — unresolved` section.** The answered question
+**On promotion, remove the `## Refine — unresolved` section** and pass `--unset-label route` on that same write. The answered question
 survives as a citation in the payload, so a `ready` task never carries the escalation
-heading or a stale `Route:` line. Leaving it behind hands the next reader two
+heading, a stale `Route:` line, or the sidecar route label. Leaving it behind hands the next reader two
 authoritative-looking statements of intent that disagree, with no way to tell which
 one is current.
 
