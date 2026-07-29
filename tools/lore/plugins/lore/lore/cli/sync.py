@@ -5,9 +5,10 @@ one. Syncing only the ``default``-scope vault is not an option the CLI offers,
 because record writes route by scope: from a repo bound to a product-scope vault,
 ``lore record create`` writes there while a ``default``-only sync commits nothing
 of what was just written — and still prints "Committed / Pushed to origin". Every
-line of output is therefore labeled with the vault it describes, so a mismatch
-between where records land and where they are committed is visible at the call
-site rather than discovered when a disk fails.
+per-vault line of output is therefore labeled with the vault it describes, so a
+mismatch between where records land and where they are committed is visible at
+the call site rather than discovered when a disk fails. (The one run-level line —
+the closing reindex report — is unlabeled, because the index spans all vaults.)
 
 **Sync is bidirectional: commit → pull → push, in that order.** The same vault
 lives on multiple devices, so a push-only sync leaves each device blind to
@@ -24,9 +25,10 @@ uncommitted — that is the same silent-data-loss shape this module exists to cl
 
 **Network failures stay soft** (exit 0 with a notice): a failed fetch or push
 leaves the commit durable locally, and a later ``lore sync`` retries both. A
-**rebase conflict is hard** (exit 1): the vault's records and the remote's now
-genuinely disagree, and only manual resolution decides which text wins — but the
-rebase is always aborted first, so the vault is never left mid-rebase.
+**failed rebase is hard** (exit 1) — most commonly a genuine conflict, where only
+manual resolution decides which text wins. The rebase is aborted before
+reporting, and the abort is verified: if the vault somehow remains mid-rebase,
+the notice says so instead of promising a clean state that does not exist.
 
 **A pull that landed commits triggers a search-index rebuild** at the end of the
 run: the index is a derived projection of the vault tree, and records written on
@@ -78,16 +80,32 @@ def _make_emitters(name: str, width: int):
 
 
 #: Outcomes of :func:`_pull_one`. ``PULL_OK`` covers both "nothing to pull" and a
-#: clean rebase; ``PULL_OFFLINE`` means the fetch never reached the remote (soft —
-#: and the push is skipped, the network already failed once this run);
-#: ``PULL_CONFLICT`` means the rebase was aborted (hard — manual resolution only).
+#: clean integration; ``PULL_OFFLINE`` means the fetch never reached the remote
+#: (soft — and the push is skipped, the network already failed once this run);
+#: ``PULL_FAILED`` means the integration failed (hard — most commonly a rebase
+#: conflict, which only manual resolution can settle).
 PULL_OK = "ok"
 PULL_OFFLINE = "offline"
-PULL_CONFLICT = "conflict"
+PULL_FAILED = "failed"
+
+
+def _vault_mid_rebase(vault: Path) -> bool:
+    """Return ``True`` iff a rebase is in progress — state git itself tracks.
+
+    Probed via ``rev-parse --git-path`` rather than a hand-built ``.git/...``
+    path, because in a linked worktree ``.git`` is a file and the state dirs
+    live elsewhere.
+    """
+    for state_dir in ("rebase-merge", "rebase-apply"):
+        rc, out, _ = _git(vault, "rev-parse", "--git-path", state_dir)
+        # `--git-path` output is relative to the vault when not absolute.
+        if rc == 0 and out and (vault / out).exists():
+            return True
+    return False
 
 
 def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
-    """Fetch and rebase ``vault`` onto origin. Returns ``(state, commits_pulled)``.
+    """Fetch ``vault`` and integrate origin's commits. Returns ``(state, commits_pulled)``.
 
     Quiet no-ops: no origin remote (push reports it), detached HEAD (push
     reports it), a remote that does not have this branch yet (the first push
@@ -100,11 +118,22 @@ def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
     every push keeps failing. Rebasing onto the fetched ``origin/<branch>`` is
     what lets the next push converge.
 
+    **An unborn branch adopts the remote branch outright.** A freshly ``git
+    init``-ed vault wired to an existing remote has no commits to rebase, so
+    without this it would print "Nothing to commit", pull nothing, and exit 0 —
+    a silent no-op on exactly the new-device shape sync exists for. The caller
+    commits BEFORE pulling, so an unborn HEAD here implies a clean tree and
+    ``reset --hard origin/<branch>`` cannot discard local records. When the
+    remote has no branch of the same name to adopt, that is reported, not
+    skipped.
+
     **Integration is a rebase, never a merge**: sync commits are machine-made and
     content-independent, so replaying them keeps vault history linear instead of
-    accumulating a merge bubble per device pair. On conflict the rebase is
+    accumulating a merge bubble per device pair. On failure the rebase is
     ABORTED before reporting — a mid-rebase vault would break every subsequent
-    record write, which is worse than the missed pull being reported.
+    record write, which is worse than the missed pull being reported — and the
+    abort is verified via :func:`_vault_mid_rebase` so the remedy printed
+    matches the state the vault is actually in.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
@@ -122,7 +151,28 @@ def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
     else:
         branch = _vault_head_branch(vault)
         if branch is None:
-            return PULL_OK, 0
+            # No commit under HEAD: an unborn branch (fresh `git init`) still
+            # resolves a symbolic ref; a detached HEAD does not.
+            rc_sym, unborn, _ = _git(vault, "symbolic-ref", "--quiet", "--short", "HEAD")
+            if rc_sym != 0 or not unborn:
+                return PULL_OK, 0
+            rc_ref, _, _ = _git(
+                vault, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{unborn}"
+            )
+            if rc_ref != 0:
+                say_err(
+                    f"notice: vault has no commits and origin has no {unborn!r} branch — "
+                    "nothing to pull; check out the branch the remote uses, or clone the vault"
+                )
+                return PULL_OK, 0
+            rc_n, n_out, _ = _git(vault, "rev-list", "--count", f"origin/{unborn}")
+            rc_reset, _, stderr_reset = _git(vault, "reset", "--hard", f"origin/{unborn}")
+            if rc_reset != 0:
+                say_err(f"error: could not adopt origin/{unborn}: {stderr_reset}")
+                return PULL_FAILED, 0
+            adopted = int(n_out) if rc_n == 0 and n_out else 0
+            say(f"Pulled {adopted} commit(s) from origin.")
+            return PULL_OK, adopted
         rc_ref, _, _ = _git(
             vault, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"
         )
@@ -137,17 +187,23 @@ def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
 
     rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
     if rc_rebase != 0:
-        # Abort unconditionally and best-effort: whether the rebase stopped on a
-        # conflict or never started, the vault must come back to its pre-pull
-        # state before anything is reported.
+        # Abort unconditionally: whether the rebase stopped on a conflict or
+        # never started, the vault must come back to its pre-pull state before
+        # anything is reported. Verified below rather than trusted.
         _git(vault, "rebase", "--abort")
-        say_err("error: local and remote records conflict — pull skipped")
+        say_err("error: rebase onto origin failed — pull skipped")
         say_err(f"  rebase error: {stderr_rebase or stdout_rebase}")
-        say_err(
-            f"  resolve manually: cd {vault} && git pull --rebase, "
-            "fix the conflicts, then re-run `lore sync`"
-        )
-        return PULL_CONFLICT, 0
+        if _vault_mid_rebase(vault):
+            say_err(
+                f"  the vault is STILL mid-rebase; run: cd {vault} && git rebase --abort, "
+                "then re-run `lore sync`"
+            )
+        else:
+            say_err(
+                f"  resolve manually: cd {vault} && git pull --rebase, "
+                "fix the conflicts, then re-run `lore sync`"
+            )
+        return PULL_FAILED, 0
 
     say(f"Pulled {behind} commit(s) from origin.")
     return PULL_OK, behind
@@ -209,8 +265,9 @@ def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
 
     A hard failure (1) is one that leaves the vault's records unsynced: the
     directory is absent, it is not its own git toplevel, git refused the
-    stage/commit, or the pull hit a rebase conflict. Network outcomes are soft —
-    see :func:`_pull_one` and :func:`_push_one`.
+    stage/commit, or the pull failed to integrate (most commonly a rebase
+    conflict). Network outcomes are soft — see :func:`_pull_one` and
+    :func:`_push_one`.
     """
     if not vault.exists():
         say_err(f"error: vault not found: {vault} — skipped")
@@ -247,7 +304,7 @@ def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
         say("Nothing to commit — vault is clean.")
 
     pull_state, pulled = _pull_one(vault, say, say_err)
-    if pull_state == PULL_CONFLICT:
+    if pull_state == PULL_FAILED:
         return 1, 0
     if pull_state == PULL_OFFLINE:
         return 0, 0

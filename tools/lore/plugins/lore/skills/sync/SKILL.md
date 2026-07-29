@@ -61,10 +61,11 @@ message true.
   relay the notice and ask the user to re-run when the network is back.
 - **A rebase conflict is hard — but the vault is left consistent.** When the same
   record was edited on two devices and git cannot auto-merge, sync aborts the
-  rebase (never leaving a mid-rebase vault), reports the conflict with a manual
-  remedy (`cd <vault> && git pull --rebase`, resolve, re-run `lore sync`), and
-  exits 1. Relay the remedy verbatim; do NOT attempt to resolve the conflict
-  unless the user asks.
+  rebase, verifies the abort took, reports the failure with a manual remedy
+  (`cd <vault> && git pull --rebase`, resolve, re-run `lore sync`), and exits 1.
+  If the abort itself failed, the notice says the vault is still mid-rebase and
+  gives the recovery command instead. Relay the remedy verbatim; do NOT attempt
+  to resolve the conflict unless the user asks.
 - **A vault that fails hard is skipped, not fatal.** A vault that is missing or is
   not its own git toplevel is reported and skipped; the remaining vaults are still
   synced and the command exits 1 with a summary naming the failures. Relay which

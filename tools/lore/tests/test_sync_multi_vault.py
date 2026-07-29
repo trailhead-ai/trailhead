@@ -21,8 +21,11 @@ Covers:
   - commits landed on the remote by another device are pulled down (rebase)
   - a diverged vault is rebased onto origin and then pushed
   - a rebase conflict aborts cleanly: no mid-rebase state, exit 1, remedy printed
+  - a conflicted vault does not strand the others (per-vault isolation holds)
   - an unreachable remote makes fetch soft: notice, exit 0, commit still lands
-  - a pull that changed files triggers a search reindex; a no-pull sync does not
+  - an unborn (`git init` + `remote add`) vault adopts the remote branch
+  - an unborn vault with no matching remote branch is reported, not silent
+  - a pulled record becomes visible to `lore search` (reindex is not vacuous)
 
 ``lore status``:
   - flags never-committed / uncommitted / remote-less vaults, per vault
@@ -570,7 +573,15 @@ def test_sync_pull_sets_up_a_no_upstream_branch_against_an_existing_remote_branc
 
 
 def test_sync_reindexes_after_a_pull_and_only_after_a_pull(tmp_path):
-    """Pulled records must become searchable: the derived index is refreshed."""
+    """Pulled records must become searchable: the derived index is refreshed.
+
+    The pulled fixture is a complete ``.md`` + ``.json`` record pair and the
+    proof is a ``lore search`` HIT — a bare "Reindexed" line can be printed by a
+    rebuild that indexed nothing (the indexer skips sidecar-less files), so the
+    search result is the only assertion that actually covers the contract.
+    """
+    import json
+
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True)
@@ -587,7 +598,19 @@ def test_sync_reindexes_after_a_pull_and_only_after_a_pull(tmp_path):
 
     other = _clone_as_second_device(remote, tmp_path / "device-b")
     (other / "decision").mkdir()
-    (other / "decision" / "from-b.md").write_text("# a decision from device B\n")
+    (other / "decision" / "from-b.md").write_text("# Chose the quokka renderer\n")
+    # The full sidecar shape `lore record create` writes: the index schema
+    # requires the dates NOT NULL, and rebuild silently skips a violating record.
+    (other / "decision" / "from-b.json").write_text(
+        json.dumps(
+            {
+                "title": "Chose the quokka renderer",
+                "status": "active",
+                "created-at": "2026-07-29",
+                "updated-at": "2026-07-29",
+            }
+        )
+    )
     _git(other, "add", "-A")
     _git(other, "commit", "-m", "device B decision")
     _git(other, "push", "origin")
@@ -596,6 +619,116 @@ def test_sync_reindexes_after_a_pull_and_only_after_a_pull(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "Pulled 1 commit(s) from origin." in r.stdout
     assert "Reindexed" in r.stdout, "a pull that changed files must refresh the index"
+
+    # The pulled record is now visible to search on THIS device.
+    s = run_cli(["search", "quokka"], config_home=config_home, state_dir=state_dir)
+    assert s.returncode == 0, s.stderr
+    assert "from-b" in s.stdout, (
+        f"the pulled record must be searchable; stdout={s.stdout!r}"
+    )
+
+
+def test_sync_conflicting_vault_does_not_strand_the_others(tmp_path):
+    """Per-vault isolation holds for the new failure mode: one conflicted vault
+    exits the run 1, but the vaults after it still commit, pull, and push."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+
+    # Vault 1 (ordered FIRST) will hit a rebase conflict.
+    conflicted = _make_vault(tmp_path / "v-conflicted", dirty=False)
+    remote_a = _make_bare_remote(tmp_path / "remote-a.git")
+    _wire_remote(conflicted, remote_a)
+    other_a = _clone_as_second_device(remote_a, tmp_path / "device-b-a")
+    (other_a / "README.md").write_text("edited on device B\n")
+    _git(other_a, "add", "-A")
+    _git(other_a, "commit", "-m", "device B edit")
+    _git(other_a, "push", "origin")
+    (conflicted / "README.md").write_text("edited on device A\n")
+
+    # Vault 2 is healthy and behind the remote.
+    healthy = _make_vault(tmp_path / "v-healthy", dirty=True)
+    remote_b = _make_bare_remote(tmp_path / "remote-b.git")
+    _wire_remote(healthy, remote_b)
+    other_b = _clone_as_second_device(remote_b, tmp_path / "device-b-b")
+    (other_b / "elsewhere.md").write_text("# from device B\n")
+    _git(other_b, "add", "-A")
+    _git(other_b, "commit", "-m", "device B record")
+    _git(other_b, "push", "origin")
+
+    write_vault_config(
+        config_home,
+        [("default", "default", conflicted), ("healthy", "product", healthy)],
+    )
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1, "the conflicted vault must surface in the exit code"
+    assert "default" in r.stderr
+
+    # The healthy vault still did its full commit → pull → push cycle.
+    assert (healthy / "elsewhere.md").exists(), "the healthy vault must still pull"
+    assert _git(healthy, "status", "--porcelain").stdout.strip() == ""
+    assert _commit_count(Path(remote_b)) == _commit_count(healthy), (
+        "the healthy vault must still push"
+    )
+
+
+def test_sync_unborn_vault_adopts_the_remote_branch(tmp_path):
+    """A fresh `git init` + `remote add` vault must pull, not silently no-op.
+
+    With no commits there is nothing to rebase, so without explicit adoption the
+    run would print "Nothing to commit — vault is clean." and exit 0 having
+    synced nothing — on exactly the new-device shape cross-device sync is for.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    device_a = _make_vault(tmp_path / "device-a", dirty=False)
+    _wire_remote(device_a, remote)
+    branch = _git(device_a, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+    fresh = tmp_path / "v-default"
+    fresh.mkdir()
+    subprocess.run(["git", "init", str(fresh)], check=True, capture_output=True)
+    for key, val in (("user.email", "b@e.st"), ("user.name", "DeviceB"), ("commit.gpgsign", "false")):
+        _git(fresh, "config", key, val)
+    _git(fresh, "symbolic-ref", "HEAD", f"refs/heads/{branch}")
+    _git(fresh, "remote", "add", "origin", str(remote))
+
+    write_vault_config(config_home, [("default", "default", fresh)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Pulled 1 commit(s) from origin." in r.stdout
+    assert (fresh / "README.md").exists(), "the remote history must be adopted"
+
+    # Converged: upstream is set, and a second sync is a quiet no-op.
+    r2 = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r2.returncode == 0, r2.stderr
+    assert "Pulled" not in r2.stdout
+
+
+def test_sync_unborn_vault_with_no_matching_remote_branch_reports_it(tmp_path):
+    """When the remote has no branch to adopt, say so — a silent 0 hides a dead vault."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    device_a = _make_vault(tmp_path / "device-a", dirty=False)
+    _wire_remote(device_a, remote)
+
+    fresh = tmp_path / "v-default"
+    fresh.mkdir()
+    subprocess.run(["git", "init", str(fresh)], check=True, capture_output=True)
+    for key, val in (("user.email", "b@e.st"), ("user.name", "DeviceB"), ("commit.gpgsign", "false")):
+        _git(fresh, "config", key, val)
+    _git(fresh, "symbolic-ref", "HEAD", "refs/heads/some-other-branch")
+    _git(fresh, "remote", "add", "origin", str(remote))
+
+    write_vault_config(config_home, [("default", "default", fresh)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "no commits" in r.stderr
+    assert "Pulled" not in r.stdout
 
 
 # ── lore status: vault drift ───────────────────────────────────────────────
