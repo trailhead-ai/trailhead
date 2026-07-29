@@ -34,7 +34,15 @@ for humans and **nothing keys trust on it**; it is never an authz/authn signal.
 **Atomic write.** Bodies and sidecars land via
 :func:`write_temp_then_rename` — write a sibling temp file, ``fsync``, then
 ``os.replace`` it onto the target. A crash before the rename leaves only the temp
-file (or nothing), never a half-written target.
+file (or nothing), never a half-written target. ``os.replace`` always succeeds by
+clobbering, which is exactly what an update/move needs but never what a
+NEW record should tolerate. ``validate_and_write(require_new=True)`` instead
+uses :func:`write_temp_then_create_exclusive` — the same temp-write-then-fsync,
+but claims the target via ``os.link`` (atomically create-only, raising
+``FileExistsError`` rather than clobbering) — the exclusivity guard behind
+adr sequence-numbered creates (``cli/record.py``'s ``--kind adr`` branch): a
+losing concurrent writer gets a named :class:`RecordAlreadyExistsError`
+instead of silently overwriting the winner.
 
 **Fence neutralization.** The injection fence token is the literal
 ``<external-memory …>`` / ``</external-memory>`` pair (the output-wrapping
@@ -58,6 +66,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -116,6 +125,19 @@ class RecordValidationError(RecordStoreError):
 
 class RecordNotFoundError(RecordStoreError):
     """The record ID does not resolve to an on-disk record."""
+
+
+class RecordAlreadyExistsError(RecordStoreError):
+    """A ``require_new=True`` write found its target stem already occupied.
+
+    Raised by :func:`validate_and_write`'s exclusive-create path (today: adr
+    sequence-numbered creates) when the atomic claim on ``location.body_path``
+    or ``location.sidecar_path`` loses a race — a concurrent writer, or a
+    pre-existing stray file, already holds that exact stem. Nothing from THIS
+    call is left written: the exclusive claim never touches an occupied
+    target, and a body claimed just before a losing sidecar claim is rolled
+    back before this raises (see :func:`validate_and_write`).
+    """
 
 
 class InvalidRecordIdError(RecordStoreError):
@@ -427,6 +449,36 @@ def write_temp_then_rename(path: Path, text: str) -> None:
         raise
 
 
+def write_temp_then_create_exclusive(path: Path, text: str) -> None:
+    """Atomically write *text* to *path* IFF *path* does not already exist.
+
+    The create-only sibling of :func:`write_temp_then_rename`. Writes a
+    sibling temp file (name-uniqued with a UUID, not just the PID, so two
+    threads in the same process never collide on the temp name), ``fsync``s
+    it, then claims *path* via ``os.link`` — a single atomic syscall that
+    creates the hard link only if the target name is free, raising
+    ``FileExistsError`` when it is not. Unlike ``os.replace`` (used by
+    :func:`write_temp_then_rename`, which always succeeds by silently
+    clobbering an existing target), a losing concurrent writer gets a clean,
+    detectable failure instead of overwriting the winner. The temp file is
+    always removed; on a collision *path* is left completely untouched.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.link(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def _now_utc_z() -> str:
     """Return the current time as an ISO-8601 UTC ``…Z`` string (second precision)."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -460,6 +512,51 @@ def _kebab(title: str) -> str:
     if not slug:
         slug = f"note-{hashlib.sha1(title.encode()).hexdigest()[:6]}"
     return slug
+
+
+#: Matches the sequence number at the front of an adr stem (e.g.
+#: ``adr-007-some-decision`` → ``"007"``). Zero-padding is cosmetic here —
+#: ``int()`` tolerates the leading zeros.
+_ADR_STEM_NUMBER_RE = re.compile(r"^adr-(\d+)-")
+
+#: Strips a user-supplied numbered prefix (``"ADR-9: "``, any case, any
+#: digit count) from a raw title before the CLI's own ``ADR-NNN:`` prefix is
+#: applied — the override is deliberate, not a merge (see
+#: :func:`format_adr_title`).
+_ADR_TITLE_PREFIX_RE = re.compile(r"^adr-\d+:\s*", re.IGNORECASE)
+
+
+def next_adr_number(kind_dir: Path) -> int:
+    """Return the next per-vault adr sequence number: highest existing + 1.
+
+    Scans ``kind_dir`` (the vault's ``adr/`` directory) for ``.md`` stems
+    matching ``^adr-(\\d+)-`` and returns ``max(numbers) + 1``, or ``1`` when
+    the directory is missing or holds no numbered adr. A dropped/superseded
+    number is never reused — the scan only ever looks at what currently
+    exists on disk, so a gap (e.g. ``adr-003`` deleted) stays a gap.
+    """
+    kind_dir = Path(kind_dir)
+    if not kind_dir.is_dir():
+        return 1
+    highest = 0
+    for md_path in kind_dir.glob("*.md"):
+        match = _ADR_STEM_NUMBER_RE.match(md_path.stem)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def format_adr_title(number: int, title: str) -> str:
+    """Return *title* rewritten as ``"ADR-NNN: <title>"`` (zero-padded to 3).
+
+    Any existing ``"ADR-<digits>: "`` prefix on *title* is stripped first —
+    a user-supplied already-numbered title (e.g. ``"ADR-9: foo"``) has its
+    number overridden by *number*, deliberately: the CLI's per-vault sequence
+    always wins over an operator-typed number, which cannot itself be
+    verified collision-free.
+    """
+    stripped = _ADR_TITLE_PREFIX_RE.sub("", title, count=1)
+    return f"ADR-{number:03d}: {stripped}"
 
 
 def _stem_occupied(kind_dir: Path, stem: str) -> bool:
@@ -563,9 +660,14 @@ def place_record(
     Resolves the target vault (``vault_root`` when given, else the config-resolved
     active vault via :func:`_active_vault_root` — the multi-vault eligibility
     hook). The vault-relative name is ``_kebab(name)`` with a ``-2``/``-3``
-    collision suffix, **except** ``session`` kind, whose name is the
-    ``session_id`` GUID **verbatim** (no slug, no suffix). Collision occupancy
-    checks both the ``.md`` and ``.json`` stem.
+    collision suffix, **except**: ``session`` kind, whose name is the
+    ``session_id`` GUID **verbatim** (no slug, no suffix); and ``adr`` kind,
+    whose stem is ``_kebab(name)`` **without** a suffix — the caller (``lore
+    record create``) has already rewritten ``name`` into its numbered
+    ``"ADR-NNN: <title>"`` form, and a colliding stem must surface as a
+    refusal at write time (:func:`validate_and_write`'s ``require_new`` path),
+    never be silently papered over by a suffix. Collision occupancy for every
+    other kind checks both the ``.md`` and ``.json`` stem.
 
     ``scope`` is accepted for the multi-vault routing hook; it is currently unused.
     Returns a :class:`RecordLocation` whose ``record_id`` is ``<kind>/<name>``.
@@ -576,6 +678,9 @@ def place_record(
     if kind == "session":
         # The GUID is the identity; never slugged, never suffixed.
         stem = name
+    elif kind == "adr":
+        # Already-numbered by the caller; a collision refuses, it never suffixes.
+        stem = _kebab(name)
     else:
         stem = _unique_stem(kind_dir, _kebab(name))
 
@@ -727,6 +832,7 @@ def validate_and_write(
     body: str,
     conn,
     shared: int = 0,
+    require_new: bool = False,
 ) -> RecordId:
     """Validate, stamp provenance, and durably write a record.
 
@@ -735,7 +841,12 @@ def validate_and_write(
          :func:`validate_stamp_neutralize` (the shared pre-write step). Non-empty
          validation errors → :class:`RecordValidationError`, an empty committer
          email → :class:`ProvenanceError` — **nothing written** in either case.
-      5. Atomically write body then sidecar (write-temp-then-rename).
+      5. Atomically write body then sidecar — via ``write_temp_then_rename``
+         (default: always succeeds, clobbering any existing target — the
+         update/move semantics every other kind relies on) or, when
+         ``require_new`` is set, via :func:`write_temp_then_create_exclusive`
+         (never clobbers; a losing race raises :class:`RecordAlreadyExistsError`
+         instead).
       6. Update the index with the resolved vault's ``shared`` trust flag
          (default 0/own preserves vanilla). **If this raises, the text is already
          durable and wins** — we do not roll back; the exception propagates.
@@ -743,6 +854,17 @@ def validate_and_write(
     ``shared`` is the trust flag for the destination vault (0 = own/trusted, 1 =
     untrusted/shared). The caller (the CLI) computes it from
     ``vault_config.is_shared(resolved_vault)`` when a config is present, else 0.
+
+    ``require_new`` is the create-time exclusivity guard (today: adr
+    sequence-numbered creates — see ``cli/record.py``'s ``--kind adr`` branch).
+    It must NEVER be set on an update: an in-place update's whole point is to
+    write over the record's own existing artifacts, which ``require_new``
+    would refuse as a collision against itself. When set, the body is claimed
+    first; if the sidecar claim then loses (an orphan ``.json`` with no
+    matching ``.md``, the same edge :func:`_stem_occupied` guards elsewhere),
+    the just-claimed body is unlinked before the error propagates — the
+    "nothing written on refusal" invariant holds even for that partial-claim
+    edge case.
 
     Returns the vault-relative ``RecordId``.
     """
@@ -752,8 +874,27 @@ def validate_and_write(
     # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
     # diff/grep and round-trip asserts.
     sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
-    write_temp_then_rename(location.body_path, safe_body)
-    write_temp_then_rename(location.sidecar_path, sidecar_text)
+    if require_new:
+        try:
+            write_temp_then_create_exclusive(location.body_path, safe_body)
+        except FileExistsError as exc:
+            raise RecordAlreadyExistsError(
+                f"a record already exists at {location.record_id!r} — refusing "
+                f"to overwrite it"
+            ) from exc
+        try:
+            write_temp_then_create_exclusive(location.sidecar_path, sidecar_text)
+        except FileExistsError as exc:
+            # Roll back the just-claimed body: an orphaned sidecar (no
+            # matching body) must not leave this call's body claim standing.
+            location.body_path.unlink(missing_ok=True)
+            raise RecordAlreadyExistsError(
+                f"a record already exists at {location.record_id!r} — refusing "
+                f"to overwrite it"
+            ) from exc
+    else:
+        write_temp_then_rename(location.body_path, safe_body)
+        write_temp_then_rename(location.sidecar_path, sidecar_text)
 
     # 6 — index last; on failure the text already won (no rollback).
     # ``shared`` is the resolved vault's trust flag: default 0 (own/trusted)
