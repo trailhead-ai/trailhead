@@ -269,23 +269,43 @@ def test_skill_names_a_per_dispatch_timeout():
 # --- skill: the dispatch prompt contract -------------------------------------
 
 
-def test_skill_pins_the_four_dispatch_prompt_values():
-    """One span naming all four, because the failure of any one is silent.
+def test_skill_pins_the_five_dispatch_prompt_values():
+    """One span naming all five, because the failure of any one is silent.
 
     Without the procedure path the agent has no ritual; without the templates
     root the procedure's `${CLAUDE_PLUGIN_ROOT}/templates/…` dereference dangles
     inside the dispatch; without the elected vault name every write falls back to
-    cwd routing, which in an isolated agent degrades to the default vault.
+    cwd routing, which in an isolated agent degrades to the default vault; and
+    without the outcome file the agent's result has nowhere to go but its reply,
+    which is the containment leak the file channel exists to close.
     """
     _pin(
         SKILL,
-        "the task record id, the procedure path, the templates root, and the elected vault name",
-        "The dispatch prompt's payload is a closed set of four; a prose list that "
+        "elected vault name, and the outcome file",
+        "The dispatch prompt's payload is a closed set of five; a prose list that "
         "drops one produces an agent that fails quietly rather than loudly.",
     )
 
 
-@pytest.mark.parametrize("value", ["procedure_path", "templates_root", "report_path", "lock_token"])
+def test_skill_forms_the_outcome_path_the_same_way_the_cli_does():
+    """The path is derived twice — in the prompt and in `record` — from one rule.
+
+    `ranger sweep record --outcome-file` recomputes the path from the report and
+    the task id rather than taking it as an argument, so a prompt that names a
+    different path records every task as `failed` with the agent's real result
+    sitting unread on disk.
+    """
+    _pin(
+        SKILL,
+        "Outcome file: <outcomes_dir>/<name>.outcome",
+        "The coordinator and the CLI must derive one path; a divergence fails "
+        "every task while the ritual itself is working correctly.",
+    )
+
+
+@pytest.mark.parametrize(
+    "value", ["procedure_path", "templates_root", "report_path", "outcomes_dir", "lock_token"]
+)
 def test_skill_names_the_start_json_keys_it_consumes(value: str):
     _pin(
         SKILL,
@@ -350,12 +370,32 @@ def test_skill_names_the_report_as_the_headless_surface():
     )
 
 
-def test_skill_streams_one_line_per_task():
+def test_skill_forbids_reading_the_agents_reply_as_a_result():
+    """The containment leak the outcome file exists to close.
+
+    A dispatched agent's reply reaches the coordinator whether or not the
+    contract says it should — the harness surfaces a subagent's final message to
+    whatever dispatched it. So "the agent returns one line" is a property no
+    code can hold: a coordinator that parses a result out of that reply has
+    already taken the task's citations, paths, and reasoning into the context
+    the dispatch exists to protect. Only routing the result through a file the
+    CLI reads makes the boundary mechanical, and only an explicit prohibition
+    stops a coordinator from reading the reply anyway.
+    """
     _pin(
         SKILL,
-        "one line per task",
-        "The coordinator's context grows by one line per task — that bound is the "
-        "reason the per-task work is dispatched at all.",
+        "The agent's result is in its outcome file, not in what it says back to you",
+        "Without this stated as a rule, a coordinator reads the reply, finds a token "
+        "in it, and the containment the file channel buys is spent anyway.",
+    )
+
+
+def test_skill_keeps_its_per_task_context_bounded():
+    _pin(
+        SKILL,
+        "print the task name as you dispatch it",
+        "An attended sweep still needs a liveness signal; it must come from what the "
+        "coordinator already knows (the task name), never from agent output.",
     )
 
 
@@ -383,15 +423,40 @@ def test_agent_runs_on_sonnet():
     )
 
 
-# --- agent: the one-line return ----------------------------------------------
+# --- agent: the one-token outcome file ---------------------------------------
 
 
-def test_agent_pins_the_one_line_return_contract():
+def test_agent_pins_the_one_line_outcome_file_contract():
     _pin(
         AGENT,
-        "Return exactly one line, and nothing else",
-        "The one-line return is what keeps task details out of the coordinator's "
-        "context; a summary appended to it is either discarded or bucketed `failed`.",
+        "write **exactly one line** to the outcome file",
+        "The outcome file is the agent's only result channel; commentary written "
+        "around the token is bucketed `failed` by the recording verb.",
+    )
+
+
+def test_agent_is_told_its_reply_is_not_the_result():
+    """The agent must know where its result goes, or it writes one in both places.
+
+    An agent told only "write the token to a file" still summarizes its run in
+    its reply, because that is what a helpful agent does — and that reply lands
+    in the coordinator's context regardless of the file. The prohibition has to
+    be explicit on the agent's side too, not just the coordinator's.
+    """
+    _pin(
+        AGENT,
+        "Nothing you say in reply is read as the result of your run",
+        "An agent that believes its reply is its result writes its summary there, "
+        "and the coordinator reads a task's details it was never meant to see.",
+    )
+
+
+def test_agent_writes_its_outcome_even_on_failure():
+    _pin(
+        AGENT,
+        "Write the file even when things went wrong",
+        "A missing outcome file is indistinguishable from a crashed agent, so an "
+        "agent that gives up silently is reported as broken rather than as skipped.",
     )
 
 
@@ -410,7 +475,7 @@ def test_agent_returns_promoted_whatever_the_records_status_is():
     """
     _pin(
         AGENT,
-        "returns `PROMOTED` regardless of the record's current status",
+        "is `PROMOTED` regardless of the record's current status",
         "A `blocked-answered` task the agent drafts successfully must still return "
         "`PROMOTED`; the agent never writes that task's status.",
     )

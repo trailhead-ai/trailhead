@@ -1,18 +1,29 @@
-"""The three startup checks a sweep must pass before it touches anything.
+"""The four startup checks a sweep must pass before it touches anything.
 
-A sweep depends on three things it cannot install for itself: craft's refine
+A sweep depends on four things it cannot install for itself: craft's refine
 procedure (the per-task worker reads it as a document), a camp group (the
-sweep's unit of work and the report's owner), and a camp-group-elected lore
-vault for kind ``task`` (the queue's source). There is no install-time
-plugin-dependency enforcement anywhere in the suite, so these runtime checks
-are the only guard — and each one fails with its own one-line message naming
-the remediation, because "sweep didn't start" without a next action is a dead
-end for an unattended operator.
+sweep's unit of work and the report's owner), a camp-group-elected lore
+vault for kind ``task`` (the queue's source), and a resolvable committer
+email (every promotion this sweep writes is provenance-stamped with it).
+There is no install-time plugin-dependency enforcement anywhere in the suite,
+so these runtime checks are the only guard — and each one fails with its own
+one-line message naming the remediation, because "sweep didn't start" without
+a next action is a dead end for an unattended operator.
 
-**Order and atomicity.** All three run *before* the lock is acquired and
+**Order and atomicity.** All four run *before* the lock is acquired and
 before the report is created, so a failed precondition leaves the filesystem
 exactly as it found it. A half-started sweep — a lock with no report, or a
 report no one will ever finish — is worse than no sweep at all.
+
+**Why provenance is a startup check and not a per-write failure.** Lore
+refuses to write a record without a committer email, and that refusal lands
+mid-ritual inside a dispatched agent — where there is no human to ask and the
+agent's only remaining moves are to fail the task or to invent an identity.
+Agents have been observed doing the latter: improvising a plausible
+``LORE_EMAIL`` and completing the write, so a sweep's promoted records carry
+an author nobody chose. Checking once at ``start`` converts that into a
+refusal before any task is dispatched, which is the only point where the
+operator is still present to fix it.
 
 **Refusal on a floor election.** ``lore vault resolve`` is total: it always
 names a destination, falling back to the unconditional default vault when
@@ -35,6 +46,8 @@ import. Camp absent is a named error, never an ImportError traceback.
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -42,6 +55,17 @@ from typing import Any
 from trailhead.paths import config_dir, state_dir
 
 from .queue import Runner, run_lore
+
+#: Lore's committer-email sources, in the order lore itself resolves them
+#: (``lore/record/store.py``'s ``resolve_committer_email``). Mirrored rather
+#: than imported: ranger shells out to the ``lore`` CLI and never imports
+#: lore's internals (see ``ranger.sweep.queue``), and lore exposes no verb
+#: that reports the resolved email. The coupling is to an env var and a git
+#: config key — a documented, stable contract — not to lore's vault layout,
+#: which is what that decoupling rule exists to protect. If lore ever grows a
+#: verb that prints the resolved identity, this check should call it instead.
+_PROVENANCE_ENV = "LORE_EMAIL"
+_PROVENANCE_GIT_KEY = "user.email"
 
 _COMPOSED_SUBDIR = "composed"
 _PROCEDURE_GLOB = "*/plugins/craft/skills/_shared/refine.md"
@@ -87,6 +111,50 @@ def find_refine_procedure(*, env: dict[str, str] | None = None) -> tuple[Path, P
     procedure = matches[0]
     # …/plugins/craft/skills/_shared/refine.md -> …/plugins/craft/templates
     return procedure, procedure.parents[2] / _TEMPLATES_DIRNAME
+
+
+def check_provenance(
+    *, env: dict[str, str] | None = None, runner: Runner | None = None
+) -> str:
+    """Return the committer email this sweep's writes will be stamped with, or refuse.
+
+    Resolves in lore's own order — ``$LORE_EMAIL`` first, then
+    ``git config --global user.email`` — because that is the identity every
+    ``lore record update`` a dispatched agent makes will be stamped with. The
+    ``--global`` scope is lore's, not an accident: a bare ``git config
+    user.email`` would inherit whatever repo-local override the sweep happens
+    to be running inside, so checking it here would pass on an identity lore
+    will not use.
+
+    Absent or unrunnable ``git`` is treated as "unresolved" rather than
+    surfaced as its own error: the operator's next action is identical either
+    way, and the remediation message already names both sources.
+    """
+    environ = os.environ if env is None else env
+    email = (environ.get(_PROVENANCE_ENV) or "").strip()
+    if not email:
+        cmd = ["git", "config", "--global", _PROVENANCE_GIT_KEY]
+        effective = runner if runner is not None else _default_git_runner
+        try:
+            result = effective(cmd)
+        except OSError:
+            result = None
+        if result is not None and result.returncode == 0:
+            email = (result.stdout or "").strip()
+
+    if not email:
+        raise PreflightError(
+            "no committer email resolves, so every record this sweep promotes would fail to "
+            f"write (lore requires it for provenance); set it with 'git config --global "
+            f"{_PROVENANCE_GIT_KEY} <you@example.com>', or export {_PROVENANCE_ENV} for this "
+            "run — do not leave it to the dispatched agents, which cannot ask and have been "
+            "observed inventing one"
+        )
+    return email
+
+
+def _default_git_runner(cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=5)
 
 
 def _import_camp() -> tuple[Any, Any]:

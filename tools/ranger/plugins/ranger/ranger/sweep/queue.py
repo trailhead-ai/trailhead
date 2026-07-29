@@ -71,6 +71,11 @@ BUCKETS = (
     "blocked-still-waiting",
 )
 
+#: The buckets whose tasks the loop actually dispatches. The other two are
+#: reported once and never drained, so a coordinator asking "what is left to
+#: do?" wants only these — see :func:`actionable`.
+ACTIONABLE_BUCKETS = ("dispatchable", "blocked-answered")
+
 _TASK_KIND = "task"
 
 #: The one spelling of the escalation heading, shared with the report writer
@@ -252,3 +257,16 @@ def derive_queue(vault: str, *, runner: Runner | None = None) -> list[dict]:
         bucket, near_miss = classify(entry["status"], body)
         queue.append({**entry, "bucket": bucket, "answer_near_miss": near_miss})
     return queue
+
+
+def actionable(entries: list[dict]) -> list[dict]:
+    """Return only the entries in :data:`ACTIONABLE_BUCKETS`, order preserved.
+
+    The coordinator re-derives after every task and needs one answer from it:
+    what is still dispatchable. Serving that question from the full queue
+    means the two never-dispatched buckets — which by design persist for the
+    whole sweep — are re-read on every pass, and their entries dominate the
+    output on any queue that has accumulated escalations. Filtering here keeps
+    the loop's own view proportional to the work it has left.
+    """
+    return [e for e in entries if e.get("bucket") in ACTIONABLE_BUCKETS]
