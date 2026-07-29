@@ -113,7 +113,10 @@ A gap is not an escalation until both passes have run:
 - **(b) Search the vault.** Run `lore search` across the touched areas: does a prior
   decision, lesson, spec, or area profile already settle it? **An area profile and the
   ADRs it cites are first-class lookup targets here, not a generic search result to
-  stumble into** — run `lore search 'area:<name>'` for the touched area's profile, then
+  stumble into** — read the touched area's profile directly with
+  `lore record show area/<name>` (fall back to `lore search "kind:area <name>"` for
+  discovery when the exact name isn't known — `lore search 'area:<name>'` resolves to the
+  `related-area` facet, records merely tagged with the area, not the profile itself), then
   `lore record show` on every ADR that profile cites; a profile's citations are curated
   pointers at the decisions worth reading, not one hit among many others. Search **wide**
   beyond that too — vary the vocabulary, search the subsystem name and the concept and

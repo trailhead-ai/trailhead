@@ -164,9 +164,17 @@ def test_exclusions_are_checked_per_candidate_not_in_the_query():
         "distill/SKILL.md must name the per-candidate check command that applies "
         "the exclusions"
     )
-    assert "a `related: adr` edge or a `distilled=` annotation" in text, (
-        "distill/SKILL.md must name both exclusion conditions — dropping either one "
-        "re-queues an already-distilled cluster forever"
+    assert "A spec is out of the queue if it already carries **a `distilled=` annotation**" in text, (
+        "distill/SKILL.md must name the sole exclusion condition — a `distilled=` "
+        "annotation. `related:` edges are forward-only and step 1 writes the spec "
+        "provenance edge on the ADR, never on the spec, so a spec-side `related: adr` "
+        "check would never fire and cannot be relied on as an exclusion."
+    )
+    assert "distilled=adr" in text, (
+        "distill/SKILL.md must stamp the ADRs-written outcome with its own "
+        "`distilled=adr` annotation, parallel to `distilled=zero-adr` and "
+        "`distilled=rejected` — otherwise an ADRs-written cluster never carries an "
+        "exclusion key and re-enters the queue forever"
     )
 
 
@@ -414,10 +422,15 @@ def test_a_rejected_cluster_leaves_member_status_untouched():
 
 def test_a_re_run_detects_the_existing_cluster_adr_rather_than_drafting_a_second():
     text = _text()
-    assert "detect the existing cluster ADR via its `related:` edges" in text, (
+    assert "detect the existing cluster ADR via the forward `related-spec` facet" in text, (
         "distill/SKILL.md must detect an interrupted run's ADR before drafting — a "
         "second draft burns a second sequence number and splits one decision across "
         "two immutable records"
+    )
+    assert 'lore search "kind:adr related-spec:<spec-name>"' in text, (
+        "distill/SKILL.md must name the concrete resume-detection query — the spec's "
+        "own sidecar carries nothing, since step 1 writes the provenance edge on the "
+        "ADR, not the spec, so resume must read the ADR side via the forward facet"
     )
     assert "completes the remaining writes" in text, (
         "the resumed run must finish the interrupted write order, not restart it"

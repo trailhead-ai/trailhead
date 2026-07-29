@@ -1,6 +1,9 @@
 # {{name}}
 
-<!-- ADRs are immutable once `active` (convention-enforced — see gauntlet adr-mode).
+<!-- ADRs are immutable once `active` (convention-enforced). A forward ADR is drafted and
+flipped active by the gauntlet's adr mode; a backward (distilled) ADR is created already
+`active` by the distill ritual's write-order disposition — either way, once `active` an edit
+means a new, superseding ADR, not a change to this one.
 Keep the whole record to roughly one screenful: a decision that doesn't fit a screen is
 usually two decisions.
 

@@ -87,20 +87,22 @@ lore search "kind:spec status:complete"
 — and let the exclusion check below drop the ones that were genuinely distilled. Once the migration
 cohort is worked through, this second query returns only already-excluded records.
 
-### 2. Apply the exclusions per candidate, never in the query
+### 2. Apply the exclusion per candidate, never in the query
 
-A spec is out of the queue if it already carries
-**a `related: adr` edge or a `distilled=` annotation**.
-Neither can ride the KQL query: edges could, but `distilled=` cannot, because
-annotations are never indexed, so this cannot be a KQL filter. Check both per candidate:
+A spec is out of the queue if it already carries **a `distilled=` annotation** —
+`distilled=adr` (ADRs written), `distilled=zero-adr`, or `distilled=rejected`. This is the sole
+exclusion key: `related:` edges are forward-only, and step 1 writes the ADR's provenance edge as
+`--related spec=<member>` **on the ADR**, never on the spec, so a spec's own sidecar never carries
+a `related: adr` edge to check. `distilled=` cannot ride the KQL query either, because
+annotations are never indexed, so this cannot be a KQL filter. Check per candidate:
 
 ```
 lore record show <spec-id> --json
 ```
 
-Read the sidecar's `related` edges and its annotations, and drop the candidate on either hit. This
-is an extra call per candidate; at spec volume that is fine, and it is the only correct way to
-apply an exclusion key the index does not carry.
+Read the sidecar's annotations and drop the candidate on a hit. This is an extra call per
+candidate; at spec volume that is fine, and it is the only correct way to apply an exclusion key
+the index does not carry.
 
 Keep the `--json` output — its scope fields are what the explicit-scope rule above needs later.
 
@@ -194,11 +196,14 @@ The order is the contract. Each step has a different failure mode, and the seque
 interrupted run recoverable: the ADR exists early enough for a re-run to detect it, and no spec
 claims `complete` until everything behind it landed.
 
-1. **ADR records are created first.** One `lore record create --kind adr --status active` per
+1. **ADR records are created first.** One
+   `lore record create --kind adr --status active --product <scope>` (or `--team <scope>`) per
    approved draft, carrying its provenance as edges: `--related spec=<member>` for each member spec,
    `--related decision=<absorbed>` for each absorbed decision, and — when this ADR supersedes an
-   existing one — `--related adr=<predecessor>`. The create path assigns the `ADR-NNN` number
-   itself. Distilled ADRs do not route through `/craft:gauntlet`; this disposition owns their flip.
+   existing one — `--related adr=<predecessor>`. The scope flag is not optional here either — on
+   create it selects the destination vault, which is the per-vault `ADR-NNN` numbering namespace,
+   so an unscoped create can mint a number in the wrong vault. The create path assigns the `ADR-NNN`
+   number itself. Distilled ADRs do not route through `/craft:gauntlet`; this disposition owns their flip.
 
 2. Then **absorbed `decision` records are flipped `superseded` with a `related: adr=` edge** back to
    the ADR that subsumed them, so no competing owner of the same decision is left `active`.
@@ -242,8 +247,14 @@ claims `complete` until everything behind it landed.
 Every cluster ends in exactly one of these, and every one of them is terminal — nothing re-queues
 forever.
 
-- **ADRs written.** The members carry `related: adr` edges from step 1 and reach `complete` in
-  step 5.
+- **ADRs written.** The ADR(s) carry `related: spec=<member>` edges from step 1, and the members
+  reach `complete` in step 5, stamped so the exclusion check can tell this outcome from "not yet
+  distilled":
+
+  ```
+  lore record update <spec-id> --status complete --annotation distilled=adr --product <scope>
+  ```
+
 - **Zero ADRs.** The cluster produced nothing worth recording. The members still reach `complete`,
   annotated so the sweep can tell "distilled, yielded nothing" from "not yet distilled":
 
@@ -267,10 +278,13 @@ A run that stops mid-write order leaves a cluster whose ADR exists and whose spe
 `planned` — which is exactly what the next sweep re-surfaces.
 
 Before drafting anything for a re-surfaced cluster,
-**detect the existing cluster ADR via its `related:` edges** — the member specs' `--json` sidecars
-carry them. A run that finds one resumes rather than restarts: it **completes the remaining writes**
-from wherever the order stopped. Do not draft a second ADR — it would burn a second sequence number
-and split one decision across two immutable records, and there is no clean way to undo either.
+**detect the existing cluster ADR via the forward `related-spec` facet** —
+`lore search "kind:adr related-spec:<spec-name>"`. `related:` edges are forward-only, and step 1
+writes the edge on the ADR (`--related spec=<member>`), never on the spec, so the member specs'
+sidecars carry nothing to detect from; the query above reads the side that actually carries it. A
+run that finds one resumes rather than restarts: it **completes the remaining writes** from
+wherever the order stopped. Do not draft a second ADR — it would burn a second sequence number and
+split one decision across two immutable records, and there is no clean way to undo either.
 
 ## Outcome report
 
@@ -282,5 +296,5 @@ End with the read command for each ADR written, **fully formed** — the real re
 placeholder — so the reader can paste it into a fresh session as-is:
 
 ```
-lore record show adr/ADR-014-record-ops-locate-by-config-order-scan
+lore record show adr/adr-014-record-ops-locate-by-config-order-scan
 ```

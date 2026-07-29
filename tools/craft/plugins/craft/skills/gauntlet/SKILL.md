@@ -246,6 +246,27 @@ lore record update <adr-id> --status active
 (A Critical dispositioned `reframed` routes the adr to `dropped`, not `superseded` — it never went
 `active`, so there is no predecessor decision for it to supersede.)
 
+### Supersession writes both directions, on the forward path too
+
+Distill is not the only writer of an ADR — the forward path (brainstorm's altitude gate → this
+gauntlet) authors and activates ADRs as well, and supersession's "both directions" contract binds
+here identically: an `active` ADR the gauntlet is about to supersede must end this flip with its
+predecessor flipped `superseded` and back-linked, not just the new one flipped `active`.
+
+The successor's `--related adr=<predecessor>` edge is set **before** this step — brainstorm (or
+whoever authored the draft) writes it at creation, same as any other provenance edge. At
+activation, when that edge names an existing `active` ADR, the gauntlet's flip is two writes, in
+this order (mirroring distill's pinned internal order):
+
+```
+lore record update <adr-id> --status active
+lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>
+```
+
+Skipping the second write leaves the predecessor `active` next to its own successor — the same
+inconsistent state distill's resume rule exists to heal, except nothing here would ever heal it,
+because only distilled ADRs are on distill's resume path.
+
 ### Provenance goes to annotations, never the body
 
 The four-section body contract (`templates/adr.md`) is exhaustive — Context, Decision, Consequences,

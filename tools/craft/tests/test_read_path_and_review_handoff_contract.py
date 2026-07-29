@@ -112,9 +112,11 @@ def test_refine_self_serve_branch_b_names_area_profiles():
         "_shared/refine.md's branch (b) must name area profiles explicitly as a "
         "first-class lookup target, not just generic `lore search`."
     )
-    assert "lore search 'area:" in branch_b, (
-        "_shared/refine.md's branch (b) must show the concrete `lore search 'area:"
-        "<name>'` invocation for pulling an area profile."
+    assert "lore record show area/<name>" in branch_b, (
+        "_shared/refine.md's branch (b) must show the concrete `lore record show "
+        "area/<name>` invocation for pulling an area profile directly — "
+        "`lore search 'area:<name>'` resolves to the `related-area` facet (records "
+        "tagged with the area), not the profile record itself."
     )
 
 

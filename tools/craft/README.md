@@ -99,7 +99,7 @@ plugins/craft/
   .claude-plugin/plugin.json      # plugin manifest
   agents/                         # dispatchable subagents
   skills/                         # /craft: ritual skills
-  templates/                      # spec/plan/task body skeletons the skills
+  templates/                      # spec/plan/task/adr/area body skeletons the skills
                                   #   render at runtime via ${CLAUDE_PLUGIN_ROOT}
 tests/                            # packaging + registrability invariants
 ```

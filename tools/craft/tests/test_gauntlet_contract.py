@@ -482,6 +482,41 @@ def test_distilled_adrs_skip_the_gauntlet():
     )
 
 
+_FORWARD_SUPERSESSION_BACK_EDGE = (
+    "lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>"
+)
+
+
+def test_gauntlet_writes_the_predecessor_supersession_back_edge():
+    """The forward path must not leave supersession one-directional.
+
+    Distill writes both directions for a backward ADR; a forward ADR authored and
+    activated through this gauntlet needs the identical guarantee, or a reader
+    landing on the superseded predecessor never finds its successor.
+    """
+    text = GAUNTLET.read_text()
+    assert _FORWARD_SUPERSESSION_BACK_EDGE in text, (
+        "gauntlet/SKILL.md must carry the predecessor's `superseded` flip + "
+        "`related: adr=` back-edge as part of the adr-activation flip, mirroring "
+        "distill's bidirectional supersession write"
+    )
+
+
+def test_gauntlet_supersession_back_edge_is_second_write():
+    """Order matters: the successor must exist (active) before the predecessor flips.
+
+    That ordering is the recoverable one, same reasoning as distill's pinned
+    internal supersession order.
+    """
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    successor_idx = adr_section.index(_ADR_ADVANCE)
+    back_edge_idx = adr_section.index(_FORWARD_SUPERSESSION_BACK_EDGE)
+    assert successor_idx < back_edge_idx, (
+        "gauntlet/SKILL.md must write the successor's `--status active` flip "
+        "before the predecessor's `superseded` back-edge"
+    )
+
+
 def test_gauntlet_selects_adr_bars_not_spec_or_plan_bars():
     adr_section = _adr_mode_section(GAUNTLET.read_text())
     assert "Per-lens Critical bars — adr review" in adr_section, (

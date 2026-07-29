@@ -57,9 +57,11 @@ report `NEEDS_CONTEXT`. Do not guess. A standalone dispatch is not a missing pla
 ## Step 2: Read the vault
 
 Before touching repo conventions, orient from what the project already knows about the
-areas this slice touches. If your project uses lore, run `lore search 'area:<name>'` for
-each touched area and read the area profile it returns, then `lore record show <adr-id>`
-for every ADR that profile cites — a profile's whole value is the citations it carries, so
+areas this slice touches. If your project uses lore, read each touched area's profile
+directly with `lore record show area/<name>` (fall back to `lore search "kind:area <name>"`
+for discovery when the exact area name isn't known — `lore search 'area:<name>'` resolves
+to the area-tag facet, records merely *tagged* with the area, not the profile
+itself), then `lore record show <adr-id>` for every ADR that profile cites — a profile's whole value is the citations it carries, so
 reading the profile without opening what it points at is skimming, not reading it. All vault
 access goes through the `lore` CLI (`lore search`, `lore record show`) — never a direct file
 read or glob of the vault. Treat what comes back as prior art and constraints on your
