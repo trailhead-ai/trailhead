@@ -35,6 +35,7 @@ TEMPLATES_DIR = CRAFT / "templates"
 
 GAUNTLET = SKILLS_DIR / "gauntlet" / "SKILL.md"
 BRAINSTORM = SKILLS_DIR / "brainstorm" / "SKILL.md"
+DISTILL = SKILLS_DIR / "distill" / "SKILL.md"
 PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 SHARED_COUNCIL = SKILLS_DIR / "_shared" / "council.md"
 PLANNER = AGENTS_DIR / "planner.md"
@@ -50,9 +51,15 @@ _SPEC_ADVANCE_RE = re.compile(r"<spec-id>\s+--status\s+(\w+)")
 # are not advances — brainstorm creates at `draft`, and a reframed spec is superseded.
 _FROZEN_STATES = {"ready", "planned", "complete"}
 
-# `planned` / `complete` may be written by a planning path, but ONLY behind this
-# guard — the phrase is the behavior, so it is pinned verbatim.
+# `planned` may be written by a planning path, but ONLY behind this guard — the
+# phrase is the behavior, so it is pinned verbatim.
 _ADVANCE_GUARD = "only if the spec is already `ready`"
+
+# `complete` is the second licensed advance, and it belongs to exactly one file.
+# The distill ritual owns the spec `planned -> complete` edge — `complete` *means*
+# distilled — so its write carries its own guard rather than planning's: a spec may
+# only complete from `planned`, and only once its whole cluster was dispositioned.
+_COMPLETE_ADVANCE_GUARD = "only if the spec is already `planned` and its cluster is dispositioned"
 
 
 def _craft_prose_files() -> list[Path]:
@@ -137,6 +144,11 @@ def test_advancing_a_spec_past_ready_is_guarded():
 
     This is the finding that a `ready`-only grep missed: the invariant is about the
     transition, not about one word.
+
+    `complete` is carved out for the distill skill alone, which carries its own,
+    stricter guard — see `test_only_distill_completes_a_spec`. The carve-out is
+    per-file AND per-state: distill advancing a spec to `ready` or `planned` would
+    still land here.
     """
     violations = []
     for p in _craft_prose_files():
@@ -144,6 +156,8 @@ def test_advancing_a_spec_past_ready_is_guarded():
             continue
         text = p.read_text()
         advances = {s for s in _SPEC_ADVANCE_RE.findall(text) if s in _FROZEN_STATES}
+        if p == DISTILL:
+            advances -= {"complete"}
         if advances and _ADVANCE_GUARD not in text:
             violations.append(f"{p.relative_to(CRAFT)}: advances spec to {sorted(advances)}")
     assert not violations, (
@@ -151,6 +165,41 @@ def test_advancing_a_spec_past_ready_is_guarded():
         f"{_ADVANCE_GUARD!r}:\n  " + "\n  ".join(violations) + "\n"
         "An unguarded advance lets a `draft` spec reach `planned` without ever passing "
         "the gauntlet — the same bypass the freeze rule exists to close."
+    )
+
+
+def test_only_distill_completes_a_spec():
+    """`complete` means *distilled* — so exactly one file may write it.
+
+    The same structural mandate as the gauntlet's `ready`: if any other skill can
+    flip a spec `complete`, the ritual that gives the status its meaning becomes
+    optional, and `complete` degrades into "someone thought this was finished".
+    """
+    offenders = [
+        p
+        for p in _craft_prose_files()
+        if p != DISTILL and "complete" in _SPEC_ADVANCE_RE.findall(p.read_text())
+    ]
+    assert not offenders, (
+        "these craft files advance a spec to `complete`, bypassing the distill "
+        f"ritual: {[str(p.relative_to(CRAFT)) for p in offenders]}. The "
+        "planned -> complete edge belongs to distill/SKILL.md alone."
+    )
+
+
+def test_distill_carries_the_complete_advance_behind_its_own_guard():
+    assert DISTILL.exists(), f"Expected distill/SKILL.md in {SKILLS_DIR}"
+    text = DISTILL.read_text()
+    assert "complete" in _SPEC_ADVANCE_RE.findall(text), (
+        "distill/SKILL.md must carry the canonical spec-completion command "
+        "(`lore record update <spec-id> --status complete`) — it owns the "
+        "planned -> complete edge, and the guard test only recognizes that form"
+    )
+    assert _COMPLETE_ADVANCE_GUARD in text, (
+        "distill/SKILL.md must carry its advance guard verbatim: "
+        f"{_COMPLETE_ADVANCE_GUARD!r}. Planning's `ready` guard is the wrong one "
+        "here — it would license completing a spec that was never planned, and say "
+        "nothing about the cluster disposition that gives `complete` its meaning."
     )
 
 

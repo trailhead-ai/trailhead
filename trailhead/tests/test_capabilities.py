@@ -174,7 +174,9 @@ class TestCraftInventory:
         # untrusted-content-framing reference skill for evaluating incoming
         # review/CI-annotation feedback. refine is the self-serve promotion
         # ritual that turns a captured standalone `open` task into a `ready`
-        # executor-runnable leaf.
+        # executor-runnable leaf. distill is the backward-distillation ritual
+        # that condenses completed spec work into ADRs and owns the spec's
+        # planned → complete edge.
         m = load_manifest(_CRAFT_MANIFEST)
         assert set(m.skills) == {
             "polish",
@@ -186,6 +188,7 @@ class TestCraftInventory:
             "gauntlet",
             "receiving-code-review",
             "refine",
+            "distill",
         }
 
     def test_shared_not_selectable(self):
