@@ -18,6 +18,11 @@ Covers:
   - one broken vault does not strand the others: they commit, exit code is 1
   - a clean but unpushed vault is still pushed
   - a clean, in-sync vault is not pushed (no needless round-trip)
+  - commits landed on the remote by another device are pulled down (rebase)
+  - a diverged vault is rebased onto origin and then pushed
+  - a rebase conflict aborts cleanly: no mid-rebase state, exit 1, remedy printed
+  - an unreachable remote makes fetch soft: notice, exit 0, commit still lands
+  - a pull that changed files triggers a search reindex; a no-pull sync does not
 
 ``lore status``:
   - flags never-committed / uncommitted / remote-less vaults, per vault
@@ -350,8 +355,12 @@ def test_status_flags_a_remote_without_an_upstream_as_never_pushed(tmp_path):
     assert "lore sync --vault default" in r.stdout
 
 
-def test_sync_soft_push_failure_does_not_fail_the_run_or_block_other_vaults(tmp_path):
-    """An unreachable remote is soft: exit 0, and later vaults still commit."""
+def test_sync_soft_network_failure_does_not_fail_the_run_or_block_other_vaults(tmp_path):
+    """An unreachable remote is soft: exit 0, and later vaults still commit.
+
+    The fetch is the first network probe, so it is the one that reports; the
+    push is then skipped rather than double-reporting the same dead remote.
+    """
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True)
@@ -364,11 +373,11 @@ def test_sync_soft_push_failure_does_not_fail_the_run_or_block_other_vaults(tmp_
 
     r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, (
-        f"a push failure is soft — the commit is durable; stderr={r.stderr!r}"
+        f"a network failure is soft — the commit is durable; stderr={r.stderr!r}"
     )
-    assert "push failed" in r.stderr
-    assert _commit_count(broken) == 2, "the commit must land before the push is attempted"
-    assert _commit_count(later) == 2, "a push failure must not skip later vaults"
+    assert "fetch failed" in r.stderr
+    assert _commit_count(broken) == 2, "the commit must land before the network is touched"
+    assert _commit_count(later) == 2, "a network failure must not skip later vaults"
 
 
 def test_sync_message_applies_to_every_vault(tmp_path):
@@ -396,6 +405,197 @@ def test_sync_skips_push_when_clean_and_in_sync(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "Nothing to commit" in r.stdout
     assert "Pushed to origin." not in r.stdout
+
+
+# ── lore sync: pull behavior ───────────────────────────────────────────────
+
+
+def _clone_as_second_device(remote: Path, path: Path) -> Path:
+    """Clone ``remote`` to ``path`` — the same vault as seen from another device."""
+    subprocess.run(
+        ["git", "clone", str(remote), str(path)], check=True, capture_output=True
+    )
+    for key, val in (("user.email", "b@e.st"), ("user.name", "DeviceB"), ("commit.gpgsign", "false")):
+        _git(path, "config", key, val)
+    return path
+
+
+def test_sync_pulls_commits_made_on_another_device(tmp_path):
+    """The cross-device case: a record captured elsewhere must land here on sync."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "elsewhere.md").write_text("# captured on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B record")
+    _git(other, "push", "origin")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Pulled 1 commit(s) from origin." in r.stdout
+    assert (default / "elsewhere.md").exists(), "the remote record must land locally"
+
+
+def test_sync_diverged_vault_rebases_then_pushes(tmp_path):
+    """Local dirt + a remote commit: sync must integrate BOTH, not fail the push.
+
+    The pre-pull command soft-failed the push on every run once the devices
+    diverged — the exact cross-device pain pull support exists to close.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "theirs.md").write_text("# device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B record")
+    _git(other, "push", "origin")
+
+    (default / "ours.md").write_text("# device A\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Pulled 1 commit(s) from origin." in r.stdout
+    assert "Pushed to origin." in r.stdout
+    assert (default / "theirs.md").exists()
+    assert (default / "ours.md").exists()
+    # Both devices' commits are on the remote — nothing left ahead or behind.
+    assert _commit_count(Path(remote)) == _commit_count(default)
+
+
+def test_sync_rebase_conflict_aborts_cleanly_and_fails_hard(tmp_path):
+    """A true both-sides edit must abort the rebase, never strand a mid-rebase vault."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+
+    (default / "README.md").write_text("edited on device A\n")
+
+    write_vault_config(config_home, [("default", "default", default)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1, "an unresolved conflict must surface in the exit code"
+    assert "conflict" in r.stderr.lower()
+    assert "git pull --rebase" in r.stderr, "the remedy must be actionable"
+
+    # The vault is NOT left mid-rebase: no rebase state dir, tree is clean, and
+    # the local commit survives intact for the manual resolution.
+    assert not (default / ".git" / "rebase-merge").exists()
+    assert not (default / ".git" / "rebase-apply").exists()
+    assert _git(default, "status", "--porcelain").stdout.strip() == ""
+    assert (default / "README.md").read_text() == "edited on device A\n"
+
+
+def test_sync_unreachable_remote_makes_fetch_soft(tmp_path):
+    """Offline is soft: the commit lands, one notice fires, exit stays 0."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+    # Simulate going offline AFTER the upstream is established.
+    _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    (default / "record.md").write_text("# a record\n")
+    write_vault_config(config_home, [("default", "default", default)])
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, (
+        f"a fetch failure is soft — the commit is durable; stderr={r.stderr!r}"
+    )
+    assert "fetch failed" in r.stderr
+    assert _commit_count(default) == 2, "the commit must land before fetch is attempted"
+    # One network probe already failed; the push is skipped, not double-reported.
+    assert "push failed" not in r.stderr
+
+
+def test_sync_pull_sets_up_a_no_upstream_branch_against_an_existing_remote_branch(tmp_path):
+    """Both devices doing a 'first push' must converge, not reject forever.
+
+    Device B wires origin with no upstream after device A has already pushed:
+    a bare push is rejected (non-fast-forward) and ``-u`` never sets the
+    upstream on a failed push, so without pulling against ``origin/<branch>``
+    the vault would fail identically on every future sync.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+
+    # Device A pushes first.
+    device_a = _make_vault(tmp_path / "device-a", dirty=False)
+    _wire_remote(device_a, remote)
+
+    # Device B has its own independent history and no upstream — but no
+    # overlapping paths, so the histories interleave without conflict.
+    device_b = tmp_path / "v-default"
+    device_b.mkdir()
+    subprocess.run(["git", "init", str(device_b)], check=True, capture_output=True)
+    for key, val in (("user.email", "b@e.st"), ("user.name", "DeviceB"), ("commit.gpgsign", "false")):
+        _git(device_b, "config", key, val)
+    branch_a = _git(device_a, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    _git(device_b, "checkout", "-b", branch_a)
+    (device_b / "b-record.md").write_text("# device B\n")
+    _git(device_b, "add", "-A")
+    _git(device_b, "commit", "-m", "device B init")
+    _git(device_b, "remote", "add", "origin", str(remote))
+
+    write_vault_config(config_home, [("default", "default", device_b)])
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Pulled" in r.stdout
+    assert "Pushed to origin." in r.stdout
+    assert (device_b / "README.md").exists(), "device A's history must be integrated"
+    assert _commit_count(Path(remote)) == _commit_count(device_b)
+
+
+def test_sync_reindexes_after_a_pull_and_only_after_a_pull(tmp_path):
+    """Pulled records must become searchable: the derived index is refreshed."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    default = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(default, remote)
+
+    write_vault_config(config_home, [("default", "default", default)])
+
+    # No pull happened — no reindex line.
+    r0 = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r0.returncode == 0, r0.stderr
+    assert "Reindexed" not in r0.stdout
+
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "decision").mkdir()
+    (other / "decision" / "from-b.md").write_text("# a decision from device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B decision")
+    _git(other, "push", "origin")
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    assert "Pulled 1 commit(s) from origin." in r.stdout
+    assert "Reindexed" in r.stdout, "a pull that changed files must refresh the index"
 
 
 # ── lore status: vault drift ───────────────────────────────────────────────

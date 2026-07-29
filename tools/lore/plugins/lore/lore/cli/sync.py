@@ -1,4 +1,4 @@
-"""``lore sync`` — stage, commit, and push EVERY configured vault.
+"""``lore sync`` — stage, commit, pull, and push EVERY configured vault.
 
 The no-argument form covers all configured vaults; ``--vault <name>`` narrows to
 one. Syncing only the ``default``-scope vault is not an option the CLI offers,
@@ -9,14 +9,29 @@ line of output is therefore labeled with the vault it describes, so a mismatch
 between where records land and where they are committed is visible at the call
 site rather than discovered when a disk fails.
 
-**Partial failure is per-vault, never fatal to the run.** A vault that is missing,
-is not its own git toplevel, or fails to stage/commit is reported and *skipped*;
-the remaining vaults are still synced and the command exits 1 at the end. One
-broken vault must not be able to strand the others uncommitted — that is the same
-silent-data-loss shape this module exists to close.
+**Sync is bidirectional: commit → pull → push, in that order.** The same vault
+lives on multiple devices, so a push-only sync leaves each device blind to
+records captured on the others — and once histories diverge, every push is
+rejected while the error text blames the network. Local changes are committed
+FIRST so the pull rebases real commits (never stashes a dirty tree), then
+remote commits are integrated, then the combined history is pushed.
 
-**Push failures stay soft** (exit 0 with a notice): the commit is already durable
-locally and a later ``lore sync`` re-pushes it.
+**Partial failure is per-vault, never fatal to the run.** A vault that is missing,
+is not its own git toplevel, fails to stage/commit, or hits a rebase conflict is
+reported and *skipped*; the remaining vaults are still synced and the command
+exits 1 at the end. One broken vault must not be able to strand the others
+uncommitted — that is the same silent-data-loss shape this module exists to close.
+
+**Network failures stay soft** (exit 0 with a notice): a failed fetch or push
+leaves the commit durable locally, and a later ``lore sync`` retries both. A
+**rebase conflict is hard** (exit 1): the vault's records and the remote's now
+genuinely disagree, and only manual resolution decides which text wins — but the
+rebase is always aborted first, so the vault is never left mid-rebase.
+
+**A pull that landed commits triggers a search-index rebuild** at the end of the
+run: the index is a derived projection of the vault tree, and records written on
+another device have never been projected on this one — without the rebuild,
+``lore search`` would silently miss exactly the records sync just fetched.
 """
 from __future__ import annotations
 
@@ -60,6 +75,82 @@ def _make_emitters(name: str, width: int):
         print(f"  {label} {text}", file=sys.stderr)
 
     return say, say_err
+
+
+#: Outcomes of :func:`_pull_one`. ``PULL_OK`` covers both "nothing to pull" and a
+#: clean rebase; ``PULL_OFFLINE`` means the fetch never reached the remote (soft —
+#: and the push is skipped, the network already failed once this run);
+#: ``PULL_CONFLICT`` means the rebase was aborted (hard — manual resolution only).
+PULL_OK = "ok"
+PULL_OFFLINE = "offline"
+PULL_CONFLICT = "conflict"
+
+
+def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
+    """Fetch and rebase ``vault`` onto origin. Returns ``(state, commits_pulled)``.
+
+    Quiet no-ops: no origin remote (push reports it), detached HEAD (push
+    reports it), a remote that does not have this branch yet (the first push
+    creates it), and an already-up-to-date upstream.
+
+    **A branch with no upstream still pulls against ``origin/<branch>`` when that
+    ref exists.** Two devices can both be at their "first push": the loser's push
+    is rejected non-fast-forward, and ``--set-upstream`` never records an upstream
+    on a FAILED push — so a pull keyed on ``@{u}`` alone would skip forever while
+    every push keeps failing. Rebasing onto the fetched ``origin/<branch>`` is
+    what lets the next push converge.
+
+    **Integration is a rebase, never a merge**: sync commits are machine-made and
+    content-independent, so replaying them keeps vault history linear instead of
+    accumulating a merge bubble per device pair. On conflict the rebase is
+    ABORTED before reporting — a mid-rebase vault would break every subsequent
+    record write, which is worse than the missed pull being reported.
+    """
+    rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
+    if rc_remote != 0 or not remote_url:
+        return PULL_OK, 0
+
+    rc_fetch, _, stderr_fetch = _git(vault, "fetch", "origin")
+    if rc_fetch != 0:
+        say_err("notice: fetch failed — skipping pull and push; records stay committed locally")
+        say_err(f"  fetch error: {stderr_fetch}")
+        say_err("  re-run `lore sync` when online")
+        return PULL_OFFLINE, 0
+
+    if _vault_has_upstream(vault):
+        upstream = "@{u}"
+    else:
+        branch = _vault_head_branch(vault)
+        if branch is None:
+            return PULL_OK, 0
+        rc_ref, _, _ = _git(
+            vault, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"
+        )
+        if rc_ref != 0:
+            return PULL_OK, 0
+        upstream = f"origin/{branch}"
+
+    rc_count, count_out, _ = _git(vault, "rev-list", "--count", f"HEAD..{upstream}")
+    if rc_count != 0 or not count_out or count_out == "0":
+        return PULL_OK, 0
+    behind = int(count_out)
+
+    rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
+    if rc_rebase != 0:
+        # Abort unconditionally and best-effort: whether the rebase stopped on a
+        # conflict or never started, the vault must come back to its pre-pull
+        # state before anything is reported.
+        _git(vault, "rebase", "--abort")
+        say_err("error: local and remote records conflict — pull skipped")
+        say_err(f"  rebase error: {stderr_rebase or stdout_rebase}")
+        say_err(
+            f"  resolve manually: cd {vault} && git pull --rebase, "
+            "fix the conflicts, then re-run `lore sync`"
+        )
+        return PULL_CONFLICT, 0
+
+    say(f"Pulled {behind} commit(s) from origin.")
+    return PULL_OK, behind
 
 
 def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
@@ -110,48 +201,58 @@ def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
     return 0
 
 
-def _sync_one(vault: Path, message: str, say, say_err) -> int:
-    """Stage, commit, and push a single vault. Returns 0, or 1 on a hard failure.
+def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
+    """Stage, commit, pull, and push a single vault.
 
-    A hard failure (1) is one that leaves the vault's records uncommitted: the
-    directory is absent, it is not its own git toplevel, or git refused the
-    stage/commit. Push outcomes are soft — see :func:`_push_one`.
+    Returns ``(exit_code, commits_pulled)`` — 1 on a hard failure, and the pull
+    count so the caller knows whether the derived search index is now stale.
+
+    A hard failure (1) is one that leaves the vault's records unsynced: the
+    directory is absent, it is not its own git toplevel, git refused the
+    stage/commit, or the pull hit a rebase conflict. Network outcomes are soft —
+    see :func:`_pull_one` and :func:`_push_one`.
     """
     if not vault.exists():
         say_err(f"error: vault not found: {vault} — skipped")
-        return 1
+        return 1, 0
 
     if not _vault_is_git_toplevel(vault):
         say_err(
             f"error: not its own git toplevel: {vault} — skipped\n"
             "         (vault may be a subdirectory of a larger repo, or not a git repo)"
         )
-        return 1
+        return 1, 0
 
     # Probe BEFORE staging: a clean vault needs no index write, and `status
     # --porcelain` already reports untracked files, so nothing is missed.
     rc, status_out, stderr = _git(vault, "status", "--porcelain")
     if rc != 0:
         say_err(f"error: git status failed: {stderr} — skipped")
-        return 1
+        return 1, 0
 
     committed = False
     if status_out.strip():
         rc, _, stderr = _git(vault, "add", "-A")
         if rc != 0:
             say_err(f"error: git add failed: {stderr} — skipped")
-            return 1
+            return 1, 0
         # Never pass -S or --no-gpg-sign; honor the adopter's commit.gpgsign.
         rc, _, stderr = _git(vault, "commit", "-m", message)
         if rc != 0:
             say_err(f"error: git commit failed: {stderr} — skipped")
-            return 1
+            return 1, 0
         say(f"Committed: {message}")
         committed = True
     else:
         say("Nothing to commit — vault is clean.")
 
-    return _push_one(vault, say, say_err, committed=committed)
+    pull_state, pulled = _pull_one(vault, say, say_err)
+    if pull_state == PULL_CONFLICT:
+        return 1, 0
+    if pull_state == PULL_OFFLINE:
+        return 0, 0
+
+    return _push_one(vault, say, say_err, committed=committed), pulled
 
 
 def _select_targets(vault_filter: str | None) -> tuple[list, int]:
@@ -188,6 +289,11 @@ def cmd_sync(args) -> int:
 
     Exit code is 1 if ANY vault hit a hard failure, 0 otherwise — the run always
     attempts every selected vault first, so one failure never strands the rest.
+
+    When any vault pulled commits, the derived search index is rebuilt ONCE at
+    the end (it is global across vaults, so per-vault rebuilds would be wasted
+    work). A reindex failure is soft: the pulled text is already on disk and
+    wins, and ``lore search`` reports its own staleness until `lore reindex`.
     """
     targets, rc = _select_targets(getattr(args, "vault", None))
     if rc != 0:
@@ -197,10 +303,25 @@ def cmd_sync(args) -> int:
     width = max(len(name) for name, _ in targets) + 1  # + ':'
 
     failed: list[str] = []
+    total_pulled = 0
     for name, vault in targets:
         say, say_err = _make_emitters(name, width)
-        if _sync_one(Path(vault), message, say, say_err) != 0:
+        rc_one, pulled = _sync_one(Path(vault), message, say, say_err)
+        total_pulled += pulled
+        if rc_one != 0:
             failed.append(name)
+
+    if total_pulled:
+        from .areas import run_reindex
+
+        count, error = run_reindex()
+        if error is not None:
+            print(
+                f"notice: search reindex failed after pull — run `lore reindex` ({error})",
+                file=sys.stderr,
+            )
+        else:
+            print(f"  Reindexed {count} record(s) after pull.")
 
     if failed:
         print(
@@ -215,7 +336,7 @@ def cmd_sync(args) -> int:
 def add_sync_subparser(sub) -> None:
     """Register the ``sync`` command parser."""
     p_sync = sub.add_parser(
-        "sync", help="Stage, commit, and push every configured vault"
+        "sync", help="Stage, commit, pull, and push every configured vault"
     )
     p_sync.add_argument(
         "--message", "-m", default=None,
