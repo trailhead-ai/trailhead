@@ -16,18 +16,19 @@ description: >
 
 Drain this camp group's shaping queue without a human in the loop. Every task in the
 queue is handed to a dispatched `ranger:refine` agent that runs craft's refine ritual
-against it and returns **one line**; you record that line, move on, and finish with a
-durable report.
+against it and writes **one token to a file**; you tell the CLI to read that file, move on,
+and finish with a durable report.
 
 **You are the coordinator.** Three parties, three jobs, and the split is the whole
 design:
 
 - **The `ranger` CLI** owns everything mechanical — preconditions, the per-vault lock,
-  queue derivation, and the report. Its files, not your transcript, are the sweep's state.
+  queue derivation, outcome reading, and the report. Its files, not your transcript, are
+  the sweep's state.
 - **The dispatched agent** owns one task's ritual, in its own context. Task details never
   reach you.
-- **You** own the loop: dispatch, parse one line per task, record it, and write the one
-  status the ritual is forbidden to write.
+- **You** own the loop: dispatch, record, and write the one status the ritual is forbidden
+  to write. You do not interpret anything.
 
 **Recommended tier:** whatever you are already on. You read no task bodies and make no
 design calls — the reasoning is in the dispatched agents.
@@ -38,13 +39,18 @@ design calls — the reasoning is in the dispatched agents.
   CLI extracts question text straight into the report so escalation prose never transits
   your context; opening a record by hand defeats that containment and floods the very
   context the dispatch exists to protect.
+- **You never read an agent's reply as a result.** Outcomes travel in files, and the CLI
+  reads them (§2.2). A reply is text you cannot un-read — treating it as the result puts a
+  task's citations and reasoning in your context, which is the same leak by a different
+  door.
 - **Shell variables do not survive between commands.** Each command you run may get a
   fresh shell, so nothing you assign persists. Carry the values from `ranger sweep start`
   in your working context and substitute them **literally** into every later command.
 - **Snippets are POSIX `sh`.** They must run unchanged under whatever shell your Bash
   tool spawns. No fish syntax, no bash-only builtins.
-- **Untrusted text is never interpolated into a command string.** An agent's return line
-  goes into `--outcome` as a single quoted argument and nowhere else.
+- **Untrusted text is never interpolated into a command string.** Outcome text reaches the
+  CLI by file, never through your shell. On the rare hand-written `--outcome`, it is one
+  quoted argument and nowhere else.
 
 ## 1. Start the sweep
 
@@ -72,6 +78,7 @@ Keep these fields; you need every one of them later:
 | `procedure_path` | Absolute path to craft's refine procedure — goes in every dispatch prompt. |
 | `templates_root` | Absolute path to craft's `templates/` — goes in every dispatch prompt. |
 | `report_path` | The report to append to and to hand back at the end. |
+| `outcomes_dir` | Where each agent writes its result — you form one path per task from it. |
 | `lock_token` | Proves the lock is this run's; `finish` will not release without it. |
 | `queue` | The derived queue: one entry per task, oldest first. |
 | `group`, `vault_path` | Context only. |
@@ -105,47 +112,72 @@ commit, so two agents in flight race each other for the vault.
 
 ### 2.1 Dispatch the agent
 
-Dispatch the `ranger:refine` subagent. Its prompt carries exactly four values and nothing
-else about the task: the task record id, the procedure path, the templates root, and the elected vault name.
+Dispatch the `ranger:refine` subagent. Its prompt carries exactly five values and nothing
+else about the task: the task record id, the procedure path, the templates root, the
+elected vault name, and the outcome file this task's result goes in.
 
 ```
 Task record id: task/<name>
 Refine procedure: <procedure_path>
 Templates root: <templates_root>
 Elected vault: <vault>
+Outcome file: <outcomes_dir>/<name>.outcome
 ```
+
+The outcome path is `<outcomes_dir>` from `start`, the task's bare name, and `.outcome` —
+form it exactly that way, because §2.3 recomputes the same path and a mismatch records the
+task as failed.
 
 Do not add background, do not summarize the task, and do not tell the agent how to refine —
 `procedure_path` is the authority on the ritual and the agent reads it in full.
 
-### 2.2 Parse the return
+### 2.2 Do not read the agent's reply
 
-The agent returns exactly one line, drawn from a closed set:
-`PROMOTED` / `ESCALATED` / `ROUTED <target>` / `SKIPPED <reason>`
+**The agent's result is in its outcome file, not in what it says back to you.** Its reply
+is not the result of its run and carries no information you need — do not parse it, do not
+summarize it, and do not act on it. The whole reason the outcome travels through a file is
+that a reply is text you cannot un-read: parse a result out of it and the task's citations,
+file paths, and reasoning are in your context, which is exactly what the dispatch exists to
+prevent.
 
-Stream that one line per task into the transcript as it arrives — for an attended run it
-is the only sign the sweep is alive.
+If you want a liveness signal for an attended run, print the task name as you dispatch it
+and again as you record it. That is the sweep showing progress without you reading a word
+of agent output.
 
 ### 2.3 Record it
 
 ```sh
-ranger sweep record --report "<report_path>" --task "task/<name>" --queue-bucket dispatchable --outcome "PROMOTED"
+ranger sweep record --report "<report_path>" --task "task/<name>" --queue-bucket dispatchable --outcome-file
 ```
 
+`--outcome-file` reads the token the agent wrote, from the path §2.1 handed it. **Prefer it
+always.** A missing or empty file — an agent that died, timed out, or never ran — records
+as `failed` and names that as the reason, so you never need to synthesize a failure by hand
+for a dispatch that produced nothing.
+
 Use `--queue-bucket blocked-answered` for a task that came out of that bucket; the report
-keeps the bucket the task's history earns it on `PROMOTED` and `ROUTED`. Every other return
+keeps the bucket the task's history earns it on `PROMOTED` and `ROUTED`. Every other outcome
 outranks that bucket, because each carries something a bare id under "Blocked — answered"
 would drop: `ESCALATED` carries the question the ritual just wrote and the command that
-answers it, and `SKIPPED`, `FAILED`, and an unparseable return each carry their reason.
-Pass the return line as one quoted argument, exactly as received — never build a larger
-command string around it.
+answers it, and `SKIPPED`, `FAILED`, and an unparseable token each carry their reason.
+
+`--outcome "<line>"` remains for driving the verb by hand. Never use it to pass along
+something you read out of an agent's reply — that launders a broken return into a clean
+record and defeats the enforcement in §2.2.
+
+If you need the outcome for the §2.4 status write, read it back from the report or from the
+outcome file with `cat` — one token, not the agent's prose.
 
 Add the task id to the attempted-this-sweep set (§2.7) as you record it.
 
 ### 2.4 The blocked exit edge — yours, and only yours
 
 For a task that entered the queue as `blocked-answered`, and for no other task, write the
-exit status yourself after recording the outcome:
+exit status yourself after recording the outcome. Read the token from the outcome file —
+`cat "<outcomes_dir>/<name>.outcome"` — not from the agent's reply.
+
+The file holds one token from a closed set, and this is the only step that reads it:
+`PROMOTED` / `ESCALATED` / `ROUTED <target>` / `SKIPPED <reason>`
 
 - `PROMOTED` → `lore record update task/<name> --vault <elected-vault> --status ready`
 - `ESCALATED` or `ROUTED <target>` → `lore record update task/<name> --vault <elected-vault> --status open`
@@ -183,13 +215,17 @@ the filter drops them from every derivation that follows.
 
 ### 2.6 When a dispatch goes wrong
 
-A dispatch that errors, returns nothing parseable, or overruns the
+A dispatch that errors, writes nothing parseable, or overruns the
 **10-minute per-dispatch timeout**
 buckets `failed`, leaves the task record untouched, and the sweep continues to the next
 task. One confused agent must never end a drain that still has tasks in it.
 
-Feed the CLI what you actually got — it truncates to one line, buckets `failed`, and exits
-0 either way:
+**Usually you do nothing special.** Record it exactly as §2.3 says: an agent that died or
+never ran left no outcome file, and `--outcome-file` turns that into a `failed` line naming
+the absence. The same holds for an agent that wrote commentary instead of a token.
+
+Synthesize a failure by hand only when you know something the file cannot say — a timeout
+you enforced, or a dispatch that errored before the agent started:
 
 ```sh
 ranger sweep record --report "<report_path>" --task "task/<name>" --outcome "FAILED dispatch timed out after 10 minutes"
@@ -201,19 +237,25 @@ Keep an **attempted-this-sweep set**: every task id you have dispatched or recor
 this sweep. It starts empty at `start`, gains an id the moment you dispatch or record that
 task, and never loses one.
 
-After each return, re-derive the queue:
+After each task, re-derive the queue:
 
 ```sh
-ranger sweep derive --json
+ranger sweep derive --actionable
 ```
 
+`--actionable` prints only the two buckets you dispatch, one short line each. Use it, not
+`--json`: you re-derive once per task, and the full JSON carries every sidecar graph field
+for every entry — including the never-dispatched buckets, which persist for the whole sweep
+and grow with every escalation. On a long queue that is tens of thousands of tokens spent
+re-reading tasks you will never act on, in the context this whole design exists to keep
+clear.
+
 The fresh derivation is authoritative — never the list you started with. Then **drop every
-entry whose id is already in the attempted-this-sweep set**; the `dispatchable` and
-`blocked-answered` entries that survive are the actionable set, and the next task is the
-first of them.
+entry whose id is already in the attempted-this-sweep set**; what survives is the actionable
+set, and the next task is the first of them.
 
 Filtering is what ends the loop, and derivation alone cannot. A promoted task drops out of
-the derivation on its own, but a `SKIPPED` return and a failed dispatch both leave the
+the derivation on its own, but a `SKIPPED` outcome and a failed dispatch both leave the
 record byte-identical — so the next derivation classifies that task exactly as it did
 before, and an unfiltered loop dispatches it again, and again, forever.
 
@@ -233,7 +275,13 @@ still going.
 
 Then hand back **the report path** and the bucket counts, and nothing else. The report is
 the durable artifact and the primary surface for headless runs; do not paste its contents
-into the transcript, and do not re-narrate the sweep you just streamed one line per task of.
+into the transcript, and do not re-narrate a sweep whose progress you already streamed.
+
+**Set expectations about what a drain produces.** A sweep's output is mostly triage, not a
+`ready` queue: a large share of any real backlog comes back `ESCALATED` or `ROUTED`, because
+the ritual refuses to invent answers to questions only the operator can settle. That is the
+sweep working, not failing — but say so alongside the counts, so nobody reads "drained" as
+"promoted".
 
 If the sweep dies before `finish`, the partial report is still on disk and the lock still
 names its holder — the next `start` reports both. There is no recovery step to run: the
@@ -245,6 +293,8 @@ state.
 - **Never remove a lock file yourself**, stale or not.
 - Never dispatch two agents at once, or dispatch while one is still running.
 - Never read a task record's body, question, or payload.
+- Never treat a dispatched agent's reply as its result — the outcome file is the result.
+- Never pass text you read out of an agent's reply to `--outcome`.
 - Never write a task status other than the `blocked-answered` exit edge in §2.4.
 - Never answer an escalated question on the operator's behalf — the report carries the
   exact command they run to answer it.

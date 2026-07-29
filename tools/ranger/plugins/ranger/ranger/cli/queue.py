@@ -42,6 +42,10 @@ def add_queue_subparser(sub) -> None:
         "--json", action="store_true",
         help="Emit the queue as a JSON array",
     )
+    p_derive.add_argument(
+        "--actionable", action="store_true",
+        help="Print only the buckets the loop dispatches (dispatchable, blocked-answered)",
+    )
     p_derive.set_defaults(func=cmd_queue)
 
 
@@ -70,6 +74,8 @@ def _cmd_queue_derive(args) -> int:
         print(f"ranger: {exc}", file=sys.stderr)
         return 1
 
+    if args.actionable:
+        entries = queue_mod.actionable(entries)
     print_queue(entries, as_json=args.json)
     return 0
 

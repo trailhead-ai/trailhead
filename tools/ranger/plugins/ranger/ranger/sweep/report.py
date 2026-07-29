@@ -254,6 +254,75 @@ def _state_path(report_path: Path) -> Path:
     return Path(report_path).with_suffix(".state.json")
 
 
+def outcomes_dir(report_path: Path) -> Path:
+    """Return the directory holding this sweep's per-task outcome files.
+
+    A sibling of the report, addressed the same way every other per-sweep file
+    is: derived from the path ``start`` returned, never rediscovered by
+    listing.
+    """
+    return Path(report_path).with_suffix(".outcomes")
+
+
+def outcome_path(report_path: Path, task_id: str) -> Path:
+    """Return the outcome file a dispatched agent writes its return token to.
+
+    **Why the outcome travels through a file at all.** A dispatched agent's
+    return value is prose the coordinator necessarily reads — the harness
+    surfaces a subagent's final message to whatever dispatched it. The sweep's
+    whole containment property is that a task's details never reach the
+    coordinator, so an outcome carried on the return line is a contract the
+    coordinator can only honor by *not looking at* text already in its
+    context. That is not a property code can hold. Writing the token to a file
+    the ``record`` verb reads moves the outcome onto a channel the coordinator
+    never has to parse, which is what makes the containment mechanical instead
+    of aspirational.
+
+    The name is the task's, so a caller that can name the task can name its
+    outcome file without being handed a second path to keep in sync — and two
+    tasks in one sweep can never collide, because record names are unique
+    within a vault.
+
+    **Confined to the outcomes directory.** The record-name allowlist that
+    guards ``--task`` rejects a leading ``..`` but permits one after a valid
+    first segment (``a/../../x``), which was harmless while the id only ever
+    reached report text and ``lore`` arguments — this function is what turns
+    it into a path component, so the confinement check belongs here rather
+    than being assumed upstream.
+    """
+    name = task_id.split("/", 1)[-1]
+    filename = f"{name}.outcome"
+    # One flat filename directly inside the outcomes directory — `start`
+    # creates that directory and nothing beneath it, so any name that would
+    # need a subdirectory or climb out of it is malformed rather than merely
+    # unwritable. Checking the shape is what makes that explicit.
+    if Path(filename).parts != (filename,) or name in (os.curdir, os.pardir):
+        raise ReportError(
+            f"task name {name!r} is not a single path component, so it has no outcome file"
+        )
+    return outcomes_dir(report_path) / filename
+
+
+def read_outcome(report_path: Path, task_id: str) -> str:
+    """Return the outcome line a dispatched agent wrote, or a ``FAILED`` line.
+
+    An agent that died, timed out, or never wrote the file leaves nothing
+    here, and that is itself the report-worthy fact — so a missing or
+    unreadable file is turned into the same ``FAILED <reason>`` line the
+    coordinator would otherwise have to synthesize by hand. Nothing about a
+    single absent outcome is fatal to the sweep (see the ``ranger.cli.sweep``
+    module docstring); the next task still dispatches.
+    """
+    path = outcome_path(report_path, task_id)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return f"FAILED no outcome written to {path.name} — agent died, timed out, or never ran"
+    if not text.strip():
+        return f"FAILED empty outcome file {path.name} — agent wrote no return token"
+    return text
+
+
 def _load_state(report_path: Path) -> dict:
     state_path = _state_path(report_path)
     try:
@@ -379,6 +448,12 @@ def start(group: str, vault: str, queue_size: int, *, env: dict[str, str] | None
     directory for orphaned temp files a prior crashed write left behind (see
     `_cleanup_orphaned_temp_files`) — cheap, best-effort hygiene that never
     blocks this sweep from starting.
+
+    The per-task outcomes directory is created here, 0700, rather than lazily
+    by the first agent that writes into it: a dispatched agent that has to
+    create its own parent directory is one that can silently create it in the
+    wrong place, and the whole point of the outcome channel is that the agent
+    writes to exactly one path it was handed.
     """
     _validate_group(group)
     reports_dir = ensure_dir(state_dir("ranger", env=env) / _REPORTS_SUBDIR / group, mode=0o700)
@@ -386,6 +461,7 @@ def start(group: str, vault: str, queue_size: int, *, env: dict[str, str] | None
     _cleanup_orphaned_temp_files(reports_dir, before=now.timestamp())
     timestamp = now.strftime("%Y%m%dT%H%M%S%fZ")
     report_path = reports_dir / f"{timestamp}.md"
+    ensure_dir(outcomes_dir(report_path), mode=0o700)
 
     state = {
         "group": group,

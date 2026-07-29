@@ -7,9 +7,14 @@ every path resolver redirected through per-app override env vars
 ``CAMP_STATE_DIR``) so no real state, config, or vault is ever touched.
 
 Test contract:
-- Each of the three ``start`` preconditions fails with its own one-line
+- Each of the four ``start`` preconditions fails with its own one-line
   message carrying remediation text, a nonzero exit, and **nothing created**
   — no lock file, no report.
+- The provenance precondition reads the same sources lore stamps from, in the
+  same order: ``$LORE_EMAIL`` then ``git config --global user.email``. A
+  repo-local ``user.email`` does not satisfy it, because it is not the
+  identity lore would write with — and passing there would start a sweep that
+  fails every task it dispatches.
 - A floor election refuses for each of its three shapes (no binding at all,
   a binding whose vault fell through an allowlist, a binding naming a vault
   absent from lore's config), and the message names the failing binding.
@@ -59,6 +64,10 @@ CLI_PATH = _PLUGIN_DIR / "cli" / "ranger"
 
 _GROUP = "testgroup"
 _VAULT = "testvault"
+
+#: Lore's committer-email override, which `sweep start`'s provenance
+#: precondition resolves first. Mirrors `ranger.sweep.preflight`'s constant.
+_PROVENANCE_ENV = "LORE_EMAIL"
 
 _QUESTION_BODY = textwrap.dedent(
     """\
@@ -250,6 +259,11 @@ class Sweep:
         env["CAMP_STATE_DIR"] = str(self.camp_state)
         env["CAMP_CONFIG_DIR"] = str(self.camp_config)
         env["FAKE_LORE_FIXTURE"] = str(self.fixture_path)
+        # Satisfies the provenance precondition without depending on the
+        # developer's `git config --global user.email`, which is genuinely
+        # unset on some machines — the exact condition the check exists to
+        # catch. Tests that exercise the check clear this explicitly.
+        env[_PROVENANCE_ENV] = "sweep-tests@example.invalid"
         env["PATH"] = f"{self.bin_dir}{os.pathsep}{env.get('PATH', '')}"
         return env
 
@@ -286,6 +300,25 @@ class Sweep:
         """
         pid = os.getpid() if holder_pid is None else holder_pid
         return self.run("sweep", "start", "--holder-pid", str(pid), *extra)
+
+    def start_without_provenance(
+        self, *, git_config: Path | None = None, lore_email: str | None = None
+    ) -> subprocess.CompletedProcess:
+        """Start a sweep with the committer-email sources under this test's control.
+
+        Clears the harness's `LORE_EMAIL` and pins `GIT_CONFIG_GLOBAL` — the
+        latter so `git config --global user.email` reads a file this test owns
+        rather than the developer's own, which would otherwise decide the
+        result. Absent *git_config*, it points at a path that does not exist,
+        which git reads as an empty config.
+        """
+        env = self.env
+        if lore_email is None:
+            env.pop(_PROVENANCE_ENV, None)
+        else:
+            env[_PROVENANCE_ENV] = lore_email
+        env["GIT_CONFIG_GLOBAL"] = str(git_config or (self.tmp / "no-such-gitconfig"))
+        return self.run("sweep", "start", "--holder-pid", str(os.getpid()), env=env)
 
     # --- inspection ----------------------------------------------------
 
@@ -466,6 +499,83 @@ def test_start_accepts_legitimate_vault_names(tmp_path, good_vault):
 
 
 # ---------------------------------------------------------------------------
+# Precondition 4 — a resolvable committer email
+#
+# Every promotion a dispatched agent writes is provenance-stamped by lore, and
+# lore refuses to write without a committer email. Unchecked, that refusal
+# lands mid-ritual inside an agent with no human to ask — whose remaining
+# options are to fail the task or to invent an identity. Checking at `start`
+# converts it into a refusal while the operator is still present.
+#
+# `GIT_CONFIG_GLOBAL` is what makes these deterministic: it points git's
+# --global scope at a file this test controls, so the result never depends on
+# whether the developer running the suite has set their own user.email.
+# ---------------------------------------------------------------------------
+
+
+def test_start_refuses_when_no_committer_email_resolves(tmp_path):
+    sweep = _sweep(tmp_path)
+
+    res = sweep.start_without_provenance()
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+    assert "committer email" in res.stderr
+    assert "git config --global user.email" in res.stderr, "the refusal must name the fix"
+    assert _PROVENANCE_ENV in res.stderr, "the per-run override is the other fix"
+    sweep.assert_nothing_created()
+
+
+def test_start_accepts_a_committer_email_from_git_config(tmp_path):
+    """The env override is not the only source — lore falls back to git."""
+    sweep = _sweep(tmp_path)
+    gitconfig = tmp_path / "gitconfig"
+    gitconfig.write_text("[user]\n\temail = dev@example.invalid\n", encoding="utf-8")
+
+    res = sweep.start_without_provenance(git_config=gitconfig)
+
+    assert res.returncode == 0, res.stderr
+
+
+def test_start_ignores_a_repo_local_committer_email(tmp_path):
+    """Lore stamps from `git config --global`, so that is what must be checked.
+
+    A repo-local `user.email` is exactly the case where checking the wrong
+    scope passes here and still fails inside every dispatched agent — the
+    sweep would start, dispatch, and fail every task.
+    """
+    sweep = _sweep(tmp_path)
+    # A real repo, checked — `git config --local` refuses outside one, and a
+    # swallowed failure here would leave nothing set and pass this test for the
+    # opposite reason.
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "config", "--local", "user.email", "repo-local@example.invalid"],
+    ):
+        setup = subprocess.run(argv, cwd=sweep.repo, capture_output=True, text=True)
+        assert setup.returncode == 0, setup.stderr
+    probe = subprocess.run(
+        ["git", "config", "--get", "user.email"], cwd=sweep.repo, capture_output=True, text=True
+    )
+    assert probe.stdout.strip() == "repo-local@example.invalid", "fixture did not take"
+
+    res = sweep.start_without_provenance()
+
+    assert res.returncode != 0, "a repo-local email is not the identity lore will stamp"
+    sweep.assert_nothing_created()
+
+
+def test_start_refuses_on_a_whitespace_only_committer_email(tmp_path):
+    sweep = _sweep(tmp_path)
+
+    res = sweep.start_without_provenance(lore_email="   ")
+
+    assert res.returncode != 0
+    assert "committer email" in res.stderr
+    sweep.assert_nothing_created()
+
+
+# ---------------------------------------------------------------------------
 # start — the machine contract
 # ---------------------------------------------------------------------------
 
@@ -484,6 +594,7 @@ def test_start_emits_exactly_the_contracted_json_keys(tmp_path):
         "procedure_path",
         "templates_root",
         "report_path",
+        "outcomes_dir",
         "lock_token",
         "queue",
     }
@@ -638,6 +749,73 @@ def test_derive_does_not_touch_the_lock_or_the_report(tmp_path):
 
     assert res.returncode == 0, res.stderr
     sweep.assert_nothing_created()
+
+
+def _mixed_queue(sweep: Sweep) -> None:
+    """One task in each of the four buckets, in derivation order."""
+    sweep.set_tasks([
+        _task("t1"),
+        _task("t2"),
+        _task("t3", status="blocked"),
+        _task("t4", status="blocked"),
+    ])
+    sweep.set_bodies({
+        "t2": _QUESTION_BODY,        # open + unanswered -> escalated-awaiting-operator
+        "t3": _ANSWERED_BODY,        # blocked + answered -> blocked-answered
+        "t4": _QUESTION_BODY,        # blocked + unanswered -> blocked-still-waiting
+    })
+
+
+def test_derive_actionable_drops_the_never_dispatched_buckets(tmp_path):
+    """The loop re-derives once per task and only ever acts on two buckets.
+
+    The other two persist for the whole sweep by design — they are recorded
+    once and never drained — so carrying them through every re-derivation
+    spends context on entries the coordinator is forbidden to dispatch.
+    """
+    sweep = _sweep(tmp_path)
+    _mixed_queue(sweep)
+
+    res = sweep.run("sweep", "derive", "--actionable", "--json")
+
+    assert res.returncode == 0, res.stderr
+    assert [(e["name"], e["bucket"]) for e in json.loads(res.stdout)] == [
+        ("t1", "dispatchable"),
+        ("t3", "blocked-answered"),
+    ]
+
+
+def test_derive_actionable_defaults_to_the_compact_rendering(tmp_path):
+    """Without `--json` the filter still applies, one short line per task."""
+    sweep = _sweep(tmp_path)
+    _mixed_queue(sweep)
+
+    res = sweep.run("sweep", "derive", "--actionable")
+
+    assert res.returncode == 0, res.stderr
+    lines = res.stdout.strip().splitlines()
+    assert len(lines) == 2, res.stdout
+    assert lines[0].startswith("t1 ")
+    assert lines[1].startswith("t3 ")
+    assert "t2" not in res.stdout and "t4" not in res.stdout
+
+
+def test_derive_without_actionable_still_carries_every_bucket(tmp_path):
+    """The filter is opt-in: the unfiltered view is what §2.5 records from."""
+    sweep = _sweep(tmp_path)
+    _mixed_queue(sweep)
+
+    res = sweep.run("sweep", "derive", "--json")
+
+    assert res.returncode == 0, res.stderr
+    # Also pins `_mixed_queue`'s intent: the filtered tests above are only
+    # meaningful if t2 and t4 really do land in the never-dispatched buckets.
+    assert [(e["name"], e["bucket"]) for e in json.loads(res.stdout)] == [
+        ("t1", "dispatchable"),
+        ("t2", "escalated-awaiting-operator"),
+        ("t3", "blocked-answered"),
+        ("t4", "blocked-still-waiting"),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -984,6 +1162,184 @@ def test_record_requires_an_outcome_for_a_dispatched_task(tmp_path):
 
     assert res.returncode != 0
     assert "--outcome" in res.stderr
+
+
+# ---------------------------------------------------------------------------
+# record — the outcome file
+#
+# A dispatched agent's reply reaches the coordinator no matter what the
+# contract says, so an outcome carried on the return line is a boundary the
+# coordinator can only hold by not reading text already in its context. The
+# agent writes its token to a file instead, and `record` reads it here — the
+# one arrangement where the one-token contract actually binds, because there
+# is no coordinator in a position to launder a malformed return into a clean
+# one.
+# ---------------------------------------------------------------------------
+
+
+def _outcome_file(sweep: Sweep, report: str, task: str) -> Path:
+    return Path(report).with_suffix(".outcomes") / f"{task}.outcome"
+
+
+def test_start_creates_the_outcomes_directory_and_names_it(tmp_path):
+    """Created by `start`, not lazily by the first agent to write into it.
+
+    An agent that has to create its own parent directory is one that can
+    create it somewhere else; the agent writes to exactly one handed path.
+    """
+    sweep = _sweep(tmp_path)
+    res = sweep.start()
+
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    outcomes = Path(payload["outcomes_dir"])
+    assert outcomes.is_dir()
+    assert outcomes == Path(payload["report_path"]).with_suffix(".outcomes")
+    assert stat.S_IMODE(outcomes.stat().st_mode) == 0o700, (
+        "the outcomes directory sits beside a 0600 report and holds the same sweep's data"
+    )
+
+
+def test_record_reads_the_token_the_agent_wrote(tmp_path):
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+    _outcome_file(sweep, report, "t1").write_text("PROMOTED\n", encoding="utf-8")
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome-file")
+
+    assert res.returncode == 0, res.stderr
+    assert "## Promoted\n\n- `task/t1`\n" in Path(report).read_text()
+
+
+def test_record_reads_a_token_with_an_argument(tmp_path):
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+    _outcome_file(sweep, report, "t1").write_text("ROUTED /craft:plan\n", encoding="utf-8")
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome-file")
+
+    assert res.returncode == 0, res.stderr
+    assert "- `task/t1` — routed to /craft:plan\n" in Path(report).read_text()
+
+
+def test_record_buckets_a_missing_outcome_file_as_failed(tmp_path):
+    """An agent that died, timed out, or never ran leaves nothing behind.
+
+    That absence is itself the report-worthy fact, and turning it into a
+    `failed` line here is what lets the coordinator record a dead dispatch
+    without synthesizing a failure reason by hand.
+    """
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome-file")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    assert "## Failed" in text
+    assert "`task/t1`" in text
+    assert "no outcome written" in text, "the report must say why, not just that it failed"
+
+
+def test_record_buckets_an_empty_outcome_file_as_failed(tmp_path):
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+    _outcome_file(sweep, report, "t1").write_text("\n  \n", encoding="utf-8")
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome-file")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    assert "## Failed" in text
+    assert "empty outcome file" in text
+
+
+def test_record_buckets_commentary_around_the_token_as_failed(tmp_path):
+    """This is where the one-token contract finally binds.
+
+    Passed as `--outcome`, this same content never reaches the CLI: a
+    coordinator reads the prose, extracts `PROMOTED`, and hands over a clean
+    token — so the violation is invisible and the containment is already
+    spent. Read from the file, the first line is not a token and the run is
+    reported as broken, which is the only feedback that makes the contract
+    real.
+    """
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+    _outcome_file(sweep, report, "t1").write_text(
+        "I refined the task and wrote the payload.\n\nPROMOTED\n", encoding="utf-8"
+    )
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome-file")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    assert "## Failed" in text
+    assert "## Promoted\n\n- `task/t1`" not in text, (
+        "a token buried under commentary must not be salvaged into a clean outcome"
+    )
+
+
+@pytest.mark.parametrize(
+    "traversing",
+    ["task/a/../../../escape", "task/a/../../etc/passwd", "task/a/b"],
+    ids=["climbs-out", "climbs-to-absolute-ish", "needs-a-subdirectory"],
+)
+def test_record_refuses_a_task_name_that_is_not_one_filename(tmp_path, traversing):
+    """The record-name allowlist permits `..` after a valid first segment.
+
+    That was harmless while a task id only reached report prose and `lore`
+    arguments; the outcome file is what turns it into a path component, so the
+    confinement has to hold here rather than be assumed upstream. Reading a
+    file the sweep never wrote and treating its first line as an outcome token
+    is the failure this prevents.
+    """
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", traversing,
+                    "--outcome-file")
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+    outcomes = Path(report).with_suffix(".outcomes")
+    assert list(outcomes.iterdir()) == [], "nothing may be created outside the sweep's own files"
+
+
+def test_record_refuses_outcome_and_outcome_file_together(tmp_path):
+    """Two sources for one value is a silent-precedence bug waiting to happen."""
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome", "PROMOTED", "--outcome-file")
+
+    assert res.returncode != 0
+    assert "not allowed with" in res.stderr
+
+
+def test_record_from_an_outcome_file_still_scrubs_credentials(tmp_path):
+    """The file is agent-authored text, exactly as untrusted as a return line."""
+    sweep = _sweep(tmp_path)
+    report = _start_and_report(sweep)
+    _outcome_file(sweep, report, "t1").write_text(
+        "SKIPPED could not auth with STRIPE_SECRET_KEY=sk_live_ABCDEFGHIJKLMNOP0123456789\n",
+        encoding="utf-8",
+    )
+
+    res = sweep.run("sweep", "record", "--report", report, "--task", "task/t1",
+                    "--outcome-file")
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report).read_text()
+    assert "sk_live_ABCDEFGHIJKLMNOP0123456789" not in text
+    assert "[REDACTED]" in text, "the secret must be redacted in place, not the line dropped"
+    assert "could not auth with" in text, "the surrounding reason must survive the scrub"
 
 
 # ---------------------------------------------------------------------------

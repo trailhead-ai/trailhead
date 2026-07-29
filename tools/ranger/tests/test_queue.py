@@ -424,3 +424,60 @@ def test_lore_record_show_failure_raises_named_error_not_a_crash():
 
     with pytest.raises(queue.QueueDeriveError, match="t1"):
         queue.derive_queue(_VAULT, runner=runner)
+
+
+# ---------------------------------------------------------------------------
+# actionable() — the loop's own view of what is left
+# ---------------------------------------------------------------------------
+
+
+def test_actionable_keeps_only_the_buckets_the_loop_dispatches():
+    entries = [
+        {"name": "a", "bucket": "dispatchable"},
+        {"name": "b", "bucket": "escalated-awaiting-operator"},
+        {"name": "c", "bucket": "blocked-answered"},
+        {"name": "d", "bucket": "blocked-still-waiting"},
+    ]
+
+    assert [e["name"] for e in queue.actionable(entries)] == ["a", "c"]
+
+
+def test_actionable_covers_every_bucket_exactly_once():
+    """The partition must stay total: a new bucket has to be classified here.
+
+    `actionable` and its complement are how the loop decides what to dispatch
+    and what to report-and-leave. A bucket in neither set is one the sweep
+    would silently never act on and never mention.
+    """
+    entries = [{"name": b, "bucket": b} for b in queue.BUCKETS]
+    kept = {e["bucket"] for e in queue.actionable(entries)}
+
+    assert kept == set(queue.ACTIONABLE_BUCKETS)
+    assert kept | (set(queue.BUCKETS) - kept) == set(queue.BUCKETS)
+    assert set(queue.ACTIONABLE_BUCKETS) <= set(queue.BUCKETS), (
+        "an actionable bucket that derivation never produces is dead configuration"
+    )
+
+
+def test_actionable_preserves_derivation_order():
+    """Order is the loop's queue order — oldest first — and must survive the filter."""
+    entries = [
+        {"name": "old", "bucket": "dispatchable"},
+        {"name": "mid", "bucket": "blocked-answered"},
+        {"name": "new", "bucket": "dispatchable"},
+    ]
+
+    assert [e["name"] for e in queue.actionable(entries)] == ["old", "mid", "new"]
+
+
+def test_actionable_is_a_filter_not_a_mutation():
+    """The caller may still need the unfiltered list (§2.5 records from it)."""
+    entries = [
+        {"name": "a", "bucket": "dispatchable"},
+        {"name": "b", "bucket": "blocked-still-waiting"},
+    ]
+
+    result = queue.actionable(entries)
+
+    assert len(entries) == 2, "the input list must not be mutated in place"
+    assert result[0] is entries[0], "entries are passed through, not copied and diverged"

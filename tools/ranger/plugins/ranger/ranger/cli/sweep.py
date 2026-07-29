@@ -3,7 +3,7 @@
 The coordinating skill owns the loop; this module owns everything mechanical
 about it, so the loop's state lives on disk rather than in a transcript:
 
-- ``start``   — run the three preconditions, take the per-vault lock, derive
+- ``start``   — run the four preconditions, take the per-vault lock, derive
                 the queue, seed the report, and hand the skill one JSON object
                 with every path and every task it needs.
 - ``derive``  — re-derive and print the classification, without touching the
@@ -40,6 +40,21 @@ built from it) is composed in this process and written straight to the report
 — it never transits the dispatched agent's one-line return or the
 coordinating session's context. That containment is the whole reason the
 report writer, not the coordinator, owns question extraction.
+
+**Why the outcome can come from a file.** The same containment argument
+applies to the outcome token itself, and ``--outcome`` alone cannot carry it.
+A dispatched agent's return value is prose the coordinator unavoidably reads
+— the harness surfaces a subagent's final message to its dispatcher — so a
+coordinator passing ``--outcome PROMOTED`` has already read whatever the
+agent wrapped that token in, and the CLI cannot tell a clean return from a
+hand-extracted one. ``--outcome-file`` closes that: the agent writes its
+token to a path under the report's ``.outcomes`` directory, ``record`` reads
+it here, and the coordinator never has to parse agent text at all. It is also
+where the one-line contract finally *binds* — an agent that writes commentary
+around its token produces a first line that is not a token, and this process
+buckets it ``failed`` with no coordinator in a position to launder it.
+``--outcome`` remains for the never-dispatched and synthesized-failure cases,
+and for driving the verb by hand.
 
 **Report bucketing takes two inputs**, because the seven report buckets carry
 more than the agent's four return tokens can express: ``--queue-bucket``
@@ -128,13 +143,32 @@ def add_sweep_subparser(sub) -> None:
         "derive", help="Re-derive and print the elected vault's queue classification"
     )
     p_derive.add_argument("--json", action="store_true", help="Emit the queue as a JSON array")
+    p_derive.add_argument(
+        "--actionable", action="store_true",
+        help=(
+            "Print only the buckets the loop dispatches (dispatchable, blocked-answered). "
+            "What the coordinator wants between tasks: the never-dispatched buckets persist "
+            "for the whole sweep and are reported once, so carrying them through every "
+            "re-derivation is pure noise"
+        ),
+    )
 
     p_record = p_sweep_sub.add_parser("record", help="Append one task's outcome to the report")
     p_record.add_argument("--report", required=True, metavar="PATH", help="Report to append to")
     p_record.add_argument("--task", required=True, metavar="ID", help="Task record id")
-    p_record.add_argument(
+    p_outcome = p_record.add_mutually_exclusive_group()
+    p_outcome.add_argument(
         "--outcome", metavar="LINE",
         help="The agent's one-line return; required unless the task was never dispatched",
+    )
+    p_outcome.add_argument(
+        "--outcome-file", action="store_true",
+        help=(
+            "Read the outcome from the task's outcome file under the report's `.outcomes` "
+            "directory, instead of taking it on the command line. The preferred form: it is "
+            "the only one where the coordinator never has to read the agent's return text. "
+            "A missing or empty file records as `failed`, naming that as the reason"
+        ),
     )
     p_record.add_argument(
         "--queue-bucket", default="dispatchable", choices=_QUEUE_BUCKET_CHOICES,
@@ -199,6 +233,7 @@ def _cmd_sweep_start(args) -> int:
 
     try:
         procedure_path, templates_root = preflight.find_refine_procedure()
+        preflight.check_provenance()
         group, resolution = _resolve_target()
     except (preflight.PreflightError, queue_mod.QueueDeriveError) as exc:
         return _fail(str(exc))
@@ -232,6 +267,7 @@ def _cmd_sweep_start(args) -> int:
                 "procedure_path": str(procedure_path),
                 "templates_root": str(templates_root),
                 "report_path": str(report_path),
+                "outcomes_dir": str(report_mod.outcomes_dir(report_path)),
                 "lock_token": token,
                 "queue": entries,
             }
@@ -254,6 +290,8 @@ def _cmd_sweep_derive(args) -> int:
     except (preflight.PreflightError, queue_mod.QueueDeriveError) as exc:
         return _fail(str(exc))
 
+    if args.actionable:
+        entries = queue_mod.actionable(entries)
     print_queue(entries, as_json=args.json)
     return 0
 
@@ -331,9 +369,14 @@ def _cmd_sweep_record(args) -> int:
             )
             return 0
 
-        if args.outcome is None:
+        if args.outcome_file:
+            outcome = report_mod.read_outcome(report_path, task_id)
+        elif args.outcome is not None:
+            outcome = args.outcome
+        else:
             return _fail(
-                f"--outcome is required for a dispatched task (--queue-bucket {queue_bucket})"
+                f"--outcome or --outcome-file is required for a dispatched task "
+                f"(--queue-bucket {queue_bucket})"
             )
 
         # Outcome first, queue bucket second. Every outcome that carries
@@ -352,7 +395,7 @@ def _cmd_sweep_record(args) -> int:
         # Reported under the queue bucket instead, each of those renders a bare
         # id under "Blocked — answered" — a line that reads as *handled* while
         # the reason, question, or target is dropped.
-        token, argument = parse_outcome(args.outcome)
+        token, argument = parse_outcome(outcome)
         if token is None or token == "FAILED":
             report_mod.append_failed(report_path, task_id, argument)
         elif token == "SKIPPED":

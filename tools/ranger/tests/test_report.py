@@ -172,7 +172,7 @@ def test_a_write_that_fails_mid_flight_leaves_the_previous_report_intact(tmp_pat
     assert report_path.read_text() == report_before
     assert state_path.read_text() == state_before
     assert sorted(p.name for p in report_path.parent.iterdir()) == sorted(
-        [report_path.name, state_path.name]
+        [report_path.name, state_path.name, report.outcomes_dir(report_path).name]
     ), "a failed write must leave no temp file behind"
 
 

@@ -150,3 +150,18 @@ def test_queue_derive_refuses_shell_metacharacters_in_vault(tmp_path, bad_vault)
 
     assert res.returncode != 0
     assert res.stderr.startswith("ranger: ")
+
+
+def test_queue_derive_accepts_actionable_for_parity_with_sweep_derive(tmp_path):
+    """The diagnostic verb carries the same flag as the sweep's own view.
+
+    The filtering itself is covered against `ranger.sweep.queue.actionable`
+    and through `sweep derive`, where a fixture with all four buckets makes
+    the assertion meaningful; this fixture holds one dispatchable task, so
+    what is pinned here is only that the two verbs stay flag-compatible.
+    """
+    res = _run(["queue", "derive", "--vault", "myvault", "--actionable", "--json"],
+               tmp_path=tmp_path)
+
+    assert res.returncode == 0, res.stderr
+    assert [e["name"] for e in json.loads(res.stdout)] == ["t1"]
