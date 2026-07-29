@@ -1,0 +1,141 @@
+"""Brainstorm's altitude gate — the ADR-vs-spec exit fork.
+
+Brainstorm normally exits into a single `spec` record. When discovery converges on
+"one design change, more than one spec of work" — one decision that fans out into
+several independently-shippable pieces — the exit artifact changes shape: a draft
+`adr` record (the decision) plus named `spec` seeds (the pieces), each seed wired to
+the ADR with a `related: adr=` edge from the moment it's created, then brainstormed
+and gauntleted separately at its own altitude.
+
+Brainstorm still never flips a status itself in either branch — that discipline
+(pinned for the spec branch by `test_gauntlet_contract.py::
+test_brainstorm_hands_off_to_gauntlet_and_does_not_freeze`) must hold for the new ADR
+branch too: no craft file may flip an adr `active` except the gauntlet
+(`test_only_gauntlet_flips_an_adr_active` in `test_gauntlet_contract.py`), so brainstorm
+must never carry the literal `--status active` write.
+
+These are content anchors on the prose, not a runtime harness — same contract-pin
+style as `test_gauntlet_contract.py` and `test_adr_area_template_contract.py`.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+BRAINSTORM = (
+    Path(__file__).parent.parent / "plugins" / "craft" / "skills" / "brainstorm" / "SKILL.md"
+)
+
+# The trigger phrase for the altitude gate — pinned verbatim so the same wording
+# fires session to session rather than drifting into synonyms an agent might not
+# recognize as the gate.
+_ALTITUDE_TRIGGER_PHRASE = "one design change, more than one spec of work"
+
+# The seed's related-edge-from-birth rule, pinned verbatim (matches the slice's
+# own Delivers wording so there is exactly one source of truth for the phrase).
+_SEED_EDGE_PHRASE = "related: adr=<the-adr>"
+
+# The rejected-ADR orphan rule, pinned verbatim.
+_ORPHAN_RULE = (
+    "its seeded derived specs are orphaned back to brainstorm — their "
+    "`related: adr=` edge points at the `dropped` draft as provenance"
+)
+
+
+def _text() -> str:
+    return BRAINSTORM.read_text(encoding="utf-8")
+
+
+def test_brainstorm_skill_ships():
+    assert BRAINSTORM.exists(), f"Expected brainstorm/SKILL.md at {BRAINSTORM}"
+
+
+def test_altitude_gate_trigger_phrase_pinned():
+    assert _ALTITUDE_TRIGGER_PHRASE in _text(), (
+        "brainstorm/SKILL.md must pin the altitude-gate trigger phrase verbatim — "
+        f"{_ALTITUDE_TRIGGER_PHRASE!r} — so the escalation to an ADR fires "
+        "consistently session to session rather than on a synonym an agent invents."
+    )
+
+
+def test_altitude_gate_creates_a_draft_adr_via_lore_record_create():
+    text = _text()
+    assert "--kind adr" in text, (
+        "brainstorm/SKILL.md must create the altitude-gate's ADR via "
+        "`lore record create --kind adr` — the CLI assigns the ADR-NNN number"
+    )
+    assert "templates/adr.md" in text, (
+        "brainstorm/SKILL.md must render the ADR body from templates/adr.md, the "
+        "same four-section template the gauntlet and distill rituals use"
+    )
+
+
+def test_altitude_gate_leaves_the_adr_at_its_default_draft_status():
+    """No explicit --status flag on the ADR create — `draft` is the kind's default."""
+    text = _text()
+    assert "--kind adr" in text
+    assert "--status draft" not in text, (
+        "the ADR create should rely on the kind's default status (`draft`) rather "
+        "than stamping it explicitly — matching the slice's 'created at default "
+        "draft status' framing"
+    )
+
+
+def test_seeds_carry_related_adr_edge_from_birth():
+    text = _text()
+    assert _SEED_EDGE_PHRASE in text, (
+        f"brainstorm/SKILL.md must pin the seed edge phrase verbatim — {_SEED_EDGE_PHRASE!r}"
+    )
+    assert "from birth" in text, (
+        "brainstorm/SKILL.md must state the edge is written at seed creation, not "
+        "added later — 'from birth' is the phrase that rules out a two-step write"
+    )
+    assert "--related adr=" in text, (
+        "brainstorm/SKILL.md must show the actual CLI flag (--related adr=<adr-id>) "
+        "for wiring a seed to its ADR, not just describe the edge in prose"
+    )
+
+
+def test_seeds_are_each_brainstormed_and_gauntleted_separately():
+    text = _text()
+    assert "separately" in text and "own altitude" in text, (
+        "brainstorm/SKILL.md must state each seed is brainstormed and gauntleted "
+        "separately at its own altitude — the ADR session's job stops at planting "
+        "the seeds, not fleshing every one of them out"
+    )
+
+
+def test_rejected_adr_orphans_its_seeded_specs():
+    assert _ORPHAN_RULE in _text(), (
+        f"brainstorm/SKILL.md must pin the rejected-ADR orphan rule verbatim — {_ORPHAN_RULE!r}"
+    )
+
+
+def test_altitude_gate_hands_off_to_gauntlet_with_the_adr_id():
+    text = _text()
+    assert "/craft:gauntlet <adr-id>" in text, (
+        "brainstorm/SKILL.md must hand the altitude-gate branch off to "
+        "`/craft:gauntlet <adr-id>` — the adr-target mode of the same gauntlet skill "
+        "the spec branch hands off to"
+    )
+
+
+def test_brainstorm_never_flips_a_spec_to_ready():
+    """Regression guard for the spec-branch disclaimer this slice must not disturb."""
+    assert "Do not flip the spec to `ready` yourself" in _text()
+
+
+def test_brainstorm_still_hands_off_to_gauntlet_for_the_spec_branch():
+    """Regression guard: the pre-existing spec-branch handoff must survive untouched."""
+    assert "/craft:gauntlet" in _text()
+
+
+def test_brainstorm_never_writes_the_adr_active_flip():
+    """Brainstorm creates the draft ADR and hands off — it must never flip statuses
+    itself, in either branch. The gauntlet alone owns `draft -> active`
+    (`test_only_gauntlet_flips_an_adr_active` in test_gauntlet_contract.py); if this
+    literal string ever appears here, brainstorm has grown a bypass around it."""
+    assert "--status active" not in _text(), (
+        "brainstorm/SKILL.md must never carry the literal `--status active` write — "
+        "the gauntlet alone flips an adr to active, never brainstorm"
+    )

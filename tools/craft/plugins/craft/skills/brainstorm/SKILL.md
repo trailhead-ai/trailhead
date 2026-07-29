@@ -171,7 +171,15 @@ you grilled too little. Do not proceed past this gate until:
 If any of these is shaky, go back to grilling — looping here multiple times is expected. Move on
 only once the playback lands cleanly.
 
-### 6. Write the Spec
+### 6. Altitude Check
+
+Before reaching for a template, ask whether what you've grilled is one design change or several.
+The signal: discovery converges on **"one design change, more than one spec of work"** — a single
+decision that fans out into pieces, each independently shippable and each large enough to be its
+own spec. When that's true, the exit fork changes shape — go to **6b**. Otherwise — the common
+case — go to **6a**.
+
+### 6a. Write the Spec
 
 Persist the spec with `lore record create` (`../_shared/note-storage.md`): render craft's
 spec body template (`${CLAUDE_PLUGIN_ROOT}/templates/spec.md`), fill in the sections, then
@@ -187,35 +195,82 @@ timing) · **UI Direction** (verbal, or `n/a`) · **Open Questions / Risks** · 
 specs, decisions). Then open the
 file and fill in the body sections.
 
+### 6b. Write the ADR and Seed the Derived Specs
+
+1. **Draft the ADR.** Render `${CLAUDE_PLUGIN_ROOT}/templates/adr.md` (Context / Decision /
+   Consequences / Alternatives rejected) from what you and the user just agreed, then create it:
+
+   ```sh
+   printf '%s' "$ADR_BODY" | lore record create --kind adr --title "<decision>"
+   ```
+
+   The create path assigns the `ADR-NNN` number itself and leaves the record at its default
+   status, `draft` — there is no `--status` flag to set here, and brainstorm never flips it.
+
+2. **Seed each derived spec, from birth.** For every spec-sized piece of work the decision fans
+   out into, create a named seed — a minimal spec record wired to the ADR before a word of its
+   own content is grilled:
+
+   ```sh
+   printf '%s' "$SEED_BODY" | lore record create --kind spec --title "<derived-topic>" \
+     --related adr=<adr-id>
+   ```
+
+   Every seed carries `related: adr=<the-adr>` from birth — the edge is written at creation, not
+   added after the fact, so each derived spec traces to the decision that spawned it from its
+   first write. Planting the seeds is this session's job; fleshing one out is not — each seed is
+   then brainstormed and gauntleted separately, at its own altitude, when it's picked up.
+
+3. **If the ADR is later rejected at gauntlet** (a Critical dispositioned `reframed`, which routes
+   the adr to `dropped`), the rule is this:
+
+   its seeded derived specs are orphaned back to brainstorm — their `related: adr=` edge points at the `dropped` draft as provenance.
+
+   That edge is a trace of the decision that spawned them, not a live link to act on. None of the
+   orphaned seeds proceed as drafted; each re-enters brainstorming on its own, unanchored to a
+   surviving decision.
+
 ### 7. Exit Gate
 
 Before declaring brainstorming done, verify the checklist:
 
 - [ ] Shared understanding was confirmed (step 5) — the user explicitly agreed to a playback of
-  exactly what gets built, and the spec only transcribes that agreement
+  exactly what gets built, and the exit artifact only transcribes that agreement
 - [ ] Objectives are clear and outcome-framed
 - [ ] Acceptance criteria are testable and bounded
 - [ ] Non-goals are explicit
 - [ ] Open questions are resolved, deferred, or accepted-as-risk (none unaddressed)
 - [ ] UI direction is locked (if applicable) — described verbally in the spec
-- [ ] Spec is written and shared with the user (the `lore record create` path)
+- [ ] The exit artifact is written and shared with the user (the `lore record create` path) — the
+  spec (6a), or the ADR plus its seeded specs (6b)
 
-If all checklist items are green, hand off to the **gauntlet** — the adversarial spec review that
-every spec passes before it freezes:
+If all checklist items are green, hand off to the **gauntlet** — the adversarial review that every
+spec, and every draft ADR, passes before it freezes.
+
+**Common case (6a):**
 
 > "The spec is saved as a lore `spec` record (status `draft`). Next it goes through the gauntlet —
 > eight parallel passes that attack its facts, premises, consistency, and underdetermination — and
 > the gauntlet flips it to `ready` once you've dispositioned what it finds. Run `/craft:gauntlet
 > <spec-id>`."
 
-**Print the handoff command fully formed** — substitute the real spec-id (e.g. `/craft:gauntlet
-spec/streaming-export`), never a `<placeholder>`, so the user can paste it into a fresh session
-as-is.
+**Altitude-gate case (6b):**
 
-**Do not flip the spec to `ready` yourself.** Brainstorm writes the spec at `draft` and stops there;
-the `gauntlet` skill owns the `ready`-flip (its step 6). That split is deliberate — it makes the
-review structurally unskippable rather than a checklist item to honor, because nothing else in the
-pipeline freezes a spec.
+> "The decision is saved as a lore `adr` record (status `draft`), with its derived specs seeded as
+> `related: adr=` from birth. Next the ADR goes through the gauntlet's adr mode — seven passes,
+> adjudicated the same way — and it flips the record once you've dispositioned what it finds. Run
+> `/craft:gauntlet <adr-id>`. Each seeded spec gets its own brainstorm-then-gauntlet pass,
+> separately, once you pick it up."
+
+**Print the handoff command fully formed** — substitute the real record id (e.g. `/craft:gauntlet
+spec/streaming-export` or `/craft:gauntlet adr/streaming-export-decision`), never a `<placeholder>`,
+so the user can paste it into a fresh session as-is.
+
+**Do not flip the spec to `ready` yourself** — and the same discipline holds for the ADR branch:
+brainstorm writes the spec at `draft`, or the ADR at its default `draft`, and stops there in both
+cases; the `gauntlet` skill owns the flip (its step 6), spec or adr alike. That split is deliberate
+— it makes the review structurally unskippable rather than a checklist item to honor, because
+nothing else in the pipeline freezes either kind of record.
 
 Let the user invoke `/craft:gauntlet` explicitly so it loads cleanly — do not enter it from within
 brainstorm (a skill→skill chain is unreliable).
