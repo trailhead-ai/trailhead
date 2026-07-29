@@ -22,6 +22,7 @@ not, until now. The handoff must not itself advance the spec's status — that r
 distill's licensed edge alone (`test_gauntlet_contract.py`'s `_SPEC_ADVANCE_RE`).
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -32,10 +33,8 @@ SHARED_REFINE = CRAFT / "skills" / "_shared" / "refine.md"
 REVIEW = CRAFT / "skills" / "review" / "SKILL.md"
 
 # The same regex test_gauntlet_contract.py polices every craft prose file with —
-# imported as a literal pattern (not the module) so this test fails independently
-# of that file's existence, and stays honest about what it is actually checking.
-import re
-
+# restated as a literal pattern (not imported from the module) so this test fails
+# independently of that file's existence, and stays honest about what it checks.
 _SPEC_ADVANCE_RE = re.compile(r"<spec-id>\s+--status\s+(\w+)")
 
 

@@ -51,6 +51,7 @@ _YAML_KEY_RE = re.compile(r"^\s*([A-Za-z][\w./-]*):\s")
 _ALLOWLIST = {
     ("tools/craft/plugins/craft/skills/plan/SKILL.md", "related-spec"),
     ("tools/craft/plugins/craft/skills/polish/SKILL.md", "related-spec"),
+    ("tools/craft/plugins/craft/skills/distill/SKILL.md", "related-spec"),
 }
 
 

@@ -33,8 +33,6 @@ import os
 import threading
 from pathlib import Path
 
-import pytest
-
 from conftest import (  # noqa: F401
     load_script,
     make_vault as _make_vault,
