@@ -49,6 +49,9 @@ _YAML_KEY_RE = re.compile(r"^\s*([A-Za-z][\w./-]*):\s")
 # (relative path, key) pairs that are legitimate related-* surfaces unrelated
 # to the `labels` map — see module docstring.
 _ALLOWLIST = {
+    # Documents how `lore search 'area:<name>'` resolves (the related-area KQL
+    # facet) — search guidance, not a `--label` write instruction.
+    ("tools/craft/plugins/craft/skills/_shared/refine.md", "related-area"),
     ("tools/craft/plugins/craft/skills/plan/SKILL.md", "related-spec"),
     ("tools/craft/plugins/craft/skills/polish/SKILL.md", "related-spec"),
     ("tools/craft/plugins/craft/skills/distill/SKILL.md", "related-spec"),
