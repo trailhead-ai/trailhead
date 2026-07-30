@@ -86,10 +86,17 @@ def _make_emitters(name: str, width: int):
     """Return ``(say, say_err)`` writers that label output with the vault name.
 
     ``say`` labels its first line and indents continuations to the same column, so
-    one vault's multi-line outcome reads as a block::
+    multiple ``say`` calls against ONE emitter pair read as a single block::
 
         trailhead:    Committed: lore: sync vault
                       Pushed to origin.
+
+    ``cmd_sync`` gets that block shape only WITHIN one phase: it calls
+    ``_make_emitters`` once for the batched commit phase (shared across every
+    target) and once more, freshly, per vault for the pull/push phase — a
+    vault's commit line and its push line therefore come from two different
+    emitter pairs, each independently labeling its own first line, rather than
+    one continuous block spanning both phases.
 
     ``say_err`` always repeats the full label and writes to stderr — an error line
     must identify its vault even when stderr is captured or read on its own, where
@@ -530,25 +537,65 @@ def cmd_sync(args) -> int:
             continue
         valid_targets.append((name, vault_path))
 
-    if valid_targets:
+    # A lock acquisition failure (e.g. a read-only vault root, or the lock path
+    # occupied by something other than a file) must not crash the whole run,
+    # AND must not strand every OTHER target unattempted just because one
+    # vault's lock is broken — both would violate this function's own
+    # exit-code contract above ("one failure never strands the rest"). So a
+    # failed acquisition is attributed to the one vault whose lock path it
+    # names (``OSError.filename`` — set by the failing ``open``/``mkdir`` call
+    # inside ``locking._flock``) and the batch is retried without it; a
+    # failure that can't be attributed to a specific target fails the whole
+    # remaining batch rather than looping forever.
+    remaining = list(valid_targets)
+    while remaining:
         try:
-            with locking.vault_write_locks(*(str(v) for _, v in valid_targets)):
-                for name, vault_path in valid_targets:
+            with locking.vault_write_locks(*(str(v) for _, v in remaining)):
+                for name, vault_path in remaining:
                     say, say_err = say_map[name]
                     rc_one, committed = _stage_and_commit_one(vault_path, message, say, say_err)
                     commit_rc[name] = rc_one
                     committed_map[name] = committed
+            break
         except OSError as exc:
-            # A lock acquisition failure (e.g. a read-only vault root, or the
-            # lock path occupied by something other than a file) must not crash
-            # the whole run — every target not yet marked stays "attempted, hard
-            # failure" instead of an unhandled traceback, matching this
-            # function's own exit-code contract above.
-            for name, _vault_path in valid_targets:
-                if name not in commit_rc:
+            # The for-loop body may already have run to completion and set
+            # commit_rc/committed_map for every target in `remaining` before
+            # this OSError fired on the way OUT of the `with` (e.g. releasing
+            # one vault's lock raised after every commit had already landed).
+            # Never clobber an outcome the loop body already recorded — only
+            # a target still unrecorded genuinely failed to lock.
+            unrecorded = [t for t in remaining if t[0] not in commit_rc]
+            if not unrecorded:
+                # Every target in this batch already has a recorded outcome —
+                # the loop body ran to completion, so this OSError fired
+                # releasing a lock AFTER the commit(s) it guarded already
+                # landed. The work is safe; only the unlock itself is in
+                # question, and that's not attributable to any one target's
+                # commit outcome, so leave commit_rc alone and just surface it.
+                print(
+                    f"notice: error releasing a vault lock after sync: {exc}",
+                    file=sys.stderr,
+                )
+                break
+            bad_filename = str(getattr(exc, "filename", "") or "")
+            bad = next(
+                (t for t in unrecorded if bad_filename and str(t[1]) in bad_filename),
+                None,
+            )
+            if bad is None:
+                # Can't tell which target's lock broke — fail every
+                # still-unrecorded vault rather than guessing (or retrying
+                # forever on the same unattributed error).
+                for name, _vault_path in unrecorded:
                     _say, say_err = say_map[name]
                     say_err(f"error: failed to acquire vault lock: {exc} — skipped")
                     commit_rc[name] = 1
+                break
+            name, _vault_path = bad
+            _say, say_err = say_map[name]
+            say_err(f"error: failed to acquire vault lock: {exc} — skipped")
+            commit_rc[name] = 1
+            remaining = [t for t in unrecorded if t[0] != name]
 
     failed: list[str] = []
     total_pulled = 0

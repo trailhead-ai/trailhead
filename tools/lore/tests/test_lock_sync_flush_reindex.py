@@ -280,9 +280,24 @@ class TestCmdSyncBatchedLockPhase:
     def test_every_targets_lock_is_held_for_the_whole_commit_phase(
         self, tmp_path, monkeypatch
     ):
+        """Every valid target's lock — identified by root, not just a depth
+        count — is held for every commit-phase git call. A depth-only check
+        can't tell "every target locked" from "some other lock nested in" (a
+        shared counter can't distinguish which root is held), so this tracks
+        the actual set of currently-held vault roots instead.
+
+        Pull/push get the opposite pin: a wired remote's ``fetch``/``push``
+        for the SAME vaults must see no lock held at all — a no-timeout flock
+        held across a network round-trip would starve every other writer.
+        """
         sync = load_script("lore.cli.sync")
+        locking = _locking()
         vault_a = _git_vault(tmp_path / "a")
         vault_b = _git_vault(tmp_path / "b")
+        remote_a = _make_bare_remote(tmp_path / "remote-a.git")
+        remote_b = _make_bare_remote(tmp_path / "remote-b.git")
+        _wire_remote(vault_a, remote_a, track=True)
+        _wire_remote(vault_b, remote_b, track=True)
         (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
         (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
 
@@ -291,25 +306,58 @@ class TestCmdSyncBatchedLockPhase:
             config_home,
             [("default", "default", vault_a), ("extra", "team", vault_b)],
         )
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
         monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
 
-        with _lock_depth_probe(sync) as events:
-            rc = sync.cmd_sync(_Args())
+        # Per-root depth, not a plain set: `_stage_and_commit_one`'s own
+        # internal ``with locking.vault_write_lock(vault)`` is a REENTRANT
+        # nested acquisition of a root the outer batch already holds — a
+        # plain add/discard would wrongly drop that root from "held" the
+        # moment the inner acquisition exits, even though the outer one
+        # (covering the whole batch) is still active.
+        held: dict[str, int] = {}
+        events: list[tuple[str, frozenset[str]]] = []
+        real_lock = locking.vault_write_lock
+        real_git = sync._git
+
+        @contextmanager
+        def spy_lock(root, **kwargs):
+            key = str(Path(root).resolve())
+            with real_lock(root, **kwargs):
+                held[key] = held.get(key, 0) + 1
+                try:
+                    yield
+                finally:
+                    held[key] -= 1
+                    if held[key] == 0:
+                        del held[key]
+
+        def spy_git(vault, *args):
+            events.append((args[0], frozenset(held)))
+            return real_git(vault, *args)
+
+        monkeypatch.setattr(locking, "vault_write_lock", spy_lock)
+        monkeypatch.setattr(sync, "_git", spy_git)
+
+        rc = sync.cmd_sync(_Args())
 
         assert rc == 0
         assert _git(vault_a, "ls-files").stdout.split().count("record.md") == 1
         assert _git(vault_b, "ls-files").stdout.split().count("record.md") == 1
-        # Both targets' locks are acquired up front — every git call in the
-        # commit phase (for EITHER vault) must therefore see depth >= 2, not
-        # the depth-1-per-vault signature a one-at-a-time lock would leave.
-        commit_events = [
-            (op, d) for op, d in events if op in ("add", "commit", "reset")
-        ]
+
+        both = frozenset(str(v.resolve()) for v in (vault_a, vault_b))
+        commit_events = [(op, roots) for op, roots in events if op in ("add", "commit", "reset")]
         assert commit_events, "no add/commit/reset calls were recorded"
-        assert all(d >= 2 for _op, d in commit_events), (
-            f"a commit-phase git call ran without every target's lock held: "
-            f"{commit_events}"
+        assert all(roots == both for _op, roots in commit_events), (
+            f"a commit-phase git call ran without BOTH targets' locks held: "
+            f"{commit_events} != {both}"
+        )
+
+        network_events = [(op, roots) for op, roots in events if op in ("fetch", "push")]
+        assert network_events, "no fetch/push calls were recorded"
+        assert all(not roots for _op, roots in network_events), (
+            f"a fetch/push call ran WHILE a vault lock was held: {network_events}"
         )
 
     def test_a_lock_acquisition_failure_fails_the_run_without_crashing(
@@ -349,6 +397,54 @@ class TestCmdSyncBatchedLockPhase:
         assert rc == 1
         assert _git(vault_a, "rev-parse", "HEAD").stdout.strip() == before_a
         assert _git(vault_b, "rev-parse", "HEAD").stdout.strip() == before_b
+
+    def test_an_attributable_lock_failure_still_commits_the_healthy_vault(
+        self, tmp_path, monkeypatch
+    ):
+        """One vault's broken lock fails only that vault, not the whole batch.
+
+        A batch failure that can be traced to a specific target's lock path
+        (via ``OSError.filename``) is retried without that target — so a
+        single bad vault root never strands every other vault's commit,
+        which the all-or-nothing shape of a bare ``except OSError`` would.
+        """
+        sync = load_script("lore.cli.sync")
+        locking = _locking()
+        vault_a = _git_vault(tmp_path / "a")
+        vault_b = _git_vault(tmp_path / "b")
+        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+
+        config_home = tmp_path / "cfg"
+        write_vault_config(
+            config_home,
+            [("default", "default", vault_a), ("extra", "team", vault_b)],
+        )
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+        real_lock = locking.vault_write_lock
+
+        @contextmanager
+        def flaky_lock(root, **kwargs):
+            if str(Path(root).resolve()) == str(vault_b.resolve()):
+                raise OSError(13, "Permission denied", str(vault_b / ".lore.lock"))
+            with real_lock(root, **kwargs):
+                yield
+
+        monkeypatch.setattr(locking, "vault_write_lock", flaky_lock)
+
+        rc = sync.cmd_sync(_Args())
+
+        assert rc == 1, "vault_b's broken lock should still fail the overall run"
+        tracked_a = _git(vault_a, "ls-files").stdout.split()
+        assert "record.md" in tracked_a, (
+            "vault_a should have committed despite vault_b's lock failure"
+        )
+        assert _git(vault_b, "status", "--porcelain").stdout.strip() != "", (
+            "vault_b's record should NOT have committed — its lock never acquired"
+        )
 
 
 

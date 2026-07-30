@@ -191,6 +191,20 @@ def test_sync_labels_output_with_the_vault_name(tmp_path):
     for name in ("default:", "trailhead:", "home-manager:"):
         assert name in r.stdout, f"output does not name {name!r}: {r.stdout!r}"
 
+    # Not just "appears somewhere" — the commit-phase line AND the pull/push-
+    # phase line for each vault must each carry the label. A regression that
+    # reused one vault's emitter closure across both phases (see
+    # ``cmd_sync``'s "fresh emitters for the pull/push phase" comment) prints
+    # the second phase's line with a blank, un-labeled prefix instead — this
+    # is the case that slipped through when this test only checked "the name
+    # appears anywhere in stdout".
+    for name in ("default:", "trailhead:", "home-manager:"):
+        labeled_lines = [line for line in r.stdout.splitlines() if line.startswith(f"  {name}")]
+        assert len(labeled_lines) >= 2, (
+            f"expected at least 2 labeled lines for {name!r} (one per phase), "
+            f"got {labeled_lines!r} in {r.stdout!r}"
+        )
+
 
 # ── lore sync --vault ──────────────────────────────────────────────────────
 
