@@ -187,6 +187,22 @@ def vault_write_lock(
     return _flock(root / VAULT_LOCK_NAME, "vault", str(root), notice_after)
 
 
+def vault_lock_sort_key(vault_root: str | Path) -> str:
+    """The ONE ordering every multi-vault lock acquirer must agree on.
+
+    ``vault_write_locks``, ``record.store.move_record``, ``cmd_sync``'s
+    per-target acquisition loop (which locks each target individually rather
+    than delegating to ``vault_write_locks``, so it can attribute a failed
+    acquisition to the exact vault instead of the whole batch), and
+    ``areas.run_reindex`` all lock several vault roots at once. If any of
+    them sorted by a DIFFERENT key, two callers could acquire the same pair
+    of roots in opposite order and deadlock on this module's no-timeout
+    flock. Route every one of them through this function rather than each
+    reimplementing ``sorted(str(Path(...)))`` separately.
+    """
+    return str(Path(vault_root))
+
+
 @contextmanager
 def vault_write_locks(
     *vault_roots: str | Path,
@@ -197,7 +213,7 @@ def vault_write_locks(
     The total order is what keeps two opposed cross-vault moves (A->B and B->A)
     from deadlocking. Duplicate roots collapse to one acquisition.
     """
-    roots = sorted({str(Path(r)) for r in vault_roots})
+    roots = sorted({vault_lock_sort_key(r) for r in vault_roots})
     with ExitStack() as stack:
         for root in roots:
             stack.enter_context(vault_write_lock(root, notice_after=notice_after))

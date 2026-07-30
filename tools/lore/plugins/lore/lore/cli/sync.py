@@ -562,7 +562,7 @@ def cmd_sync(args) -> int:
     # locked target together for the whole commit phase, in the same sorted
     # order ``vault_write_locks`` itself uses, so this still can't deadlock
     # against a cross-vault ``move_record``.
-    sorted_targets = sorted(valid_targets, key=lambda t: str(t[1]))
+    sorted_targets = sorted(valid_targets, key=lambda t: locking.vault_lock_sort_key(t[1]))
     try:
         with ExitStack() as stack:
             locked: list[tuple[str, Path]] = []

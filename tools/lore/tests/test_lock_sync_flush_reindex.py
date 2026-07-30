@@ -499,6 +499,105 @@ class TestCmdSyncBatchedLockPhase:
             tracked = _git(vault, "ls-files").stdout.split()
             assert "record.md" in tracked, f"{name} should have committed its record"
 
+    def test_acquisition_order_matches_the_shared_sort_key(self, tmp_path, monkeypatch):
+        """cmd_sync's per-target acquisition loop must agree with
+        ``locking.vault_lock_sort_key`` — the ONE ordering every multi-vault
+        lock acquirer (``vault_write_locks``, ``move_record``, ``run_reindex``,
+        and this loop) has to share, or two callers could take the same pair
+        of roots in opposite order and deadlock on a no-timeout flock.
+        cmd_sync locks each target individually rather than delegating to
+        ``vault_write_locks`` (so a failed acquisition attributes to the exact
+        vault — see the class docstring), so nothing else pins its order
+        against the shared key; this does.
+        """
+        sync = load_script("lore.cli.sync")
+        locking = _locking()
+        # Named so config order (default, extra, other) is the REVERSE of sort
+        # order — a bug that dropped the sort (or sorted by name/config order
+        # instead of path) would still pass a same-order check.
+        vault_c = _git_vault(tmp_path / "c")
+        vault_b = _git_vault(tmp_path / "b")
+        vault_a = _git_vault(tmp_path / "a")
+        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+        (vault_c / "record.md").write_text("# c\n", encoding="utf-8")
+
+        config_home = tmp_path / "cfg"
+        write_vault_config(
+            config_home,
+            [
+                ("default", "default", vault_c),
+                ("extra_b", "team", vault_b),
+                ("extra_a", "team", vault_a),
+            ],
+        )
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+        acquired: list[str] = []
+        real_lock = locking.vault_write_lock
+
+        @contextmanager
+        def spy_lock(root, **kwargs):
+            key = str(Path(root).resolve())
+            with real_lock(root, **kwargs):
+                if key not in acquired:  # only the OUTER acquisition per root
+                    acquired.append(key)
+                yield
+
+        monkeypatch.setattr(locking, "vault_write_lock", spy_lock)
+
+        rc = sync.cmd_sync(_Args())
+
+        assert rc == 0
+        expected = sorted(
+            (str(vault_a.resolve()), str(vault_b.resolve()), str(vault_c.resolve())),
+            key=locking.vault_lock_sort_key,
+        )
+        assert acquired == expected, (
+            f"cmd_sync acquired locks in {acquired}, expected sorted order {expected}"
+        )
+
+    def test_an_ungitignored_lock_file_is_still_excluded_from_the_commit(
+        self, tmp_path, monkeypatch
+    ):
+        """A vault with no ``*.lock`` entry in its own ``.gitignore`` — an
+        adopted vault ``config.installer`` never scaffolded, the exact shape
+        the ``:(exclude)`` status pathspec and the ``git reset -q --
+        .lore.lock`` unstage (added in the fix for the original CI failure on
+        this branch) exist for — must still commit its real changes without
+        ever committing the lock sidecar ``cmd_sync`` itself creates while
+        taking the write lock. ``_git_vault`` (used by every other test in
+        this module) always gitignores ``*.lock``, so it can't exercise this
+        path — this test builds a vault without that ignore instead.
+        """
+        sync = load_script("lore.cli.sync")
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
+        _git_identity(vault)
+        (vault / "README.md").write_text("vault\n", encoding="utf-8")
+        _git(vault, "add", "-A")
+        _git(vault, "commit", "-m", "init")
+        (vault / "record.md").write_text("# a record\n", encoding="utf-8")
+
+        config_home = tmp_path / "cfg"
+        write_default_config(config_home, vault)
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+        rc = sync.cmd_sync(_Args())
+
+        assert rc == 0
+        tracked = _git(vault, "ls-files").stdout.split()
+        assert "record.md" in tracked, "the real change was not committed"
+        assert ".lore.lock" not in tracked, (
+            "the lock sidecar cmd_sync itself creates was committed alongside "
+            "the real change — the vault has no *.lock ignore of its own"
+        )
+
 
 
 # ── 2 — sync racing a cross-vault move ─────────────────────────────────────
