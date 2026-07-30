@@ -110,17 +110,29 @@ def scaffold_gitignore(vault: Path) -> None:
     appears at the root of *any* vault the first time anything writes to it, and
     ``reindex`` writes to every configured vault.
 
-    Idempotent: only writes when ``.gitignore`` is absent, so a user's own
-    additions are never clobbered. A missing ``.gitignore`` is the only state
-    this repairs (it does not merge into an existing one). A *missing vault dir*
-    is a no-op — the ignore never conjures the directory it would live in.
+    An existing ``.gitignore`` is **appended to**, not skipped: an adopted repo
+    vault virtually always has one, and skipping meant such a vault never ignored
+    ``*.lock`` at all. Only the missing patterns are appended and the file's
+    existing lines are preserved verbatim, so the operation is idempotent and a
+    user's own entries are never clobbered. A *missing vault dir* is a no-op —
+    the ignore never conjures the directory it would live in.
     """
     if not vault.is_dir():
         return
     gitignore = vault / ".gitignore"
-    if gitignore.exists():
+    if not gitignore.exists():
+        gitignore.write_text("\n".join(_GITIGNORE_PATTERNS) + "\n", encoding="utf-8")
         return
-    gitignore.write_text("\n".join(_GITIGNORE_PATTERNS) + "\n", encoding="utf-8")
+
+    existing = gitignore.read_text(encoding="utf-8")
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [p for p in _GITIGNORE_PATTERNS if p not in present]
+    if not missing:
+        return
+    separator = "" if existing.endswith("\n") or existing == "" else "\n"
+    gitignore.write_text(
+        existing + separator + "\n".join(missing) + "\n", encoding="utf-8"
+    )
 
 
 def git_init(path: Path) -> None:

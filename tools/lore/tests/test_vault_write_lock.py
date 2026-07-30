@@ -434,6 +434,13 @@ def _spawn_holder(vault: Path, hold_for: float) -> subprocess.Popen:
     raise AssertionError("holder subprocess never acquired the lock")
 
 
+def _wait_for_session_lock(locking, vault: Path, buf: io.StringIO) -> None:
+    """Acquire the session lock from a second thread, capturing the wait notice."""
+    with redirect_stderr(buf):
+        with locking.session_write_lock(vault, "sess-x", notice_after=0.1):
+            pass
+
+
 class TestLockContract:
     def test_lock_blocks_rather_than_failing(self, tmp_path):
         """A held lock DELAYS the second writer; it never errors."""
@@ -497,6 +504,79 @@ class TestLockContract:
         # Still acquirable after the nested release (depth unwound correctly).
         with locking.vault_write_lock(vault):
             pass
+
+    def test_reentrant_across_two_spellings_of_one_vault(self, tmp_path):
+        """Two spellings of ONE vault path are one lock, not two.
+
+        Reentrancy is keyed by lock path; keyed by the *unresolved* spelling, a
+        nested acquisition written ``vault`` outside and ``vault/../vault`` inside
+        misses the depth bump, opens a second fd, and self-deadlocks on the flock
+        this thread already holds.
+        """
+        locking = load_script("lore.locking")
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        alias = Path(f"{vault}/../{vault.name}")
+
+        done = threading.Event()
+
+        def nested() -> None:
+            with locking.vault_write_lock(vault):
+                with locking.vault_write_lock(alias):
+                    pass
+            done.set()
+
+        t = threading.Thread(target=nested, daemon=True)
+        t.start()
+        t.join(timeout=5)
+        assert done.is_set(), "two spellings of one vault self-deadlocked"
+
+    def test_session_wait_notice_names_the_session_scope(self, tmp_path):
+        """A session-key wait must NOT read as a vault-lock wait.
+
+        Operators (and ranger's mass-timeout triage) key on the vault-lock
+        wording to mean "the whole vault is contended"; a per-session-key wait,
+        which blocks only that one session's writers, must say so instead.
+        """
+        locking = load_script("lore.locking")
+        vault = tmp_path / "vault"
+        vault.mkdir()
+
+        holder_release = threading.Event()
+        holding = threading.Event()
+
+        def holder() -> None:
+            with locking.session_write_lock(vault, "sess-x"):
+                holding.set()
+                holder_release.wait(timeout=15)
+
+        t = threading.Thread(target=holder, daemon=True)
+        t.start()
+        assert holding.wait(timeout=15)
+        try:
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                # Same-thread reentrancy would skip the wait, so contend from a
+                # second thread's perspective: the holder thread owns the depth
+                # entry, this one does not.
+                waiter = threading.Thread(
+                    target=lambda: _wait_for_session_lock(locking, vault, buf),
+                    daemon=True,
+                )
+                waiter.start()
+                time.sleep(0.4)
+                holder_release.set()
+                waiter.join(timeout=15)
+        finally:
+            holder_release.set()
+            t.join(timeout=15)
+
+        notice = buf.getvalue()
+        assert "waiting for the session write lock" in notice, f"no notice: {notice!r}"
+        assert "session/sess-x" in notice, notice
+        assert "vault write lock" not in notice, (
+            f"a session-key wait reads as a vault-wide wait: {notice!r}"
+        )
 
     def test_lock_file_lives_at_the_vault_root(self, tmp_path):
         locking = load_script("lore.locking")

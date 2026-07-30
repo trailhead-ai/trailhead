@@ -119,9 +119,10 @@ def test_open_index_reports_wal_journal_mode(tmp_path):
 def test_open_index_upgrades_a_pre_existing_non_wal_index(tmp_path):
     """A provisioned-but-rollback-journal index is switched to WAL on open.
 
-    The WAL switch is skipped when the schema is already in place, so an index
-    created (or reverted) in rollback-journal mode would otherwise stay there for
-    the life of the file — the exact mode lore's cross-vault concurrency relies on.
+    The switch runs on EVERY open, not only when provisioning the schema: gated on
+    provisioning, an index created (or reverted) in rollback-journal mode would
+    stay there for the life of the file — and WAL is the mode lore's cross-vault
+    concurrency relies on.
     """
     mod = load_index_store()
     fake_state = tmp_path / "xdg-state"

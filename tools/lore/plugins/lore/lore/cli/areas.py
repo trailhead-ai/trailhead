@@ -110,10 +110,14 @@ def run_reindex() -> "tuple[int | None, str | None]":
         # truncate and its vault's rescan vanishes from the index. Every
         # configured vault's write lock is therefore held for the whole rebuild.
         #
-        # Locks BEFORE the index transaction, deliberately: every writer takes
-        # the vault flock and then opens the index (``record.store``,
-        # ``cli.record``), so acquiring in the other order here would invert the
-        # order and deadlock a writer against the rebuild's SQLite write lock.
+        # Locks BEFORE the index transaction, deliberately: the rebuild must not
+        # be holding a SQLite transaction while it waits on a vault flock, or it
+        # would deadlock against a writer holding that flock and waiting on the
+        # index. ``cli.record`` does open its index connection before taking the
+        # vault flock; that inversion is benign because opening holds no lock past
+        # its own return (first-use provisioning commits its ``BEGIN IMMEDIATE``)
+        # and every record statement runs after the flock is held — so no SQLite
+        # lock is ever owned by a writer still waiting for a vault.
         #
         # This is the only all-vault acquisition in lore. It is bounded by local
         # disk-scan time, and a writer that waits on it past the notice threshold

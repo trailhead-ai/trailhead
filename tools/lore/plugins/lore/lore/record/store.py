@@ -1105,6 +1105,15 @@ def move_record(
     shared vault fences the moved record correctly — the caller computes it from
     ``vault_config.shared_flag(dest_vault)`` (symmetric with the create path).
 
+    **Lock scope.** The paired source+destination acquisition (sorted order, so
+    opposed moves cannot deadlock) covers the copy → repoint → delete sequence
+    only. The existence check and the verbatim source read above it sit OUTSIDE it,
+    so a concurrent write to the source between that read and the acquisition is
+    not detected here. A caller that needs the read and the move to be one atomic
+    unit must hold the pair itself across both — ``cli.record``'s relocating
+    ``record update`` does exactly that, and this function's own acquisition then
+    becomes a reentrant depth bump.
+
     Returns the new ``RecordId``.
     """
     old_root = old_vault_root if old_vault_root is not None else _active_vault_root()

@@ -62,6 +62,15 @@ def _stage_and_commit_session(vault: Path, key: str) -> tuple[int, bool]:
     acquisition order is fixed **session-key → vault**; no lore path takes them
     the other way round, so the pair cannot deadlock.
 
+    **Accepted residual:** ``capture_candidate`` writes a session's body and
+    sidecar under the session-key lock ONLY, never the vault lock. A ``lore sync``
+    running concurrently can therefore take the vault lock and ``git add -A``
+    between that pair's two writes, staging a half-updated session pair. This is
+    pre-existing and out of this lock's scope — closing it means putting session
+    writes under the vault lock too, which would serialize every session capture
+    against every vault writer. The next capture or flush rewrites both files, so
+    the effect is a momentarily-stale commit, not lost data.
+
     The push is deliberately left to the caller / :func:`_flush_commit`, outside
     both locks — a network round-trip must never run under a no-timeout flock.
     """

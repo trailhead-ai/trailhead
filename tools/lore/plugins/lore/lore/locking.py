@@ -28,9 +28,11 @@ Semantics (matching the session-store idiom this replaces):
     are never aliased and concurrent **readers** take no lock at all.
   - Acquisition **blocks**; it never fails or times out. A contended writer is
     delayed, never errored.
-  - A wait past *notice_after* seconds prints a one-line stderr notice, so a
-    writer blocked behind another (e.g. a mid-drain ``lore reindex``) is
-    distinguishable from a stuck one. Uncontended acquisition is silent.
+  - A wait past *notice_after* seconds prints a one-line stderr notice naming the
+    lock's SCOPE (``vault`` vs ``session``), so a writer blocked behind another
+    (e.g. a mid-drain ``lore reindex``) is distinguishable from a stuck one — and
+    a wait on one session's key never reads as the whole vault being contended.
+    Uncontended acquisition is silent.
   - **Reentrant per thread.** Nested acquisition of the same lock path in one
     thread is a depth bump, not a second ``flock`` — a second ``flock`` on a
     fresh fd would block on the fd this thread already holds and self-deadlock.
@@ -84,7 +86,17 @@ def _depths() -> dict[str, int]:
     return depths
 
 
-def _acquire(lock_fd, label: str, notice_after: float) -> None:
+def _resolve_key(lock_path: Path) -> Path:
+    """Normalize a lock path for use as a reentrancy key.
+
+    ``strict=False`` because the lock file (and, for session locks, its parent)
+    may not exist yet — the point is to collapse ``..`` segments and symlinks so
+    one lock file has exactly one key.
+    """
+    return lock_path.resolve()
+
+
+def _acquire(lock_fd, scope: str, label: str, notice_after: float) -> None:
     """Blocking ``LOCK_EX``, reporting a wait that runs past *notice_after*.
 
     Fast path is a single non-blocking attempt. On contention we poll until the
@@ -106,8 +118,11 @@ def _acquire(lock_fd, label: str, notice_after: float) -> None:
         except BlockingIOError:
             time.sleep(_POLL_SECONDS)
 
+    # The scope is part of the message on purpose: a vault-wide wait blocks every
+    # writer in the vault, a session-key wait blocks only that session's writers.
+    # An operator triaging "everything is hung" needs to tell the two apart.
     print(
-        f"lore: waiting for the vault write lock ({label}) — "
+        f"lore: waiting for the {scope} write lock ({label}) — "
         "another lore write is in progress",
         file=sys.stderr,
     )
@@ -117,11 +132,18 @@ def _acquire(lock_fd, label: str, notice_after: float) -> None:
 @contextmanager
 def _flock(
     lock_path: Path,
+    scope: str,
     label: str,
     notice_after: float = LOCK_WAIT_NOTICE_SECONDS,
 ) -> Iterator[None]:
-    """Hold an exclusive, reentrant-per-thread flock on *lock_path*."""
-    key = str(lock_path)
+    """Hold an exclusive, reentrant-per-thread flock on *lock_path*.
+
+    The reentrancy key is the RESOLVED lock path: two spellings of one vault
+    (``v`` and ``v/../v``, or a symlinked root) must share one depth entry, or a
+    nested acquisition written differently misses the bump and self-deadlocks on
+    the flock this thread already holds.
+    """
+    key = str(_resolve_key(lock_path))
     depths = _depths()
     if depths.get(key):
         depths[key] += 1
@@ -135,7 +157,7 @@ def _flock(
     lock_fd = open(lock_path, "a")  # create-or-open, no truncate
     depths[key] = 1
     try:
-        _acquire(lock_fd, label, notice_after)
+        _acquire(lock_fd, scope, label, notice_after)
         yield
     finally:
         depths[key] -= 1
@@ -155,7 +177,7 @@ def vault_write_lock(
     the collision check and the write, nor between the write and the reindex.
     """
     root = Path(vault_root)
-    return _flock(root / VAULT_LOCK_NAME, str(root), notice_after)
+    return _flock(root / VAULT_LOCK_NAME, "vault", str(root), notice_after)
 
 
 @contextmanager
@@ -187,4 +209,4 @@ def session_write_lock(
     ``sanitize_worktree_name``) — it becomes a filename verbatim.
     """
     session_dir = Path(vault_root) / "session"
-    return _flock(session_dir / f"{key}.lock", f"session/{key}", notice_after)
+    return _flock(session_dir / f"{key}.lock", "session", f"session/{key}", notice_after)

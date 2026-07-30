@@ -269,6 +269,39 @@ class TestVaultGitignoreScaffolding:
         installer.scaffold_gitignore(missing)
         assert not missing.exists()
 
+    def test_existing_gitignore_without_the_pattern_gets_it_appended(self, tmp_path):
+        """An adopted repo already has a ``.gitignore`` — it still needs the ignore.
+
+        Early-returning on "a ``.gitignore`` exists" means an adopted repo vault
+        (which virtually always has one) never ignores ``*.lock``, and ``lore
+        sync``'s ``git add -A`` commits ``.lore.lock`` into the user's own repo.
+        The user's own lines must survive the append verbatim.
+        """
+        installer = load_script("lore.config.installer")
+        vault = tmp_path / "adopted"
+        vault.mkdir()
+        original = "# mine\n__pycache__/\n"
+        (vault / ".gitignore").write_text(original, encoding="utf-8")
+
+        installer.scaffold_gitignore(vault)
+
+        text = (vault / ".gitignore").read_text(encoding="utf-8")
+        assert text.startswith(original), f"user's own lines were clobbered: {text!r}"
+        assert "*.lock" in text.splitlines(), f"lock ignore not appended: {text!r}"
+
+    def test_existing_gitignore_with_the_pattern_is_untouched(self, tmp_path):
+        """Idempotent: a ``.gitignore`` already carrying the pattern is byte-identical."""
+        installer = load_script("lore.config.installer")
+        vault = tmp_path / "adopted"
+        vault.mkdir()
+        original = "# mine\n*.lock\nbuild/\n"
+        (vault / ".gitignore").write_text(original, encoding="utf-8")
+
+        installer.scaffold_gitignore(vault)
+        installer.scaffold_gitignore(vault)
+
+        assert (vault / ".gitignore").read_text(encoding="utf-8") == original
+
     def test_bootstrap_is_idempotent_on_gitignore(self, tmp_path):
         """Re-running bootstrap_vault does not duplicate or clobber the .gitignore."""
         installer = load_script("lore.config.installer")

@@ -20,10 +20,12 @@ and the one place lore serializes globally:
   2b. **The record-delete index commit** lands inside the vault lock, like the
      create path's — a commit after the release would publish the row drop to a
      writer that already holds the lock.
-  2c. **A relocating ``record update`` enters ``move_record`` holding nothing**,
-     so the paired sorted-order acquisition inside it is still a total order —
-     holding one of the pair across the call is what would let two opposed
-     cross-vault moves deadlock.
+  2c. **A relocating ``record update`` enters ``move_record`` holding exactly the
+     sorted source+destination pair** — never one of the two, which is what would
+     let two opposed cross-vault moves deadlock. It drops the single source lock,
+     re-acquires the pair through the sorted helper, and RE-READS the record under
+     it, so a same-record write that lands in the swap window is picked up rather
+     than silently overwritten.
   3. **``lore reindex``'s rebuild** takes EVERY configured vault's lock, in
      sorted-path order, before the truncate-and-rescan — closing the window
      where a concurrent write's row is dropped by the truncate and missed by the
@@ -349,16 +351,17 @@ class TestSyncVsCrossVaultMove:
 
 
 class TestUpdateLockOrder:
-    def test_a_relocating_update_holds_no_lock_across_move_record(
+    def test_a_relocating_update_enters_move_record_under_the_sorted_pair(
         self, tmp_path, monkeypatch
     ):
-        """`record update` locks its read-modify-write — but lets go to relocate.
+        """A relocating ``record update`` holds source+destination as a sorted set.
 
-        ``move_record`` acquires source + destination as a SORTED set, and that
-        total order is the only thing keeping two opposed cross-vault moves (A→B
-        and B→A) from deadlocking on a lock with no timeout. Holding one of the
-        pair across the call breaks the order, so the relocation branch must enter
-        ``move_record`` with nothing held.
+        ``move_record`` acquires source + destination in sorted path order, and
+        that total order is the only thing keeping two opposed cross-vault moves
+        (A→B and B→A) from deadlocking on a lock with no timeout. Holding *one* of
+        the pair across the call breaks the order — so the relocation branch drops
+        the single source lock and re-acquires the PAIR through the same sorted
+        helper, making ``move_record``'s own acquisition a reentrant bump.
         """
         record_cli = load_script("lore.cli.record")
         store = importlib.import_module("lore.record.store")
@@ -388,22 +391,25 @@ class TestUpdateLockOrder:
         # Metadata-only update: pytest's captured stdin is not readable.
         monkeypatch.setattr(record_cli, "_read_stdin_body", lambda: "")
 
-        depth = {"n": 0}
-        depth_at_move: list[int] = []
+        held: list[str] = []
+        acquisitions: list[str] = []
+        held_at_move: list[list[str]] = []
         real_lock = locking.vault_write_lock
         real_move = store.move_record
 
         @contextmanager
         def spy_lock(root, **kwargs):
+            key = str(Path(root).resolve())
             with real_lock(root, **kwargs):
-                depth["n"] += 1
+                acquisitions.append(key)
+                held.append(key)
                 try:
                     yield
                 finally:
-                    depth["n"] -= 1
+                    held.remove(key)
 
         def spy_move(*args, **kwargs):
-            depth_at_move.append(depth["n"])
+            held_at_move.append(sorted(held))
             return real_move(*args, **kwargs)
 
         monkeypatch.setattr(locking, "vault_write_lock", spy_lock)
@@ -412,13 +418,90 @@ class TestUpdateLockOrder:
         rc = record_cli._cmd_record_update(_Args(record_id=record_id, team="beta"))
 
         assert rc == 0
-        assert depth_at_move == [0], (
-            f"the source-vault lock was still held entering move_record "
-            f"(depth {depth_at_move}) — opposed cross-vault moves can deadlock"
+        both = sorted(str(v.resolve()) for v in (vault_a, vault_b))
+        assert held_at_move == [both], (
+            f"entered move_record holding {held_at_move} — expected exactly the "
+            f"sorted source+destination pair {both}"
+        )
+        pair_order = [a for a in acquisitions if a in both][-2:]
+        assert pair_order == both, (
+            f"the pair was acquired out of sorted order ({pair_order}) — opposed "
+            "cross-vault moves can deadlock"
         )
         assert (vault_b / "decision" / f"{record_id.split('/', 1)[1]}.md").exists(), (
             "the relocation did not land in the destination vault"
         )
+
+    def test_a_relocating_update_re_reads_the_record_under_the_paired_locks(
+        self, tmp_path, monkeypatch
+    ):
+        """A write landing in the lock-swap window is not silently overwritten.
+
+        The relocation branch releases the single source lock before acquiring the
+        sorted pair. A concurrent same-record update that slips into that window
+        commits its own mutation to the source vault — so the body and sidecar this
+        update relocates must be RE-READ under the pair, not the pre-release
+        snapshot, or that concurrent write is lost with no error.
+        """
+        record_cli = load_script("lore.cli.record")
+        locking = _locking()
+
+        state = tmp_path / "state"
+        state.mkdir()
+        config_home = tmp_path / "cfg"
+        vault_a = tmp_path / "a"
+        vault_b = tmp_path / "b"
+        vault_a.mkdir()
+        vault_b.mkdir()
+        _write_routed_config(config_home, vault_a, vault_b)
+
+        r = run_cli(
+            ["record", "create", "--kind", "decision", "--title", "mover",
+             "--team", "alpha"],
+            vault=vault_a, state_dir=state, stdin_text="orig\n",
+            env_extra={"XDG_CONFIG_HOME": str(config_home)},
+        )
+        assert r.returncode == 0, r.stderr
+        record_id = r.stdout.strip()
+        name = record_id.split("/", 1)[1]
+        source_sidecar = vault_a / "decision" / f"{name}.json"
+
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+        monkeypatch.setattr(record_cli, "_read_stdin_body", lambda: "")
+
+        real_locks = locking.vault_write_locks
+        raced = {"done": False}
+
+        @contextmanager
+        def racing_locks(*roots, **kwargs):
+            # Stand in for a concurrent writer that won the released source lock:
+            # its mutation is on disk BEFORE the pair is acquired.
+            if not raced["done"]:
+                raced["done"] = True
+                sidecar = json.loads(source_sidecar.read_text(encoding="utf-8"))
+                sidecar["keywords"] = sorted({*sidecar.get("keywords", []), "raced"})
+                source_sidecar.write_text(json.dumps(sidecar), encoding="utf-8")
+            with real_locks(*roots, **kwargs):
+                yield
+
+        monkeypatch.setattr(locking, "vault_write_locks", racing_locks)
+
+        rc = record_cli._cmd_record_update(
+            _Args(record_id=record_id, team="beta", keyword=["mine"])
+        )
+        assert rc == 0
+        assert raced["done"], "the paired acquisition never ran — test is not wired"
+
+        moved = json.loads(
+            (vault_b / "decision" / f"{name}.json").read_text(encoding="utf-8")
+        )
+        keywords = moved.get("keywords", [])
+        assert "raced" in keywords, (
+            f"the concurrent write was silently overwritten — keywords={keywords!r}"
+        )
+        assert "mine" in keywords, f"this update's own mutation was lost: {keywords!r}"
 
 
 # ── 3 — reindex: all-vault lock, sorted order, and the write race ──────────

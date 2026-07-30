@@ -798,6 +798,20 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
     return str(resolution.chosen.path), vault_config_mod.shared_flag(resolution.chosen)
 
 
+class _UpdateAborted(Exception):
+    """An update step already reported its own error; carries the exit code.
+
+    ``record update``'s read-modify-apply step is a re-runnable inner call (the
+    relocation path runs it twice, under two lock spans), so it cannot ``return``
+    the handler's exit code directly. It raises this instead, and the handler
+    returns the carried code unchanged.
+    """
+
+    def __init__(self, code: int = 1) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 def _cmd_record_update(args) -> int:
     """``lore record update RECORD_ID`` (with auto-move) — thin shell.
 
@@ -856,6 +870,13 @@ def _cmd_record_update(args) -> int:
         ``moved: <old id> → <new id>`` line is printed to **stdout** in addition to
         the RECORD_ID so a tool can detect the relocation (no silent move).
 
+    **Locking.** The whole read-modify-write runs under the source vault's write
+    lock. Relocation needs both vaults, and holding one of the pair while
+    ``move_record`` acquires the sorted pair would break that total order — so the
+    single lock is dropped, the pair is acquired through the sorted helper, and the
+    read-modify-apply is re-run under it (steps 2–3 above), which is what keeps a
+    write that lands in the swap window from being silently overwritten.
+
     ``updated-at``/``updated-by`` are re-stamped every update; ``created-*`` are
     preserved. The relocation is automatic; there is no manual ``--move-to`` flag —
     removing it also closed an unconfined-destination write path (the dest is now
@@ -898,6 +919,7 @@ def _cmd_record_update(args) -> int:
     has_stdin = stdin_text != ""
 
     guard_notices: list[str] = []
+    notice_shown: set[str] = set()
     try:
         with record_store_mod.index_transaction() as conn, ExitStack() as locks:
             # (1) Resolve the CURRENT location, decoupled from the scope flags
@@ -923,89 +945,112 @@ def _cmd_record_update(args) -> int:
             # ExitStack is entered inside the transaction.
             locks.enter_context(locking_mod.vault_write_lock(location.vault_root))
 
-            # Load the existing sidecar so the field flags mutate the live record.
-            existing_sidecar: dict = {}
-            if location.sidecar_path.exists():
-                try:
-                    existing_sidecar = json.loads(
-                        location.sidecar_path.read_text(encoding="utf-8")
-                    )
-                except (OSError, ValueError):
+            def read_apply_and_guard() -> tuple[dict, str, list[str]]:
+                """Read the record from disk, apply this call's mutations, guard it.
+
+                Returns ``(sidecar, body, notices)``; raises :class:`_UpdateAborted`
+                when a step has already reported its own error.
+
+                MUST be called with the record's vault write lock held — this is
+                the read half of the read-modify-write. It is deliberately
+                re-runnable: the relocation path calls it a SECOND time, under the
+                source+destination lock pair, so a write that landed while it was
+                between locks is picked up instead of overwritten.
+                """
+                # Load the existing sidecar so the field flags mutate the live record.
+                existing_sidecar: dict = {}
+                if location.sidecar_path.exists():
+                    try:
+                        existing_sidecar = json.loads(
+                            location.sidecar_path.read_text(encoding="utf-8")
+                        )
+                    except (OSError, ValueError):
+                        existing_sidecar = {}
+                if not isinstance(existing_sidecar, dict):
                     existing_sidecar = {}
-            if not isinstance(existing_sidecar, dict):
-                existing_sidecar = {}
 
-            existing_body = (
-                location.body_path.read_text(encoding="utf-8")
-                if location.body_path.exists()
-                else ""
-            )
-
-            # --- resolve the new body -----------------------------------------
-            if use_diff:
-                # stdin is a unified diff applied to the existing body.
-                try:
-                    new_body, _ = record_store_mod.apply_unified_diff(
-                        existing_body, stdin_text
-                    )
-                except record_store_mod.DiffRejectError as exc:
-                    # Atomic reject: body byte-for-byte unchanged, no
-                    # index update. Parseable one-line-per-hunk stderr for retry.
-                    for header, reason in exc.rejected:
-                        print(f"rejected hunk {header}: {reason}", file=sys.stderr)
-                    return 1
-                except record_store_mod.DiffFormatError as exc:
-                    print(f"error: unparseable diff: {exc}", file=sys.stderr)
-                    return 1
-            elif has_stdin:
-                # Full-body replace.
-                new_body = stdin_text
-            else:
-                # Metadata-only: body unchanged. Emit the notice to
-                # stderr — exit stays 0.
-                new_body = existing_body
-                print(
-                    "note: no stdin — body unchanged, metadata-only update",
-                    file=sys.stderr,
+                existing_body = (
+                    location.body_path.read_text(encoding="utf-8")
+                    if location.body_path.exists()
+                    else ""
                 )
 
-            # (2) --- apply ALL field mutations to the sidecar IN MEMORY --------
-            # Scope flags (--team etc.) become field-setters that drive the merged
-            # scope; the non-scope per-field flags (--status / --title / --keyword
-            # / --related-*) reuse the shared applier. --title is optional here.
-            sidecar = dict(existing_sidecar)
-            for flag in _SCOPE_FLAGS:
-                val = getattr(args, flag, None)
-                if val:
-                    sidecar[flag] = val
+                # --- resolve the new body -------------------------------------
+                if use_diff:
+                    # stdin is a unified diff applied to the existing body.
+                    try:
+                        new_body, _ = record_store_mod.apply_unified_diff(
+                            existing_body, stdin_text
+                        )
+                    except record_store_mod.DiffRejectError as exc:
+                        # Atomic reject: body byte-for-byte unchanged, no
+                        # index update. Parseable one-line-per-hunk stderr for retry.
+                        for header, reason in exc.rejected:
+                            print(f"rejected hunk {header}: {reason}", file=sys.stderr)
+                        raise _UpdateAborted() from None
+                    except record_store_mod.DiffFormatError as exc:
+                        print(f"error: unparseable diff: {exc}", file=sys.stderr)
+                        raise _UpdateAborted() from None
+                elif has_stdin:
+                    # Full-body replace.
+                    new_body = stdin_text
+                else:
+                    # Metadata-only: body unchanged. Emit the notice to
+                    # stderr — exit stays 0. Printed once even when this runs
+                    # twice (the relocation path's re-read).
+                    new_body = existing_body
+                    if "metadata-only" not in notice_shown:
+                        notice_shown.add("metadata-only")
+                        print(
+                            "note: no stdin — body unchanged, metadata-only update",
+                            file=sys.stderr,
+                        )
 
-            sidecar, field_errors = fields_mod.apply_record_fields(sidecar, args)
-            if field_errors:
-                return _fail(field_errors)
+                # (2) --- apply ALL field mutations to the sidecar IN MEMORY ----
+                # Scope flags (--team etc.) become field-setters that drive the merged
+                # scope; the non-scope per-field flags (--status / --title / --keyword
+                # / --related-*) reuse the shared applier. --title is optional here.
+                sidecar = dict(existing_sidecar)
+                for flag in _SCOPE_FLAGS:
+                    val = getattr(args, flag, None)
+                    if val:
+                        sidecar[flag] = val
 
-            # Apply --label / --annotation / --unset-label / --unset-annotation.
-            sidecar = fields_mod.apply_map_labels_annotations(
-                sidecar,
-                label_pairs=list(getattr(args, "label_pairs", None) or []),
-                annotation_pairs=list(getattr(args, "annotation_pairs", None) or []),
-                unset_labels=list(getattr(args, "unset_labels", None) or []),
-                unset_annotations=list(getattr(args, "unset_annotations", None) or []),
-            )
+                sidecar, field_errors = fields_mod.apply_record_fields(sidecar, args)
+                if field_errors:
+                    raise _UpdateAborted(_fail(field_errors))
 
-            # Task graph guards run against the record's CURRENT vault (where its
-            # parent/depends-on relatives live), with the mutated record overlaid.
-            # Blocking errors → nothing written; notices are held for the success
-            # path. A no-op for every non-task kind.
-            guard_errors, guard_notices = guards_mod.evaluate_task_guards(
-                kind=location.kind,
-                name=location.name,
-                sidecar=sidecar,
-                body=new_body,
-                vault_root=location.vault_root,
-                status_set=getattr(args, "status", None),
-            )
-            if guard_errors:
-                return _fail(guard_errors)
+                # Apply --label / --annotation / --unset-label / --unset-annotation.
+                sidecar = fields_mod.apply_map_labels_annotations(
+                    sidecar,
+                    label_pairs=list(getattr(args, "label_pairs", None) or []),
+                    annotation_pairs=list(
+                        getattr(args, "annotation_pairs", None) or []
+                    ),
+                    unset_labels=list(getattr(args, "unset_labels", None) or []),
+                    unset_annotations=list(
+                        getattr(args, "unset_annotations", None) or []
+                    ),
+                )
+
+                # Task graph guards run against the record's CURRENT vault (where its
+                # parent/depends-on relatives live), with the mutated record overlaid.
+                # Blocking errors → nothing written; notices are held for the success
+                # path. A no-op for every non-task kind.
+                guard_errors, notices = guards_mod.evaluate_task_guards(
+                    kind=location.kind,
+                    name=location.name,
+                    sidecar=sidecar,
+                    body=new_body,
+                    vault_root=location.vault_root,
+                    status_set=getattr(args, "status", None),
+                )
+                if guard_errors:
+                    raise _UpdateAborted(_fail(guard_errors))
+
+                return sidecar, new_body, notices
+
+            sidecar, new_body, guard_notices = read_apply_and_guard()
 
             # (3) re-resolve the DESTINATION (root + shared trust). When --vault named
             # the current location AND no explicit destination scope flag was given on
@@ -1018,14 +1063,17 @@ def _cmd_record_update(args) -> int:
             # asked for a re-route. An explicit scope flag still means "re-route",
             # --vault or not, so it takes the merged-scope resolution below exactly
             # as before.
-            explicit_destination_flag = any(
-                getattr(args, flag, None) for flag in _SCOPE_FLAGS
-            )
-            if named_vault is not None and not explicit_destination_flag:
-                dest_root = str(named_vault.path)
-                dest_shared = vault_config_mod.shared_flag(named_vault)
-            else:
-                dest_root, dest_shared = _resolve_destination_root(sidecar, location.kind)
+            def resolve_destination(sidecar: dict) -> tuple[str, bool]:
+                explicit_destination_flag = any(
+                    getattr(args, flag, None) for flag in _SCOPE_FLAGS
+                )
+                if named_vault is not None and not explicit_destination_flag:
+                    return str(named_vault.path), vault_config_mod.shared_flag(
+                        named_vault
+                    )
+                return _resolve_destination_root(sidecar, location.kind)
+
+            dest_root, dest_shared = resolve_destination(sidecar)
             same_vault = (
                 Path(dest_root).resolve() == Path(location.vault_root).resolve()
             )
@@ -1039,53 +1087,79 @@ def _cmd_record_update(args) -> int:
                     location=location, sidecar=sidecar, body=new_body, conn=conn,
                     shared=dest_shared,
                 )
+                conn.commit()
             else:
-                # (4b) validate + stamp + neutralize the mutated record IN MEMORY,
-                # then write it ONCE at the destination via move_record overrides —
-                # the mutated sidecar is NEVER written at the old location and then
-                # moved (single durable write at destination).
-                stamped, safe_body = record_store_mod.validate_stamp_neutralize(
-                    location, sidecar, new_body
-                )
-                # Release the source-vault lock BEFORE the move. ``move_record``
+                # (4b) Relocation. Two lock spans, deliberately:
+                #
+                # The single source lock is released FIRST because ``move_record``
                 # acquires source+destination as a SORTED set, which is what keeps
                 # two opposed cross-vault moves from deadlocking — and holding one
                 # of the pair across that call is exactly what breaks the total
                 # order: this update would hold A and want B while its opposite
-                # holds B and wants A, and the lock has no timeout. So the
-                # relocation branch is covered by ``move_record``'s own paired
-                # acquisition, not by an outer lock; the read-modify-write above
-                # stays locked for the same-vault case, which is every update that
-                # does not re-route.
+                # holds B and wants A, and the lock has no timeout.
+                #
+                # Releasing alone would open a lost-write window: a concurrent
+                # same-record update can commit inside it, and re-using the
+                # pre-release snapshot would silently overwrite that write. So the
+                # record is RE-READ and the mutations RE-APPLIED under the pair,
+                # which is acquired here (through the same sorted helper, so
+                # ``move_record``'s own acquisition is a reentrant bump and the
+                # total order still holds) and held across ``conn.commit()``.
                 locks.close()
-                # Destination paths are confined via the shared
-                # ``confine_record_id`` seam (the same guard every RECORD_ID-bearing
-                # op uses) rather than hand-rolled — so a destination vault whose
-                # ``kind`` dir is symlinked outside its root is rejected here, not
-                # merely relied upon downstream.
-                dest_kind, dest_name, dest_body_path, dest_sidecar_path = (
-                    record_store_mod.confine_record_id(location.record_id, dest_root)
-                )
-                dest_location = record_store_mod.RecordLocation(
-                    vault_root=dest_root,
-                    kind=dest_kind,
-                    name=dest_name,
-                    record_id=location.record_id,  # ID is vault-root-agnostic
-                    body_path=dest_body_path,
-                    sidecar_path=dest_sidecar_path,
-                )
-                new_id = record_store_mod.move_record(
-                    old_id=location.record_id,
-                    new_location=dest_location,
-                    conn=conn,
-                    old_vault_root=location.vault_root,
-                    new_sidecar=stamped,
-                    new_body=safe_body,
-                    shared=dest_shared,
-                )
-                moved_line = f"moved: {location.record_id} → {new_id}"
+                with locking_mod.vault_write_locks(location.vault_root, dest_root):
+                    sidecar, new_body, guard_notices = read_apply_and_guard()
+                    # The re-read can only change the destination if a concurrent
+                    # writer re-scoped the record; the pair already held is then
+                    # the wrong pair, so this call bails instead of moving the
+                    # record to a vault resolved from a superseded scope.
+                    recheck_root, dest_shared = resolve_destination(sidecar)
+                    if Path(recheck_root).resolve() != Path(dest_root).resolve():
+                        print(
+                            "error: the record's destination vault changed "
+                            "concurrently — nothing written, re-run the update",
+                            file=sys.stderr,
+                        )
+                        return 1
 
-            conn.commit()
+                    # validate + stamp + neutralize the mutated record IN MEMORY,
+                    # then write it ONCE at the destination via move_record
+                    # overrides — the mutated sidecar is NEVER written at the old
+                    # location and then moved (single durable write at destination).
+                    stamped, safe_body = record_store_mod.validate_stamp_neutralize(
+                        location, sidecar, new_body
+                    )
+                    # Destination paths are confined via the shared
+                    # ``confine_record_id`` seam (the same guard every
+                    # RECORD_ID-bearing op uses) rather than hand-rolled — so a
+                    # destination vault whose ``kind`` dir is symlinked outside its
+                    # root is rejected here, not merely relied upon downstream.
+                    dest_kind, dest_name, dest_body_path, dest_sidecar_path = (
+                        record_store_mod.confine_record_id(location.record_id, dest_root)
+                    )
+                    dest_location = record_store_mod.RecordLocation(
+                        vault_root=dest_root,
+                        kind=dest_kind,
+                        name=dest_name,
+                        record_id=location.record_id,  # ID is vault-root-agnostic
+                        body_path=dest_body_path,
+                        sidecar_path=dest_sidecar_path,
+                    )
+                    new_id = record_store_mod.move_record(
+                        old_id=location.record_id,
+                        new_location=dest_location,
+                        conn=conn,
+                        old_vault_root=location.vault_root,
+                        new_sidecar=stamped,
+                        new_body=safe_body,
+                        shared=dest_shared,
+                    )
+                    # Inside the pair, mirroring the delete path: a commit after
+                    # the release would publish the repointed rows to a writer
+                    # that already holds the lock.
+                    conn.commit()
+                moved_line = f"moved: {location.record_id} → {new_id}"
+    except _UpdateAborted as aborted:
+        return aborted.code
     except (
         record_store_mod.RecordNotFoundError,
         record_store_mod.InvalidRecordIdError,

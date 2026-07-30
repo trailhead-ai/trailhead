@@ -112,6 +112,12 @@ from typing import Any
 
 #: Busy timeout for every index connection. Generous on purpose: a writer waiting
 #: on a peer in another vault must queue, never fail.
+#:
+#: The bound this does NOT remove: session captures take only their session-key
+#: flock, so they are outside ``reindex``'s all-vault acquisition and rely on this
+#: timeout alone to survive a rebuild's SQLite write lock. A rebuild that runs
+#: longer than the timeout still surfaces ``database is locked`` to ``lore session
+#: candidate`` — improved from SQLite's 5s default, not eliminated.
 BUSY_TIMEOUT_SECONDS = 30.0
 
 #: Wall-clock budget for the provisioning retry loop (see the module docstring).
