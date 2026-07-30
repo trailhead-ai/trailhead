@@ -401,6 +401,45 @@ def test_routed_line_names_target(tmp_path):
     assert "/craft:plan" in text
 
 
+@pytest.mark.parametrize("target", ["/craft:plan", "/craft:brainstorm"])
+def test_routed_command_block_is_paste_able_at_column_zero(tmp_path, target):
+    """Mirrors test_answer_command_block_is_paste_able_at_column_zero.
+
+    A routed entry whose target is exactly `/craft:plan` or `/craft:brainstorm`
+    gets a fenced code block, at parity with the escalated bucket's answer
+    command, so the operator can copy the fully-formed slash command straight
+    out of the raw markdown.
+    """
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+
+    report.append_routed(report_path, "task/route", target)
+
+    text = report_path.read_text()
+    command = f"{target} task/route"
+    assert command in text
+    lines = text.splitlines()
+    offenders = [line for line in lines if line.strip() == command and line != command]
+    assert not offenders, f"the routed command must render at column 0; indented: {offenders}"
+    fence_start = text.index("```\n" + command)
+    assert text[fence_start + len("```\n" + command + "\n"):].startswith("```\n")
+
+
+def test_routed_non_standard_target_renders_flat_bullet_with_no_fence(tmp_path):
+    """A `ROUTED` target other than `/craft:plan`/`/craft:brainstorm` — e.g. the
+    parent record — keeps today's flat bullet unchanged (fail-closed): no
+    fenced block, since there's no fixed command syntax to build one from.
+    """
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+
+    report.append_routed(report_path, "task/route", "task/some-parent")
+
+    text = report_path.read_text()
+    assert "- `task/route` — routed to task/some-parent\n" in text
+    assert "```" not in text
+
+
 def test_skipped_line_carries_reason(tmp_path):
     env = _env(tmp_path)
     report_path = report.start("mygroup", "myvault", 1, env=env)

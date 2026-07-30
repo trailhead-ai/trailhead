@@ -850,6 +850,7 @@ def test_record_buckets_promoted_routed_and_skipped(tmp_path):
     text = Path(report).read_text()
     assert "## Promoted\n\n- `task/t1`\n" in text
     assert "- `task/t2` — routed to /craft:plan\n" in text
+    assert "```\n/craft:plan task/t2\n```\n" in text
     assert "- `task/t3` — not a standalone task\n" in text
 
 
@@ -1070,6 +1071,7 @@ def test_record_routed_outranks_the_blocked_answered_bucket(tmp_path):
     text = Path(report).read_text()
     routed = text.split("## Routed")[1].split("## Blocked — answered")[0]
     assert "- `task/t1` — routed to /craft:plan" in routed
+    assert "```\n/craft:plan task/t1\n```\n" in routed
     answered = text.split("## Blocked — answered")[1].split("## Blocked — still waiting")[0]
     assert "task/t1" not in answered
 

@@ -257,6 +257,38 @@ def test_route_outcome_states_what_gets_written():
     )
 
 
+def test_route_outcome_writes_a_sidecar_label():
+    """The `Route:` line is human-readable prose; nothing greps for it mechanically.
+
+    A later sweep or dashboard that wants to find routed tasks needs a machine-readable
+    fact, not a sentence to parse — so the route outcome also writes a sidecar label,
+    on the same write as the body, never a follow-up write that could land on a record
+    whose body has already moved on.
+    """
+    text = SHARED_REFINE.read_text()
+    assert "`--label route=plan`" in text, (
+        "_shared/refine.md must write the sidecar label `--label route=plan` for a "
+        "route-to-plan outcome"
+    )
+    assert "`--label route=brainstorm`" in text, (
+        "_shared/refine.md must write the sidecar label `--label route=brainstorm` for "
+        "a route-to-brainstorm outcome"
+    )
+    assert "on the same `lore record update` invocation as the body write" in text, (
+        "_shared/refine.md must bind the `--label` write to the same `lore record "
+        "update` invocation as the body write — a separate write risks landing on a "
+        "record whose body has since changed shape"
+    )
+    assert "An answer that confirms the route" in text, (
+        "_shared/refine.md must bind the sidecar label write to a route-confirming "
+        "answer specifically — an operator's answer can also reject the route "
+        "(deciding the task is a leaf after all), and that rejection must write no "
+        "label. This phrase is unique to the interactive-path sentence, so deleting "
+        "that instruction fails here even though the unattended-path sentence alone "
+        "still satisfies the label-string pins above"
+    )
+
+
 def test_unattended_escalation_never_invents():
     text = SHARED_REFINE.read_text()
     assert "Never invent" in text, (
@@ -298,6 +330,18 @@ def test_promotion_removes_the_escalation_section():
         "_shared/refine.md must remove the escalation section on promotion — a "
         "`ready` task carrying a stale `Route:` line contradicts its own payload with "
         "equal authority, and the reader cannot tell which one is current"
+    )
+
+
+def test_promotion_clears_the_route_label():
+    """The sidecar label must not outlive the escalation it recorded.
+
+    A `ready` task carrying a stale `route=plan` label is the same authoritative-looking
+    contradiction the `Route:` line removal already guards against, just in sidecar form.
+    """
+    assert "`--unset-label route`" in SHARED_REFINE.read_text(), (
+        "_shared/refine.md must pass `--unset-label route` on the promotion write, so a "
+        "`ready` task never carries the sidecar route label"
     )
 
 

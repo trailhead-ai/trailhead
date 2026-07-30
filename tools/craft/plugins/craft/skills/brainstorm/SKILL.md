@@ -235,6 +235,8 @@ file and fill in the body sections.
    orphaned seeds proceed as drafted; each re-enters brainstorming on its own, unanchored to a
    surviving decision.
 
+**If this brainstorm consumed a routed task** — the entry point was a `task` record carrying refine's `route=brainstorm` sidecar label (and its `## Refine — unresolved` section) — close the loop on the source record after the spec is written: `lore record update task/<source-name> --status superseded --related spec=<spec-name> --unset-label route` — one write. The routing has been acted on: the spec is now the canonical statement of the what/why, the `related` edge preserves the source's captured context, and a superseded source stops rendering a stale routed chip or next-step affordance on task boards. Never leave the consumed source `open`.
+
 ### 7. Exit Gate
 
 Before declaring brainstorming done, verify the checklist:
