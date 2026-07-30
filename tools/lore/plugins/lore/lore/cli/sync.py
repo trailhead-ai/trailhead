@@ -44,6 +44,18 @@ they never touch the working tree, and lore's lock is blocking with no timeout �
 holding it across a network round-trip would let one hung remote starve every
 local writer. Hold time is therefore bounded by local git work.
 
+**The commit phase locks every target vault TOGETHER, not one at a time.**
+``cmd_sync`` stages+commits every configured vault under one combined
+:func:`lore.locking.vault_write_locks` acquisition before touching any pull or
+push. A per-vault-only lock would let a cross-vault ``move_record`` run its
+whole copy → repoint → delete sequence strictly BETWEEN two different targets'
+visits — sync would then commit the destination vault's new copy while the
+source vault's own commit (dropping the now-moved record) never happens this
+run, leaving the record readable as committed in both vaults until a later
+sync catches up. Locking every target up front closes that window: whichever
+of sync or the move starts first, the other waits for it to finish in full
+before touching any of the shared vaults.
+
 **Caveat: a git operation that PROMPTS is unbounded.** A commit whose signing key
 needs a gpg pinentry passphrase (or any git helper that waits on a human) blocks
 inside the lock, and because the lock has no timeout every other vault writer
@@ -288,20 +300,46 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
 
     Returns ``(exit_code, committed)``.
 
-    Probed twice, deliberately. The lock file is a sidecar INSIDE the vault, so
-    locking a clean vault would leave an untracked ``.lore.lock`` behind and no
-    vault would ever read as clean again — which would also mean a freshly ``git
-    init``-ed vault always "commits" instead of taking the unborn-adoption path.
-    So a clean tree is answered outside the lock, creating nothing. The probe is
-    then REPEATED under the lock, because staging what the first probe saw is only
+    **The lock file itself is excluded from every ``status``/``add`` call here**,
+    not just left to whatever ``.gitignore`` the vault happens to carry.
+    ``config.installer``'s ``scaffold_gitignore`` covers real vaults, but this
+    function must not depend on that: without the exclusion, the mere act of
+    taking the write lock — which create-or-opens ``<vault_root>/.lore.lock`` —
+    would make an otherwise-clean, ungitignored vault read as dirty and "commit"
+    nothing but its own lock sidecar. That would also break a freshly ``git
+    init``-ed vault's unborn-adoption path in :func:`_pull_one`, which assumes an
+    unborn HEAD implies a clean tree. Excluding the lock file makes that true
+    unconditionally, which is what lets :func:`cmd_sync` safely hold every
+    configured vault's lock for its ENTIRE multi-target commit phase (see its
+    docstring) instead of only locking vaults already known to be dirty.
+
+    The ``status`` probes use a ``:(exclude)`` pathspec for this — safe there,
+    since ``status`` never complains about ignored paths. ``add`` can't use the
+    same trick: git treats an *explicitly named* pathspec — even an exclude-only
+    one with no positive match — as an explicit request, and errors out ("The
+    following paths are ignored…") the moment that name also happens to be
+    gitignored (as ``.lore.lock`` is, in every scaffolded vault). So staging
+    instead runs a bare ``git add -A`` (no pathspec — the one shape where git
+    silently skips ignored paths instead of erroring on them) and then unstages
+    the lock file explicitly with ``git reset``, which never errors whether or
+    not the path was staged. Net effect is the same: the lock file is never part
+    of the commit, whether or not the vault's own ``.gitignore`` already excludes it.
+
+    Probed twice, deliberately. A clean tree is answered outside the lock,
+    creating nothing (skipping straight to "clean", never touching the lock
+    file for a vault this call ends up doing nothing to). The probe is then
+    REPEATED under the lock, because staging what the first probe saw is only
     meaningful if nothing moved in between — and a cross-vault ``move_record``
-    relocating a record out of this vault is exactly what would otherwise stage a
-    copy that no longer exists.
+    relocating a record out of this vault is exactly what would otherwise stage
+    a copy that no longer exists.
 
     No network runs in here — see the module docstring.
     """
-    # `status --porcelain` reports untracked files too, so nothing is missed.
-    rc, status_out, stderr = _git(vault, "status", "--porcelain")
+    lock_exclude = f":(exclude){locking.VAULT_LOCK_NAME}"
+
+    # `status --porcelain` reports untracked files too, so nothing is missed —
+    # except the lock sidecar itself, deliberately (see above).
+    rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", lock_exclude)
     if rc != 0:
         say_err(f"error: git status failed: {stderr} — skipped")
         return 1, False
@@ -310,7 +348,7 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
         return 0, False
 
     with locking.vault_write_lock(vault):
-        rc, status_out, stderr = _git(vault, "status", "--porcelain")
+        rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", lock_exclude)
         if rc != 0:
             say_err(f"error: git status failed: {stderr} — skipped")
             return 1, False
@@ -319,9 +357,17 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
             say("Nothing to commit — vault is clean.")
             return 0, False
 
+        # Bare `-A`, no pathspec — see the docstring for why an explicit
+        # exclude pathspec errors here (unlike for `status`).
         rc, _, stderr = _git(vault, "add", "-A")
         if rc != 0:
             say_err(f"error: git add failed: {stderr} — skipped")
+            return 1, False
+        # Unstage the lock sidecar if it got swept up (i.e. wasn't already
+        # gitignored). `reset` never errors on an ignored or never-staged path.
+        rc, _, stderr = _git(vault, "reset", "-q", "--", locking.VAULT_LOCK_NAME)
+        if rc != 0:
+            say_err(f"error: git reset (unstaging lock file) failed: {stderr} — skipped")
             return 1, False
         # Never pass -S or --no-gpg-sign; honor the adopter's commit.gpgsign.
         rc, _, stderr = _git(vault, "commit", "-m", message)
@@ -331,6 +377,25 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
 
     say(f"Committed: {message}")
     return 0, True
+
+
+def _pull_and_push_one(
+    vault: Path, say, say_err, *, committed: bool
+) -> tuple[int, int]:
+    """Pull then push one vault, given whether this run just committed to it.
+
+    Returns ``(exit_code, commits_pulled)``. Split out of the old ``_sync_one``
+    so :func:`cmd_sync` can run every target's stage+commit phase under ONE
+    combined lock (see its docstring) before running each target's
+    network-touching pull/push tail separately, one vault at a time.
+    """
+    pull_state, pulled = _pull_one(vault, say, say_err)
+    if pull_state == PULL_FAILED:
+        return 1, 0
+    if pull_state == PULL_OFFLINE:
+        return 0, 0
+
+    return _push_one(vault, say, say_err, committed=committed), pulled
 
 
 def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
@@ -344,6 +409,10 @@ def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
     stage/commit, or the pull failed to integrate (most commonly a rebase
     conflict). Network outcomes are soft — see :func:`_pull_one` and
     :func:`_push_one`.
+
+    Used directly by single-vault tests/callers; :func:`cmd_sync` no longer
+    calls this for its multi-target run (see its docstring for why the
+    stage+commit phase there is batched under one combined lock instead).
     """
     if not vault.exists():
         say_err(f"error: vault not found: {vault} — skipped")
@@ -360,13 +429,7 @@ def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
     if rc != 0:
         return rc, 0
 
-    pull_state, pulled = _pull_one(vault, say, say_err)
-    if pull_state == PULL_FAILED:
-        return 1, 0
-    if pull_state == PULL_OFFLINE:
-        return 0, 0
-
-    return _push_one(vault, say, say_err, committed=committed), pulled
+    return _pull_and_push_one(vault, say, say_err, committed=committed)
 
 
 def _select_targets(vault_filter: str | None) -> tuple[list, int]:
@@ -404,6 +467,30 @@ def cmd_sync(args) -> int:
     Exit code is 1 if ANY vault hit a hard failure, 0 otherwise — the run always
     attempts every selected vault first, so one failure never strands the rest.
 
+    **The stage+commit phase runs under every target's write lock held
+    TOGETHER, not one target at a time.** A single ``lore sync`` run visits
+    several vaults sequentially; locking each one independently (the original
+    shape) only keeps a concurrent writer from interleaving WITHIN one
+    vault's own stage/commit call. It does nothing to stop a cross-vault
+    ``move_record`` (which holds source+destination together — see
+    ``locking.vault_write_locks`` and ``record.store.move_record``) from
+    running its ENTIRE copy -> repoint -> delete sequence strictly between
+    two different targets' visits — e.g. sync sees the source vault clean
+    before the move starts, the move completes, then sync commits the
+    destination vault. That leaves the source vault's own commit (the one
+    that would drop the now-deleted record) never taken this run, while the
+    destination vault's commit for the SAME record already landed — the
+    record then reads as committed in both vaults until a later sync happens
+    to revisit the source. Acquiring every target's lock up front (sorted
+    order, matching ``move_record``'s own discipline, so this can never
+    deadlock against it) closes that: a move starting after this phase begins
+    must wait for the WHOLE phase (every target) to finish, and a move
+    already in flight blocks the phase from starting until it releases both
+    its locks — either way, every target's post-move state is only ever
+    visible together, never split across this run. Pull/push stay outside it
+    and per-vault, one at a time, exactly as before — see
+    :func:`_pull_and_push_one`.
+
     When any vault pulled commits, the derived search index is rebuilt ONCE at
     the end (it is global across vaults, so per-vault rebuilds would be wasted
     work). A reindex failure is soft: the pulled text is already on disk and
@@ -416,11 +503,45 @@ def cmd_sync(args) -> int:
     message = getattr(args, "message", None) or DEFAULT_SYNC_MSG
     width = max(len(name) for name, _ in targets) + 1  # + ':'
 
+    say_map = {name: _make_emitters(name, width) for name, _ in targets}
+    commit_rc: dict[str, int] = {}
+    committed_map: dict[str, bool] = {}
+    valid_targets: list[tuple[str, Path]] = []
+
+    for name, vault in targets:
+        say, say_err = say_map[name]
+        vault_path = Path(vault)
+        if not vault_path.exists():
+            say_err(f"error: vault not found: {vault_path} — skipped")
+            commit_rc[name] = 1
+            continue
+        if not _vault_is_git_toplevel(vault_path):
+            say_err(
+                f"error: not its own git toplevel: {vault_path} — skipped\n"
+                "         (vault may be a subdirectory of a larger repo, or not a git repo)"
+            )
+            commit_rc[name] = 1
+            continue
+        valid_targets.append((name, vault_path))
+
+    if valid_targets:
+        with locking.vault_write_locks(*(str(v) for _, v in valid_targets)):
+            for name, vault_path in valid_targets:
+                say, say_err = say_map[name]
+                rc_one, committed = _stage_and_commit_one(vault_path, message, say, say_err)
+                commit_rc[name] = rc_one
+                committed_map[name] = committed
+
     failed: list[str] = []
     total_pulled = 0
     for name, vault in targets:
-        say, say_err = _make_emitters(name, width)
-        rc_one, pulled = _sync_one(Path(vault), message, say, say_err)
+        say, say_err = say_map[name]
+        if commit_rc.get(name, 1) != 0:
+            failed.append(name)
+            continue
+        rc_one, pulled = _pull_and_push_one(
+            Path(vault), say, say_err, committed=committed_map.get(name, False)
+        )
         total_pulled += pulled
         if rc_one != 0:
             failed.append(name)
