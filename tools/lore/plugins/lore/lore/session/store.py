@@ -262,7 +262,8 @@ def capture_candidate(
 
     The critical section: the existence-check, the sidecar create-or-ensure-dirty,
     the body append, and the ``upsert_row``+commit ALL happen inside a single held
-    :func:`lore.locking.session_write_lock` (see the module docstring). *open_index* is a no-arg factory returning a fresh index connection
+    :func:`lore.locking.session_write_lock` (see the module docstring). *open_index*
+    is a no-arg factory returning a fresh index connection
     (so test isolation via ``XDG_STATE_HOME`` flows through); the connection is
     opened and closed inside the lock.
 
