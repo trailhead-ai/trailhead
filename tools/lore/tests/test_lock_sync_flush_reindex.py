@@ -73,10 +73,12 @@ SID = "11111111-2222-4333-8444-555555555555"
 def _git_vault(path: Path) -> Path:
     """A committed git vault, gitignoring ``*.lock`` as every real vault does.
 
-    ``config.installer`` scaffolds that ignore into every vault, which is what
-    keeps lore's write-lock sidecars — including the ``.lore.lock`` that ``sync``
-    itself now creates by taking the lock before probing the tree — out of the
-    commits ``sync`` makes.
+    ``config.installer`` scaffolds that ignore into every real vault, but
+    ``sync``'s own stage+commit does not depend on it — it stages then
+    explicitly unstages the lock sidecar (``git reset``), which is what
+    actually keeps it out of the commits ``sync`` makes, gitignored or not.
+    See ``test_a_clean_ungitignored_vault_sync_is_still_a_no_op`` for a vault
+    fixture that deliberately omits this ignore, to exercise that path too.
     """
     _init_git_vault(path, commit=False, dirty=False)
     _git(path, "add", "-A")
@@ -160,8 +162,25 @@ class _Args:
 # ── 1 — sync: tree mutation inside the lock, network outside ───────────────
 
 
+def _sync_via_cmd(sync, vault: Path, tmp_path: Path, monkeypatch) -> int:
+    """Run the real ``cmd_sync`` entrypoint against a single default vault.
+
+    ``_sync_one`` (the single-vault primitive these tests used to call
+    directly) has no production caller once ``cmd_sync`` moved to its own
+    batched ExitStack acquisition — every test in this class now goes
+    through the actual shipped path instead, fenced into ``tmp_path`` so it
+    never touches the live install.
+    """
+    config_home = tmp_path / "cfg"
+    write_default_config(config_home, vault)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+    return sync.cmd_sync(_Args())
+
+
 class TestSyncLockScope:
-    def test_tree_mutation_is_locked_and_network_is_not(self, tmp_path):
+    def test_tree_mutation_is_locked_and_network_is_not(self, tmp_path, monkeypatch):
         """``add``/``commit``/``rebase`` hold the vault lock; ``fetch``/``push`` do not.
 
         Holding lore's blocking, no-timeout flock across a network round-trip
@@ -187,12 +206,11 @@ class TestSyncLockScope:
         # Local dirt, so add + commit run too.
         (vault / "record.md").write_text("# a record\n", encoding="utf-8")
 
-        say, say_err = sync._make_emitters("default", 9)
         with _lock_depth_probe(sync) as events:
-            rc, pulled = sync._sync_one(vault, "lore: test sync", say, say_err)
+            rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
 
         assert rc == 0
-        assert pulled == 1, "the peer commit was never pulled — rebase did not run"
+        assert (vault / "peer.md").exists(), "the peer commit was never pulled — rebase did not run"
 
         for op in ("add", "commit", "rebase"):
             seen = _depths(events, op)
@@ -207,7 +225,7 @@ class TestSyncLockScope:
                 "starve every local writer"
             )
 
-    def test_unborn_branch_reset_is_locked(self, tmp_path):
+    def test_unborn_branch_reset_is_locked(self, tmp_path, monkeypatch):
         """The unborn-branch ``reset --hard`` is a tree mutation too."""
         sync = load_script("lore.cli.sync")
         remote = _make_bare_remote(tmp_path / "remote.git")
@@ -223,45 +241,76 @@ class TestSyncLockScope:
         _git(vault, "checkout", "-b", branch)
         _git(vault, "remote", "add", "origin", str(remote))
 
-        say, say_err = sync._make_emitters("default", 9)
         with _lock_depth_probe(sync) as events:
-            rc, pulled = sync._sync_one(vault, "lore: test sync", say, say_err)
+            rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
 
         assert rc == 0
-        assert pulled >= 1, "the unborn vault never adopted the remote branch"
+        assert (vault / "README.md").exists(), "the unborn vault never adopted the remote branch"
         seen = _depths(events, "reset")
         assert seen, "reset --hard never ran"
         assert all(d >= 1 for d in seen), f"reset --hard ran OUTSIDE the vault lock: {seen}"
 
-    def test_clean_vault_sync_stays_a_no_op_and_creates_no_lock_file(self, tmp_path):
-        """No-regression: a clean vault commits nothing — and is not even locked.
+    def test_clean_vault_sync_is_a_no_op(self, tmp_path, monkeypatch):
+        """No-regression: a clean, gitignored vault commits nothing.
 
-        The lock file is a sidecar INSIDE the vault, so locking a clean vault
-        would leave it permanently un-clean. The clean answer comes from the
-        pre-lock probe, creating nothing.
+        Unlike the old single-vault ``_sync_one`` path, ``cmd_sync``'s batch
+        pre-acquires every target's lock (creating the lock sidecar) BEFORE
+        probing clean/dirty — see ``_stage_and_commit_one``'s docstring — so
+        a clean vault is no longer un-locked here. What must still hold is
+        the user-visible outcome: no commit, no git-status change.
         """
         sync = load_script("lore.cli.sync")
         vault = _git_vault(tmp_path / "vault")
         before = _git(vault, "rev-parse", "HEAD").stdout.strip()
 
-        say, say_err = sync._make_emitters("default", 9)
-        rc, pulled = sync._sync_one(vault, "lore: test sync", say, say_err)
+        rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
 
-        assert (rc, pulled) == (0, 0)
+        assert rc == 0
         assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before
-        assert not (vault / ".lore.lock").exists(), (
-            "a clean vault was locked — its tree can never read clean again"
-        )
         assert _git(vault, "status", "--porcelain").stdout.strip() == ""
 
-    def test_a_dirty_vault_commits_its_records_but_not_the_lock_file(self, tmp_path):
+    def test_a_clean_ungitignored_vault_sync_is_still_a_no_op(self, tmp_path, monkeypatch):
+        """The same no-op guarantee for a vault with no ``*.lock`` ignore of
+        its own — the adopted-vault shape ``config.installer`` never
+        scaffolded. ``cmd_sync``'s batch creates the lock sidecar taking the
+        lock before this vault's own probe ever runs; without the
+        ``:(exclude)`` pathspec on that probe (added in the fix for the
+        ORIGINAL CI failure on this branch), a clean vault like this one
+        would misread as dirty, stage only the lock file, unstage it via
+        ``git reset``, and then fail ``git commit`` with nothing left staged
+        — a regression a gitignored test vault can never expose, since its
+        own ``.gitignore`` would paper over a dropped exclusion.
+        """
+        sync = load_script("lore.cli.sync")
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
+        _git_identity(vault)
+        (vault / "README.md").write_text("vault\n", encoding="utf-8")
+        _git(vault, "add", "-A")
+        _git(vault, "commit", "-m", "init")
+        before = _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+        rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
+
+        assert rc == 0, "a clean, ungitignored vault must sync as a no-op, not fail"
+        assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before
+        # The lock sidecar cmd_sync's batch itself created is legitimately left
+        # behind, untracked, on disk (there's no gitignore here to hide it
+        # from `git status` the way a real vault's own scaffolding would) —
+        # that's expected, not a regression. What must NOT happen is anything
+        # else reading as dirty, or the lock file itself being tracked.
+        status = _git(vault, "status", "--porcelain").stdout.strip()
+        assert status == "?? .lore.lock", f"unexpected status after a no-op sync: {status!r}"
+        assert ".lore.lock" not in _git(vault, "ls-files").stdout.split()
+
+    def test_a_dirty_vault_commits_its_records_but_not_the_lock_file(self, tmp_path, monkeypatch):
         """Records are committed; the lock sidecar sync itself created is not."""
         sync = load_script("lore.cli.sync")
         vault = _git_vault(tmp_path / "vault")
         (vault / "record.md").write_text("# a record\n", encoding="utf-8")
 
-        say, say_err = sync._make_emitters("default", 9)
-        rc, _pulled = sync._sync_one(vault, "lore: test sync", say, say_err)
+        rc = _sync_via_cmd(sync, vault, tmp_path, monkeypatch)
 
         assert rc == 0
         tracked = _git(vault, "ls-files").stdout.split()
@@ -499,22 +548,29 @@ class TestCmdSyncBatchedLockPhase:
             tracked = _git(vault, "ls-files").stdout.split()
             assert "record.md" in tracked, f"{name} should have committed its record"
 
-    def test_acquisition_order_matches_the_shared_sort_key(self, tmp_path, monkeypatch):
-        """cmd_sync's per-target acquisition loop must agree with
+    def test_acquisition_order_routes_through_the_shared_sort_key(
+        self, tmp_path, monkeypatch
+    ):
+        """cmd_sync's per-target acquisition loop must genuinely ROUTE THROUGH
         ``locking.vault_lock_sort_key`` — the ONE ordering every multi-vault
         lock acquirer (``vault_write_locks``, ``move_record``, ``run_reindex``,
         and this loop) has to share, or two callers could take the same pair
         of roots in opposite order and deadlock on a no-timeout flock.
         cmd_sync locks each target individually rather than delegating to
         ``vault_write_locks`` (so a failed acquisition attributes to the exact
-        vault — see the class docstring), so nothing else pins its order
-        against the shared key; this does.
+        vault — see the class docstring), so nothing else pins that it calls
+        the shared function rather than reimplementing its own sort inline.
+
+        Proves ROUTING, not just coincidental agreement: patches
+        ``vault_lock_sort_key`` itself to a forced order distinct from BOTH
+        the vaults' natural path-sort order (a, b, c) AND their config order
+        (c, b, a) — b, c, a — and asserts cmd_sync's actual acquisition
+        follows that patched order. A version that inlined its own
+        ``sorted(str(path))`` instead of calling through
+        ``locking.vault_lock_sort_key`` would ignore the patch and fail this.
         """
         sync = load_script("lore.cli.sync")
         locking = _locking()
-        # Named so config order (default, extra, other) is the REVERSE of sort
-        # order — a bug that dropped the sort (or sorted by name/config order
-        # instead of path) would still pass a same-order check.
         vault_c = _git_vault(tmp_path / "c")
         vault_b = _git_vault(tmp_path / "b")
         vault_a = _git_vault(tmp_path / "a")
@@ -535,6 +591,17 @@ class TestCmdSyncBatchedLockPhase:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
         monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
 
+        forced_order = {
+            str(vault_b.resolve()): 0,
+            str(vault_c.resolve()): 1,
+            str(vault_a.resolve()): 2,
+        }
+
+        def fake_sort_key(root):
+            return forced_order[str(Path(root).resolve())]
+
+        monkeypatch.setattr(locking, "vault_lock_sort_key", fake_sort_key)
+
         acquired: list[str] = []
         real_lock = locking.vault_write_lock
 
@@ -551,12 +618,13 @@ class TestCmdSyncBatchedLockPhase:
         rc = sync.cmd_sync(_Args())
 
         assert rc == 0
-        expected = sorted(
-            (str(vault_a.resolve()), str(vault_b.resolve()), str(vault_c.resolve())),
-            key=locking.vault_lock_sort_key,
-        )
+        expected = [
+            str(vault_b.resolve()), str(vault_c.resolve()), str(vault_a.resolve()),
+        ]
         assert acquired == expected, (
-            f"cmd_sync acquired locks in {acquired}, expected sorted order {expected}"
+            f"cmd_sync acquired locks in {acquired}, expected the patched "
+            f"sort key's order {expected} — it isn't routing through "
+            "locking.vault_lock_sort_key"
         )
 
     def test_an_ungitignored_lock_file_is_still_excluded_from_the_commit(

@@ -417,40 +417,6 @@ def _pull_and_push_one(
     return _push_one(vault, say, say_err, committed=committed), pulled
 
 
-def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
-    """Stage, commit, pull, and push a single vault.
-
-    Returns ``(exit_code, commits_pulled)`` — 1 on a hard failure, and the pull
-    count so the caller knows whether the derived search index is now stale.
-
-    A hard failure (1) is one that leaves the vault's records unsynced: the
-    directory is absent, it is not its own git toplevel, git refused the
-    stage/commit, or the pull failed to integrate (most commonly a rebase
-    conflict). Network outcomes are soft — see :func:`_pull_one` and
-    :func:`_push_one`.
-
-    Used directly by single-vault tests/callers; :func:`cmd_sync` no longer
-    calls this for its multi-target run (see its docstring for why the
-    stage+commit phase there is batched under one combined lock instead).
-    """
-    if not vault.exists():
-        say_err(f"error: vault not found: {vault} — skipped")
-        return 1, 0
-
-    if not _vault_is_git_toplevel(vault):
-        say_err(
-            f"error: not its own git toplevel: {vault} — skipped\n"
-            "         (vault may be a subdirectory of a larger repo, or not a git repo)"
-        )
-        return 1, 0
-
-    rc, committed = _stage_and_commit_one(vault, message, say, say_err)
-    if rc != 0:
-        return rc, 0
-
-    return _pull_and_push_one(vault, say, say_err, committed=committed)
-
-
 def _select_targets(vault_filter: str | None) -> tuple[list, int]:
     """Resolve the vaults to sync. Returns ``(targets, exit_code)``.
 

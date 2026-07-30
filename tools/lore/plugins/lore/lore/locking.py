@@ -63,7 +63,10 @@ from pathlib import Path
 from typing import Iterator
 
 #: The vault-root lock file. ``*.lock`` is gitignore-scaffolded into every vault
-#: (``config.installer``), so this is never staged by ``sync``'s ``git add -A``.
+#: (``config.installer``), but ``sync``'s stage+commit does not rely on that —
+#: it stages then explicitly unstages this file (``git reset``) so a vault
+#: that predates that scaffolding (adopted, never re-scaffolded) still never
+#: commits it. See ``cli.sync._stage_and_commit_one``.
 VAULT_LOCK_NAME = ".lore.lock"
 
 #: Wait longer than this (seconds) and the wait is reported on stderr.
