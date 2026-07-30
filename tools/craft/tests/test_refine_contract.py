@@ -279,6 +279,14 @@ def test_route_outcome_writes_a_sidecar_label():
         "update` invocation as the body write — a separate write risks landing on a "
         "record whose body has since changed shape"
     )
+    assert "An answer that confirms the route" in text, (
+        "_shared/refine.md must bind the sidecar label write to a route-confirming "
+        "answer specifically — an operator's answer can also reject the route "
+        "(deciding the task is a leaf after all), and that rejection must write no "
+        "label. This phrase is unique to the interactive-path sentence, so deleting "
+        "that instruction fails here even though the unattended-path sentence alone "
+        "still satisfies the label-string pins above"
+    )
 
 
 def test_unattended_escalation_never_invents():

@@ -57,6 +57,7 @@ _ALLOWLIST = {
 
 def _scanned_files():
     yield from TOOLS_ROOT.glob("*/plugins/*/skills/**/SKILL.md")
+    yield from TOOLS_ROOT.glob("*/plugins/*/skills/_shared/*.md")
     yield from TOOLS_ROOT.glob("*/plugins/*/agents/*.md")
 
 

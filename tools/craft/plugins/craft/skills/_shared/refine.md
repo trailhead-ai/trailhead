@@ -328,7 +328,9 @@ reshapes the drafting that follows it, so batching questions wastes the later on
   committable cuts; route it to `/craft:plan`?"), pre-loaded with the evidence behind
   that read. An answer settles the route; a defer falls back to the unattended
   escalation for it — `Route:` line included, so the recommendation is not lost along
-  with the question. An answer also writes the sidecar label (`--label route=plan` or `--label route=brainstorm`) on the same `lore record update` invocation as the body write, exactly as the unattended path does.
+  with the question. An answer can also reject the route — deciding the task is a
+  leaf after all — and that rejection writes no label at all.
+- **An answer that confirms the route** writes the sidecar label (`--label route=plan` or `--label route=brainstorm`) on the same `lore record update` invocation as the body write, exactly as the unattended path does.
 
 ### Promotion clears the escalation
 

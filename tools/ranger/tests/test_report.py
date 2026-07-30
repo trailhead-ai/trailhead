@@ -418,8 +418,9 @@ def test_routed_command_block_is_paste_able_at_column_zero(tmp_path, target):
     text = report_path.read_text()
     command = f"{target} task/route"
     assert command in text
-    command_line = next(line for line in text.splitlines() if line == command)
-    assert command_line == command, "the routed command must render at column 0"
+    lines = text.splitlines()
+    offenders = [line for line in lines if line.strip() == command and line != command]
+    assert not offenders, f"the routed command must render at column 0; indented: {offenders}"
     fence_start = text.index("```\n" + command)
     assert text[fence_start + len("```\n" + command + "\n"):].startswith("```\n")
 
