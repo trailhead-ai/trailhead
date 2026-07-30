@@ -376,9 +376,12 @@ _ADR_MODE_AGENTS: list[str] = [
     "advocate",
 ]
 
-# Mirrors `<spec-id> --status ready`: the gauntlet owns this edge too, and it is
+# Mirrors `_SPEC_ADVANCE_RE`: a literal substring only catches the one exact
+# spelling this file happens to use, so a differently-phrased adr activation
+# elsewhere (extra whitespace, reordered flags) would silently escape the
+# "only gauntlet flips it" guard. The gauntlet owns this edge too, and it is
 # the ONLY file allowed to carry it.
-_ADR_ADVANCE = "<adr-id> --status active"
+_ADR_ADVANCE_RE = re.compile(r"<adr-id>\s+--status\s+active")
 
 _ANNOTATION_PROVENANCE_SENTENCE = (
     "Gauntlet provenance for an adr target goes to the record's annotations, "
@@ -400,7 +403,7 @@ def _adr_mode_section(text: str) -> str:
 
 
 def test_gauntlet_owns_the_adr_freeze():
-    assert _ADR_ADVANCE in GAUNTLET.read_text(), (
+    assert _ADR_ADVANCE_RE.search(GAUNTLET.read_text()), (
         "gauntlet/SKILL.md must carry the adr-freeze command "
         "(`lore record update <adr-id> --status active`) — it owns the "
         "draft -> active edge, the adr equivalent of the spec `ready` guard"
@@ -415,7 +418,7 @@ def test_only_gauntlet_flips_an_adr_active():
     """
     offenders = [
         p for p in _craft_prose_files()
-        if p != GAUNTLET and _ADR_ADVANCE in p.read_text()
+        if p != GAUNTLET and _ADR_ADVANCE_RE.search(p.read_text())
     ]
     assert not offenders, (
         "these craft files can flip an adr to `active`, bypassing the gauntlet: "
@@ -509,7 +512,7 @@ def test_gauntlet_supersession_back_edge_is_second_write():
     internal supersession order.
     """
     adr_section = _adr_mode_section(GAUNTLET.read_text())
-    successor_idx = adr_section.index(_ADR_ADVANCE)
+    successor_idx = _ADR_ADVANCE_RE.search(adr_section).start()
     back_edge_idx = adr_section.index(_FORWARD_SUPERSESSION_BACK_EDGE)
     assert successor_idx < back_edge_idx, (
         "gauntlet/SKILL.md must write the successor's `--status active` flip "

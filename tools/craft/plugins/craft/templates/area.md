@@ -7,9 +7,7 @@ after it verbatim. Cite ADRs and other records inline as [[wikilinks]] (e.g.
 [[adr/adr-003-example]]) so a reader can drill in. -->
 
 ## Overview
-<!-- One clear lead sentence: what this area is and why it exists. This line (or the
-`summary:` frontmatter field, if set) becomes the area menu's one-liner — keep it a real
-sentence, not a placeholder. -->
+<!-- One clear lead sentence: what this area is and why it exists — becomes the area menu's one-liner (or the `summary:` frontmatter field, if set). Keep it a real sentence, not a placeholder. -->
 
 ## Key files
 <!-- The files/modules that matter, with a one-line role each. -->

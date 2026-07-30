@@ -207,6 +207,11 @@ file and fill in the body sections.
    The create path assigns the `ADR-NNN` number itself and leaves the record at its default
    status, `draft` — there is no `--status` flag to set here, and brainstorm never flips it.
 
+   **If this decision supersedes an existing `active` ADR**, carry that from birth too: the create
+   call adds `--related adr=<predecessor-adr-id>`, the same edge convention every other provenance
+   link uses. Gauntlet reads that edge at activation to drive its own two-directional supersession
+   flip — this draft never flips anything itself, it only records the link.
+
 2. **Seed each derived spec, from birth.** For every spec-sized piece of work the decision fans
    out into, create a named seed — a minimal spec record wired to the ADR before a word of its
    own content is grilled:
