@@ -75,9 +75,23 @@ def _locking():
     return importlib.import_module("lore.locking")
 
 
+def _git_identity(path: Path) -> None:
+    """Give a git repo a committer identity and disable signing.
+
+    Test repos are created bare of any user config, and an unsigned commit with a
+    known author is the only thing these tests need from it.
+    """
+    for key, val in (
+        ("user.email", "t@e.st"),
+        ("user.name", "Test"),
+        ("commit.gpgsign", "false"),
+    ):
+        _git(path, "config", key, val)
+
+
 @contextmanager
 def _lock_depth_probe(sync_module):
-    """Yield ``(events, depth)`` while instrumenting locks + git in *sync_module*.
+    """Yield the git-call ``events`` recorded while instrumenting *sync_module*.
 
     ``events`` collects ``(git_subcommand, lock_depth_at_call)`` for every git
     invocation the module makes, so "was the lock held for this operation?" is
@@ -106,7 +120,7 @@ def _lock_depth_probe(sync_module):
     locking.vault_write_lock = spy_lock
     sync_module._git = spy_git
     try:
-        yield events, depth
+        yield events
     finally:
         locking.vault_write_lock = real_lock
         sync_module._git = real_git
@@ -137,12 +151,7 @@ class TestSyncLockScope:
         subprocess.run(
             ["git", "clone", str(remote), str(peer)], check=True, capture_output=True
         )
-        for key, val in (
-            ("user.email", "t@e.st"),
-            ("user.name", "Test"),
-            ("commit.gpgsign", "false"),
-        ):
-            _git(peer, "config", key, val)
+        _git_identity(peer)
         (peer / "peer.md").write_text("peer\n", encoding="utf-8")
         _git(peer, "add", "-A")
         _git(peer, "commit", "-m", "peer commit")
@@ -152,7 +161,7 @@ class TestSyncLockScope:
         (vault / "record.md").write_text("# a record\n", encoding="utf-8")
 
         say, say_err = sync._make_emitters("default", 9)
-        with _lock_depth_probe(sync) as (events, _depth):
+        with _lock_depth_probe(sync) as events:
             rc, pulled = sync._sync_one(vault, "lore: test sync", say, say_err)
 
         assert rc == 0
@@ -182,18 +191,13 @@ class TestSyncLockScope:
         vault = tmp_path / "vault"
         vault.mkdir()
         subprocess.run(["git", "init", str(vault)], check=True, capture_output=True)
-        for key, val in (
-            ("user.email", "t@e.st"),
-            ("user.name", "Test"),
-            ("commit.gpgsign", "false"),
-        ):
-            _git(vault, "config", key, val)
+        _git_identity(vault)
         branch = _git(seed, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
         _git(vault, "checkout", "-b", branch)
         _git(vault, "remote", "add", "origin", str(remote))
 
         say, say_err = sync._make_emitters("default", 9)
-        with _lock_depth_probe(sync) as (events, _depth):
+        with _lock_depth_probe(sync) as events:
             rc, pulled = sync._sync_one(vault, "lore: test sync", say, say_err)
 
         assert rc == 0
@@ -535,7 +539,9 @@ class TestKillMidCriticalSectionRepair:
 
 
 class TestFlushCommitLockGranularity:
-    def test_commit_takes_the_session_key_lock_and_not_the_vault_lock(self, tmp_path):
+    def test_commit_takes_the_session_key_lock_and_not_the_vault_lock(
+        self, tmp_path, monkeypatch
+    ):
         """The commit is a session-record operation, so its lock granularity is
         (vault, session-key). The vault lock guards file+index mutation and must
         NOT be taken for a commit."""
@@ -562,13 +568,9 @@ class TestFlushCommitLockGranularity:
             vault_calls.append(str(root))
             return real_vault(root, **kwargs)
 
-        locking.session_write_lock = spy_session
-        locking.vault_write_lock = spy_vault
-        try:
-            rc = flush._flush_commit(vault, SID, push=False)
-        finally:
-            locking.session_write_lock = real_session
-            locking.vault_write_lock = real_vault
+        monkeypatch.setattr(locking, "session_write_lock", spy_session)
+        monkeypatch.setattr(locking, "vault_write_lock", spy_vault)
+        rc = flush._flush_commit(vault, SID, push=False)
 
         assert rc == 0
         assert (str(vault), SID) in session_calls, (

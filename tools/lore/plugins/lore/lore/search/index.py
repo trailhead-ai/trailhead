@@ -100,6 +100,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -204,6 +205,13 @@ _DDL_STATEMENTS: tuple[str, ...] = tuple(
     s.strip() for s in _DDL.split(";") if s.strip()
 )
 
+# Every schema object the DDL creates, DERIVED from the DDL rather than restated —
+# ``_schema_is_provisioned`` compares against this, so a table added above is
+# covered by the provisioning check automatically instead of silently escaping it.
+_SCHEMA_OBJECTS: frozenset[str] = frozenset(
+    re.findall(r"IF NOT EXISTS\s+(\w+)", _DDL)
+)
+
 # The forward list-valued facets and the sidecar keys / facet names they project to.
 # ``related`` (the nested kind -> [names] map) is handled separately.
 _LIST_FACETS: tuple[tuple[str, str], ...] = (
@@ -257,15 +265,15 @@ def _schema_is_provisioned(conn: sqlite3.Connection) -> bool:
     A pure read, so it never contends with a concurrent writer in WAL mode — and
     it is what lets the common case skip the write-locking DDL entirely.
     """
+    placeholders = ",".join("?" * len(_SCHEMA_OBJECTS))
+    names = sorted(_SCHEMA_OBJECTS)
     present = {
         row[0]
         for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE name IN "
-            "('records','record_facet','idx_facet','record_labels','idx_labels',"
-            "'record_fts','index_meta')"
+            f"SELECT name FROM sqlite_master WHERE name IN ({placeholders})", names
         )
     }
-    return len(present) == 7
+    return present == _SCHEMA_OBJECTS
 
 
 def _provision(conn: sqlite3.Connection) -> None:

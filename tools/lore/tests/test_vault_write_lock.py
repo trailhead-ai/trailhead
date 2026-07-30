@@ -417,7 +417,7 @@ class TestLockContract:
 
     def test_wait_past_threshold_emits_stderr_notice(self, tmp_path):
         """A wait past the notice threshold reports it, so a blocked writer
-        reads as blocked rather than stuck (council C2)."""
+        reads as blocked rather than stuck."""
         locking = load_script("lore.locking")
         vault = tmp_path / "vault"
         vault.mkdir()
