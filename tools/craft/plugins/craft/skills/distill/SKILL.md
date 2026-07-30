@@ -63,11 +63,13 @@ A direct write bypasses the index and the sidecar and silently corrupts the reco
 a direct read sees bytes on disk without the sidecar that gives them meaning. This ritual touches
 more records in one sitting than any other in craft, so a shortcut here costs the most.
 
-**Every batch write passes its scope explicitly (`--product` / `--team`).** Record operations locate
-a record by scanning the configured vaults in **config order**, so an unscoped write in a multi-vault
-install lands wherever the scan happens to hit first — which is not necessarily where the record
-lives. Read each record's scope from the sidecar that `lore record show <record-id> --json` already
-returned during the queue pass, and pass it back on every write against that record.
+**Every batch update passes `--vault <name>` explicitly.** `lore record update` locates a record by
+scanning the configured vaults in **config order**, so an unscoped update in a multi-vault install
+lands wherever the scan happens to hit first — which is not necessarily where the record lives.
+`--vault` disambiguates the record's CURRENT location; it is not the same flag as `--product`/`--team`
+on a `create`, which instead selects the DESTINATION vault (the ADR's numbering namespace — see step
+1). Read each record's vault from the sidecar that `lore record show <record-id> --json` already
+returned during the queue pass, and pass it back as `--vault` on every update against that record.
 
 ## Sweep mode — building the queue
 
@@ -90,19 +92,24 @@ cohort is worked through, this second query returns only already-excluded record
 ### 2. Apply the exclusion per candidate, never in the query
 
 A spec is out of the queue if it already carries **a `distilled=` annotation** —
-`distilled=adr` (ADRs written), `distilled=zero-adr`, or `distilled=rejected`. This is the sole
-exclusion key: `related:` edges are forward-only, and step 1 writes the ADR's provenance edge as
-`--related spec=<member>` **on the ADR**, never on the spec, so a spec's own sidecar never carries
-a `related: adr` edge to check. `distilled=` cannot ride the KQL query either, because
-annotations are never indexed, so this cannot be a KQL filter. Check per candidate:
+`distilled=adr` (ADRs written), `distilled=zero-adr`, or `distilled=rejected` — **or a `related: adr`
+edge**. Two keys, not one, because they arise from opposite directions: distill's own writes never
+land spec-side — step 1 writes the ADR's provenance edge as `--related spec=<member>` **on the ADR**,
+never on the spec, so a `related: adr` edge on a spec never came from a prior distillation. It comes
+from the forward path instead: brainstorm's altitude gate creates every forward-derived spec with
+`--related adr=<adr-id>` **from birth**, so a spec descended from an ADR already belongs to a decision
+already on record, and sweeping it would re-distill that decision into a second ADR restating its
+parent's. `distilled=` cannot ride the KQL query either, because
+annotations are never indexed, so this cannot be a KQL filter, and the same per-candidate check
+covers the edge too. Check per candidate:
 
 ```
 lore record show <spec-id> --json
 ```
 
-Read the sidecar's annotations and drop the candidate on a hit. This is an extra call per
-candidate; at spec volume that is fine, and it is the only correct way to apply an exclusion key
-the index does not carry.
+Read the sidecar's annotations and `related` edges and drop the candidate on either hit. This is an
+extra call per candidate; at spec volume that is fine, and it is the only correct way to apply an
+exclusion key the index does not carry.
 
 Keep the `--json` output — its scope fields are what the explicit-scope rule above needs later.
 
@@ -234,7 +241,7 @@ claims `complete` until everything behind it landed.
 5. Finally, **member-spec `complete` flips land last** — one per member:
 
    ```
-   lore record update <spec-id> --status complete --product <scope>
+   lore record update <spec-id> --status complete --vault <name>
    ```
 
    Write this **only if the spec is already `planned` and its cluster is dispositioned**. `complete`
@@ -252,14 +259,14 @@ forever.
   distilled":
 
   ```
-  lore record update <spec-id> --status complete --annotation distilled=adr --product <scope>
+  lore record update <spec-id> --status complete --annotation distilled=adr --vault <name>
   ```
 
 - **Zero ADRs.** The cluster produced nothing worth recording. The members still reach `complete`,
   annotated so the sweep can tell "distilled, yielded nothing" from "not yet distilled":
 
   ```
-  lore record update <spec-id> --status complete --annotation distilled=zero-adr --product <scope>
+  lore record update <spec-id> --status complete --annotation distilled=zero-adr --vault <name>
   ```
 
 - **Rejected.** The operator rejected the cluster's drafts. The stamp goes on, and it
@@ -267,7 +274,7 @@ forever.
   be a lie:
 
   ```
-  lore record update <spec-id> --annotation distilled=rejected --product <scope>
+  lore record update <spec-id> --annotation distilled=rejected --vault <name>
   ```
 
   Re-open it later with `/craft:distill spec/<id>`; the sweep will not.

@@ -165,10 +165,15 @@ def test_exclusions_are_checked_per_candidate_not_in_the_query():
         "the exclusions"
     )
     assert "A spec is out of the queue if it already carries **a `distilled=` annotation**" in text, (
-        "distill/SKILL.md must name the sole exclusion condition — a `distilled=` "
-        "annotation. `related:` edges are forward-only and step 1 writes the spec "
-        "provenance edge on the ADR, never on the spec, so a spec-side `related: adr` "
-        "check would never fire and cannot be relied on as an exclusion."
+        "distill/SKILL.md must name the annotation exclusion condition — a `distilled=` "
+        "annotation"
+    )
+    assert "or a `related: adr`\nedge" in text, (
+        "distill/SKILL.md must name a SECOND exclusion key — a `related: adr` edge. "
+        "distill's own writes never land spec-side (step 1 writes the provenance edge "
+        "on the ADR, never the spec), but brainstorm's altitude gate creates every "
+        "forward-derived spec with `--related adr=<adr-id>` from birth, so that edge "
+        "can and does appear spec-side and must also exclude the candidate"
     )
     assert "distilled=adr" in text, (
         "distill/SKILL.md must stamp the ADRs-written outcome with its own "
@@ -449,13 +454,15 @@ def test_all_vault_access_goes_through_the_lore_cli():
     )
 
 
-def test_every_batch_write_passes_its_scope_explicitly():
+def test_every_batch_update_passes_vault_explicitly():
     text = _text()
-    assert "Every batch write passes its scope explicitly (`--product` / `--team`)" in text, (
-        "distill/SKILL.md must mandate explicit scope on every batch write"
+    assert "Every batch update passes `--vault <name>` explicitly" in text, (
+        "distill/SKILL.md must mandate explicit `--vault` on every batch update — "
+        "`--product`/`--team` is destination re-routing on a create, not current-"
+        "location disambiguation on an update"
     )
     assert "config order" in text, (
         "the mandate needs its reason stated — record ops locate by a config-order "
-        "scan, so an unscoped write in a multi-vault install lands wherever the "
+        "scan, so an unscoped update in a multi-vault install lands wherever the "
         "scan happens to hit first"
     )
