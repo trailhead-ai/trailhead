@@ -12,11 +12,12 @@ CLI (invoked over `Bash`) plus `Bash(git)` — no MCP server, no bespoke tools.
 ## What lore captures
 
 Capture is one skill — `/lore:record` (`lore record create --kind <kind>`) —
-over a **closed set of eight kinds**:
+over a **closed set of nine kinds**:
 
 | Kind | What it records |
 |---|---|
 | `decision` | Non-obvious architectural choices and their reasoning |
+| `adr` | A more formal architecture decision record — convention treats an `active` adr as immutable |
 | `lesson` | A mistake plus a concrete prevention check |
 | `task` | Anything worth seeing through to completion — implementation work, a deferred item, an abandoned approach, or an external thing to watch — distinguished by `status` (`open` / `ready` / `in-progress` / `blocked` / `done` / `dropped` / `superseded`) |
 | `area` | Mental model of a codebase area (files, gotchas, conventions) |
@@ -110,16 +111,18 @@ Key transitions:
 - **session:** `dirty` → `clean`
 - **task:** `open` → `ready` → `in-progress` → `done` (off-path: `blocked` / `dropped` / `superseded`)
 - **decision:** `active` → `superseded` / `dropped`
+- **adr:** `draft` → `active` → `superseded` / `dropped`
 - **lesson:** `active` → `conditional`
 - **spec:** `draft` → `ready` → … → `complete` (off-path: `superseded` / `dropped`)
 
 ## Record kinds
 
-The kind set is closed — eight kinds:
+The kind set is closed — nine kinds:
 
 - `session` — one note per working session (the running log)
 - `area` — mental models of codebase areas
 - `decision` — lightweight ADRs
+- `adr` — a more formal architecture decision record (convention-immutable once `active`)
 - `lesson` — mistakes plus prevention checks
 - `task` — work to track to completion: implementation work, deferred items, abandoned approaches, things to watch (status: open/ready/in-progress/blocked/done/dropped/superseded)
 - `collaboration` — working-style preferences

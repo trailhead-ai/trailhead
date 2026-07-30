@@ -47,6 +47,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from conftest import (  # noqa: F401
     load_script,
     make_vault as _make_vault,
@@ -973,6 +975,70 @@ def test_scope_no_other_team_field_flag(tmp_path):
     sidecar = _find_sidecar(vault, r.stdout.strip())
     # No --team supplied → no team field in sidecar (no other write path exists).
     assert sidecar.get("team") is None
+
+
+# ---------------------------------------------------------------------------
+# the `adr` kind: status defaults to draft; vocab is draft/active/superseded/
+# dropped; a bare `--label adr=x` is refused as a reserved key naming the
+# `--related adr=<name>` edge alternative.
+# ---------------------------------------------------------------------------
+
+
+def test_adr_create_defaults_status_to_draft(tmp_path):
+    """A freshly created adr, with no --status flag, defaults to draft."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", "My ADR"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["status"] == "draft"
+
+
+@pytest.mark.parametrize("status", ["active", "superseded", "dropped"])
+def test_adr_create_accepts_each_vocab_status(tmp_path, status):
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", "My ADR", "--status", status],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, r.stdout.strip())
+    assert sidecar["status"] == status
+
+
+@pytest.mark.parametrize("status", ["ready", "open"])
+def test_adr_create_rejects_task_and_spec_only_statuses(tmp_path, status):
+    """--status ready/open (task/spec vocab, not adr's) → non-zero; vocab named."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", "My ADR", "--status", status],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode != 0
+    err = r.stderr.lower()
+    assert "draft" in err and "active" in err
+    assert list(vault.glob("**/*.md")) == []
+
+
+def test_adr_label_reserved_key_offers_related_flag(tmp_path):
+    """--label adr=x is refused; 'adr' is now a record kind, so the refusal
+    names the edge alternative (--related adr=<name>), same as any other kind.
+    """
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", "My ADR", "--label", "adr=x"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode != 0
+    assert "adr" in r.stderr
+    assert "--related adr=<name>" in r.stderr
+    assert list(vault.glob("**/*.md")) == []
 
 
 # ---------------------------------------------------------------------------

@@ -266,6 +266,17 @@ class TestLockedCompileTable:
         assert "EXISTS" in cq.where
         assert "keywords" in cq.params
 
+    def test_related_task_kind_field_compiles_no_sql_changes(self, kql, compiler):
+        """A kind-derived ``related-<kind>`` field compiles exactly like the
+        pre-existing ``related-area``/``related-phases`` real-key fields — the
+        facet name is bound as a plain SQL param, so the compiler needed no
+        change to support the new per-kind fields."""
+        cq = compiler.compile(kql.parse("related-task:my-task"))
+        assert "EXISTS" in cq.where
+        assert "record_facet" in cq.where
+        assert "related-task" in cq.params
+        assert "my-task" in cq.params
+
     def test_compare_gte_created_at(self, kql, compiler):
         cq = compiler.compile(kql.parse('created-at >= "2026-01-01"'))
         assert "records.created_at >= ?" in cq.where

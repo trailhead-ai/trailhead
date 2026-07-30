@@ -35,6 +35,7 @@ TEMPLATES_DIR = CRAFT / "templates"
 
 GAUNTLET = SKILLS_DIR / "gauntlet" / "SKILL.md"
 BRAINSTORM = SKILLS_DIR / "brainstorm" / "SKILL.md"
+DISTILL = SKILLS_DIR / "distill" / "SKILL.md"
 PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 SHARED_COUNCIL = SKILLS_DIR / "_shared" / "council.md"
 PLANNER = AGENTS_DIR / "planner.md"
@@ -50,9 +51,15 @@ _SPEC_ADVANCE_RE = re.compile(r"<spec-id>\s+--status\s+(\w+)")
 # are not advances — brainstorm creates at `draft`, and a reframed spec is superseded.
 _FROZEN_STATES = {"ready", "planned", "complete"}
 
-# `planned` / `complete` may be written by a planning path, but ONLY behind this
-# guard — the phrase is the behavior, so it is pinned verbatim.
+# `planned` may be written by a planning path, but ONLY behind this guard — the
+# phrase is the behavior, so it is pinned verbatim.
 _ADVANCE_GUARD = "only if the spec is already `ready`"
+
+# `complete` is the second licensed advance, and it belongs to exactly one file.
+# The distill ritual owns the spec `planned -> complete` edge — `complete` *means*
+# distilled — so its write carries its own guard rather than planning's: a spec may
+# only complete from `planned`, and only once its whole cluster was dispositioned.
+_COMPLETE_ADVANCE_GUARD = "only if the spec is already `planned` and its cluster is dispositioned"
 
 
 def _craft_prose_files() -> list[Path]:
@@ -137,6 +144,11 @@ def test_advancing_a_spec_past_ready_is_guarded():
 
     This is the finding that a `ready`-only grep missed: the invariant is about the
     transition, not about one word.
+
+    `complete` is carved out for the distill skill alone, which carries its own,
+    stricter guard — see `test_only_distill_completes_a_spec`. The carve-out is
+    per-file AND per-state: distill advancing a spec to `ready` or `planned` would
+    still land here.
     """
     violations = []
     for p in _craft_prose_files():
@@ -144,6 +156,8 @@ def test_advancing_a_spec_past_ready_is_guarded():
             continue
         text = p.read_text()
         advances = {s for s in _SPEC_ADVANCE_RE.findall(text) if s in _FROZEN_STATES}
+        if p == DISTILL:
+            advances -= {"complete"}
         if advances and _ADVANCE_GUARD not in text:
             violations.append(f"{p.relative_to(CRAFT)}: advances spec to {sorted(advances)}")
     assert not violations, (
@@ -151,6 +165,41 @@ def test_advancing_a_spec_past_ready_is_guarded():
         f"{_ADVANCE_GUARD!r}:\n  " + "\n  ".join(violations) + "\n"
         "An unguarded advance lets a `draft` spec reach `planned` without ever passing "
         "the gauntlet — the same bypass the freeze rule exists to close."
+    )
+
+
+def test_only_distill_completes_a_spec():
+    """`complete` means *distilled* — so exactly one file may write it.
+
+    The same structural mandate as the gauntlet's `ready`: if any other skill can
+    flip a spec `complete`, the ritual that gives the status its meaning becomes
+    optional, and `complete` degrades into "someone thought this was finished".
+    """
+    offenders = [
+        p
+        for p in _craft_prose_files()
+        if p != DISTILL and "complete" in _SPEC_ADVANCE_RE.findall(p.read_text())
+    ]
+    assert not offenders, (
+        "these craft files advance a spec to `complete`, bypassing the distill "
+        f"ritual: {[str(p.relative_to(CRAFT)) for p in offenders]}. The "
+        "planned -> complete edge belongs to distill/SKILL.md alone."
+    )
+
+
+def test_distill_carries_the_complete_advance_behind_its_own_guard():
+    assert DISTILL.exists(), f"Expected distill/SKILL.md in {SKILLS_DIR}"
+    text = DISTILL.read_text()
+    assert "complete" in _SPEC_ADVANCE_RE.findall(text), (
+        "distill/SKILL.md must carry the canonical spec-completion command "
+        "(`lore record update <spec-id> --status complete`) — it owns the "
+        "planned -> complete edge, and the guard test only recognizes that form"
+    )
+    assert _COMPLETE_ADVANCE_GUARD in text, (
+        "distill/SKILL.md must carry its advance guard verbatim: "
+        f"{_COMPLETE_ADVANCE_GUARD!r}. Planning's `ready` guard is the wrong one "
+        "here — it would license completing a spec that was never planned, and say "
+        "nothing about the cluster disposition that gives `complete` its meaning."
     )
 
 
@@ -309,3 +358,182 @@ def test_gauntlet_selects_spec_bars_not_plan_bars():
         "the plan bars yields findings that are all true and all useless ('this slice has "
         "no test contract' — there are no slices)"
     )
+
+
+# --- adr mode: adapted roster, direct freeze, annotation-borne provenance ---
+
+# The `## Reviewing an adr` heading scopes the adr-specific checks below to just
+# that section of the file, so a check for "divergence-prober absent" doesn't
+# also have to be true of the spec-mode section earlier in the same file.
+ADR_SECTION_HEADER = "## Reviewing an adr"
+
+_ADR_MODE_AGENTS: list[str] = [
+    "premise-attacker",
+    "consistency-auditor",
+    "builder",
+    "breaker",
+    "attacker",
+    "advocate",
+]
+
+# Mirrors `_SPEC_ADVANCE_RE`: a literal substring only catches the one exact
+# spelling this file happens to use, so a differently-phrased adr activation
+# elsewhere (extra whitespace, reordered flags) would silently escape the
+# "only gauntlet flips it" guard. The gauntlet owns this edge too, and it is
+# the ONLY file allowed to carry it.
+_ADR_ADVANCE_RE = re.compile(r"<adr-id>\s+--status\s+active")
+
+_ANNOTATION_PROVENANCE_SENTENCE = (
+    "Gauntlet provenance for an adr target goes to the record's annotations, "
+    "never the body"
+)
+
+_DISTILLED_SKIP_SENTENCE = (
+    "Distilled (backward) ADRs skip the gauntlet — the distill disposition owns "
+    "their flip"
+)
+
+
+def _adr_mode_section(text: str) -> str:
+    assert ADR_SECTION_HEADER in text, (
+        f"gauntlet/SKILL.md must carry a {ADR_SECTION_HEADER!r} section describing "
+        "adr-target mode"
+    )
+    return text[text.index(ADR_SECTION_HEADER):]
+
+
+def test_gauntlet_owns_the_adr_freeze():
+    assert _ADR_ADVANCE_RE.search(GAUNTLET.read_text()), (
+        "gauntlet/SKILL.md must carry the adr-freeze command "
+        "(`lore record update <adr-id> --status active`) — it owns the "
+        "draft -> active edge, the adr equivalent of the spec `ready` guard"
+    )
+
+
+def test_only_gauntlet_flips_an_adr_active():
+    """No craft file except the gauntlet may advance an adr to `active`.
+
+    The same structural mandate as the spec freeze: a bypass here can hand an
+    unreviewed decision straight into the immutable, convention-enforced log.
+    """
+    offenders = [
+        p for p in _craft_prose_files()
+        if p != GAUNTLET and _ADR_ADVANCE_RE.search(p.read_text())
+    ]
+    assert not offenders, (
+        "these craft files can flip an adr to `active`, bypassing the gauntlet: "
+        f"{[str(p.relative_to(CRAFT)) for p in offenders]}"
+    )
+
+
+@pytest.mark.parametrize("agent", _ADR_MODE_AGENTS)
+def test_adr_mode_roster_agents_resolve(agent: str):
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert agent in adr_section, (
+        f"gauntlet/SKILL.md's adr-mode section does not dispatch {agent!r}"
+    )
+    agent_file = AGENTS_DIR / f"{agent}.md"
+    assert agent_file.exists(), f"{agent_file} does not exist — a dispatch must not dead-end"
+
+
+def test_adr_mode_dispatches_fact_verification_too():
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert "Explore" in adr_section, (
+        "the adr roster keeps the fact-verification pass via the generic Explore agent"
+    )
+
+
+def test_adr_mode_drops_divergence_prober():
+    """The two-implementations method has no analogue for a decision document."""
+    text = GAUNTLET.read_text()
+    adr_section = _adr_mode_section(text)
+    assert "divergence-prober" not in adr_section, (
+        "divergence-prober must be absent from the adr roster"
+    )
+    assert "divergence-prober" in text, (
+        "divergence-prober must still be dispatched for the spec roster elsewhere "
+        "in the same file"
+    )
+
+
+def test_adr_mode_restates_all_passes_required():
+    adr_section = _adr_mode_section(GAUNTLET.read_text()).lower()
+    assert "name" in adr_section and "stop" in adr_section, (
+        "the 'all passes required — name the missing one and stop' rule must be "
+        "restated for the adr roster, not silently inherited from the spec section"
+    )
+
+
+def test_adr_gauntlet_owns_the_flip_directly_with_no_intermediate_state():
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert "no intermediate" in adr_section, (
+        "the adr-mode section must explain there is no intermediate "
+        "frozen-but-inactive state — the adr vocab has no `ready`, so the flip "
+        "goes straight to `active`"
+    )
+
+
+def test_adr_provenance_goes_to_annotations_never_body():
+    assert _ANNOTATION_PROVENANCE_SENTENCE in GAUNTLET.read_text(), (
+        "the annotation-provenance rule must be pinned verbatim in gauntlet/SKILL.md"
+    )
+
+
+def test_distilled_adrs_skip_the_gauntlet():
+    assert _DISTILLED_SKIP_SENTENCE in GAUNTLET.read_text(), (
+        "the 'distilled ADRs skip the gauntlet' sentence must be pinned verbatim"
+    )
+
+
+_FORWARD_SUPERSESSION_BACK_EDGE = (
+    "lore record update <predecessor-adr-id> --status superseded --related adr=<adr-id>"
+)
+
+
+def test_gauntlet_writes_the_predecessor_supersession_back_edge():
+    """The forward path must not leave supersession one-directional.
+
+    Distill writes both directions for a backward ADR; a forward ADR authored and
+    activated through this gauntlet needs the identical guarantee, or a reader
+    landing on the superseded predecessor never finds its successor.
+    """
+    text = GAUNTLET.read_text()
+    assert _FORWARD_SUPERSESSION_BACK_EDGE in text, (
+        "gauntlet/SKILL.md must carry the predecessor's `superseded` flip + "
+        "`related: adr=` back-edge as part of the adr-activation flip, mirroring "
+        "distill's bidirectional supersession write"
+    )
+
+
+def test_gauntlet_supersession_back_edge_is_second_write():
+    """Order matters: the successor must exist (active) before the predecessor flips.
+
+    That ordering is the recoverable one, same reasoning as distill's pinned
+    internal supersession order.
+    """
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    successor_idx = _ADR_ADVANCE_RE.search(adr_section).start()
+    back_edge_idx = adr_section.index(_FORWARD_SUPERSESSION_BACK_EDGE)
+    assert successor_idx < back_edge_idx, (
+        "gauntlet/SKILL.md must write the successor's `--status active` flip "
+        "before the predecessor's `superseded` back-edge"
+    )
+
+
+def test_gauntlet_selects_adr_bars_not_spec_or_plan_bars():
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    assert "Per-lens Critical bars — adr review" in adr_section, (
+        "gauntlet/SKILL.md's adr-mode section must point the lens dispatch at the "
+        "ADR bars, not the spec or plan bars"
+    )
+
+
+def test_adr_review_bars_live_in_shared_council():
+    text = SHARED_COUNCIL.read_text()
+    assert "Per-lens Critical bars — adr review" in text, (
+        "_shared/council.md must carry the adr-review bar set for the gauntlet's "
+        "adr-mode lens pass"
+    )
+    for lens in ("*Builder — adr review:*", "*Reliability — adr review:*",
+                 "*Security — adr review:*", "*Advocate — adr review:*"):
+        assert lens in text, f"_shared/council.md missing the {lens!r} bar block"

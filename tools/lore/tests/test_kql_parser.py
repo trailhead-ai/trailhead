@@ -241,6 +241,29 @@ def test_hyphenated_field_not_quoted(kql):
 
 
 # ---------------------------------------------------------------------------
+# Kind-derived `related-<kind>` facet fields — one per record.model.KINDS
+# member, derived rather than hand-listed (table-driven off KINDS itself, so a
+# newly added kind such as `adr` is covered automatically).
+# ---------------------------------------------------------------------------
+
+
+def test_related_kind_field_parses_for_every_kind(kql):
+    record_model = load_script("lore.record.model")
+    for kind in sorted(record_model.KINDS):
+        ast = kql.parse(f"related-{kind}:foo")
+        assert isinstance(ast, kql.FacetMembership), f"related-{kind} did not parse as a facet"
+        assert ast.facet == f"related-{kind}"
+        assert ast.value == "foo"
+
+
+def test_related_notakind_field_is_unknown(kql):
+    # A related-<x> field where <x> is not a real kind is still a hard error —
+    # the derivation is exact, not a blanket "related-*" pass-through.
+    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
+        kql.parse("related-notakind:foo")
+
+
+# ---------------------------------------------------------------------------
 # Error cases — each must raise KqlParseError
 # ---------------------------------------------------------------------------
 

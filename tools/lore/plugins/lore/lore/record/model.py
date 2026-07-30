@@ -1,7 +1,7 @@
 """Canonical lore record model + pure sidecar validator.
 
 This module is the single, machine-checkable definition of *what a lore record
-is*: the closed set of 8 kinds, the per-record JSON sidecar field schema (`v1`),
+is*: the closed set of 9 kinds, the per-record JSON sidecar field schema (`v1`),
 the per-kind status vocabularies and their initial/default value, the phases
 taxonomy, and a **pure** `validate(sidecar, kind)` function.
 
@@ -14,11 +14,15 @@ dict and is shared verbatim by the `lore record` CLI and the migration.
 It does, however, depend on `search.kql` for one thing: the set of queryable
 field names. `RESERVED_LABEL_KEYS` is derived from `KINDS | kql.VALID_FIELDS` at
 import, so the names an operator can *query by* and the names an operator may not
-*label with* cannot drift apart. The import is data-only and acyclic (`kql`
-imports nothing from this package).
+*label with* cannot drift apart. This module's own import of `kql` is a plain,
+eager, module-level import; the reach-back the other way — `kql` derives its
+`related-<kind>` facet fields from `KINDS` — is deliberately LAZY (inside a
+function, never at `kql`'s module load) so the pair is not a genuine cycle. See
+`search/kql.py`'s "Kind-derived facet fields" docstring section for the reasoning;
+it owns that contract.
 
 Invariants:
-- The kind set is closed: exactly the 8 kinds in ``KINDS``; any other ``kind`` is
+- The kind set is closed: exactly the 9 kinds in ``KINDS``; any other ``kind`` is
   rejected.
 - Each record carries ``version: v1``; the schema is keyed by ``(kind, version)``,
   but in ``v1`` all kinds share one global field schema (``FIELDS_V1``).
@@ -63,11 +67,14 @@ from ..search import kql
 
 # --- Canonical declarative model --------------------------------------------
 
-#: The closed set of 8 record kinds. Any other ``kind`` value is rejected.
+#: The closed set of 9 record kinds. Any other ``kind`` value is rejected.
 #: ``task`` unifies the former ``backlog``/``plan`` kinds — a single kind for
 #: anything worth tracking to completion, ordered via ``depends-on``/``parent``.
+#: ``adr`` is an immutable architecture decision record (convention-enforced,
+#: not CLI-enforced); it uses no ``task``-only gated field.
 KINDS: frozenset[str] = frozenset(
     {
+        "adr",
         "area",
         "blob",
         "collaboration",
@@ -91,6 +98,7 @@ VERSION: str = "v1"
 #: kind's initial/default status (applied when ``status`` is omitted on create).
 #: Ordered (not a ``frozenset``) so "first == initial" is well-defined.
 STATUS_VOCAB: dict[str, tuple[str, ...]] = {
+    "adr": ("draft", "active", "superseded", "dropped"),
     "area": ("active",),
     "blob": ("active",),
     "collaboration": ("active",),
@@ -361,7 +369,7 @@ def _derive_reserved_label_keys() -> frozenset[str]:
 
 
 #: Bare ``labels`` keys that shadow a first-class record concept: every record
-#: kind and every queryable KQL field name (22 keys today). Derived at import from
+#: kind and every queryable KQL field name. Derived at import from
 #: the two authoritative sets — adding a kind or a query field reserves its name
 #: with no change here. Exact match only: ``hm/area`` is fine, ``area`` is not.
 RESERVED_LABEL_KEYS: frozenset[str] = _derive_reserved_label_keys()

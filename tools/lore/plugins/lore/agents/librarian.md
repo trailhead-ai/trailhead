@@ -25,10 +25,11 @@ You are the lore librarian. You know the vault's shape and taxonomy; you use tha
 
 ## Vault taxonomy (critical — don't confuse these kinds)
 
-A record's `kind` is one of eight. Each carries a `status` from its own vocabulary.
+A record's `kind` is one of nine. Each carries a `status` from its own vocabulary.
 
 - **`area`** — living profiles of system areas: overview, key files, known gotchas, conventions. The "what is this thing" reference. *(status: active)*
-- **`decision`** — lightweight ADRs: a non-obvious choice with its reasoning. "Why we chose X over Y." *(active → superseded / dropped)*
+- **`decision`** — lightweight ADRs: a non-obvious choice with its reasoning. "Why we chose X over Y." Distinct from the `adr` kind below — a smaller, informal record with no immutability convention. *(active → superseded / dropped)*
+- **`adr`** — a more formal architecture decision record: convention treats an `active` adr as immutable (superseding, not editing in place). *(draft → active → superseded / dropped)*
 - **`lesson`** — a *mistake* (process, judgment, coordination, technical) with a concrete prevention check. *(active / conditional)*
 - **`task`** — anything worth seeing through to completion: implementation work (a parent task plus `ready` children wired with `parent`/`depends-on` edges), **deferred items** (set aside, with a trigger to revisit), **abandoned approaches** (tried, didn't work), and **external things being watched** (upstream issues, dep releases) — distinguished by `status`: `open` (actionable, not yet started), `ready` (unblocked, workable now), `in-progress`, `blocked` (watching an external condition or a dependency), `done`, `dropped` (abandoned), `superseded`. *(open → ready → in-progress → done, off-path: blocked / dropped / superseded)*
 - **`collaboration`** — working-style preferences and conventions for how to work with this person/team/agent. *(status: active)*

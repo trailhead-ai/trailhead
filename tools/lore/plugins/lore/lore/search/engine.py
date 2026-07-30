@@ -49,7 +49,9 @@ never mutates the index:
       ``SELECT COUNT(*)`` over the same WHERE (without LIMIT) to report M.
   (c) a one-line "reverse edges reflect last reindex — run ``lore reindex`` for
       full membership" note when the query used a reverse-edge alias
-      (``area:``/``phase:``/``keyword:``).
+      (``area:``/``phase:``/``keyword:``, or any ``related-<kind>`` facet field —
+      ``kql.kind_related_fields()`` names them without this module importing
+      ``record.model`` itself).
 
 **tty param:** ``tty`` is accepted by ``run_search`` for render-time
 detection (not cached at import) but is not yet wired into the renderer. Detection
@@ -68,6 +70,9 @@ from .xml_escape import wrap_shared, xml_body_escape
 
 # Reverse-edge alias surface names (the facets whose membership is materialized in
 # reindex pass 2; a query using them gets the "run lore reindex" completeness note).
+# The kind-derived ``related-<kind>`` fields (one per ``record.model.KINDS`` member)
+# join this set via ``kql.kind_related_fields()`` rather than being hand-listed here
+# — see ``_uses_reverse_edge_alias``.
 _REVERSE_EDGE_ALIASES = frozenset({"area", "phase", "keyword"})
 
 # Snippet excerpt length (chars) for the per-hit match preview.
@@ -113,7 +118,7 @@ def _uses_reverse_edge_alias(node) -> bool:
     """
     type_name = type(node).__name__
     if type_name == "FacetMembership":
-        return node.facet in _REVERSE_EDGE_ALIASES
+        return node.facet in _REVERSE_EDGE_ALIASES or node.facet in _kql.kind_related_fields()
     if type_name in ("And", "Or"):
         return _uses_reverse_edge_alias(node.left) or _uses_reverse_edge_alias(node.right)
     if type_name == "Not":

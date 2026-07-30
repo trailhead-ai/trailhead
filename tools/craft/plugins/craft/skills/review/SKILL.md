@@ -89,6 +89,16 @@ You: [Fix progress indicators]
 - Review before merge
 - Review when stuck
 
+## Closing handoff
+
+Review sits before distill in the pipeline (brainstorm → gauntlet → plan → execute →
+review → distill) — merging closes review's own job, not the spec's lifecycle. Once
+the reviewed diff is merged, end with a fully-formed handoff command — the real spec
+id, never a `<placeholder>` — so a fresh session can pick up distillation as-is:
+
+> "Review passed and the change is merged. Run `/craft:distill spec/streaming-export`
+> when you're ready to distill this work into the ADR log."
+
 ## Red Flags
 
 **Never:**

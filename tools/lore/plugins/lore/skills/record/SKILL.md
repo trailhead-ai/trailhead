@@ -56,7 +56,7 @@ now. Create it directly:
 lore record create --kind <kind> --title "<title>"
 ```
 
-`<kind>` is one of: `area`, `blob`, `collaboration`, `decision`,
+`<kind>` is one of: `adr`, `area`, `blob`, `collaboration`, `decision`,
 `lesson`, `session`, `spec`, `task`. The title derives the record name slug.
 
 Set sidecar metadata with the dedicated per-field flags — `--status` (scalar),

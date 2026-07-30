@@ -5,6 +5,8 @@ v1 field schema) and the pure accessors, plus the pure ``validate``
 contract. Loaded via ``conftest.load_script("lore.record.model")``.
 """
 
+import pytest
+
 from conftest import load_script
 
 
@@ -15,8 +17,9 @@ def rm():
 # --- declarative model + accessors ---------------------------------
 
 
-def test_kinds_are_exactly_the_eight():
+def test_kinds_are_exactly_the_nine():
     assert set(rm().KINDS) == {
+        "adr",
         "area",
         "blob",
         "collaboration",
@@ -34,6 +37,7 @@ def test_version_is_v1():
 
 def test_status_vocab_matches_spec_per_kind():
     vocab = rm().STATUS_VOCAB
+    assert set(vocab["adr"]) == {"draft", "active", "superseded", "dropped"}
     assert set(vocab["area"]) == {"active"}
     assert set(vocab["blob"]) == {"active"}
     assert set(vocab["collaboration"]) == {"active"}
@@ -63,12 +67,14 @@ def test_status_vocab_is_ordered_tuple_not_frozenset():
     """First element == initial; ordering must be preserved (tuple, not set)."""
     vocab = rm().STATUS_VOCAB
     assert all(isinstance(v, tuple) for v in vocab.values())
+    assert vocab["adr"][0] == "draft"
     assert vocab["spec"][0] == "draft"
     assert vocab["task"][0] == "open"
 
 
 def test_initial_status_per_kind():
     m = rm()
+    assert m.initial_status("adr") == "draft"
     assert m.initial_status("area") == "active"
     assert m.initial_status("blob") == "active"
     assert m.initial_status("collaboration") == "active"
@@ -659,6 +665,17 @@ def test_related_prefix_reserves_beyond_the_derived_set():
     assert any("related-subsystems" in e for e in result.errors)
 
 
+def test_related_spec_label_key_still_refused():
+    """``related-spec`` is now ALSO an exact-match member of ``VALID_FIELDS``
+    (it names a real KQL query field, ``search/kql.py``'s kind-derived
+    ``related-<kind>`` facet), not just caught by the ``related-`` prefix rule.
+    A ``--label related-spec=x`` must still be refused either way — this pins
+    the regression: growing ``VALID_FIELDS`` never legitimizes a label key the
+    prefix rule already rejected."""
+    result = rm().validate(_base_sidecar_with(labels={"related-spec": "x"}))
+    assert any("related-spec" in e for e in result.errors)
+
+
 def test_annotations_accept_the_identical_reserved_key():
     """The exemption is by sidecar field name — annotations keep charset-only rules."""
     sidecar = _base_sidecar_with(
@@ -972,9 +989,10 @@ def test_parent_accepted_on_task():
 _NON_TASK_KINDS = sorted(rm().KINDS - {"task"})
 
 
-def test_non_task_kinds_are_the_expected_seven():
+def test_non_task_kinds_are_the_expected_eight():
     """Guards the parametrized rejection tests below against a silent kind-set drift."""
     assert _NON_TASK_KINDS == [
+        "adr",
         "area",
         "blob",
         "collaboration",
@@ -1078,3 +1096,53 @@ def test_session_finalized_is_rejected():
     sidecar = _base_sidecar_with(kind="session", status="finalized")
     result = m.validate(sidecar)
     assert result.errors, "finalized must be rejected for session kind"
+
+
+# --- adr kind: status vocab {draft, active, superseded, dropped} -----------
+
+
+def _base_adr_sidecar_with(**extra):
+    """Minimal valid adr sidecar with optional extras merged in."""
+    s = {
+        "version": "v1",
+        "kind": "adr",
+        "title": "Test ADR",
+        "status": "draft",
+        "created-at": "2026-06-17T14:32:00Z",
+        "created-by": "tester@example.com",
+        "updated-at": "2026-06-17T15:00:00Z",
+        "updated-by": "tester@example.com",
+    }
+    s.update(extra)
+    return s
+
+
+def test_adr_is_a_valid_kind():
+    assert rm().is_valid_kind("adr") is True
+
+
+# `initial_status("adr") == "draft"` and `STATUS_VOCAB["adr"][0] == "draft"` are
+# asserted with every other kind in `test_initial_status_per_kind` and
+# `test_status_vocab_is_ordered_tuple_not_frozenset` above — not repeated here.
+
+
+@pytest.mark.parametrize("status", ["draft", "active", "superseded", "dropped"])
+def test_adr_each_vocab_status_validates(status):
+    sidecar = _base_adr_sidecar_with(status=status)
+    result = rm().validate(sidecar)
+    assert result.errors == []
+
+
+def test_adr_status_defaults_to_draft_when_omitted():
+    sidecar = _base_adr_sidecar_with()
+    del sidecar["status"]
+    result = rm().validate(sidecar)
+    assert result.errors == []
+    assert result.sidecar["status"] == "draft"
+
+
+@pytest.mark.parametrize("status", ["ready", "open", "active-ish", "complete"])
+def test_adr_off_vocab_status_rejected(status):
+    sidecar = _base_adr_sidecar_with(status=status)
+    result = rm().validate(sidecar)
+    assert any("invalid status" in e and status in e for e in result.errors)
