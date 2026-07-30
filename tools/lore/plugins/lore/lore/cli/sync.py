@@ -44,10 +44,12 @@ they never touch the working tree, and lore's lock is blocking with no timeout �
 holding it across a network round-trip would let one hung remote starve every
 local writer. Hold time is therefore bounded by local git work.
 
-**The commit phase locks every target vault TOGETHER, not one at a time.**
-``cmd_sync`` stages+commits every TARGET of the run (every configured vault,
-or just ``--vault <name>`` when given) under one combined
-:func:`lore.locking.vault_write_locks` acquisition before touching any pull or
+**The commit phase locks every SUCCESSFULLY-LOCKED target vault TOGETHER, not
+one at a time.** ``cmd_sync`` stages+commits every target of the run (every
+configured vault, or just ``--vault <name>`` when given) with each target's
+:func:`lore.locking.vault_write_lock` entered into one shared
+``contextlib.ExitStack``, in the same sorted-path order
+:func:`lore.locking.vault_write_locks` itself uses, before touching any pull or
 push. A per-vault-only lock would let a cross-vault ``move_record`` run its
 whole copy → repoint → delete sequence strictly BETWEEN two different targets'
 visits — sync would then commit the destination vault's new copy while the
@@ -55,7 +57,10 @@ source vault's own commit (dropping the now-moved record) never happens this
 run, leaving the record readable as committed in both vaults until a later
 sync catches up. Locking every target up front closes that window: whichever
 of sync or the move starts first, the other waits for it to finish in full
-before touching any of the shared vaults.
+before touching any of the shared vaults. Acquiring one target at a time
+(rather than delegating to ``vault_write_locks`` as one opaque call) also means
+a lock that fails to acquire is attributed to that exact vault, with no need to
+infer it from the failing exception — see ``cmd_sync``'s own docstring.
 
 **Caveat: a git operation that PROMPTS is unbounded.** A commit whose signing key
 needs a gpg pinentry passphrase (or any git helper that waits on a human) blocks
@@ -67,6 +72,7 @@ past ~2 seconds — is the diagnostic that distinguishes this from a hang.
 from __future__ import annotations
 
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 from .. import locking
@@ -504,6 +510,13 @@ def cmd_sync(args) -> int:
     and per-vault, one at a time, exactly as before — see
     :func:`_pull_and_push_one`.
 
+    Locks are acquired ONE TARGET AT A TIME into a single ``ExitStack`` (sorted
+    order, same as ``vault_write_locks``), not via that helper's one opaque
+    all-or-nothing call — a target whose lock fails to acquire is skipped
+    (attributed exactly, no exception-message guessing needed) while every
+    OTHER target still gets locked together and committed; it never strands
+    the rest of the batch just because one vault's lock is broken.
+
     When any vault pulled commits, the derived search index is rebuilt ONCE at
     the end (it is global across vaults, so per-vault rebuilds would be wasted
     work). A reindex failure is soft: the pulled text is already on disk and
@@ -537,65 +550,46 @@ def cmd_sync(args) -> int:
             continue
         valid_targets.append((name, vault_path))
 
-    # A lock acquisition failure (e.g. a read-only vault root, or the lock path
-    # occupied by something other than a file) must not crash the whole run,
-    # AND must not strand every OTHER target unattempted just because one
-    # vault's lock is broken — both would violate this function's own
-    # exit-code contract above ("one failure never strands the rest"). So a
-    # failed acquisition is attributed to the one vault whose lock path it
-    # names (``OSError.filename`` — set by the failing ``open``/``mkdir`` call
-    # inside ``locking._flock``) and the batch is retried without it; a
-    # failure that can't be attributed to a specific target fails the whole
-    # remaining batch rather than looping forever.
-    remaining = list(valid_targets)
-    while remaining:
-        try:
-            with locking.vault_write_locks(*(str(v) for _, v in remaining)):
-                for name, vault_path in remaining:
-                    say, say_err = say_map[name]
-                    rc_one, committed = _stage_and_commit_one(vault_path, message, say, say_err)
-                    commit_rc[name] = rc_one
-                    committed_map[name] = committed
-            break
-        except OSError as exc:
-            # The for-loop body may already have run to completion and set
-            # commit_rc/committed_map for every target in `remaining` before
-            # this OSError fired on the way OUT of the `with` (e.g. releasing
-            # one vault's lock raised after every commit had already landed).
-            # Never clobber an outcome the loop body already recorded — only
-            # a target still unrecorded genuinely failed to lock.
-            unrecorded = [t for t in remaining if t[0] not in commit_rc]
-            if not unrecorded:
-                # Every target in this batch already has a recorded outcome —
-                # the loop body ran to completion, so this OSError fired
-                # releasing a lock AFTER the commit(s) it guarded already
-                # landed. The work is safe; only the unlock itself is in
-                # question, and that's not attributable to any one target's
-                # commit outcome, so leave commit_rc alone and just surface it.
-                print(
-                    f"notice: error releasing a vault lock after sync: {exc}",
-                    file=sys.stderr,
-                )
-                break
-            bad_filename = str(getattr(exc, "filename", "") or "")
-            bad = next(
-                (t for t in unrecorded if bad_filename and str(t[1]) in bad_filename),
-                None,
-            )
-            if bad is None:
-                # Can't tell which target's lock broke — fail every
-                # still-unrecorded vault rather than guessing (or retrying
-                # forever on the same unattributed error).
-                for name, _vault_path in unrecorded:
-                    _say, say_err = say_map[name]
+    # A lock acquisition failure (e.g. a read-only vault root, or the lock
+    # path occupied by something other than a file) must not crash the whole
+    # run, AND must not strand every OTHER target unattempted just because
+    # one vault's lock is broken. Acquiring each target's lock ONE AT A TIME
+    # into a single shared ExitStack (rather than delegating to
+    # ``locking.vault_write_locks`` as one opaque all-or-nothing call) gives
+    # exact attribution for free — the vault whose lock just failed to
+    # acquire is whichever one this loop iteration is on, no need to infer it
+    # from ``OSError.filename`` — while still holding every SUCCESSFULLY
+    # locked target together for the whole commit phase, in the same sorted
+    # order ``vault_write_locks`` itself uses, so this still can't deadlock
+    # against a cross-vault ``move_record``.
+    sorted_targets = sorted(valid_targets, key=lambda t: str(t[1]))
+    try:
+        with ExitStack() as stack:
+            locked: list[tuple[str, Path]] = []
+            for name, vault_path in sorted_targets:
+                try:
+                    stack.enter_context(locking.vault_write_lock(vault_path))
+                except OSError as exc:
+                    say_err = say_map[name][1]
                     say_err(f"error: failed to acquire vault lock: {exc} — skipped")
                     commit_rc[name] = 1
-                break
-            name, _vault_path = bad
-            _say, say_err = say_map[name]
-            say_err(f"error: failed to acquire vault lock: {exc} — skipped")
-            commit_rc[name] = 1
-            remaining = [t for t in unrecorded if t[0] != name]
+                    continue
+                locked.append((name, vault_path))
+
+            for name, vault_path in locked:
+                say, say_err = say_map[name]
+                rc_one, committed = _stage_and_commit_one(vault_path, message, say, say_err)
+                commit_rc[name] = rc_one
+                committed_map[name] = committed
+    except OSError as exc:
+        # Every target that reached the point of being locked or committed
+        # above already has a recorded commit_rc entry (set as the loops run,
+        # not just at the end) — this can only fire releasing a lock during
+        # the ExitStack's own unwind, after all guarded work already landed.
+        # The work is safe; only the unlock itself is in question, and that's
+        # not attributable to any one target's commit outcome, so leave
+        # commit_rc alone and just surface it.
+        print(f"notice: error releasing a vault lock after sync: {exc}", file=sys.stderr)
 
     failed: list[str] = []
     total_pulled = 0

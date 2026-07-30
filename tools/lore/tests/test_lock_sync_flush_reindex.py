@@ -367,6 +367,9 @@ class TestCmdSyncBatchedLockPhase:
 
         crash the whole ``cmd_sync`` call with an unhandled traceback — every
         target stays "attempted", per this function's own exit-code contract.
+        Both vaults are unlockable here (not just one), so this is distinct
+        from the single-bad-vault case below: NOTHING succeeds, and cmd_sync
+        still has to return a plain exit code rather than propagate.
         """
         sync = load_script("lore.cli.sync")
         locking = _locking()
@@ -382,15 +385,16 @@ class TestCmdSyncBatchedLockPhase:
             config_home,
             [("default", "default", vault_a), ("extra", "team", vault_b)],
         )
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
         monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
 
         @contextmanager
-        def failing_locks(*roots, **kwargs):
-            raise PermissionError(f"simulated lock failure: {roots}")
+        def failing_lock(root, **kwargs):
+            raise PermissionError(f"simulated lock failure: {root}")
             yield  # pragma: no cover - unreachable, keeps this a generator
 
-        monkeypatch.setattr(locking, "vault_write_locks", failing_locks)
+        monkeypatch.setattr(locking, "vault_write_lock", failing_lock)
 
         rc = sync.cmd_sync(_Args())
 
@@ -403,15 +407,20 @@ class TestCmdSyncBatchedLockPhase:
     ):
         """One vault's broken lock fails only that vault, not the whole batch.
 
-        A batch failure that can be traced to a specific target's lock path
-        (via ``OSError.filename``) is retried without that target — so a
-        single bad vault root never strands every other vault's commit,
-        which the all-or-nothing shape of a bare ``except OSError`` would.
+        cmd_sync acquires each target's lock ONE AT A TIME into a shared
+        ``ExitStack``, so the vault whose acquisition just failed is exactly
+        the one this loop iteration is on — no need to infer it from
+        ``OSError.filename``. Deliberately uses vault roots ``a`` and ``ab``
+        (one a string-prefix of the other): an attribution scheme that
+        matched the failing path against candidate roots by substring
+        (rather than this per-iteration design) would misattribute a failure
+        in ``ab`` to ``a`` here, since ``str(a)`` is a substring of
+        ``ab/.lore.lock``.
         """
         sync = load_script("lore.cli.sync")
         locking = _locking()
         vault_a = _git_vault(tmp_path / "a")
-        vault_b = _git_vault(tmp_path / "b")
+        vault_b = _git_vault(tmp_path / "ab")
         (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
         (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
 
@@ -437,7 +446,7 @@ class TestCmdSyncBatchedLockPhase:
 
         rc = sync.cmd_sync(_Args())
 
-        assert rc == 1, "vault_b's broken lock should still fail the overall run"
+        assert rc == 1, "vault_b's (ab's) broken lock should still fail the overall run"
         tracked_a = _git(vault_a, "ls-files").stdout.split()
         assert "record.md" in tracked_a, (
             "vault_a should have committed despite vault_b's lock failure"
@@ -445,6 +454,50 @@ class TestCmdSyncBatchedLockPhase:
         assert _git(vault_b, "status", "--porcelain").stdout.strip() != "", (
             "vault_b's record should NOT have committed — its lock never acquired"
         )
+
+    def test_an_unlock_failure_after_commits_land_does_not_clobber_outcomes(
+        self, tmp_path, monkeypatch
+    ):
+        """An ``OSError`` releasing a lock AFTER its guarded commit already
+        landed must not overwrite that commit's already-recorded success, and
+        must not crash ``cmd_sync`` — the "leave commit_rc alone, just
+        surface it" branch. Patches the real unlock syscall
+        (``fcntl.flock(..., LOCK_UN)``) rather than ``vault_write_lock``
+        itself, so it only fires on the TRUE release (depth 0) — never on
+        ``_stage_and_commit_one``'s own reentrant nested acquisition, which
+        never reaches this syscall at all.
+        """
+        sync = load_script("lore.cli.sync")
+        locking = _locking()
+        vault_a = _git_vault(tmp_path / "a")
+        vault_b = _git_vault(tmp_path / "b")
+        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+
+        config_home = tmp_path / "cfg"
+        write_vault_config(
+            config_home,
+            [("default", "default", vault_a), ("extra", "team", vault_b)],
+        )
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+        real_flock = locking.fcntl.flock
+
+        def flaky_flock(fd, op):
+            if op == locking.fcntl.LOCK_UN:
+                raise OSError(5, "simulated I/O error releasing the lock")
+            return real_flock(fd, op)
+
+        monkeypatch.setattr(locking.fcntl, "flock", flaky_flock)
+
+        rc = sync.cmd_sync(_Args())
+
+        assert rc == 0, "both commits landed; a later unlock failure must not fail the run"
+        for name, vault in (("vault_a", vault_a), ("vault_b", vault_b)):
+            tracked = _git(vault, "ls-files").stdout.split()
+            assert "record.md" in tracked, f"{name} should have committed its record"
 
 
 

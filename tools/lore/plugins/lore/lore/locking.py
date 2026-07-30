@@ -161,8 +161,15 @@ def _flock(
         yield
     finally:
         depths[key] -= 1
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()
+        try:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        finally:
+            # Always close, even if LOCK_UN itself raised — an fd left open
+            # on a failed unlock still leaks the OS-level flock, but closing
+            # it here at least frees the file descriptor and keeps this
+            # process's own reentrancy bookkeeping (the `depths` decrement
+            # above) in sync with what's actually held.
+            lock_fd.close()
 
 
 def vault_write_lock(
