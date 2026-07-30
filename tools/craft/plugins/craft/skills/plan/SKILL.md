@@ -121,6 +121,8 @@ directory in your vault manually, mirroring the template shapes.
 
 If an upstream spec exists, link the parent task to it with `lore record update <parent-id> --related spec=<spec-name>`. Then advance the spec's status `ready → planned` (`lore record update <spec-id> --status planned`) after the plan is written — but **only if the spec is already `ready`**, i.e. it has passed the gauntlet. A spec still at `draft` must be left at `draft`: advancing it to `planned` would carry it *past* `ready` and imply a freeze the gauntlet never granted, which is the same bypass by another door. You should not be here at all with a `draft` spec (step 1 routes it to `/craft:gauntlet`); if you are, stop and route it. Do **not** create a new design spec — the upstream spec is the canonical "what / why" doc; the plan is the "how".
 
+**If this plan consumed a routed task** — the argument was a `task` record carrying refine's `route=plan` sidecar label (and its `## Refine — unresolved` section) — close the loop on the source record after the plan is written: `lore record update task/<source-name> --status superseded --related task=<parent-name> --unset-label route` — one write. The routing has been acted on: the new parent task is the live work item, the `related` edge preserves the source's captured payload, and a superseded source stops rendering a stale routed chip or next-step affordance on task boards. Never leave the consumed source `open` — two authoritative-looking open statements of the same intent is exactly the drift refine's promotion-clear rule exists to prevent.
+
 The parent-task body template (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`) carries these canonical sections — fill each in:
 
 - **Goal** — one or two sentences
