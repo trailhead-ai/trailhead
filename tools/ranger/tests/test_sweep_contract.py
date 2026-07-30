@@ -416,6 +416,22 @@ def test_skill_never_removes_a_lock_itself():
 # --- skill: the durable surface ----------------------------------------------
 
 
+def test_skill_pins_the_triage_not_readiness_expectation():
+    """A drain's product is triage, not a `ready` queue — say so with the measured number.
+
+    An operator who reads bucket counts without this framing expects a mostly-`ready`
+    queue; the first real drain came back roughly half needing the operator (5/12
+    promoted, 3 escalated, 3 routed, 1 still blocked), and prose that drops the measured
+    expectation lets a well-meaning edit quietly revert to "drained" framing.
+    """
+    _pin(
+        SKILL,
+        "The drain's product is a triage list, not a `ready` queue.",
+        "Without this stated expectation, an operator reads a report full of "
+        "`ESCALATED`/`ROUTED` lines as the sweep failing rather than working as designed.",
+    )
+
+
 def test_skill_names_the_report_as_the_headless_surface():
     _pin(
         SKILL,

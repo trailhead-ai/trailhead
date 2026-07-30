@@ -297,7 +297,9 @@ an operator which task finished when, not where it sat in the original derivatio
 `ready` queue: a large share of any real backlog comes back `ESCALATED` or `ROUTED`, because
 the ritual refuses to invent answers to questions only the operator can settle. That is the
 sweep working, not failing — but say so alongside the counts, so nobody reads "drained" as
-"promoted".
+"promoted". The first real drain measured this directly: of 12 queued tasks, 5 were
+promoted, 3 escalated, 3 routed, and 1 stayed blocked — roughly half the queue came back
+needing the operator. **The drain's product is a triage list, not a `ready` queue.**
 
 If the sweep dies before `finish`, the partial report is still on disk and the lock still
 names its holder — the next `start` reports both. There is no recovery step to run: the
