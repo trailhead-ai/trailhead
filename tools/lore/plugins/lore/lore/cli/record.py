@@ -493,6 +493,7 @@ def _cmd_record_create(args) -> int:
     lock that makes exactly one of them win and the other refuse cleanly —
     never a silent suffix, and never a clobber.
     """
+    from .. import locking as locking_mod
     from ..record import fields as fields_mod
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
@@ -629,7 +630,13 @@ def _cmd_record_create(args) -> int:
 
     guard_notices: list[str] = []
     try:
-        with record_store_mod.index_transaction() as conn:
+        # The create critical section starts at ``place_record``, not at the write:
+        # stem collision resolution is a check-then-act, so two concurrent creates
+        # of the same title would otherwise both claim the same stem and one record
+        # would be lost. Held through ``conn.commit()`` so the index row for the
+        # claimed stem is durable before the next writer picks a stem.
+        with locking_mod.vault_write_lock(vault_root), \
+                record_store_mod.index_transaction() as conn:
             location = record_store_mod.place_record(
                 name=title,
                 kind=kind,

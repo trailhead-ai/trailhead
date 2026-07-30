@@ -210,6 +210,37 @@ class TestVaultGitignoreScaffolding:
             f"lock file is not reported ignored by git:\n{result.stdout}"
         )
 
+    def test_vault_root_write_lock_is_git_ignored(self, tmp_path):
+        """The vault-root ``.lore.lock`` write lock is never staged.
+
+        ``lore sync``'s ``git add -A`` would otherwise commit the lock file that
+        ``locking.vault_write_lock`` creates at the vault root. Unlike the
+        ``session/<key>.lock`` sidecars this one is a dotfile, and gitignore
+        globs — unlike shell globs — do match a leading dot.
+        """
+        import subprocess
+
+        installer = load_script("lore.config.installer")
+        locking = load_script("lore.locking")
+        vaults_root = tmp_path / "vaults"
+        vault = installer.bootstrap_vault(vaults_root, vault_path=None)
+
+        with locking.vault_write_lock(vault):
+            pass
+        assert (vault / locking.VAULT_LOCK_NAME).is_file(), "lock file not created"
+
+        result = subprocess.run(
+            ["git", "-C", str(vault), "status", "--porcelain", "--ignored=matching"],
+            capture_output=True,
+            text=True,
+        )
+        assert f"?? {locking.VAULT_LOCK_NAME}" not in result.stdout, (
+            f"vault write lock would be staged by `git add -A`:\n{result.stdout}"
+        )
+        assert f"!! {locking.VAULT_LOCK_NAME}" in result.stdout, (
+            f"vault write lock is not reported ignored by git:\n{result.stdout}"
+        )
+
     def test_bootstrap_is_idempotent_on_gitignore(self, tmp_path):
         """Re-running bootstrap_vault does not duplicate or clobber the .gitignore."""
         installer = load_script("lore.config.installer")

@@ -37,8 +37,7 @@ Three responsibilities live here:
 the body ``.md`` append; the sidecar write + reindex sat OUTSIDE it and were proven
 racy (torn JSON from concurrent ``write_text``, a stale FTS snapshot where the body
 holds an entry the index doesn't, and ``sqlite3.OperationalError: database is
-locked``). The lock therefore extends the held ``fcntl.flock`` LOCK_EX to span ONE
-critical section:
+locked``). The lock therefore spans ONE critical section:
 
     existence-check → lazy-create-or-ensure-dirty (sidecar) → body-append →
     open-index + ``upsert_row`` + ``conn.commit()``
@@ -47,31 +46,33 @@ so a concurrent second candidate can never interleave between the body append an
 the reindex. Per-candidate ``upsert_row``+commit is ~0.1-0.2ms (negligible inside
 the lock).
 
-  - The lock object is a SEPARATE sidecar ``<key>.lock`` file, NOT the record — so
-    concurrent *reads* are never blocked and the record fds are never aliased.
-  - ``open(lock_path, "a")`` create-or-opens the lock without truncating.
-  - All callers for the SAME key queue on the lock; DIFFERENT keys never contend.
-  - Releasing happens in ``finally`` via ``LOCK_UN`` + close.
+The lock itself is :func:`lore.locking.session_write_lock` — the shared blocking
+flock helper every lore writer uses (see that module for the acquisition
+semantics, the lock-wait stderr notice, and the single-user threat model). Its
+granularity here is **(vault, session key)**, an exclusive flock on a separate
+sidecar ``session/<key>.lock`` file: all callers for the SAME key queue on it,
+DIFFERENT keys never contend, and concurrent *readers* take no lock at all. It is
+deliberately NOT the vault-wide ``.lore.lock`` — a session capture must not block
+an unrelated ``record`` write, and vice versa.
 
 The dominant unguarded failure mode is **LOST ENTRIES / STALE INDEX**, not
 double-create. The behavioral test asserts "exactly one record" AND "all body
 entries present" AND "the FTS body reflects the final body" over many concurrent
 iterations.
 
-Pure stdlib (``fcntl``, ``re``, ``json``, ``pathlib``) + the sibling ``index_store``
-and ``record_store`` modules. ``fcntl`` is stdlib on darwin/linux; flock is
-unreliable over NFS (non-issue — the vault is local git). darwin ``LOCK_UN == 8``.
+Pure stdlib (``re``, ``json``, ``pathlib``) + the sibling ``locking``,
+``index_store``, and ``record_store`` modules.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import fcntl
 import json
 import re
 from pathlib import Path
 from typing import Any, Callable
 
+from .. import locking
 from ..record import store as record_store_mod
 from ..search import index as index_store_mod
 
@@ -261,8 +262,7 @@ def capture_candidate(
 
     The critical section: the existence-check, the sidecar create-or-ensure-dirty,
     the body append, and the ``upsert_row``+commit ALL happen inside a single held
-    ``fcntl.flock`` LOCK_EX on a sidecar ``<key>.lock`` file (see the module
-    docstring). *open_index* is a no-arg factory returning a fresh index connection
+    :func:`lore.locking.session_write_lock` (see the module docstring). *open_index* is a no-arg factory returning a fresh index connection
     (so test isolation via ``XDG_STATE_HOME`` flows through); the connection is
     opened and closed inside the lock.
 
@@ -274,11 +274,8 @@ def capture_candidate(
     session_dir.mkdir(parents=True, exist_ok=True)
     body_path = session_dir / f"{key}.md"
     sidecar_path = session_dir / f"{key}.json"
-    lock_path = session_dir / f"{key}.lock"
 
-    lock_fd = open(lock_path, "a")  # create-or-open, no truncate; held until unlock
-    try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)  # blocks until exclusive
+    with locking.session_write_lock(vault_root, key):
         now = _now_utc_z()
 
         # Sidecar: lazy-create born-dirty, OR ensure-dirty + bump updated-at.
@@ -306,9 +303,6 @@ def capture_candidate(
             _reindex(conn, str(vault_root), key, sidecar, body)
         finally:
             conn.close()
-    finally:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()
 
 
 # Flush verdicts. The CLI maps these to user-facing notices + the
@@ -347,16 +341,13 @@ def flush_session(
     session_dir = Path(vault_root) / "session"
     sidecar_path = session_dir / f"{key}.json"
     body_path = session_dir / f"{key}.md"
-    lock_path = session_dir / f"{key}.lock"
 
     # Fast path: no record at all → no-op, create nothing. Re-checked under lock.
     if not sidecar_path.exists():
         return FLUSH_NO_SESSION
 
     session_dir.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(lock_path, "a")
-    try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+    with locking.session_write_lock(vault_root, key):
         if not sidecar_path.exists():
             return FLUSH_NO_SESSION
         sidecar = json.loads(sidecar_path.read_text())
@@ -383,9 +374,6 @@ def flush_session(
         finally:
             conn.close()
         return FLUSH_FLUSHED
-    finally:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()
 
 
 def revert_flush(
@@ -411,15 +399,12 @@ def revert_flush(
     session_dir = Path(vault_root) / "session"
     sidecar_path = session_dir / f"{key}.json"
     body_path = session_dir / f"{key}.md"
-    lock_path = session_dir / f"{key}.lock"
 
     if not sidecar_path.exists():
         return
 
     session_dir.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(lock_path, "a")
-    try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+    with locking.session_write_lock(vault_root, key):
         if not sidecar_path.exists():
             return
         sidecar = json.loads(sidecar_path.read_text())
@@ -445,9 +430,6 @@ def revert_flush(
             _reindex(conn, str(vault_root), key, sidecar, body)
         finally:
             conn.close()
-    finally:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()
 
 
 def capture_referenced(
@@ -472,7 +454,6 @@ def capture_referenced(
     session_dir = Path(vault_root) / "session"
     body_path = session_dir / f"{key}.md"
     sidecar_path = session_dir / f"{key}.json"
-    lock_path = session_dir / f"{key}.lock"
 
     # No record (neither artifact) → no-op, create nothing. Checked outside the
     # lock as a fast path; re-checked inside the lock before any write.
@@ -480,9 +461,7 @@ def capture_referenced(
         return False
 
     session_dir.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(lock_path, "a")
-    try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+    with locking.session_write_lock(vault_root, key):
         if not body_path.exists() and not sidecar_path.exists():
             return False
         now = _now_utc_z()
@@ -518,6 +497,3 @@ def capture_referenced(
             finally:
                 conn.close()
         return True
-    finally:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()
