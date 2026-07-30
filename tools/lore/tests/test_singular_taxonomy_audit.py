@@ -24,6 +24,7 @@ otherwise commit). Uses ``tmp_path`` only — never the real vault (Axiom 6).
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -301,6 +302,36 @@ class TestVaultGitignoreScaffolding:
         installer.scaffold_gitignore(vault)
 
         assert (vault / ".gitignore").read_text(encoding="utf-8") == original
+
+    def test_append_survives_a_crash_mid_write(self, tmp_path, monkeypatch):
+        """The append is atomic: a crash after the temp file is written but
+        before the rename lands must leave the user's original ``.gitignore``
+        intact, never truncated.
+
+        A prior implementation did read -> concat -> ``write_text`` (truncate
+        in place), so a crash mid-write could destroy the user's file. The fix
+        writes to a sibling temp file and ``os.replace``s it onto the target;
+        this test kills the process at the ``os.replace`` step and asserts the
+        original content survived untouched.
+        """
+        installer = load_script("lore.config.installer")
+        vault = tmp_path / "adopted"
+        vault.mkdir()
+        original = "# mine\n__pycache__/\n"
+        (vault / ".gitignore").write_text(original, encoding="utf-8")
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("simulated crash before rename")
+
+        monkeypatch.setattr(os, "replace", boom)
+
+        with pytest.raises(RuntimeError):
+            installer.scaffold_gitignore(vault)
+
+        text = (vault / ".gitignore").read_text(encoding="utf-8")
+        assert text == original, (
+            f"a crash mid-write truncated the user's .gitignore: {text!r}"
+        )
 
     def test_bootstrap_is_idempotent_on_gitignore(self, tmp_path):
         """Re-running bootstrap_vault does not duplicate or clobber the .gitignore."""

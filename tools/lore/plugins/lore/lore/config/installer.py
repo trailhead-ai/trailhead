@@ -25,6 +25,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from ..record.store import write_temp_then_rename
+
 
 # ---------------------------------------------------------------------------
 # resolve_targets
@@ -130,8 +132,11 @@ def scaffold_gitignore(vault: Path) -> None:
     if not missing:
         return
     separator = "" if existing.endswith("\n") or existing == "" else "\n"
-    gitignore.write_text(
-        existing + separator + "\n".join(missing) + "\n", encoding="utf-8"
+    # Atomic append (temp file + os.replace), not read -> concat -> write_text
+    # (truncate in place): the target is a pre-existing, user-owned file in an
+    # adopted repo, and a crash mid-write must never leave it truncated.
+    write_temp_then_rename(
+        gitignore, existing + separator + "\n".join(missing) + "\n"
     )
 
 

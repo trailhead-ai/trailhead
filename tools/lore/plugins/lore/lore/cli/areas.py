@@ -94,6 +94,12 @@ def run_reindex() -> "tuple[int | None, str | None]":
 
     if loaded is not None:
         config_path, vaults = loaded
+        # A configured-but-absent vault root must never reach the locking
+        # helper: `_flock` mkdir's the lock file's parent as a side effect of
+        # taking the lock, which would silently materialize a directory (and
+        # a `.lore.lock`) the user never provisioned. Filtering here mirrors
+        # `sync.py`'s `vault.exists()` guard.
+        vaults = [v for v in vaults if Path(v.path).exists()]
         vault_roots = [str(v.path) for v in vaults]
         shared_roots = {
             str(v.path) for v in vaults if vault_config_mod.is_shared(v)

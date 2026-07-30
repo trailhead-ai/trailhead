@@ -588,6 +588,54 @@ class TestReindexAllVaultLock:
             f"reindex lock order was {acquired}"
         )
 
+    def test_reindex_skips_a_configured_but_absent_vault_root(self, tmp_path):
+        """A configured vault root that does not exist on disk is neither
+        created nor locked — locking's ``_flock`` would otherwise materialize
+        it (mkdir + ``.lore.lock``) purely as a side effect of taking its
+        write lock, a regression vs. pre-lock behavior where ``index.rebuild``
+        simply skipped absent roots. The existing vault is still rebuilt."""
+        state = tmp_path / "state"
+        state.mkdir()
+        config_home = tmp_path / "cfg"
+
+        existing_root = tmp_path / "existing_vault"
+        existing_root.mkdir()
+        absent_root = tmp_path / "absent_vault"
+        assert not absent_root.exists()
+
+        lore_cfg = config_home / "lore"
+        lore_cfg.mkdir(parents=True)
+        (lore_cfg / "config.json").write_text(
+            json.dumps(
+                {
+                    "vaults": [
+                        {"name": "default", "scope": "default", "path": str(existing_root)},
+                        {"name": "second", "scope": "team",
+                         "records": ["decision"], "path": str(absent_root)},
+                    ]
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        r = run_cli(
+            ["record", "create", "--kind", "decision", "--title", "seed"],
+            vault=existing_root, state_dir=state, stdin_text="seed body\n",
+            env_extra={"XDG_CONFIG_HOME": str(config_home)},
+        )
+        assert r.returncode == 0, r.stderr
+
+        r = run_cli(["reindex"], vault=existing_root, state_dir=state,
+                     env_extra={"XDG_CONFIG_HOME": str(config_home)})
+        assert r.returncode == 0, r.stderr
+
+        assert not absent_root.exists(), (
+            "run_reindex materialized a configured-but-absent vault root"
+        )
+        indexed = _index_names(state, "existing_vault", "decision")
+        assert "seed" in indexed, "the existing vault was not rebuilt"
+
 
 class TestReindexVsWriteRace:
     ITERS = 3
