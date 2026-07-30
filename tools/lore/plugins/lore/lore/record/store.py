@@ -78,6 +78,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
+from .. import locking
 from ..search import index as index_store
 from ..vault import vault as vault_mod
 from . import model as record_model
@@ -1029,28 +1030,33 @@ def validate_and_write(
     """
     stamped, safe_body = validate_stamp_neutralize(location, sidecar, body)
 
-    # 5 — durable text first (atomic). Body before sidecar; both atomic.
-    # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
-    # diff/grep and round-trip asserts.
-    sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
-    if require_new:
-        with _number_claim_for(location):
-            _write_new_artifacts(location, safe_body, sidecar_text)
-    else:
-        write_temp_then_rename(location.body_path, safe_body)
-        write_temp_then_rename(location.sidecar_path, sidecar_text)
+    # Steps 5-6 are the destination vault's critical section: a concurrent writer
+    # must not interleave between the text write and the index upsert. Reentrant,
+    # so a caller already holding this vault's lock (``record create``, which also
+    # needs the preceding ``place_record`` inside it) is not blocked by itself.
+    with locking.vault_write_lock(location.vault_root):
+        # 5 — durable text first (atomic). Body before sidecar; both atomic.
+        # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
+        # diff/grep and round-trip asserts.
+        sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
+        if require_new:
+            with _number_claim_for(location):
+                _write_new_artifacts(location, safe_body, sidecar_text)
+        else:
+            write_temp_then_rename(location.body_path, safe_body)
+            write_temp_then_rename(location.sidecar_path, sidecar_text)
 
-    # 6 — index last; on failure the text already won (no rollback).
-    # ``shared`` is the resolved vault's trust flag: default 0 (own/trusted)
-    # preserves vanilla; the config-driven create path passes 1 for a shared vault.
-    update_index(
-        conn,
-        location.record_id,
-        stamped,
-        safe_body,
-        location.vault_root,
-        shared=shared,
-    )
+        # 6 — index last; on failure the text already won (no rollback).
+        # ``shared`` is the resolved vault's trust flag: default 0 (own/trusted)
+        # preserves vanilla; the config-driven create path passes 1 for a shared vault.
+        update_index(
+            conn,
+            location.record_id,
+            stamped,
+            safe_body,
+            location.vault_root,
+            shared=shared,
+        )
 
     return location.record_id
 
@@ -1099,6 +1105,15 @@ def move_record(
     shared vault fences the moved record correctly — the caller computes it from
     ``vault_config.shared_flag(dest_vault)`` (symmetric with the create path).
 
+    **Lock scope.** The paired source+destination acquisition (sorted order, so
+    opposed moves cannot deadlock) covers the copy → repoint → delete sequence
+    only. The existence check and the verbatim source read above it sit OUTSIDE it,
+    so a concurrent write to the source between that read and the acquisition is
+    not detected here. A caller that needs the read and the move to be one atomic
+    unit must hold the pair itself across both — ``cli.record``'s relocating
+    ``record update`` does exactly that, and this function's own acquisition then
+    becomes a reentrant depth bump.
+
     Returns the new ``RecordId``.
     """
     old_root = old_vault_root if old_vault_root is not None else _active_vault_root()
@@ -1131,24 +1146,31 @@ def move_record(
         )
         sidecar = json.loads(sidecar_text)
 
-    # copy-new (atomic).
-    write_temp_then_rename(new_location.body_path, body)
-    write_temp_then_rename(new_location.sidecar_path, sidecar_text)
+    # Both vaults are mutated, so both write locks are held for the whole
+    # copy → repoint → delete sequence — otherwise a concurrent ``sync``'s
+    # ``git add -A`` can observe the record at both endpoints or at neither.
+    # ``vault_write_locks`` acquires them in sorted path order, so two opposed
+    # moves between the same pair of vaults cannot deadlock.
+    with locking.vault_write_locks(old_root, new_location.vault_root):
+        # copy-new (atomic).
+        write_temp_then_rename(new_location.body_path, body)
+        write_temp_then_rename(new_location.sidecar_path, sidecar_text)
 
-    # index-repoint: drop the old keyed row, upsert the new one. ``shared`` is the
-    # destination vault's trust flag: a relocation INTO a ``shared: true``
-    # vault must stamp the new row shared=1, not the default 0 — otherwise the moved
-    # record leaks into ``search`` as own-vault until the next ``lore reindex``.
-    index_store.delete_row(conn, old_root, old_kind, old_name)
-    update_index(
-        conn, new_location.record_id, sidecar, body, new_location.vault_root, shared=shared
-    )
+        # index-repoint: drop the old keyed row, upsert the new one. ``shared`` is the
+        # destination vault's trust flag: a relocation INTO a ``shared: true``
+        # vault must stamp the new row shared=1, not the default 0 — otherwise the moved
+        # record leaks into ``search`` as own-vault until the next ``lore reindex``.
+        index_store.delete_row(conn, old_root, old_kind, old_name)
+        update_index(
+            conn, new_location.record_id, sidecar, body, new_location.vault_root,
+            shared=shared,
+        )
 
-    # delete-old (last — a crash here is the safe, self-healing direction).
-    if old_body_path.exists():
-        old_body_path.unlink()
-    if old_sidecar_path.exists():
-        old_sidecar_path.unlink()
+        # delete-old (last — a crash here is the safe, self-healing direction).
+        if old_body_path.exists():
+            old_body_path.unlink()
+        if old_sidecar_path.exists():
+            old_sidecar_path.unlink()
 
     return new_location.record_id
 
@@ -1166,15 +1188,24 @@ def delete_record(
     """Remove a record's body+sidecar+index row in one op.
 
     A missing ID (neither artifact on disk) → :class:`RecordNotFoundError`.
+
+    The existence check, both unlinks, and the index-row drop are one critical
+    section under the vault write lock, so a concurrent writer never sees the
+    record half-removed (body gone, sidecar or index row still present).
+
+    The lock covers this function's own span; the caller's ``conn.commit()`` has
+    to land inside it too, so the caller takes the same (reentrant) lock around
+    the transaction — see ``cli.record._cmd_record_delete``.
     """
     root = vault_root if vault_root is not None else _active_vault_root()
     kind, name, body_path, sidecar_path = _confine_record_id(record_id, root)
 
-    if not body_path.exists() and not sidecar_path.exists():
-        raise RecordNotFoundError(f"record not found: {record_id}")
+    with locking.vault_write_lock(root):
+        if not body_path.exists() and not sidecar_path.exists():
+            raise RecordNotFoundError(f"record not found: {record_id}")
 
-    if body_path.exists():
-        body_path.unlink()
-    if sidecar_path.exists():
-        sidecar_path.unlink()
-    index_store.delete_row(conn, root, kind, name)
+        if body_path.exists():
+            body_path.unlink()
+        if sidecar_path.exists():
+            sidecar_path.unlink()
+        index_store.delete_row(conn, root, kind, name)

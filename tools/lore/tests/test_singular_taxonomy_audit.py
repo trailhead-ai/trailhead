@@ -24,6 +24,7 @@ otherwise commit). Uses ``tmp_path`` only — never the real vault (Axiom 6).
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -208,6 +209,128 @@ class TestVaultGitignoreScaffolding:
         )
         assert "!! session/deadbeef.lock" in result.stdout, (
             f"lock file is not reported ignored by git:\n{result.stdout}"
+        )
+
+    def test_vault_root_write_lock_is_git_ignored(self, tmp_path):
+        """The vault-root ``.lore.lock`` write lock is never staged.
+
+        ``lore sync``'s ``git add -A`` would otherwise commit the lock file that
+        ``locking.vault_write_lock`` creates at the vault root. Unlike the
+        ``session/<key>.lock`` sidecars this one is a dotfile, and gitignore
+        globs — unlike shell globs — do match a leading dot.
+        """
+        import subprocess
+
+        installer = load_script("lore.config.installer")
+        locking = load_script("lore.locking")
+        vaults_root = tmp_path / "vaults"
+        vault = installer.bootstrap_vault(vaults_root, vault_path=None)
+
+        with locking.vault_write_lock(vault):
+            pass
+        assert (vault / locking.VAULT_LOCK_NAME).is_file(), "lock file not created"
+
+        result = subprocess.run(
+            ["git", "-C", str(vault), "status", "--porcelain", "--ignored=matching"],
+            capture_output=True,
+            text=True,
+        )
+        assert f"?? {locking.VAULT_LOCK_NAME}" not in result.stdout, (
+            f"vault write lock would be staged by `git add -A`:\n{result.stdout}"
+        )
+        assert f"!! {locking.VAULT_LOCK_NAME}" in result.stdout, (
+            f"vault write lock is not reported ignored by git:\n{result.stdout}"
+        )
+
+    def test_symlink_mode_scaffolds_the_gitignore_in_the_target(self, tmp_path):
+        """A vault adopted by symlink gets the ignore too.
+
+        ``bootstrap_vault``'s symlink mode used to return before any scaffolding,
+        so an adopted repo never ignored ``*.lock`` — and every vault gets a
+        ``.lore.lock`` at its root the first time anything writes to it, which
+        ``lore sync``'s ``git add -A`` would then commit.
+        """
+        installer = load_script("lore.config.installer")
+        existing = tmp_path / "adopted"
+        existing.mkdir()
+        installer.git_init(existing)
+
+        vault = installer.bootstrap_vault(tmp_path / "vaults", vault_path=existing)
+
+        patterns = (existing / ".gitignore").read_text(encoding="utf-8").splitlines()
+        assert "*.lock" in patterns, (
+            f"symlink-mode vault does not ignore lock files: {patterns!r}"
+        )
+        assert vault.is_symlink()
+
+    def test_scaffold_is_a_no_op_when_the_vault_dir_is_absent(self, tmp_path):
+        """A dangling target is not created just to hold a ``.gitignore``."""
+        installer = load_script("lore.config.installer")
+        missing = tmp_path / "nope"
+        installer.scaffold_gitignore(missing)
+        assert not missing.exists()
+
+    def test_existing_gitignore_without_the_pattern_gets_it_appended(self, tmp_path):
+        """An adopted repo already has a ``.gitignore`` — it still needs the ignore.
+
+        Early-returning on "a ``.gitignore`` exists" means an adopted repo vault
+        (which virtually always has one) never ignores ``*.lock``, and ``lore
+        sync``'s ``git add -A`` commits ``.lore.lock`` into the user's own repo.
+        The user's own lines must survive the append verbatim.
+        """
+        installer = load_script("lore.config.installer")
+        vault = tmp_path / "adopted"
+        vault.mkdir()
+        original = "# mine\n__pycache__/\n"
+        (vault / ".gitignore").write_text(original, encoding="utf-8")
+
+        installer.scaffold_gitignore(vault)
+
+        text = (vault / ".gitignore").read_text(encoding="utf-8")
+        assert text.startswith(original), f"user's own lines were clobbered: {text!r}"
+        assert "*.lock" in text.splitlines(), f"lock ignore not appended: {text!r}"
+
+    def test_existing_gitignore_with_the_pattern_is_untouched(self, tmp_path):
+        """Idempotent: a ``.gitignore`` already carrying the pattern is byte-identical."""
+        installer = load_script("lore.config.installer")
+        vault = tmp_path / "adopted"
+        vault.mkdir()
+        original = "# mine\n*.lock\nbuild/\n"
+        (vault / ".gitignore").write_text(original, encoding="utf-8")
+
+        installer.scaffold_gitignore(vault)
+        installer.scaffold_gitignore(vault)
+
+        assert (vault / ".gitignore").read_text(encoding="utf-8") == original
+
+    def test_append_survives_a_crash_mid_write(self, tmp_path, monkeypatch):
+        """The append is atomic: a crash after the temp file is written but
+        before the rename lands must leave the user's original ``.gitignore``
+        intact, never truncated.
+
+        A prior implementation did read -> concat -> ``write_text`` (truncate
+        in place), so a crash mid-write could destroy the user's file. The fix
+        writes to a sibling temp file and ``os.replace``s it onto the target;
+        this test kills the process at the ``os.replace`` step and asserts the
+        original content survived untouched.
+        """
+        installer = load_script("lore.config.installer")
+        vault = tmp_path / "adopted"
+        vault.mkdir()
+        original = "# mine\n__pycache__/\n"
+        (vault / ".gitignore").write_text(original, encoding="utf-8")
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("simulated crash before rename")
+
+        monkeypatch.setattr(os, "replace", boom)
+
+        with pytest.raises(RuntimeError):
+            installer.scaffold_gitignore(vault)
+
+        text = (vault / ".gitignore").read_text(encoding="utf-8")
+        assert text == original, (
+            f"a crash mid-write truncated the user's .gitignore: {text!r}"
         )
 
     def test_bootstrap_is_idempotent_on_gitignore(self, tmp_path):

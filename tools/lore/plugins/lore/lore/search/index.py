@@ -78,14 +78,50 @@ foreign_keys`` to OFF and does NOT persist it in the file, so ``open_index`` iss
   column shape (``shared`` 0/1) and the ``search`` classification are unchanged.
 - ``delete_row`` removes the ``records`` row (CASCADE clears its facets) and the
   matching ``record_fts`` row; a missing key is a silent no-op (never raises).
+
+**Concurrency.** This is ONE global database shared by every vault, so the
+per-vault write lock (``lore.locking``) does NOT serialize writers in different
+vaults — they meet here. Two hardenings make that safe, and both are load-bearing
+(without them, concurrent first-writers in different vaults fail immediately with
+``sqlite3.OperationalError: database is locked``):
+
+1. An explicit busy timeout on every connection (``timeout=`` plus ``PRAGMA
+   busy_timeout``), rather than relying on the driver default.
+2. Provisioning (the ``CREATE … IF NOT EXISTS`` DDL) runs only when the schema is
+   actually absent, and then under a ``BEGIN IMMEDIATE`` retry loop: DDL run
+   inside an implicitly-begun deferred transaction hits an un-retryable
+   lock-upgrade path that the busy handler never sees.
+
+   The ``journal_mode=WAL`` switch is NOT gated on provisioning — it is attempted
+   on every open (only when the pragma read says the file is not already WAL), so
+   an index that carries the schema but a rollback journal is upgraded rather than
+   left that way forever. It needs a brief exclusive lock and returns
+   ``SQLITE_BUSY`` *without* consulting the busy handler, so a contended attempt
+   is tolerated and retried by the next open.
 """
 
 from __future__ import annotations
 
 import json
+import random
+import re
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
+
+#: Busy timeout for every index connection. Generous on purpose: a writer waiting
+#: on a peer in another vault must queue, never fail.
+#:
+#: The bound this does NOT remove: session captures take only their session-key
+#: flock, so they are outside ``reindex``'s all-vault acquisition and rely on this
+#: timeout alone to survive a rebuild's SQLite write lock. A rebuild that runs
+#: longer than the timeout still surfaces ``database is locked`` to ``lore session
+#: candidate`` — improved from SQLite's 5s default, not eliminated.
+BUSY_TIMEOUT_SECONDS = 30.0
+
+#: Wall-clock budget for the provisioning retry loop (see the module docstring).
+_PROVISION_DEADLINE_SECONDS = 30.0
 
 # ---------------------------------------------------------------------------
 # Index path resolver
@@ -172,6 +208,20 @@ CREATE TABLE IF NOT EXISTS index_meta (
 );
 """
 
+# The same DDL as individual statements, so provisioning can run them inside one
+# explicit ``BEGIN IMMEDIATE`` transaction — ``executescript`` cannot, because it
+# issues a COMMIT before executing. No statement contains a literal ``;``.
+_DDL_STATEMENTS: tuple[str, ...] = tuple(
+    s.strip() for s in _DDL.split(";") if s.strip()
+)
+
+# Every schema object the DDL creates, DERIVED from the DDL rather than restated —
+# ``_schema_is_provisioned`` compares against this, so a table added above is
+# covered by the provisioning check automatically instead of silently escaping it.
+_SCHEMA_OBJECTS: frozenset[str] = frozenset(
+    re.findall(r"IF NOT EXISTS\s+(\w+)", _DDL)
+)
+
 # The forward list-valued facets and the sidecar keys / facet names they project to.
 # ``related`` (the nested kind -> [names] map) is handled separately.
 _LIST_FACETS: tuple[tuple[str, str], ...] = (
@@ -197,15 +247,102 @@ def open_index(env: dict[str, str] | None = None) -> sqlite3.Connection:
     provisions the realized ``records`` + ``record_facet`` + ``idx_facet`` +
     ``record_fts`` schema. The caller is responsible for ``conn.commit()`` and
     ``conn.close()``.
+
+    Concurrency-safe against writers in OTHER vaults, which share this one
+    database and are not covered by the per-vault write lock: the connection
+    carries an explicit busy timeout, and provisioning is skipped when the schema
+    is already present and retried under ``BEGIN IMMEDIATE`` when it is not (see
+    the module docstring's Concurrency section).
     """
     index_path = _resolve_index_path(env=env)
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(index_path))
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = sqlite3.connect(str(index_path), timeout=BUSY_TIMEOUT_SECONDS)
+    conn.execute(f"PRAGMA busy_timeout = {int(BUSY_TIMEOUT_SECONDS * 1000)}")
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(_DDL)
-    conn.commit()
+    _ensure_wal(conn)
+    _provision(conn)
     return conn
+
+
+def _ensure_wal(conn: sqlite3.Connection) -> None:
+    """Put the index in WAL mode, on EVERY open — not only when provisioning.
+
+    Gating this on provisioning would leave an index that already carries the
+    schema but a rollback journal (created by an older lore, or reverted by hand)
+    in that mode for the life of the file — and WAL is what lets a reader work
+    while another vault's writer holds the write lock.
+
+    Reading the pragma first keeps the common case a no-op: the switch takes a
+    brief exclusive lock, so it is attempted only when it would change something.
+    A concurrent holder making that attempt fail is tolerated — the mode is a
+    performance property, not a correctness one, and the next open retries.
+    """
+    if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
+        return
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError as exc:
+        if not _is_busy(exc):
+            raise
+
+
+def _is_busy(exc: sqlite3.OperationalError) -> bool:
+    """True for SQLite's lock-contention errors (``database is locked``/``busy``)."""
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
+
+def _schema_is_provisioned(conn: sqlite3.Connection) -> bool:
+    """True when every schema object the DDL creates already exists.
+
+    A pure read, so it never contends with a concurrent writer in WAL mode — and
+    it is what lets the common case skip the write-locking DDL entirely.
+    """
+    placeholders = ",".join("?" * len(_SCHEMA_OBJECTS))
+    names = sorted(_SCHEMA_OBJECTS)
+    present = {
+        row[0]
+        for row in conn.execute(
+            f"SELECT name FROM sqlite_master WHERE name IN ({placeholders})", names
+        )
+    }
+    return present == _SCHEMA_OBJECTS
+
+
+def _provision(conn: sqlite3.Connection) -> None:
+    """Create the schema, tolerating concurrent provisioners.
+
+    The DDL takes an exclusive lock that SQLite's busy handler does not cover
+    (see the module docstring), so it runs under an explicit retry-with-backoff
+    loop, and is skipped outright once the schema is in place. WAL is set by
+    :func:`_ensure_wal` on every open, independently of this.
+    """
+    if _schema_is_provisioned(conn):
+        return
+
+    deadline = time.monotonic() + _PROVISION_DEADLINE_SECONDS
+    backoff = 0.01
+    while True:
+        try:
+            # Statement-at-a-time under an explicit write transaction:
+            # ``executescript`` would COMMIT the BEGIN IMMEDIATE out from under us.
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                for statement in _DDL_STATEMENTS:
+                    conn.execute(statement)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            return
+        except sqlite3.OperationalError as exc:
+            if not _is_busy(exc) or time.monotonic() >= deadline:
+                raise
+            # Another process is provisioning; it may already have finished.
+            if _schema_is_provisioned(conn):
+                return
+            time.sleep(backoff + random.random() * backoff)
+            backoff = min(backoff * 2, 0.5)
 
 
 def _record_id(vault: str, kind: str, name: str) -> str:

@@ -9,8 +9,11 @@ is silent, unattended, and expensive:
     `ESCALATED` / `ROUTED <target>` / `SKIPPED <reason>` is the entire
     vocabulary between agent and coordinator; the CLI parses exactly these, so
     a fifth spelling in either document buckets every task `failed`.
-  - **Dispatch is serial.** Lore has no write mutex and every record write is a
-    vault git commit, so two agents in flight race the vault.
+  - **Dispatch is a bounded pool, not one-at-a-time.** The vault write lock
+    serializes the writes themselves, so up to 4 agents can run concurrently;
+    the pool is filled to 4 up front, each slot carries the state its return
+    needs (outcome file, deadline, originating bucket), and a freed slot is
+    refilled immediately from a fresh `--actionable` derive.
   - **The loop owns the `blocked` exit edge, and only the loop.** Craft's
     ritual never flips `blocked`; the sweep is the pre-authorized writer of
     that one edge, acting on the operator's recorded answer.
@@ -137,15 +140,107 @@ def test_skill_pins_the_return_line_as_a_single_contract():
     )
 
 
-# --- skill: serial dispatch ---------------------------------------------------
+# --- skill: bounded-pool background dispatch ----------------------------------
 
 
-def test_skill_pins_serial_dispatch():
+def test_skill_pins_the_pool_cap():
     _pin(
         SKILL,
-        "Dispatch is serial — one task at a time",
-        "Lore has no write mutex and every record write is a vault git commit, so a "
-        "parallel dispatch races the vault. Serial is a correctness constraint.",
+        "up to 4 agents in flight",
+        "The vault write lock (not serial dispatch) is what makes concurrent agents "
+        "safe now; the cap bounds how much escalation/failure context one sweep "
+        "can produce at once, not vault contention.",
+    )
+
+
+def test_skill_pins_background_dispatch():
+    _pin(
+        SKILL,
+        "dispatched in the background",
+        "Filling 4 slots requires each dispatch to return control to the "
+        "coordinator immediately rather than blocking on the agent's reply.",
+    )
+
+
+def test_skill_pins_dispatch_on_slot_free():
+    _pin(
+        SKILL,
+        "fill the freed slot with the next task",
+        "The pool's whole throughput gain is dispatching into a slot the instant "
+        "it empties, rather than waiting for the whole pool to drain before "
+        "starting the next batch.",
+    )
+
+
+def test_skill_rederives_actionable_on_slot_free():
+    _pin(
+        SKILL,
+        "re-derive with `--actionable` the moment a slot frees",
+        "A slot filled from a queue snapshot taken before the last completion can "
+        "hand out a task another slot's completion already promoted.",
+    )
+
+
+def test_skill_pins_the_initial_fill():
+    """A pool nobody fills runs one agent at a time.
+
+    Every other pool sentence describes the steady state (a slot frees, refill
+    it). Without an explicit "fill all 4 before you wait" step, a coordinator
+    reading the loop top-to-bottom dispatches one, waits for it, and the cap
+    never binds — a serial drain wearing a pool's prose.
+    """
+    _pin(
+        SKILL,
+        "dispatch up to 4 tasks before you wait for any of them",
+        "The steady-state refill rule cannot start a pool. The initial fill is "
+        "the only step that gets 4 agents running at once.",
+    )
+
+
+def test_skill_pins_the_per_slot_state():
+    """A slot's outcome cannot be recorded from the task id alone.
+
+    Recording a return needs the outcome file path (§2.3) and the bucket the task
+    came out of (§2.4's status write is `blocked-answered`-only), and enforcing
+    the timeout needs the slot's own deadline. Held per slot or the coordinator
+    has to re-derive them from memory once 4 tasks interleave.
+    """
+    _pin(
+        SKILL,
+        "task id, its outcome file path, its dispatch deadline, and the queue bucket",
+        "These four values are what recording a return and enforcing a timeout "
+        "cost; a pool that tracks only task ids cannot write §2.4's status.",
+    )
+
+
+def test_skill_pins_the_slot_free_cycle():
+    """The steady-state cycle, in order, as one span.
+
+    Re-deriving before recording hands out a task whose promotion has not landed
+    yet; refilling before re-deriving fills from a stale snapshot. The order is
+    the contract, so it is pinned as one sentence rather than four phrases.
+    """
+    _pin(
+        SKILL,
+        "record its outcome, re-derive, then dispatch the next task into that slot",
+        "Each step is only correct in this order — recording last would re-derive "
+        "a queue that still lists the task that just finished.",
+    )
+
+
+def test_skill_has_no_serial_dispatch_leftovers():
+    """An absence pin: the pre-pool serial sentence must be gone.
+
+    The serial loop's "after each task, re-derive" reads as a single in-flight
+    dispatch and directly contradicts the pool. Prose that says both leaves the
+    coordinator to pick, unattended.
+    """
+    stale = "After each task, re-derive the queue"
+    text = " ".join(SKILL.read_text().split())
+    assert stale not in text, (
+        f"{SKILL.name}: the serial-dispatch sentence {stale!r} is still present — "
+        "it contradicts the bounded pool, and a coordinator that follows it drains "
+        "the queue one agent at a time."
     )
 
 
@@ -153,8 +248,8 @@ def test_skill_re_derives_between_tasks():
     _pin(
         SKILL,
         "ranger sweep derive",
-        "The queue is re-derived after each return — a stale in-memory queue would "
-        "re-dispatch a task the previous iteration already promoted.",
+        "The queue is re-derived on every slot-free — a stale in-memory queue "
+        "would re-dispatch a task an in-flight completion already promoted.",
     )
 
 
@@ -251,18 +346,43 @@ def test_skill_pins_the_failed_bucket_behavior():
     )
 
 
-def test_skill_names_a_per_dispatch_timeout():
+def test_skill_names_a_per_slot_timeout():
     """The timeout has no mechanical enforcement — the prose *is* the enforcement.
 
     Agents are harness constructs the CLI can neither dispatch nor kill, so a
     named duration in the loop is the only thing that turns a hung dispatch into
-    a `failed` line instead of a sweep that waits forever.
+    a `failed` line instead of a sweep that waits forever. It applies per slot,
+    not per sweep, now that up to 4 dispatches run concurrently.
     """
     _pin(
         SKILL,
-        "10-minute per-dispatch timeout",
+        "10-minute per-slot timeout",
         "An unnamed timeout is not a timeout — an unattended coordinator with no "
-        "duration to compare against waits forever.",
+        "duration to compare against waits forever. Naming it per-slot (not "
+        "per-dispatch) matters once 4 dispatches share the clock independently.",
+    )
+
+
+# --- skill: completion order and lock-vs-stuck triage -------------------------
+
+
+def test_skill_pins_completion_ordered_report_entries():
+    _pin(
+        SKILL,
+        "Report entries are completion-ordered, not queue order",
+        "With 4 dispatches in flight, the fastest agent returns first regardless "
+        "of queue position — an operator reading the report as queue order would "
+        "misread which task actually stalled.",
+    )
+
+
+def test_skill_pins_the_lock_contention_vs_stuck_agent_triage():
+    _pin(
+        SKILL,
+        "waiting for the vault write lock",
+        "A mass timeout across every slot at once, accompanied by the lock "
+        "helper's own stderr notice, means the vault write lock is contended "
+        "(e.g. an operator-run `lore reindex` mid-drain) — not 4 stuck agents.",
     )
 
 
@@ -359,6 +479,22 @@ def test_skill_never_removes_a_lock_itself():
 
 
 # --- skill: the durable surface ----------------------------------------------
+
+
+def test_skill_pins_the_triage_not_readiness_expectation():
+    """A drain's product is triage, not a `ready` queue — say so with the measured number.
+
+    An operator who reads bucket counts without this framing expects a mostly-`ready`
+    queue; the first real drain came back roughly half needing the operator (5/12
+    promoted, 3 escalated, 3 routed, 1 still blocked), and prose that drops the measured
+    expectation lets a well-meaning edit quietly revert to "drained" framing.
+    """
+    _pin(
+        SKILL,
+        "The drain's product is a triage list, not a `ready` queue.",
+        "Without this stated expectation, an operator reads a report full of "
+        "`ESCALATED`/`ROUTED` lines as the sweep failing rather than working as designed.",
+    )
 
 
 def test_skill_names_the_report_as_the_headless_surface():

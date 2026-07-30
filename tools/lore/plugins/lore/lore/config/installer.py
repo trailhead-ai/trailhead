@@ -25,6 +25,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from ..record.store import write_temp_then_rename
+
 
 # ---------------------------------------------------------------------------
 # resolve_targets
@@ -73,11 +75,11 @@ def bootstrap_vault(vaults_root: Path, vault_path: Path | None = None) -> Path:
     if vault_path is not None:
         # Symlink mode: create a symlink if not already one pointing correctly.
         target = vault_path.resolve()
-        if default.is_symlink():
-            return default
-        if default.exists():
-            return default
-        default.symlink_to(target)
+        if not (default.is_symlink() or default.exists()):
+            default.symlink_to(target)
+        # The adopted repo is a vault like any other — it needs the ignore too
+        # (scaffold_gitignore no-ops on a dangling target).
+        scaffold_gitignore(default)
         return default
 
     # Plain directory mode.
@@ -85,33 +87,57 @@ def bootstrap_vault(vaults_root: Path, vault_path: Path | None = None) -> Path:
         # Already present — check if git init is needed.
         if default.is_dir() and not (default / ".git").is_dir():
             git_init(default)
-        _scaffold_gitignore(default)
+        scaffold_gitignore(default)
         return default
 
     default.mkdir(parents=True, exist_ok=True)
     git_init(default)
-    _scaffold_gitignore(default)
+    scaffold_gitignore(default)
     return default
 
 
 # Patterns a freshly-initialised vault ignores. ``*.lock`` covers the
-# ``session/<key>.lock`` flock sidecars the capture path creates: without this,
-# ``lore sync``'s ``git add -A`` (the only catch-all stage path) would commit
-# them. The flush commit path uses explicit paths and is unaffected.
+# ``session/<key>.lock`` flock sidecars the capture path creates AND the
+# ``.lore.lock`` write lock at the vault root: without this, ``lore sync``'s
+# ``git add -A`` (the only catch-all stage path) would commit them. The flush
+# commit path uses explicit paths and is unaffected.
 _GITIGNORE_PATTERNS = ("*.lock",)
 
 
-def _scaffold_gitignore(vault: Path) -> None:
+def scaffold_gitignore(vault: Path) -> None:
     """Ensure the vault carries a ``.gitignore`` covering the flock sidecars.
 
-    Idempotent: only writes when ``.gitignore`` is absent, so a user's own
-    additions are never clobbered. A missing ``.gitignore`` is the only state
-    this repairs (it does not merge into an existing one).
+    Every path that produces a vault owes it this ignore — ``lore init`` in both
+    plain-dir and symlink mode, and ``lore vault add`` — because a lock file
+    appears at the root of *any* vault the first time anything writes to it, and
+    ``reindex`` writes to every configured vault.
+
+    An existing ``.gitignore`` is **appended to**, not skipped: an adopted repo
+    vault virtually always has one, and skipping meant such a vault never ignored
+    ``*.lock`` at all. Only the missing patterns are appended and the file's
+    existing lines are preserved verbatim, so the operation is idempotent and a
+    user's own entries are never clobbered. A *missing vault dir* is a no-op —
+    the ignore never conjures the directory it would live in.
     """
-    gitignore = vault / ".gitignore"
-    if gitignore.exists():
+    if not vault.is_dir():
         return
-    gitignore.write_text("\n".join(_GITIGNORE_PATTERNS) + "\n", encoding="utf-8")
+    gitignore = vault / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("\n".join(_GITIGNORE_PATTERNS) + "\n", encoding="utf-8")
+        return
+
+    existing = gitignore.read_text(encoding="utf-8")
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [p for p in _GITIGNORE_PATTERNS if p not in present]
+    if not missing:
+        return
+    separator = "" if existing.endswith("\n") or existing == "" else "\n"
+    # Atomic append (temp file + os.replace), not read -> concat -> write_text
+    # (truncate in place): the target is a pre-existing, user-owned file in an
+    # adopted repo, and a crash mid-write must never leave it truncated.
+    write_temp_then_rename(
+        gitignore, existing + separator + "\n".join(missing) + "\n"
+    )
 
 
 def git_init(path: Path) -> None:
