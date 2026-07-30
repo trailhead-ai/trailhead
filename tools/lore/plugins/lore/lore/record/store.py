@@ -1183,6 +1183,10 @@ def delete_record(
     The existence check, both unlinks, and the index-row drop are one critical
     section under the vault write lock, so a concurrent writer never sees the
     record half-removed (body gone, sidecar or index row still present).
+
+    The lock covers this function's own span; the caller's ``conn.commit()`` has
+    to land inside it too, so the caller takes the same (reentrant) lock around
+    the transaction — see ``cli.record._cmd_record_delete``.
     """
     root = vault_root if vault_root is not None else _active_vault_root()
     kind, name, body_path, sidecar_path = _confine_record_id(record_id, root)

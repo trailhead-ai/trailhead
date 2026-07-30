@@ -241,6 +241,34 @@ class TestVaultGitignoreScaffolding:
             f"vault write lock is not reported ignored by git:\n{result.stdout}"
         )
 
+    def test_symlink_mode_scaffolds_the_gitignore_in_the_target(self, tmp_path):
+        """A vault adopted by symlink gets the ignore too.
+
+        ``bootstrap_vault``'s symlink mode used to return before any scaffolding,
+        so an adopted repo never ignored ``*.lock`` — and every vault gets a
+        ``.lore.lock`` at its root the first time anything writes to it, which
+        ``lore sync``'s ``git add -A`` would then commit.
+        """
+        installer = load_script("lore.config.installer")
+        existing = tmp_path / "adopted"
+        existing.mkdir()
+        installer.git_init(existing)
+
+        vault = installer.bootstrap_vault(tmp_path / "vaults", vault_path=existing)
+
+        patterns = (existing / ".gitignore").read_text(encoding="utf-8").splitlines()
+        assert "*.lock" in patterns, (
+            f"symlink-mode vault does not ignore lock files: {patterns!r}"
+        )
+        assert vault.is_symlink()
+
+    def test_scaffold_is_a_no_op_when_the_vault_dir_is_absent(self, tmp_path):
+        """A dangling target is not created just to hold a ``.gitignore``."""
+        installer = load_script("lore.config.installer")
+        missing = tmp_path / "nope"
+        installer.scaffold_gitignore(missing)
+        assert not missing.exists()
+
     def test_bootstrap_is_idempotent_on_gitignore(self, tmp_path):
         """Re-running bootstrap_vault does not duplicate or clobber the .gitignore."""
         installer = load_script("lore.config.installer")

@@ -87,13 +87,17 @@ vaults — they meet here. Two hardenings make that safe, and both are load-bear
 
 1. An explicit busy timeout on every connection (``timeout=`` plus ``PRAGMA
    busy_timeout``), rather than relying on the driver default.
-2. Provisioning (the ``journal_mode=WAL`` switch and the ``CREATE … IF NOT
-   EXISTS`` DDL) runs only when the schema is actually absent, and then under a
-   ``BEGIN IMMEDIATE`` retry loop. ``journal_mode=WAL`` needs a brief exclusive
-   lock and returns ``SQLITE_BUSY`` *without* consulting the busy handler, and DDL
-   run inside an implicitly-begun deferred transaction hits the same
-   un-retryable lock-upgrade path — so neither can be left to the busy timeout
-   alone.
+2. Provisioning (the ``CREATE … IF NOT EXISTS`` DDL) runs only when the schema is
+   actually absent, and then under a ``BEGIN IMMEDIATE`` retry loop: DDL run
+   inside an implicitly-begun deferred transaction hits an un-retryable
+   lock-upgrade path that the busy handler never sees.
+
+   The ``journal_mode=WAL`` switch is NOT gated on provisioning — it is attempted
+   on every open (only when the pragma read says the file is not already WAL), so
+   an index that carries the schema but a rollback journal is upgraded rather than
+   left that way forever. It needs a brief exclusive lock and returns
+   ``SQLITE_BUSY`` *without* consulting the busy handler, so a contended attempt
+   is tolerated and retried by the next open.
 """
 
 from __future__ import annotations
@@ -249,8 +253,31 @@ def open_index(env: dict[str, str] | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(index_path), timeout=BUSY_TIMEOUT_SECONDS)
     conn.execute(f"PRAGMA busy_timeout = {int(BUSY_TIMEOUT_SECONDS * 1000)}")
     conn.execute("PRAGMA foreign_keys = ON")
+    _ensure_wal(conn)
     _provision(conn)
     return conn
+
+
+def _ensure_wal(conn: sqlite3.Connection) -> None:
+    """Put the index in WAL mode, on EVERY open — not only when provisioning.
+
+    Gating this on provisioning would leave an index that already carries the
+    schema but a rollback journal (created by an older lore, or reverted by hand)
+    in that mode for the life of the file — and WAL is what lets a reader work
+    while another vault's writer holds the write lock.
+
+    Reading the pragma first keeps the common case a no-op: the switch takes a
+    brief exclusive lock, so it is attempted only when it would change something.
+    A concurrent holder making that attempt fail is tolerated — the mode is a
+    performance property, not a correctness one, and the next open retries.
+    """
+    if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
+        return
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError as exc:
+        if not _is_busy(exc):
+            raise
 
 
 def _is_busy(exc: sqlite3.OperationalError) -> bool:
@@ -277,11 +304,12 @@ def _schema_is_provisioned(conn: sqlite3.Connection) -> bool:
 
 
 def _provision(conn: sqlite3.Connection) -> None:
-    """Switch on WAL and create the schema, tolerating concurrent provisioners.
+    """Create the schema, tolerating concurrent provisioners.
 
-    Both steps take an exclusive lock that SQLite's busy handler does not cover
-    (see the module docstring), so they run under an explicit retry-with-backoff
-    loop instead, and are skipped outright once the schema is in place.
+    The DDL takes an exclusive lock that SQLite's busy handler does not cover
+    (see the module docstring), so it runs under an explicit retry-with-backoff
+    loop, and is skipped outright once the schema is in place. WAL is set by
+    :func:`_ensure_wal` on every open, independently of this.
     """
     if _schema_is_provisioned(conn):
         return
@@ -290,8 +318,6 @@ def _provision(conn: sqlite3.Connection) -> None:
     backoff = 0.01
     while True:
         try:
-            if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
-                conn.execute("PRAGMA journal_mode=WAL")
             # Statement-at-a-time under an explicit write transaction:
             # ``executescript`` would COMMIT the BEGIN IMMEDIATE out from under us.
             conn.execute("BEGIN IMMEDIATE")

@@ -188,6 +188,40 @@ def test_add_creates_vault_directory_when_absent(tmp_path):
     assert (vault_dir / ".git").is_dir(), "vault was not git-initialized"
 
 
+def test_add_scaffolds_the_lock_gitignore_in_a_new_vault(tmp_path):
+    """`vault add` git-inits the vault, so it owes it the `*.lock` ignore too.
+
+    Every vault gets a `.lore.lock` write-lock file at its root the first time
+    anything writes to it; without the ignore, `lore sync`'s `git add -A` commits
+    it.
+    """
+    state, config = _dirs(tmp_path)
+    _seed_default_config(config, state)
+
+    res = _run(["vault", "add", "product-vault", "--scope", "product"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+
+    gitignore = _vaults_root(state) / "product-vault" / ".gitignore"
+    assert gitignore.is_file(), "vault add did not scaffold a .gitignore"
+    assert "*.lock" in gitignore.read_text(encoding="utf-8").splitlines()
+
+
+def test_add_scaffolds_the_lock_gitignore_in_an_existing_dir(tmp_path):
+    """An already-populated dir registered by `vault add` gets the ignore too."""
+    state, config = _dirs(tmp_path)
+    _seed_default_config(config, state)
+
+    vault_dir = _vaults_root(state) / "team-vault"
+    _write_record(vault_dir, "spec", "spec-a", _sidecar("spec", "spec-a", "Spec A"), "body a")
+
+    res = _run(["vault", "add", "team-vault", "--scope", "team"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+
+    gitignore = vault_dir / ".gitignore"
+    assert gitignore.is_file(), "vault add did not scaffold a .gitignore"
+    assert "*.lock" in gitignore.read_text(encoding="utf-8").splitlines()
+
+
 def test_add_scans_populated_dir_into_index(tmp_path):
     state, config = _dirs(tmp_path)
     _seed_default_config(config, state)

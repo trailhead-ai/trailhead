@@ -12,8 +12,18 @@ and the one place lore serializes globally:
      remote would starve every local writer.
   2. **``lore flush``'s commit** runs under the **session-key** lock — the flip
      and the commit are one unit, so a concurrent ``session candidate`` cannot
-     land a ``dirty`` sidecar inside the flush commit. Never the vault lock: the
-     axiom is that the vault lock guards file+index mutation, not a commit.
+     land a ``dirty`` sidecar inside the flush commit — and, nested inside it,
+     under the **vault** lock, so a concurrent ``sync``'s ``git add -A`` cannot
+     land between the flush's own ``add`` and its ``commit`` and be swept into
+     it. The acquisition order is fixed session-key → vault; nothing in lore
+     takes them the other way round.
+  2b. **The record-delete index commit** lands inside the vault lock, like the
+     create path's — a commit after the release would publish the row drop to a
+     writer that already holds the lock.
+  2c. **A relocating ``record update`` enters ``move_record`` holding nothing**,
+     so the paired sorted-order acquisition inside it is still a total order —
+     holding one of the pair across the call is what would let two opposed
+     cross-vault moves deadlock.
   3. **``lore reindex``'s rebuild** takes EVERY configured vault's lock, in
      sorted-path order, before the truncate-and-rescan — closing the window
      where a concurrent write's row is dropped by the truncate and missed by the
@@ -128,6 +138,20 @@ def _lock_depth_probe(sync_module):
 
 def _depths(events, op: str) -> list[int]:
     return [d for name, d in events if name == op]
+
+
+class _Args:
+    """A CLI-handler argument namespace whose unset flags read as ``None``.
+
+    The handlers reach for their flags with ``getattr(args, flag, default)``, so
+    an in-process call only has to name the flags the case under test sets.
+    """
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def __getattr__(self, name):
+        return None
 
 
 # ── 1 — sync: tree mutation inside the lock, network outside ───────────────
@@ -322,6 +346,79 @@ class TestSyncVsCrossVaultMove:
                 )
                 on_disk = [v.name for v in (vault_a, vault_b) if (v / rel).exists()]
                 assert len(on_disk) == 1, f"iteration {it}: {rel} on disk in {on_disk}"
+
+
+class TestUpdateLockOrder:
+    def test_a_relocating_update_holds_no_lock_across_move_record(
+        self, tmp_path, monkeypatch
+    ):
+        """`record update` locks its read-modify-write — but lets go to relocate.
+
+        ``move_record`` acquires source + destination as a SORTED set, and that
+        total order is the only thing keeping two opposed cross-vault moves (A→B
+        and B→A) from deadlocking on a lock with no timeout. Holding one of the
+        pair across the call breaks the order, so the relocation branch must enter
+        ``move_record`` with nothing held.
+        """
+        record_cli = load_script("lore.cli.record")
+        store = importlib.import_module("lore.record.store")
+        locking = _locking()
+
+        state = tmp_path / "state"
+        state.mkdir()
+        config_home = tmp_path / "cfg"
+        vault_a = tmp_path / "a"
+        vault_b = tmp_path / "b"
+        vault_a.mkdir()
+        vault_b.mkdir()
+        _write_routed_config(config_home, vault_a, vault_b)
+
+        r = run_cli(
+            ["record", "create", "--kind", "decision", "--title", "mover",
+             "--team", "alpha"],
+            vault=vault_a, state_dir=state, stdin_text="orig\n",
+            env_extra={"XDG_CONFIG_HOME": str(config_home)},
+        )
+        assert r.returncode == 0, r.stderr
+        record_id = r.stdout.strip()
+
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+        # Metadata-only update: pytest's captured stdin is not readable.
+        monkeypatch.setattr(record_cli, "_read_stdin_body", lambda: "")
+
+        depth = {"n": 0}
+        depth_at_move: list[int] = []
+        real_lock = locking.vault_write_lock
+        real_move = store.move_record
+
+        @contextmanager
+        def spy_lock(root, **kwargs):
+            with real_lock(root, **kwargs):
+                depth["n"] += 1
+                try:
+                    yield
+                finally:
+                    depth["n"] -= 1
+
+        def spy_move(*args, **kwargs):
+            depth_at_move.append(depth["n"])
+            return real_move(*args, **kwargs)
+
+        monkeypatch.setattr(locking, "vault_write_lock", spy_lock)
+        monkeypatch.setattr(store, "move_record", spy_move)
+
+        rc = record_cli._cmd_record_update(_Args(record_id=record_id, team="beta"))
+
+        assert rc == 0
+        assert depth_at_move == [0], (
+            f"the source-vault lock was still held entering move_record "
+            f"(depth {depth_at_move}) — opposed cross-vault moves can deadlock"
+        )
+        assert (vault_b / "decision" / f"{record_id.split('/', 1)[1]}.md").exists(), (
+            "the relocation did not land in the destination vault"
+        )
 
 
 # ── 3 — reindex: all-vault lock, sorted order, and the write race ──────────
@@ -535,16 +632,105 @@ class TestKillMidCriticalSectionRepair:
         assert r.returncode == 0, r.stderr
 
 
-# ── 5 — flush: session-key lock, not the vault lock ────────────────────────
+# ── 4b — record delete: the index commit lands inside the lock ─────────────
+
+
+class _ConnProbe:
+    """A ``sqlite3.Connection`` proxy that records the lock depth at ``commit``.
+
+    ``sqlite3.Connection`` rejects attribute assignment, so the recording wrapper
+    has to be a proxy rather than a patched method.
+    """
+
+    def __init__(self, conn, record):
+        self._conn = conn
+        self._record = record
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def commit(self):
+        self._record()
+        return self._conn.commit()
+
+
+class TestDeleteCommitsUnderTheLock:
+    def test_the_index_commit_lands_inside_the_vault_lock(self, tmp_path, monkeypatch):
+        """`record delete` commits the row drop before releasing the lock.
+
+        Symmetric with the create path. A commit after the release publishes the
+        drop to a writer that already holds the lock and has therefore already
+        decided the record exists.
+        """
+        record_cli = load_script("lore.cli.record")
+        store = importlib.import_module("lore.record.store")
+        locking = _locking()
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        state = tmp_path / "state"
+        state.mkdir()
+        config_home = state / "_xdg_config"
+        write_default_config(config_home, vault)
+
+        r = run_cli(
+            ["record", "create", "--kind", "decision", "--title", "doomed"],
+            vault=vault, state_dir=state, stdin_text="body\n",
+        )
+        assert r.returncode == 0, r.stderr
+        record_id = r.stdout.strip()
+
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+        depth = {"n": 0}
+        commit_depths: list[int] = []
+        real_lock = locking.vault_write_lock
+        real_txn = store.index_transaction
+
+        @contextmanager
+        def spy_lock(root, **kwargs):
+            with real_lock(root, **kwargs):
+                depth["n"] += 1
+                try:
+                    yield
+                finally:
+                    depth["n"] -= 1
+
+        @contextmanager
+        def spy_txn(*args, **kwargs):
+            with real_txn(*args, **kwargs) as conn:
+                yield _ConnProbe(conn, lambda: commit_depths.append(depth["n"]))
+
+        monkeypatch.setattr(locking, "vault_write_lock", spy_lock)
+        monkeypatch.setattr(store, "index_transaction", spy_txn)
+
+        rc = record_cli._cmd_record_delete(_Args(record_id=record_id))
+
+        assert rc == 0
+        assert commit_depths, "the delete never committed"
+        assert all(d > 0 for d in commit_depths), (
+            f"the index commit ran with the vault lock released: {commit_depths}"
+        )
+
+
+# ── 5 — flush: session-key lock + the vault lock ───────────────────────────
 
 
 class TestFlushCommitLockGranularity:
-    def test_commit_takes_the_session_key_lock_and_not_the_vault_lock(
+    def test_commit_takes_the_session_key_lock_then_the_vault_lock(
         self, tmp_path, monkeypatch
     ):
-        """The commit is a session-record operation, so its lock granularity is
-        (vault, session-key). The vault lock guards file+index mutation and must
-        NOT be taken for a commit."""
+        """The commit takes BOTH locks, session-key first.
+
+        The session-key lock is the flip-and-commit atomicity unit. The vault lock
+        is what keeps a concurrent ``lore sync`` — which holds the vault lock
+        across its ``git add -A`` → ``commit`` — from staging the whole dirty tree
+        between this commit's ``add`` and its ``commit``, which would break the
+        flush's explicit-paths-only contract. The order is fixed session-key →
+        vault so the two can never be taken in opposition.
+        """
         flush = load_script("lore.cli.flush")
         locking = _locking()
         vault = _git_vault(tmp_path / "vault")
@@ -555,30 +741,56 @@ class TestFlushCommitLockGranularity:
         )
         (vault / "session" / f"{SID}.md").write_text("session body\n", encoding="utf-8")
 
-        session_calls: list[tuple[str, str]] = []
-        vault_calls: list[str] = []
+        events: list[str] = []
         real_session = locking.session_write_lock
         real_vault = locking.vault_write_lock
+        real_git = flush._git
 
+        @contextmanager
         def spy_session(root, key, **kwargs):
-            session_calls.append((str(root), key))
-            return real_session(root, key, **kwargs)
+            with real_session(root, key, **kwargs):
+                events.append(f"session:{root}:{key}")
+                try:
+                    yield
+                finally:
+                    events.append("session-release")
 
+        @contextmanager
         def spy_vault(root, **kwargs):
-            vault_calls.append(str(root))
-            return real_vault(root, **kwargs)
+            with real_vault(root, **kwargs):
+                events.append(f"vault:{root}")
+                try:
+                    yield
+                finally:
+                    events.append("vault-release")
+
+        def spy_git(v, *args):
+            events.append(f"git:{args[0]}")
+            return real_git(v, *args)
 
         monkeypatch.setattr(locking, "session_write_lock", spy_session)
         monkeypatch.setattr(locking, "vault_write_lock", spy_vault)
+        monkeypatch.setattr(flush, "_git", spy_git)
         rc = flush._flush_commit(vault, SID, push=False)
 
         assert rc == 0
-        assert (str(vault), SID) in session_calls, (
-            f"the flush commit did not take the session-key lock: {session_calls}"
+        assert f"session:{vault}:{SID}" in events, (
+            f"the flush commit did not take the session-key lock: {events}"
         )
-        assert vault_calls == [], (
-            f"the flush commit took the VAULT lock: {vault_calls}"
+        assert f"vault:{vault}" in events, (
+            f"the flush commit did not take the vault lock — a concurrent `sync` "
+            f"can stage the whole tree into it: {events}"
         )
+        # Fixed order: session-key acquired first, vault nested inside it.
+        assert events.index(f"session:{vault}:{SID}") < events.index(f"vault:{vault}"), (
+            f"locks taken in the wrong order (must be session-key → vault): {events}"
+        )
+        # Both git mutations happen while BOTH locks are held.
+        vault_span = (events.index(f"vault:{vault}"), events.index("vault-release"))
+        for op in ("add", "commit"):
+            assert vault_span[0] < events.index(f"git:{op}") < vault_span[1], (
+                f"git {op} ran outside the vault lock: {events}"
+            )
 
 
 class TestFlushVsCaptureRace:

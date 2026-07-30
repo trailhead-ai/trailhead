@@ -416,6 +416,7 @@ def _cmd_record_delete(args) -> int:
     RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
     An invalid format or nonexistent record → non-zero + clear stderr.
     """
+    from .. import locking as locking_mod
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
 
@@ -445,7 +446,12 @@ def _cmd_record_delete(args) -> int:
     )
 
     try:
-        with record_store_mod.index_transaction() as conn:
+        # The lock is held across the commit, symmetric with the create path: a
+        # commit after the release publishes the row drop to a writer that already
+        # holds the lock and has therefore already decided the record exists.
+        # ``delete_record``'s own acquisition is a reentrant depth bump.
+        with locking_mod.vault_write_lock(vault_root), \
+                record_store_mod.index_transaction() as conn:
             record_store_mod.delete_record(record_id, conn, vault_root=vault_root)
             conn.commit()
     except (
@@ -858,7 +864,9 @@ def _cmd_record_update(args) -> int:
     Invalid/nonexistent RECORD_ID → non-zero.
     """
     import json
+    from contextlib import ExitStack
 
+    from .. import locking as locking_mod
     from ..record import fields as fields_mod
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
@@ -891,7 +899,7 @@ def _cmd_record_update(args) -> int:
 
     guard_notices: list[str] = []
     try:
-        with record_store_mod.index_transaction() as conn:
+        with record_store_mod.index_transaction() as conn, ExitStack() as locks:
             # (1) Resolve the CURRENT location, decoupled from the scope flags
             # (which now mean destination); a missing record → RecordNotFoundError.
             # --vault skips the scan entirely and locates ONLY in the named
@@ -903,6 +911,17 @@ def _cmd_record_update(args) -> int:
                 )
             else:
                 location = _find_current_record_location(record_id)
+
+            # An update is a read-modify-write, so the WHOLE of it — the reads
+            # below, the in-memory mutation, and the write+index upsert — is one
+            # critical section. Locking only the write loses updates silently: two
+            # concurrent `--keyword` updates would both read the same pre-state and
+            # the second write would drop the first one's field. Taken here, the
+            # instant the vault is known (the locate above is the only unlocked
+            # read); the write path's own acquisition is a reentrant depth bump, and
+            # the lock is released after ``conn.commit()`` below because the
+            # ExitStack is entered inside the transaction.
+            locks.enter_context(locking_mod.vault_write_lock(location.vault_root))
 
             # Load the existing sidecar so the field flags mutate the live record.
             existing_sidecar: dict = {}
@@ -1028,6 +1047,17 @@ def _cmd_record_update(args) -> int:
                 stamped, safe_body = record_store_mod.validate_stamp_neutralize(
                     location, sidecar, new_body
                 )
+                # Release the source-vault lock BEFORE the move. ``move_record``
+                # acquires source+destination as a SORTED set, which is what keeps
+                # two opposed cross-vault moves from deadlocking — and holding one
+                # of the pair across that call is exactly what breaks the total
+                # order: this update would hold A and want B while its opposite
+                # holds B and wants A, and the lock has no timeout. So the
+                # relocation branch is covered by ``move_record``'s own paired
+                # acquisition, not by an outer lock; the read-modify-write above
+                # stays locked for the same-vault case, which is every update that
+                # does not re-route.
+                locks.close()
                 # Destination paths are confined via the shared
                 # ``confine_record_id`` seam (the same guard every RECORD_ID-bearing
                 # op uses) rather than hand-rolled — so a destination vault whose

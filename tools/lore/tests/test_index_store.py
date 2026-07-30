@@ -16,6 +16,7 @@ Covers the test contract:
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -113,6 +114,37 @@ def test_open_index_reports_wal_journal_mode(tmp_path):
         conn.close()
 
     assert result[0] == "wal", f"Expected 'wal', got {result[0]!r}"
+
+
+def test_open_index_upgrades_a_pre_existing_non_wal_index(tmp_path):
+    """A provisioned-but-rollback-journal index is switched to WAL on open.
+
+    The WAL switch is skipped when the schema is already in place, so an index
+    created (or reverted) in rollback-journal mode would otherwise stay there for
+    the life of the file — the exact mode lore's cross-vault concurrency relies on.
+    """
+    mod = load_index_store()
+    fake_state = tmp_path / "xdg-state"
+    fake_state.mkdir()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(fake_state)
+
+    conn = mod.open_index(env=env)
+    conn.close()
+
+    index_path = fake_state / "lore" / "index.sqlite"
+    raw = sqlite3.connect(str(index_path))
+    raw.execute("PRAGMA journal_mode=DELETE")
+    assert raw.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    raw.close()
+
+    conn2 = mod.open_index(env=env)
+    try:
+        mode = conn2.execute("PRAGMA journal_mode").fetchone()[0]
+    finally:
+        conn2.close()
+
+    assert mode == "wal", f"a pre-existing non-WAL index was not upgraded: {mode!r}"
 
 
 def test_open_index_creates_records_table(tmp_path):

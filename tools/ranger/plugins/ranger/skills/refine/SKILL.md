@@ -111,8 +111,8 @@ lock now serializes the writes themselves, so concurrent dispatches no longer ra
 vault — the cap exists to bound how much escalation/failure context one sweep can pile
 up at once, not to protect writes. Each agent is dispatched in the background, so
 dispatching does not block on its reply: the coordinator keeps working while all 4
-slots run. The moment any slot's agent returns, record its outcome (§2.3–§2.5) and
-re-derive with `--actionable` the moment a slot frees (§2.7). Then fill the freed slot with the next task from that fresh derivation — never from the queue snapshot you started the pool with.
+slots run. §2.7 is the pool loop — initial fill, per-slot state, and what happens the
+moment a slot frees.
 
 ### 2.1 Dispatch the agent
 
@@ -132,8 +132,10 @@ The outcome path is `<outcomes_dir>` from `start`, the task's bare name, and `.o
 form it exactly that way, because §2.3 recomputes the same path and a mismatch records the
 task as failed.
 
-Do not add background, do not summarize the task, and do not tell the agent how to refine —
-`procedure_path` is the authority on the ritual and the agent reads it in full.
+Send those five lines and nothing more: do not add context about the task, do not summarize
+it, and do not tell the agent how to refine — `procedure_path` is the authority on the ritual
+and the agent reads it in full. (This is about the prompt's *content*. The dispatch itself
+runs in the background — that is what §2.7's pool requires.)
 
 ### 2.2 Do not read the agent's reply
 
@@ -221,9 +223,10 @@ the filter drops them from every derivation that follows.
 
 A dispatch that errors, writes nothing parseable, or overruns its own
 **10-minute per-slot timeout**
-buckets `failed`, leaves the task record untouched, and the sweep continues to the next
-task. One confused agent must never end a drain that still has tasks in it — and because
-each slot's timeout is independent, one slow agent never holds up the other 3.
+buckets `failed`, leaves the task record untouched, and the sweep continues: that slot frees
+and §2.7 refills it like any other completion. One confused agent must never end a drain
+that still has tasks in it — and because each slot's deadline is its own, one slow agent
+expires alone and never holds up the other 3.
 
 If **every** slot times out at once, read that as lock contention before you read it as
 4 stuck agents: check the transcript for the lock helper's own stderr notice —
@@ -243,37 +246,76 @@ you enforced, or a dispatch that errored before the agent started:
 ranger sweep record --report "<report_path>" --task "task/<name>" --outcome "FAILED dispatch timed out after 10 minutes"
 ```
 
-### 2.7 Re-derive, filter, then take the next task
+### 2.7 The pool loop: fill, record, re-derive, refill
 
 Keep an **attempted-this-sweep set**: every task id you have dispatched or recorded during
 this sweep. It starts empty at `start`, gains an id the moment you dispatch or record that
 task, and never loses one.
 
-After each task, re-derive the queue:
+**Initial fill.** Open the pool by taking the first 4 entries of the actionable set (fewer
+if the queue is shorter) and
+dispatch up to 4 tasks before you wait for any of them
+— each one per §2.1, each in the background. Waiting on the first dispatch before making
+the second is how a pool degrades into a serial drain.
+
+**Per-slot state.** For each in-flight slot, hold four values and nothing else — no record
+body, no agent reply:
+its
+task id, its outcome file path, its dispatch deadline, and the queue bucket
+it was derived from.
+
+- **task id** — what §2.3 records and what goes in the attempted-this-sweep set.
+- **outcome file path** — `<outcomes_dir>/<name>.outcome`, formed once at dispatch and
+  handed straight back to `--outcome-file`; a path recomputed differently at return time
+  records a completed task as `failed`.
+- **dispatch deadline** — dispatch time plus 10 minutes, this slot's own §2.6 timeout
+  clock. Per slot, so a slow agent expires alone instead of taking the pool with it.
+- **queue bucket** — `dispatchable` or `blocked-answered`, the `--queue-bucket` §2.3
+  needs and the gate on §2.4's status write. With 4 tasks interleaving, the bucket is
+  unrecoverable from the return; it has to be carried from the derivation that produced
+  the task.
+
+**When a slot frees** — its agent returned, or its deadline passed —
+record its outcome, re-derive, then dispatch the next task into that slot,
+in exactly that order:
+
+1. Record the outcome (§2.3–§2.5), write the §2.4 status if this slot's bucket was
+   `blocked-answered`, and add the id to the attempted-this-sweep set.
+2. Re-derive the queue (below) and filter it. Do this after recording, never before: a
+   derivation taken before the outcome lands still classifies the finished task as
+   actionable.
+3. Then fill the freed slot with the next task from that fresh derivation — never from the
+   queue snapshot you started the pool with. Nothing else in the pool is disturbed; the
+   other 3 slots keep running.
+
+Step 2 is a fresh `derive`, so re-derive with `--actionable` the moment a slot frees:
 
 ```sh
 ranger sweep derive --actionable
 ```
 
 `--actionable` prints only the two buckets you dispatch, one short line each. Use it, not
-`--json`: you re-derive once per task, and the full JSON carries every sidecar graph field
-for every entry — including the never-dispatched buckets, which persist for the whole sweep
-and grow with every escalation. On a long queue that is tens of thousands of tokens spent
-re-reading tasks you will never act on, in the context this whole design exists to keep
-clear.
+`--json`: you re-derive once per completed task, and the full JSON carries every sidecar
+graph field for every entry — including the never-dispatched buckets, which persist for the
+whole sweep and grow with every escalation. On a long queue that is tens of thousands of
+tokens spent re-reading tasks you will never act on, in the context this whole design
+exists to keep clear.
 
 The fresh derivation is authoritative — never the list you started with. Then **drop every
 entry whose id is already in the attempted-this-sweep set**; what survives is the actionable
-set, and the next task is the first of them.
+set, and the next task is the first of them. The set already excludes every in-flight task
+(an id joins it at dispatch, not at return), so no two slots can hold the same task.
 
 Filtering is what ends the loop, and derivation alone cannot. A promoted task drops out of
 the derivation on its own, but a `SKIPPED` outcome and a failed dispatch both leave the
 record byte-identical — so the next derivation classifies that task exactly as it did
 before, and an unfiltered loop dispatches it again, and again, forever.
 
-**Exit when the filtered actionable set is empty.** The never-dispatched buckets persist by
-design; they are recorded exactly once per sweep, reported rather than drained, and the
-filter is what stops them keeping the loop spinning.
+**Exit when the filtered actionable set is empty and no slot is still in flight.** An empty
+derivation with 3 agents still running is a drained *queue*, not a finished sweep — their
+outcomes are still owed to the report. The never-dispatched buckets persist by design; they
+are recorded exactly once per sweep, reported rather than drained, and the filter is what
+stops them keeping the loop spinning.
 
 ## 3. Finish
 

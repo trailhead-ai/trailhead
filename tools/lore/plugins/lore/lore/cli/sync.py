@@ -43,6 +43,13 @@ the record at both endpoints. ``fetch`` and ``push`` are deliberately OUTSIDE it
 they never touch the working tree, and lore's lock is blocking with no timeout —
 holding it across a network round-trip would let one hung remote starve every
 local writer. Hold time is therefore bounded by local git work.
+
+**Caveat: a git operation that PROMPTS is unbounded.** A commit whose signing key
+needs a gpg pinentry passphrase (or any git helper that waits on a human) blocks
+inside the lock, and because the lock has no timeout every other vault writer
+queues behind that prompt until it is answered. The lock helper's own
+``lore: waiting for the vault write lock`` stderr notice — printed on any wait
+past ~2 seconds — is the diagnostic that distinguishes this from a hang.
 """
 from __future__ import annotations
 

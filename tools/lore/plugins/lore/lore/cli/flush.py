@@ -42,27 +42,34 @@ def _flush_commit(vault: Path, key: str, *, push: bool = True) -> int:
 
 
 def _stage_and_commit_session(vault: Path, key: str) -> tuple[int, bool]:
-    """Stage + commit ``session/<key>.{json,md}`` under the SESSION-KEY lock.
+    """Stage + commit ``session/<key>.{json,md}`` under TWO locks.
 
     Returns ``(exit_code, committed)``.
 
-    The lock is :func:`lore.locking.session_write_lock` — the (vault,
-    session-key) granularity every session write already uses — and NOT the vault
-    write lock: the standing axiom is that the vault lock guards file+index
-    mutation, never a commit, and taking it here would make one session's flush
-    block every unrelated record write in the vault.
+    :func:`lore.locking.session_write_lock` — the (vault, session-key)
+    granularity every session write already uses — is the outer one. It is
+    reentrant per thread, so the callers that hold it across ``flush_session`` →
+    this commit (making the flip and the commit one unit, so a concurrent
+    ``session candidate`` cannot leave a ``dirty`` sidecar staged inside the flush
+    commit) are not blocked by themselves.
 
-    It is reentrant per thread, so the callers that hold it across
-    ``flush_session`` → this commit (making the flip and the commit one unit, so a
-    concurrent ``session candidate`` cannot leave a ``dirty`` sidecar staged
-    inside the flush commit) are not blocked by themselves. The push is
-    deliberately left to the caller / :func:`_flush_commit`, outside the lock.
+    :func:`lore.locking.vault_write_lock` is taken **inside** it, for the staging
+    span only. Staging is the git index, which is vault-wide state, not
+    session-scoped: ``lore sync`` holds the vault lock across its own ``git add
+    -A`` → ``commit``, and without this lock that ``add -A`` could land between
+    this function's ``add`` and its ``commit`` and sweep the whole dirty tree into
+    the flush commit — breaking the explicit-paths-only contract above. The
+    acquisition order is fixed **session-key → vault**; no lore path takes them
+    the other way round, so the pair cannot deadlock.
+
+    The push is deliberately left to the caller / :func:`_flush_commit`, outside
+    both locks — a network round-trip must never run under a no-timeout flock.
     """
     if not vault.exists() or not _vault_is_git_toplevel(vault):
         print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
         return 0, False
 
-    with locking.session_write_lock(vault, key):
+    with locking.session_write_lock(vault, key), locking.vault_write_lock(vault):
         session_dir = vault / "session"
         paths = []
         for suffix in (".json", ".md"):

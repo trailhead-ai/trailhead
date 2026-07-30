@@ -227,6 +227,52 @@ class TestConcurrentUpdates:
             conn.close()
 
 
+    def test_concurrent_updates_to_the_SAME_record_never_lose_a_mutation(self, tmp_path):
+        """Two writers mutating one record's sidecar both survive.
+
+        ``record update`` is a read-modify-write: it reads the sidecar, applies the
+        field flags in memory, then writes. With only the write locked, both
+        writers read the same pre-state and the second write silently drops the
+        first one's field. The whole read-modify-write has to be one critical
+        section, so the losers serialize behind the winner and re-read.
+        """
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        state = tmp_path / "state"
+        state.mkdir()
+        config_home = state / "_xdg_config"
+        write_default_config(config_home, vault)
+        barrier = tmp_path / "_barrier_same"
+
+        r = run_cli(
+            ["record", "create", "--kind", "decision", "--title", "contended"],
+            vault=vault, state_dir=state, stdin_text="seed\n",
+        )
+        assert r.returncode == 0, r.stderr
+        rid = r.stdout.strip()
+
+        tags = [f"w{i}" for i in range(self.WORKERS)]
+        procs = [
+            _spawn(
+                vault=vault, state=state, config_home=config_home,
+                barrier=barrier, n=self.WORKERS, tag=tag,
+                # Metadata-only (no stdin): each worker appends its own keyword.
+                args=["record", "update", rid, "--keyword", "{TAG}"],
+            )
+            for tag in tags
+        ]
+        errs = _collect(procs)
+        assert not errs, f"concurrent same-record updates failed: {errs}"
+
+        sidecar = json.loads((vault / f"{rid}.json").read_text(encoding="utf-8"))
+        keywords = sidecar.get("keywords", [])
+        missing = [t for t in tags if t not in keywords]
+        assert not missing, (
+            f"lost update: {missing} never landed — keywords={keywords!r}. The "
+            "read-modify-write is not one critical section."
+        )
+
+
 # ---------------------------------------------------------------------------
 # 3 — cross-vault contention on the single global index
 # ---------------------------------------------------------------------------

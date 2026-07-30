@@ -154,6 +154,13 @@ def _cmd_vault_add(args) -> int:
             print(f"lore: {exc}", file=sys.stderr)
             return 1
 
+    # Every vault owes the `*.lock` ignore, not just the ones `lore init` makes:
+    # a `.lore.lock` write lock appears at the root of any vault the first time
+    # anything writes to it (`lore reindex` writes to every configured vault), and
+    # `lore sync`'s `git add -A` would commit it. Applied to an existing dir too —
+    # it only writes when there is no `.gitignore` at all.
+    installer_mod.scaffold_gitignore(vault.path)
+
     config_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         vault_config_mod.write_config_atomic(config_path, config)

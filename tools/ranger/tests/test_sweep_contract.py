@@ -11,7 +11,9 @@ is silent, unattended, and expensive:
     a fifth spelling in either document buckets every task `failed`.
   - **Dispatch is a bounded pool, not one-at-a-time.** The vault write lock
     serializes the writes themselves, so up to 4 agents can run concurrently;
-    a freed slot is refilled immediately from a fresh `--actionable` derive.
+    the pool is filled to 4 up front, each slot carries the state its return
+    needs (outcome file, deadline, originating bucket), and a freed slot is
+    refilled immediately from a fresh `--actionable` derive.
   - **The loop owns the `blocked` exit edge, and only the loop.** Craft's
     ritual never flips `blocked`; the sweep is the pre-authorized writer of
     that one edge, acting on the operator's recorded answer.
@@ -176,6 +178,69 @@ def test_skill_rederives_actionable_on_slot_free():
         "re-derive with `--actionable` the moment a slot frees",
         "A slot filled from a queue snapshot taken before the last completion can "
         "hand out a task another slot's completion already promoted.",
+    )
+
+
+def test_skill_pins_the_initial_fill():
+    """A pool nobody fills runs one agent at a time.
+
+    Every other pool sentence describes the steady state (a slot frees, refill
+    it). Without an explicit "fill all 4 before you wait" step, a coordinator
+    reading the loop top-to-bottom dispatches one, waits for it, and the cap
+    never binds — a serial drain wearing a pool's prose.
+    """
+    _pin(
+        SKILL,
+        "dispatch up to 4 tasks before you wait for any of them",
+        "The steady-state refill rule cannot start a pool. The initial fill is "
+        "the only step that gets 4 agents running at once.",
+    )
+
+
+def test_skill_pins_the_per_slot_state():
+    """A slot's outcome cannot be recorded from the task id alone.
+
+    Recording a return needs the outcome file path (§2.3) and the bucket the task
+    came out of (§2.4's status write is `blocked-answered`-only), and enforcing
+    the timeout needs the slot's own deadline. Held per slot or the coordinator
+    has to re-derive them from memory once 4 tasks interleave.
+    """
+    _pin(
+        SKILL,
+        "task id, its outcome file path, its dispatch deadline, and the queue bucket",
+        "These four values are what recording a return and enforcing a timeout "
+        "cost; a pool that tracks only task ids cannot write §2.4's status.",
+    )
+
+
+def test_skill_pins_the_slot_free_cycle():
+    """The steady-state cycle, in order, as one span.
+
+    Re-deriving before recording hands out a task whose promotion has not landed
+    yet; refilling before re-deriving fills from a stale snapshot. The order is
+    the contract, so it is pinned as one sentence rather than four phrases.
+    """
+    _pin(
+        SKILL,
+        "record its outcome, re-derive, then dispatch the next task into that slot",
+        "Each step is only correct in this order — recording last would re-derive "
+        "a queue that still lists the task that just finished.",
+    )
+
+
+def test_skill_has_no_serial_dispatch_leftovers():
+    """An absence pin: the pre-pool serial sentence must be gone.
+
+    The serial loop's "after each task, re-derive" reads as a single in-flight
+    dispatch and directly contradicts the pool. Prose that says both leaves the
+    coordinator to pick, unattended.
+    """
+    stale = "After each task, re-derive the queue"
+    text = " ".join(SKILL.read_text().split())
+    assert stale not in text, (
+        f"{SKILL.name}: the serial-dispatch sentence {stale!r} is still present — "
+        "it contradicts the bounded pool, and a coordinator that follows it drains "
+        "the queue one agent at a time."
     )
 
 
