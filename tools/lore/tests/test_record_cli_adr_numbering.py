@@ -195,6 +195,33 @@ def test_user_supplied_numbered_title_is_overridden(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# kebab-empty title (all-punctuation / non-Latin) still participates in scan + claim
+# ---------------------------------------------------------------------------
+
+
+def test_kebab_empty_title_still_gets_distinct_sequence_numbers(tmp_path):
+    """A title that kebabs to nothing (e.g. all non-Latin) must still land on a
+    stem the number scan and claim recognize — not an invisible ``adr-001`` that
+    a second, differently-titled ADR can silently collide with.
+
+    ``_kebab("中文")`` collapses to nothing and falls back to a stem with NO
+    trailing hyphen after the number (``adr-001``, not ``adr-001-...``). A number
+    regex requiring a trailing hyphen misses it entirely: ``next_adr_number``
+    would not see it as occupying 1, so a second create also lands on 1.
+    """
+    vault, state = _make_vault(tmp_path)
+    first = _create_adr(vault, state, "中文")
+    assert first.returncode == 0, first.stderr
+    second = _create_adr(vault, state, "Use widgets")
+    assert second.returncode == 0, second.stderr
+
+    first_id = first.stdout.strip()
+    second_id = second.stdout.strip()
+    assert first_id != second_id
+    assert second_id == "adr/adr-002-use-widgets"
+
+
+# ---------------------------------------------------------------------------
 # regression: non-adr kinds untouched
 # ---------------------------------------------------------------------------
 

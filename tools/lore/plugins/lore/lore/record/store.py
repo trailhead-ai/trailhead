@@ -528,8 +528,12 @@ def _kebab(title: str) -> str:
 
 #: Matches the sequence number at the front of an adr stem (e.g.
 #: ``adr-007-some-decision`` → ``"007"``). Zero-padding is cosmetic here —
-#: ``int()`` tolerates the leading zeros.
-_ADR_STEM_NUMBER_RE = re.compile(r"^adr-(\d+)-")
+#: ``int()`` tolerates the leading zeros. The number may be followed by a
+#: hyphen (the common case) or by the end of the stem — a kebab-empty title
+#: (all-punctuation / non-Latin) falls back through ``_kebab`` to a bare
+#: ``adr-<n>`` with no trailing hyphen, and that stem must still be visible to
+#: the number scan and claim, not silently invisible to both.
+_ADR_STEM_NUMBER_RE = re.compile(r"^adr-(\d+)(?:-|$)")
 
 #: Strips a user-supplied numbered prefix (``"ADR-9: "``, any case, any
 #: digit count) from a raw title before the CLI's own ``ADR-NNN:`` prefix is
