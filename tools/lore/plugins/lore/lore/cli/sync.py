@@ -65,9 +65,13 @@ infer it from the failing exception — see ``cmd_sync``'s own docstring.
 **Caveat: a git operation that PROMPTS is unbounded.** A commit whose signing key
 needs a gpg pinentry passphrase (or any git helper that waits on a human) blocks
 inside the lock, and because the lock has no timeout every other vault writer
-queues behind that prompt until it is answered. The lock helper's own
-``lore: waiting for the vault write lock`` stderr notice — printed on any wait
-past ~2 seconds — is the diagnostic that distinguishes this from a hang.
+queues behind that prompt until it is answered. Under the batched commit phase
+this blast radius is the WHOLE phase, not just one vault: a prompt stalling
+ONE target's commit blocks every other configured vault's lock acquisition
+too, since they're all held together for the phase's duration. The lock
+helper's own ``lore: waiting for the vault write lock`` stderr notice —
+printed on any wait past ~2 seconds — is the diagnostic that distinguishes
+this from a hang.
 """
 from __future__ import annotations
 
@@ -339,18 +343,18 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
     not the path was staged. Net effect is the same: the lock file is never part
     of the commit, whether or not the vault's own ``.gitignore`` already excludes it.
 
-    Probed twice, deliberately. A clean tree is answered by the FIRST probe,
-    before ``with locking.vault_write_lock(vault)`` below runs — skipping
-    straight to "clean" without this call itself creating the lock file for a
-    vault it ends up doing nothing to. (:func:`cmd_sync`'s batched multi-target
-    phase is the one exception: it already holds every target's lock, lock
-    file created, before calling this function at all — the exclusion above is
-    what keeps that pre-existing lock file from making an otherwise-clean vault
-    read as dirty regardless.) The probe is then REPEATED under the lock,
-    because staging what the first probe saw is only meaningful if nothing
-    moved in between — and a cross-vault ``move_record`` relocating a record
-    out of this vault is exactly what would otherwise stage a copy that no
-    longer exists.
+    Probed twice, deliberately, though :func:`cmd_sync` — this function's only
+    caller — already holds every target's lock (lock file created) before
+    calling in, so neither probe here ever finds a vault genuinely un-locked;
+    the exclusion above is what keeps that pre-existing lock file from making
+    an otherwise-clean vault read as dirty regardless. The REPEAT under
+    ``with locking.vault_write_lock(vault)`` below (a reentrant no-op against
+    the lock cmd_sync already holds) exists because staging what the first
+    probe saw would only be safe if this vault's tree can't change between the
+    two reads — true for a standalone caller taking the lock fresh here, and
+    still asserted defensively even though cmd_sync's own batched acquisition
+    already rules out a concurrent cross-vault ``move_record`` doing exactly
+    that in between.
 
     No network runs in here — see the module docstring.
     """
@@ -403,10 +407,11 @@ def _pull_and_push_one(
 ) -> tuple[int, int]:
     """Pull then push one vault, given whether this run just committed to it.
 
-    Returns ``(exit_code, commits_pulled)``. Split out of the old ``_sync_one``
-    so :func:`cmd_sync` can run every target's stage+commit phase under ONE
-    combined lock (see its docstring) before running each target's
-    network-touching pull/push tail separately, one vault at a time.
+    Returns ``(exit_code, commits_pulled)``. Kept separate from
+    :func:`_stage_and_commit_one` so :func:`cmd_sync` can run every target's
+    stage+commit phase under ONE combined lock (see its docstring) before
+    running each target's network-touching pull/push tail separately, one
+    vault at a time.
     """
     pull_state, pulled = _pull_one(vault, say, say_err)
     if pull_state == PULL_FAILED:

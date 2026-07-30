@@ -165,11 +165,9 @@ class _Args:
 def _sync_via_cmd(sync, vault: Path, tmp_path: Path, monkeypatch) -> int:
     """Run the real ``cmd_sync`` entrypoint against a single default vault.
 
-    ``_sync_one`` (the single-vault primitive these tests used to call
-    directly) has no production caller once ``cmd_sync`` moved to its own
-    batched ExitStack acquisition — every test in this class now goes
-    through the actual shipped path instead, fenced into ``tmp_path`` so it
-    never touches the live install.
+    Every test in this class goes through this actual shipped entrypoint
+    (rather than any lower-level, single-vault primitive), fenced into
+    ``tmp_path`` so it never touches the live install.
     """
     config_home = tmp_path / "cfg"
     write_default_config(config_home, vault)
@@ -253,11 +251,11 @@ class TestSyncLockScope:
     def test_clean_vault_sync_is_a_no_op(self, tmp_path, monkeypatch):
         """No-regression: a clean, gitignored vault commits nothing.
 
-        Unlike the old single-vault ``_sync_one`` path, ``cmd_sync``'s batch
-        pre-acquires every target's lock (creating the lock sidecar) BEFORE
-        probing clean/dirty — see ``_stage_and_commit_one``'s docstring — so
-        a clean vault is no longer un-locked here. What must still hold is
-        the user-visible outcome: no commit, no git-status change.
+        ``cmd_sync``'s batch pre-acquires every target's lock (creating the
+        lock sidecar) BEFORE probing clean/dirty — see
+        ``_stage_and_commit_one``'s docstring — so a clean vault is not
+        left un-locked here. What must still hold is the user-visible
+        outcome: no commit, no git-status change.
         """
         sync = load_script("lore.cli.sync")
         vault = _git_vault(tmp_path / "vault")
@@ -274,8 +272,7 @@ class TestSyncLockScope:
         its own — the adopted-vault shape ``config.installer`` never
         scaffolded. ``cmd_sync``'s batch creates the lock sidecar taking the
         lock before this vault's own probe ever runs; without the
-        ``:(exclude)`` pathspec on that probe (added in the fix for the
-        ORIGINAL CI failure on this branch), a clean vault like this one
+        ``:(exclude)`` pathspec on that probe, a clean vault like this one
         would misread as dirty, stage only the lock file, unstage it via
         ``git reset``, and then fail ``git commit`` with nothing left staged
         — a regression a gitignored test vault can never expose, since its
@@ -633,12 +630,11 @@ class TestCmdSyncBatchedLockPhase:
         """A vault with no ``*.lock`` entry in its own ``.gitignore`` — an
         adopted vault ``config.installer`` never scaffolded, the exact shape
         the ``:(exclude)`` status pathspec and the ``git reset -q --
-        .lore.lock`` unstage (added in the fix for the original CI failure on
-        this branch) exist for — must still commit its real changes without
-        ever committing the lock sidecar ``cmd_sync`` itself creates while
-        taking the write lock. ``_git_vault`` (used by every other test in
-        this module) always gitignores ``*.lock``, so it can't exercise this
-        path — this test builds a vault without that ignore instead.
+        .lore.lock`` unstage exist for — must still commit its real changes
+        without ever committing the lock sidecar ``cmd_sync`` itself creates
+        while taking the write lock. ``_git_vault`` (used by every other test
+        in this module) always gitignores ``*.lock``, so it can't exercise
+        this path — this test builds a vault without that ignore instead.
         """
         sync = load_script("lore.cli.sync")
         vault = tmp_path / "vault"

@@ -167,11 +167,14 @@ def _flock(
         try:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
         finally:
-            # Always close, even if LOCK_UN itself raised — an fd left open
-            # on a failed unlock still leaks the OS-level flock, but closing
-            # it here at least frees the file descriptor and keeps this
-            # process's own reentrancy bookkeeping (the `depths` decrement
-            # above) in sync with what's actually held.
+            # Always close, even if LOCK_UN itself raised. A raised LOCK_UN
+            # generally means the fd (and its flock) are already gone by some
+            # other path (e.g. EBADF); closing here is what actually releases
+            # the flock in the ordinary case too — per flock(2), the lock
+            # goes away when the last fd on the open file description closes,
+            # not only via an explicit LOCK_UN — and keeps this process's own
+            # reentrancy bookkeeping (the `depths` decrement above) in sync
+            # with what's actually held either way.
             lock_fd.close()
 
 
