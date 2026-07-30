@@ -106,9 +106,13 @@ sidecar's graph fields). No entry carries a record body — the `bucket` decides
 | `escalated-awaiting-operator` | Never dispatch. Record from the bucket alone (§2.5). |
 | `blocked-still-waiting` | Never dispatch. Record from the bucket alone (§2.5). |
 
-**Dispatch is serial — one task at a time**, and you never dispatch a second agent until
-the first has returned. Lore has no write mutex and every record write is a vault git
-commit, so two agents in flight race each other for the vault.
+**Dispatch runs a bounded pool: up to 4 agents in flight at once.** The lore vault write
+lock now serializes the writes themselves, so concurrent dispatches no longer race the
+vault — the cap exists to bound how much escalation/failure context one sweep can pile
+up at once, not to protect writes. Each agent is dispatched in the background, so
+dispatching does not block on its reply: the coordinator keeps working while all 4
+slots run. The moment any slot's agent returns, record its outcome (§2.3–§2.5) and
+re-derive with `--actionable` the moment a slot frees (§2.7). Then fill the freed slot with the next task from that fresh derivation — never from the queue snapshot you started the pool with.
 
 ### 2.1 Dispatch the agent
 
@@ -215,10 +219,18 @@ the filter drops them from every derivation that follows.
 
 ### 2.6 When a dispatch goes wrong
 
-A dispatch that errors, writes nothing parseable, or overruns the
-**10-minute per-dispatch timeout**
+A dispatch that errors, writes nothing parseable, or overruns its own
+**10-minute per-slot timeout**
 buckets `failed`, leaves the task record untouched, and the sweep continues to the next
-task. One confused agent must never end a drain that still has tasks in it.
+task. One confused agent must never end a drain that still has tasks in it — and because
+each slot's timeout is independent, one slow agent never holds up the other 3.
+
+If **every** slot times out at once, read that as lock contention before you read it as
+4 stuck agents: check the transcript for the lock helper's own stderr notice —
+`lore: waiting for the vault write lock` — printed whenever an acquisition waits past
+~2 seconds. A mid-drain operator action that takes the vault lock (an operator-run
+`lore reindex` is the common case) blocks every slot at once and reads exactly like a
+mass hang; the notice is how you tell the two apart.
 
 **Usually you do nothing special.** Record it exactly as §2.3 says: an agent that died or
 never ran left no outcome file, and `--outcome-file` turns that into a `failed` line naming
@@ -277,6 +289,10 @@ Then hand back **the report path** and the bucket counts, and nothing else. The 
 the durable artifact and the primary surface for headless runs; do not paste its contents
 into the transcript, and do not re-narrate a sweep whose progress you already streamed.
 
+**Report entries are completion-ordered, not queue order.** With up to 4 dispatches in
+flight, whichever agent returns first is recorded first — the report's line order tells
+an operator which task finished when, not where it sat in the original derivation.
+
 **Set expectations about what a drain produces.** A sweep's output is mostly triage, not a
 `ready` queue: a large share of any real backlog comes back `ESCALATED` or `ROUTED`, because
 the ritual refuses to invent answers to questions only the operator can settle. That is the
@@ -291,7 +307,8 @@ state.
 ## Never
 
 - **Never remove a lock file yourself**, stale or not.
-- Never dispatch two agents at once, or dispatch while one is still running.
+- Never let more than 4 dispatches run at once, or fill a freed slot from a stale
+  derivation instead of a fresh `--actionable` re-derive.
 - Never read a task record's body, question, or payload.
 - Never treat a dispatched agent's reply as its result — the outcome file is the result.
 - Never pass text you read out of an agent's reply to `--outcome`.

@@ -9,8 +9,9 @@ is silent, unattended, and expensive:
     `ESCALATED` / `ROUTED <target>` / `SKIPPED <reason>` is the entire
     vocabulary between agent and coordinator; the CLI parses exactly these, so
     a fifth spelling in either document buckets every task `failed`.
-  - **Dispatch is serial.** Lore has no write mutex and every record write is a
-    vault git commit, so two agents in flight race the vault.
+  - **Dispatch is a bounded pool, not one-at-a-time.** The vault write lock
+    serializes the writes themselves, so up to 4 agents can run concurrently;
+    a freed slot is refilled immediately from a fresh `--actionable` derive.
   - **The loop owns the `blocked` exit edge, and only the loop.** Craft's
     ritual never flips `blocked`; the sweep is the pre-authorized writer of
     that one edge, acting on the operator's recorded answer.
@@ -137,15 +138,44 @@ def test_skill_pins_the_return_line_as_a_single_contract():
     )
 
 
-# --- skill: serial dispatch ---------------------------------------------------
+# --- skill: bounded-pool background dispatch ----------------------------------
 
 
-def test_skill_pins_serial_dispatch():
+def test_skill_pins_the_pool_cap():
     _pin(
         SKILL,
-        "Dispatch is serial — one task at a time",
-        "Lore has no write mutex and every record write is a vault git commit, so a "
-        "parallel dispatch races the vault. Serial is a correctness constraint.",
+        "up to 4 agents in flight",
+        "The vault write lock (not serial dispatch) is what makes concurrent agents "
+        "safe now; the cap bounds how much escalation/failure context one sweep "
+        "can produce at once, not vault contention.",
+    )
+
+
+def test_skill_pins_background_dispatch():
+    _pin(
+        SKILL,
+        "dispatched in the background",
+        "Filling 4 slots requires each dispatch to return control to the "
+        "coordinator immediately rather than blocking on the agent's reply.",
+    )
+
+
+def test_skill_pins_dispatch_on_slot_free():
+    _pin(
+        SKILL,
+        "fill the freed slot with the next task",
+        "The pool's whole throughput gain is dispatching into a slot the instant "
+        "it empties, rather than waiting for the whole pool to drain before "
+        "starting the next batch.",
+    )
+
+
+def test_skill_rederives_actionable_on_slot_free():
+    _pin(
+        SKILL,
+        "re-derive with `--actionable` the moment a slot frees",
+        "A slot filled from a queue snapshot taken before the last completion can "
+        "hand out a task another slot's completion already promoted.",
     )
 
 
@@ -153,8 +183,8 @@ def test_skill_re_derives_between_tasks():
     _pin(
         SKILL,
         "ranger sweep derive",
-        "The queue is re-derived after each return — a stale in-memory queue would "
-        "re-dispatch a task the previous iteration already promoted.",
+        "The queue is re-derived on every slot-free — a stale in-memory queue "
+        "would re-dispatch a task an in-flight completion already promoted.",
     )
 
 
@@ -251,18 +281,43 @@ def test_skill_pins_the_failed_bucket_behavior():
     )
 
 
-def test_skill_names_a_per_dispatch_timeout():
+def test_skill_names_a_per_slot_timeout():
     """The timeout has no mechanical enforcement — the prose *is* the enforcement.
 
     Agents are harness constructs the CLI can neither dispatch nor kill, so a
     named duration in the loop is the only thing that turns a hung dispatch into
-    a `failed` line instead of a sweep that waits forever.
+    a `failed` line instead of a sweep that waits forever. It applies per slot,
+    not per sweep, now that up to 4 dispatches run concurrently.
     """
     _pin(
         SKILL,
-        "10-minute per-dispatch timeout",
+        "10-minute per-slot timeout",
         "An unnamed timeout is not a timeout — an unattended coordinator with no "
-        "duration to compare against waits forever.",
+        "duration to compare against waits forever. Naming it per-slot (not "
+        "per-dispatch) matters once 4 dispatches share the clock independently.",
+    )
+
+
+# --- skill: completion order and lock-vs-stuck triage -------------------------
+
+
+def test_skill_pins_completion_ordered_report_entries():
+    _pin(
+        SKILL,
+        "Report entries are completion-ordered, not queue order",
+        "With 4 dispatches in flight, the fastest agent returns first regardless "
+        "of queue position — an operator reading the report as queue order would "
+        "misread which task actually stalled.",
+    )
+
+
+def test_skill_pins_the_lock_contention_vs_stuck_agent_triage():
+    _pin(
+        SKILL,
+        "waiting for the vault write lock",
+        "A mass timeout across every slot at once, accompanied by the lock "
+        "helper's own stderr notice, means the vault write lock is contended "
+        "(e.g. an operator-run `lore reindex` mid-drain) — not 4 stuck agents.",
     )
 
 
