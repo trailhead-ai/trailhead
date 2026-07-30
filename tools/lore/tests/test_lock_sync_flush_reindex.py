@@ -54,6 +54,7 @@ from conftest import (
     load_script,
     run_cli,
     write_default_config,
+    write_vault_config,
 )
 from test_sync_multi_vault import (
     _git,
@@ -266,6 +267,89 @@ class TestSyncLockScope:
         tracked = _git(vault, "ls-files").stdout.split()
         assert "record.md" in tracked
         assert ".lore.lock" not in tracked
+
+
+class TestCmdSyncBatchedLockPhase:
+    """``cmd_sync`` (the real ``lore sync`` entrypoint) locks every target
+    TOGETHER for its whole stage+commit phase — not one vault at a time.
+    See the module docstring and ``cmd_sync``'s own docstring for the race
+    this closes (a cross-vault ``move_record`` interleaving between two
+    targets' visits so a moved record reads as committed in both vaults).
+    """
+
+    def test_every_targets_lock_is_held_for_the_whole_commit_phase(
+        self, tmp_path, monkeypatch
+    ):
+        sync = load_script("lore.cli.sync")
+        vault_a = _git_vault(tmp_path / "a")
+        vault_b = _git_vault(tmp_path / "b")
+        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+
+        config_home = tmp_path / "cfg"
+        write_vault_config(
+            config_home,
+            [("default", "default", vault_a), ("extra", "team", vault_b)],
+        )
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+        with _lock_depth_probe(sync) as events:
+            rc = sync.cmd_sync(_Args())
+
+        assert rc == 0
+        assert _git(vault_a, "ls-files").stdout.split().count("record.md") == 1
+        assert _git(vault_b, "ls-files").stdout.split().count("record.md") == 1
+        # Both targets' locks are acquired up front — every git call in the
+        # commit phase (for EITHER vault) must therefore see depth >= 2, not
+        # the depth-1-per-vault signature a one-at-a-time lock would leave.
+        commit_events = [
+            (op, d) for op, d in events if op in ("add", "commit", "reset")
+        ]
+        assert commit_events, "no add/commit/reset calls were recorded"
+        assert all(d >= 2 for _op, d in commit_events), (
+            f"a commit-phase git call ran without every target's lock held: "
+            f"{commit_events}"
+        )
+
+    def test_a_lock_acquisition_failure_fails_the_run_without_crashing(
+        self, tmp_path, monkeypatch
+    ):
+        """A vault whose lock can't be taken (e.g. a read-only root) must not
+
+        crash the whole ``cmd_sync`` call with an unhandled traceback — every
+        target stays "attempted", per this function's own exit-code contract.
+        """
+        sync = load_script("lore.cli.sync")
+        locking = _locking()
+        vault_a = _git_vault(tmp_path / "a")
+        vault_b = _git_vault(tmp_path / "b")
+        (vault_a / "record.md").write_text("# a\n", encoding="utf-8")
+        (vault_b / "record.md").write_text("# b\n", encoding="utf-8")
+        before_a = _git(vault_a, "rev-parse", "HEAD").stdout.strip()
+        before_b = _git(vault_b, "rev-parse", "HEAD").stdout.strip()
+
+        config_home = tmp_path / "cfg"
+        write_vault_config(
+            config_home,
+            [("default", "default", vault_a), ("extra", "team", vault_b)],
+        )
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+        @contextmanager
+        def failing_locks(*roots, **kwargs):
+            raise PermissionError(f"simulated lock failure: {roots}")
+            yield  # pragma: no cover - unreachable, keeps this a generator
+
+        monkeypatch.setattr(locking, "vault_write_locks", failing_locks)
+
+        rc = sync.cmd_sync(_Args())
+
+        assert rc == 1
+        assert _git(vault_a, "rev-parse", "HEAD").stdout.strip() == before_a
+        assert _git(vault_b, "rev-parse", "HEAD").stdout.strip() == before_b
+
 
 
 # ── 2 — sync racing a cross-vault move ─────────────────────────────────────

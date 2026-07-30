@@ -45,7 +45,8 @@ holding it across a network round-trip would let one hung remote starve every
 local writer. Hold time is therefore bounded by local git work.
 
 **The commit phase locks every target vault TOGETHER, not one at a time.**
-``cmd_sync`` stages+commits every configured vault under one combined
+``cmd_sync`` stages+commits every TARGET of the run (every configured vault,
+or just ``--vault <name>`` when given) under one combined
 :func:`lore.locking.vault_write_locks` acquisition before touching any pull or
 push. A per-vault-only lock would let a cross-vault ``move_record`` run its
 whole copy → repoint → delete sequence strictly BETWEEN two different targets'
@@ -325,13 +326,18 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
     not the path was staged. Net effect is the same: the lock file is never part
     of the commit, whether or not the vault's own ``.gitignore`` already excludes it.
 
-    Probed twice, deliberately. A clean tree is answered outside the lock,
-    creating nothing (skipping straight to "clean", never touching the lock
-    file for a vault this call ends up doing nothing to). The probe is then
-    REPEATED under the lock, because staging what the first probe saw is only
-    meaningful if nothing moved in between — and a cross-vault ``move_record``
-    relocating a record out of this vault is exactly what would otherwise stage
-    a copy that no longer exists.
+    Probed twice, deliberately. A clean tree is answered by the FIRST probe,
+    before ``with locking.vault_write_lock(vault)`` below runs — skipping
+    straight to "clean" without this call itself creating the lock file for a
+    vault it ends up doing nothing to. (:func:`cmd_sync`'s batched multi-target
+    phase is the one exception: it already holds every target's lock, lock
+    file created, before calling this function at all — the exclusion above is
+    what keeps that pre-existing lock file from making an otherwise-clean vault
+    read as dirty regardless.) The probe is then REPEATED under the lock,
+    because staging what the first probe saw is only meaningful if nothing
+    moved in between — and a cross-vault ``move_record`` relocating a record
+    out of this vault is exactly what would otherwise stage a copy that no
+    longer exists.
 
     No network runs in here — see the module docstring.
     """
@@ -525,20 +531,36 @@ def cmd_sync(args) -> int:
         valid_targets.append((name, vault_path))
 
     if valid_targets:
-        with locking.vault_write_locks(*(str(v) for _, v in valid_targets)):
-            for name, vault_path in valid_targets:
-                say, say_err = say_map[name]
-                rc_one, committed = _stage_and_commit_one(vault_path, message, say, say_err)
-                commit_rc[name] = rc_one
-                committed_map[name] = committed
+        try:
+            with locking.vault_write_locks(*(str(v) for _, v in valid_targets)):
+                for name, vault_path in valid_targets:
+                    say, say_err = say_map[name]
+                    rc_one, committed = _stage_and_commit_one(vault_path, message, say, say_err)
+                    commit_rc[name] = rc_one
+                    committed_map[name] = committed
+        except OSError as exc:
+            # A lock acquisition failure (e.g. a read-only vault root, or the
+            # lock path occupied by something other than a file) must not crash
+            # the whole run — every target not yet marked stays "attempted, hard
+            # failure" instead of an unhandled traceback, matching this
+            # function's own exit-code contract above.
+            for name, _vault_path in valid_targets:
+                if name not in commit_rc:
+                    _say, say_err = say_map[name]
+                    say_err(f"error: failed to acquire vault lock: {exc} — skipped")
+                    commit_rc[name] = 1
 
     failed: list[str] = []
     total_pulled = 0
     for name, vault in targets:
-        say, say_err = say_map[name]
         if commit_rc.get(name, 1) != 0:
             failed.append(name)
             continue
+        # Fresh emitters for the pull/push phase: the commit phase above may
+        # already have printed this vault's labeled first line, and reusing
+        # that closure's `state["first"]` here would print an unlabeled
+        # continuation instead of a new labeled block (see `_make_emitters`).
+        say, say_err = _make_emitters(name, width)
         rc_one, pulled = _pull_and_push_one(
             Path(vault), say, say_err, committed=committed_map.get(name, False)
         )
