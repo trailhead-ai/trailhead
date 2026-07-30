@@ -312,6 +312,20 @@ FLUSH_ALREADY_CLEAN = "clean"  # session exists but was already clean — no-op
 FLUSH_NO_SESSION = "no-session"  # no record for this key — distinct from clean
 
 
+def session_exists(vault_root: str, key: str) -> bool:
+    """Return whether a session record exists for *key* — creating nothing.
+
+    The lock-free precondition probe. A caller that wants the flip and its own
+    follow-on work (``lore flush``'s commit) to be ONE locked unit has to take the
+    session lock before calling :func:`flush_session`, and taking a lock creates
+    its ``session/<key>.lock`` sidecar — turning a "no session here" flush into a
+    command that dirties the vault. Probing first keeps that no-op inert.
+    ``flush_session`` re-checks under the lock, so this is a fast path, not the
+    guarantee.
+    """
+    return (Path(vault_root) / "session" / f"{key}.json").exists()
+
+
 def flush_session(
     key: str,
     *,

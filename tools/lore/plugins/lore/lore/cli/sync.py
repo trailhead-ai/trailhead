@@ -34,12 +34,22 @@ the notice says so instead of promising a clean state that does not exist.
 run: the index is a derived projection of the vault tree, and records written on
 another device have never been projected on this one — without the rebuild,
 ``lore search`` would silently miss exactly the records sync just fetched.
+
+**Only the tree-mutating half runs under the vault write lock.** ``git add -A`` →
+``commit`` and the pull's ``rebase`` / ``reset --hard`` are held under
+:func:`lore.locking.vault_write_lock`, because a concurrent ``move_record`` is a
+copy → index-repoint → delete sequence and an unlocked ``git add -A`` can observe
+the record at both endpoints. ``fetch`` and ``push`` are deliberately OUTSIDE it:
+they never touch the working tree, and lore's lock is blocking with no timeout —
+holding it across a network round-trip would let one hung remote starve every
+local writer. Hold time is therefore bounded by local git work.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
+from .. import locking
 from .common import (
     _git,
     _resolve_all_vaults,
@@ -166,7 +176,11 @@ def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
                 )
                 return PULL_OK, 0
             rc_n, n_out, _ = _git(vault, "rev-list", "--count", f"origin/{unborn}")
-            rc_reset, _, stderr_reset = _git(vault, "reset", "--hard", f"origin/{unborn}")
+            # Tree mutation — locked (the fetch above was not).
+            with locking.vault_write_lock(vault):
+                rc_reset, _, stderr_reset = _git(
+                    vault, "reset", "--hard", f"origin/{unborn}"
+                )
             if rc_reset != 0:
                 say_err(f"error: could not adopt origin/{unborn}: {stderr_reset}")
                 return PULL_FAILED, 0
@@ -185,12 +199,17 @@ def _pull_one(vault: Path, say, say_err) -> tuple[str, int]:
         return PULL_OK, 0
     behind = int(count_out)
 
-    rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
+    # Tree mutation — locked, so a concurrent record write can never see a
+    # half-replayed tree. The abort is part of the same critical section: the
+    # vault must not be observable mid-rebase.
+    with locking.vault_write_lock(vault):
+        rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
+        if rc_rebase != 0:
+            # Abort unconditionally: whether the rebase stopped on a conflict or
+            # never started, the vault must come back to its pre-pull state before
+            # anything is reported. Verified below rather than trusted.
+            _git(vault, "rebase", "--abort")
     if rc_rebase != 0:
-        # Abort unconditionally: whether the rebase stopped on a conflict or
-        # never started, the vault must come back to its pre-pull state before
-        # anything is reported. Verified below rather than trusted.
-        _git(vault, "rebase", "--abort")
         say_err("error: rebase onto origin failed — pull skipped")
         say_err(f"  rebase error: {stderr_rebase or stdout_rebase}")
         if _vault_mid_rebase(vault):
@@ -257,6 +276,56 @@ def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
     return 0
 
 
+def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int, bool]:
+    """Stage + commit one vault's whole tree under its write lock.
+
+    Returns ``(exit_code, committed)``.
+
+    Probed twice, deliberately. The lock file is a sidecar INSIDE the vault, so
+    locking a clean vault would leave an untracked ``.lore.lock`` behind and no
+    vault would ever read as clean again — which would also mean a freshly ``git
+    init``-ed vault always "commits" instead of taking the unborn-adoption path.
+    So a clean tree is answered outside the lock, creating nothing. The probe is
+    then REPEATED under the lock, because staging what the first probe saw is only
+    meaningful if nothing moved in between — and a cross-vault ``move_record``
+    relocating a record out of this vault is exactly what would otherwise stage a
+    copy that no longer exists.
+
+    No network runs in here — see the module docstring.
+    """
+    # `status --porcelain` reports untracked files too, so nothing is missed.
+    rc, status_out, stderr = _git(vault, "status", "--porcelain")
+    if rc != 0:
+        say_err(f"error: git status failed: {stderr} — skipped")
+        return 1, False
+    if not status_out.strip():
+        say("Nothing to commit — vault is clean.")
+        return 0, False
+
+    with locking.vault_write_lock(vault):
+        rc, status_out, stderr = _git(vault, "status", "--porcelain")
+        if rc != 0:
+            say_err(f"error: git status failed: {stderr} — skipped")
+            return 1, False
+
+        if not status_out.strip():
+            say("Nothing to commit — vault is clean.")
+            return 0, False
+
+        rc, _, stderr = _git(vault, "add", "-A")
+        if rc != 0:
+            say_err(f"error: git add failed: {stderr} — skipped")
+            return 1, False
+        # Never pass -S or --no-gpg-sign; honor the adopter's commit.gpgsign.
+        rc, _, stderr = _git(vault, "commit", "-m", message)
+        if rc != 0:
+            say_err(f"error: git commit failed: {stderr} — skipped")
+            return 1, False
+
+    say(f"Committed: {message}")
+    return 0, True
+
+
 def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
     """Stage, commit, pull, and push a single vault.
 
@@ -280,28 +349,9 @@ def _sync_one(vault: Path, message: str, say, say_err) -> tuple[int, int]:
         )
         return 1, 0
 
-    # Probe BEFORE staging: a clean vault needs no index write, and `status
-    # --porcelain` already reports untracked files, so nothing is missed.
-    rc, status_out, stderr = _git(vault, "status", "--porcelain")
+    rc, committed = _stage_and_commit_one(vault, message, say, say_err)
     if rc != 0:
-        say_err(f"error: git status failed: {stderr} — skipped")
-        return 1, 0
-
-    committed = False
-    if status_out.strip():
-        rc, _, stderr = _git(vault, "add", "-A")
-        if rc != 0:
-            say_err(f"error: git add failed: {stderr} — skipped")
-            return 1, 0
-        # Never pass -S or --no-gpg-sign; honor the adopter's commit.gpgsign.
-        rc, _, stderr = _git(vault, "commit", "-m", message)
-        if rc != 0:
-            say_err(f"error: git commit failed: {stderr} — skipped")
-            return 1, 0
-        say(f"Committed: {message}")
-        committed = True
-    else:
-        say("Nothing to commit — vault is clean.")
+        return rc, 0
 
     pull_state, pulled = _pull_one(vault, say, say_err)
     if pull_state == PULL_FAILED:

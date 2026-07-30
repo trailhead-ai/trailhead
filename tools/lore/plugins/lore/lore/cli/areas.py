@@ -80,7 +80,12 @@ def run_reindex() -> "tuple[int | None, str | None]":
     pull lands records this device has never indexed. Prints nothing — each caller
     owns its own reporting, because the same rebuild is a whole command in one
     place and a footnote to a sync in the other.
+
+    Holds EVERY configured vault's write lock (sorted-path order) across the
+    rebuild — lore's one named all-vault serialization point. See the comment at
+    the acquisition for why it is the only one and why it comes first.
     """
+    from .. import locking
     from ..record import store as record_store_mod
     from ..search import index as index_store_mod
     from ..vault import config as vault_config_mod
@@ -100,7 +105,21 @@ def run_reindex() -> "tuple[int | None, str | None]":
         shared_roots = None
 
     try:
-        with record_store_mod.index_transaction() as conn:
+        # THE global serialization point. The rebuild truncates the index and
+        # rescans every vault from disk, so a write that lands between the
+        # truncate and its vault's rescan vanishes from the index. Every
+        # configured vault's write lock is therefore held for the whole rebuild.
+        #
+        # Locks BEFORE the index transaction, deliberately: every writer takes
+        # the vault flock and then opens the index (``record.store``,
+        # ``cli.record``), so acquiring in the other order here would invert the
+        # order and deadlock a writer against the rebuild's SQLite write lock.
+        #
+        # This is the only all-vault acquisition in lore. It is bounded by local
+        # disk-scan time, and a writer that waits on it past the notice threshold
+        # says so on stderr rather than looking stuck.
+        with locking.vault_write_locks(*vault_roots), \
+                record_store_mod.index_transaction() as conn:
             count = index_store_mod.rebuild(
                 vault_roots, conn, shared_roots=shared_roots
             )

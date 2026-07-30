@@ -69,6 +69,10 @@ def _make_vault(path: Path, *, commit: bool = True, dirty: bool = True) -> Path:
     for key, val in (("user.email", "t@e.st"), ("user.name", "Test"), ("commit.gpgsign", "false")):
         _git(path, "config", key, val)
     (path / "README.md").write_text("vault\n")
+    # Mirrors what `config.installer` scaffolds into every real vault. Lore's
+    # write locks are `*.lock` sidecars living inside the vault, so a fixture
+    # without this would test a vault shape no install ever has.
+    (path / ".gitignore").write_text("*.lock\n")
     if commit:
         _git(path, "add", "-A")
         _git(path, "commit", "-m", "init")

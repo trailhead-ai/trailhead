@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from .. import locking
 from .common import (
     DRIFT_SYNC_FIXABLE,
     _add_session_selectors,
@@ -25,48 +26,71 @@ def _flush_commit(vault: Path, key: str, *, push: bool = True) -> int:
     The staged-index gate (`git diff --cached --quiet`) makes an already-clean
     flush a no-op rather than a failed empty commit. Returns exit code.
 
-    The per-session *commit* is the deliberate atomicity unit and always runs here.
-    The *push* is NOT per-session: a batch flush passes ``push=False`` and pushes
-    ONCE after the whole batch commits (:func:`_flush_push`), turning N network
-    round-trips into one. The current-session path keeps the inline push
-    (``push=True`` default) — there is nothing to batch. A skipped mid-batch push
-    is harmless: the commits are durable locally and a re-run (or `lore sync`)
-    pushes them, so atomicity is unchanged.
+    The per-session *commit* is the deliberate atomicity unit and always runs here,
+    under the session-key lock (see :func:`_stage_and_commit_session`). The *push*
+    is not: both flush paths pass ``push=False`` and push themselves once the lock
+    is released, because a push is a network round-trip and lore's lock is blocking
+    with no timeout. ``push=True`` therefore stays available for a caller that owns
+    no lock span of its own and wants commit-then-push in one call; it pushes only
+    after the lock is released either way. A skipped push is harmless: the commit is
+    durable locally and a re-run (or `lore sync`) pushes it.
+    """
+    rc, committed = _stage_and_commit_session(vault, key)
+    if rc == 0 and committed and push:
+        return _flush_push(vault)
+    return rc
+
+
+def _stage_and_commit_session(vault: Path, key: str) -> tuple[int, bool]:
+    """Stage + commit ``session/<key>.{json,md}`` under the SESSION-KEY lock.
+
+    Returns ``(exit_code, committed)``.
+
+    The lock is :func:`lore.locking.session_write_lock` — the (vault,
+    session-key) granularity every session write already uses — and NOT the vault
+    write lock: the standing axiom is that the vault lock guards file+index
+    mutation, never a commit, and taking it here would make one session's flush
+    block every unrelated record write in the vault.
+
+    It is reentrant per thread, so the callers that hold it across
+    ``flush_session`` → this commit (making the flip and the commit one unit, so a
+    concurrent ``session candidate`` cannot leave a ``dirty`` sidecar staged
+    inside the flush commit) are not blocked by themselves. The push is
+    deliberately left to the caller / :func:`_flush_commit`, outside the lock.
     """
     if not vault.exists() or not _vault_is_git_toplevel(vault):
         print("notice: vault is not its own git toplevel — skipping commit.", file=sys.stderr)
-        return 0
+        return 0, False
 
-    session_dir = vault / "session"
-    paths = []
-    for suffix in (".json", ".md"):
-        p = session_dir / f"{key}{suffix}"
-        if p.exists():
-            paths.append(str(p))
-    if not paths:
-        print("Nothing to commit — no session record on disk.")
-        return 0
+    with locking.session_write_lock(vault, key):
+        session_dir = vault / "session"
+        paths = []
+        for suffix in (".json", ".md"):
+            p = session_dir / f"{key}{suffix}"
+            if p.exists():
+                paths.append(str(p))
+        if not paths:
+            print("Nothing to commit — no session record on disk.")
+            return 0, False
 
-    rc, _, stderr = _git(vault, "add", "--", *paths)
-    if rc != 0:
-        print(f"error: git add failed: {stderr}", file=sys.stderr)
-        return 1
+        rc, _, stderr = _git(vault, "add", "--", *paths)
+        if rc != 0:
+            print(f"error: git add failed: {stderr}", file=sys.stderr)
+            return 1, False
 
-    rc, _, _ = _git(vault, "diff", "--cached", "--quiet")
-    if rc == 0:
-        print("Nothing to commit — index is clean.")
-        return 0
+        rc, _, _ = _git(vault, "diff", "--cached", "--quiet")
+        if rc == 0:
+            print("Nothing to commit — index is clean.")
+            return 0, False
 
-    message = f"session: flush {key}"
-    rc, _, stderr = _git(vault, "commit", "-m", message)
-    if rc != 0:
-        print(f"error: git commit failed: {stderr}", file=sys.stderr)
-        return 1
+        message = f"session: flush {key}"
+        rc, _, stderr = _git(vault, "commit", "-m", message)
+        if rc != 0:
+            print(f"error: git commit failed: {stderr}", file=sys.stderr)
+            return 1, False
+
     print(f"Committed: {message}")
-
-    if push:
-        return _flush_push(vault)
-    return 0
+    return 0, True
 
 
 def _flush_push(vault: Path) -> int:
@@ -209,27 +233,45 @@ def _flush_current_session(args) -> int:
         return rc
 
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
-    try:
-        verdict = session_store_mod.flush_session(
-            key,
-            vault_root=str(vault),
-            committer=committer,
-            open_index=_open_session_index,
-        )
-    except Exception as exc:
-        print(f"error: session flush failed: {exc}", file=sys.stderr)
-        return 1
 
-    if verdict == session_store_mod.FLUSH_NO_SESSION:
+    # Probed BEFORE the lock so a flush with no session here creates nothing —
+    # not even the lock sidecar. `flush_session` re-checks under the lock.
+    if not session_store_mod.session_exists(str(vault), key):
         print(f"notice: no session exists for {key!r} — nothing to flush.")
         return 0
-    if verdict == session_store_mod.FLUSH_ALREADY_CLEAN:
-        print(f"notice: session {key!r} is clean — nothing to flush.")
-        return 0
 
-    print(f"Flushed: session/{key} (dirty -> clean)")
-    rc = _flush_commit(vault, key)
-    if rc != 0:
+    # The flip and the commit are ONE unit under the session-key lock: a
+    # `session candidate` that landed between them would flip the sidecar back to
+    # `dirty` and be staged into the flush commit. The lock is reentrant, so
+    # `flush_session`'s own acquisition is a depth bump. The push stays outside.
+    with locking.session_write_lock(vault, key):
+        try:
+            verdict = session_store_mod.flush_session(
+                key,
+                vault_root=str(vault),
+                committer=committer,
+                open_index=_open_session_index,
+            )
+        except Exception as exc:
+            print(f"error: session flush failed: {exc}", file=sys.stderr)
+            return 1
+
+        if verdict == session_store_mod.FLUSH_NO_SESSION:
+            print(f"notice: no session exists for {key!r} — nothing to flush.")
+            return 0
+        if verdict == session_store_mod.FLUSH_ALREADY_CLEAN:
+            print(f"notice: session {key!r} is clean — nothing to flush.")
+            return 0
+
+        print(f"Flushed: session/{key} (dirty -> clean)")
+        rc = _flush_commit(vault, key, push=False)
+    if rc == 0:
+        # Push OUTSIDE the lock (network never runs under a no-timeout flock).
+        # Only when the vault is a git toplevel — otherwise the commit was
+        # skipped with a notice and there is nothing to push.
+        if _vault_is_git_toplevel(vault):
+            _flush_push(vault)
+    else:
         # Same orphan-gap guarantee as the batch path: `flush_session` flips the
         # record `clean` on disk BEFORE the commit, so a commit failure would leave
         # a clean-on-disk-but-uncommitted record that `status:dirty` re-discovery
@@ -336,21 +378,27 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     for key in keys:
         flipped = False
         try:
-            verdict = session_store_mod.flush_session(
-                key,
-                vault_root=str(vault),
-                committer=committer,
-                open_index=_open_session_index,
-            )
-            # A session that raced clean since discovery is a benign skip.
-            if verdict != session_store_mod.FLUSH_FLUSHED:
-                continue
-            flipped = True
-            # Commit per-session (the atomicity unit) but DON'T push here — the
-            # push is hoisted to one round-trip after the batch (see below).
-            rc = _flush_commit(vault, key, push=False)
-            if rc != 0:
-                raise RuntimeError(f"commit failed (rc={rc})")
+            # Flip + commit as ONE unit under the session-key lock, so a
+            # concurrent `session candidate` for this key cannot re-dirty the
+            # sidecar between them and be staged into the flush commit. Keyed,
+            # so sibling sessions in the batch never contend.
+            with locking.session_write_lock(vault, key):
+                verdict = session_store_mod.flush_session(
+                    key,
+                    vault_root=str(vault),
+                    committer=committer,
+                    open_index=_open_session_index,
+                )
+                # A session that raced clean since discovery is a benign skip.
+                if verdict != session_store_mod.FLUSH_FLUSHED:
+                    continue
+                flipped = True
+                # Commit per-session (the atomicity unit) but DON'T push here —
+                # the push is hoisted to one round-trip after the batch (below),
+                # which also keeps the network out of the lock.
+                rc = _flush_commit(vault, key, push=False)
+                if rc != 0:
+                    raise RuntimeError(f"commit failed (rc={rc})")
         except Exception as exc:
             # Per-session atomicity: the flip happened before the commit, so on a
             # commit failure roll the flip BACK to `dirty` — otherwise the session
