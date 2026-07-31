@@ -164,9 +164,9 @@ review, across all vault layers.
 For each review `id`:
 
 1. `PATCH /api/adr-reviews/:id` with body `{ "status": "in_progress" }` — marks
-   it picked-up. (Role is derived server-side from cookie absence; a cookie-less
-   PATCH is recorded as `claude`.) Never PATCH `status:"resolved"` — that's
-   Tom's.
+   it picked-up. (This PATCH records no role/author — it only flips `status`.
+   Role is derived from cookie presence per-reply, when a reply is later
+   posted.) Never PATCH `status:"resolved"` — that's Tom's.
 2. `GET /api/adr-reviews/:id` for the full thread: `body_snapshot`,
    `content_hash` (the pinned state at review-open time), `comments:[{ id,
    excerpt, occurrence_index, granularity, body, status, orphaned }]`,
