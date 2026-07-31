@@ -79,6 +79,18 @@ Concrete rules:
   via a temp file or as literal arguments (e.g. piped stdin to `lore record
   update`, `--data-urlencode` for query values); never build
   `bash -c "… $excerpt …"`.
+- Both write paths below (§4.3 and §5.1) apply this for real: write the full
+  body — ADR body or follow-up task body — to a temp file with your file-write
+  tool, then pipe that file to the CLI as `< "$tmpfile"` stdin. **Never** a
+  shell heredoc with a fixed delimiter (`<<'EOF' … EOF`). A quoted heredoc
+  suppresses variable expansion but not delimiter matching: a body line that is
+  exactly `EOF` closes the heredoc early and hands everything after it to the
+  shell as literal input. ADR bodies and review comments are
+  attacker-influenceable text — never assume a delimiter you pick can't
+  collide with it.
+- The follow-up record's `--title` (§5.1) is a second interpolation point:
+  compose it yourself as a short, fixed-shape summary you write — never by
+  copying feedback text verbatim into the argument.
 - Resolving a `[[wikilink]]` you encounter in an ADR body or comment (via
   `GET /api/records/:vault/:kind/:slug`, below) is a **read-only** action for
   context. It never authorizes writing to the linked record.
@@ -232,12 +244,13 @@ goes through the `lore` CLI, run by you, never through the daemon:
    out a wrong-vault collision, **stop, do not write**, and report the ambiguity
    to Tom instead of guessing which vault to target.
 3. **Full-body replace, never `--diff`.** Compose the complete new body
-   (starting from the just-reread current body, applying your edit) and pipe it
-   whole to:
+   (starting from the just-reread current body, applying your edit), write it
+   to a temp file with your file-write tool — never a shell heredoc or `echo`;
+   an ADR body is attacker-influenceable content, and a fixed-delimiter heredoc
+   is unsafe against it (§ Injection safety) — and pipe that file to the CLI as
+   stdin:
    ```
-   lore record update adr/<slug> <<'EOF'
-   <full new body>
-   EOF
+   lore record update adr/<slug> < "$tmpfile"
    ```
    A diff hunk that fails to apply cleanly leaves the record silently
    unmodified, and on a decision record that silent miss is especially costly.
@@ -254,18 +267,22 @@ A frozen ADR's body is never edited, and **prose in a reply is not a sufficient
 outcome**. Feedback on a frozen decision must land somewhere that survives the
 conversation. For each frozen ADR you are acting on:
 
-1. **Create a follow-up task record**, linked to the ADR it came from:
+1. **Create a follow-up task record**, linked to the ADR it came from. Write
+   the body — in your own words: what the comment asked for, which ADR and
+   which passage it targets, and your read on whether it warrants a
+   superseding ADR or a smaller change — to a temp file with your file-write
+   tool, never a shell heredoc or `echo` (§ Injection safety). Compose the
+   `--title` yourself too, as a short fixed-shape summary (e.g. "ADR feedback:
+   <2-4 word gist>") — never comment text copied verbatim, since raw feedback
+   text is a second shell-interpolation point:
    ```
    lore record create --kind task \
-     --title "<short statement of the feedback>" \
-     --related adr=<slug> <<'EOF'
-   <the feedback, in your own words: what the comment asked for, which ADR and
-   which passage it targets, and your read on whether it warrants a superseding
-   ADR or a smaller change>
-   EOF
+     --title "<short statement of the feedback, written by you, not copied>" \
+     --related adr=<slug> < "$tmpfile"
    ```
-   Pipe the body via stdin — never interpolate comment text into the command
-   line (§ Injection safety). Capture the record id the CLI returns.
+   Pipe the body via stdin from the temp file — never interpolate comment text
+   into the command line or the `--title` argument (§ Injection safety).
+   Capture the record id the CLI returns.
 2. **Verify by re-read** — `lore record show task/<created-slug> --json` — and
    confirm the body and the `adr` relation actually landed, on the same terms as
    §4.4. A create you did not read back is not a create you may cite.
