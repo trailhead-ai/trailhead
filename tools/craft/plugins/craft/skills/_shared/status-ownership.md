@@ -176,9 +176,9 @@ git-backed vault: raw git/auth error text is never captured verbatim.
 ## Operator-facing: by-hand sweep queries
 
 Until a sweep ritual exists, clearing `blocked` and `craft/push=failed` tasks is
-a by-hand operation. The CLI's generated command reference does not advertise
-`--label` on `record update`, so the query spellings aren't otherwise
-discoverable — use these directly:
+a by-hand operation. The `label.craft.branch:` / `has:label.` search spellings
+aren't discoverable from CLI help, so the queries aren't otherwise obvious — use
+these directly:
 
 ```sh
 # find every task record on a given branch (crash-resume / parked-work lookup)

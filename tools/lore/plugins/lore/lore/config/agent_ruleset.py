@@ -5,7 +5,7 @@ This module owns the *content* lore installs into a harness's user-level ruleset
 ``Harness`` seam owns the *delivery* (see ``trailhead/harness/base.py``); lore
 only supplies the bytes.
 
-``render_ruleset_content()`` assembles three parts, in this fixed order:
+``render_ruleset_content()`` assembles two parts, in this fixed order:
 
   * ``_WRITE_PROHIBITION`` — the mandatory vault-write rules.  The Claude Code
     PreToolUse guardrail blocks Edit/Write/MultiEdit/NotebookEdit but is OPAQUE
@@ -18,31 +18,15 @@ only supplies the bytes.
     disposition (``lore session candidate`` is the default for findings during
     work; ``lore record`` is the direct-write exception for authored artifacts;
     ``/lore:flush`` promotes candidates), and the triggers for reaching for lore.
-  * a generated command-reference block, built by walking the live CLI parser
-    (see ``command_reference.build_reference``) so the agent-facing invocation
-    reference can never drift from the actual argparse surface.
 
-The content is DETERMINISTIC, not statically fixed: the command-reference
-block is computed from the live parser on every call. Two calls nonetheless
-return byte-identical output, since nothing involved reads clock, environment,
-or filesystem state — and byte-stability (not literal source-level staticness)
-is what the whole-file drift compare (``user_ruleset_status``) actually
-requires to detect ``lore status`` drift.
-
-Building the command-reference block requires the CLI parser
-(``lore.cli.dispatch.build_parser``), imported lazily inside
-``render_ruleset_content()`` rather than at module scope — importing this
-config-layer module must never pull in the whole ``lore.cli`` package. If
-building the parser or the reference fails for any reason, that failure is
-contained to the enrichment step alone: the mandatory write-prohibition and
-primer are still returned (a decorative reference must never take down the
-load-bearing guardrail), and a warning is printed to stderr so the failure is
-still visible.
+The content is static: two calls return byte-identical output, which is what
+the whole-file drift compare (``user_ruleset_status``) requires to detect
+``lore status`` drift.  Nothing else belongs here: per Claude 5-era guidance a
+memory file carries concise load-time instructions only, so an exhaustive
+command reference is a documentation anti-pattern rather than a guardrail.
 """
 
 from __future__ import annotations
-
-import sys
 
 _WRITE_PROHIBITION = """\
 ## Lore vault — mandatory write rules
@@ -96,25 +80,5 @@ setting something aside to revisit later.
 
 
 def render_ruleset_content() -> str:
-    """Render the full user-level ruleset: prohibition + primer + command reference.
-
-    The write-prohibition and primer always come back untouched, even if
-    generating the command-reference block fails — only that enrichment step
-    is wrapped, so a broken argparse introspection can never prevent the
-    mandatory guardrail from installing.
-    """
-    try:
-        from ..cli.dispatch import build_parser
-        from .command_reference import build_reference
-
-        parser = build_parser()
-        reference = build_reference(parser)
-    except Exception as exc:
-        print(
-            f"lore: warning: command-reference generation failed ({exc}); "
-            f"ruleset installed without the invocation-reference block",
-            file=sys.stderr,
-        )
-        return f"{_WRITE_PROHIBITION}\n{PRIMER}"
-
-    return f"{_WRITE_PROHIBITION}\n{PRIMER}\n{reference}"
+    """Render the full user-level ruleset: write-prohibition + primer."""
+    return f"{_WRITE_PROHIBITION}\n{PRIMER}"

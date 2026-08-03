@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from lore.argparse_util import _leaf_parsers
 from lore.cli.dispatch import build_parser
-from lore.config.command_reference import _leaf_parsers
 
 REPO_ROOT = Path(__file__).parent.parent
 SKILLS_DIR = REPO_ROOT / "plugins" / "lore" / "skills"
