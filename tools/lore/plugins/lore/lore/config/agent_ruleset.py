@@ -21,12 +21,9 @@ only supplies the bytes.
 
 The content is static: two calls return byte-identical output, which is what
 the whole-file drift compare (``user_ruleset_status``) requires to detect
-``lore status`` drift. A generated command-reference block (walking the live
-CLI parser) used to be appended as a third part; per Claude 5-era guidance
-that repositions memory files as concise load-time instructions only, an
-exhaustive command reference is now a documentation anti-pattern rather than
-a load-bearing guardrail, so it was dropped along with the per-project
-rules-block delivery model it depended on.
+``lore status`` drift.  Nothing else belongs here: per Claude 5-era guidance a
+memory file carries concise load-time instructions only, so an exhaustive
+command reference is a documentation anti-pattern rather than a guardrail.
 """
 
 from __future__ import annotations

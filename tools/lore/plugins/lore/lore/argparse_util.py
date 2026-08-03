@@ -1,8 +1,8 @@
-"""Argparse-introspection helpers shared by the CLI dispatcher and the config
-layer's command-reference generator.
+"""Argparse-introspection helpers shared by the CLI dispatcher and the tests
+that assert against rendered ``--help`` text.
 
 Deliberately dependency-free — no imports of ``lore.cli`` or ``lore.config`` —
-so either side can import this module without creating a cycle.
+so every caller can import this module without creating a cycle.
 """
 from __future__ import annotations
 
