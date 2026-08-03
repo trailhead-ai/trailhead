@@ -2,11 +2,8 @@
 
 ``lore/config/agent_ruleset.py`` renders lore's user-level ruleset via
 ``render_ruleset_content()``: the write-prohibition rules (minus the stale
-per-project multi-rules-file "Drift caveat"), a short disposition primer, and
-a generated command reference. The content is deterministic — computed from
-the live CLI parser on every call, but two calls always return byte-identical
-output, since it is byte-stability (not literal source-level staticness) that
-the whole-file drift compare (``user_ruleset_status``) actually requires.
+per-project multi-rules-file "Drift caveat") plus a short disposition primer —
+nothing else. The content is static and byte-identical across calls.
 
 The write-prohibition block must name ``/lore:flush``, must not reference a
 non-existent ``/checkpoint`` command, and must teach ``lore session candidate``
@@ -88,12 +85,10 @@ def test_teaches_lore_session_candidate_as_capture_path():
 # render_ruleset_content(): integration, guardrail-first ordering, determinism
 # ---------------------------------------------------------------------------
 
-def test_render_contains_prohibition_primer_and_command_reference():
+def test_render_is_exactly_prohibition_plus_primer():
     mod = load_script("lore.config.agent_ruleset")
     content = mod.render_ruleset_content()
-    assert mod._WRITE_PROHIBITION in content
-    assert mod.PRIMER in content
-    assert "## Lore command reference (generated)" in content
+    assert content == f"{mod._WRITE_PROHIBITION}\n{mod.PRIMER}"
 
 
 def test_write_prohibition_is_first_in_the_rendered_content():
@@ -113,7 +108,7 @@ def test_two_renders_are_byte_identical():
 # ---------------------------------------------------------------------------
 
 def test_importing_agent_ruleset_does_not_import_cli_dispatch():
-    """Only CALLING render_ruleset_content() may load lore.cli.dispatch.
+    """Importing this config-layer module must never pull in ``lore.cli``.
 
     Runs in a fresh subprocess so sys.modules pollution from earlier tests in
     this same process (which may already have imported lore.cli.dispatch)
@@ -161,42 +156,3 @@ def test_drift_via_the_seam_current_stale_missing(tmp_path):
     path = harness.user_ruleset_path("probe", env=env)
     path.write_text(path.read_text() + "\nmutated\n")
     assert harness.user_ruleset_status("probe", content, env=env) == "stale"
-
-
-# ---------------------------------------------------------------------------
-# Fail-closed: an enrichment failure must never take down the write-prohibition.
-# ---------------------------------------------------------------------------
-
-def test_render_falls_back_when_build_reference_fails(monkeypatch, capsys):
-    mod = load_script("lore.config.agent_ruleset")
-    from lore.config import command_reference as command_reference_mod
-
-    def _boom(parser):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(command_reference_mod, "build_reference", _boom)
-    content = mod.render_ruleset_content()
-
-    assert content == f"{mod._WRITE_PROHIBITION}\n{mod.PRIMER}", (
-        "on enrichment failure, content must fall back to just the "
-        "write-prohibition + primer, with no invocation-reference block"
-    )
-    assert content.index(mod._WRITE_PROHIBITION) == 0
-
-    captured = capsys.readouterr()
-    assert "command-reference generation failed" in captured.err
-
-
-def test_render_falls_back_when_build_parser_fails(monkeypatch, capsys):
-    mod = load_script("lore.config.agent_ruleset")
-    import lore.cli.dispatch as dispatch_mod
-
-    def _boom():
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(dispatch_mod, "build_parser", _boom)
-    content = mod.render_ruleset_content()
-
-    assert content == f"{mod._WRITE_PROHIBITION}\n{mod.PRIMER}"
-    captured = capsys.readouterr()
-    assert "command-reference generation failed" in captured.err
