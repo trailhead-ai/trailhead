@@ -29,16 +29,32 @@ inside the group drain is running in, named by camp's own slug
 normalization (lowercase, non-`[a-z0-9-]` squashed to `-`, trimmed) of the
 task's record name — mirrored here rather than imported, since camp's
 normalizer (`camp/spine.py`'s `_normalize_slug`) is not exposed as a library
-call ranger can import without reaching into camp's CLI-private module. A
-task's derived slug already exists as a workspace read from `camp list
---json` in one of two shapes: the drain's own prior attempt at this exact
-task (a fresh `camp new <slug>` workspace's branch is always
-`worktree-<slug>`, so a workspace at this task's slug carrying that exact
-branch is presumed to be this task's own — a resumable in-flight or
-crashed run, not a collision) or something else entirely (a differently-named
-task whose name normalizes to the same slug, or a workspace a human made by
-hand) — reported `skipped:collision` with the colliding slug named, since
-drain cannot safely reuse a workspace it did not create.
+call ranger can import without reaching into camp's CLI-private module.
+Two different sources of collision, both reported `skipped:collision`:
+
+- **Intra-queue.** Two tasks in the *same* derive pass whose names normalize
+  to the same slug (a case/punctuation variant, e.g. `"Fix Bug"` and
+  `"fix-bug"`) would both claim the same camp workspace. Processed in the
+  queue's own oldest-first order, the first claims the slug and keeps
+  whatever bucket its payload earns; every later task with that slug is
+  `skipped:collision`, naming the first task's name (`collision_with`) and
+  the shared slug.
+- **Against an existing workspace.** A task's derived slug already names a
+  workspace in `camp list --json`. A same-branch guess is not proof of
+  ownership — camp's `new` re-enters any existing slug on the same default
+  `worktree-<slug>` branch regardless of which task asked for it, so a
+  workspace with a *different* task's name normalizing to this slug would
+  read as "this task's own" under a branch-only check. The actual resume
+  marker is the task record's own `craft/branch` label — the plan's
+  resume-from-`craft/branch` semantics, written by the execute ritual at
+  dispatch (see `craft/skills/_shared/execute.md`). Only a task whose label
+  names *exactly* this slug's `worktree-<slug>` branch is treated as this
+  workspace's owner; no label, or a label naming anything else, is
+  `skipped:collision` naming the existing workspace's slug. The label is
+  read off the same `record show` call this module already makes for the
+  body (`lore/record/tasks.py`'s documented 2-call pattern — `task list` for
+  the candidate set, `record show --vault` per candidate for everything
+  `task list`'s summary entries don't carry), never by globbing the vault.
 
 **Read-only**, like `ranger.sweep.queue`: this module only lists and reads,
 via the same injectable lore-CLI `Runner` seam, plus its own `run_camp` for
@@ -52,7 +68,7 @@ import re
 import subprocess
 from typing import Any
 
-from ..sweep.queue import QueueDeriveError, Runner, read_body, run_lore
+from ..sweep.queue import QueueDeriveError, Runner, run_lore
 
 __all__ = [
     "QueueDeriveError",
@@ -205,6 +221,25 @@ def _list_group_workspaces(*, runner: Runner | None) -> list[dict]:
     return run_camp(["list", "--json"], runner=runner)
 
 
+def _read_task_record(name: str, *, vault: str, runner: Runner | None) -> tuple[str, dict]:
+    """Return `(body, labels)` for task *name* in *vault* via one `record show`.
+
+    The second call of the documented 2-call pattern (`lore/record/tasks.py`):
+    `task list` supplies the candidate set's summary fields, and this reads
+    everything a summary entry doesn't carry — the body (for the `**Files:**`
+    buildable check) and the sidecar's `labels` map (for the `craft/branch`
+    resume marker) — in the single read this module already needed for the
+    body, never a second round trip and never a vault glob.
+    """
+    payload = run_lore(
+        ["record", "show", f"task/{name}", "--vault", vault, "--json"],
+        runner=runner,
+    )
+    body = payload.get("body", "")
+    labels = (payload.get("sidecar") or {}).get("labels") or {}
+    return body, labels
+
+
 def parse_drain_outcome(line: str) -> tuple[str | None, str]:
     """Split a drain outcome line into `(token, argument)`.
 
@@ -228,8 +263,12 @@ def derive_drain_queue(vault: str, *, runner: Runner | None = None) -> list[dict
 
     Returns a list of dicts — each candidate's `lore task list` entry plus
     `bucket` (one of `DRAIN_BUCKETS`) and `slug` (this task's derived camp
-    workspace slug, named in the report whichever bucket it lands in).
-    Ordered oldest-first by `created-at`, matching `ranger.sweep.queue`.
+    workspace slug, named in the report whichever bucket it lands in). A
+    `skipped:collision` entry additionally carries `collision_with`: the
+    colliding task's name for an intra-queue slug clash, or the colliding
+    slug again (already in `slug`) for an existing-workspace clash — see the
+    module docstring's Slug collision section for both. Ordered oldest-first
+    by `created-at`, matching `ranger.sweep.queue`.
     """
     candidates = _list_runnable_standalone_leaves(vault, runner=runner)
     workspaces = _list_group_workspaces(runner=runner)
@@ -238,18 +277,49 @@ def derive_drain_queue(vault: str, *, runner: Runner | None = None) -> list[dict
         by_slug.setdefault(ws.get("slug"), []).append(ws)
 
     queue: list[dict] = []
+    slug_owner: dict[str, str] = {}
+
     for entry in candidates:
         name = entry["name"]
         slug = derive_slug(name)
-        body = read_body(name, vault=vault, runner=runner)
+
+        # Intra-queue collision: a later task's slug already belongs to an
+        # earlier one in this same derive pass. Checked before the record
+        # read even runs — two different tasks can never both own this
+        # workspace, so there is nothing left to classify.
+        if slug in slug_owner:
+            queue.append(
+                {
+                    **entry,
+                    "bucket": "skipped:collision",
+                    "slug": slug,
+                    "collision_with": slug_owner[slug],
+                }
+            )
+            continue
+        slug_owner[slug] = name
+
+        body, labels = _read_task_record(name, vault=vault, runner=runner)
 
         if not is_buildable_payload(body):
-            bucket = "skipped:not-buildable"
-        else:
-            expected_branch = f"worktree-{slug}"
-            existing = by_slug.get(slug, [])
-            collides = any(ws.get("branch") != expected_branch for ws in existing)
-            bucket = "skipped:collision" if collides else "buildable"
+            queue.append({**entry, "bucket": "skipped:not-buildable", "slug": slug})
+            continue
 
-        queue.append({**entry, "bucket": bucket, "slug": slug})
+        existing = by_slug.get(slug, [])
+        if existing:
+            expected_branch = f"worktree-{slug}"
+            resume_label = labels.get("craft/branch")
+            if resume_label != expected_branch:
+                queue.append(
+                    {
+                        **entry,
+                        "bucket": "skipped:collision",
+                        "slug": slug,
+                        "collision_with": slug,
+                    }
+                )
+                continue
+
+        queue.append({**entry, "bucket": "buildable", "slug": slug})
+
     return queue

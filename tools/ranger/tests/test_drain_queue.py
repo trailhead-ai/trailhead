@@ -72,10 +72,11 @@ def _workspace(slug: str, branch: str) -> dict:
     return {"slug": slug, "branch": branch, "workspace_path": f"/workspaces/{slug}"}
 
 
-def _make_runner(*, tasks=None, bodies=None, workspaces=None, tasks_rc=0, camp_rc=0):
+def _make_runner(*, tasks=None, bodies=None, workspaces=None, labels=None, tasks_rc=0, camp_rc=0):
     tasks = tasks if tasks is not None else []
     bodies = bodies if bodies is not None else {}
     workspaces = workspaces if workspaces is not None else []
+    labels = labels if labels is not None else {}
 
     def runner(cmd, **kwargs):
         if cmd[:3] == ["lore", "task", "list"]:
@@ -90,7 +91,7 @@ def _make_runner(*, tasks=None, bodies=None, workspaces=None, tasks_rc=0, camp_r
                 "record_id": record_id,
                 "kind": "task",
                 "name": name,
-                "sidecar": {},
+                "sidecar": {"labels": labels.get(name, {})},
                 "body": bodies.get(name, ""),
             }
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
@@ -177,11 +178,38 @@ def test_mixed_files_line_with_one_member_repo_path_is_buildable():
 # ---------------------------------------------------------------------------
 
 
-def test_existing_workspace_with_non_matching_branch_is_a_collision():
-    tasks = [_task_entry("Fix Bug")]
-    slug = drain_queue.derive_slug("Fix Bug")
-    workspaces = [_workspace(slug, "some-unrelated-branch")]
-    runner = _make_runner(tasks=tasks, bodies={"Fix Bug": _buildable_body()}, workspaces=workspaces)
+def test_intra_queue_same_slug_different_task_second_is_a_collision():
+    """Two queued tasks whose names normalize to the same slug: the first (in
+    listing/oldest-first order) keeps its own bucket; every later one with the
+    same derived slug is a collision naming the first task and the slug —
+    camp would re-enter the same workspace for both, silently mixing their
+    changes."""
+    tasks = [
+        _task_entry("Fix Bug", created_at="2026-01-01T00:00:00Z"),
+        _task_entry("fix-bug", created_at="2026-01-02T00:00:00Z"),
+    ]
+    bodies = {"Fix Bug": _buildable_body(), "fix-bug": _buildable_body()}
+    runner = _make_runner(tasks=tasks, bodies=bodies)
+
+    result = drain_queue.derive_drain_queue(_VAULT, runner=runner)
+
+    by_name = {e["name"]: e for e in result}
+    assert by_name["Fix Bug"]["bucket"] == "buildable"
+    assert by_name["fix-bug"]["bucket"] == "skipped:collision"
+    assert by_name["fix-bug"]["slug"] == "fix-bug"
+    assert by_name["fix-bug"]["collision_with"] == "Fix Bug"
+
+
+def test_existing_workspace_without_resume_label_is_a_collision():
+    """A workspace already exists at the task's slug, but the task record
+    carries no `craft/branch` label — there is no proof this workspace is
+    this task's own, so it is not safe to reuse."""
+    tasks = [_task_entry("fix-bug")]
+    slug = drain_queue.derive_slug("fix-bug")
+    workspaces = [_workspace(slug, f"worktree-{slug}")]
+    runner = _make_runner(
+        tasks=tasks, bodies={"fix-bug": _buildable_body()}, workspaces=workspaces, labels={}
+    )
 
     result = drain_queue.derive_drain_queue(_VAULT, runner=runner)
 
@@ -189,15 +217,43 @@ def test_existing_workspace_with_non_matching_branch_is_a_collision():
     assert result[0]["slug"] == slug
 
 
-def test_existing_workspace_with_the_expected_branch_is_the_tasks_own_not_a_collision():
+def test_existing_workspace_with_matching_resume_label_is_the_tasks_own_not_a_collision():
+    """The task record's own `craft/branch` label names this exact
+    `worktree-<slug>` branch — the resume marker execute's ritual writes at
+    dispatch — so this is provably this task's own prior attempt."""
     tasks = [_task_entry("fix-bug")]
     slug = drain_queue.derive_slug("fix-bug")
     workspaces = [_workspace(slug, f"worktree-{slug}")]
-    runner = _make_runner(tasks=tasks, bodies={"fix-bug": _buildable_body()}, workspaces=workspaces)
+    runner = _make_runner(
+        tasks=tasks,
+        bodies={"fix-bug": _buildable_body()},
+        workspaces=workspaces,
+        labels={"fix-bug": {"craft/branch": f"worktree-{slug}"}},
+    )
 
     result = drain_queue.derive_drain_queue(_VAULT, runner=runner)
 
     assert result[0]["bucket"] == "buildable"
+
+
+def test_existing_workspace_with_label_naming_a_different_branch_is_a_collision():
+    """The label is present but names a different branch than this slug's
+    expected `worktree-<slug>` — a stale or otherwise-owned label, not proof
+    of ownership over the workspace actually sitting at this slug."""
+    tasks = [_task_entry("fix-bug")]
+    slug = drain_queue.derive_slug("fix-bug")
+    workspaces = [_workspace(slug, f"worktree-{slug}")]
+    runner = _make_runner(
+        tasks=tasks,
+        bodies={"fix-bug": _buildable_body()},
+        workspaces=workspaces,
+        labels={"fix-bug": {"craft/branch": "some-other-branch"}},
+    )
+
+    result = drain_queue.derive_drain_queue(_VAULT, runner=runner)
+
+    assert result[0]["bucket"] == "skipped:collision"
+    assert result[0]["slug"] == slug
 
 
 def test_no_matching_workspace_slug_is_not_a_collision():
