@@ -320,7 +320,14 @@ def _dispatch_group_command(
         return
     if cmd == "bookmark":
         from ..bookmark.capture import cmd_bookmark
-        cmd_bookmark(rest, group, group_env)
+        from ..bookmark.render import cmd_bookmark_ls, cmd_bookmark_rm
+
+        if rest and rest[0] == "ls":
+            cmd_bookmark_ls(rest[1:], group, group_env)
+        elif rest and rest[0] == "rm":
+            cmd_bookmark_rm(rest[1:], group, group_env)
+        else:
+            cmd_bookmark(rest, group, group_env)
         return
 
     # Bare slug removed: any non-RESERVED token that isn't a known verb → error

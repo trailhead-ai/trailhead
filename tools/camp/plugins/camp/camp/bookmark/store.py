@@ -194,6 +194,22 @@ def list_bookmarks(*, env: dict[str, str] | None = None) -> list[dict[str, Any]]
     return [bookmarks[ref] for ref in sorted(bookmarks)]
 
 
+def list_bookmarks_by_recency(*, env: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """Return every bookmark, most-recently-updated first.
+
+    Ties (identical ``updated_at``) break on ref for a deterministic order —
+    :func:`list_bookmarks`'s ref-ordered contract is untouched; this is a second,
+    display-oriented ordering for ``camp bookmark ls``.
+    """
+    with store_lock(env=env):
+        bookmarks = _read_unlocked(store_path(env=env))
+    return sorted(
+        bookmarks.values(),
+        key=lambda record: (record.get("updated_at", ""), record.get("ref", "")),
+        reverse=True,
+    )
+
+
 def find_by_workspace(
     group: str, slug: str, *, env: dict[str, str] | None = None
 ) -> dict[str, Any] | None:

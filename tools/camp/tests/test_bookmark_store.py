@@ -122,6 +122,22 @@ def test_list_bookmarks_is_ordered_by_ref(env: dict[str, str]) -> None:
     assert [b["ref"] for b in list_bookmarks(env=env)] == ["alpha", "bravo", "charlie"]
 
 
+def test_list_bookmarks_by_recency_orders_most_recent_first(env: dict[str, str]) -> None:
+    from camp.bookmark.store import list_bookmarks_by_recency, upsert
+
+    upsert(_record("old", slug="old", updated_at="2026-01-01T00:00:00Z"), env=env)
+    upsert(_record("new", slug="new", updated_at="2026-06-01T00:00:00Z"), env=env)
+    upsert(_record("mid", slug="mid", updated_at="2026-03-01T00:00:00Z"), env=env)
+
+    assert [b["ref"] for b in list_bookmarks_by_recency(env=env)] == ["new", "mid", "old"]
+
+
+def test_list_bookmarks_by_recency_empty_when_store_absent(env: dict[str, str]) -> None:
+    from camp.bookmark.store import list_bookmarks_by_recency
+
+    assert list_bookmarks_by_recency(env=env) == []
+
+
 def test_find_by_workspace_matches_group_and_slug(env: dict[str, str]) -> None:
     from camp.bookmark.store import find_by_workspace, upsert
 
