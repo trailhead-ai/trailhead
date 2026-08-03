@@ -181,7 +181,18 @@ def test_in_flight_count_survives_a_fresh_report_object_reading_only_the_state_f
 
 def test_degraded_mode_never_bucketing_in_flight(tmp_path):
     report_path = report.start("g", "v", 0, degraded=True, env=_env(tmp_path))
+    with pytest.raises(report.ReportError, match="degraded"):
+        report.mark_in_flight(
+            report_path,
+            "task/a",
+            branch="branch-a",
+            sha="sha1",
+            diffstat="1 file changed",
+            workspace="ws-a",
+        )
     assert report.in_flight_count(report_path) == 0
+    reloaded = report._load_state(report_path)
+    assert reloaded["in_flight"] == {}
 
 
 # ---------------------------------------------------------------------------

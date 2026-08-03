@@ -510,10 +510,24 @@ def mark_in_flight(
     Called when a task is dispatched to portage's monitor. Also renders the
     ``in-flight`` pushed-substate line immediately, so the report always
     reflects the cap's current occupants without a separate render call.
+
+    **Refused in degraded mode.** A degraded drain (portage absent — see
+    ``start``'s ``degraded`` flag) has no monitor outcome file to ever
+    resolve this slot against, so a slot opened here would occupy the cap
+    forever with no way to close it. Refusing loudly, rather than silently
+    no-opping, is what keeps "portage-absent -> in-flight set always empty"
+    a property of the substrate itself instead of a discipline every caller
+    has to remember to uphold.
     """
+    state = _load_state(report_path)
+    if state.get("degraded"):
+        raise ReportError(
+            f"cannot mark {task_id!r} in-flight: this drain is degraded (portage absent), "
+            "so its monitor outcome could never resolve the slot — the in-flight cap stays "
+            "vacuous in degraded mode"
+        )
     now = now or datetime.now(timezone.utc)
     deadline = now + timedelta(hours=deadline_hours)
-    state = _load_state(report_path)
     state["in_flight"][task_id] = {
         "branch": branch,
         "sha": sha,
