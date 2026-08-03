@@ -40,6 +40,8 @@ profile, so invoke it as bare `portage <subcommand>`.
 - `group_toml_path` — absolute path to the group TOML file (used for `[release]` config including
   `review_bot_login`, `external_tracker`, `merge_order`, and `green_driver_agent`)
 - `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
+- `outcome_file` — absolute path to a machine-readable completion channel (optional — see
+  "Outcome file" below)
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
 `{schema_version:1, group, slug, branch, members:[{name, repo_root, worktree_path}]}`.
@@ -67,6 +69,32 @@ Read `review_bot_login` and `external_tracker` from the `[release]` block of the
 the TOML path as an explicit arg — read via stdlib `tomllib`). If the `[release]` block is absent
 or a key is missing, treat that key as `none`. When both are absent, the summary reads:
 `release config: review_bot=none, tracker=none — configure in [release] of the group TOML`
+
+## Outcome file
+
+When the dispatcher supplies `outcome_file`, monitor is that caller's machine-readable
+completion channel — its own reply is prose a background dispatch may never surface
+synchronously, so an unattended caller (e.g. a ranger drain loop) polls this file instead.
+
+If `outcome_file` was provided, monitor writes exactly one line to that file.
+
+Monitor writes the outcome file only once it reaches a terminal state — never before, and
+never more than once. "Terminal state" means the same four outcomes the "Report structure"
+section below reports in prose: merged, ready-to-merge-but-stopped,
+ready-awaiting-human-approval, or blocked after N cycles. The line is one of:
+
+- `MERGED` — all PRs merged.
+- `READY <reason>` — a terminal-but-unmerged state the caller asked not to wait forever on,
+  e.g. `READY awaiting-human-approval`.
+- `BLOCKED <reason>` — blocked after 3 fix cycles without progress.
+- `STOPPED <reason>` — stopped for an operator reason short of blocked, e.g.
+  `STOPPED auto_merge disabled`.
+
+Monitor uses the path verbatim and never creates its parent directory — the caller
+pre-creates it (ranger's 0700 outcomes-directory pattern), so a missing directory means the
+caller's contract was violated, not something monitor should paper over with its own mkdir.
+A missing or empty outcome file is the caller's crashed signal; monitor's job is only to
+write the file, never to pre-create or clean it up.
 
 ## Green-driver dispatch
 
@@ -251,3 +279,6 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
   comments) that may itself have been hostile or mistaken.
 - Don't loop back to `portage wait-for-actionable` on a `blocked` green-driver verdict — that's a fix
   cycle, not a `done`-eligible state.
+- Don't create the `outcome_file`'s parent directory, and don't write to it before reaching a
+  terminal state — the caller pre-creates the directory, and a mid-loop write would let a poller
+  observe a non-final result.
