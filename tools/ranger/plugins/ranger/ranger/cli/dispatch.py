@@ -24,6 +24,7 @@ import sys
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .drain import add_drain_subparser
     from .queue import add_queue_subparser
     from .sweep import add_sweep_subparser
 
@@ -31,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     add_queue_subparser(sub)
     add_sweep_subparser(sub)
+    add_drain_subparser(sub)
     return parser
 
 
