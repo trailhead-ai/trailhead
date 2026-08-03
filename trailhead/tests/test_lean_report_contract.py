@@ -4,7 +4,7 @@ These guard the craft execute-loop prompt files:
 - executor report head/tail split (agents/executor.md)
 - code-reviewer structured verdict
   (agents/code-reviewer.md + skills/review/code-reviewer.md)
-- execute SKILL §4 single-pass + §5 working set (skills/execute/SKILL.md)
+- execute SKILL §4 single-pass + §5 working set (skills/_shared/execute.md)
 
 They are grep-style body guards on the craft agent/skill prompt files.
 
@@ -297,7 +297,7 @@ class TestCodeReviewerSeverityLabelsInvariant:
 #   INVARIANT §5: plan-file-as-source-of-truth + draft→in-progress still present.
 # ---------------------------------------------------------------------------
 
-_EXECUTE_SKILL_MD = _CRAFT_PLUGIN_ROOT / "skills" / "execute" / "SKILL.md"
+_EXECUTE_SKILL_MD = _CRAFT_PLUGIN_ROOT / "skills" / "_shared" / "execute.md"
 
 
 def _execute_skill_text() -> str:
@@ -330,7 +330,7 @@ class TestExecuteSkillSection5WorkingSet:
         text = _execute_skill_text()
         section = _split_execute_at_section(text, "Update the task graph")
         assert "current child task" in section.lower(), (
-            "skills/execute/SKILL.md §5 must name the 'current child task' in the working-set "
+            "skills/_shared/execute.md §5 must name the 'current child task' in the working-set "
             "directive — the controller's per-cycle working set is the current child task "
             "+ the parent's Known Unknowns block."
         )
@@ -340,7 +340,7 @@ class TestExecuteSkillSection5WorkingSet:
         text = _execute_skill_text()
         section = _split_execute_at_section(text, "Update the task graph")
         assert "known unknowns" in section.lower(), (
-            "skills/execute/SKILL.md §5 must name the 'Known Unknowns' block in the "
+            "skills/_shared/execute.md §5 must name the 'Known Unknowns' block in the "
             "working-set directive."
         )
 
@@ -353,7 +353,7 @@ class TestExecuteSkillSection5WorkingSet:
         text = _execute_skill_text()
         section = _split_execute_at_section(text, "Update the task graph")
         assert "does not re-read the whole graph" in section.lower(), (
-            "skills/execute/SKILL.md §5 must contain the contiguous phrase "
+            "skills/_shared/execute.md §5 must contain the contiguous phrase "
             "'does not re-read the whole graph' — asserting the controller pins its "
             "working set to the current child task + Known Unknowns rather than re-reading "
             "the entire graph each cycle."
@@ -368,7 +368,7 @@ class TestExecuteSkillSection5WorkingSet:
         text = _execute_skill_text()
         section = _split_execute_at_section(text, "Update the task graph")
         assert "source of truth" in section.lower(), (
-            "skills/execute/SKILL.md §5 must retain 'source of truth' language — "
+            "skills/_shared/execute.md §5 must retain 'source of truth' language — "
             "spec Constraint: the task graph is the source of truth for what's left."
         )
 
@@ -383,7 +383,7 @@ class TestExecuteSkillSection5WorkingSet:
         has_ready = "ready" in section.lower()
         has_in_progress = "in-progress" in section.lower()
         assert has_ready and has_in_progress, (
-            "skills/execute/SKILL.md §5 must retain the parent ready→in-progress status-flip "
+            "skills/_shared/execute.md §5 must retain the parent ready→in-progress status-flip "
             "behavior (assert 'ready' and 'in-progress' both present). "
             f"Found: ready={has_ready}, in-progress={has_in_progress}."
         )
