@@ -329,6 +329,11 @@ def _dispatch_group_command(
         else:
             cmd_bookmark(rest, group, group_env)
         return
+    if cmd == "resume":
+        from ..bookmark.resume import cmd_resume
+
+        cmd_resume(rest, group, group_env)
+        return
 
     # Bare slug removed: any non-RESERVED token that isn't a known verb → error
     # (shared message, defined in verb_taxonomy).

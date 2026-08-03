@@ -386,3 +386,29 @@ class ClaudeCodeHarness(Harness):
         munged = str(Path(workspace).resolve()).replace("/", "-").replace(".", "-")
         candidate = _claude_dir(_env) / _PROJECTS_SUBDIR / munged / f"{session_id}.jsonl"
         return candidate if candidate.is_file() else None
+
+    # -- session resume -------------------------------------------------------
+    #
+    # ``claude --resume <session-id>`` re-enters a session.  (``-r`` is the
+    # documented short alias; the long form is used here because the argv is read
+    # by humans debugging a wrapper.)  The command MUST run with the working
+    # directory set to the session's ORIGINAL start cwd — Claude Code indexes
+    # sessions per project directory, and resuming from anywhere else fails with
+    # "No conversation found".  Setting that cwd is the caller's half of the
+    # contract; this method only supplies the tokens.
+    #
+    # Known limitation: some child/subagent transcripts are not resumable even
+    # from the correct cwd (``--resume`` indexes top-level sessions).  Claude
+    # Code's own error surfaces that at resume time, so nothing is filtered here.
+
+    def session_resume(self, session_id: str) -> list[str] | None:
+        """Return ``["claude", "--resume", <session-id>]``, or None.
+
+        The session-id guard is the same one the transcript lookup applies: an id
+        that is not a plain token is rejected outright rather than passed into an
+        argv, so no id can ever contribute an extra argument or a shell-active
+        character to the command a caller runs.
+        """
+        if not isinstance(session_id, str) or not _SESSION_ID_RE.match(session_id):
+            return None
+        return ["claude", "--resume", session_id]

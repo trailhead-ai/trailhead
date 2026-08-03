@@ -419,3 +419,42 @@ def test_bookmark_is_listed_in_help() -> None:
     """The verb is discoverable: camp help names it."""
     result = _run(["help"])
     assert "camp bookmark" in result.stdout
+
+
+# camp resume — a group-aware verb; reaches its handler (never the bare-slug
+# error), and without a resolved group emits the standard needs-group message.
+
+
+def test_group_path_resume_reaches_its_handler(stub_group_env: dict[str, str]) -> None:
+    """camp resume <ref> dispatches to the resume handler, which refuses an
+    unknown ref — NOT to the bare-slug error."""
+    result = _run_group(["resume", "no-such-ref"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "bare slug dispatch is no longer supported" not in combined
+    assert "camp resume:" in combined
+
+
+def test_group_path_resume_prints_nothing_on_stdout_when_it_refuses(
+    stub_group_env: dict[str, str],
+) -> None:
+    """The two-line machine contract is all-or-nothing: a refusal leaves stdout
+    empty so the shell wrapper can never act on a partial answer."""
+    result = _run_group(["resume", "no-such-ref"], group_env=stub_group_env)
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_resume_without_a_group_says_so(tmp_path: Path) -> None:
+    """With no group resolvable, camp resume emits the needs-group error."""
+    result = _run(["resume", "x"], env={"CAMP_CONFIG_DIR": str(tmp_path / "empty")})
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "group" in combined.lower()
+    assert "bare slug dispatch is no longer supported" not in combined
+
+
+def test_resume_is_listed_in_help() -> None:
+    """The verb is discoverable: camp help names it."""
+    result = _run(["help"])
+    assert "camp resume" in result.stdout

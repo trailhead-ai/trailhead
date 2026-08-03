@@ -205,3 +205,31 @@ class Harness(ABC):
         that already carry an injected env); ``None`` means ``os.environ``.
         """
         return None
+
+    # -- session resume -------------------------------------------------------
+    #
+    # Resuming a session means re-entering it as a fresh foreground process.  The
+    # seam owns the ARGV — the exact binary, flag spelling, and argument order are
+    # harness-specific knowledge and live in that harness's module only (Axiom 1).
+    # A caller receives an already-safe token list and passes it through
+    # untouched; it must never assemble, edit, or re-quote one of its own.
+    #
+    # Same degrading default as the transcript seam: ``None`` means "this harness
+    # cannot be resumed", which a caller must report rather than paper over.
+    #
+    # The seam does NOT exec.  Deciding where and how to run the argv (in-process,
+    # via a shell wrapper, not at all) belongs to the caller; splitting it this way
+    # is what lets a core that must never exec still offer resume.
+
+    def session_resume(self, session_id: str) -> list[str] | None:
+        """Return the argv that re-enters ``session_id``, or ``None``.
+
+        The argv is a list of individually-quoted-free tokens suitable for a
+        direct ``exec``: no shell is implied and no element needs further
+        escaping.
+
+        Returns ``None`` when the harness has no resume concept, or when
+        ``session_id`` is not a shape the harness accepts — a malformed id must
+        never be smuggled into an argv a caller will run.
+        """
+        return None

@@ -362,3 +362,38 @@ class TestClaudeCodeSessionTranscriptPath:
                 )
                 is None
             )
+
+
+class TestSessionResumeBaseDefault:
+    """The resume-argv seam is CONCRETE with a degrading default: a harness with
+    no resume concept answers None rather than raising."""
+
+    def test_returns_none(self):
+        assert _BareHarness().session_resume("abc123") is None
+
+
+class TestClaudeCodeSessionResume:
+    """Claude Code resumes a session by id. The seam OWNS the argv: callers never
+    compose it, they receive a ready-to-exec token list or None."""
+
+    def test_returns_resume_argv_for_the_session(self):
+        assert ClaudeCodeHarness().session_resume("sess-1") == [
+            "claude",
+            "--resume",
+            "sess-1",
+        ]
+
+    def test_argv_is_a_token_list_needing_no_shell(self):
+        """Every element is a separate token — nothing is pre-joined or quoted, so
+        an exec-style caller passes it through untouched."""
+        argv = ClaudeCodeHarness().session_resume("sess-1")
+        assert all(isinstance(tok, str) for tok in argv)
+        assert not any(" " in tok for tok in argv)
+
+    def test_rejects_a_session_id_that_is_not_a_plain_token(self):
+        """A malformed id must never reach an argv the caller will exec."""
+        for bad in ("", "a b", "a;rm -rf /", "$(whoami)", "../escape", "a/b", "-x"):
+            assert ClaudeCodeHarness().session_resume(bad) is None, bad
+
+    def test_rejects_a_non_string_session_id(self):
+        assert ClaudeCodeHarness().session_resume(None) is None

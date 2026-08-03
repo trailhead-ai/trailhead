@@ -8,7 +8,8 @@ new aliases (rm→remove, ls→list) resolve to their canonical verbs.
 Contract:
 - VERB_ALIASES maps the short aliases rm→remove, ls→list.
 - canonical_verb normalizes an alias to its canonical verb (identity otherwise).
-- NEEDS_GROUP_VERBS is the canonical set {new, remove, pwd, activate, setup, bookmark}.
+- NEEDS_GROUP_VERBS is the canonical set {new, remove, pwd, activate, setup,
+  bookmark, resume}.
 - LEGACY_REDIRECTS points directly at the renamed canonicals (open→new,
   break→remove, init→group, ai→new, enter→activate) — never at a removed verb
   (the dispatcher does not support chained redirects).
@@ -72,6 +73,7 @@ def test_needs_group_verbs_is_canonical_set() -> None:
         "activate",
         "setup",
         "bookmark",
+        "resume",
     }
 
 
@@ -182,6 +184,7 @@ def test_reserved_membership_is_pinned() -> None:
             "activate",
             "setup",
             "bookmark",
+            "resume",
             # Static: canonical/fleet verbs, meta verbs, hook handlers.
             "group",
             "list",
