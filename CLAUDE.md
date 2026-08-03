@@ -76,6 +76,9 @@ fallback, no GNU `readlink -f`, macOS-safe).
 - Code is written for testability via dependency injection: real collaborators are
   imported at module level so tests patch them (e.g. `patch("trailhead.install.wire")`),
   and resolvers/pipelines take injectable `env=` / `runner=` / `platform=`.
+- Error hygiene, CLI-wide: a named error prints a clean `trailhead: <message>` on
+  stderr and exits nonzero — never a raw traceback. Normal output goes to stdout.
+  No ANSI/color.
 
 ## MCP Tools: code-review-graph
 
