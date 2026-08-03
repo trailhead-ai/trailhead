@@ -428,9 +428,9 @@ def test_shape_check_pins_the_same_parent_resolution_command_execute_does():
         "for resolving a `parent` value, and a shape check that only says 'resolve it' "
         "lets the two callers disagree about what resolution means"
     )
-    execute_skill = CRAFT / "skills" / "execute" / "SKILL.md"
-    assert command in execute_skill.read_text(), (
-        f"execute/SKILL.md must keep {command!r} — _shared/refine.md mirrors it "
+    execute_shared = CRAFT / "skills" / "_shared" / "execute.md"
+    assert command in execute_shared.read_text(), (
+        f"_shared/execute.md must keep {command!r} — _shared/refine.md mirrors it "
         "deliberately, so a rename in one file has to fail here rather than silently "
         "split the two shape checks"
     )
@@ -597,9 +597,9 @@ def test_scrub_names_executes_phase_5_as_the_canonical_pattern_set():
         "forking its own — the inlined categories are a reading convenience and must "
         "say which copy wins"
     )
-    execute_skill = CRAFT / "skills" / "execute" / "SKILL.md"
-    assert "credential-pattern scrub" in execute_skill.read_text(), (
-        "execute/SKILL.md must keep its Phase 5 credential-pattern scrub — "
+    execute_shared = CRAFT / "skills" / "_shared" / "execute.md"
+    assert "credential-pattern scrub" in execute_shared.read_text(), (
+        "_shared/execute.md must keep its Phase 5 credential-pattern scrub — "
         "_shared/refine.md names it as canonical, so removing it there has to fail "
         "here rather than silently strand the pointer"
     )
@@ -705,7 +705,7 @@ def test_shared_refine_references_resolve_relative_to_their_skill_dir():
     `../_shared/status-ownership.md`. Counted, not spot-checked: every bare
     occurrence must sit inside an anchored one.
     """
-    for skill_md in (REFINE_SKILL, CRAFT / "skills" / "execute" / "SKILL.md"):
+    for skill_md in (REFINE_SKILL, CRAFT / "skills" / "_shared" / "execute.md"):
         text = skill_md.read_text()
         assert text.count("_shared/refine.md") == text.count("../_shared/refine.md"), (
             f"{skill_md} carries a bare `_shared/refine.md` reference that does not "
@@ -793,17 +793,17 @@ def test_execute_rechecks_citations_before_the_first_dispatch():
     Pinned on three phrases, not one: a rewrite that still mentions the gate but
     drops the ordering or the stop behavior would otherwise stay green.
     """
-    execute_text = (CRAFT / "skills" / "execute" / "SKILL.md").read_text()
+    execute_text = (CRAFT / "skills" / "_shared" / "execute.md").read_text()
     assert "citation-resolution gate" in execute_text, (
-        "execute/SKILL.md must re-run the citation-resolution gate on a standalone "
+        "_shared/execute.md must re-run the citation-resolution gate on a standalone "
         "task's payload — the gate's verdict decays as commits land"
     )
     assert "stamped at promotion time" in execute_text, (
-        "execute/SKILL.md must say why the re-check exists — the gate's verdict was "
+        "_shared/execute.md must say why the re-check exists — the gate's verdict was "
         "stamped at promotion time, and the dispatch may come much later"
     )
     assert "stop and report rather than dispatching" in execute_text, (
-        "execute/SKILL.md must state the failure behavior: a citation that no longer "
+        "_shared/execute.md must state the failure behavior: a citation that no longer "
         "resolves stops the run — it never dispatches an executor at a rotted pointer"
     )
 
@@ -816,9 +816,9 @@ def test_execute_promote_branch_reports_the_promotion():
     procedure mandates have no caller-side surface on exactly the path that needs
     them most.
     """
-    execute_text = (CRAFT / "skills" / "execute" / "SKILL.md").read_text()
+    execute_text = (CRAFT / "skills" / "_shared" / "execute.md").read_text()
     assert "folded-in scope delta" in execute_text, (
-        "execute/SKILL.md's inline-refine promote branch must report the promotion "
+        "_shared/execute.md's inline-refine promote branch must report the promotion "
         "(fields filled, folded-in scope delta, judgment calls) before proceeding "
         "to the ready case — a clean promotion is not a silent one"
     )

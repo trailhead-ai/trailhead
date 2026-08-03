@@ -26,6 +26,7 @@ from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 EXECUTE_SKILL = CRAFT / "skills" / "execute" / "SKILL.md"
+SHARED_EXECUTE = CRAFT / "skills" / "_shared" / "execute.md"
 SHARED_REFINE = CRAFT / "skills" / "_shared" / "refine.md"
 
 # Mirrors test_refine_contract.py's ESCALATION_HEADING — kept as its own literal here
@@ -36,12 +37,22 @@ MISWIRED_LESSON_LINK = "[[lesson/lore-task-graph-parent-depends-on-require-bare-
 
 
 def _execute_text() -> str:
-    assert EXECUTE_SKILL.exists(), f"Expected execute/SKILL.md at {EXECUTE_SKILL}"
-    return EXECUTE_SKILL.read_text()
+    """The Loop/standalone-branch content this file pins.
+
+    That content lives in `_shared/execute.md` (the single source of truth
+    `execute/SKILL.md` wraps, per test_execute_mode_contract.py's thinness guard) —
+    reading it from there is what keeps these pins correct after the shared-procedure
+    extraction, without restating them against a thin wrapper that no longer carries
+    the steps at all.
+    """
+    assert SHARED_EXECUTE.exists(), f"Expected _shared/execute.md at {SHARED_EXECUTE}"
+    return SHARED_EXECUTE.read_text()
 
 
 def _execute_frontmatter() -> str:
-    text = _execute_text()
+    """The frontmatter still lives on the thin wrapper, not the shared procedure."""
+    assert EXECUTE_SKILL.exists(), f"Expected execute/SKILL.md at {EXECUTE_SKILL}"
+    text = EXECUTE_SKILL.read_text()
     assert text.startswith("---\n"), "execute/SKILL.md must open with a frontmatter block"
     end = text.index("\n---", 3)
     return text[3:end]

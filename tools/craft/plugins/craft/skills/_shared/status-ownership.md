@@ -14,6 +14,30 @@ values mean and when they are written — the *primary contract owner*. For `tas
 records that plugin is craft. No other plugin writes a task status outside
 craft's contract semantics defined below.
 
+## Pre-authorized carve-outs for an unattended run
+
+`../_shared/execute.md`'s mode table re-routes every attended escalation point
+through escalate-via-park or proceed-per-contract when the caller has no human
+channel. Two of those re-routes are decisions this contract pre-authorizes up front,
+named here so an unattended run never has to invent an answer:
+
+- **(a) Under a loop, the loop session is the sole task-status writer.** This is the
+  same rule the next section states generally — "vanilla usage: the session running
+  `/craft:execute`; under a loop: the loop session. That session is the only writer of
+  task status" — restated here as a carve-out because an unattended dispatch makes it
+  load-bearing: the dispatched `executor` **never writes status**, under a loop exactly
+  as much as it never does in the attended path. A dispatched agent reports its
+  outcome (`PUSHED <branch> <sha>` / `BLOCKED <reason>`) and the loop session performs
+  the write; nothing in the unattended mode table licenses a dispatched agent to write
+  its own status.
+- **(b) The PR decision is pre-authorized only into the portage tail.** Once a push
+  succeeds, whether and when to open, merge, or otherwise decide a pull request is
+  never the unattended run's call to make directly — it is pre-authorized **only**
+  into the portage tail (`updater`/`monitor`), the same pipeline an attended operator
+  would eventually hand a pushed branch to. An unattended run never merges and never decides the PR outside that pipeline: no drain, no loop session, and no dispatched
+  agent applies a merge decision itself — the decision belongs to `updater`/`monitor`
+  once the run's task-status obligations are settled.
+
 ## Write execution: the top-level orchestrating session writes status
 
 The **top-level orchestrating session** is the session that invoked the ritual
