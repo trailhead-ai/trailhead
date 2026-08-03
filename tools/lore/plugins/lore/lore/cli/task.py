@@ -133,7 +133,7 @@ def _print_task_list(entries: list[dict], *, as_json: bool) -> None:
 
 
 def _cmd_task_list(args) -> int:
-    """``lore task list --vault NAME [--status STATUS ...] [--json]``.
+    """``lore task list --vault NAME [--status STATUS ...] [--runnable] [--json]``.
 
     Flat listing of every task record in the NAMED vault — the read surface a
     caller outside this repo (ranger's sweep) shells out to for a queue read,
@@ -142,14 +142,29 @@ def _cmd_task_list(args) -> int:
     locate-by-vault path ``record update --vault`` uses); an unreadable
     ``config.json`` or a name absent from it is ``lore: <msg>`` on stderr,
     nonzero — never a silent fall-through to some other vault.
+
+    ``--runnable`` filters to :func:`graph.runnable`'s result (``ready`` with
+    every ``depends-on`` target ``done``) and refuses loudly when combined
+    with ``--status`` — the two filters express contradictory intents (an
+    explicit status set vs. the runnable predicate's own status check), so
+    composing them silently would hide one or the other.
     """
     from ..record import tasks as tasks_mod
+
+    if args.runnable and args.status:
+        print(
+            "lore: --runnable cannot be combined with --status",
+            file=sys.stderr,
+        )
+        return 1
 
     vault = _resolve_named_vault(args.vault)
     if vault is None:
         return 1
 
-    entries = tasks_mod.list_tasks(str(vault.path), statuses=args.status)
+    entries = tasks_mod.list_tasks(
+        str(vault.path), statuses=args.status, runnable_only=args.runnable
+    )
     _print_task_list(entries, as_json=args.json)
     return 0
 
@@ -198,6 +213,10 @@ def add_task_subparser(sub) -> None:
     p_task_list.add_argument(
         "--status", action="append", default=None, metavar="STATUS",
         help="Keep only tasks with this status (repeatable)",
+    )
+    p_task_list.add_argument(
+        "--runnable", action="store_true",
+        help="Keep only tasks that are ready with every depends-on target done",
     )
     p_task_list.add_argument(
         "--json", action="store_true",
