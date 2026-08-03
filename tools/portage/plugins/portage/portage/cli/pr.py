@@ -1,5 +1,5 @@
-"""``portage`` PR subcommands: check-status, evaluate-status, merge, summarize,
-and the ``sidecar`` read/write pair.
+"""``portage`` PR subcommands: check-status, evaluate-status, merge, approvals,
+summarize, and the ``sidecar`` read/write pair.
 
 All are thin consumers of ``trailhead.vcs``: each parses argv, calls the matching
 ``get_provider().pr`` method, and reproduces the JSON output shape + exit codes.
@@ -35,6 +35,7 @@ def add_pr_subparsers(sub) -> None:
     _add_check_status(sub)
     _add_evaluate_status(sub)
     _add_merge(sub)
+    _add_approvals(sub)
     _add_summarize(sub)
     _add_sidecar(sub)
 
@@ -176,6 +177,40 @@ def cmd_merge(args: argparse.Namespace) -> int:
     if result.get("failed") or result.get("skipped"):
         return 1
     return 0
+
+
+# ---------------------------------------------------------------------------
+# approvals
+# ---------------------------------------------------------------------------
+
+
+def _add_approvals(sub) -> None:
+    p = sub.add_parser(
+        "approvals",
+        help="Check whether a PR carries a human-authored approval signal.",
+        description=(
+            "Answers whether a PR carries a human-authored approval signal — an "
+            "approving review by a User (non-bot) reviewer, or the human-approved "
+            "label applied by a User actor. This is the merge gate monitor checks "
+            "before calling `portage merge`; it never applies the signal itself."
+        ),
+    )
+    p.add_argument("repo_path")
+    p.add_argument("pr_number")
+    p.set_defaults(func=cmd_approvals)
+
+
+def cmd_approvals(args: argparse.Namespace) -> int:
+    if not Path(args.repo_path).is_dir():
+        print(json.dumps({"error": f"not a directory: {args.repo_path}"}))
+        return 1
+    try:
+        result = get_provider().pr.approval(args.repo_path, args.pr_number)
+    except (RuntimeError, InvalidInputError) as e:
+        print(json.dumps({"error": str(e)}))
+        return 2
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("approved") else 1
 
 
 # ---------------------------------------------------------------------------

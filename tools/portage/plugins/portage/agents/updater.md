@@ -146,3 +146,5 @@ Keep it under 15 lines.
 - Don't launch monitor from inside this subagent — return `pr_pairs` to the caller so it can
   launch monitor from the top-level session where notifications are visible.
 - Don't treat any one repo as special or privileged. Every member of a camp group is a peer.
+- Don't apply the `human-approved` label or post an approving review on any PR — the approval
+  signal is human-applied only; no drain, portage, or dispatched-agent component ever applies it.

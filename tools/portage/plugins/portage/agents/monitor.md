@@ -143,7 +143,26 @@ again (or stop, per that threshold) rather than looping back to `portage wait-fo
 (intra-portage, pinned haiku/low) to compose the blocker report rather than writing it inline —
 keeps this loop's context lean. Then stop.
 
-When **all** PRs report `done`, merge them in dependency order:
+### Human-approval merge gate
+
+Before calling `portage merge` on any PR, check its human-authored approval signal:
+
+```bash
+portage approvals <repo_path> <pr_number>
+```
+
+Exit 0 means approved (an approving review by a human reviewer, or the operator-applied
+`human-approved` label) — proceed to merge. Exit 1 means not yet approved: **hold that PR,
+do not merge it**, and report it as `ready-awaiting-human-approval`. Exit 2 is a loud API
+error — treat it the same as not-approved (hold, don't merge) and surface the error.
+Monitor never merges a PR without a passing `portage approvals` check.
+
+**Monitor never applies the approval signal itself.** The `human-approved` label and the
+approving review are human-applied only — no drain, portage, or dispatched-agent component
+(including this one) may add the label or post the approving review, even to unblock a
+stalled merge.
+
+When **all** PRs report `done` AND pass the approvals check, merge them in dependency order:
 
 ```bash
 portage merge \
@@ -202,7 +221,7 @@ external_tracker = { kind = "...", ... }  # optional
 When you finish (all merged, stopped ready-to-merge, or blocked), return a short summary:
 
 ```
-**Watch result:** merged | ready-to-merge (auto_merge disabled) | blocked after N cycles
+**Watch result:** merged | ready-to-merge (auto_merge disabled) | ready-awaiting-human-approval | blocked after N cycles
 **Group/Slug:** <group>/<slug>
 **PRs:** <urls + final state>
 **Fix cycles run:** <count per PR>
@@ -218,6 +237,13 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
 - Don't dispatch an unverified `green_driver_agent` — confirm its `agents/<name>.md` file exists
   before entering the watch loop. A misconfigured name must surface as the named `BLOCKED` config
   error above, never a silent no-op or a dispatch failure discovered mid-loop.
+- Don't merge a PR that hasn't passed `portage approvals` — a `done` CI/review state is not a
+  substitute for the human-approval gate; hold it as `ready-awaiting-human-approval` instead.
+- Don't apply the `human-approved` label or post an approving review yourself, and don't dispatch
+  another agent to do so — the approval signal is human-applied only, with no exception for
+  unblocking a stalled merge. This is a manual-bypass weakness: automation running under the
+  operator's own GitHub credentials could still self-approve; that residual is accepted as risk
+  within single-operator scope, not something this loop is meant to close.
 - Don't exceed 3 fix cycles per PR without progress — stop and report.
 - Don't merge a PR that isn't `done` — if it's still `review`/`fix_ci`/`rebase`, handle that action first.
 - Don't treat the green-driver agent's verdict as pure fact without applying `receiving-code-review`

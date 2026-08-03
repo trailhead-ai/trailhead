@@ -742,6 +742,62 @@ def _merge_prs(
     return {"merged": merged, "failed": failed, "skipped": skipped}
 
 
+HUMAN_APPROVED_LABEL = "human-approved"
+
+
+def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dict[str, Any]:
+    """Read-only check: does this PR carry a human-authored approval signal?
+
+    Checked in order: an approving review by a `User` (non-bot) reviewer;
+    then the `human-approved` label, current-state-per-timeline, applied by a
+    `User` actor with no `performed_via_github_app` (U2, prover-validated —
+    self-approval via review 422s for the PR's own author, which is why the
+    label path exists for self-authored PRs).
+    """
+    validate_pr_number(pr_number)
+    owner_repo = _get_owner_repo(repo_path, runner)
+    if not owner_repo:
+        raise RuntimeError(f"approval: could not resolve owner/repo for {repo_path}")
+
+    reviews = _gh(
+        ["api", f"repos/{owner_repo}/pulls/{pr_number}/reviews", "--paginate"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if reviews is None:
+        raise RuntimeError(f"approval: could not fetch reviews for PR #{pr_number} in {repo_path}")
+
+    for review in reviews:
+        user = review.get("user") or {}
+        if review.get("state") == "APPROVED" and user.get("type") == "User":
+            return {"approved": True, "source": "review", "actor": user.get("login")}
+
+    timeline = _gh(
+        ["api", f"repos/{owner_repo}/issues/{pr_number}/timeline", "--paginate"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if timeline is None:
+        raise RuntimeError(f"approval: could not fetch timeline for PR #{pr_number} in {repo_path}")
+
+    label_events = [
+        e
+        for e in timeline
+        if e.get("event") in ("labeled", "unlabeled")
+        and (e.get("label") or {}).get("name") == HUMAN_APPROVED_LABEL
+    ]
+    label_events.sort(key=lambda e: e.get("created_at") or "")
+
+    if label_events:
+        last = label_events[-1]
+        if last.get("event") == "labeled":
+            actor = last.get("actor") or {}
+            if actor.get("type") == "User" and last.get("performed_via_github_app") is None:
+                return {"approved": True, "source": "label", "actor": actor.get("login")}
+
+    return {"approved": False, "source": None, "actor": None}
+
+
 # ---------------------------------------------------------------------------
 # prs.json sidecar — ported from release_prs_sidecar.py
 # ---------------------------------------------------------------------------
@@ -845,6 +901,9 @@ class _GitHubPR(PRSurface):
         toml_path: str | None = None,
     ) -> dict[str, Any]:
         return _merge_prs(list(pr_pairs), manifest_path, toml_path, self._runner)
+
+    def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:
+        return _check_approval(repo_path, pr_number, runner=self._runner)
 
 
 class _GitHubCI(CISurface):

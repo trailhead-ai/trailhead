@@ -83,6 +83,20 @@ class PRSurface(ABC):
         """Merge PRs in dependency order with the safety gate."""
 
     @abstractmethod
+    def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:
+        """Answer whether this PR carries a human-authored approval signal.
+
+        Checks two independent signals: an approving review by a `User`
+        (non-bot) reviewer, or — since GitHub 422s self-approval, making the
+        review path impossible for a self-authored PR — the `human-approved`
+        label applied by a `User` actor per the timeline API. Never applies
+        the signal itself; read-only.
+
+        Returns ``{"approved": bool, "source": "review" | "label" | None,
+        "actor": str | None}``.
+        """
+
+    @abstractmethod
     def summary_inputs(self, repo_path: str, pr_number: str) -> dict[str, Any]:
         """Fetch a PR's summarizer inputs (metadata/diff/inline comments).
 

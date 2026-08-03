@@ -46,6 +46,7 @@ class _FakePR:
         }
         self.evaluate_result = {"action": "done", "reason": "clean", "details": {}}
         self.merge_result = {"merged": ["a:1"], "failed": {}, "skipped": {}}
+        self.approval_result = {"approved": True, "source": "review", "actor": "tom"}
         self.sidecar = {"schema_version": 1, "prs": [], "external_tracker": None}
         self.summary_result = {
             "number": 1,
@@ -69,6 +70,10 @@ class _FakePR:
     def merge(self, pr_pairs, manifest_path, *, toml_path=None):
         self.calls.append(("merge", list(pr_pairs), manifest_path, toml_path))
         return self.merge_result
+
+    def approval(self, repo_path, pr_number):
+        self.calls.append(("approval", repo_path, pr_number))
+        return self.approval_result
 
     def summary_inputs(self, repo_path, pr_number):
         self.calls.append(("summary_inputs", repo_path, pr_number))
@@ -180,6 +185,71 @@ class TestCheckStatus:
 
         rc = dispatch.main(["check-status", str(tmp_path), "abc"])
         assert rc == 1
+        out = json.loads(capsys.readouterr().out)
+        assert "must be all digits" in out["error"]
+
+
+# ---------------------------------------------------------------------------
+# approvals
+# ---------------------------------------------------------------------------
+
+
+class TestApprovals:
+    def test_approved_delegates_to_pr_approval_and_exits_0(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+        provider.pr.approval_result = {"approved": True, "source": "review", "actor": "tom"}
+        _install(monkeypatch, provider)
+
+        rc = dispatch.main(["approvals", str(tmp_path), "42"])
+        assert rc == 0
+        assert provider.pr.calls[0] == ("approval", str(tmp_path), "42")
+        out = json.loads(capsys.readouterr().out)
+        assert out["approved"] is True
+
+    def test_not_approved_exits_1(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+        provider.pr.approval_result = {"approved": False, "source": None, "actor": None}
+        _install(monkeypatch, provider)
+
+        rc = dispatch.main(["approvals", str(tmp_path), "42"])
+        assert rc == 1
+        out = json.loads(capsys.readouterr().out)
+        assert out["approved"] is False
+
+    def test_not_a_directory_exits_1(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+        _install(monkeypatch, provider)
+        rc = dispatch.main(["approvals", str(tmp_path / "nope"), "42"])
+        assert rc == 1
+        assert "not a directory" in capsys.readouterr().out
+
+    def test_api_error_exits_2_distinct_from_not_approved(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+
+        def raising_approval(repo_path, pr_number):
+            raise RuntimeError("approval: could not fetch reviews for PR #42 in " + repo_path)
+
+        provider.pr.approval = raising_approval
+        _install(monkeypatch, provider)
+
+        rc = dispatch.main(["approvals", str(tmp_path), "42"])
+        assert rc == 2
+        out = json.loads(capsys.readouterr().out)
+        assert "could not fetch reviews" in out["error"]
+
+    def test_invalid_pr_number_exits_2(self, tmp_path, monkeypatch, capsys):
+        from trailhead.vcs.github import InvalidInputError
+
+        provider = _FakeProvider()
+
+        def raising_approval(repo_path, pr_number):
+            raise InvalidInputError(f"pr_number must be all digits, got: {pr_number!r}")
+
+        provider.pr.approval = raising_approval
+        _install(monkeypatch, provider)
+
+        rc = dispatch.main(["approvals", str(tmp_path), "abc"])
+        assert rc == 2
         out = json.loads(capsys.readouterr().out)
         assert "must be all digits" in out["error"]
 
