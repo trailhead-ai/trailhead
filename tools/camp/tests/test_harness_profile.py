@@ -84,6 +84,16 @@ class TestHarnessConfigValidation:
             )
         assert "nope" in str(exc.value)
 
+    def test_harness_session_id_placeholder_rejected(self, tmp_path):
+        """{session_id} is NOT a substitutable placeholder — camp does not launch the
+        harness, so it never has a session id to fill in. It must fail at load
+        rather than KeyError at substitution time."""
+        from camp.group.config import GroupConfigError
+
+        with pytest.raises(GroupConfigError) as exc:
+            self._load(tmp_path, '[harness]\ncwd = "{session_id}"\n')
+        assert "session_id" in str(exc.value)
+
     def test_harness_inject_stdout_parses(self, tmp_path):
         cfg = self._load(tmp_path, '[harness]\ninject = "stdout"\n')
         assert cfg["harness"]["inject"] == "stdout"

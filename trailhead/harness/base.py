@@ -173,3 +173,35 @@ class Harness(ABC):
     def user_ruleset_status(self, name: str, content: str) -> str:
         """One of ``current`` / ``stale`` / ``missing`` / ``unsupported``."""
         return "unsupported"
+
+    # -- session transcripts --------------------------------------------------
+    #
+    # A *session transcript* is the harness's on-disk record of one agent
+    # session.  Same asymmetry as the user-ruleset trio above: CONCRETE with a
+    # safe default, so a harness with no transcript concept doesn't have to
+    # implement it.  Everything about a harness's transcript LAYOUT (config dir,
+    # directory munging, file extension) lives in that harness's module — the
+    # core only ever receives a resolved path or ``None``.
+    #
+    # The default degrades to ``None`` — "this harness cannot tell you where the
+    # transcript is".  Callers must treat ``None`` as unresolvable and say so;
+    # they must never synthesize a path of their own.
+
+    def session_transcript_path(
+        self, session_id: str, workspace: Path, *, env: dict[str, str] | None = None
+    ) -> Path | None:
+        """Resolve the on-disk transcript for ``session_id``, or ``None``.
+
+        ``workspace`` is the session's START-OF-SESSION working directory (for
+        camp, the workspace root) — harnesses that key their transcript layout on
+        the launch cwd need it, and it must never be inferred from the CALLER's
+        cwd, which has usually moved by capture time.
+
+        Returns ``None`` when the harness has no transcript concept, when the
+        transcript does not exist, or when ``session_id`` is not a usable path
+        component.  Never raises for an absent transcript.
+
+        ``env`` overrides the process environment (hermetic tests, and callers
+        that already carry an injected env); ``None`` means ``os.environ``.
+        """
+        return None

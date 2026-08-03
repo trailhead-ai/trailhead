@@ -70,6 +70,15 @@ _RULES_SUBDIR = "rules"
 
 _TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
+#: Subdir under the Claude dir holding one directory of session transcripts per
+#: project (``~/.claude/projects/<munged-cwd>/<session-id>.jsonl``).
+_PROJECTS_SUBDIR = "projects"
+
+#: A session id must be a single, inert path COMPONENT before it is joined onto
+#: the transcripts root.  Anything else (``..``, a separator, an empty string)
+#: would escape the projects dir, so it resolves to "unknown session" instead.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "lore": (
         "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall."
@@ -103,10 +112,13 @@ def _claude_dir(env: dict[str, str]) -> Path:
     """Resolve Claude Code's config dir (``~/.claude``) from *env*.
 
     Honors the ``TRAILHEAD_CLAUDE_DIR`` override (tests redirect it here), then
-    ``HOME``/``USERPROFILE``, falling back to the real home.  Single source of
-    truth for both ``detect`` and the user-ruleset methods.
+    ``CLAUDE_CONFIG_DIR`` (Claude Code's OWN relocation env var — when a user
+    sets it, the config dir really has moved, so every path derived here must
+    follow), then ``HOME``/``USERPROFILE``, falling back to the real home.
+    Single source of truth for ``detect``, the user-ruleset methods, and the
+    session-transcript lookup.
     """
-    override = env.get("TRAILHEAD_CLAUDE_DIR")
+    override = env.get("TRAILHEAD_CLAUDE_DIR") or env.get("CLAUDE_CONFIG_DIR")
     if override:
         return Path(override)
     home = env.get("HOME") or env.get("USERPROFILE")
@@ -344,3 +356,33 @@ class ClaudeCodeHarness(Harness):
         if not target.is_file():
             return "missing"
         return "current" if target.read_text() == content else "stale"
+
+    # -- session transcripts --------------------------------------------------
+    #
+    # Claude Code writes one JSONL transcript per session at
+    # ``<claude-dir>/projects/<munged>/<session-id>.jsonl``, where ``<munged>`` is
+    # the session's start-of-session working directory with BOTH ``/`` and ``.``
+    # replaced by ``-`` (so ``/Users/x/.local`` → ``-Users-x--local``: the ``/.``
+    # pair yields a DOUBLE dash).  That layout is Claude-Code-specific knowledge
+    # and lives here only (Axiom 1); callers receive a resolved path or None.
+
+    def session_transcript_path(
+        self, session_id: str, workspace: Path, *, env: dict[str, str] | None = None
+    ) -> Path | None:
+        """Resolve the transcript for ``session_id`` under ``workspace``, or None.
+
+        ``workspace`` must be the session's START cwd — the munge key is baked in
+        when the session starts, so a caller that has since changed directory must
+        still pass the launch dir.
+
+        Returns None when the session id is not a usable path component or the
+        transcript file does not exist.  Existence is checked rather than assumed:
+        transcripts are subject to Claude Code's retention cleanup, and a path to
+        a file that is gone is worse than an honest "unresolvable".
+        """
+        if not isinstance(session_id, str) or not _SESSION_ID_RE.match(session_id):
+            return None
+        _env = env if env is not None else dict(os.environ)
+        munged = str(Path(workspace).resolve()).replace("/", "-").replace(".", "-")
+        candidate = _claude_dir(_env) / _PROJECTS_SUBDIR / munged / f"{session_id}.jsonl"
+        return candidate if candidate.is_file() else None

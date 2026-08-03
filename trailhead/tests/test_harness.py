@@ -282,3 +282,83 @@ class TestClaudeCodeUserRuleset:
         h.install_user_ruleset("trailhead-lore", content, env=env)
         (claude_dir / "rules" / "trailhead-lore.md").unlink()
         assert h.user_ruleset_status("trailhead-lore", content, env=env) == "missing"
+
+
+class TestSessionTranscriptPathBaseDefault:
+    """The transcript-path seam is CONCRETE with a degrading default: a harness
+    with no session-transcript concept answers None rather than raising."""
+
+    def test_returns_none(self, tmp_path):
+        assert _BareHarness().session_transcript_path("abc123", tmp_path) is None
+
+
+class TestClaudeCodeSessionTranscriptPath:
+    """Claude Code stores transcripts at <config_dir>/projects/<munged-cwd>/<id>.jsonl,
+    where <munged-cwd> is the session's start cwd with BOTH '/' and '.' replaced by '-'."""
+
+    def _seed(self, claude_dir, workspace, session_id):
+        munged = str(workspace).replace("/", "-").replace(".", "-")
+        d = claude_dir / "projects" / munged
+        d.mkdir(parents=True)
+        t = d / f"{session_id}.jsonl"
+        t.write_text("{}\n")
+        return t
+
+    def test_resolves_existing_transcript(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "state" / "camp" / "g" / "worktrees" / "slug"
+        ws.mkdir(parents=True)
+        expected = self._seed(claude_dir, ws, "sess-1")
+        got = ClaudeCodeHarness().session_transcript_path(
+            "sess-1", ws, env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+        )
+        assert got == expected
+
+    def test_munges_dot_and_slash_to_dash(self, tmp_path):
+        """A '/.'-containing path munges to a DOUBLE dash — both characters map."""
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / ".local" / "state"
+        ws.mkdir(parents=True)
+        expected = self._seed(claude_dir, ws, "sess-2")
+        assert "--local" in expected.parent.name
+        got = ClaudeCodeHarness().session_transcript_path(
+            "sess-2", ws, env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+        )
+        assert got == expected
+
+    def test_none_when_transcript_absent(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        assert (
+            ClaudeCodeHarness().session_transcript_path(
+                "missing-id", ws, env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+            )
+            is None
+        )
+
+    def test_honors_claude_config_dir_env(self, tmp_path):
+        """Claude Code's own CLAUDE_CONFIG_DIR relocates the whole config dir."""
+        claude_dir = tmp_path / "elsewhere"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        expected = self._seed(claude_dir, ws, "sess-3")
+        got = ClaudeCodeHarness().session_transcript_path(
+            "sess-3", ws, env={"CLAUDE_CONFIG_DIR": str(claude_dir), "HOME": str(tmp_path)}
+        )
+        assert got == expected
+
+    def test_rejects_traversal_in_session_id(self, tmp_path):
+        """A session id is a path COMPONENT; anything else must not reach the filesystem."""
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (claude_dir / "projects").mkdir(parents=True)
+        for bad in ("../escape", "a/b", "", "."):
+            assert (
+                ClaudeCodeHarness().session_transcript_path(
+                    bad, ws, env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+                )
+                is None
+            )

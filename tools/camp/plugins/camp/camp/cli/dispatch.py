@@ -318,6 +318,10 @@ def _dispatch_group_command(
     if cmd == "pwd":
         _cmd_pwd_group_cli(rest, group, group_env)
         return
+    if cmd == "bookmark":
+        from ..bookmark.capture import cmd_bookmark
+        cmd_bookmark(rest, group, group_env)
+        return
 
     # Bare slug removed: any non-RESERVED token that isn't a known verb → error
     # (shared message, defined in verb_taxonomy).

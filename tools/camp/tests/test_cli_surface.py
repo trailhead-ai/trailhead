@@ -390,3 +390,32 @@ def test_group_path_rm_alias_matches_remove(stub_group_env: dict[str, str]) -> N
         f"rm: {rm_result.stderr}\nremove: {remove_result.stderr}"
     )
     assert "bare slug dispatch is no longer supported" not in (rm_result.stdout + rm_result.stderr)
+
+
+# camp bookmark — a group-aware verb; reaches its handler (never the bare-slug
+# error), and without a resolved group emits the standard needs-group message.
+
+
+def test_group_path_bookmark_reaches_its_handler(stub_group_env: dict[str, str]) -> None:
+    """camp bookmark dispatches to the capture handler, which refuses outside a
+    workspace — NOT to the bare-slug error."""
+    result = _run_group(["bookmark"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "bare slug dispatch is no longer supported" not in combined
+    assert "camp bookmark:" in combined
+
+
+def test_bookmark_without_a_group_says_so(tmp_path: Path) -> None:
+    """With no group resolvable, camp bookmark emits the needs-group error."""
+    result = _run(["bookmark"], env={"CAMP_CONFIG_DIR": str(tmp_path / "empty")})
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "group" in combined.lower()
+    assert "bare slug dispatch is no longer supported" not in combined
+
+
+def test_bookmark_is_listed_in_help() -> None:
+    """The verb is discoverable: camp help names it."""
+    result = _run(["help"])
+    assert "camp bookmark" in result.stdout

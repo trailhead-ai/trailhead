@@ -54,7 +54,7 @@ _TAXONOMY_RESERVED = (
     set(VERB_ALIASES)  # alias keys: rm, ls
     | set(LEGACY_REDIRECTS)  # legacy keys: open, break, init, ai, enter
     | set(DISABLED_VERBS)  # restock, sweep, code, fire
-    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup
+    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup, bookmark
 )
 
 _STATIC_RESERVED = frozenset(
@@ -420,6 +420,8 @@ def cmd_help(_args: list[str]) -> None:
         "  camp sync [--force]               Fast-forward canonical siblings to origin/main\n"
         "  camp rebase [--onto <branch>]     Rebase worktree branches onto origin/main\n"
         "  camp foreach [--fail-fast] <cmd>  Run a command in each member worktree\n"
+        "  camp bookmark [--ref <ref>] [--note <text>]\n"
+        "                                    Bookmark this workspace's harness session\n"
         "\n"
         "Health:\n"
         "  camp doctor [--json]              Read-only workspace health check\n"
