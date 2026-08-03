@@ -4,10 +4,15 @@ trailhead does not edit the shell rc; it builds a shim dir and `shellenv`
 prints the export lines the user adds to their profile.
 """
 
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+_FISH_BIN = shutil.which("fish")
+_HAS_FISH = _FISH_BIN is not None
 
 from trailhead.pathint import (
     ShimDenylistError,
@@ -148,17 +153,29 @@ class TestCampWrapperPosix:
 
     def test_cds_only_on_the_intercepted_verbs(self, out):
         # new enters a workspace; remove/rm (both spellings — aliasing happens
-        # inside the CLI, the wrapper sees the raw token) exit one.
+        # inside the CLI, the wrapper sees the raw token) exit one; resume is a
+        # separate two-line-contract branch below.
         assert 'case "$1" in' in out
         assert "new|remove|rm)" in out
-        # Exactly one cd — guarded inside the intercepted branch, not the passthrough.
-        assert out.count("cd -- ") == 1
+        # One cd per intercepted branch (new|remove|rm, resume) — none in passthrough.
+        assert out.count("cd -- ") == 2
 
     def test_cd_is_quote_safe(self, out):
         assert 'cd -- "$p"' in out
 
     def test_exports_marker_only_around_new(self, out):
         assert "CAMP_SHELL_INTEGRATION=1 command camp" in out
+
+    def test_resume_is_intercepted_and_execs_line_two(self, out):
+        assert "resume)" in out
+        assert "eval " in out
+
+    def test_exports_marker_around_resume(self, out):
+        # The marker export must cover the resume invocation too, not just new.
+        lines = out.splitlines()
+        resume_idx = next(i for i, line in enumerate(lines) if "resume)" in line)
+        block = "\n".join(lines[resume_idx : resume_idx + 6])
+        assert "CAMP_SHELL_INTEGRATION=1 command camp" in block
 
     def test_does_not_spawn_a_subshell_function_body(self, out):
         # A `camp() ( … )` body would run the cd in a subshell and never reach the
@@ -187,7 +204,8 @@ class TestCampWrapperFish:
     def test_cds_only_on_the_intercepted_verbs(self, out):
         assert 'switch "$argv[1]"' in out
         assert "case new remove rm" in out
-        assert out.count("cd -- ") == 1
+        # One cd per intercepted branch (new/remove/rm, resume) — none in passthrough.
+        assert out.count("cd -- ") == 2
 
     def test_cd_is_quote_safe(self, out):
         # fish cmd-sub splits on newlines, not spaces, so a one-line path is a
@@ -199,6 +217,19 @@ class TestCampWrapperFish:
         # `command`); function-scoped `set -lx` is the validated form.
         assert "set -lx CAMP_SHELL_INTEGRATION 1" in out
         assert "env CAMP_SHELL_INTEGRATION" not in out
+
+    def test_resume_is_intercepted_and_runs_line_two_via_sh(self, out):
+        # NEVER fish-eval line 2 — hand it to sh -c so POSIX-shlex quoting stays
+        # authoritative and fish-active syntax (`(...)`, `$var`) is never
+        # reinterpreted.
+        assert "case resume" in out
+        assert "sh -c " in out
+
+    def test_exports_marker_around_resume(self, out):
+        lines = out.splitlines()
+        resume_idx = next(i for i, line in enumerate(lines) if "case resume" in line)
+        block = "\n".join(lines[resume_idx : resume_idx + 6])
+        assert "set -lx CAMP_SHELL_INTEGRATION 1" in block
 
     def test_keeps_the_existing_path_lines(self, out):
         assert 'set -gx TRAILHEAD_ROOT "/repo"' in out
@@ -362,3 +393,210 @@ class TestCampWrapperBehavior:
         assert "ran: list" in proc.stdout
         # No cd happened — still in the starting dir.
         assert proc.stdout.strip().splitlines()[-1] == str(start)
+
+
+# ---------------------------------------------------------------------------
+# camp() cd-wrapper — resume (two-line machine contract)
+# ---------------------------------------------------------------------------
+
+
+def _fake_camp_resume_bash(target: Path, argv_line: str) -> str:
+    return (
+        "#!/usr/bin/env bash\n"
+        'if [ "$1" = "resume" ]; then\n'
+        f'  printf "%s\\n" "{target}"\n'
+        f'  printf "%s\\n" {shlex.quote(argv_line)}\n'
+        "fi\n"
+    )
+
+
+class TestCampWrapperResumeBehaviorBash:
+    """Exercise the emitted bash resume branch end-to-end."""
+
+    def test_resume_cds_and_invokes_the_argv_line(self, tmp_path):
+        target = tmp_path / "work space"
+        target.mkdir()
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        marker = tmp_path / "ran"
+        fake_camp.write_text(_fake_camp_resume_bash(target, f"touch {shlex.quote(str(marker))}"))
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = f"{wrapper}\nexport PATH=\"{fakebin}:$PATH\"\ncamp resume alpha\npwd\n"
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip().splitlines()[-1] == str(target)
+        assert marker.exists()
+
+    def test_resume_nonzero_exit_propagates_without_cd_or_exec(self, tmp_path):
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text("#!/usr/bin/env bash\nexit 4\n")
+        fake_camp.chmod(0o755)
+
+        start = tmp_path / "start"
+        start.mkdir()
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = (
+            f"{wrapper}\n"
+            f'export PATH="{fakebin}:$PATH"\n'
+            "camp resume alpha\n"
+            'printf "rc=%s\\n" "$?"\n'
+            "pwd\n"
+        )
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(start),
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        lines = proc.stdout.strip().splitlines()
+        assert "rc=4" in lines
+        assert lines[-1] == str(start)
+
+    def test_resume_exports_marker(self, tmp_path):
+        # camp's stdout is captured by the wrapper's $(...), so the marker check
+        # writes to a side file instead of stdout.
+        marker_file = tmp_path / "marker.txt"
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text(
+            "#!/usr/bin/env bash\n"
+            f'printf "%s" "$CAMP_SHELL_INTEGRATION" > {shlex.quote(str(marker_file))}\n'
+            "exit 1\n"
+        )
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nexport PATH="{fakebin}:$PATH"\ncamp resume alpha\n'
+        subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert marker_file.read_text() == "1"
+
+    def test_metacharacter_argv_line_executes_as_literal_arguments(self, tmp_path):
+        # eval on line 2 is safe because line 2 is POSIX-shlex-quoted: metachars
+        # inside a quoted token stay literal through eval's single parse pass.
+        target = tmp_path / "ws"
+        target.mkdir()
+        marker = tmp_path / "out.txt"
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        payload = shlex.join(
+            ["printf", "%s", "literal: $(whoami) `id` $HOME ${PATH}"]
+        ) + f" > {shlex.quote(str(marker))}"
+        fake_camp.write_text(_fake_camp_resume_bash(target, payload))
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nexport PATH="{fakebin}:$PATH"\ncamp resume alpha\n'
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert marker.read_text() == "literal: $(whoami) `id` $HOME ${PATH}"
+
+
+@pytest.mark.skipif(not _HAS_FISH, reason="fish not installed")
+class TestCampWrapperResumeBehaviorFish:
+    """Exercise the emitted fish resume branch end-to-end."""
+
+    def test_resume_cds_and_invokes_the_argv_line(self, tmp_path):
+        target = tmp_path / "work space"
+        target.mkdir()
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        marker = tmp_path / "ran"
+        fake_camp.write_text(_fake_camp_resume_bash(target, f"touch {shlex.quote(str(marker))}"))
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="fish", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nset -gx PATH "{fakebin}" $PATH\ncamp resume alpha\npwd\n'
+        proc = subprocess.run(
+            [_FISH_BIN, "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip().splitlines()[-1] == str(target)
+        assert marker.exists()
+
+    def test_resume_nonzero_exit_propagates_without_cd_or_exec(self, tmp_path):
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text("#!/usr/bin/env bash\nexit 4\n")
+        fake_camp.chmod(0o755)
+
+        start = tmp_path / "start"
+        start.mkdir()
+        wrapper = shellenv_lines(shell="fish", env=_env(tmp_path), trailhead_root="/repo")
+        script = (
+            f"{wrapper}\n"
+            f'set -gx PATH "{fakebin}" $PATH\n'
+            "camp resume alpha\n"
+            'printf "rc=%s\\n" $status\n'
+            "pwd\n"
+        )
+        proc = subprocess.run(
+            [_FISH_BIN, "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(start),
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        lines = proc.stdout.strip().splitlines()
+        assert "rc=4" in lines
+        assert lines[-1] == str(start)
+
+    def test_metacharacter_argv_line_executes_as_literal_arguments(self, tmp_path):
+        # fish MUST hand line 2 to `sh -c`, never eval it natively — fish-active
+        # syntax like `(...)` and `$var` inside the quoted token would otherwise
+        # be reinterpreted before sh ever sees it.
+        target = tmp_path / "ws"
+        target.mkdir()
+        marker = tmp_path / "out.txt"
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        payload = shlex.join(
+            ["printf", "%s", "literal: $(whoami) `id` $HOME (echo hi)"]
+        ) + f" > {shlex.quote(str(marker))}"
+        fake_camp.write_text(_fake_camp_resume_bash(target, payload))
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="fish", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nset -gx PATH "{fakebin}" $PATH\ncamp resume alpha\n'
+        proc = subprocess.run(
+            [_FISH_BIN, "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert marker.read_text() == "literal: $(whoami) `id` $HOME (echo hi)"
