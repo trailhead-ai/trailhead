@@ -241,7 +241,7 @@ class TestListJson:
     Covers the group --json path and the convergence (both entry points emit
     the SAME key set)."""
 
-    _FIXED_KEYS = {"slug", "branch", "workspace_path", "group"}
+    _FIXED_KEYS = {"slug", "branch", "workspace_path", "group", "bookmark_count"}
 
     def test_json_carries_workspace_path(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
@@ -293,6 +293,153 @@ class TestListJson:
         rows = json.loads(capsys.readouterr().out)
         assert {frozenset(r) for r in rows} == {frozenset(self._FIXED_KEYS)}
         assert rows[0]["group"] == "grp" and rows[1]["group"] is None
+
+
+class TestListBookmarkCount:
+    """`camp list` gains a bookmark_count field: --json key + human suffix,
+    omitted from the human line at N=0."""
+
+    def _seed_bookmark(self, group_name: str, slug: str, ref: str, *, env: dict) -> None:
+        from camp.bookmark import store as bookmark_store
+
+        bookmark_store.upsert(
+            {
+                "ref": ref,
+                "group": group_name,
+                "slug": slug,
+                "session_id": "sess-1",
+                "transcript_path": "/tmp/transcript.jsonl",
+                "note": "",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+            env=env,
+        )
+
+    def test_json_bookmark_count_zero_when_no_bookmark(self, camp_cli, tmp_path, capsys):
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("listgrp", "feat-x", env=env)
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env)
+
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["bookmark_count"] == 0
+
+    def test_json_bookmark_count_one_when_bookmarked(self, camp_cli, tmp_path, capsys):
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("listgrp", "feat-x", env=env)
+        self._seed_bookmark("listgrp", "feat-x", "feat-x", env=env)
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env)
+
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["bookmark_count"] == 1
+
+    def test_human_line_bare_when_no_bookmark(self, camp_cli, tmp_path, capsys):
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        ws = _seed_manifest("listgrp", "feat-x", env=env)
+
+        camp_cli._cmd_ls_group_cli([], group, env)
+
+        out = capsys.readouterr().out.strip()
+        assert out == f"feat-x {ws}", f"expected bare line at N=0, got {out!r}"
+
+    def test_human_line_has_suffix_when_bookmarked(self, camp_cli, tmp_path, capsys):
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        ws = _seed_manifest("listgrp", "feat-x", env=env)
+        self._seed_bookmark("listgrp", "feat-x", "feat-x", env=env)
+
+        camp_cli._cmd_ls_group_cli([], group, env)
+
+        out = capsys.readouterr().out.strip()
+        assert out == f"feat-x {ws} [1 bookmarks]", f"got {out!r}"
+
+    def test_cmd_ls_group_entry_carries_bookmark_count(self, tmp_path):
+        from camp.provision.lifecycle import cmd_ls_group
+
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("listgrp", "feat-x", env=env)
+        self._seed_bookmark("listgrp", "feat-x", "feat-x", env=env)
+
+        entries = cmd_ls_group(group, env=env)
+
+        assert entries[0]["bookmark_count"] == 1
+
+    def test_spine_cmd_ls_json_bookmark_count_zero_by_default(self, tmp_path, monkeypatch, capsys):
+        from camp import spine
+
+        workspace_root = tmp_path / "code"
+        wt = workspace_root / "trailhead" / ".claude" / "worktrees" / "feat-y"
+        wt.mkdir(parents=True)
+        (wt / ".workspace-manifest.json").write_text(
+            json.dumps({"name": "feat-y", "branch": "worktree-feat-y"})
+        )
+        state_dir = tmp_path / "state"
+        monkeypatch.setenv("WORKSPACE_ROOT", str(workspace_root))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+
+        spine.cmd_ls(["--json"])
+
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["bookmark_count"] == 0
+
+    def test_spine_cmd_ls_human_line_bare_at_n_zero(self, tmp_path, monkeypatch, capsys):
+        from camp import spine
+
+        workspace_root = tmp_path / "code"
+        wt = workspace_root / "trailhead" / ".claude" / "worktrees" / "feat-y"
+        wt.mkdir(parents=True)
+        (wt / ".workspace-manifest.json").write_text(
+            json.dumps({"name": "feat-y", "branch": "worktree-feat-y"})
+        )
+        state_dir = tmp_path / "state"
+        monkeypatch.setenv("WORKSPACE_ROOT", str(workspace_root))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+
+        spine.cmd_ls([])
+
+        out = capsys.readouterr().out.strip()
+        assert out == f"feat-y {wt}", f"expected bare line at N=0, got {out!r}"
+
+    def test_spine_cmd_ls_json_bookmark_count_one_when_bookmarked(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from camp import spine
+        from camp.bookmark import store as bookmark_store
+
+        workspace_root = tmp_path / "code"
+        wt = workspace_root / "trailhead" / ".claude" / "worktrees" / "feat-y"
+        wt.mkdir(parents=True)
+        (wt / ".workspace-manifest.json").write_text(
+            json.dumps({"name": "feat-y", "branch": "worktree-feat-y"})
+        )
+        state_dir = tmp_path / "state"
+        monkeypatch.setenv("WORKSPACE_ROOT", str(workspace_root))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        env = {"CAMP_STATE_DIR": str(state_dir)}
+        bookmark_store.upsert(
+            {
+                "ref": "feat-y",
+                "group": None,
+                "slug": "feat-y",
+                "session_id": "sess-1",
+                "transcript_path": "/tmp/transcript.jsonl",
+                "note": "",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+            env=env,
+        )
+
+        spine.cmd_ls(["--json"])
+
+        rows = json.loads(capsys.readouterr().out)
+        assert rows[0]["bookmark_count"] == 1
 
 
 class TestListEmpty:

@@ -382,7 +382,7 @@ def cmd_ls(args: list[str]) -> None:
     surface is identical regardless of cwd. `group` is None here (the
     standalone registry is not group-scoped).
     """
-    from .provision.lifecycle import render_workspace_list
+    from .provision.lifecycle import _bookmark_count, render_workspace_list
 
     as_json = "--json" in args
     workspace_root = _workspace_root()
@@ -392,6 +392,7 @@ def cmd_ls(args: list[str]) -> None:
             "branch": manifest.get("branch", ""),
             "workspace_path": str(wt_path),
             "group": None,
+            "bookmark_count": _bookmark_count(None, manifest.get("name", wt_path.name), env=None),
         }
         for wt_path, manifest in _list_manifests(workspace_root)
     ]
