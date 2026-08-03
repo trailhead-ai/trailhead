@@ -69,6 +69,7 @@ import subprocess
 from typing import Any
 
 from ..sweep.queue import QueueDeriveError, Runner, run_lore
+from .report import DRAIN_OUTCOME_TOKENS, parse_drain_outcome
 
 __all__ = [
     "QueueDeriveError",
@@ -94,17 +95,6 @@ _RECORD_KIND_PREFIXES = (
 _VAULT_PATH_MARKER = "/vaults/"
 
 _SLUG_INVALID_RE = re.compile(r"[^a-z0-9-]+")
-
-#: The drain outcome grammar. Shared with the sibling
-#: `ranger-drain-report-and-outcome-contract` slice, which extends this into
-#: full report bucket writing (`PUSHED` splits into merged / in-flight /
-#: awaiting-approval / monitor-timeout there); this slice defines the
-#: grammar and its validation surface so `drain record` can enforce it now.
-#: `PUSHED <branch> <sha> <diffstat>` | `BLOCKED <reason>` | `FAILED
-#: <reason>` | `SKIPPED <reason>` — every token takes a mandatory argument.
-DRAIN_OUTCOME_TOKENS = frozenset({"PUSHED", "BLOCKED", "FAILED", "SKIPPED"})
-_MAX_OUTCOME_ARG_CHARS = 200
-
 
 def _default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
     """Production runner: subprocess.run with shell=False, output captured as text.
@@ -238,24 +228,6 @@ def _read_task_record(name: str, *, vault: str, runner: Runner | None) -> tuple[
     body = payload.get("body", "")
     labels = (payload.get("sidecar") or {}).get("labels") or {}
     return body, labels
-
-
-def parse_drain_outcome(line: str) -> tuple[str | None, str]:
-    """Split a drain outcome line into `(token, argument)`.
-
-    Grammar: `PUSHED <branch> <sha> <diffstat>` | `BLOCKED <reason>` |
-    `FAILED <reason>` | `SKIPPED <reason>`. Returns `(None, <line>)` when the
-    first line is not one of the four tokens, or the token's mandatory
-    argument is missing — the caller (`drain record`) treats that as a
-    validation failure, mirroring `ranger.sweep.sweep.parse_outcome`'s shape
-    for the refine grammar.
-    """
-    first_line = line.strip().splitlines()[0].strip() if line.strip() else ""
-    token, _, argument = first_line.partition(" ")
-    argument = argument.strip()
-    if token not in DRAIN_OUTCOME_TOKENS or not argument:
-        return None, first_line[:_MAX_OUTCOME_ARG_CHARS]
-    return token, argument
 
 
 def derive_drain_queue(vault: str, *, runner: Runner | None = None) -> list[dict]:

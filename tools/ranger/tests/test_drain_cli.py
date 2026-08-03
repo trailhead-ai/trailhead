@@ -479,3 +479,61 @@ def test_finish_refuses_a_mismatched_token(tmp_path):
 
     assert res.returncode != 0
     assert drain.lock_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# record/finish wired to the report substrate
+# ---------------------------------------------------------------------------
+
+
+def test_start_seeds_a_report_and_carries_its_path(tmp_path):
+    drain = _drain(tmp_path)
+
+    res = drain.start()
+
+    payload = json.loads(res.stdout)
+    report_path = Path(payload["report_path"])
+    assert report_path.exists()
+    assert "**Group:** testgroup" in report_path.read_text()
+
+
+def test_record_with_report_appends_the_matching_bucket_line(tmp_path):
+    drain = _drain(tmp_path)
+    start_res = drain.start()
+    report_path = json.loads(start_res.stdout)["report_path"]
+
+    res = drain.run(
+        "drain", "record", "--report", report_path,
+        "--task", "task/t1", "--outcome", "BLOCKED needs a human",
+    )
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report_path).read_text()
+    assert "task/t1" in text
+    assert "needs a human" in text
+
+
+def test_record_without_report_only_validates(tmp_path):
+    drain = _drain(tmp_path)
+
+    res = drain.run("drain", "record", "--task", "task/t1", "--outcome", "SKIPPED not buildable")
+
+    assert res.returncode == 0, res.stderr
+
+
+def test_finish_with_report_writes_the_footer_and_still_standing_workspaces(tmp_path):
+    drain = _drain(tmp_path)
+    start_res = drain.start()
+    payload = json.loads(start_res.stdout)
+    report_path = payload["report_path"]
+    token = payload["lock_token"]
+
+    res = drain.run(
+        "drain", "finish", "--report", report_path, "--still-standing", "ws-a",
+        "--vault", _VAULT, "--token", token,
+    )
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report_path).read_text()
+    assert "Report written to" in text
+    assert "camp remove ws-a" in text

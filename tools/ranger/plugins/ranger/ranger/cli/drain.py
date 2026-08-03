@@ -4,23 +4,21 @@ Mirrors `ranger sweep`'s split (see `cli/sweep.py`'s module docstring for the
 full rationale): a coordinating loop drives `start` once, `derive` between
 tasks, `record` once per dispatched task, and `finish` once — each a
 separate process, so a coordinator that dies between two of them leaves
-recoverable, on-disk state rather than nothing. The lock and report
-substrate is reused verbatim from the sweep — `drain` and `sweep` contend on
-the identical `state_dir("ranger")/locks/<vault>.lock` path, so an operator
-cannot run a refine sweep and an execute drain against the same vault at
-once.
+recoverable, on-disk state rather than nothing. The lock substrate is reused
+verbatim from the sweep — `drain` and `sweep` contend on the identical
+`state_dir("ranger")/locks/<vault>.lock` path, so an operator cannot run a
+refine sweep and an execute drain against the same vault at once. The report
+substrate is `ranger.drain.report` — a sibling of `ranger.sweep.report`, not
+the same module, because a drain's `pushed` bucket carries the in-flight
+monitor cap sweep's buckets have no analog for (see that module's docstring).
 
-**This slice's scope.** `start`/`derive` are fully wired: preflight, lock,
-and queue derivation. `record` validates the drain outcome grammar and the
-task id's shell-safety — the sibling `ranger-drain-report-and-outcome-contract`
-slice adds the report substrate `record` writes into (bucket rendering, the
-outcomes directory, the in-flight cap) and `finish`'s report footer; until
-then, `record` only validates and `finish` only releases the lock.
-
-**No ``--vault`` election override**, matching `ranger sweep`: the group and
-elected vault are both read from cwd (`ranger.drain.preflight.run_preflight`),
-so a flag naming a different vault could only relabel the report while the
-drain kept touching cwd's vault.
+`start` seeds the report (so a drain's report exists from the same moment
+its lock does, like a sweep's); `record` validates the drain outcome grammar
+and, for a task that was actually dispatched (as opposed to never reaching
+one, which `finish`'s loop caller reports as `dropped` directly through
+`ranger.drain.report.append_dropped`), appends the matching bucket line;
+`finish` writes the report footer (still-standing workspaces + the report's
+own path) before releasing the lock.
 """
 
 from __future__ import annotations
@@ -61,7 +59,11 @@ def add_drain_subparser(sub) -> None:
     p_derive.add_argument("--json", action="store_true", help="Emit the queue as a JSON array")
 
     p_record = p_drain_sub.add_parser(
-        "record", help="Validate one task's outcome against the drain outcome grammar"
+        "record", help="Validate and append one task's outcome to the drain report"
+    )
+    p_record.add_argument(
+        "--report", metavar="PATH",
+        help="Report to append to; when omitted, the outcome is only validated (not persisted)",
     )
     p_record.add_argument("--task", required=True, metavar="ID", help="Task record id")
     p_record.add_argument(
@@ -69,7 +71,15 @@ def add_drain_subparser(sub) -> None:
         help="The dispatched agent's one-line drain outcome",
     )
 
-    p_finish = p_drain_sub.add_parser("finish", help="Release the vault lock")
+    p_finish = p_drain_sub.add_parser("finish", help="Write the report footer, release the vault lock")
+    p_finish.add_argument(
+        "--report", metavar="PATH",
+        help="Report to finish; when omitted, only the lock is released",
+    )
+    p_finish.add_argument(
+        "--still-standing", metavar="SLUG", action="append", default=[],
+        help="An unresolved ephemeral camp workspace slug (repeatable)",
+    )
     p_finish.add_argument("--vault", required=True, metavar="NAME", help="The locked vault")
     p_finish.add_argument(
         "--token", required=True, metavar="TOKEN",
@@ -114,6 +124,7 @@ def print_drain_queue(entries: list[dict], *, as_json: bool) -> None:
 def _cmd_drain_start(args) -> int:
     from ..drain import preflight as drain_preflight
     from ..drain import queue as drain_queue_mod
+    from ..drain import report as drain_report_mod
     from ..sweep import lock as lock_mod
 
     try:
@@ -132,9 +143,14 @@ def _cmd_drain_start(args) -> int:
     except lock_mod.LockError as exc:
         return _fail(str(exc))
 
+    # From here the lock is held, so every failure must release it — a drain
+    # that never started must not leave its vault locked against the retry.
     try:
         entries = drain_queue_mod.derive_drain_queue(vault)
-    except drain_queue_mod.QueueDeriveError as exc:
+        report_path = drain_report_mod.start(
+            result["group"], vault, len(entries), degraded=result["degraded"],
+        )
+    except (drain_queue_mod.QueueDeriveError, drain_report_mod.ReportError) as exc:
         lock_mod.release(vault, token=token)
         return _fail(str(exc))
 
@@ -147,11 +163,14 @@ def _cmd_drain_start(args) -> int:
                 "procedure_path": str(result["procedure_path"]),
                 "templates_root": str(result["templates_root"]),
                 "degraded": result["degraded"],
+                "report_path": str(report_path),
+                "outcomes_dir": str(drain_report_mod.outcomes_dir(report_path)),
                 "lock_token": token,
                 "queue": entries,
             }
         )
     )
+    print(f"ranger drain: report at {report_path}", file=sys.stderr)
     return 0
 
 
@@ -173,9 +192,10 @@ def _cmd_drain_derive(args) -> int:
 
 def _cmd_drain_record(args) -> int:
     from ..drain import queue as drain_queue_mod
+    from ..drain import report as drain_report_mod
 
     try:
-        _record_id(args.task)
+        task_id = _record_id(args.task)
     except ValueError as exc:
         return _fail(str(exc))
 
@@ -186,17 +206,36 @@ def _cmd_drain_record(args) -> int:
             f"({'|'.join(sorted(drain_queue_mod.DRAIN_OUTCOME_TOKENS))} <argument>)"
         )
 
-    # Persistence into a durable report is the sibling
-    # `ranger-drain-report-and-outcome-contract` slice's job — this verb's
-    # scope in this slice is the grammar validation above, which is what
-    # lets the loop trust a dispatched agent's outcome before that report
-    # substrate exists to hold it.
-    print(json.dumps({"task": _record_id(args.task), "token": token, "argument": argument}))
+    if args.report:
+        try:
+            report_path = Path(args.report)
+            if token == "BLOCKED":
+                drain_report_mod.append_blocked(report_path, task_id, argument)
+            elif token == "FAILED":
+                drain_report_mod.append_failed(report_path, task_id, argument)
+            elif token == "SKIPPED":
+                drain_report_mod.append_skipped(report_path, task_id, argument)
+            # PUSHED is recorded via `ranger.drain.report.mark_in_flight`
+            # once the loop hands the task to portage's monitor — this verb
+            # only validates a `PUSHED` outcome's grammar, since the report
+            # line needs the monitor cap bookkeeping `record` alone has no
+            # branch/workspace context to supply.
+        except drain_report_mod.ReportError as exc:
+            return _fail(str(exc))
+
+    print(json.dumps({"task": task_id, "token": token, "argument": argument}))
     return 0
 
 
 def _cmd_drain_finish(args) -> int:
+    from ..drain import report as drain_report_mod
     from ..sweep import lock as lock_mod
+
+    if args.report:
+        try:
+            drain_report_mod.finish(Path(args.report), still_standing=args.still_standing)
+        except drain_report_mod.ReportError as exc:
+            return _fail(str(exc))
 
     try:
         lock_mod.release(args.vault, token=args.token)
