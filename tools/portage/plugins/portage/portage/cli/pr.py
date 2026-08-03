@@ -134,8 +134,8 @@ def _add_merge(sub) -> None:
     p.add_argument(
         "pairs",
         nargs="*",
-        metavar="path:pr_number",
-        help="One or more repo-path:pr-number[:member_name] pairs.",
+        metavar="path:pr_number:member_name",
+        help="One or more repo-path:pr-number:member_name pairs.",
     )
     p.set_defaults(func=cmd_merge)
 
@@ -148,8 +148,15 @@ def cmd_merge(args: argparse.Namespace) -> int:
         except PairFormatError as e:
             print(f"merge: {e}", file=sys.stderr)
             return 2
-        repo_path, pr_number = parts[0], parts[1]
-        member_name = parts[2] if len(parts) > 2 else repo_path.rstrip("/").split("/")[-1]
+        if len(parts) < 3:
+            print(
+                f"merge: pair {pair_str!r} is missing member_name — expected "
+                "path:pr_number:member_name (2-field basename back-fill has been removed "
+                "because it silently corrupts merge_order keying)",
+                file=sys.stderr,
+            )
+            return 2
+        repo_path, pr_number, member_name = parts[0], parts[1], parts[2]
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
 
     try:

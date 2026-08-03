@@ -1,11 +1,13 @@
 """Shared `repo:pr_number[:extra]` pair parsing for the portage CLI.
 
 The ``wait-for-actionable`` and ``merge`` subcommands both take positional
-``repo:pr_number`` tokens on argv (``merge`` additionally accepts an optional
-third ``:member_name`` field). Both validate the same rule -- at least a repo
-and a pr_number field, pr_number all-digits -- and both exit 2 with a clean
-stderr message on malformity rather than raising a raw exception. This module is
-the single place that shared rule lives; the field count differs per caller via
+``repo:pr_number`` tokens on argv (``merge`` requires a third ``:member_name``
+field -- callers reject a 2-field pair themselves rather than back-filling a
+guessed member name, since a wrong guess silently corrupts ``merge_order``
+keying). Both validate the same rule -- at least a repo and a pr_number field,
+pr_number all-digits -- and both exit 2 with a clean stderr message on
+malformity rather than raising a raw exception. This module is the single
+place that shared rule lives; the field count differs per caller via
 ``max_parts``, and any extra fields beyond repo/pr_number are the caller's to
 interpret. The digit check itself delegates to
 ``trailhead.vcs.github.validate_pr_number`` (imported lazily inside

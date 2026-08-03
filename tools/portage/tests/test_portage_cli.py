@@ -292,6 +292,18 @@ class TestMerge:
         assert rc == 2
         assert not [c for c in provider.pr.calls if c[0] == "merge"]
 
+    def test_two_field_pair_is_loud_refusal_not_basename_backfill(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        provider = _FakeProvider()
+        _install(monkeypatch, provider)
+        manifest = _make_manifest(tmp_path)
+
+        rc = dispatch.main(["merge", "--manifest", str(manifest), f"{tmp_path}:1"])
+        assert rc == 2
+        assert not [c for c in provider.pr.calls if c[0] == "merge"]
+        assert "member_name" in capsys.readouterr().err
+
 
 # ---------------------------------------------------------------------------
 # wait-for-actionable
@@ -331,6 +343,16 @@ class TestWaitForActionable:
         assert rc == 2
         assert provider.ci.calls == []
         assert "--repo=owner/other" in capsys.readouterr().err
+
+    def test_accepts_three_field_pairs(self, tmp_path, monkeypatch, capsys):
+        provider = _FakeProvider()
+        _install(monkeypatch, provider)
+
+        rc = dispatch.main(["wait-for-actionable", f"{tmp_path}:1:api"])
+        assert rc == 0
+        assert provider.ci.calls[0][0] == "wait"
+        out = json.loads(capsys.readouterr().out)
+        assert "actionable" in out
 
 
 # ---------------------------------------------------------------------------
