@@ -241,7 +241,25 @@ def main() -> None:
         "help", "--help", "-h", "doctor",
         "foreach", "path", "which",
         "--version", "version",
+        "resume",  # fully groupless: spine's cmd_resume(rest) handles it unconditionally
     })
+    # `camp bookmark ls`/`rm` are also fully groupless (global-store, ref-
+    # addressed), but bare `camp bookmark` (capture) still needs a group
+    # resolved from cwd — so bookmark cannot join _SKIP_GROUP_RESOLVE outright.
+    # Classify with the SAME groupless_subverb used by item 6 so this special
+    # case can never disagree with the dispatcher it hands off to: if the
+    # remaining args name ls/rm, dispatch straight there, bypassing
+    # _resolve_group_for_command entirely so a corrupt sibling group toml
+    # elsewhere in the config dir can't abort a command that never needed any
+    # group's config in the first place.
+    if first == "bookmark":
+        from ..bookmark import groupless_subverb
+
+        groupless = groupless_subverb(argv[1:])
+        if groupless is not None:
+            handler, sub_args = groupless
+            handler(sub_args, None)
+            return
     if first and first not in _SKIP_GROUP_RESOLVE:
         try:
             group, group_env = _resolve_group_for_command(argv)

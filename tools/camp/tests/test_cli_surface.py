@@ -568,3 +568,68 @@ def test_resume_is_listed_in_help() -> None:
     """The verb is discoverable: camp help names it."""
     result = _run(["help"])
     assert "camp resume" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# A malformed sibling group toml must not abort fully-groupless commands.
+#
+# _resolve_group_for_command calls load_all_groups(config_dir), which loads
+# and validates EVERY group toml up front; a GroupConfigError from any one of
+# them was treated as a hard failure BEFORE resume/bookmark ls/bookmark rm —
+# none of which need any particular group — ever got a chance to run.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def corrupt_sibling_env(tmp_path: Path) -> dict[str, str]:
+    """CAMP_CONFIG_DIR with one valid group and one group toml that raises
+    GroupConfigError (unknown hook kind, same malformed-config shape used by
+    test_activation.py's regression coverage for _resolve_group_for_command)."""
+    groups_dir = tmp_path / "groups"
+    groups_dir.mkdir(parents=True)
+    (groups_dir / "testgrp.toml").write_text(
+        '[group]\nname = "testgrp"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
+    )
+    (groups_dir / "badgroup.toml").write_text(
+        '[group]\nname = "badgroup"\n\n'
+        '[[members]]\nname = "myrepo"\nrepo_root = "/tmp/fake-myrepo"\n\n'
+        '[[members.hooks]]\nkind = "not-a-valid-kind"\ncmd = ["echo", "hi"]\n'
+    )
+    return {"CAMP_CONFIG_DIR": str(tmp_path), "CAMP_STATE_DIR": str(tmp_path / "state")}
+
+
+def test_resume_reaches_its_handler_despite_a_corrupt_sibling_group_toml(
+    corrupt_sibling_env: dict[str, str],
+) -> None:
+    result = _run(
+        ["resume", "no-such-ref"],
+        env={**corrupt_sibling_env, "CAMP_SHELL_INTEGRATION": "1"},
+    )
+    combined = result.stdout + result.stderr
+    assert "config error" not in combined, combined
+    assert "camp resume:" in combined
+    assert result.returncode != 0
+
+
+def test_bookmark_ls_reaches_its_handler_despite_a_corrupt_sibling_group_toml(
+    corrupt_sibling_env: dict[str, str],
+) -> None:
+    result = _run(["bookmark", "ls"], env=corrupt_sibling_env)
+    combined = result.stdout + result.stderr
+    assert "config error" not in combined, combined
+    assert result.returncode == 0, combined
+
+
+def test_bookmark_capture_still_surfaces_the_corrupt_sibling_group_toml(
+    corrupt_sibling_env: dict[str, str],
+) -> None:
+    """Bare capture DOES need a resolved group from cwd, so it must not skip
+    resolution — the corrupt sibling should still surface for it."""
+    result = _run(["bookmark", "--group", "testgrp"], env=corrupt_sibling_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    # Either the corrupt sibling aborts group resolution, or resolution
+    # succeeds for testgrp and capture proceeds to its own refusal — either
+    # way this must not silently skip past group resolution the way ls/rm now do.
+    assert "bare slug dispatch is no longer supported" not in combined
