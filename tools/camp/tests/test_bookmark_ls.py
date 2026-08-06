@@ -358,6 +358,33 @@ def test_expiry_threshold_matches_the_harness_seam() -> None:
     assert _RETENTION_WARNING_FRACTION == SESSION_RETENTION_WARNING_FRACTION
 
 
+def test_cmd_bookmark_ls_expiry_reads_the_injected_claude_dir_not_the_real_one(
+    env: dict[str, str], capsys: pytest.CaptureFixture
+) -> None:
+    """cmd_bookmark_ls's default retention resolver falls through to the
+    baked-in claude-default harness profile for an unconfigured group, which
+    reads Claude Code's settings.json for cleanupPeriodDays. Without a
+    TRAILHEAD_CLAUDE_DIR override that read hits the real ~/.claude on the
+    developer's machine; injecting it here must redirect it to a tmp file
+    instead, proven by a custom cleanupPeriodDays actually taking effect.
+    """
+    import json
+
+    from camp.bookmark.render import cmd_bookmark_ls
+
+    claude_dir = Path(env["CAMP_STATE_DIR"]).parent / "fake-claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    (claude_dir / "settings.json").write_text(json.dumps({"cleanupPeriodDays": 10}))
+    env = {**env, "TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+
+    record = _seed(env, _record("alpha"))
+    _age_transcript(record, days=9)
+
+    cmd_bookmark_ls([], env)
+    out = capsys.readouterr().out
+    assert "expires ~1d" in out
+
+
 def test_cmd_bookmark_ls_corrupt_store_prints_one_clean_line(
     env: dict[str, str], capsys: pytest.CaptureFixture
 ) -> None:
