@@ -54,6 +54,8 @@ from ranger.drain import loop as drain_loop  # noqa: E402  (needs the sys.path a
 
 SKILL = _PLUGIN_DIR / "skills" / "execute" / "SKILL.md"
 AGENT = _PLUGIN_DIR / "agents" / "execute.md"
+RITUALS = _PLUGIN_DIR / "skills" / "execute" / "operator-rituals.md"
+REPORT_PY = _PLUGIN_DIR / "ranger" / "drain" / "report.py"
 
 #: The drain outcome grammar's four tokens, as the agent document must spell
 #: them. `ranger.drain.report.parse_drain_outcome` accepts exactly these, so a
@@ -567,6 +569,157 @@ class TestTeardownEligibility:
 
     def test_an_expired_slot_never_tears_down(self):
         assert not drain_loop.teardown_decision("MERGED", expired=True).teardown
+
+
+# --- operator re-entry rituals -------------------------------------------------
+
+
+def test_rituals_doc_ships():
+    assert RITUALS.exists(), f"Expected the operator re-entry rituals doc at {RITUALS}"
+
+
+def test_skill_references_the_rituals_doc():
+    _pin(
+        SKILL,
+        "operator-rituals.md",
+        "The loop skill must point an operator at the rituals doc, not just at this file.",
+    )
+
+
+def test_report_py_references_the_rituals_doc():
+    _pin(
+        REPORT_PY,
+        "skills/execute/operator-rituals.md",
+        "The report module must point back at the rituals doc a stranded state sends the "
+        "operator to.",
+    )
+
+
+def test_rituals_doc_names_the_failed_ritual():
+    _pin(
+        RITUALS,
+        "craft/push=failed",
+        "The failed ritual's guard label must be named exactly as craft's execute ritual "
+        "writes it.",
+    )
+    _pin(
+        RITUALS,
+        "lore record update task/<name> --unset-label craft/push",
+        "The exact clearing command is the whole of the failed ritual's recovery.",
+    )
+
+
+def test_rituals_doc_names_the_blocked_ritual():
+    _pin(
+        RITUALS,
+        "## Refine — unresolved",
+        "The blocked ritual must name the literal section heading the answer is added to.",
+    )
+    _pin(
+        RITUALS,
+        "**Answer:**",
+        "The answered-blocked edge is the exact-case `**Answer:**` line refine's queue "
+        "classifier reads.",
+    )
+
+
+def test_rituals_doc_names_the_crashed_ritual():
+    _pin(
+        RITUALS,
+        "`in-progress` and its workspace preserved",
+        "The crashed ritual must name the exact state a dead coordinator leaves the task in.",
+    )
+    _pin(
+        RITUALS,
+        "lore record update task/<name> --status ready --label craft/branch=worktree-<slug>",
+        "The exact recovery command re-asserting `craft/branch` is the crashed ritual's "
+        "clear-to-ready path.",
+    )
+    _pin(
+        RITUALS,
+        "`camp remove <slug>`",
+        "The crashed ritual's abandon path is the exact teardown command.",
+    )
+
+
+def test_rituals_doc_names_the_stale_lock_ritual_and_crash_signal():
+    _pin(
+        RITUALS,
+        "state_dir(\"ranger\")/locks/<vault>.lock",
+        "The stale lock ritual must name the exact lock path.",
+    )
+    _pin(
+        RITUALS,
+        "held lock whose holder is no longer alive, paired with no exit report",
+        "The crash-signal pair — a held lock plus an absent exit report — must be named "
+        "explicitly; either signal alone is ambiguous.",
+    )
+    _pin(
+        RITUALS,
+        "Nothing in the drain ever removes a lock file itself",
+        "The stale lock ritual must forbid automated removal — an operator-only `rm`.",
+    )
+
+
+def test_rituals_doc_names_the_approval_and_cap_stall_ritual():
+    _pin(
+        RITUALS,
+        "`gh pr edit <pr> --add-label human-approved`",
+        "The approval ritual's exact grant command must be named.",
+    )
+    _pin(
+        RITUALS,
+        "`portage approvals`",
+        "The verification surface for the approval signal must be named.",
+    )
+    _pin(
+        RITUALS,
+        "No drain component, executor, or portage agent ever applies that label",
+        "The prohibition on automated self-approval must be explicit.",
+    )
+    _pin(
+        RITUALS,
+        "`merged` / `in-flight` / `awaiting-human-approval` / `monitor-timeout`",
+        "The cap-stall ritual must name the pushed bucket's full substate split as it reads "
+        "in the report.",
+    )
+
+
+def test_rituals_doc_names_the_corrupt_state_file_ritual():
+    _pin(
+        RITUALS,
+        "refuses this by name rather than resetting it blind",
+        "The corrupt-state ritual must name the refuse-by-name behavior, not a blind reset.",
+    )
+    _pin(
+        RITUALS,
+        "`ranger drain finish`",
+        "The corrupt-state ritual must name how the run is closed out.",
+    )
+
+
+def test_rituals_doc_describes_degraded_trust_mode():
+    _pin(
+        RITUALS,
+        "`degraded: true`",
+        "The degraded-trust mode must be named by its exact flag.",
+    )
+    _pin(
+        RITUALS,
+        "no PR tail, no monitor, and no in-flight cap",
+        "The degraded-trust mode description must name what is absent.",
+    )
+
+
+def test_no_ritual_instructs_a_vault_write_outside_the_lore_cli():
+    text = RITUALS.read_text()
+    forbidden = ("Edit ", "edit the record", "> ~/.local", "sed -i", "write directly to")
+    offenders = [phrase for phrase in forbidden if phrase in text]
+    assert not offenders, (
+        f"operator-rituals.md appears to instruct a non-CLI vault write: {offenders}"
+    )
+    # Every vault mutation named in the doc must go through `lore record update`.
+    assert "lore record update" in text
 
 
 # --- discoverability ----------------------------------------------------------

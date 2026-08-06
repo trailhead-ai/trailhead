@@ -335,6 +335,14 @@ If the drain dies before `finish`, the partial report is still on disk and the l
 names its holder — the next `start` reports both. Every preserved workspace and every task
 left `in-progress` is picked up by the next drain's resume ritual.
 
+## Operator re-entry
+
+Every stranded state the drain can leave — a failed push, a parked block, a crashed
+coordinator, a stale lock, a stalled approval, a corrupt state file — has a named,
+pinned recovery ritual, plus the degraded-trust (portage-absent) mode description, in
+[`operator-rituals.md`](./operator-rituals.md). Read it before touching a task or a lock
+by hand.
+
 ## Never
 
 - **Never remove a lock file yourself**, stale or not.

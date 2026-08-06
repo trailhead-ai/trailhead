@@ -57,6 +57,13 @@ than through portage's VCS-provider seam, so this module carries no runtime
 dependency on the portage plugin being installed. An agent's free-text
 return is scrubbed like any other untrusted string, but it never supplies a
 PR number or url — only ``prs.json`` does.
+
+**Stranded-state recovery is documented, not handled here.** A failed push, a
+parked block, a crashed coordinator, a stale lock, a stalled approval, or
+this module's own corrupt-``.state.json`` refusal above each have a named,
+pinned operator ritual in ``skills/execute/operator-rituals.md`` (alongside
+the degraded-trust mode description) — this module raises and reports; it
+never resolves those states on its own.
 """
 
 from __future__ import annotations
