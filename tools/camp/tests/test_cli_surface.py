@@ -292,6 +292,11 @@ def stub_group_env(tmp_path: Path) -> dict[str, str]:
     The stub group 'testgrp' has one member with a non-existent repo_root —
     sufficient for load_group (which validates schema, not disk presence) to
     parse and for _resolve_group_for_command to return a group dict.
+
+    CAMP_STATE_DIR is ALSO overridden here (Axiom 6 — tests must never touch
+    real state): without it, any handler reached by a test built on this
+    fixture (bookmark, resume, new, remove, …) resolves the developer's real
+    ``~/.local/state/camp`` and reads/writes real bookmarks.json/manifests.
     """
     groups_dir = tmp_path / "groups"
     groups_dir.mkdir(parents=True)
@@ -299,7 +304,10 @@ def stub_group_env(tmp_path: Path) -> dict[str, str]:
         '[group]\nname = "testgrp"\n\n'
         '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n'
     )
-    return {"CAMP_CONFIG_DIR": str(tmp_path)}
+    return {
+        "CAMP_CONFIG_DIR": str(tmp_path),
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+    }
 
 
 def _run_group(args: list[str], *, group_env: dict[str, str]) -> subprocess.CompletedProcess:
@@ -338,10 +346,9 @@ def test_group_path_disabled_verb_prints_stabilizes_message(
 # claude exec to suppress (no CAMP_TEST_NO_EXEC needed).
 
 
-def test_group_path_new_seeds_and_exits_zero(stub_group_env: dict[str, str], tmp_path: Path) -> None:
+def test_group_path_new_seeds_and_exits_zero(stub_group_env: dict[str, str]) -> None:
     """camp new <slug> via group path seeds the workspace and exits 0 (no claude)."""
-    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state")}
-    result = _run_group(["new", "my-slug"], group_env=env)
+    result = _run_group(["new", "my-slug"], group_env=stub_group_env)
     assert result.returncode == 0, (
         f"camp new via group path should seed + exit 0.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -357,11 +364,10 @@ def test_group_path_new_seeds_and_exits_zero(stub_group_env: dict[str, str], tmp
 
 
 def test_group_path_new_announces_background_provisioning(
-    stub_group_env: dict[str, str], tmp_path: Path
+    stub_group_env: dict[str, str],
 ) -> None:
     """camp new reports that provisioning runs in the background (on stderr)."""
-    env = {**stub_group_env, "CAMP_STATE_DIR": str(tmp_path / "state")}
-    result = _run_group(["new", "my-slug"], group_env=env)
+    result = _run_group(["new", "my-slug"], group_env=stub_group_env)
     assert "background" in result.stderr.lower() or "camp status" in result.stderr, (
         f"camp new must announce background provisioning on stderr.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -408,7 +414,13 @@ def test_group_path_bookmark_reaches_its_handler(stub_group_env: dict[str, str])
 
 def test_bookmark_without_a_group_says_so(tmp_path: Path) -> None:
     """With no group resolvable, camp bookmark emits the needs-group error."""
-    result = _run(["bookmark"], env={"CAMP_CONFIG_DIR": str(tmp_path / "empty")})
+    result = _run(
+        ["bookmark"],
+        env={
+            "CAMP_CONFIG_DIR": str(tmp_path / "empty"),
+            "CAMP_STATE_DIR": str(tmp_path / "state"),
+        },
+    )
     combined = result.stdout + result.stderr
     assert result.returncode != 0
     assert "group" in combined.lower()
@@ -468,8 +480,15 @@ def test_group_path_bookmark_rm_consumes_group_flag(
 
 def test_group_path_resume_reaches_its_handler(stub_group_env: dict[str, str]) -> None:
     """camp resume <ref> dispatches to the resume handler, which refuses an
-    unknown ref — NOT to the bare-slug error."""
-    result = _run_group(["resume", "no-such-ref"], group_env=stub_group_env)
+    unknown ref — NOT to the bare-slug error.
+
+    CAMP_SHELL_INTEGRATION must be set: without it, resume's shell-integration
+    guard (checked before ref resolution) fires first, and the test would
+    never actually reach the unknown-ref refusal its docstring claims to
+    exercise.
+    """
+    env = {**stub_group_env, "CAMP_SHELL_INTEGRATION": "1"}
+    result = _run_group(["resume", "no-such-ref"], group_env=env)
     combined = result.stdout + result.stderr
     assert result.returncode != 0
     assert "bare slug dispatch is no longer supported" not in combined
@@ -481,7 +500,8 @@ def test_group_path_resume_prints_nothing_on_stdout_when_it_refuses(
 ) -> None:
     """The two-line machine contract is all-or-nothing: a refusal leaves stdout
     empty so the shell wrapper can never act on a partial answer."""
-    result = _run_group(["resume", "no-such-ref"], group_env=stub_group_env)
+    env = {**stub_group_env, "CAMP_SHELL_INTEGRATION": "1"}
+    result = _run_group(["resume", "no-such-ref"], group_env=env)
     assert result.returncode != 0
     assert result.stdout == ""
 
