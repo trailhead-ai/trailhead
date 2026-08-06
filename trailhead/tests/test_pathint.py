@@ -11,9 +11,6 @@ from pathlib import Path
 
 import pytest
 
-_FISH_BIN = shutil.which("fish")
-_HAS_FISH = _FISH_BIN is not None
-
 from trailhead.pathint import (
     ShimDenylistError,
     create_shims,
@@ -21,6 +18,9 @@ from trailhead.pathint import (
     resolve_shim_dir,
     shellenv_lines,
 )
+
+_FISH_BIN = shutil.which("fish")
+_HAS_FISH = _FISH_BIN is not None
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
