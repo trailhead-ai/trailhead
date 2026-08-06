@@ -744,13 +744,49 @@ def _merge_prs(
 
 HUMAN_APPROVED_LABEL = "human-approved"
 
+#: The review states that change where a reviewer stands. `COMMENTED` (and
+#: `PENDING`) leave a standing approval untouched — GitHub itself keeps the
+#: approval when the same reviewer later leaves a plain comment — so only
+#: these three ever supersede an earlier review.
+_DECISIVE_REVIEW_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
+
+
+def _latest_decisive_reviews(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return each `User` reviewer's most recent decisive review, in first-seen order.
+
+    The reviews API returns every review a PR ever collected, including
+    approvals their author has since withdrawn, so "any APPROVED anywhere in
+    the list" is not the reviewer's current position. Collapsing to the
+    latest decisive state per reviewer mirrors the label path's
+    last-event-wins rule below: a later `CHANGES_REQUESTED` or a dismissal
+    supersedes the earlier `APPROVED`, and a later approval supersedes an
+    earlier objection. Sorted by `submitted_at` first (with the API's own
+    order as the tiebreak) so an out-of-order page cannot invert the result.
+    """
+    ordered = sorted(
+        enumerate(reviews),
+        key=lambda pair: (str((pair[1] or {}).get("submitted_at") or ""), pair[0]),
+    )
+    latest: dict[str, dict[str, Any]] = {}
+    for _index, review in ordered:
+        user = (review or {}).get("user") or {}
+        if user.get("type") != "User":
+            continue
+        if review.get("state") not in _DECISIVE_REVIEW_STATES:
+            continue
+        latest[str(user.get("login"))] = review
+    return list(latest.values())
+
 
 def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dict[str, Any]:
     """Read-only check: does this PR carry a human-authored approval signal?
 
-    Checked in order: an approving review by a `User` (non-bot) reviewer;
-    then the `human-approved` label, current-state-per-timeline, applied by a
-    `User` actor with no `performed_via_github_app`. The label path exists
+    Checked in order: a `User` (non-bot) reviewer whose *latest* decisive
+    review is `APPROVED` (see :func:`_latest_decisive_reviews` — a withdrawn
+    or dismissed approval never counts); then the `human-approved` label,
+    current-state-per-timeline, applied by a `User` actor with no
+    `performed_via_github_app`. Both paths are last-event-wins, deliberately:
+    a signal its author has taken back is not a signal. The label path exists
     because GitHub 422s an approving review by the PR's own author, so a
     self-authored PR can never satisfy the review signal.
     """
@@ -767,9 +803,9 @@ def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dic
     if reviews is None:
         raise RuntimeError(f"approval: could not fetch reviews for PR #{pr_number} in {repo_path}")
 
-    for review in reviews:
-        user = review.get("user") or {}
-        if review.get("state") == "APPROVED" and user.get("type") == "User":
+    for review in _latest_decisive_reviews(reviews):
+        if review.get("state") == "APPROVED":
+            user = review.get("user") or {}
             return {"approved": True, "source": "review", "actor": user.get("login")}
 
     timeline = _gh(

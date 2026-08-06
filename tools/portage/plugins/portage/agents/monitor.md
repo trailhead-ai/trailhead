@@ -181,8 +181,10 @@ portage approvals <repo_path> <pr_number>
 
 Exit 0 means approved (an approving review by a human reviewer, or the operator-applied
 `human-approved` label) — proceed to merge. Exit 1 means not yet approved: **hold that PR,
-do not merge it**, and report it as `ready-awaiting-human-approval`. Exit 2 is a loud API
-error — treat it the same as not-approved (hold, don't merge) and surface the error.
+do not merge it**, and report it as `ready-awaiting-human-approval`. Exit 2 is a loud
+usage or API error — a bad repo path, a malformed PR number, or an unreachable API — and
+means the question was never answered, not that the answer was no: treat it the same as
+not-approved (hold, don't merge) and surface the error.
 Monitor never merges a PR without a passing `portage approvals` check.
 
 **Monitor never applies the approval signal itself.** The `human-approved` label and the

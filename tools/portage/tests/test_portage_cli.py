@@ -216,11 +216,16 @@ class TestApprovals:
         out = json.loads(capsys.readouterr().out)
         assert out["approved"] is False
 
-    def test_not_a_directory_exits_1(self, tmp_path, monkeypatch, capsys):
+    def test_not_a_directory_exits_2_distinct_from_not_approved(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        # Exit 1 means "asked and answered: not approved". A bad repo path is
+        # a usage error — the question was never asked — and a caller gating a
+        # merge on this verb must be able to tell the two apart.
         provider = _FakeProvider()
         _install(monkeypatch, provider)
         rc = dispatch.main(["approvals", str(tmp_path / "nope"), "42"])
-        assert rc == 1
+        assert rc == 2
         assert "not a directory" in capsys.readouterr().out
 
     def test_api_error_exits_2_distinct_from_not_approved(self, tmp_path, monkeypatch, capsys):

@@ -36,8 +36,12 @@ def _make_stub(reviews: list[dict] | None = None, timeline: list[dict] | None = 
     return stub
 
 
-def _review(login: str, user_type: str, state: str) -> dict[str, Any]:
-    return {"user": {"login": login, "type": user_type}, "state": state}
+def _review(login: str, user_type: str, state: str, submitted_at: str = "") -> dict[str, Any]:
+    return {
+        "user": {"login": login, "type": user_type},
+        "state": state,
+        "submitted_at": submitted_at,
+    }
 
 
 def _labeled(actor_login: str, actor_type: str, created_at: str, app=None, name="human-approved") -> dict[str, Any]:
@@ -83,6 +87,104 @@ class TestApprovalReviewPath:
         result = provider.pr.approval("some/path", "42")
         assert result["approved"] is False
         assert result["source"] is None
+
+
+class TestApprovalReviewRecency:
+    """A reviewer's *latest* decisive review is the one that counts.
+
+    GitHub's reviews API returns every review a PR ever collected, so an
+    approval a reviewer later withdrew is still in the list. Evaluating each
+    reviewer's latest decisive state mirrors the label path's
+    last-event-wins rule; without it a `CHANGES_REQUESTED` or a dismissal is
+    silently outranked by the stale `APPROVED` that preceded it, and the
+    merge gate opens on an approval its author has already taken back.
+    """
+
+    def test_later_changes_requested_supersedes_an_earlier_approval(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[
+                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
+                    _review("tom", "User", "CHANGES_REQUESTED", "2026-08-02T00:00:00Z"),
+                ],
+                timeline=[],
+            ),
+        )
+        result = provider.pr.approval("some/path", "42")
+        assert result["approved"] is False
+
+    def test_later_approval_supersedes_an_earlier_changes_requested(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[
+                    _review("tom", "User", "CHANGES_REQUESTED", "2026-08-01T00:00:00Z"),
+                    _review("tom", "User", "APPROVED", "2026-08-02T00:00:00Z"),
+                ],
+            ),
+        )
+        result = provider.pr.approval("some/path", "42")
+        assert result["approved"] is True
+        assert result["actor"] == "tom"
+
+    def test_a_dismissed_approval_no_longer_counts(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[
+                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
+                    _review("tom", "User", "DISMISSED", "2026-08-02T00:00:00Z"),
+                ],
+                timeline=[],
+            ),
+        )
+        result = provider.pr.approval("some/path", "42")
+        assert result["approved"] is False
+
+    def test_another_reviewers_standing_approval_still_counts(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[
+                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
+                    _review("tom", "User", "CHANGES_REQUESTED", "2026-08-02T00:00:00Z"),
+                    _review("ada", "User", "APPROVED", "2026-08-03T00:00:00Z"),
+                ],
+            ),
+        )
+        result = provider.pr.approval("some/path", "42")
+        assert result["approved"] is True
+        assert result["actor"] == "ada"
+
+    def test_a_later_comment_does_not_withdraw_an_approval(self) -> None:
+        # COMMENTED is not a decisive state — GitHub keeps the standing
+        # approval when the same reviewer later leaves a plain comment.
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[
+                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
+                    _review("tom", "User", "COMMENTED", "2026-08-02T00:00:00Z"),
+                ],
+            ),
+        )
+        result = provider.pr.approval("some/path", "42")
+        assert result["approved"] is True
+
+    def test_out_of_order_reviews_are_sorted_by_submitted_at(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[
+                    _review("tom", "User", "CHANGES_REQUESTED", "2026-08-02T00:00:00Z"),
+                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
+                ],
+                timeline=[],
+            ),
+        )
+        result = provider.pr.approval("some/path", "42")
+        assert result["approved"] is False
 
 
 class TestApprovalLabelPath:

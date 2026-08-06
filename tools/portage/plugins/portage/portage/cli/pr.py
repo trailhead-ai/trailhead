@@ -192,7 +192,8 @@ def _add_approvals(sub) -> None:
             "Answers whether a PR carries a human-authored approval signal — an "
             "approving review by a User (non-bot) reviewer, or the human-approved "
             "label applied by a User actor. This is the merge gate monitor checks "
-            "before calling `portage merge`; it never applies the signal itself."
+            "before calling `portage merge`; it never applies the signal itself. "
+            "Exits 0 approved, 1 not approved, 2 on a usage or IO error."
         ),
     )
     p.add_argument("repo_path")
@@ -201,9 +202,13 @@ def _add_approvals(sub) -> None:
 
 
 def cmd_approvals(args: argparse.Namespace) -> int:
+    # Exit codes are a three-way answer, not a boolean: 0 approved, 1 asked
+    # and not approved, 2 never asked (usage or IO error). A caller gating a
+    # merge on this verb must not read "could not ask" as "not approved" —
+    # or, worse, collapse a bad path into the same code as a real refusal.
     if not Path(args.repo_path).is_dir():
         print(json.dumps({"error": f"not a directory: {args.repo_path}"}))
-        return 1
+        return 2
     try:
         result = get_provider().pr.approval(args.repo_path, args.pr_number)
     except (RuntimeError, InvalidInputError) as e:
