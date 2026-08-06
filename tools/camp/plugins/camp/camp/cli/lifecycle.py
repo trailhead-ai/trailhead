@@ -181,6 +181,8 @@ def _cmd_remove_group_cli(
     (including partial removal) stdout is EMPTY and the exit is nonzero — the
     wrapper stays put.
     """
+    from ..bookmark import guard as bookmark_guard
+    from ..bookmark.store import BookmarkStoreError
     from ..group.manifest import workspace_dir
     from ..provision.reconcile import reconcile_break
     from ..spine import _consume_flag_value, _die
@@ -207,6 +209,18 @@ def _cmd_remove_group_cli(
         print(f"[dry-run] would remove worktree {slug!r} for group {group['group']['name']!r}",
               file=sys.stderr)
         return
+
+    # Bookmark guard: refuse BEFORE teardown so a rejected removal has torn down
+    # nothing. Cleanup of the entries happens only after teardown succeeds (below).
+    group_name = group["group"]["name"]
+    if not force:
+        try:
+            blocking = bookmark_guard.blocking_bookmarks(group_name, slug, env=env)
+        except BookmarkStoreError as e:
+            _die(f"camp remove: {e}")
+        if blocking:
+            print(bookmark_guard.render_block(slug, blocking), file=sys.stderr)
+            sys.exit(1)
 
     try:
         # ManifestError is an Exception; the single handler covers it.
@@ -238,6 +252,18 @@ def _cmd_remove_group_cli(
         f"camp remove: removed worktree {slug!r} ({', '.join(removed)})",
         file=sys.stderr,
     )
+
+    # Teardown succeeded — only now is it safe to drop the workspace's bookmarks.
+    # A store failure here must not turn a completed removal into a nonzero exit:
+    # the workspace really is gone, and a surviving entry renders as
+    # `workspace gone` in `camp bookmark ls`, which is recoverable by hand.
+    try:
+        cleared = bookmark_guard.clear_workspace_bookmarks(group_name, slug, env=env)
+    except BookmarkStoreError as e:
+        print(f"camp remove: could not clear bookmarks for {slug!r}: {e}", file=sys.stderr)
+        cleared = []
+    for ref in cleared:
+        print(f"  removed bookmark {ref!r}", file=sys.stderr)
 
     # The caller's shell is now sitting in a deleted directory — hand it the
     # first member's repo_root as the ONLY stdout line so the shellenv wrapper

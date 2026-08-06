@@ -1113,3 +1113,83 @@ class TestConfinementAdversarial:
         assert outside.is_dir(), (
             "the outside workspace dir must survive after ConfinementError"
         )
+
+
+# ===========================================================================
+# Bookmark delete guard, end to end through the real CLI
+# ===========================================================================
+
+
+class TestCampRemoveBookmarkGuard:
+    """`camp rm` refuses to orphan a bookmarked session, and `--force` clears the
+    bookmark only after the workspace is actually gone."""
+
+    def _seed_bookmark(self, remove_env, *, ref="alpha", slug="ws-slug", note="mid-refactor"):
+        from camp.bookmark.store import upsert
+
+        transcript = remove_env["tmp_path"] / f"{ref}.jsonl"
+        transcript.write_text("{}\n")
+        return upsert(
+            {
+                "ref": ref,
+                "group": "rmgroup",
+                "slug": slug,
+                "session_id": f"sess-{ref}",
+                "transcript_path": str(transcript),
+                "note": note,
+                "created_at": "2026-08-03T00:00:00Z",
+                "updated_at": "2026-08-03T00:00:00Z",
+            },
+            env=remove_env["env"],
+        )
+
+    def _get(self, remove_env, ref="alpha"):
+        from camp.bookmark.store import get_by_ref
+
+        return get_by_ref(ref, env=remove_env["env"])
+
+    def test_bookmarked_workspace_is_refused(self, remove_env):
+        self._seed_bookmark(remove_env)
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode != 0, (
+            f"camp rm must refuse a bookmarked workspace.\n"
+            f"stdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert "alpha" in r.stderr, r.stderr
+        assert "mid-refactor" in r.stderr, r.stderr
+        assert r.stdout == "", "a refused removal must print no return path"
+
+    def test_refused_removal_leaves_the_workspace_intact(self, remove_env):
+        self._seed_bookmark(remove_env)
+        _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert _manifest_path(remove_env).is_file(), "the guard must fire before teardown"
+
+    def test_force_removes_workspace_and_bookmark(self, remove_env):
+        self._seed_bookmark(remove_env)
+        r = _camp(remove_env, "rm", "--force", "ws-slug", "--group", "rmgroup")
+        assert r.returncode == 0, f"camp rm --force failed: {r.stderr}"
+        assert not _manifest_path(remove_env).exists()
+        assert self._get(remove_env) is None, "the bookmark must be cleared after teardown"
+
+    def test_force_success_keeps_the_one_line_stdout_contract(self, remove_env):
+        """Clearing bookmarks must not add stdout noise: from inside the removed
+        workspace stdout is still exactly the first member's repo_root."""
+        self._seed_bookmark(remove_env)
+        wt_a = remove_env["ws_dir"] / "repo_a"
+        r = subprocess.run(
+            [sys.executable, str(_CLI_CAMP), "rm", "--force", "--group", "rmgroup"],
+            capture_output=True,
+            text=True,
+            env=remove_env["env"],
+            cwd=str(wt_a),
+        )
+        assert r.returncode == 0, f"camp rm --force failed: {r.stderr}"
+        assert r.stdout == f"{remove_env['repo_a']}\n", (
+            f"stdout must stay one line (the return path).\nstdout: {r.stdout!r}"
+        )
+
+    def test_unbookmarked_workspace_removes_normally(self, remove_env):
+        self._seed_bookmark(remove_env, ref="other", slug="other-slug")
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode == 0, f"an unrelated bookmark must not block: {r.stderr}"
+        assert self._get(remove_env, "other") is not None

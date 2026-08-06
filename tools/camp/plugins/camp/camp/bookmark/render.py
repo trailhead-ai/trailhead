@@ -31,7 +31,7 @@ _COLUMNS = ("REF", "WORKSPACE", "AGE", "NOTE")
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
-def _format_age(updated_at: str, *, now: dt.datetime) -> str:
+def format_age(updated_at: str, *, now: dt.datetime) -> str:
     """Return a short human age (e.g. ``3h``, ``2d``) for *updated_at*.
 
     An unparsable timestamp renders as ``?`` rather than raising — a display
@@ -93,7 +93,7 @@ def render_bookmarks(
     rows: list[tuple[str, str, str, str]] = []
     for record in bookmarks:
         workspace_label = f"{record['group']}/{record['slug']}"
-        age = _format_age(record.get("updated_at", ""), now=now)
+        age = format_age(record.get("updated_at", ""), now=now)
         note = record.get("note") or ""
         marker = _status_marker(record, env=env)
         if marker:
