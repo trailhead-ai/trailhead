@@ -421,6 +421,47 @@ def test_bookmark_is_listed_in_help() -> None:
     assert "camp bookmark" in result.stdout
 
 
+# --group is resolved upstream by _resolve_group_for_command but stays in argv
+# for the handler to see; each bookmark subverb must drop it (matching
+# resume's `_consume_flag_value` idiom) instead of tripping its own
+# stray-positional refusal.
+
+
+def test_group_path_bookmark_capture_consumes_group_flag(
+    stub_group_env: dict[str, str],
+) -> None:
+    """camp bookmark --group <name> reaches the workspace-resolution refusal,
+    not a stray-positional error about --group itself."""
+    result = _run_group(["bookmark"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "unexpected argument" not in combined
+    assert "this is not a camp workspace" in combined
+
+
+def test_group_path_bookmark_ls_consumes_group_flag(
+    stub_group_env: dict[str, str],
+) -> None:
+    """camp bookmark ls --group <name> succeeds instead of refusing --group as
+    a stray positional."""
+    result = _run_group(["bookmark", "ls"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "unexpected argument" not in combined
+
+
+def test_group_path_bookmark_rm_consumes_group_flag(
+    stub_group_env: dict[str, str],
+) -> None:
+    """camp bookmark rm --group <name> reaches the missing-ref usage refusal,
+    not a stray-positional error about --group itself."""
+    result = _run_group(["bookmark", "rm"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "unexpected argument" not in combined
+    assert "usage: camp bookmark rm <ref>" in combined
+
+
 # camp resume — a group-aware verb; reaches its handler (never the bare-slug
 # error), and without a resolved group emits the standard needs-group message.
 

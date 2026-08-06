@@ -321,13 +321,20 @@ def _dispatch_group_command(
     if cmd == "bookmark":
         from ..bookmark.capture import cmd_bookmark
         from ..bookmark.render import cmd_bookmark_ls, cmd_bookmark_rm
+        from ..spine import _consume_flag_value
 
         if rest and rest[0] == "ls":
-            cmd_bookmark_ls(rest[1:], group, group_env)
+            sub_rest = rest[1:]
+            _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
+            cmd_bookmark_ls(sub_rest, group, group_env)
         elif rest and rest[0] == "rm":
-            cmd_bookmark_rm(rest[1:], group, group_env)
+            sub_rest = rest[1:]
+            _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
+            cmd_bookmark_rm(sub_rest, group, group_env)
         else:
-            cmd_bookmark(rest, group, group_env)
+            sub_rest = list(rest)
+            _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
+            cmd_bookmark(sub_rest, group, group_env)
         return
     if cmd == "resume":
         from ..bookmark.resume import cmd_resume
