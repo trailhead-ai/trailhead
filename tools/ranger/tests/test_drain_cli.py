@@ -537,3 +537,52 @@ def test_finish_with_report_writes_the_footer_and_still_standing_workspaces(tmp_
     text = Path(report_path).read_text()
     assert "Report written to" in text
     assert "camp remove ws-a" in text
+
+
+# ---------------------------------------------------------------------------
+# start — the loop's three bounds are flags, defaulted, and durable
+# ---------------------------------------------------------------------------
+
+
+def test_start_carries_the_default_loop_bounds(tmp_path):
+    drain = _drain(tmp_path)
+
+    payload = json.loads(drain.start().stdout)
+
+    assert payload["concurrency"] == 2
+    assert payload["inflight_cap"] == 3
+    assert payload["monitor_deadline_hours"] == 2.0
+
+
+def test_start_bounds_are_overridable_and_persisted_in_the_report_state(tmp_path):
+    drain = _drain(tmp_path)
+
+    payload = json.loads(
+        drain.start(
+            "--concurrency", "4", "--inflight-cap", "1", "--monitor-deadline", "0.5",
+        ).stdout
+    )
+
+    assert payload["concurrency"] == 4
+    assert payload["inflight_cap"] == 1
+    assert payload["monitor_deadline_hours"] == 0.5
+
+    # Persisted, so the bounds survive the coordinator that read them once.
+    state = json.loads(Path(payload["report_path"]).with_suffix(".state.json").read_text())
+    assert state["concurrency"] == 4
+    assert state["inflight_cap"] == 1
+    assert state["monitor_deadline_hours"] == 0.5
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [("--concurrency", "0"), ("--inflight-cap", "0"), ("--monitor-deadline", "0")],
+)
+def test_start_refuses_a_non_positive_bound(tmp_path, flag, value):
+    drain = _drain(tmp_path)
+
+    res = drain.start(flag, value)
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+    drain.assert_nothing_created()

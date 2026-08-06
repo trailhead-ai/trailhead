@@ -53,6 +53,29 @@ def add_drain_subparser(sub) -> None:
         ),
     )
 
+    # The loop's three bounds. Defaults live here, in the CLI, rather than in
+    # the coordinator's prose: prose that carries a number drifts from the
+    # number the state file actually holds, and the state file is what a
+    # restarted coordinator reads.
+    p_start.add_argument(
+        "--concurrency", type=int, default=2, metavar="N",
+        help="How many executor agents may be in flight at once (default 2)",
+    )
+    p_start.add_argument(
+        "--inflight-cap", type=int, default=3, metavar="N",
+        help=(
+            "How many pushed-but-unmerged tasks may hold a monitor slot at once before "
+            "dispatch pauses (default 3)"
+        ),
+    )
+    p_start.add_argument(
+        "--monitor-deadline", type=float, default=2.0, metavar="HOURS",
+        help=(
+            "How long a monitor slot may stay in flight before it is reclaimed into the "
+            "`monitor-timeout` bucket, in hours (default 2)"
+        ),
+    )
+
     p_derive = p_drain_sub.add_parser(
         "derive", help="Re-derive and print the elected vault's drain queue classification"
     )
@@ -127,6 +150,17 @@ def _cmd_drain_start(args) -> int:
     from ..drain import report as drain_report_mod
     from ..sweep import lock as lock_mod
 
+    # Validated before any precondition runs, so a typo'd bound refuses
+    # without touching the filesystem — same posture as every other `start`
+    # refusal (see `ranger.drain.preflight`'s module docstring).
+    for flag, value in (
+        ("--concurrency", args.concurrency),
+        ("--inflight-cap", args.inflight_cap),
+        ("--monitor-deadline", args.monitor_deadline),
+    ):
+        if value <= 0:
+            return _fail(f"{flag} must be greater than 0 (got {value})")
+
     try:
         result = drain_preflight.run_preflight(cwd=Path.cwd())
     except (drain_preflight.PreflightError, drain_queue_mod.QueueDeriveError) as exc:
@@ -149,6 +183,9 @@ def _cmd_drain_start(args) -> int:
         entries = drain_queue_mod.derive_drain_queue(vault)
         report_path = drain_report_mod.start(
             result["group"], vault, len(entries), degraded=result["degraded"],
+            concurrency=args.concurrency,
+            inflight_cap=args.inflight_cap,
+            monitor_deadline_hours=args.monitor_deadline,
         )
     except (drain_queue_mod.QueueDeriveError, drain_report_mod.ReportError) as exc:
         lock_mod.release(vault, token=token)
@@ -165,6 +202,9 @@ def _cmd_drain_start(args) -> int:
                 "degraded": result["degraded"],
                 "report_path": str(report_path),
                 "outcomes_dir": str(drain_report_mod.outcomes_dir(report_path)),
+                "concurrency": args.concurrency,
+                "inflight_cap": args.inflight_cap,
+                "monitor_deadline_hours": args.monitor_deadline,
                 "lock_token": token,
                 "queue": entries,
             }

@@ -297,6 +297,9 @@ def start(
     queue_size: int,
     *,
     degraded: bool = False,
+    concurrency: int = 2,
+    inflight_cap: int = 3,
+    monitor_deadline_hours: float = DEFAULT_MONITOR_DEADLINE_HOURS,
     env: dict[str, str] | None = None,
 ) -> Path:
     """Create the report + state files for a fresh drain, return the report path.
@@ -319,6 +322,12 @@ def start(
         "group": group,
         "vault": vault,
         "degraded": degraded,
+        # The loop's three bounds, persisted so a coordinator that restarts
+        # mid-drain reads the same bounds the run started with rather than
+        # today's defaults (see `ranger.cli.drain`'s `start` flags).
+        "concurrency": concurrency,
+        "inflight_cap": inflight_cap,
+        "monitor_deadline_hours": monitor_deadline_hours,
         "queue_size": queue_size,
         "report_path": str(report_path),
         "appended_task_ids": [],
@@ -502,7 +511,7 @@ def mark_in_flight(
     diffstat: str,
     workspace: str,
     cap_blocking: bool = True,
-    deadline_hours: float = DEFAULT_MONITOR_DEADLINE_HOURS,
+    deadline_hours: float | None = None,
     now: datetime | None = None,
 ) -> None:
     """Mark *task_id* as occupying a cap slot, durably, with a monitor deadline.
@@ -526,6 +535,11 @@ def mark_in_flight(
             "so its monitor outcome could never resolve the slot — the in-flight cap stays "
             "vacuous in degraded mode"
         )
+    # Falls back to the deadline this drain was *started* with, not to the
+    # module default — the `--monitor-deadline` an operator passed is only
+    # honored if every slot opened afterwards reads it back from the state.
+    if deadline_hours is None:
+        deadline_hours = state.get("monitor_deadline_hours", DEFAULT_MONITOR_DEADLINE_HOURS)
     now = now or datetime.now(timezone.utc)
     deadline = now + timedelta(hours=deadline_hours)
     state["in_flight"][task_id] = {
