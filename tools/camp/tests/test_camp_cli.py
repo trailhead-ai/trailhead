@@ -147,16 +147,16 @@ def test_capabilities_toml_loads_and_validates() -> None:
     assert manifest.validate is True
 
 
-def test_capabilities_toml_no_skills() -> None:
-    # camp ships only a CLI (bin) + hooks — no always-on base and no selectable
-    # skills. The worktree SKILL was removed: the workspace exists before the
-    # harness opens, so worktree orchestration is operator-facing (README), not
-    # a skill the agent invokes.
+def test_capabilities_toml_skills() -> None:
+    # camp ships a CLI (bin) + hooks and no always-on base. Its single selectable
+    # skill, `bookmark`, wraps the bookmark/resume verbs; worktree orchestration
+    # stays operator-facing (README), since the workspace exists before the
+    # harness opens.
     from trailhead.capabilities import load_manifest
 
     manifest = load_manifest(_CAPABILITIES_TOML)
     assert manifest.base == []
-    assert manifest.skills == {}
+    assert manifest.skills == {"bookmark": "skills/bookmark"}
 
 
 # ---------------------------------------------------------------------------

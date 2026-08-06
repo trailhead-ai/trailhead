@@ -397,3 +397,81 @@ class TestClaudeCodeSessionResume:
 
     def test_rejects_a_non_string_session_id(self):
         assert ClaudeCodeHarness().session_resume(None) is None
+
+
+class TestSessionRetentionDaysBaseDefault:
+    """The retention seam is CONCRETE with a degrading default: a harness that
+    does not clean up transcripts on a schedule answers None, and a caller must
+    skip its retention warning entirely rather than invent a window."""
+
+    def test_returns_none(self):
+        assert _BareHarness().session_retention_days() is None
+
+
+class TestClaudeCodeSessionRetentionDays:
+    """Claude Code deletes transcripts older than the top-level `cleanupPeriodDays`
+    setting; absent, its own default is 30 days."""
+
+    def _write_settings(self, claude_dir, body):
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "settings.json").write_text(body)
+
+    def test_reads_explicit_cleanup_period_days(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write_settings(claude_dir, '{"cleanupPeriodDays": 7}')
+        got = ClaudeCodeHarness().session_retention_days(
+            env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+        )
+        assert got == 7
+
+    def test_defaults_to_thirty_when_key_absent(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write_settings(claude_dir, '{"theme": "dark"}')
+        got = ClaudeCodeHarness().session_retention_days(
+            env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+        )
+        assert got == 30
+
+    def test_defaults_to_thirty_when_settings_file_absent(self, tmp_path):
+        got = ClaudeCodeHarness().session_retention_days(
+            env={"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "nope")}
+        )
+        assert got == 30
+
+    def test_defaults_to_thirty_when_settings_are_unreadable(self, tmp_path):
+        """A corrupt settings file must not crash a caller that only wants a hint."""
+        claude_dir = tmp_path / ".claude"
+        self._write_settings(claude_dir, "{not json")
+        got = ClaudeCodeHarness().session_retention_days(
+            env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+        )
+        assert got == 30
+
+    def test_ignores_a_non_integer_or_out_of_range_value(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        for body in ('{"cleanupPeriodDays": "7"}', '{"cleanupPeriodDays": 0}',
+                     '{"cleanupPeriodDays": -3}', '{"cleanupPeriodDays": true}'):
+            self._write_settings(claude_dir, body)
+            got = ClaudeCodeHarness().session_retention_days(
+                env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+            )
+            assert got == 30, body
+
+    def test_honors_claude_config_dir_env(self, tmp_path):
+        claude_dir = tmp_path / "elsewhere"
+        self._write_settings(claude_dir, '{"cleanupPeriodDays": 5}')
+        got = ClaudeCodeHarness().session_retention_days(
+            env={"CLAUDE_CONFIG_DIR": str(claude_dir), "HOME": str(tmp_path)}
+        )
+        assert got == 5
+
+
+class TestSessionRetentionSetting:
+    """The remedy a retention warning names is harness knowledge: the base seam
+    reports no setting, Claude Code names its own key."""
+
+    def test_base_default_is_none(self):
+        assert _BareHarness().session_retention_setting() is None
+
+    def test_claude_code_names_its_cleanup_key(self):
+        assert ClaudeCodeHarness().session_retention_setting() == "cleanupPeriodDays"

@@ -175,3 +175,149 @@ class TestBrokenCliManifest:
             manifest_paths=manifest_paths,
         )
         assert "lore" in r.data["clis"]
+
+
+class TestBookmarkRetentionWarning:
+    """doctor warns when a camp bookmark's session transcript is approaching the
+    harness's retention cleanup, so a user can resume or re-capture it before the
+    harness deletes it out from under the bookmark.
+
+    Everything is injected through env: the camp state dir holding the bookmark
+    store, and the Claude dir holding the retention setting.
+    """
+
+    def _env(self, tmp_path: Path, *, cleanup_days: int | None = None) -> dict[str, str]:
+        claude_dir = tmp_path / "claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        body = {} if cleanup_days is None else {"cleanupPeriodDays": cleanup_days}
+        import json
+
+        (claude_dir / "settings.json").write_text(json.dumps(body))
+        _make_tree(tmp_path, "claude_code", ["camp"])
+        return {
+            **os.environ,
+            "TRAILHEAD_STATE_DIR": str(tmp_path),
+            "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
+            "TRAILHEAD_CLAUDE_DIR": str(claude_dir),
+        }
+
+    def _seed_bookmark(self, tmp_path: Path, ref: str, *, age_days: float) -> None:
+        import json
+        import time
+
+        state = tmp_path / "camp-state"
+        state.mkdir(parents=True, exist_ok=True)
+        transcript = state / f"{ref}.jsonl"
+        transcript.write_text("{}\n")
+        old = time.time() - age_days * 86400
+        os.utime(transcript, (old, old))
+
+        store = state / "bookmarks.json"
+        data = json.loads(store.read_text()) if store.exists() else {
+            "schema_version": 1,
+            "bookmarks": {},
+        }
+        data["bookmarks"][ref] = {
+            "ref": ref,
+            "group": "demo",
+            "slug": ref,
+            "session_id": f"sess-{ref}",
+            "transcript_path": str(transcript),
+            "note": "",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+        store.write_text(json.dumps(data))
+
+    def _run(self, env):
+        return run_doctor(
+            env=env, which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+
+    def test_warns_naming_the_at_risk_ref_and_the_settings_key(self, tmp_path):
+        env = self._env(tmp_path, cleanup_days=10)
+        self._seed_bookmark(tmp_path, "alpha", age_days=9)
+        r = self._run(env)
+        assert len(r.data["warnings"]) == 1
+        warning = r.data["warnings"][0]
+        assert "alpha" in warning
+        assert "cleanupPeriodDays" in warning
+        assert warning in r.human_output
+        assert r.exit_code == 0
+
+    def test_no_warning_below_the_threshold(self, tmp_path):
+        env = self._env(tmp_path, cleanup_days=10)
+        self._seed_bookmark(tmp_path, "alpha", age_days=3)
+        assert self._run(env).data["warnings"] == []
+
+    def test_no_warning_without_bookmarks(self, tmp_path):
+        env = self._env(tmp_path, cleanup_days=10)
+        assert self._run(env).data["warnings"] == []
+
+    def test_names_every_at_risk_ref_not_only_the_oldest(self, tmp_path):
+        env = self._env(tmp_path, cleanup_days=10)
+        self._seed_bookmark(tmp_path, "alpha", age_days=9)
+        self._seed_bookmark(tmp_path, "beta", age_days=8.5)
+        self._seed_bookmark(tmp_path, "gamma", age_days=1)
+        warning = self._run(env).data["warnings"][0]
+        assert "alpha" in warning and "beta" in warning
+        assert "gamma" not in warning
+
+    def test_bookmark_with_a_gone_transcript_is_not_at_risk(self, tmp_path):
+        """A transcript already deleted is a staleness problem `camp bookmark ls`
+        reports, not an approaching-expiry warning doctor should raise."""
+        env = self._env(tmp_path, cleanup_days=10)
+        self._seed_bookmark(tmp_path, "alpha", age_days=9)
+        (tmp_path / "camp-state" / "alpha.jsonl").unlink()
+        assert self._run(env).data["warnings"] == []
+
+    def test_uses_the_thirty_day_default_when_the_setting_is_absent(self, tmp_path):
+        env = self._env(tmp_path)
+        self._seed_bookmark(tmp_path, "alpha", age_days=27)
+        self._seed_bookmark(tmp_path, "young", age_days=20)
+        warning = self._run(env).data["warnings"][0]
+        assert "alpha" in warning
+        assert "young" not in warning
+
+    def test_skips_silently_when_no_harness_reports_a_retention_window(self, tmp_path):
+        """The seam's degrading None means "no window to warn about" — doctor must
+        say nothing rather than guess one."""
+        env = {
+            **os.environ,
+            "TRAILHEAD_STATE_DIR": str(tmp_path),
+            "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
+        }
+        (tmp_path / "composed" / "not_a_real_harness").mkdir(parents=True)
+        self._seed_bookmark(tmp_path, "alpha", age_days=900)
+        r = self._run(env)
+        assert r.data["warnings"] == []
+        assert r.exit_code == 0
+
+    def test_corrupt_bookmark_store_does_not_crash_doctor(self, tmp_path):
+        env = self._env(tmp_path, cleanup_days=10)
+        state = tmp_path / "camp-state"
+        state.mkdir(parents=True, exist_ok=True)
+        (state / "bookmarks.json").write_text("{not json")
+        r = self._run(env)
+        assert r.data["warnings"] == []
+        assert r.exit_code == 0
+
+    def test_human_output_has_no_warning_section_when_clean(self, tmp_path):
+        env = self._env(tmp_path, cleanup_days=10)
+        assert "warnings:" not in self._run(env).human_output
+
+    def test_json_report_carries_the_warning(self, tmp_path):
+        """`trailhead doctor --json` dumps `data` verbatim, so the warning has to
+        live there and not only in the rendered text."""
+        env = self._env(tmp_path, cleanup_days=10)
+        self._seed_bookmark(tmp_path, "alpha", age_days=9)
+        r = run_doctor(
+            as_json=True,
+            env=env,
+            which_runner=lambda n: None,
+            python_version_runner=_fake_py,
+        )
+        import json as _json
+
+        round_tripped = _json.loads(_json.dumps(r.data))
+        assert any("alpha" in w for w in round_tripped["warnings"])

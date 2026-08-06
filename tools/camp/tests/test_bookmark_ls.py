@@ -231,3 +231,85 @@ def test_cmd_bookmark_ls_rejects_unexpected_argument(
         cmd_bookmark_ls(["mystery"], group, env)
     assert exc.value.code != 0
     assert "mystery" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Approaching-expiry marker
+# ---------------------------------------------------------------------------
+
+
+def _age_transcript(record: dict, *, days: float) -> None:
+    import os
+    import time
+
+    old = time.time() - days * 86400
+    os.utime(record["transcript_path"], (old, old))
+
+
+def test_ls_marks_a_transcript_approaching_retention_expiry(env: dict[str, str]) -> None:
+    """Past 80% of the harness's retention window a bookmark is about to become
+    unresumable, and the row says roughly how long is left."""
+    from camp.bookmark.render import render_bookmarks
+
+    record = _seed(env, _record("alpha"))
+    _age_transcript(record, days=9)
+    out = render_bookmarks([record], env=env, retention_days=10)
+
+    row = out.splitlines()[1]
+    assert "expires ~1d" in row
+
+
+def test_ls_omits_the_expiry_marker_below_the_threshold(env: dict[str, str]) -> None:
+    from camp.bookmark.render import render_bookmarks
+
+    record = _seed(env, _record("alpha"))
+    _age_transcript(record, days=2)
+    out = render_bookmarks([record], env=env, retention_days=10)
+
+    assert "expires" not in out
+
+
+def test_ls_omits_the_expiry_marker_when_retention_is_unavailable(
+    env: dict[str, str],
+) -> None:
+    """The harness seam degrades to None — with no window, camp must not guess one."""
+    from camp.bookmark.render import render_bookmarks
+
+    record = _seed(env, _record("alpha"))
+    _age_transcript(record, days=900)
+    out = render_bookmarks([record], env=env, retention_days=None)
+
+    assert "expires" not in out
+
+
+def test_ls_expiry_marker_never_masks_a_gone_transcript(env: dict[str, str]) -> None:
+    """Already-gone beats about-to-go: one marker per row, and the actionable one
+    is the failure that has already happened."""
+    from camp.bookmark.render import render_bookmarks
+
+    record = _seed(env, _record("alpha"), transcript=False)
+    out = render_bookmarks([record], env=env, retention_days=10)
+
+    row = out.splitlines()[1]
+    assert "transcript gone" in row
+    assert "expires" not in row
+
+
+def test_ls_expiry_marker_clamps_at_zero_days_left(env: dict[str, str]) -> None:
+    """A transcript past the whole window is overdue for cleanup, not negative."""
+    from camp.bookmark.render import render_bookmarks
+
+    record = _seed(env, _record("alpha"))
+    _age_transcript(record, days=40)
+    out = render_bookmarks([record], env=env, retention_days=10)
+
+    assert "expires ~0d" in out.splitlines()[1]
+
+
+def test_expiry_threshold_matches_the_harness_seam() -> None:
+    """camp restates the warning fraction so it can run without trailhead; the two
+    must not drift, or doctor and `ls` would disagree about the same deadline."""
+    from camp.bookmark.render import _RETENTION_WARNING_FRACTION
+    from trailhead.harness.base import SESSION_RETENTION_WARNING_FRACTION
+
+    assert _RETENTION_WARNING_FRACTION == SESSION_RETENTION_WARNING_FRACTION

@@ -50,6 +50,12 @@ UNSUPPORTED_RULESET_NOTICE = (
     "trailhead: this harness has no user-level ruleset support; nothing was installed."
 )
 
+#: Fraction of a harness's transcript-retention window after which a session is
+#: "approaching expiry".  Lives here, beside ``session_retention_days``, because
+#: two independent surfaces warn off it — ``trailhead doctor`` and
+#: ``camp bookmark ls`` — and a user reading both must see the same cutoff.
+SESSION_RETENTION_WARNING_FRACTION = 0.8
+
 
 class Harness(ABC):
     """Abstract installer for one AI code harness.
@@ -231,5 +237,39 @@ class Harness(ABC):
         Returns ``None`` when the harness has no resume concept, or when
         ``session_id`` is not a shape the harness accepts — a malformed id must
         never be smuggled into an argv a caller will run.
+        """
+        return None
+
+    # -- session retention ----------------------------------------------------
+    #
+    # Harnesses delete their own session transcripts on a schedule.  A caller
+    # holding a long-lived pointer at a transcript (camp's bookmarks) wants to
+    # warn BEFORE that deletion, which needs the window — expressed here in days
+    # and read from wherever the harness configures it (that location, and the
+    # setting's name, are harness knowledge and stay in the harness module).
+    #
+    # Same degrading default as the two seams above: ``None`` means "this harness
+    # has no retention window to report".  A caller must then skip its warning
+    # silently — a guessed window would warn about deletions that never come.
+
+    def session_retention_days(self, *, env: dict[str, str] | None = None) -> int | None:
+        """Days a session transcript survives before the harness cleans it up.
+
+        Returns ``None`` when the harness does not expire transcripts or cannot
+        report the window.  Implementations return their own documented default
+        when the setting is simply unset, and never raise for an unreadable or
+        malformed config — a retention hint is advisory, and crashing a report
+        over it is worse than not showing it.
+        """
+        return None
+
+    def session_retention_setting(self) -> str | None:
+        """Name of the setting controlling the retention window, or ``None``.
+
+        A warning that a transcript is about to be deleted is only actionable if
+        it says what to change — but the SPELLING of that setting is
+        harness-specific knowledge, so a core caller asks for it here rather than
+        naming any harness's key itself.  ``None`` means "not reportable", and a
+        caller must then omit the remedy rather than invent one.
         """
         return None
