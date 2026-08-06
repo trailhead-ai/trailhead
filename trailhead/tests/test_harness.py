@@ -47,6 +47,22 @@ class TestDetection:
         assert ClaudeCodeHarness.detect({"TRAILHEAD_CLAUDE_DIR": str(cdir)}) is True
         assert ClaudeCodeHarness.detect({"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "nope")}) is False
 
+    def test_detect_honors_claude_config_dir(self, tmp_path):
+        """``CLAUDE_CONFIG_DIR`` is Claude Code's OWN relocation variable: when it
+        is set the config dir really has moved, so detection must look there and
+        must NOT fall back to ``$HOME/.claude``."""
+        moved = tmp_path / "elsewhere"
+        moved.mkdir()
+        (tmp_path / ".claude").mkdir()
+        env = {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(moved)}
+        assert ClaudeCodeHarness.detect(env) is True
+        assert (
+            ClaudeCodeHarness.detect(
+                {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(tmp_path / "nope")}
+            )
+            is False
+        )
+
     def test_detect_harnesses_finds_claude_code(self, tmp_path):
         (tmp_path / ".claude").mkdir()
         found = detect_harnesses({"HOME": str(tmp_path)})
@@ -212,6 +228,56 @@ class TestUserRulesetBaseDefault:
         out = capsys.readouterr().out
         assert out.strip() == UNSUPPORTED_RULESET_NOTICE
         assert "trailhead-lore" not in out  # static notice, no per-name interpolation
+
+
+class TestClaudeConfigDirRelocation:
+    """Every path derived from the Claude config dir follows ``CLAUDE_CONFIG_DIR``.
+
+    That variable is Claude Code's own relocation switch — when a user sets it,
+    the config dir HAS moved, so a ruleset written to ``$HOME/.claude`` would land
+    where Claude Code will never read it. These pin that the relocation reaches
+    the whole surface, not just the session-transcript lookup it was added for.
+    """
+
+    def test_user_ruleset_path_follows_the_relocation(self, tmp_path):
+        moved = tmp_path / "moved-claude"
+        h = ClaudeCodeHarness()
+        env = {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(moved)}
+        assert h.user_ruleset_path("trailhead-lore", env=env) == (
+            moved / "rules" / "trailhead-lore.md"
+        )
+
+    def test_install_user_ruleset_writes_under_the_relocation(self, tmp_path):
+        moved = tmp_path / "moved-claude"
+        moved.mkdir()
+        h = ClaudeCodeHarness()
+        env = {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(moved)}
+        h.install_user_ruleset("trailhead-lore", "body\n", env=env)
+        assert (moved / "rules" / "trailhead-lore.md").read_text() == "body\n"
+        assert not (tmp_path / ".claude").exists()
+
+    def test_user_ruleset_status_reads_the_relocated_file(self, tmp_path):
+        moved = tmp_path / "moved-claude"
+        (moved / "rules").mkdir(parents=True)
+        (moved / "rules" / "trailhead-lore.md").write_text("body\n")
+        h = ClaudeCodeHarness()
+        env = {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(moved)}
+        assert h.user_ruleset_status("trailhead-lore", "body\n", env=env) == "current"
+        assert h.user_ruleset_status("trailhead-lore", "other\n", env=env) == "stale"
+
+    def test_trailhead_override_still_wins_over_the_relocation(self, tmp_path):
+        """``TRAILHEAD_CLAUDE_DIR`` is the test/redirect hatch and stays the
+        highest-precedence answer, so a developer's own relocation cannot leak
+        into a hermetic run."""
+        moved = tmp_path / "moved-claude"
+        override = tmp_path / "override-claude"
+        h = ClaudeCodeHarness()
+        env = {
+            "HOME": str(tmp_path),
+            "CLAUDE_CONFIG_DIR": str(moved),
+            "TRAILHEAD_CLAUDE_DIR": str(override),
+        }
+        assert h.user_ruleset_path("x", env=env) == override / "rules" / "x.md"
 
 
 class TestClaudeCodeUserRuleset:

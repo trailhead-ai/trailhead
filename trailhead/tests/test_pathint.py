@@ -410,8 +410,43 @@ def _fake_camp_resume_bash(target: Path, argv_line: str) -> str:
     )
 
 
+def _fake_camp_resume_recording_marker(target: Path, marker_file: Path) -> str:
+    """A fake camp whose line-2 command records CAMP_SHELL_INTEGRATION as the
+    RESUMED process sees it — the value a nested `camp resume` would inherit."""
+    argv_line = (
+        f'sh -c {shlex.quote(f"printf %s [${{CAMP_SHELL_INTEGRATION}}] > {shlex.quote(str(marker_file))}")}'
+    )
+    return _fake_camp_resume_bash(target, argv_line)
+
+
 class TestCampWrapperResumeBehaviorBash:
     """Exercise the emitted bash resume branch end-to-end."""
+
+    def test_the_marker_does_not_leak_into_the_resumed_process(self, tmp_path):
+        """The marker exists to tell camp that a wrapper is listening for THIS
+        invocation. If it survived into the resumed harness, a nested
+        `camp resume` inside that session would pass the integration guard with
+        no wrapper present and print its inert machine lines as if they worked."""
+        target = tmp_path / "ws"
+        target.mkdir()
+        seen = tmp_path / "seen.txt"
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text(_fake_camp_resume_recording_marker(target, seen))
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nexport PATH="{fakebin}:$PATH"\ncamp resume alpha\n'
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert seen.read_text() == "[]"
 
     def test_resume_cds_and_invokes_the_argv_line(self, tmp_path):
         target = tmp_path / "work space"
@@ -520,6 +555,30 @@ class TestCampWrapperResumeBehaviorBash:
 @pytest.mark.skipif(not _HAS_FISH, reason="fish not installed")
 class TestCampWrapperResumeBehaviorFish:
     """Exercise the emitted fish resume branch end-to-end."""
+
+    def test_the_marker_does_not_leak_into_the_resumed_process(self, tmp_path):
+        """Mirrors the bash guarantee: the marker covers the camp invocation only,
+        never the harness the wrapper goes on to run."""
+        target = tmp_path / "ws"
+        target.mkdir()
+        seen = tmp_path / "seen.txt"
+
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_camp = fakebin / "camp"
+        fake_camp.write_text(_fake_camp_resume_recording_marker(target, seen))
+        fake_camp.chmod(0o755)
+
+        wrapper = shellenv_lines(shell="fish", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nset -gx PATH "{fakebin}" $PATH\ncamp resume alpha\n'
+        proc = subprocess.run(
+            [_FISH_BIN, "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert seen.read_text() == "[]"
 
     def test_resume_cds_and_invokes_the_argv_line(self, tmp_path):
         target = tmp_path / "work space"

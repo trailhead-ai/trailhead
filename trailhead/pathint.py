@@ -169,10 +169,18 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 #     reinterpreted before the POSIX quoting is honored — so it hands line 2 to
 #     `sh -c` instead, keeping POSIX-shlex quoting authoritative in both dialects.
 #   - The CAMP_SHELL_INTEGRATION marker is exported ONLY around the intercepted
-#     invocations (new|remove|rm and resume) so the handlers suppress their
-#     bare-binary shellenv nudges; every other verb passes through with NO marker.
-#   - fish MUST use function-scoped `set -lx` — `env VAR=val command camp` breaks
-#     (env tries to exec a binary literally named `command`).
+#     camp INVOCATION (new|remove|rm and resume) so the handlers suppress their
+#     bare-binary shellenv nudges; every other verb passes through with NO marker,
+#     and — crucially — the resumed harness on line 2 runs WITHOUT it. Were it to
+#     leak into that process, a nested `camp resume` inside the resumed session
+#     would pass the integration guard with no wrapper listening and print its
+#     inert machine lines as though they had worked.
+#   - bash gets that scoping free from its `VAR=val cmd` prefix assignment. fish
+#     cannot use `env VAR=val command camp` (env would try to exec a binary
+#     literally named `command`), and a bare `set -lx` in the case body would stay
+#     exported for the REST of the function, including the `sh -c` on line 2 — so
+#     fish wraps just the invocation in a `begin … end` block and scopes the
+#     `set -lx` to that block.
 #
 # These are LITERAL shell snippets: never let Python interpolate $ / {} here.
 
@@ -205,8 +213,11 @@ _CAMP_WRAPPER_FISH = """\
 function camp
     switch "$argv[1]"
         case new remove rm
-            set -lx CAMP_SHELL_INTEGRATION 1
-            set -l p (command camp $argv)
+            set -l p
+            begin
+                set -lx CAMP_SHELL_INTEGRATION 1
+                set p (command camp $argv)
+            end
             set -l rc $status
             if test $rc -ne 0
                 return $rc
@@ -215,8 +226,11 @@ function camp
                 cd -- $p
             end
         case resume
-            set -lx CAMP_SHELL_INTEGRATION 1
-            set -l lines (command camp $argv)
+            set -l lines
+            begin
+                set -lx CAMP_SHELL_INTEGRATION 1
+                set lines (command camp $argv)
+            end
             set -l rc $status
             if test $rc -ne 0
                 return $rc
