@@ -63,8 +63,20 @@ def test_each_token_requires_its_argument(token):
     assert arg == "some-arg"
 
 
+def test_pushed_carries_its_full_three_field_argument():
+    parsed, arg = report.parse_drain_outcome(
+        "PUSHED craft/some-task abc1234 1 file changed, 3 insertions(+)"
+    )
+    assert parsed == "PUSHED"
+    assert arg == "craft/some-task abc1234 1 file changed, 3 insertions(+)"
+
+
 def test_unrecognized_token_fails_to_parse():
     assert report.parse_drain_outcome("PROMOTED nope") == (None, "PROMOTED nope")
+
+
+def test_empty_outcome_fails_to_parse():
+    assert report.parse_drain_outcome("") == (None, "")
 
 
 def test_only_the_first_line_is_parsed():

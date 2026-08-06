@@ -79,6 +79,12 @@ terminal state — `DONE` / `BLOCKED` / `NEEDS_CONTEXT` — to the outcome file 
 caller passed at dispatch, and nothing else; commentary written around the token is
 unparseable by whatever reads the file.
 
+That vocabulary is this document's **default**, not a floor: a dispatching caller whose
+own dispatch instructions pin a different outcome grammar overrides it, and the caller's
+grammar wins (ranger's execute drain does exactly this — its per-task agent returns
+`PUSHED` / `BLOCKED` / `FAILED` / `SKIPPED` with mandatory arguments). Follow whichever
+grammar your dispatch named; if it named none, the three tokens above are it.
+
 **`--vault` is mandatory on every `lore record update` in this procedure.** `lore
 record update` locates a record by a cwd-blind first-match scan across configured
 vaults in declaration order; a dispatched agent's cwd is not the operator's, so an

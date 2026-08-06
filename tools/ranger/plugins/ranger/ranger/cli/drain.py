@@ -231,7 +231,6 @@ def _cmd_drain_derive(args) -> int:
 
 
 def _cmd_drain_record(args) -> int:
-    from ..drain import queue as drain_queue_mod
     from ..drain import report as drain_report_mod
 
     try:
@@ -239,11 +238,11 @@ def _cmd_drain_record(args) -> int:
     except ValueError as exc:
         return _fail(str(exc))
 
-    token, argument = drain_queue_mod.parse_drain_outcome(args.outcome)
+    token, argument = drain_report_mod.parse_drain_outcome(args.outcome)
     if token is None:
         return _fail(
             f"--outcome {args.outcome!r} does not match the drain grammar "
-            f"({'|'.join(sorted(drain_queue_mod.DRAIN_OUTCOME_TOKENS))} <argument>)"
+            f"({'|'.join(sorted(drain_report_mod.DRAIN_OUTCOME_TOKENS))} <argument>)"
         )
 
     if args.report:

@@ -3,8 +3,8 @@
 Answers "does this PR carry a human-authored approval signal?": an approving
 review by a `User` (non-bot) reviewer, OR (self-authored PRs — the drain's
 normal case, since GitHub 422s self-approval) the `human-approved` label
-applied by a `User` actor per the timeline API (U2, prover-validated). All
-gh/git calls go through an injected stub runner — zero network.
+applied by a `User` actor per the timeline API. All gh/git calls go through
+an injected stub runner — zero network.
 """
 
 from __future__ import annotations

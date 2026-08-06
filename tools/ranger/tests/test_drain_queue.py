@@ -320,46 +320,5 @@ def test_absent_camp_cli_raises_a_named_error_with_remediation(monkeypatch, tmp_
     assert "install camp or adjust PATH" in str(exc.value)
 
 
-# ---------------------------------------------------------------------------
-# Drain outcome grammar
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("token", sorted(drain_queue.DRAIN_OUTCOME_TOKENS))
-def test_each_grammar_token_round_trips_with_its_argument(token):
-    parsed_token, argument = drain_queue.parse_drain_outcome(f"{token} some-argument-text")
-    assert parsed_token == token
-    assert argument == "some-argument-text"
-
-
-def test_pushed_carries_its_full_three_field_argument():
-    parsed_token, argument = drain_queue.parse_drain_outcome(
-        "PUSHED craft/some-task abc1234 1 file changed, 3 insertions(+)"
-    )
-    assert parsed_token == "PUSHED"
-    assert argument == "craft/some-task abc1234 1 file changed, 3 insertions(+)"
-
-
-@pytest.mark.parametrize("token", sorted(drain_queue.DRAIN_OUTCOME_TOKENS))
-def test_missing_argument_fails_to_parse(token):
-    parsed_token, remainder = drain_queue.parse_drain_outcome(token)
-    assert parsed_token is None
-    assert remainder == token
-
-
-def test_unrecognized_token_fails_to_parse():
-    parsed_token, remainder = drain_queue.parse_drain_outcome("PROMOTED not-a-drain-token")
-    assert parsed_token is None
-    assert remainder == "PROMOTED not-a-drain-token"
-
-
-def test_empty_outcome_fails_to_parse():
-    parsed_token, remainder = drain_queue.parse_drain_outcome("")
-    assert parsed_token is None
-    assert remainder == ""
-
-
-def test_only_the_first_line_is_considered():
-    parsed_token, argument = drain_queue.parse_drain_outcome("BLOCKED needs approval\nextra commentary")
-    assert parsed_token == "BLOCKED"
-    assert argument == "needs approval"
+# The drain outcome grammar lives in `ranger.drain.report`, and so do its
+# tests (`test_drain_report.py`) — this module only derives the queue.

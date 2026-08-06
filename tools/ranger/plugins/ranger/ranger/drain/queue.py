@@ -45,9 +45,9 @@ Two different sources of collision, both reported `skipped:collision`:
   `worktree-<slug>` branch regardless of which task asked for it, so a
   workspace with a *different* task's name normalizing to this slug would
   read as "this task's own" under a branch-only check. The actual resume
-  marker is the task record's own `craft/branch` label — the plan's
-  resume-from-`craft/branch` semantics, written by the execute ritual at
-  dispatch (see `craft/skills/_shared/execute.md`). Only a task whose label
+  marker is the task record's own `craft/branch` label, written by the
+  execute ritual at dispatch to name the branch that run's commits live on
+  (see `craft/skills/_shared/execute.md`). Only a task whose label
   names *exactly* this slug's `worktree-<slug>` branch is treated as this
   workspace's owner; no label, or a label naming anything else, is
   `skipped:collision` naming the existing workspace's slug. The label is
@@ -69,16 +69,13 @@ import subprocess
 from typing import Any
 
 from ..sweep.queue import QueueDeriveError, Runner, run_lore
-from .report import DRAIN_OUTCOME_TOKENS, parse_drain_outcome
 
 __all__ = [
     "QueueDeriveError",
     "DRAIN_BUCKETS",
-    "DRAIN_OUTCOME_TOKENS",
     "derive_slug",
     "is_buildable_payload",
     "derive_drain_queue",
-    "parse_drain_outcome",
 ]
 
 DRAIN_BUCKETS = ("buildable", "skipped:not-buildable", "skipped:collision")

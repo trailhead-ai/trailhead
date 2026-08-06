@@ -125,7 +125,12 @@ extra steps.
 
 Your last action is to write **exactly one line** to the outcome file path you were
 handed — the whole file, one line, nothing else. No preamble, no summary, no file list, no
-explanation of what you did:
+explanation of what you did.
+
+**This grammar supersedes the procedure's own.** The procedure document names a default
+outcome vocabulary for unattended dispatches; the four tokens below are what this dispatch
+pins, and they are the ones the coordinator parses. Write one of these, never the
+procedure's default:
 
 - `PUSHED <branch> <sha> <diffstat>` — the build finished and every repo carrying commits
   was pushed. `<branch>` is the bare branch name, `<sha>` the head commit, `<diffstat>` a

@@ -42,10 +42,10 @@ be running. ``dropped`` is reserved for a task the drain queue named but
 never dispatched this run at all (the concurrency cap was already full) —
 distinct from every other bucket in that no agent, and no monitor, ever ran.
 
-**Outcome grammar** (moved here from ``ranger.drain.queue``, which now
-re-exports it for backward compatibility): ``PUSHED <branch> <sha>
-<diffstat>`` | ``BLOCKED <reason>`` | ``FAILED <reason>`` | ``SKIPPED
-<reason>``, every token's argument mandatory, first-line-only parsing.
+**Outcome grammar** (this module is its only home — ``ranger.cli.drain``'s
+``record`` verb parses through it): ``PUSHED <branch> <sha> <diffstat>`` |
+``BLOCKED <reason>`` | ``FAILED <reason>`` | ``SKIPPED <reason>``, every
+token's argument mandatory, first-line-only parsing.
 
 **PR data is never invented.** The PR links section and the
 awaiting-human-approval bullet's ``gh pr edit`` command are built only from
@@ -95,6 +95,7 @@ __all__ = [
     "MONITOR_OUTCOME_TOKENS",
     "DEFAULT_MONITOR_DEADLINE_HOURS",
     "parse_drain_outcome",
+    "parse_monitor_outcome",
     "start",
     "finish",
     "elected_vault",
@@ -175,13 +176,16 @@ def parse_drain_outcome(line: str) -> tuple[str | None, str]:
     return token, argument
 
 
-def _parse_monitor_outcome(line: str) -> tuple[str | None, str]:
+def parse_monitor_outcome(line: str) -> tuple[str | None, str]:
     """Split a monitor outcome line into ``(token, argument)``.
 
     Mirrors ``portage.monitor_outcome.parse_monitor_outcome`` exactly (see
     :data:`MONITOR_OUTCOME_TOKENS` for why it is reimplemented rather than
     imported). ``MERGED`` needs no argument; the other three always carry a
-    reason.
+    reason. Public because ``ranger.drain.loop``'s teardown gate classifies
+    the same monitor line this module's :func:`resolve_monitor_outcome`
+    does — one mirror of portage's grammar inside the drain package, not
+    two.
     """
     first_line = line.strip().splitlines()[0].strip() if line.strip() else ""
     token, _, argument = first_line.partition(" ")
@@ -600,7 +604,7 @@ def resolve_monitor_outcome(
         append_crashed(report_path, task_id, "monitor left no readable outcome file")
         return "crashed"
 
-    token, argument = _parse_monitor_outcome(monitor_outcome_line)
+    token, argument = parse_monitor_outcome(monitor_outcome_line)
     if token == "MERGED":
         append_pushed_merged(report_path, task_id, branch, sha, diffstat, pr_url=pr_url)
         return "pushed"

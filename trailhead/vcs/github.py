@@ -750,9 +750,9 @@ def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dic
 
     Checked in order: an approving review by a `User` (non-bot) reviewer;
     then the `human-approved` label, current-state-per-timeline, applied by a
-    `User` actor with no `performed_via_github_app` (U2, prover-validated —
-    self-approval via review 422s for the PR's own author, which is why the
-    label path exists for self-authored PRs).
+    `User` actor with no `performed_via_github_app`. The label path exists
+    because GitHub 422s an approving review by the PR's own author, so a
+    self-authored PR can never satisfy the review signal.
     """
     validate_pr_number(pr_number)
     owner_repo = _get_owner_repo(repo_path, runner)

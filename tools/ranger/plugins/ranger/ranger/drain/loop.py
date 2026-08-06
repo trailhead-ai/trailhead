@@ -36,6 +36,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# The monitor grammar this gate classifies is mirrored from portage in exactly
+# one place inside the drain package (see `report.parse_monitor_outcome`), so
+# the teardown gate and the report's own cap resolution can never drift into
+# disagreeing about what a monitor line says.
+from .report import parse_monitor_outcome
+
 __all__ = [
     "SYNCED_ACTIONS",
     "BLOCKING_SYNC_ACTIONS",
@@ -150,10 +156,10 @@ def teardown_decision(
             reason="monitor left no readable outcome file (crashed) — workspace preserved",
         )
 
-    token = monitor_outcome_line.strip().splitlines()[0].strip().partition(" ")[0]
+    token, _argument = parse_monitor_outcome(monitor_outcome_line)
     if token == "MERGED":
         return TeardownDecision(teardown=True, reason="monitor reported the PR merged")
-    if token in ("READY", "BLOCKED", "STOPPED"):
+    if token is not None:
         return TeardownDecision(
             teardown=False,
             reason=(
