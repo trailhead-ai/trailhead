@@ -131,9 +131,10 @@ def test_skill_pins_pool_cap_and_its_flag():
 def test_skill_pins_the_per_slot_state_quadruple():
     _pin(
         SKILL,
-        "its task id, its outcome file path, its dispatch deadline, and the queue bucket",
-        "With several tasks interleaving, none of these four is recoverable from a return; "
-        "each has to be carried from the derivation that produced the task.",
+        "its task id, its workspace slug, its outcome file path, its dispatch deadline, and the queue bucket",
+        "With several tasks interleaving, none of these five is recoverable from a return; "
+        "each has to be carried from the derivation that produced the task — the slug twice "
+        "over, for §5's `craft/branch` re-assert and for §7's teardown.",
     )
 
 
@@ -772,9 +773,10 @@ def test_rituals_doc_names_the_stale_lock_ritual_and_crash_signal():
     )
     _pin(
         RITUALS,
-        "held lock whose holder is no longer alive, paired with no exit report",
-        "The crash-signal pair — a held lock plus an absent exit report — must be named "
-        "explicitly; either signal alone is ambiguous.",
+        "held lock whose holder is no longer alive, paired with an unfinished exit report",
+        "The crash-signal pair must be named explicitly, and it is not an *absent* report: "
+        "`ranger drain start` writes the report as it takes the lock, so every locked vault "
+        "has one — the signal is a report that was never finished.",
     )
     _pin(
         RITUALS,
@@ -865,4 +867,122 @@ def test_drain_agent_is_discoverable_by_the_capabilities_loader():
     assert subagents.get("execute") == "agents/execute.md", (
         "ranger's execute agent must be discoverable as a selectable subagent — "
         f"expected `execute -> agents/execute.md`, got {subagents!r}"
+    )
+
+
+# --- no outcome leaves a task in a state nothing re-derives --------------------
+
+
+def test_skill_records_the_outcome_from_the_file_never_from_a_command_string():
+    _pin(
+        SKILL,
+        "--outcome-file",
+        "`$(cat …)` interpolates agent-written text into a command string, which the "
+        "skill's own ground rules forbid; the verb recomputes the path itself.",
+    )
+    _pin(
+        SKILL,
+        "Never pass the file's contents on the command line",
+        "The prohibition has to be stated, not just modeled by the snippet — an editor "
+        "reaching for `$(cat …)` needs a reason not to.",
+    )
+
+
+def test_skill_pins_a_missing_agent_outcome_as_crashed_not_failed():
+    _pin(
+        SKILL,
+        "missing or empty file is a different bucket",
+        "An agent that wrote nothing died, timed out, or never ran: its workspace is "
+        "preserved and its run claim still stands, which is the crashed ritual. The failed "
+        "ritual's recovery assumes an outcome line to read.",
+    )
+
+
+def test_skill_pins_the_failed_status_edge_back_to_ready():
+    _pin(
+        SKILL,
+        "--status ready --label craft/branch=worktree-<slug>",
+        "A dispatched task that failed is left `in-progress` by the run claim, and nothing "
+        "re-derives an `in-progress` task: the drain queue derives from `ready` and the "
+        "refine sweep from `open`/`blocked`. The label rides along because work may exist "
+        "on the branch.",
+    )
+    _pin(
+        SKILL,
+        "re-derived by **nothing**",
+        "The reason the release edge exists must be stated where the edge is written.",
+    )
+
+
+def test_skill_pins_that_a_pre_dispatch_skip_never_left_ready():
+    _pin(
+        SKILL,
+        "the task never left `ready`",
+        "A `SKIPPED` or a `FAILED` synthesized before §4.4's claim has no claim to release "
+        "— saying so is what stops an editor inventing a status write for it.",
+    )
+
+
+def test_skill_pins_resolving_a_slot_exactly_once():
+    _pin(
+        SKILL,
+        "Resolve each slot exactly once",
+        "Resolving a slot `inflight expire` already reclaimed overwrites its "
+        "`monitor-timeout` line with an empty branch and sha — the only record of the "
+        "timed-out PR.",
+    )
+
+
+def test_rituals_doc_gives_the_failed_ritual_its_restore_command():
+    _pin(
+        RITUALS,
+        "lore record update task/<name> --vault <vault> --status ready "
+        "--label craft/branch=worktree-<slug>",
+        "Ritual 1 must carry the exact command for the state it restores, like ritual 3 "
+        "does; naming a state with no command sends the operator to a vault edit.",
+    )
+    _pin(
+        RITUALS,
+        "back at `ready` with `craft/branch` asserted",
+        "Ritual 1's opening claim must match what the loop actually wrote — an operator "
+        "told the record is untouched looks for a state that is not there.",
+    )
+    _pin(
+        RITUALS,
+        "left `in-progress` is re-derived by nothing",
+        "The whole reason the restore command exists: no queue derives an `in-progress` "
+        "task.",
+    )
+
+
+def test_rituals_doc_crashed_ritual_covers_the_agent_crash_too():
+    _pin(
+        RITUALS,
+        "dispatched executor agent left no outcome file at all",
+        "`record` buckets an agent that wrote nothing as `crashed`; without this entry "
+        "point named, the report's crashed line points at a ritual that only mentions a "
+        "dead coordinator.",
+    )
+
+
+def test_rituals_doc_names_the_concrete_unfinished_report_marker():
+    _pin(
+        RITUALS,
+        "An absent report is not the signal",
+        "`report.start` writes the report as the lock is taken, so an operator looking for "
+        "an absent file never finds the crash.",
+    )
+    _pin(
+        RITUALS,
+        "only `ranger drain finish` writes",
+        "The marker an operator checks has to be a concrete, findable one.",
+    )
+
+
+def test_rituals_doc_names_the_degraded_in_flight_terminal_state():
+    _pin(
+        RITUALS,
+        "pushed tasks stay under **In flight** for the life of the report",
+        "With no monitor to resolve them, a degraded run's pushed lines never leave the "
+        "`in-flight` substate; unsaid, a finished degraded report reads as a stalled drain.",
     )

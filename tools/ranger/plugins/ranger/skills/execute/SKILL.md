@@ -123,11 +123,13 @@ A `SKIPPED` outcome and a failed build both leave the record byte-identical, so 
 unfiltered loop rebuilds the same task forever, and a re-dispatched *successful* task
 rebuilds work that is already committed and pushed.
 
-**Per-slot state.** For each in-flight slot, hold four values and nothing else — no record
+**Per-slot state.** For each in-flight slot, hold five values and nothing else — no record
 body, no agent reply, no diff:
-its task id, its outcome file path, its dispatch deadline, and the queue bucket
-it was derived from. With several tasks interleaving, none of the four is recoverable from
-a return; each has to be carried from the derivation that produced the task.
+its task id, its workspace slug, its outcome file path, its dispatch deadline, and the queue bucket
+it was derived from. With several tasks interleaving, none of the five is recoverable from
+a return; each has to be carried from the derivation that produced the task. The slug in
+particular is needed twice after the agent is gone — by §5's status edge, which re-asserts
+`craft/branch=worktree-<slug>`, and by §7's teardown.
 
 **Initial fill.** Open the pool by dispatching up to `concurrency` tasks before you wait
 for any of them. Waiting on the first dispatch before making the second is how a pool
@@ -257,15 +259,28 @@ ritual and the agent reads it in full.
 ## 5. Record it, and write the status edge
 
 ```sh
-ranger drain record --report "<report_path>" --task "task/<name>" --outcome "$(cat <outcomes_dir>/<name>.outcome)" --prs-json "<prs_json>"
+ranger drain record --report "<report_path>" --task "task/<name>" --outcome-file --prs-json "<prs_json>"
 ```
 
+`--outcome-file` takes no path here: `record` recomputes `<outcomes_dir>/<name>.outcome`
+from `--report` and `--task`, which is exactly why §4.4 forms that path the same way.
+**Never pass the file's contents on the command line** — agent-written text inside a
+command string is the one thing the ground rules forbid, and `$(cat …)` is that.
+
 The file's first line is held to the drain grammar — `PUSHED <branch> <sha> <diffstat>` /
-`BLOCKED <reason>` / `FAILED <reason>` / `SKIPPED <reason>`. **Anything else — a missing or
-empty file, commentary, a fifth token, a `PUSHED` missing its fields — is not your problem
+`BLOCKED <reason>` / `FAILED <reason>` / `SKIPPED <reason>`. **Content that is not one of
+the four — commentary, a fifth token, a `PUSHED` missing its fields — is not your problem
 to classify: `record` buckets it `FAILED` for you** and exits 0, carrying the raw line into
-the report as the reason. There is no nonzero exit to interpret and no fallback for you to
-get wrong; the JSON it prints names the bucket it wrote.
+the report as the reason. A **missing or empty file is a different bucket**: the agent
+wrote nothing at all, so it died, timed out, or never ran, and `record` buckets that
+`crashed` — the same bucket a monitor that wrote nothing lands in, because both preserve
+the workspace and both send the operator to the same crashed ritual. Either way there is no
+nonzero exit to interpret and no fallback for you to get wrong; the JSON it prints names
+the bucket it wrote, in its `bucket` field.
+
+Use `--outcome "<line>"` **only for an outcome you synthesize yourself, where no agent
+ran** — §4.1's sync-gate `SKIPPED`, §4.2's provisioning `FAILED`, §4.3's rebase conflict,
+§2's never-dispatched buckets. Never for an agent's own return.
 
 `--prs-json` is portage's `prs.json` sidecar (§6), optional: given it, a `PUSHED` outcome's
 branch is looked up there and the report's pushed line carries the PR link. The PR link
@@ -280,7 +295,9 @@ contract, because a status split across a process boundary races:
 | At dispatch (§4.4) | `lore record update task/<name> --vault <vault> --status in-progress --label craft/branch=worktree-<slug>` — the run claim, written `before you dispatch`. Nothing else writes it, and three downstream contracts are false without it (§4.4). |
 | `PUSHED` | `lore record update task/<name> --vault <vault> --status done` — write `done` immediately after the push succeeds, before the portage tail, so a coordinator that dies mid-monitor does not lose the edge the push already earned. |
 | `BLOCKED` | Park it: the agent has already written the literal `## Refine — unresolved` section onto the record; you write `lore record update task/<name> --vault <vault> --status blocked --label craft/branch=<branch>` — the status **and** a re-assert `craft/branch` in one command, because without the label the next drain cannot find the branch the parked work is on. |
-| `FAILED` / `SKIPPED` | No status write at all. The report's line is the operator's handle, and a status guessed from a run that produced nothing is worse than a task that stays `ready`. |
+| `FAILED`, from a **dispatched** agent | `lore record update task/<name> --vault <vault> --status ready --label craft/branch=worktree-<slug>` — release the claim §4.4 wrote and re-assert `craft/branch` in the same command. `ready` is what puts the task back in a queue: the drain derives from `ready` and the refine sweep from `open`/`blocked`, so a failed task left `in-progress` is re-derived by **nothing**. The label stays because work may exist on the branch — the next drain's resume ritual (§4.3) keys on it, and the queue's workspace-ownership check reads it as the owner of `worktree-<slug>`. |
+| `FAILED` / `SKIPPED` **you synthesized before dispatch** (§4.1's sync gate, §4.2's provisioning, §4.3's rebase conflict, §2's never-dispatched buckets) | No status write, and none is needed: §4.4's claim never ran, so the task never left `ready` and the next drain re-derives it as it stands. The report's line is the operator's handle. |
+| `crashed` — the agent left no outcome file | No status write. The task keeps the `in-progress` claim §4.4 wrote and its workspace is preserved (§7) — the same two handles a coordinator crash leaves, recovered by the same crashed ritual, which is what restores `ready` and `craft/branch`. A `ready` written here would invite the next drain to rebuild on top of a workspace nobody has inspected. |
 | Your own crash | Nothing to write — and that is the design. A task whose coordinator died stays `in-progress` — the claim §4.4 already wrote — and its workspace is preserved, so the next drain's resume ritual picks it up from the branch. |
 
 `--vault` is not optional. Without it `lore record update` locates the record by a
@@ -327,7 +344,10 @@ That frees the cap slot, writes the bucket, and prints which bucket it wrote. A 
 unreadable file resolves as `crashed` — not an error, and never a wedged slot. `MERGED` and
 `READY` stay in the pushed bucket; `BLOCKED` and `STOPPED` both report **`failed`**, because
 a monitor's `BLOCKED` is a PR it could not get green, not the operator-question park the
-`blocked` bucket is reserved for. If a monitor's outcome file is missing for a task that
+`blocked` bucket is reserved for. **Resolve each slot exactly once:** a task holding no
+slot — never marked, or already reclaimed by `inflight expire` — is refused, because
+resolving on top of a reclaimed slot would overwrite its `monitor-timeout` line with an
+empty branch and sha. If a monitor's outcome file is missing for a task that
 never held a cap slot at all, report it directly:
 
 ```sh
@@ -388,7 +408,8 @@ it and carry the slug into §8's still-standing list.
 
 The rules it applies, so you can recognize its answers: only `MERGED` licenses removal.
 `READY`, `BLOCKED`, and `STOPPED` are terminal for the monitor while still naming something
-an operator may need the workspace to finish, so they preserve it. A crashed monitor, an
+an operator may need the workspace to finish, so they preserve it. A crashed monitor, a
+crashed agent, an
 expired deadline, a `FAILED` build, and a `BLOCKED` park all preserve it too. When
 portage absent (degraded), tear down at push instead
 — there is no monitor-terminal to wait for.
@@ -431,7 +452,7 @@ left `in-progress` is picked up by the next drain's resume ritual.
 ## Operator re-entry
 
 Every stranded state the drain can leave — a failed push, a parked block, a crashed
-coordinator, a stale lock, a stalled approval, a corrupt state file — has a named,
+coordinator or agent, a stale lock, a stalled approval, a corrupt state file — has a named,
 pinned recovery ritual, plus the degraded-trust (portage-absent) mode description, in
 [`operator-rituals.md`](./operator-rituals.md). Read it before touching a task or a lock
 by hand.

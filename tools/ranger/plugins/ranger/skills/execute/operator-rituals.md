@@ -8,17 +8,32 @@ CLI invocation or a plain shell command — **never a direct edit of a vault fil
 
 ## 1. Failed
 
-A task's outcome line reads `FAILED <reason>` (§5 of the loop skill: no status write
-accompanies it, so the record is exactly where it was before the drain touched it), **or**
-it is stuck `in-progress` carrying the `craft/push=failed` label — craft's execute ritual
-sets that label when a push fails at close, and a task carrying it is never silently
-resumed. Either way:
+A task's outcome line reads `FAILED <reason>`, **or** it is stuck `in-progress` carrying
+the `craft/push=failed` label — craft's execute ritual sets that label when a push fails at
+close, and a task carrying it is never silently resumed.
+
+The two arrive in different states, and the ritual restores both to the same one:
+
+- **The outcome-line case.** §5 of the loop skill has already written the release edge:
+  the task is back at `ready` with `craft/branch` asserted, and its workspace is preserved.
+  Work may exist on that branch — the `FAILED` says the run ended, not that it committed
+  nothing.
+- **The `craft/push=failed` case.** Nothing was released. The task sits `in-progress` and
+  the guard label is what holds it out of every queue.
 
 1. Inspect the report line (or the record, for the label case) to see what failed.
-2. Fix the underlying problem and get the push through by hand, or decide to abandon the
-   attempt.
-3. Clear the guard: `lore record update task/<name> --vault <vault> --unset-label craft/push`.
-4. The task returns to `ready` once the guard is clear — nothing else holds it back.
+2. Inspect the preserved workspace and the task's `craft/branch`; fix the underlying
+   problem and get the push through by hand, or decide to abandon the attempt.
+3. Clear the guard, if the record carries it:
+   `lore record update task/<name> --vault <vault> --unset-label craft/push`
+4. Put the task back in a queue — `ready`, with its branch still named:
+   `lore record update task/<name> --vault <vault> --status ready --label craft/branch=worktree-<slug>`
+   In the outcome-line case the loop already wrote exactly this command, so run it only if
+   the record does not read `ready`. **A task left `in-progress` is re-derived by nothing**:
+   the drain queue derives from `ready`, the refine sweep from `open`/`blocked`.
+5. Or abandon it: `camp remove <slug>` tears the workspace down, and
+   `lore record update task/<name> --vault <vault> --status dropped` takes the task out of
+   every queue deliberately rather than by omission.
 
 ## 2. Blocked
 
@@ -38,7 +53,14 @@ reports it in the `failed` bucket alongside `STOPPED`, and ritual 1 is its re-en
 
 ## 3. Crashed
 
-The coordinator itself died mid-task. This leaves the task `in-progress` and its workspace preserved. The `in-progress` is the run claim
+Two entry points, one state and one recovery:
+
+- **The coordinator itself died mid-task** — nothing is in the report for that task.
+- **The dispatched executor agent left no outcome file at all** — it died, timed out, or
+  never ran, and the report carries the task in its `crashed` bucket. (A *monitor* that
+  wrote nothing lands in the same bucket; see §6 of the loop skill.)
+
+Either way this leaves the task `in-progress` and its workspace preserved. The `in-progress` is the run claim
 the loop wrote at dispatch (§4.4 of the loop skill) — a crashed run writes no status edge
 of its own, by design, so nothing was recorded on the way down and the claim plus the
 workspace are the only recovery handles.
@@ -53,7 +75,13 @@ workspace are the only recovery handles.
 
 The drain's vault lock lives at `state_dir("ranger")/locks/<vault>.lock`.
 
-A held lock whose holder is no longer alive, paired with no exit report having been written for that run, is the crash signal — the same pair a dead coordinator leaves behind.
+A held lock whose holder is no longer alive, paired with an unfinished exit report, is the crash signal — the same pair a dead coordinator leaves behind.
+
+**An absent report is not the signal.** `ranger drain start` writes the report at the same
+moment it takes the lock, so every locked vault has one. The marker to check is the
+report's footer, which only `ranger drain finish` writes: a `---` rule followed by
+``Report written to `<path>`.`` at the end of the file. Present, the run closed out and the
+lock is someone else's; absent, the run died holding it.
 
 `ranger drain start` detects the staleness itself (the holder pid is checked against the
 running process table) and prints the exact `rm <path>` command to clear it. The operator
@@ -102,3 +130,7 @@ project: there is no PR tail, no monitor, and no in-flight cap. A `PUSHED` task 
 immediately at the push — its workspace tears down there too, since there is no
 monitor-terminal to wait for — and the report carries a banner naming the degraded run so
 an operator reading it later knows no PR, CI, or approval gate ever ran.
+
+The banner also names the one substate this mode strands: with no monitor to resolve them,
+pushed tasks stay under **In flight** for the life of the report. That is the terminal
+state of a degraded run, not a stall — there is no ritual to run against it.
