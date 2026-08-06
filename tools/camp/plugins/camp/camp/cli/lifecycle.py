@@ -205,13 +205,13 @@ def _cmd_remove_group_cli(
     except OSError:
         cwd_inside_ws = False
 
-    if dry_run:
-        print(f"[dry-run] would remove worktree {slug!r} for group {group['group']['name']!r}",
-              file=sys.stderr)
-        return
-
-    # Bookmark guard: refuse BEFORE teardown so a rejected removal has torn down
-    # nothing. Cleanup of the entries happens only after teardown succeeds (below).
+    # Bookmark guard: refuse BEFORE teardown (and before the dry-run early
+    # return) so a rejected removal — real or previewed — has torn down
+    # nothing. Reporting a refusal is not a mutation, so checking it ahead of
+    # the dry-run return keeps dry-run non-mutating while making a would-be
+    # refusal visible instead of silently promising a removal that would
+    # actually be blocked. Cleanup of the entries happens only after a REAL
+    # teardown succeeds (below); dry-run never reaches that far.
     group_name = group["group"]["name"]
     if not force:
         try:
@@ -223,6 +223,11 @@ def _cmd_remove_group_cli(
         if blocking:
             print(bookmark_guard.render_block(slug, blocking), file=sys.stderr)
             sys.exit(1)
+
+    if dry_run:
+        print(f"[dry-run] would remove worktree {slug!r} for group {group['group']['name']!r}",
+              file=sys.stderr)
+        return
 
     try:
         # ManifestError is an Exception; the single handler covers it.

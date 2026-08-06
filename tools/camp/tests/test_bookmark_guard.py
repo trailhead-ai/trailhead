@@ -236,6 +236,64 @@ def test_remove_reattempt_after_workspace_gone_is_not_blocked(
 
 
 # ---------------------------------------------------------------------------
+# --dry-run: the guard must fire even though the early return never mutates
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_exits_nonzero_when_bookmarked(
+    env: dict[str, str], group: dict, teardown_spy, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.cli.lifecycle import _cmd_remove_group_cli
+
+    _seed_bookmark(env)
+
+    with pytest.raises(SystemExit) as exc:
+        _cmd_remove_group_cli([SLUG], group, env, True)
+    assert exc.value.code != 0
+
+
+def test_dry_run_prints_the_refusal_message(
+    env: dict[str, str], group: dict, teardown_spy, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.cli.lifecycle import _cmd_remove_group_cli
+
+    _seed_bookmark(env, ref="alpha", note="mid-refactor")
+
+    with pytest.raises(SystemExit):
+        _cmd_remove_group_cli([SLUG], group, env, True)
+
+    err = capsys.readouterr().err
+    assert "alpha" in err, err
+    assert "mid-refactor" in err, err
+
+
+def test_dry_run_blocked_by_bookmark_runs_no_teardown(
+    env: dict[str, str], group: dict, teardown_spy, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.cli.lifecycle import _cmd_remove_group_cli
+
+    _seed_bookmark(env)
+
+    with pytest.raises(SystemExit):
+        _cmd_remove_group_cli([SLUG], group, env, True)
+    assert teardown_spy["calls"] == [], "dry-run must never mutate, even when blocked"
+
+
+def test_dry_run_unbookmarked_workspace_still_prints_would_remove(
+    env: dict[str, str], group: dict, teardown_spy, capsys: pytest.CaptureFixture
+) -> None:
+    """When NOT blocked, dry-run keeps its existing non-mutating preview line."""
+    from camp.cli.lifecycle import _cmd_remove_group_cli
+
+    _workspace_dir(env).mkdir(parents=True, exist_ok=True)
+
+    _cmd_remove_group_cli([SLUG], group, env, True)
+    assert teardown_spy["calls"] == []
+    err = capsys.readouterr().err
+    assert "would remove" in err, err
+
+
+# ---------------------------------------------------------------------------
 # --force: teardown first, bookmark cleanup only after success
 # ---------------------------------------------------------------------------
 
