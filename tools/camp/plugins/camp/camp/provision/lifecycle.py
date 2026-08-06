@@ -202,8 +202,9 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
     `bookmark_count` are optional (group is None for the standalone fallback;
     bookmark_count defaults to 0). Output:
       - human: one `slug workspace_path` line per entry, with a trailing
-        ` [N bookmarks]` suffix when bookmark_count > 0 (omitted entirely at
-        N=0, preserving the bare `slug workspace_path` line); empty → no stdout.
+        ` [N bookmark]`/` [N bookmarks]` suffix (singular/plural agreement)
+        when bookmark_count > 0 (omitted entirely at N=0, preserving the bare
+        `slug workspace_path` line); empty → no stdout.
       - --json: a list of {slug, branch, workspace_path, group, bookmark_count}
         dicts (the fixed _LIST_JSON_KEYS schema); empty → `[]`.
 
@@ -229,7 +230,8 @@ def render_workspace_list(entries: list[dict[str, Any]], *, as_json: bool) -> No
 
     for e in entries:
         count = e.get("bookmark_count", 0)
-        suffix = f" [{count} bookmarks]" if count > 0 else ""
+        noun = "bookmark" if count == 1 else "bookmarks"
+        suffix = f" [{count} {noun}]" if count > 0 else ""
         print(f"{e['slug']} {e['workspace_path']}{suffix}")
 
 

@@ -356,7 +356,21 @@ class TestListBookmarkCount:
         camp_cli._cmd_ls_group_cli([], group, env)
 
         out = capsys.readouterr().out.strip()
-        assert out == f"feat-x {ws} [1 bookmarks]", f"got {out!r}"
+        assert out == f"feat-x {ws} [1 bookmark]", f"got {out!r}"
+
+    def test_human_line_suffix_stays_plural_for_multiple_bookmarks(self, capsys):
+        """The store enforces one bookmark per workspace, so N > 1 is never
+        reachable through normal usage — exercise the rendering helper
+        directly against a synthetic entry instead."""
+        from camp.provision.lifecycle import render_workspace_list
+
+        render_workspace_list(
+            [{"slug": "feat-x", "workspace_path": "/ws/feat-x", "bookmark_count": 2}],
+            as_json=False,
+        )
+
+        out = capsys.readouterr().out.strip()
+        assert out == "feat-x /ws/feat-x [2 bookmarks]", f"got {out!r}"
 
     def test_cmd_ls_group_entry_carries_bookmark_count(self, tmp_path):
         from camp.provision.lifecycle import cmd_ls_group
