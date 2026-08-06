@@ -106,6 +106,14 @@ _FAKE_CAMP_SCRIPT = textwrap.dedent(
         print(json.dumps(fixture["workspaces"]))
         sys.exit(0)
 
+    if argv[:2] == ["sync", "--json"]:
+        sync = fixture.get("sync")
+        if sync is None:
+            print("fake camp: no sync fixture", file=sys.stderr)
+            sys.exit(2)
+        print(json.dumps(sync))
+        sys.exit(0)
+
     print(f"fake camp: unexpected argv {argv!r}", file=sys.stderr)
     sys.exit(2)
     """
@@ -423,22 +431,78 @@ def test_record_accepts_each_grammar_token(tmp_path):
         assert payload["task"] == "task/t1"
 
 
-def test_record_refuses_an_outcome_with_no_argument(tmp_path):
+@pytest.mark.parametrize(
+    "outcome",
+    ["PUSHED", "PROMOTED nope", "all done!", "", "PUSHED branch-only"],
+    ids=["no-argument", "unknown-token", "free-text", "empty", "pushed-missing-fields"],
+)
+def test_record_buckets_an_unparseable_outcome_as_failed(tmp_path, outcome):
+    # The agent doc promises this: "the recording verb parses the file's first
+    # line and buckets anything else `failed`". A refusal instead would leave
+    # the finished-but-unrecordable run with no line in the report at all, and
+    # the coordinator with a nonzero exit and no bucket to write.
     drain = _drain(tmp_path)
+    report_path = json.loads(drain.start().stdout)["report_path"]
 
-    res = drain.run("drain", "record", "--task", "task/t1", "--outcome", "PUSHED")
+    res = drain.run(
+        "drain", "record", "--report", report_path,
+        "--task", "task/t1", "--outcome", outcome,
+    )
 
-    assert res.returncode != 0
-    assert res.stderr.startswith("ranger: ")
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert payload["token"] == "FAILED"
+    assert payload["unparseable"] is True
+    text = Path(report_path).read_text()
+    failed_section = text.split("## Failed\n", 1)[1].split("## ", 1)[0]
+    assert "task/t1" in failed_section
 
 
-def test_record_refuses_an_unrecognized_token(tmp_path):
+def test_record_pushed_appends_the_pushed_entry_with_its_diffstat(tmp_path):
+    # Without this the whole `## Pushed` section of a successful drain renders
+    # empty: `record` was the only verb the loop ever called for a PUSHED task.
     drain = _drain(tmp_path)
+    report_path = json.loads(drain.start().stdout)["report_path"]
 
-    res = drain.run("drain", "record", "--task", "task/t1", "--outcome", "PROMOTED nope")
+    res = drain.run(
+        "drain", "record", "--report", report_path, "--task", "task/t1",
+        "--outcome", "PUSHED worktree-t1 a1b2c3d 3 files changed, 45 insertions(+)",
+    )
 
-    assert res.returncode != 0
-    assert res.stderr.startswith("ranger: ")
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert payload["token"] == "PUSHED"
+    assert payload["branch"] == "worktree-t1"
+    assert payload["sha"] == "a1b2c3d"
+    text = Path(report_path).read_text()
+    assert "## Pushed" in text
+    assert "worktree-t1" in text
+    assert "a1b2c3d" in text
+    assert "3 files changed, 45 insertions(+)" in text
+
+
+def test_record_pushed_carries_the_pr_link_from_the_prs_sidecar(tmp_path):
+    drain = _drain(tmp_path)
+    report_path = json.loads(drain.start().stdout)["report_path"]
+    sidecar = tmp_path / "prs.json"
+    sidecar.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "prs": [{"branch": "worktree-t1", "url": "https://github.com/org/repo/pull/7",
+                     "pr_number": "7"}],
+            "external_tracker": None,
+        }),
+        encoding="utf-8",
+    )
+
+    res = drain.run(
+        "drain", "record", "--report", report_path, "--task", "task/t1",
+        "--outcome", "PUSHED worktree-t1 a1b2c3d 1 file changed",
+        "--prs-json", str(sidecar),
+    )
+
+    assert res.returncode == 0, res.stderr
+    assert "https://github.com/org/repo/pull/7" in Path(report_path).read_text()
 
 
 @pytest.mark.parametrize(
@@ -537,6 +601,281 @@ def test_finish_with_report_writes_the_footer_and_still_standing_workspaces(tmp_
     text = Path(report_path).read_text()
     assert "Report written to" in text
     assert "camp remove ws-a" in text
+
+
+# ---------------------------------------------------------------------------
+# inflight — the cap substrate the loop drives between record and finish
+# ---------------------------------------------------------------------------
+
+
+def _started(tmp_path, *extra: str) -> tuple:
+    drain = _drain(tmp_path)
+    drain.install_portage()
+    payload = json.loads(drain.start(*extra).stdout)
+    return drain, payload
+
+
+def test_inflight_mark_then_count_reports_the_occupied_cap(tmp_path):
+    drain, payload = _started(tmp_path)
+    report_path = payload["report_path"]
+
+    mark = drain.run(
+        "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
+        "--branch", "worktree-t1", "--sha", "a1b2c3d", "--diffstat", "1 file changed",
+        "--workspace", "t1",
+    )
+    assert mark.returncode == 0, mark.stderr
+
+    count = drain.run("drain", "inflight", "count", "--report", report_path)
+    assert count.returncode == 0, count.stderr
+    counted = json.loads(count.stdout)
+    assert counted["in_flight"] == 1
+    assert counted["inflight_cap"] == 3
+    assert counted["at_cap"] is False
+
+
+def test_inflight_count_reports_at_cap_so_the_loop_pauses_dispatch(tmp_path):
+    drain, payload = _started(tmp_path, "--inflight-cap", "1")
+    report_path = payload["report_path"]
+    drain.run(
+        "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
+        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+    )
+
+    counted = json.loads(drain.run("drain", "inflight", "count", "--report", report_path).stdout)
+
+    assert counted["at_cap"] is True
+
+
+def test_inflight_mark_is_refused_in_degraded_mode(tmp_path):
+    drain = _drain(tmp_path)  # no portage installed -> degraded
+    report_path = json.loads(drain.start().stdout)["report_path"]
+
+    res = drain.run(
+        "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
+        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+    )
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+    assert "degraded" in res.stderr
+
+
+def test_inflight_resolve_frees_the_slot_and_reports_the_bucket(tmp_path):
+    drain, payload = _started(tmp_path)
+    report_path = payload["report_path"]
+    drain.run(
+        "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
+        "--branch", "worktree-t1", "--sha", "a1b2c3d", "--diffstat", "1 file changed",
+        "--workspace", "t1",
+    )
+    monitor_outcome = tmp_path / "monitor.outcome"
+    monitor_outcome.write_text("MERGED\n", encoding="utf-8")
+
+    res = drain.run(
+        "drain", "inflight", "resolve", "--report", report_path, "--task", "task/t1",
+        "--monitor-outcome-file", str(monitor_outcome),
+    )
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout)["bucket"] == "pushed"
+    counted = json.loads(drain.run("drain", "inflight", "count", "--report", report_path).stdout)
+    assert counted["in_flight"] == 0
+    assert "### Merged" in Path(report_path).read_text()
+
+
+def test_inflight_resolve_reads_a_missing_monitor_outcome_file_as_crashed(tmp_path):
+    drain, payload = _started(tmp_path)
+    report_path = payload["report_path"]
+    drain.run(
+        "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
+        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+    )
+
+    res = drain.run(
+        "drain", "inflight", "resolve", "--report", report_path, "--task", "task/t1",
+        "--monitor-outcome-file", str(tmp_path / "never-written.outcome"),
+    )
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout)["bucket"] == "crashed"
+    assert "## Crashed" in Path(report_path).read_text()
+
+
+def test_inflight_resolve_takes_the_approval_pr_link_from_the_sidecar(tmp_path):
+    drain, payload = _started(tmp_path)
+    report_path = payload["report_path"]
+    drain.run(
+        "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
+        "--branch", "worktree-t1", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+    )
+    monitor_outcome = tmp_path / "monitor.outcome"
+    monitor_outcome.write_text("READY awaiting the human-approval label\n", encoding="utf-8")
+    sidecar = tmp_path / "prs.json"
+    sidecar.write_text(
+        json.dumps({"schema_version": 1, "external_tracker": None, "prs": [
+            {"branch": "worktree-t1", "url": "https://github.com/org/repo/pull/9", "pr_number": "9"}
+        ]}),
+        encoding="utf-8",
+    )
+
+    res = drain.run(
+        "drain", "inflight", "resolve", "--report", report_path, "--task", "task/t1",
+        "--monitor-outcome-file", str(monitor_outcome), "--prs-json", str(sidecar),
+    )
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report_path).read_text()
+    assert "gh pr edit https://github.com/org/repo/pull/9 --add-label human-approved" in text
+
+
+def test_inflight_expire_reclaims_a_slot_past_its_deadline(tmp_path):
+    drain, payload = _started(tmp_path, "--monitor-deadline", "0.0001")
+    report_path = payload["report_path"]
+    drain.run(
+        "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
+        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+        "--deadline-hours", "-1",
+    )
+
+    res = drain.run("drain", "inflight", "expire", "--report", report_path)
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout)["reclaimed"] == ["task/t1"]
+    text = Path(report_path).read_text()
+    assert "### Monitor timeout" in text
+    counted = json.loads(drain.run("drain", "inflight", "count", "--report", report_path).stdout)
+    assert counted["in_flight"] == 0
+
+
+# ---------------------------------------------------------------------------
+# crashed / dropped — the two buckets no outcome file ever produces
+# ---------------------------------------------------------------------------
+
+
+def test_crashed_appends_the_crashed_bucket_line(tmp_path):
+    drain = _drain(tmp_path)
+    report_path = json.loads(drain.start().stdout)["report_path"]
+
+    res = drain.run(
+        "drain", "crashed", "--report", report_path, "--task", "task/t1",
+        "--reason", "monitor left no readable outcome file",
+    )
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report_path).read_text()
+    crashed_section = text.split("## Crashed\n", 1)[1].split("## ", 1)[0]
+    assert "task/t1" in crashed_section
+
+
+def test_dropped_appends_the_dropped_bucket_line(tmp_path):
+    drain = _drain(tmp_path)
+    report_path = json.loads(drain.start().stdout)["report_path"]
+
+    res = drain.run(
+        "drain", "dropped", "--report", report_path, "--task", "task/t1",
+        "--reason", "in-flight cap full at drain end",
+    )
+
+    assert res.returncode == 0, res.stderr
+    text = Path(report_path).read_text()
+    dropped_section = text.split("## Dropped\n", 1)[1].split("## ", 1)[0]
+    assert "task/t1" in dropped_section
+    assert "cap full" in dropped_section
+
+
+# ---------------------------------------------------------------------------
+# sync-gate / teardown-check — the two classifications the loop never re-derives
+# ---------------------------------------------------------------------------
+
+
+def test_sync_gate_passes_when_every_member_is_at_origin_main(tmp_path):
+    drain = _drain(tmp_path)
+    drain.set_camp_fixture(workspaces=[], sync={"status": "ok", "members": {"member": {"action": "ff"}}})
+
+    res = drain.run("drain", "sync-gate", "--json")
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout)["ok"] is True
+
+
+@pytest.mark.parametrize("action", ["skip-dirty", "skip-off-main", "absent"])
+def test_sync_gate_blocks_on_a_skip_hiding_under_a_top_level_ok(tmp_path, action):
+    # The whole reason this is a verb: `camp sync` reports a top-level "ok"
+    # while a member sat out, and prose that re-derives the classification
+    # drifts from the JSON silently.
+    drain = _drain(tmp_path)
+    drain.set_camp_fixture(
+        workspaces=[], sync={"status": "ok", "members": {"member": {"action": action}}},
+    )
+
+    res = drain.run("drain", "sync-gate", "--json")
+
+    assert res.returncode == 1
+    payload = json.loads(res.stdout)
+    assert payload["ok"] is False
+    assert payload["blocking"] == [["member", action]]
+    assert action in payload["reason"]
+
+
+def test_teardown_check_licenses_removal_only_on_merged(tmp_path):
+    drain = _drain(tmp_path)
+    outcome = tmp_path / "monitor.outcome"
+    outcome.write_text("MERGED\n", encoding="utf-8")
+
+    res = drain.run("drain", "teardown-check", "--monitor-outcome-file", str(outcome))
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout)["teardown"] is True
+
+
+def test_teardown_check_preserves_the_workspace_on_a_terminal_state_needing_a_human(tmp_path):
+    drain = _drain(tmp_path)
+    outcome = tmp_path / "monitor.outcome"
+    outcome.write_text("READY awaiting human approval\n", encoding="utf-8")
+
+    payload = json.loads(
+        drain.run("drain", "teardown-check", "--monitor-outcome-file", str(outcome)).stdout
+    )
+
+    assert payload["teardown"] is False
+    assert payload["crashed"] is False
+
+
+def test_teardown_check_reads_a_missing_outcome_file_as_a_crash(tmp_path):
+    drain = _drain(tmp_path)
+
+    payload = json.loads(
+        drain.run(
+            "drain", "teardown-check",
+            "--monitor-outcome-file", str(tmp_path / "never-written.outcome"),
+        ).stdout
+    )
+
+    assert payload["teardown"] is False
+    assert payload["crashed"] is True
+
+
+def test_teardown_check_tears_down_at_push_in_degraded_mode(tmp_path):
+    drain = _drain(tmp_path)
+
+    payload = json.loads(drain.run("drain", "teardown-check", "--degraded").stdout)
+
+    assert payload["teardown"] is True
+
+
+def test_teardown_check_never_tears_down_an_expired_slot(tmp_path):
+    drain = _drain(tmp_path)
+    outcome = tmp_path / "monitor.outcome"
+    outcome.write_text("MERGED\n", encoding="utf-8")
+
+    payload = json.loads(
+        drain.run(
+            "drain", "teardown-check", "--monitor-outcome-file", str(outcome), "--expired",
+        ).stdout
+    )
+
+    assert payload["teardown"] is False
 
 
 # ---------------------------------------------------------------------------

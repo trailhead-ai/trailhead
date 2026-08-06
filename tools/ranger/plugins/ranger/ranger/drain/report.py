@@ -106,11 +106,13 @@ __all__ = [
     "MONITOR_OUTCOME_TOKENS",
     "DEFAULT_MONITOR_DEADLINE_HOURS",
     "parse_drain_outcome",
+    "parse_pushed_argument",
     "parse_monitor_outcome",
     "start",
     "finish",
     "elected_vault",
     "in_flight_count",
+    "inflight_cap",
     "mark_in_flight",
     "expire_in_flight",
     "resolve_monitor_outcome",
@@ -122,6 +124,10 @@ __all__ = [
     "append_skipped",
     "append_crashed",
     "append_dropped",
+    "append_pushed_merged",
+    "append_pushed_in_flight",
+    "append_pushed_awaiting_approval",
+    "append_pushed_monitor_timeout",
 ]
 
 _REPORTS_SUBDIR = "reports"
@@ -185,6 +191,21 @@ def parse_drain_outcome(line: str) -> tuple[str | None, str]:
     if token not in DRAIN_OUTCOME_TOKENS or not argument:
         return None, first_line[:_MAX_OUTCOME_ARG_CHARS]
     return token, argument
+
+
+def parse_pushed_argument(argument: str) -> tuple[str, str, str] | None:
+    """Split a ``PUSHED`` outcome's argument into ``(branch, sha, diffstat)``.
+
+    The diffstat is the whole remainder — it carries spaces and commas by
+    construction (``3 files changed, 45 insertions(+)``) — so only the first
+    two fields are split off. Returns ``None`` when fewer than three fields
+    are present: a ``PUSHED`` line the report cannot render is as unparseable
+    as an unrecognized token, and ``drain record`` buckets both as failed.
+    """
+    parts = argument.split(None, 2)
+    if len(parts) < 3 or not parts[2].strip():
+        return None
+    return parts[0], parts[1], parts[2].strip()
 
 
 def parse_monitor_outcome(line: str) -> tuple[str | None, str]:
@@ -662,6 +683,17 @@ def in_flight_count(report_path: Path) -> int:
     return len(_load_state(report_path)["in_flight"])
 
 
+def inflight_cap(report_path: Path) -> int:
+    """Return the in-flight cap this drain was *started* with.
+
+    Read back from the state file rather than re-passed per call, for the
+    same reason the deadline is (see :func:`mark_in_flight`): a caller free
+    to supply its own bound each time is a caller that can quietly stop
+    honoring the one `ranger drain start --inflight-cap` set.
+    """
+    return _load_state(report_path).get("inflight_cap", 3)
+
+
 def resolve_monitor_outcome(
     report_path: Path,
     task_id: str,
@@ -669,6 +701,7 @@ def resolve_monitor_outcome(
     *,
     pr_url: str | None = None,
     pr_url_or_number: str | None = None,
+    prs_json: Path | str | None = None,
 ) -> str:
     """Resolve a monitor-terminal outcome for an in-flight task, freeing its cap slot.
 
@@ -677,12 +710,22 @@ def resolve_monitor_outcome(
     latter buckets ``crashed`` (see the module docstring), never
     ``monitor-timeout``, which is reserved for :func:`expire_in_flight`'s own
     deadline check. Returns the bucket the task landed in
-    (``"pushed"``/``"blocked"``/``"failed"``/``"crashed"``).
+    (``"pushed"``/``"failed"``/``"crashed"``).
+
+    ``prs_json`` is portage's sidecar path: when given, the PR url/number for
+    this task's own in-flight branch is read from it (never from anything an
+    agent wrote) and supplies whichever of ``pr_url`` / ``pr_url_or_number``
+    the caller did not pass explicitly.
     """
     state = _load_state(report_path)
     entry = state["in_flight"].pop(task_id, {})
     _write_state(report_path, state)
     branch, sha, diffstat = entry.get("branch", ""), entry.get("sha", ""), entry.get("diffstat", "")
+
+    if prs_json is not None:
+        sidecar_url, sidecar_number = pr_url_for_branch(read_prs_sidecar(prs_json), branch)
+        pr_url = pr_url or sidecar_url
+        pr_url_or_number = pr_url_or_number or sidecar_url or sidecar_number
 
     if not monitor_outcome_line or not monitor_outcome_line.strip():
         _clear_pushed(report_path, task_id)
