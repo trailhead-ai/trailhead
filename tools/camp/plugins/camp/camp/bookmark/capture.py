@@ -111,7 +111,9 @@ def _resolve_transcript(
     if resolved is None:
         raise BookmarkError(
             f"camp bookmark: the transcript for session {session_id} cannot be resolved "
-            f"for workspace {workspace} — nothing to bookmark"
+            f"for workspace {workspace} — nothing to bookmark\n"
+            "  — if this session was started from inside a member directory rather "
+            "than the workspace root, that's the likely cause"
         )
     return Path(resolved).resolve()
 

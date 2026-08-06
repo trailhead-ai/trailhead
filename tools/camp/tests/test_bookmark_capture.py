@@ -164,6 +164,7 @@ def test_unresolvable_transcript_names_that_precondition(
     with pytest.raises(BookmarkError) as exc:
         capture(group=group, ref=None, note=None, env=env)
     assert "transcript" in str(exc.value)
+    assert "member directory rather than the workspace root" in str(exc.value)
 
 
 def test_unresolvable_transcript_writes_nothing(
