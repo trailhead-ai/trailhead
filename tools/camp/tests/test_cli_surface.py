@@ -427,6 +427,22 @@ def test_bookmark_without_a_group_says_so(tmp_path: Path) -> None:
     assert "bare slug dispatch is no longer supported" not in combined
 
 
+def test_bookmark_group_before_ls_reaches_ls_via_spine_fallback(tmp_path: Path) -> None:
+    """The spine fallback path (no group resolved at all) shares the same
+    groupless_subverb classifier, so `--group` before the subverb must not
+    misclassify there either."""
+    result = _run(
+        ["bookmark", "--group", "testgrp", "ls"],
+        env={
+            "CAMP_CONFIG_DIR": str(tmp_path / "empty"),
+            "CAMP_STATE_DIR": str(tmp_path / "state"),
+        },
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "unexpected argument" not in combined
+
+
 def test_bookmark_is_listed_in_help() -> None:
     """The verb is discoverable: camp help names it."""
     result = _run(["help"])
@@ -468,6 +484,30 @@ def test_group_path_bookmark_rm_consumes_group_flag(
     """camp bookmark rm --group <name> reaches the missing-ref usage refusal,
     not a stray-positional error about --group itself."""
     result = _run_group(["bookmark", "rm"], group_env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "unexpected argument" not in combined
+    assert "usage: camp bookmark rm <ref>" in combined
+
+
+# --group may also appear BEFORE the subverb token (`camp bookmark --group g
+# ls`); the classifier must drop --group before reading the subverb, not
+# after, or this ordering misclassifies as capture and dies.
+
+
+def test_group_path_bookmark_group_before_ls_reaches_its_handler(
+    stub_group_env: dict[str, str],
+) -> None:
+    result = _run(["bookmark", "--group", "testgrp", "ls"], env=stub_group_env)
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "unexpected argument" not in combined
+
+
+def test_group_path_bookmark_group_before_rm_reaches_its_handler(
+    stub_group_env: dict[str, str],
+) -> None:
+    result = _run(["bookmark", "--group", "testgrp", "rm"], env=stub_group_env)
     combined = result.stdout + result.stderr
     assert result.returncode != 0
     assert "unexpected argument" not in combined

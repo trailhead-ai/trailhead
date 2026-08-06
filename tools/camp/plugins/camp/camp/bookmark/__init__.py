@@ -101,9 +101,11 @@ def groupless_subverb(
     and stays cwd-scoped. Both dispatchers consult this ONE classifier so the two
     entry points cannot disagree about which subverbs need a group.
 
-    The subverb is recognized off the FIRST token only, before ``--group`` is
-    dropped, so ``camp bookmark --group g`` still captures rather than being read
-    as a subverb named ``--group``.
+    ``--group`` is dropped from a COPY of *rest* first, so the subverb is
+    classified off the first remaining token regardless of whether ``--group``
+    appeared before or after it — ``camp bookmark --group g ls`` and
+    ``camp bookmark ls --group g`` both classify as ``ls``. The caller must not
+    re-consume ``--group`` itself: this is the only place it is dropped.
     """
     if not rest:
         return None
@@ -111,9 +113,11 @@ def groupless_subverb(
     from ..spine import _consume_flag_value
     from .render import cmd_bookmark_ls, cmd_bookmark_rm
 
-    handler = {"ls": cmd_bookmark_ls, "rm": cmd_bookmark_rm}.get(rest[0])
+    args = list(rest)
+    _consume_flag_value(args, "--group")  # resolved (or unresolvable) upstream; drop it
+    if not args:
+        return None
+    handler = {"ls": cmd_bookmark_ls, "rm": cmd_bookmark_rm}.get(args[0])
     if handler is None:
         return None
-    args = rest[1:]
-    _consume_flag_value(args, "--group")  # resolved (or unresolvable) upstream; drop it
-    return handler, args
+    return handler, args[1:]
