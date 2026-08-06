@@ -17,7 +17,7 @@ resumed. Either way:
 1. Inspect the report line (or the record, for the label case) to see what failed.
 2. Fix the underlying problem and get the push through by hand, or decide to abandon the
    attempt.
-3. Clear the guard: `lore record update task/<name> --unset-label craft/push`.
+3. Clear the guard: `lore record update task/<name> --vault <vault> --unset-label craft/push`.
 4. The task returns to `ready` once the guard is clear — nothing else holds it back.
 
 ## 2. Blocked
@@ -30,14 +30,22 @@ queue classifier reads (`ranger/sweep/queue.py`'s `_ANSWER_PREFIX` / answered pr
 That single line is the whole re-entry: once it lands, a later refine or drain sweep reads
 the task as `blocked-answered` and re-attempts it — the ratified answered-blocked edge.
 
+This ritual covers the `blocked` bucket only, and that bucket has exactly one source: an
+executor agent's own parked question.
+**A monitor's own `BLOCKED` line is a red PR, not a parked question**
+— no `## Refine — unresolved` section exists to answer — so the drain
+reports it in the `failed` bucket alongside `STOPPED`, and ritual 1 is its re-entry.
+
 ## 3. Crashed
 
-The coordinator itself died mid-task. Per §5's contract this leaves the task `in-progress` and its workspace preserved — a crashed run writes no status edge, by design, so the
-record and the workspace are the only recovery handles.
+The coordinator itself died mid-task. This leaves the task `in-progress` and its workspace preserved. The `in-progress` is the run claim
+the loop wrote at dispatch (§4.4 of the loop skill) — a crashed run writes no status edge
+of its own, by design, so nothing was recorded on the way down and the claim plus the
+workspace are the only recovery handles.
 
 1. Inspect the preserved workspace to see how far the build got.
 2. Recover it with this exact command, which re-asserts `craft/branch`:
-   `lore record update task/<name> --status ready --label craft/branch=worktree-<slug>`
+   `lore record update task/<name> --vault <vault> --status ready --label craft/branch=worktree-<slug>`
 3. Or abandon it: `camp remove <slug>` tears the workspace down without touching the
    task record's status.
 

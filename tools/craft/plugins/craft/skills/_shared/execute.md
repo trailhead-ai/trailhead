@@ -91,7 +91,11 @@ vaults in declaration order; a dispatched agent's cwd is not the operator's, so 
 unqualified write can silently land in the wrong vault. Every literal
 `lore record update` command below names `--vault <elected-vault>` — the vault the
 caller elected, passed at dispatch — so attended and unattended runs never diverge on
-which vault gets written.
+which vault gets written. **Attended runs are handed nothing, so bind it once at the
+start:** `<elected-vault>` is the vault the task record you are building came from — ask
+`lore vault resolve --kind task --json` and read its `vault` field — and if that
+disagrees with where you actually found the record, name the record's own vault and say
+so rather than guessing.
 
 
 ## When to Use

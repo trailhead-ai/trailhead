@@ -74,6 +74,21 @@ DRAIN_VERBS = [
     "ranger drain finish",
 ]
 
+#: The verbs that own state or a classification the loop must never re-derive
+#: in prose: the durable in-flight cap (which prose cannot hold across a
+#: restart), the two buckets no outcome file produces, and the two
+#: classifications of another tool's JSON.
+DRAIN_SUBSTRATE_VERBS = [
+    "ranger drain sync-gate",
+    "ranger drain inflight mark",
+    "ranger drain inflight count",
+    "ranger drain inflight resolve",
+    "ranger drain inflight expire",
+    "ranger drain teardown-check",
+    "ranger drain crashed",
+    "ranger drain dropped",
+]
+
 
 # --- both documents ship ------------------------------------------------------
 
@@ -147,7 +162,19 @@ def test_skill_pins_the_attempted_set():
 
 def test_skill_pins_the_drain_verbs():
     for verb in DRAIN_VERBS:
-        _pin(SKILL, verb, "The loop is driven entirely through the drain CLI's four verbs.")
+        _pin(SKILL, verb, "The loop is driven entirely through the drain CLI's verbs.")
+
+
+def test_skill_calls_the_substrate_verbs_rather_than_re_deriving_them():
+    for verb in DRAIN_SUBSTRATE_VERBS:
+        _pin(
+            SKILL,
+            verb,
+            "The cap is durable state on disk and the sync/teardown gates are "
+            "classifications of another tool's JSON — a coordinator that tracked either in "
+            "its own transcript loses the cap to a restart and drifts from the JSON "
+            "silently.",
+        )
 
 
 # --- skill: the camp sync gate ------------------------------------------------
@@ -247,12 +274,35 @@ def test_skill_pins_the_blocked_park():
     )
 
 
+def test_skill_pins_the_run_claim_written_at_dispatch():
+    _pin(
+        SKILL,
+        "--status in-progress --label craft/branch=worktree-<slug>",
+        "Nothing else writes the run claim: the executor agent is forbidden from writing "
+        "any status, so without this write at dispatch a crashed run leaves the task "
+        "`ready` (not `in-progress`), the resume ritual finds no `craft/branch` label, and "
+        "the drain queue's workspace-ownership check reads the task as a collision.",
+    )
+    _pin(
+        SKILL,
+        "before you dispatch",
+        "A claim written after the dispatch is a claim a crash between the two loses.",
+    )
+
+
 def test_skill_pins_the_crash_edge():
     _pin(
         SKILL,
-        "left `in-progress`, and its workspace is preserved",
-        "A crashed run's workspace holds uncommitted work; removing it or rewriting its "
-        "status destroys the only recovery handle.",
+        "stays `in-progress` — the claim §4.4 already wrote",
+        "The crash state is true only because the loop wrote the claim at dispatch; a "
+        "crashed run writes nothing itself, so the dispatch-time write is what leaves the "
+        "record and the workspace as recovery handles.",
+    )
+    _pin(
+        SKILL,
+        "its workspace is preserved",
+        "A crashed run's workspace holds uncommitted work; removing it destroys the only "
+        "recovery handle.",
     )
 
 
@@ -337,6 +387,18 @@ def test_skill_pins_teardown_at_monitor_terminal():
         SKILL,
         "portage absent (degraded), tear down at push instead",
         "With no monitor there is no monitor-terminal to wait for.",
+    )
+
+
+def test_skill_pins_monitor_timeout_workspaces_as_listed_but_never_removable():
+    # §7 preserves the workspace and §8 hands `finish` the still-standing
+    # list; without this the two read as licensing a `camp remove` on the one
+    # workspace class whose whole point is that the loop lost track of its PR.
+    _pin(
+        SKILL,
+        "never carries a `camp remove`",
+        "A monitor-timeout workspace is preserved because the loop lost track of the PR; a "
+        "remove command next to it destroys the only handle back to that work.",
     )
 
 
@@ -451,6 +513,36 @@ def test_agent_pins_its_four_prohibitions():
         AGENT,
         "You never apply the approval signal",
         "A gate the automation can open is not a gate.",
+    )
+
+
+def test_agent_pins_the_inline_build_carve_out():
+    _pin(
+        AGENT,
+        "you build the task INLINE",
+        "The agent has no Task tool, so the procedure's dispatch-a-subagent path is a "
+        "capability it does not have; naming the inline carve-out is what stops it "
+        "improvising a substitute for a dispatch it cannot make.",
+    )
+    _pin(
+        AGENT,
+        "You never dispatch a subagent",
+        "An unnamed impossibility gets improvised around; this one is named.",
+    )
+
+
+def test_agent_and_skill_agree_that_an_unparseable_outcome_buckets_failed():
+    _pin(
+        AGENT,
+        "buckets anything else `FAILED`",
+        "`ranger drain record` implements exactly this; a doc promising a coordinator "
+        "fallback instead would describe behavior no code performs.",
+    )
+    _pin(
+        SKILL,
+        "buckets it `FAILED` for you",
+        "The CLI does the bucketing, so the loop has no fallback to get wrong — and no "
+        "nonzero exit to interpret.",
     )
 
 
@@ -604,8 +696,10 @@ def test_rituals_doc_names_the_failed_ritual():
     )
     _pin(
         RITUALS,
-        "lore record update task/<name> --unset-label craft/push",
-        "The exact clearing command is the whole of the failed ritual's recovery.",
+        "lore record update task/<name> --vault <vault> --unset-label craft/push",
+        "The exact clearing command is the whole of the failed ritual's recovery, and "
+        "without `--vault` it clears the guard in whichever vault lore's config happens to "
+        "list first.",
     )
 
 
@@ -631,9 +725,37 @@ def test_rituals_doc_names_the_crashed_ritual():
     )
     _pin(
         RITUALS,
-        "lore record update task/<name> --status ready --label craft/branch=worktree-<slug>",
+        "the loop wrote at dispatch",
+        "The task reads `in-progress` because the loop claimed it before dispatching, not "
+        "because anything wrote a status on the way down — an operator who expects a "
+        "crash-time write looks for a record that was never made.",
+    )
+    _pin(
+        RITUALS,
+        "lore record update task/<name> --vault <vault> --status ready "
+        "--label craft/branch=worktree-<slug>",
         "The exact recovery command re-asserting `craft/branch` is the crashed ritual's "
-        "clear-to-ready path.",
+        "clear-to-ready path, and without `--vault` it lands in whichever vault lore's "
+        "config happens to list first.",
+    )
+
+
+def test_every_rituals_recovery_command_names_its_vault():
+    for line in RITUALS.read_text().splitlines():
+        if "lore record update" in line:
+            assert "--vault" in line, (
+                "every `lore record update` in the rituals doc must name `--vault`; an "
+                f"unvaulted write lands in someone else's vault, silently: {line!r}"
+            )
+
+
+def test_rituals_doc_routes_a_monitor_blocked_to_the_failed_bucket():
+    _pin(
+        RITUALS,
+        "monitor's own `BLOCKED` line is a red PR, not a parked question",
+        "The `blocked` bucket and its answer-line ritual exist for an executor's parked "
+        "operator question; a monitor's BLOCKED parks no question anywhere, so it reports "
+        "`failed` and the answer ritual would have nothing to answer.",
     )
     _pin(
         RITUALS,

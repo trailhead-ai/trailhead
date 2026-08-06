@@ -189,6 +189,16 @@ def test_shared_execute_states_vault_is_mandatory():
     )
 
 
+def test_shared_execute_says_how_an_attended_session_binds_the_elected_vault():
+    _pin(
+        SHARED_EXECUTE,
+        "lore vault resolve --kind task --json",
+        "An unattended run is handed `<elected-vault>` at dispatch; an attended one is "
+        "handed nothing, so without a named mechanism the flag the procedure calls "
+        "mandatory has no value to take — and the reader guesses or drops it.",
+    )
+
+
 # --- the wrapper stays thin -------------------------------------------------------
 
 
