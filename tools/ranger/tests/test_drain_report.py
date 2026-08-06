@@ -276,8 +276,136 @@ def test_each_pushed_substate_fixture_renders_a_distinct_line_shape(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Monitor-terminal resolution: one bucket per task, never two
+# ---------------------------------------------------------------------------
+
+
+class TestResolveClearsThePushedEntry:
+    """A task resolved into a terminal non-pushed bucket leaves `pushed`.
+
+    `mark_in_flight` renders an `in-flight` line under `## Pushed`. When the
+    monitor's own outcome moves the task to `blocked`, `failed`, or
+    `crashed`, that in-flight line is no longer true — leaving it renders the
+    same task twice, in two mutually exclusive buckets, and an operator
+    reading the report cannot tell which one is current.
+    """
+
+    def _mark(self, tmp_path):
+        report_path = report.start("g", "v", 1, env=_env(tmp_path))
+        report.mark_in_flight(
+            report_path, "task/a", branch="branch-a", sha="sha1",
+            diffstat="1 file changed", workspace="ws-a",
+        )
+        assert "### In flight" in report_path.read_text()
+        return report_path
+
+    def test_a_monitor_blocked_line_leaves_no_in_flight_entry(self, tmp_path):
+        report_path = self._mark(tmp_path)
+        report.resolve_monitor_outcome(report_path, "task/a", "BLOCKED CI red after three fixes")
+        text = report_path.read_text()
+        assert "### In flight" not in text
+        assert text.count("task/a") == 1
+
+    def test_a_monitor_stopped_line_leaves_no_in_flight_entry(self, tmp_path):
+        report_path = self._mark(tmp_path)
+        report.resolve_monitor_outcome(report_path, "task/a", "STOPPED operator interrupt")
+        text = report_path.read_text()
+        assert "### In flight" not in text
+        assert text.count("task/a") == 1
+
+    def test_an_unreadable_monitor_outcome_leaves_no_in_flight_entry(self, tmp_path):
+        report_path = self._mark(tmp_path)
+        assert report.resolve_monitor_outcome(report_path, "task/a", None) == "crashed"
+        text = report_path.read_text()
+        assert "### In flight" not in text
+        assert text.count("task/a") == 1
+        assert "## Crashed" in text
+
+    def test_an_unparseable_monitor_line_leaves_no_in_flight_entry(self, tmp_path):
+        report_path = self._mark(tmp_path)
+        assert report.resolve_monitor_outcome(report_path, "task/a", "all good, merged it!") == "failed"
+        assert "### In flight" not in report_path.read_text()
+
+    def test_merged_keeps_the_task_in_the_pushed_bucket(self, tmp_path):
+        report_path = self._mark(tmp_path)
+        report.resolve_monitor_outcome(report_path, "task/a", "MERGED")
+        text = report_path.read_text()
+        assert "### In flight" not in text
+        assert "### Merged" in text
+
+
+def test_a_monitor_blocked_line_buckets_failed_not_blocked(tmp_path):
+    # The `blocked` bucket is reserved for a drain outcome's operator-question
+    # park (the `## Refine — unresolved` section on the record). A monitor's
+    # BLOCKED is a red PR with no question parked anywhere, so routing it to
+    # `blocked` sends the operator to a re-entry ritual that does not apply.
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    report.mark_in_flight(
+        report_path, "task/a", branch="b", sha="s", diffstat="d", workspace="ws-a",
+    )
+
+    bucket = report.resolve_monitor_outcome(report_path, "task/a", "BLOCKED CI red")
+
+    assert bucket == "failed"
+    text = report_path.read_text()
+    failed_section = text.split("## Failed\n", 1)[1].split("## ", 1)[0]
+    assert "task/a" in failed_section
+    assert "CI red" in failed_section
+
+
+def test_awaiting_approval_omits_the_command_when_no_pr_reference_exists(tmp_path):
+    # An uncopyable `gh pr edit  --add-label …` is worse than no command: it
+    # reads as a runnable instruction and silently is not one.
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    report.append_pushed_awaiting_approval(
+        report_path, "task/a", "branch-a", "sha1", "1 file changed", pr_url_or_number="",
+    )
+    text = report_path.read_text()
+    assert "### Awaiting human approval" in text
+    assert "gh pr edit" not in text
+    assert "no PR reference" in text
+
+
+def test_an_unreadable_deadline_is_refused_as_a_report_error(tmp_path):
+    # Every other malformed-state path in this module refuses by name; a raw
+    # ValueError out of `fromisoformat` escapes the CLI's ReportError funnel
+    # and reaches an unattended operator as a traceback.
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    report.mark_in_flight(
+        report_path, "task/a", branch="b", sha="s", diffstat="d", workspace="ws-a",
+    )
+    state_path = report_path.with_suffix(".state.json")
+    state = json.loads(state_path.read_text())
+    state["in_flight"]["task/a"]["deadline"] = "not-a-timestamp"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(report.ReportError) as exc:
+        report.expire_in_flight(report_path)
+
+    assert "task/a" in str(exc.value)
+    assert "deadline" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
 # Still-standing workspaces + degraded banner + empty queue
 # ---------------------------------------------------------------------------
+
+
+def test_monitor_timeout_workspaces_are_listed_distinctly_and_never_for_removal(tmp_path):
+    # A timed-out monitor's workspace is preserved *because* the loop lost
+    # track of the PR — putting it in the generic `camp remove` list is the
+    # one instruction that destroys the recovery handle.
+    report_path = report.start("g", "v", 2, env=_env(tmp_path))
+    report.append_pushed_monitor_timeout(
+        report_path, "task/timeout", "b", "s", "d", workspace="ws-timeout",
+    )
+    report.finish(report_path, still_standing=["ws-standing", "ws-timeout"])
+
+    text = report_path.read_text()
+    assert "camp remove ws-standing" in text
+    assert "camp remove ws-timeout" not in text
+    assert "## Monitor-timeout workspaces" in text
+    assert "ws-timeout" in text.split("## Monitor-timeout workspaces", 1)[1]
 
 
 def test_still_standing_workspaces_render_one_camp_remove_line_each(tmp_path):

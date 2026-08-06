@@ -26,14 +26,25 @@ reclaimed either when a monitor-terminal outcome is recorded
 (:func:`expire_in_flight`) — the latter renders as the distinct
 ``monitor-timeout`` substate and, per the loop's contract, never deletes the
 task's ephemeral camp workspace: an expired monitor deadline means the loop
-lost track of the PR, not that the work is disposable.
+lost track of the PR, not that the work is disposable. That preservation is
+enforced at render time too — a ``monitor-timeout`` workspace is listed in
+its own section and never carries a ``camp remove`` command, even if the
+loop hands it to :func:`finish` alongside the ordinary still-standing ones.
+A task that leaves ``pushed`` for a terminal bucket has its pushed line
+cleared as it goes, so no task ever renders under two buckets at once.
 
 **Bucket set**: ``pushed``, ``blocked``, ``failed``, ``crashed``,
 ``skipped``, ``dropped``. ``pushed`` is the only bucket that also carries a
 substate; the other five are flat, one line per task, exactly like a
 sweep's. ``blocked``/``failed``/``skipped`` come straight off the drain
 outcome grammar's ``BLOCKED``/``FAILED``/``SKIPPED`` tokens (see
-:data:`DRAIN_OUTCOME_TOKENS` below). ``crashed`` is reserved for a task
+:data:`DRAIN_OUTCOME_TOKENS` below). ``blocked`` is **only** ever an
+executor agent's own operator-question park — the one that writes a
+``## Refine — unresolved`` section onto the record for an operator to
+answer. A portage *monitor*'s ``BLOCKED`` line means a PR it could not get
+green, with no question parked anywhere, so it lands in ``failed``
+(:func:`resolve_monitor_outcome`) rather than sending an operator to a
+re-entry ritual with nothing to answer. ``crashed`` is reserved for a task
 whose portage *monitor* left no readable outcome file at all — a distinct
 signal from ``monitor-timeout``: a crash is the monitor process itself never
 writing anything (see ``portage.monitor_outcome``'s module docstring), while
@@ -236,6 +247,23 @@ def _write_state(report_path: Path, state: dict) -> None:
     _write_0600(_state_path(report_path), json.dumps(state, indent=2, sort_keys=True))
 
 
+def _monitor_timeout_workspaces(state: dict) -> list[str]:
+    """Return the workspace slugs held by ``monitor-timeout`` pushed entries.
+
+    These are the one class of preserved workspace that must never appear in
+    the report's `camp remove` guidance: an expired deadline means the loop
+    lost track of the PR, not that the work is disposable, so a remove
+    command next to one destroys the only handle back to it. Derived from the
+    pushed entries rather than trusted from the caller's ``still_standing``
+    list, so the two can never disagree.
+    """
+    return [
+        entry["workspace"]
+        for entry in state["pushed"].values()
+        if entry.get("substate") == "monitor-timeout" and entry.get("workspace")
+    ]
+
+
 def _render(state: dict) -> str:
     parts = [
         "# Ranger drain report\n\n",
@@ -271,12 +299,28 @@ def _render(state: dict) -> str:
             if entries:
                 parts.append("\n")
 
-    still_standing = state.get("still_standing") or []
+    preserved = _monitor_timeout_workspaces(state)
+
+    still_standing = [
+        ws for ws in (state.get("still_standing") or [])
+        if (ws if isinstance(ws, str) else ws.get("slug")) not in preserved
+    ]
     if still_standing:
         parts.append("## Still-standing workspaces\n\n")
         for ws in still_standing:
             slug = ws if isinstance(ws, str) else ws.get("slug")
             parts.append(f"- `{slug}` — `camp remove {slug}`\n")
+        parts.append("\n")
+
+    if preserved:
+        parts.append("## Monitor-timeout workspaces\n\n")
+        parts.append(
+            "Preserved, **not** for removal — the monitor deadline expired, so the loop lost "
+            "track of the PR rather than finishing with it. Check each PR before deciding "
+            "anything about its workspace.\n\n"
+        )
+        for slug in preserved:
+            parts.append(f"- `{slug}`\n")
         parts.append("\n")
 
     if state["finished"]:
@@ -368,9 +412,11 @@ def finish(report_path: Path, *, still_standing: list[str] | None = None) -> Non
     """Append the footer + still-standing-workspaces section, name the report's own path.
 
     ``still_standing`` is the loop's own list of camp workspace slugs left
-    unresolved at drain end — every ``monitor-timeout`` workspace is
-    deliberately excluded by the caller (see the module docstring: a timed
-    out task's workspace is preserved but never listed for removal).
+    unresolved at drain end. A ``monitor-timeout`` workspace passed in here is
+    not dropped from the report — it is moved into its own
+    preserved-not-removable section (:func:`_monitor_timeout_workspaces`), so
+    the loop may pass every preserved workspace it knows about without having
+    to remember which ones must not carry a `camp remove`.
     """
     state = _load_state(report_path)
     state["finished"] = True
@@ -404,7 +450,10 @@ def _append(
     _write_report(report_path, state)
 
 
-def _set_pushed(report_path: Path, task_id: str, substate: str, render, untrusted: str = "") -> None:
+def _set_pushed(
+    report_path: Path, task_id: str, substate: str, render, untrusted: str = "",
+    *, workspace: str = "",
+) -> None:
     """Set (or replace) *task_id*'s current pushed-substate line, scrubbed, and persist.
 
     Unlike :func:`_append`'s flat buckets, a pushed task's substate changes
@@ -417,7 +466,26 @@ def _set_pushed(report_path: Path, task_id: str, substate: str, render, untruste
     state["pushed"][task_id] = {
         "substate": substate,
         "line": render(scrub_credentials(untrusted)),
+        # Carried so `finish` can render the monitor-timeout workspaces as
+        # their own preserved-not-removable list rather than folding them
+        # into the generic `camp remove` guidance.
+        "workspace": workspace,
     }
+    _write_state(report_path, state)
+    _write_report(report_path, state)
+
+
+def _clear_pushed(report_path: Path, task_id: str) -> None:
+    """Drop *task_id*'s pushed-substate line, if it has one.
+
+    Called when a task leaves the ``pushed`` bucket for a terminal one:
+    ``mark_in_flight`` already rendered an ``in-flight`` line, and leaving it
+    standing renders the same task under two mutually exclusive buckets with
+    nothing telling a reader which is current.
+    """
+    state = _load_state(report_path)
+    if state["pushed"].pop(task_id, None) is None:
+        return
     _write_state(report_path, state)
     _write_report(report_path, state)
 
@@ -494,8 +562,19 @@ def append_pushed_awaiting_approval(
     report_path: Path, task_id: str, branch: str, sha: str, diffstat: str,
     *, pr_url_or_number: str,
 ) -> None:
-    command = approval_command(pr_url_or_number)
-    extra = f" — awaiting human approval\n\nApprove with:\n\n```\n{command}\n```\n"
+    # No PR reference means `prs.json` never named one for this branch, and a
+    # `gh pr edit  --add-label …` with the reference missing is an
+    # uncopyable command that still reads as a runnable instruction. Say what
+    # is missing instead.
+    if pr_url_or_number:
+        command = approval_command(pr_url_or_number)
+        extra = f" — awaiting human approval\n\nApprove with:\n\n```\n{command}\n```\n"
+    else:
+        extra = (
+            " — awaiting human approval; no PR reference was recorded for this branch, "
+            "so no approval command can be given — find the PR by its branch and apply "
+            "the `human-approved` label by hand\n"
+        )
 
     def render(safe_diffstat: str) -> str:
         return f"- `{task_id}` — `{branch}` @ `{sha}` — {safe_diffstat}{extra}"
@@ -510,7 +589,12 @@ def append_pushed_monitor_timeout(
         f" — monitor deadline expired; ephemeral workspace `{workspace}` preserved, "
         "not removed"
     )
-    _append_pushed(report_path, task_id, "monitor-timeout", branch, sha, diffstat, extra=extra)
+    _set_pushed(
+        report_path, task_id, "monitor-timeout",
+        lambda safe_diffstat: _pushed_line(task_id, branch, sha, safe_diffstat, extra=extra),
+        diffstat,
+        workspace=workspace,
+    )
 
 
 def mark_in_flight(
@@ -601,6 +685,7 @@ def resolve_monitor_outcome(
     branch, sha, diffstat = entry.get("branch", ""), entry.get("sha", ""), entry.get("diffstat", "")
 
     if not monitor_outcome_line or not monitor_outcome_line.strip():
+        _clear_pushed(report_path, task_id)
         append_crashed(report_path, task_id, "monitor left no readable outcome file")
         return "crashed"
 
@@ -614,14 +699,38 @@ def resolve_monitor_outcome(
             report_path, task_id, branch, sha, diffstat, pr_url_or_number=target,
         )
         return "pushed"
-    if token == "BLOCKED":
-        append_blocked(report_path, task_id, argument or "monitor reported blocked")
-        return "blocked"
-    # STOPPED, or an unparseable monitor line: the monitor reached a
-    # terminal state it cannot resolve further; report it as failed rather
-    # than silently dropping the cap slot's outcome.
-    append_failed(report_path, task_id, argument or "monitor stopped")
+    # `BLOCKED`, `STOPPED`, or an unparseable monitor line all land in
+    # `failed`. A monitor's BLOCKED is a PR it could not get green, not the
+    # drain's `blocked` bucket — that one is reserved for an executor agent's
+    # own operator-question park, which carries a `## Refine — unresolved`
+    # section on the record and a re-entry ritual that answers it. Routing a
+    # red PR there sends the operator to a ritual with nothing to answer.
+    _clear_pushed(report_path, task_id)
+    append_failed(
+        report_path,
+        task_id,
+        argument or (f"monitor reported {token}" if token else "monitor stopped"),
+    )
     return "failed"
+
+
+def _deadline(task_id: str, entry: dict) -> datetime:
+    """Parse one in-flight entry's deadline, or refuse by name.
+
+    Inside this module's ``ReportError`` contract like every other
+    malformed-state path: a raw ``ValueError`` out of ``fromisoformat``
+    escapes the CLI's refusal funnel and reaches an unattended operator as a
+    traceback with no named recovery.
+    """
+    raw = entry.get("deadline")
+    try:
+        return datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise ReportError(
+            f"in-flight entry for {task_id!r} carries an unreadable deadline {raw!r} ({exc}); "
+            "the cap cannot be reclaimed from this state — see the corrupt-state-file ritual "
+            "in skills/execute/operator-rituals.md"
+        ) from exc
 
 
 def expire_in_flight(report_path: Path, *, now: datetime | None = None) -> list[str]:
@@ -637,7 +746,7 @@ def expire_in_flight(report_path: Path, *, now: datetime | None = None) -> list[
     expired = [
         task_id
         for task_id, entry in state["in_flight"].items()
-        if datetime.fromisoformat(entry["deadline"]) <= now
+        if _deadline(task_id, entry) <= now
     ]
     reclaimed: list[dict] = []
     for task_id in expired:
