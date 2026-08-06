@@ -108,10 +108,19 @@ def _status_marker(
     Ordered most-broken first — workspace gone, transcript gone, then approaching
     expiry — because a row carries ONE marker: something already lost outranks
     something about to be lost, and reporting both would bury the former.
+
+    The record's group/slug are untrusted here too — this is a global listing
+    over every stored record, and one hand-edited row (e.g. group or slug
+    containing '..') must degrade only ITS marker rather than raise out of the
+    whole table and abort every other row's listing.
     """
     from ..group.manifest import workspace_dir
+    from ..group.resolve import GroupConfinementError
 
-    workspace = workspace_dir(record["group"], record["slug"], env=env)
+    try:
+        workspace = workspace_dir(record["group"], record["slug"], env=env)
+    except GroupConfinementError:
+        return "invalid record"
     if not workspace.exists():
         return "workspace gone"
     transcript = Path(record["transcript_path"])

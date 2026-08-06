@@ -125,6 +125,43 @@ def test_missing_note_stores_empty_string(live_workspace, env: dict[str, str], g
     assert get_by_ref(_SLUG, env=env)["note"] == ""
 
 
+def test_note_control_characters_are_stripped(
+    live_workspace, env: dict[str, str], group: dict
+) -> None:
+    """A note is echoed verbatim by `camp bookmark ls` and the `camp rm` guard —
+    a captured control byte (ANSI/OSC escape, bare ESC, CR, ...) would let a
+    bookmarked note repaint whichever terminal later lists or reads it. Notes
+    are single-line free text, so dropping controls costs nothing legitimate."""
+    from camp.bookmark.capture import capture
+    from camp.bookmark.store import get_by_ref
+
+    note = "before\x1b[31mred\x1b[0m\x07bell\x00null after"
+    capture(group=group, ref=None, note=note, env=env)
+
+    stored = get_by_ref(_SLUG, env=env)["note"]
+    # The escape LEAD byte is stripped; the printable characters that formed
+    # the rest of the escape sequence (e.g. '[31m') are not — this sanitizer
+    # only drops control bytes, it does not parse ANSI/OSC grammar.
+    assert stored == "before[31mred[0mbellnull after"
+    assert "\x1b" not in stored
+    assert "\x07" not in stored
+    assert "\x00" not in stored
+
+
+def test_note_printable_unicode_is_preserved(
+    live_workspace, env: dict[str, str], group: dict
+) -> None:
+    """Stripping controls must not touch ordinary printable text, including
+    non-ASCII, or the sanitizer would be doing more than its job."""
+    from camp.bookmark.capture import capture
+    from camp.bookmark.store import get_by_ref
+
+    note = "mid-refactor — café é中文"
+    capture(group=group, ref=None, note=note, env=env)
+
+    assert get_by_ref(_SLUG, env=env)["note"] == note
+
+
 # ---------------------------------------------------------------------------
 # Preconditions
 # ---------------------------------------------------------------------------

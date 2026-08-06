@@ -183,6 +183,49 @@ def test_ls_healthy_bookmark_has_no_marker(env: dict[str, str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# A hand-edited record cannot escape confinement or crash the whole listing
+# ---------------------------------------------------------------------------
+
+
+def test_ls_degrades_a_traversal_slug_row_instead_of_crashing(env: dict[str, str]) -> None:
+    """A stored record with slug='..' (never re-validated since capture) must
+    not raise out of render_bookmarks — it degrades to a marker on ITS row,
+    while a healthy row alongside it still renders normally."""
+    from camp.bookmark.render import render_bookmarks
+    from camp.bookmark.store import upsert
+
+    good = _seed(env, _record("alpha"))
+    bad = _record("evil", group="demo", slug="..", transcript=None)
+    upsert(bad, env=env)
+
+    out = render_bookmarks([good, bad], env=env)
+
+    lines = out.splitlines()
+    assert any(line.split()[0] == "alpha" and "gone" not in line for line in lines)
+    assert any(line.split()[0] == "evil" for line in lines)
+
+
+def test_ls_a_malformed_group_on_one_record_does_not_abort_the_table(
+    env: dict[str, str],
+) -> None:
+    """A record whose `group` fails path confinement (e.g. hand-edited to
+    contain '..') must degrade only that row, not raise through the whole
+    `camp bookmark ls` table."""
+    from camp.bookmark.render import render_bookmarks
+    from camp.bookmark.store import upsert
+
+    good = _seed(env, _record("alpha"))
+    bad = _record("evil", group="../escape", slug="whatever", transcript=None)
+    upsert(bad, env=env)
+
+    out = render_bookmarks([good, bad], env=env)
+
+    lines = out.splitlines()
+    assert any(line.split()[0] == "alpha" for line in lines)
+    assert any(line.split()[0] == "evil" for line in lines)
+
+
+# ---------------------------------------------------------------------------
 # Empty state
 # ---------------------------------------------------------------------------
 

@@ -388,3 +388,50 @@ def test_the_group_flag_is_accepted_in_equals_form_too(
     cmd_resume(["--group=demo", "alpha"], env)
 
     assert len(capsys.readouterr().out.splitlines()) == 2
+
+
+# ---------------------------------------------------------------------------
+# A hand-edited record's slug/group cannot walk resume outside the state tree
+# ---------------------------------------------------------------------------
+
+
+def _seed_raw(env: dict[str, str], *, ref: str = "alpha", group: str = "demo", slug: str, tmp_path: Path) -> dict:
+    """Store a bookmark whose (group, slug) is NOT re-derived through
+    workspace_dir first — simulating a hand-edited store.json record whose
+    slug never passed capture-time validation."""
+    from camp.bookmark.store import upsert
+
+    transcript = tmp_path / "sess.jsonl"
+    transcript.write_text("{}\n")
+    return upsert(
+        {
+            "ref": ref,
+            "group": group,
+            "slug": slug,
+            "session_id": "sess-alpha",
+            "transcript_path": str(transcript),
+            "note": "",
+            "created_at": "2026-08-03T00:00:00Z",
+            "updated_at": "2026-08-03T00:00:00Z",
+        },
+        env=env,
+    )
+
+
+def test_a_traversal_slug_on_a_stored_record_is_a_clean_resume_refusal(
+    env: dict[str, str], group: dict, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """A stored record with slug='../../../etc' must not resolve resume's cd
+    target outside the camp state tree, and must not crash with a raw
+    traceback — it is a clean, non-zero, no-stdout refusal like any other."""
+    from camp.bookmark.resume import cmd_resume
+
+    _seed_raw(env, slug="../../../etc", tmp_path=tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        cmd_resume(["alpha"], env)
+
+    captured = capsys.readouterr()
+    assert exc.value.code != 0
+    assert captured.out == ""
+    assert "alpha" in captured.err

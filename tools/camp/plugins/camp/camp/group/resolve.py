@@ -47,10 +47,12 @@ class GroupResolutionError(Exception):
 
 
 class GroupConfinementError(Exception):
-    """Raised when a group name fails the path-confinement check.
+    """Raised when a group name, or a workspace slug, fails path confinement.
 
     Mirrors trailhead.paths.PathResolutionError's contract for the group
-    segment camp appends to state_dir("camp")/<group>/.
+    segment camp appends to state_dir("camp")/<group>/, and for the slug
+    segment workspace_dir appends under it — see validate_group_name and
+    validate_workspace_slug.
     """
 
 
@@ -86,6 +88,41 @@ def validate_group_name(name: str) -> None:
         raise GroupConfinementError(
             f"camp: group name {name!r} must contain only lowercase letters, "
             "digits, and hyphens (^[a-z0-9-]+$)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# workspace-slug confinement
+# ---------------------------------------------------------------------------
+
+# A slug consumed from a STORED record (e.g. a bookmark) is untrusted in a way a
+# freshly-captured slug is not: spine._resolve_slug validates the tighter
+# capture-time charset once, at write time, but a hand-edited or otherwise
+# corrupted record bypasses that check entirely and is read back here as plain
+# text. This guard only needs to keep the joined path confined under the
+# worktrees root — it does not re-impose the wider capture-time charset (a
+# stored slug carrying e.g. spaces or shell metacharacters is still a valid,
+# resolvable workspace; only a path separator or a literal '.'/'..' segment can
+# walk workspace_dir's result outside the root).
+_SLUG_PATH_ESCAPE_RE = re.compile(r"[/\\\x00]")
+
+
+def validate_workspace_slug(slug: str) -> None:
+    """Validate that `slug` is safe to join as a single path segment.
+
+    Guards `workspace_dir`'s slug argument, which every consumer — resume,
+    the bookmark listing, the bookmark rm guard — re-derives from a STORED
+    record rather than a slug this process just validated. Rejecting here,
+    at the single place all of them call through, protects every current and
+    future reader without each one re-implementing the check.
+
+    Raises:
+        GroupConfinementError: if slug is empty, contains a path separator or
+            NUL byte, or is exactly '.' or '..'.
+    """
+    if not slug or _SLUG_PATH_ESCAPE_RE.search(slug) or slug in (".", ".."):
+        raise GroupConfinementError(
+            f"camp: slug {slug!r} is not safe to use as a workspace path segment"
         )
 
 

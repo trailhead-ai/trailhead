@@ -279,9 +279,16 @@ def workspace_dir(group: str, slug: str, *, env: dict[str, str] | None = None) -
 
     Returns:
         Absolute path to the workspace dir (directory may not exist yet).
-    """
-    from .resolve import central_state_dir
 
+    Raises:
+        GroupConfinementError: If group or slug fails path-confinement
+            validation — slug is validated here (not just at the CLI layer)
+            because callers routinely re-derive it from a STORED record
+            (e.g. a bookmark) rather than a slug this process just captured.
+    """
+    from .resolve import central_state_dir, validate_workspace_slug
+
+    validate_workspace_slug(slug)
     return central_state_dir(group, env=env) / "worktrees" / slug
 
 

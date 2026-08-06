@@ -42,6 +42,13 @@ _REF_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _REF_BODY_RE = re.compile(r"^[a-z0-9._-]*$")
 _REF_MAX_LEN = 64
 
+#: C0 and C1 control characters — everything `camp bookmark ls` and the `camp
+#: rm` guard would otherwise echo verbatim into a terminal, including bare ESC
+#: (the lead byte of both ANSI CSI and OSC-8 hyperlink escapes), BEL, and CR/LF.
+#: Notes are single-line free text, so dropping these costs nothing legitimate;
+#: every other printable character, including non-ASCII, passes through.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
 #: Where the harness publishes the id of the running session. camp resolves it
 #: generically here (rather than in a harness module) because it is read from the
 #: environment camp itself is running in — there is no harness object to ask.
@@ -56,6 +63,17 @@ class BookmarkError(Exception):
 
 def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime(store.TIMESTAMP_FORMAT)
+
+
+def _sanitize_note(note: str) -> str:
+    """Strip C0/C1 control characters from *note* before it is stored.
+
+    A note is captured once here and then echoed verbatim by `camp bookmark
+    ls` and the `camp rm` guard's refusal message — sanitizing at capture time
+    means every reader gets a safe string for free, rather than each render
+    site needing to remember to defend itself.
+    """
+    return _CONTROL_CHAR_RE.sub("", note)
 
 
 def _resolve_workspace(group: dict, env: dict[str, str] | None) -> tuple[str, Path]:
@@ -197,7 +215,7 @@ def capture(
             "slug": slug,
             "session_id": session_id,
             "transcript_path": str(transcript),
-            "note": note or "",
+            "note": _sanitize_note(note) if note else "",
             "created_at": (previous or {}).get("created_at") or now,
             "updated_at": now,
         }

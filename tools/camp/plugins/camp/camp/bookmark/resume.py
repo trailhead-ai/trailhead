@@ -89,11 +89,24 @@ def _resolve_workspace(record: dict, env: dict[str, str] | None) -> Path:
     The workspace is DERIVED from the record's (group, slug) rather than stored:
     it is the same pure resolution capture used, and re-deriving it means a
     relocated state dir resolves correctly instead of resuming a stale path.
+
+    The record's group/slug are untrusted here — they come from the store, not
+    from anything this process just validated — so a confinement failure
+    (e.g. a hand-edited slug of '..') is caught and turned into the same clean
+    refusal as any other broken bookmark, rather than an uncaught traceback.
     """
     from ..group.manifest import workspace_dir
+    from ..group.resolve import GroupConfinementError
 
     ref = record["ref"]
-    workspace = workspace_dir(record["group"], record["slug"], env=env)
+    try:
+        workspace = workspace_dir(record["group"], record["slug"], env=env)
+    except GroupConfinementError:
+        raise ResumeError(
+            f"camp resume: bookmark {ref!r} has an invalid workspace record and "
+            f"cannot be resumed\n"
+            f"  run 'camp bookmark rm {ref}' to drop the stale bookmark"
+        )
     if not workspace.is_dir():
         raise ResumeError(
             f"camp resume: the workspace for bookmark {ref!r} is gone "
