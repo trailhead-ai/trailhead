@@ -321,3 +321,79 @@ class TestBookmarkRetentionWarning:
 
         round_tripped = _json.loads(_json.dumps(r.data))
         assert any("alpha" in w for w in round_tripped["warnings"])
+
+
+class TestBookmarkStoreShapePin:
+    """doctor._load_bookmarks re-implements camp's on-disk bookmark-store shape
+    by reading bookmarks.json directly, since trailhead cannot import camp
+    (the harness-agnostic boundary). Pin that shape here by round-tripping a
+    REAL record through camp.bookmark.store.upsert and reading it back with
+    doctor's own reader, so the two can never silently drift — same idiom as
+    test_bookmark_ls.py's sys.path import of camp for a cross-package check.
+    """
+
+    @staticmethod
+    def _import_camp_store():
+        import sys
+
+        repo_root = Path(__file__).resolve().parents[2]
+        plugin_dir = repo_root / "tools" / "camp" / "plugins" / "camp"
+        if str(plugin_dir) not in sys.path:
+            sys.path.insert(0, str(plugin_dir))
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+
+        from camp.bookmark import store
+
+        return store
+
+    def test_reads_a_record_written_by_camps_own_store(self, tmp_path: Path) -> None:
+        from trailhead.doctor import _load_bookmarks
+
+        store = self._import_camp_store()
+        env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
+        record = store.upsert(
+            {
+                "ref": "alpha",
+                "group": "demo",
+                "slug": "alpha",
+                "session_id": "sess-alpha",
+                "transcript_path": "/nonexistent/alpha.jsonl",
+                "note": "mid-refactor",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+            env=env,
+        )
+
+        [loaded] = _load_bookmarks(env)
+        for key in ("ref", "group", "slug", "session_id", "transcript_path", "note", "updated_at"):
+            assert loaded[key] == record[key], key
+
+    def test_schema_version_key_is_present_alongside_the_bookmarks_map(
+        self, tmp_path: Path
+    ) -> None:
+        """Pin that store.upsert always writes schema_version at the top level —
+        doctor's reader ignores it, but if the store ever stopped writing it (or
+        renamed it) that would be exactly the drift this pin exists to catch."""
+        import json
+
+        store = self._import_camp_store()
+        env = {"CAMP_STATE_DIR": str(tmp_path / "camp-state")}
+        store.upsert(
+            {
+                "ref": "alpha",
+                "group": "demo",
+                "slug": "alpha",
+                "session_id": "sess-alpha",
+                "transcript_path": "/nonexistent/alpha.jsonl",
+                "note": "",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+            env=env,
+        )
+
+        raw = json.loads(store.store_path(env=env).read_text())
+        assert raw["schema_version"] == store.SCHEMA_VERSION
+        assert "alpha" in raw["bookmarks"]
