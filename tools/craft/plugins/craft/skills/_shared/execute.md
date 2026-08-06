@@ -85,17 +85,28 @@ grammar wins (ranger's execute drain does exactly this — its per-task agent re
 `PUSHED` / `BLOCKED` / `FAILED` / `SKIPPED` with mandatory arguments). Follow whichever
 grammar your dispatch named; if it named none, the three tokens above are it.
 
-**`--vault` is mandatory on every `lore record update` in this procedure.** `lore
-record update` locates a record by a cwd-blind first-match scan across configured
+**`--vault` is mandatory on every `lore record update` and every `lore record show` in
+this procedure.** Both locate a record by a cwd-blind first-match scan across configured
 vaults in declaration order; a dispatched agent's cwd is not the operator's, so an
-unqualified write can silently land in the wrong vault. Every literal
-`lore record update` command below names `--vault <elected-vault>` — the vault the
+unqualified write can silently land in the wrong vault — and an unqualified *read* can
+just as silently answer from a different vault's same-named record, which is how a run
+decides a task's shape from someone else's graph. Every literal
+`lore record update` and `lore record show` command below names `--vault <elected-vault>`
+— the vault the
 caller elected, passed at dispatch — so attended and unattended runs never diverge on
 which vault gets written. **Attended runs are handed nothing, so bind it once at the
 start:** `<elected-vault>` is the vault the task record you are building came from — ask
 `lore vault resolve --kind task --json` and read its `vault` field — and if that
 disagrees with where you actually found the record, name the record's own vault and say
 so rather than guessing.
+
+**Where `--vault` is not offered, the elected vault still governs.** `lore task graph`,
+`lore record create`, and `lore session candidate` take no `--vault` flag — do not invent
+one; a rejected flag stops the run. For those, name the routing scope the elected vault
+corresponds to (`lore record create --team <scope>` and its `--repo` / `--product` /
+`--suite` siblings) where the command offers it, and where it offers nothing, check the
+result against `<elected-vault>` before acting on it: a `lore task graph` render that does
+not match the vault the task came from is the ambiguous case below, not a fact.
 
 
 ## When to Use
@@ -146,7 +157,7 @@ task itself — and read both the render and the record's sidecar:
   walking it.
 - **Ambiguous.** A single-line render **with** a `parent` edge present matches neither
   case above and is never classified silently. Disambiguate first —
-  **resolve the `parent` value** (`lore record show task/<parent-value>`), because the
+  **resolve the `parent` value** (`lore record show task/<parent-value> --vault <elected-vault>`), because the
   two causes have opposite remediations:
   - **It resolves to a real task** — the ordinary cause: you rooted the run at a child
     slice of a live plan, not at the plan. Tell the operator to

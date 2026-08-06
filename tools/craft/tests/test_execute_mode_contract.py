@@ -19,9 +19,12 @@ Pinned here, using the wrap-aware `_pin` helper mirrored from ranger's
   - Unattended mode names the outcome-file write and the `## Refine — unresolved`
     park heading verbatim — the answered-predicate's literal heading per the ranger
     drain spec, so a later answered-blocked sweep can find a parked run by grep.
-  - Every `lore record update` in the shared procedure carries `--vault` — a
-    dispatched agent's cwd is not the operator's, so an unqualified write can
-    silently land in the wrong vault.
+  - Every `--vault`-capable `lore` invocation in the shared procedure carries
+    `--vault` — a dispatched agent's cwd is not the operator's, so an unqualified
+    write lands in the wrong vault and an unqualified read answers from a
+    different vault's same-named record. The commands that offer no `--vault`
+    flag (`lore task graph`, `lore record create`, `lore session candidate`) are
+    carved out in prose rather than mandated into a rejected flag.
   - `status-ownership.md` carries both pre-authorized carve-outs: the loop session
     as sole task-status writer (the dispatched executor never writes status), and
     the PR decision pre-authorized only into the portage tail.
@@ -162,27 +165,47 @@ def test_shared_execute_writes_the_park_section_as_a_diff_append():
 # --- --vault is mandatory on every lore record update ----------------------------
 
 
-def test_every_lore_record_update_call_carries_vault():
-    """Every literal `lore record update task/...` invocation names `--vault`.
+#: The `lore` subcommands that accept `--vault`. Every literal invocation of one
+#: in the shared procedure must name it. `lore task graph`, `lore record create`,
+#: and `lore session candidate` are deliberately absent — they offer no `--vault`
+#: flag, so mandating one would put a rejected flag in an unattended run's hands
+#: (the procedure says so in prose instead).
+_VAULT_CAPABLE_LORE_CALLS = ("lore record update", "lore record show")
 
-    A dispatched agent's cwd is not the operator's, so an unqualified
-    `lore record update` locates a record by a cwd-blind first-match scan across
-    configured vaults — an unattended write can silently land in the wrong vault.
+
+@pytest.mark.parametrize("command", _VAULT_CAPABLE_LORE_CALLS)
+def test_every_vault_capable_lore_call_carries_vault(command):
+    """Every literal invocation of a `--vault`-capable `lore` command names it.
+
+    A dispatched agent's cwd is not the operator's, so an unqualified call
+    locates a record by a cwd-blind first-match scan across configured vaults —
+    an unattended write lands in the wrong vault, and an unattended read answers
+    from a different vault's same-named record.
     """
     text = SHARED_EXECUTE.read_text()
-    calls = re.findall(r"lore record update task/<[^>]+>[^`\n]*", text)
-    assert calls, "expected at least one literal `lore record update task/<...>` call in _shared/execute.md"
+    calls = re.findall(rf"{command} (?:task/)?<[^>]+>[^`\n]*", text)
+    assert calls, f"expected at least one literal `{command} <...>` call in _shared/execute.md"
     missing = [c for c in calls if "--vault" not in c]
     assert not missing, (
-        "_shared/execute.md has `lore record update` calls with no `--vault` flag — "
+        f"_shared/execute.md has `{command}` calls with no `--vault` flag — "
         f"every literal invocation must carry `--vault <elected-vault>`: {missing}"
+    )
+
+
+def test_shared_execute_says_what_to_do_where_vault_is_not_offered():
+    _pin(
+        SHARED_EXECUTE,
+        "take no `--vault` flag — do not invent",
+        "`lore task graph`, `lore record create`, and `lore session candidate` accept no "
+        "`--vault`; a mandate that did not carve them out would put a rejected flag in an "
+        "unattended run's hands, and the run stops on it.",
     )
 
 
 def test_shared_execute_states_vault_is_mandatory():
     _pin(
         SHARED_EXECUTE,
-        "**`--vault` is mandatory on every `lore record update` in this procedure.**",
+        "**`--vault` is mandatory on every `lore record update` and every `lore record show` in",
         "The rule must be stated explicitly, not just followed by example — an "
         "editor adding a new `lore record update` call has no cue to include it "
         "otherwise.",
