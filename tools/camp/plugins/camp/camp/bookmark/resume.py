@@ -132,17 +132,10 @@ def _resolve_argv(group: dict, session_id: str) -> list[str]:
     An unrecognized harness and a recognized harness that declines are the same
     outcome for a user — neither yields a command — so both raise the one message.
     """
-    from trailhead.harness import get_harness, HarnessError
+    from . import harness_for
 
-    from ..launch.profile import resolve_harness_profile
-
-    binary = Path(resolve_harness_profile(group).binary).name
-    try:
-        harness = get_harness(binary)
-    except HarnessError:
-        argv = None
-    else:
-        argv = harness.session_resume(session_id)
+    harness = harness_for(group)
+    argv = harness.session_resume(session_id) if harness else None
     if not argv:
         raise ResumeError(_UNSUPPORTED)
     return list(argv)

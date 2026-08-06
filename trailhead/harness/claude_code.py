@@ -79,6 +79,16 @@ _PROJECTS_SUBDIR = "projects"
 #: would escape the projects dir, so it resolves to "unknown session" instead.
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
+
+def _is_session_id(session_id: object) -> bool:
+    """Whether ``session_id`` is a plain token safe to use as a path or an argv.
+
+    One predicate for both uses on purpose: an id is either inert enough to be
+    joined onto the transcripts root AND handed to a caller's argv, or it is not
+    a session id this harness recognizes at all.
+    """
+    return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
+
 #: The user-level settings file under the Claude dir, and the top-level key in it
 #: that sets how many days a session transcript is kept before cleanup.  Claude
 #: Code's own default when the key is absent is 30 days (minimum accepted: 1).
@@ -387,7 +397,7 @@ class ClaudeCodeHarness(Harness):
         transcripts are subject to Claude Code's retention cleanup, and a path to
         a file that is gone is worse than an honest "unresolvable".
         """
-        if not isinstance(session_id, str) or not _SESSION_ID_RE.match(session_id):
+        if not _is_session_id(session_id):
             return None
         _env = env if env is not None else dict(os.environ)
         munged = str(Path(workspace).resolve()).replace("/", "-").replace(".", "-")
@@ -416,7 +426,7 @@ class ClaudeCodeHarness(Harness):
         argv, so no id can ever contribute an extra argument or a shell-active
         character to the command a caller runs.
         """
-        if not isinstance(session_id, str) or not _SESSION_ID_RE.match(session_id):
+        if not _is_session_id(session_id):
             return None
         return ["claude", "--resume", session_id]
 

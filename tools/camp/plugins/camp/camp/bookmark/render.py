@@ -40,8 +40,6 @@ _EMPTY_HINT = (
 
 _COLUMNS = ("REF", "WORKSPACE", "AGE", "NOTE")
 
-_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
-
 
 def format_age(updated_at: str, *, now: dt.datetime) -> str:
     """Return a short human age (e.g. ``3h``, ``2d``) for *updated_at*.
@@ -50,7 +48,7 @@ def format_age(updated_at: str, *, now: dt.datetime) -> str:
     concern must never crash the whole listing over one malformed record.
     """
     try:
-        then = dt.datetime.strptime(updated_at, _TIMESTAMP_FORMAT).replace(
+        then = dt.datetime.strptime(updated_at, store.TIMESTAMP_FORMAT).replace(
             tzinfo=dt.timezone.utc
         )
     except (ValueError, TypeError):
@@ -125,12 +123,10 @@ def resolve_retention_days(group: dict) -> int | None:
     advisory marker: a listing must never fail over one.
     """
     try:
-        from trailhead.harness import get_harness
+        from . import harness_for
 
-        from ..launch.profile import resolve_harness_profile
-
-        binary = Path(resolve_harness_profile(group).binary).name
-        return get_harness(binary).session_retention_days()
+        harness = harness_for(group)
+        return harness.session_retention_days() if harness else None
     except Exception:
         return None
 

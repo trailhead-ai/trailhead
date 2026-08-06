@@ -53,7 +53,7 @@ class BookmarkError(Exception):
 
 
 def _now() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.datetime.now(dt.timezone.utc).strftime(store.TIMESTAMP_FORMAT)
 
 
 def _resolve_workspace(group: dict, env: dict[str, str] | None) -> tuple[str, Path]:
@@ -96,21 +96,16 @@ def _resolve_transcript(
 
     A harness with no transcript support and a harness whose transcript is simply
     gone both answer ``None``; the user-facing message is the same either way,
-    since neither can be bookmarked.
+    since neither can be bookmarked. An unrecognized harness (``harness_for``
+    answering None) has no transcript layout camp can ask about at all — the same
+    unresolvable outcome.
     """
-    from trailhead.harness import get_harness, HarnessError
+    from . import harness_for
 
-    from ..launch.profile import resolve_harness_profile
-
-    binary = Path(resolve_harness_profile(group).binary).name
-    try:
-        harness = get_harness(binary)
-    except HarnessError:
-        # An unrecognized harness has no transcript layout camp can ask about —
-        # the same "unresolvable" outcome as a harness that answers None.
-        resolved = None
-    else:
-        resolved = harness.session_transcript_path(session_id, workspace, env=env)
+    harness = harness_for(group)
+    resolved = (
+        harness.session_transcript_path(session_id, workspace, env=env) if harness else None
+    )
     if resolved is None:
         raise BookmarkError(
             f"camp bookmark: the transcript for session {session_id} cannot be resolved "

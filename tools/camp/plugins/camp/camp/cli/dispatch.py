@@ -323,18 +323,18 @@ def _dispatch_group_command(
         from ..bookmark.render import cmd_bookmark_ls, cmd_bookmark_rm
         from ..spine import _consume_flag_value
 
-        if rest and rest[0] == "ls":
-            sub_rest = rest[1:]
-            _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
-            cmd_bookmark_ls(sub_rest, group, group_env)
-        elif rest and rest[0] == "rm":
-            sub_rest = rest[1:]
-            _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
-            cmd_bookmark_rm(sub_rest, group, group_env)
+        # The subverb is recognized off the FIRST token only, before --group is
+        # dropped, so `camp bookmark --group g` still captures rather than being
+        # read as a subverb named '--group'.
+        subverbs = {"ls": cmd_bookmark_ls, "rm": cmd_bookmark_rm}
+        sub_rest = list(rest)
+        handler = subverbs.get(sub_rest[0]) if sub_rest else None
+        if handler is not None:
+            del sub_rest[0]
         else:
-            sub_rest = list(rest)
-            _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
-            cmd_bookmark(sub_rest, group, group_env)
+            handler = cmd_bookmark
+        _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
+        handler(sub_rest, group, group_env)
         return
     if cmd == "resume":
         from ..bookmark.resume import cmd_resume

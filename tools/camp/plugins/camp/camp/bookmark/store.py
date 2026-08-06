@@ -46,6 +46,12 @@ from typing import Any, Iterator
 #: save so a future reader can tell which shape it is holding.
 SCHEMA_VERSION = 1
 
+#: The format every record's ``created_at``/``updated_at`` is written and read in.
+#: It belongs to the on-disk shape, so writer and reader share this one
+#: declaration: a divergence would not fail loudly — it would silently render
+#: every age as unknown.
+TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
 _STORE_FILENAME = "bookmarks.json"
 _LOCK_FILENAME = "bookmarks.lock"
 
