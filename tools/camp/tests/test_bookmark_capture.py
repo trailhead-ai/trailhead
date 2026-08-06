@@ -317,19 +317,34 @@ def test_recapture_without_a_note_clears_the_previous_note(
     assert get_by_ref(_SLUG, env=env)["note"] == ""
 
 
-def test_recapture_under_a_new_ref_moves_the_workspace_bookmark(
+def test_recapture_under_a_new_ref_is_refused_naming_the_existing_ref(
     live_workspace, env: dict[str, str], group: dict
 ) -> None:
-    """One workspace holds at most one bookmark — a new ref renames, never forks."""
-    from camp.bookmark.capture import capture
+    """One workspace holds at most one bookmark, and removal is EXPLICIT: a second
+    ref for the same workspace refuses rather than silently dropping the first."""
+    from camp.bookmark.capture import BookmarkError, capture
+
+    capture(group=group, ref=None, note=None, env=env)
+    with pytest.raises(BookmarkError) as exc:
+        capture(group=group, ref="renamed", note=None, env=env)
+
+    message = str(exc.value)
+    assert _SLUG in message
+    assert f"camp bookmark rm {_SLUG}" in message
+
+
+def test_a_refused_rename_leaves_the_original_bookmark_intact(
+    live_workspace, env: dict[str, str], group: dict
+) -> None:
+    from camp.bookmark.capture import BookmarkError, capture
     from camp.bookmark.store import get_by_ref, list_bookmarks
 
     capture(group=group, ref=None, note=None, env=env)
-    capture(group=group, ref="renamed", note=None, env=env)
+    with pytest.raises(BookmarkError):
+        capture(group=group, ref="renamed", note=None, env=env)
 
-    assert [b["ref"] for b in list_bookmarks(env=env)] == ["renamed"]
-    assert get_by_ref(_SLUG, env=env) is None
-    assert get_by_ref("renamed", env=env)["slug"] == _SLUG
+    assert [b["ref"] for b in list_bookmarks(env=env)] == [_SLUG]
+    assert get_by_ref("renamed", env=env) is None
 
 
 # ---------------------------------------------------------------------------
@@ -401,3 +416,40 @@ def test_cli_ref_flag_requires_a_value(
         cmd_bookmark(["--ref"], group, env)
     assert exc.value.code != 0
     assert "--ref" in capsys.readouterr().err
+
+
+def test_cli_accepts_the_equals_form_of_ref(
+    live_workspace, env: dict[str, str], group: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """`--flag=value` is camp's accepted spelling everywhere else; bookmark's own
+    flags must not be the one surface that reads it as a stray positional."""
+    from camp.bookmark.capture import cmd_bookmark
+    from camp.bookmark.store import get_by_ref
+
+    cmd_bookmark(["--ref=chosen"], group, env)
+    assert get_by_ref("chosen", env=env) is not None
+
+
+def test_cli_accepts_the_equals_form_of_note(
+    live_workspace, env: dict[str, str], group: dict, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.bookmark.capture import cmd_bookmark
+    from camp.bookmark.store import get_by_ref
+
+    cmd_bookmark(["--note=mid refactor"], group, env)
+    assert get_by_ref(_SLUG, env=env)["note"] == "mid refactor"
+
+
+def test_cli_a_flag_is_never_consumed_as_another_flags_value(
+    live_workspace, env: dict[str, str], group: dict, capsys: pytest.CaptureFixture
+) -> None:
+    """`--ref --note x` is a value-less --ref, not a ref literally named '--note'
+    — reporting an invalid ref charset would point the user at the wrong token."""
+    from camp.bookmark.capture import cmd_bookmark
+
+    with pytest.raises(SystemExit) as exc:
+        cmd_bookmark(["--ref", "--note", "x"], group, env)
+
+    assert exc.value.code != 0
+    err = capsys.readouterr().err
+    assert "--ref requires a value" in err

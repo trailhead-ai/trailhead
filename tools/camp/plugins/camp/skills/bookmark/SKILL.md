@@ -23,8 +23,11 @@ camp bookmark [--ref <ref>] [--note <text>]
 
 - The default ref is the workspace slug. Refs are lowercase, short, and free of
   shell metacharacters (`^[a-z0-9][a-z0-9._-]{0,63}$`).
-- One bookmark per workspace: re-running updates that record in place (new session
-  id, new transcript, note replaced) rather than accumulating a second one.
+- One bookmark per workspace: re-running under the SAME ref updates that record in
+  place (new session id, new transcript, note replaced) rather than accumulating a
+  second one. Re-running under a DIFFERENT ref is refused, naming the existing ref
+  — moving a bookmark means `camp bookmark rm <old-ref>` first, because dropping a
+  bookmark is always explicit.
 - A ref already held by a **different** workspace is refused, not stolen — pick
   another ref, or remove the old one.
 - Three preconditions each fail on their own terms: cwd must be inside a camp
@@ -38,7 +41,9 @@ camp bookmark ls
 ```
 
 Global — every bookmark on the machine, most-recently-updated first, whatever
-workspace you run it from. Columns are ref / group-workspace / age / note, plus at
+directory you run it from, including outside every camp group (`ls`, `rm`, and
+`resume` address a ref, and a ref is looked up without knowing its group; only bare
+capture is cwd-scoped). Columns are ref / group-workspace / age / note, plus at
 most one marker per row:
 
 - `[workspace gone]` / `[transcript gone]` — the bookmark now points at nothing;

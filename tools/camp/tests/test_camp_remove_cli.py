@@ -1188,6 +1188,20 @@ class TestCampRemoveBookmarkGuard:
             f"stdout must stay one line (the return path).\nstdout: {r.stdout!r}"
         )
 
+    def test_corrupt_store_refuses_with_a_single_camp_prefix(self, remove_env):
+        """BookmarkStoreError messages are already prefixed; re-prefixing them
+        would print 'camp remove: camp: the bookmark store …'."""
+        from camp.bookmark.store import store_path
+
+        path = store_path(env=remove_env["env"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{oh no")
+
+        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
+        assert r.returncode != 0
+        assert "camp remove: camp:" not in r.stderr, r.stderr
+        assert str(path) in r.stderr
+
     def test_unbookmarked_workspace_removes_normally(self, remove_env):
         self._seed_bookmark(remove_env, ref="other", slug="other-slug")
         r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")

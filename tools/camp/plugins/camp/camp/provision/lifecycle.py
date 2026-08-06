@@ -123,16 +123,25 @@ def cmd_status_group(
     return {"worktrees": worktrees}
 
 
-def _bookmark_count(group_name: str | None, slug: str, *, env: dict[str, str] | None) -> int:
+def _bookmark_count(group_name: str, slug: str, *, env: dict[str, str] | None) -> int:
     """Return the number of bookmarks pointing at workspace (group_name, slug).
 
     A workspace holds at most one bookmark (store.find_by_workspace's own
     invariant), so this is always 0 or 1 — but callers deal in a count, not a
     bool, since the render surface is `[N bookmarks]`.
+
+    An unreadable store answers 0. The count is an ANNOTATION on a listing that
+    predates bookmarks entirely: degrading to the bare `slug path` line keeps
+    `camp list` — the command a user reaches for to find their workspaces —
+    working, where raising would take the whole listing down over a side note.
     """
     from ..bookmark import store as bookmark_store
 
-    return 1 if bookmark_store.find_by_workspace(group_name, slug, env=env) is not None else 0
+    try:
+        found = bookmark_store.find_by_workspace(group_name, slug, env=env)
+    except bookmark_store.BookmarkStoreError:
+        return 0
+    return 1 if found is not None else 0
 
 
 def cmd_ls_group(

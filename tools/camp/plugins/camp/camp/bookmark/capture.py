@@ -20,8 +20,10 @@ Ref rules: the default ref is the workspace slug; refs match
 ``^[a-z0-9][a-z0-9._-]{0,63}$`` (a ref is typed by hand and appears in shell
 commands, so it stays lowercase, short, and free of shell metacharacters). A ref
 already held by a DIFFERENT workspace is refused rather than stolen. Re-capturing
-the same workspace updates its record in place — a new session id and transcript,
-the note replaced, ``created_at`` preserved.
+the same workspace under the SAME ref updates its record in place — a new session
+id and transcript, the note replaced, ``created_at`` preserved. Re-capturing it
+under a DIFFERENT ref is refused, naming the ref to ``camp bookmark rm`` first:
+one workspace holds at most one bookmark, and dropping one is always explicit.
 """
 
 from __future__ import annotations
@@ -175,14 +177,18 @@ def capture(
                 f"{held.get('group')}/{held.get('slug')}{hint}"
             )
 
-        # One workspace holds at most one bookmark: capturing under a new ref
-        # RENAMES the existing record rather than forking a second pointer at the
-        # same workspace.
-        previous = held
+        # One workspace holds at most one bookmark, and dropping a bookmark is
+        # always an EXPLICIT act: capturing the same workspace under a SECOND ref
+        # refuses and names the ref to remove, rather than silently discarding a
+        # pointer the user may still want.
         prior_ref = store.ref_for_workspace(bookmarks, group_name, slug)
         if prior_ref is not None and prior_ref != ref:
-            previous = bookmarks.pop(prior_ref)
+            raise BookmarkError(
+                f"camp bookmark: {group_name}/{slug} is already bookmarked as {prior_ref!r}\n"
+                f"  run 'camp bookmark rm {prior_ref}' first to bookmark it under another ref"
+            )
 
+        previous = held
         record = {
             "ref": ref,
             "group": group_name,
@@ -203,15 +209,27 @@ def capture(
 
 
 def _consume_value(args: list[str], flag: str) -> str | None:
-    """Consume ``<flag> <value>`` from *args* in place; refuse a value-less flag."""
-    if flag not in args:
-        return None
-    i = args.index(flag)
-    if i + 1 >= len(args):
-        raise BookmarkError(f"camp bookmark: {flag} requires a value\n  {_USAGE}")
-    value = args[i + 1]
-    del args[i : i + 2]
-    return value
+    """Consume ``<flag> <value>`` or ``<flag>=<value>`` from *args* in place.
+
+    Both spellings are accepted because every other camp flag accepts both, and a
+    surface where only one works reads as a bug. A value-less flag is refused
+    naming that flag — and a following token that is itself a flag counts as
+    value-less, so ``--ref --note x`` reports the missing ``--ref`` value rather
+    than silently binding ``--note`` as the ref and then blaming its charset. A
+    value that must genuinely begin with ``--`` is written in the equals form.
+    """
+    for i, token in enumerate(args):
+        if token.startswith(f"{flag}="):
+            value = token[len(flag) + 1 :]
+            del args[i]
+            return value
+        if token == flag:
+            if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                raise BookmarkError(f"camp bookmark: {flag} requires a value\n  {_USAGE}")
+            value = args[i + 1]
+            del args[i : i + 2]
+            return value
+    return None
 
 
 def cmd_bookmark(args: list[str], group: dict, env: dict[str, str] | None) -> None:

@@ -217,7 +217,9 @@ def _cmd_remove_group_cli(
         try:
             blocking = bookmark_guard.blocking_bookmarks(group_name, slug, env=env)
         except BookmarkStoreError as e:
-            _die(f"camp remove: {e}")
+            # BookmarkStoreError messages already open with "camp: " — re-prefixing
+            # would read "camp remove: camp: the bookmark store …".
+            _die(str(e))
         if blocking:
             print(bookmark_guard.render_block(slug, blocking), file=sys.stderr)
             sys.exit(1)

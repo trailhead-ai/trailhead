@@ -406,9 +406,13 @@ class TestListBookmarkCount:
         out = capsys.readouterr().out.strip()
         assert out == f"feat-y {wt}", f"expected bare line at N=0, got {out!r}"
 
-    def test_spine_cmd_ls_json_bookmark_count_one_when_bookmarked(
+    def test_spine_cmd_ls_does_not_touch_the_bookmark_store(
         self, tmp_path, monkeypatch, capsys
     ):
+        """Every bookmark records the GROUP it was captured in, and the standalone
+        registry is not group-scoped — so no bookmark can ever match a row here.
+        `camp list` must therefore not open (and lock, and materialize the state
+        dir for) a store whose answer is structurally always zero."""
         from camp import spine
         from camp.bookmark import store as bookmark_store
 
@@ -418,28 +422,40 @@ class TestListBookmarkCount:
         (wt / ".workspace-manifest.json").write_text(
             json.dumps({"name": "feat-y", "branch": "worktree-feat-y"})
         )
-        state_dir = tmp_path / "state"
         monkeypatch.setenv("WORKSPACE_ROOT", str(workspace_root))
-        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
-        env = {"CAMP_STATE_DIR": str(state_dir)}
-        bookmark_store.upsert(
-            {
-                "ref": "feat-y",
-                "group": None,
-                "slug": "feat-y",
-                "session_id": "sess-1",
-                "transcript_path": "/tmp/transcript.jsonl",
-                "note": "",
-                "created_at": "2026-01-01T00:00:00Z",
-                "updated_at": "2026-01-01T00:00:00Z",
-            },
-            env=env,
-        )
+        monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+
+        def explode(*a, **k):
+            raise AssertionError("camp list must not query the bookmark store")
+
+        monkeypatch.setattr(bookmark_store, "find_by_workspace", explode)
 
         spine.cmd_ls(["--json"])
 
         rows = json.loads(capsys.readouterr().out)
-        assert rows[0]["bookmark_count"] == 1
+        assert rows[0]["bookmark_count"] == 0
+        assert not (tmp_path / "state").exists(), (
+            "a read-only `camp list` must not materialize the camp state dir"
+        )
+
+    def test_group_list_degrades_to_countless_output_on_a_corrupt_store(
+        self, camp_cli, tmp_path, capsys
+    ):
+        """A corrupt bookmarks.json must not take `camp list` down with it: the
+        count is an ANNOTATION on a listing that predates bookmarks entirely, so
+        it degrades to the bare line rather than a traceback."""
+        from camp.bookmark.store import store_path
+
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        ws = _seed_manifest("listgrp", "feat-x", env=env)
+        path = store_path(env=env)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{oh no")
+
+        camp_cli._cmd_ls_group_cli([], group, env)
+
+        assert capsys.readouterr().out.strip() == f"feat-x {ws}"
 
 
 class TestListEmpty:
