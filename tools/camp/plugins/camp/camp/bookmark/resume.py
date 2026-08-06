@@ -126,25 +126,32 @@ def _require_transcript(record: dict) -> None:
         )
 
 
-def _resolve_argv(group: dict, session_id: str) -> list[str]:
+def _resolve_argv(record: dict, env: dict[str, str] | None) -> list[str]:
     """Ask the harness seam for the command, or refuse.
+
+    The harness is the one that RAN the session — the harness of the group named
+    on the record — not the harness of whatever group the invoking shell is near.
+    Asking the wrong group would hand back a command for a different harness while
+    looking like a success.
 
     An unrecognized harness and a recognized harness that declines are the same
     outcome for a user — neither yields a command — so both raise the one message.
     """
-    from . import harness_for
+    from . import harness_for_bookmark
 
-    harness = harness_for(group)
-    argv = harness.session_resume(session_id) if harness else None
+    harness = harness_for_bookmark(record, env=env)
+    argv = harness.session_resume(record["session_id"]) if harness else None
     if not argv:
         raise ResumeError(_UNSUPPORTED)
     return list(argv)
 
 
-def resolve_resume(
-    *, group: dict, ref: str, env: dict[str, str] | None = None
-) -> tuple[Path, list[str]]:
+def resolve_resume(*, ref: str, env: dict[str, str] | None = None) -> tuple[Path, list[str]]:
     """Return (workspace_root, argv) for *ref*, or raise :class:`ResumeError`.
+
+    Every answer is derived from the STORED record, so this resolves identically
+    from any cwd — including a plain shell outside every group directory, which is
+    the whole point of addressing a session by ref.
 
     The checks run in the order a user can act on them: the shell integration
     first (nothing else matters without it), then the bookmark, then the two
@@ -154,7 +161,7 @@ def resolve_resume(
     record = _load_bookmark(ref, env)
     workspace = _resolve_workspace(record, env)
     _require_transcript(record)
-    argv = _resolve_argv(group, record["session_id"])
+    argv = _resolve_argv(record, env)
     return workspace, argv
 
 
@@ -163,16 +170,17 @@ def resolve_resume(
 # ---------------------------------------------------------------------------
 
 
-def cmd_resume(args: list[str], group: dict, env: dict[str, str] | None) -> None:
+def cmd_resume(args: list[str], env: dict[str, str] | None = None) -> None:
     """``camp resume <ref>`` — print the two-line machine contract for the wrapper.
 
-    Nothing reaches stdout until every check has passed, so a failure is always a
-    clean stderr line and an empty stdout.
+    Takes no group: the ref names everything the command needs. Nothing reaches
+    stdout until every check has passed, so a failure is always a clean stderr
+    line and an empty stdout.
     """
     from ..spine import _consume_flag_value
 
     rest = list(args)
-    _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+    _consume_flag_value(rest, "--group")  # resolved (or unresolvable) upstream; drop it
     try:
         if not rest:
             raise ResumeError(f"camp resume: a ref is required\n  {_USAGE}")
@@ -181,7 +189,7 @@ def cmd_resume(args: list[str], group: dict, env: dict[str, str] | None) -> None
             raise ResumeError(
                 f"camp resume: unexpected argument {rest[0]!r}\n  {_USAGE}"
             )
-        workspace, argv = resolve_resume(group=group, ref=ref, env=env)
+        workspace, argv = resolve_resume(ref=ref, env=env)
     except (ResumeError, store.BookmarkStoreError) as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)

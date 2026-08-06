@@ -1,8 +1,13 @@
 """``camp bookmark ls`` / ``camp bookmark rm`` — list and remove global bookmarks.
 
 ``ls`` is GLOBAL: it lists every bookmark in the store, most-recently-updated
-first, regardless of which group's workspace the invoking shell happens to be
-in. Its four columns are ref / group-workspace / age / note; a bookmark whose
+first, regardless of which group's workspace the invoking shell happens to be in
+— including from no group at all. Every group-scoped answer a row needs (its
+harness's retention window) is resolved from the group recorded ON THAT ROW, so
+rows spanning groups with different harnesses each report their own deadline
+rather than one group's window applied to all.
+
+Its four columns are ref / group-workspace / age / note; a bookmark whose
 transcript or workspace has since disappeared gets an inline marker rather than
 being silently dropped — camp core only ever CHECKS existence, never derives or
 repairs a path (the seam the transcript/workspace paths came from already
@@ -21,7 +26,7 @@ import math
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import store
 
@@ -115,20 +120,43 @@ def _status_marker(
     return _expiry_marker(transcript, retention_days)
 
 
-def resolve_retention_days(group: dict) -> int | None:
-    """Ask the group's harness how long it keeps session transcripts, or None.
+def retention_days_for_group(
+    group_name: str, *, env: dict[str, str] | None = None
+) -> int | None:
+    """Ask the harness of the group named *group_name* for its retention window.
 
-    Every failure — no trailhead install, an unrecognized harness, a harness with
-    no retention concept — collapses to None, because the answer only drives an
-    advisory marker: a listing must never fail over one.
+    Every failure — no trailhead install, no such group, an unrecognized harness,
+    a harness with no retention concept — collapses to None, because the answer
+    only drives an advisory marker: a listing must never fail over one.
     """
     try:
-        from . import harness_for
+        from . import group_config_for, harness_for
 
-        harness = harness_for(group)
-        return harness.session_retention_days() if harness else None
+        harness = harness_for(group_config_for(group_name, env=env) or {})
+        return harness.session_retention_days(env=env) if harness else None
     except Exception:
         return None
+
+
+def retention_resolver(
+    *, env: dict[str, str] | None = None
+) -> Callable[[str], int | None]:
+    """Return a memoized ``group name → retention days`` callable.
+
+    The listing is GLOBAL, and its rows may span groups running different
+    harnesses with different windows; resolving one window and applying it to
+    every row would print a deadline the harness in question never set. Answers
+    are memoized because a listing is typically many rows over few groups, and
+    each miss costs a config load plus a settings read.
+    """
+    cache: dict[str, int | None] = {}
+
+    def resolve(group_name: str) -> int | None:
+        if group_name not in cache:
+            cache[group_name] = retention_days_for_group(group_name, env=env)
+        return cache[group_name]
+
+    return resolve
 
 
 def render_bookmarks(
@@ -136,9 +164,13 @@ def render_bookmarks(
     *,
     env: dict[str, str] | None = None,
     now: dt.datetime | None = None,
-    retention_days: int | None = None,
+    retention_for: Callable[[str], int | None] | None = None,
 ) -> str:
     """Render *bookmarks* (already ordered by the caller) as a column table.
+
+    ``retention_for`` answers the retention window PER ROW, keyed on the row's own
+    group, so a listing spanning groups reports each one's real deadline. Omitting
+    it renders no expiry markers at all.
 
     Zero bookmarks renders the empty-state hint, never a header-only table — an
     agent scanning for "any bookmarks?" should not have to distinguish an empty
@@ -153,6 +185,7 @@ def render_bookmarks(
         workspace_label = f"{record['group']}/{record['slug']}"
         age = format_age(record.get("updated_at", ""), now=now)
         note = record.get("note") or ""
+        retention_days = retention_for(record["group"]) if retention_for else None
         marker = _status_marker(record, env=env, retention_days=retention_days)
         if marker:
             note = f"{note}  [{marker}]" if note else f"[{marker}]"
@@ -168,20 +201,28 @@ def render_bookmarks(
     return "\n".join(lines)
 
 
-def cmd_bookmark_ls(args: list[str], group: dict, env: dict[str, str] | None) -> None:
-    """``camp bookmark ls`` — print every bookmark, most-recently-updated first."""
+def cmd_bookmark_ls(args: list[str], env: dict[str, str] | None = None) -> None:
+    """``camp bookmark ls`` — print every bookmark, most-recently-updated first.
+
+    Takes no group: the listing is global, and each row's retention window is
+    resolved from the group recorded ON that row.
+    """
     if args:
         print(f"camp bookmark ls: unexpected argument {args[0]!r}", file=sys.stderr)
         sys.exit(1)
-    bookmarks = store.list_bookmarks_by_recency(env=env)
+    try:
+        bookmarks = store.list_bookmarks_by_recency(env=env)
+    except store.BookmarkStoreError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
     print(
         render_bookmarks(
-            bookmarks, env=env, retention_days=resolve_retention_days(group)
+            bookmarks, env=env, retention_for=retention_resolver(env=env)
         )
     )
 
 
-def cmd_bookmark_rm(args: list[str], group: dict, env: dict[str, str] | None) -> None:
+def cmd_bookmark_rm(args: list[str], env: dict[str, str] | None = None) -> None:
     """``camp bookmark rm <ref>`` — remove exactly the named bookmark."""
     if not args:
         print("camp bookmark rm: usage: camp bookmark rm <ref>", file=sys.stderr)
@@ -191,7 +232,11 @@ def cmd_bookmark_rm(args: list[str], group: dict, env: dict[str, str] | None) ->
         print(f"camp bookmark rm: unexpected argument {rest[0]!r}", file=sys.stderr)
         sys.exit(1)
 
-    removed = store.delete_by_ref(ref, env=env)
+    try:
+        removed = store.delete_by_ref(ref, env=env)
+    except store.BookmarkStoreError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
     if not removed:
         print(f"camp bookmark rm: no bookmark named {ref!r}", file=sys.stderr)
         sys.exit(1)

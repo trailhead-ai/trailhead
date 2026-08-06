@@ -43,11 +43,28 @@ def group() -> dict:
 
 @pytest.fixture()
 def env(tmp_path: Path) -> dict[str, str]:
-    """A hermetic env with the shell integration marker present."""
+    """A hermetic env with the shell integration marker present.
+
+    CAMP_CONFIG_DIR is injected too: resume resolves the harness from the config
+    of the group named on the bookmark, and no test may reach the developer's own
+    group configs to do it.
+    """
     return {
         "CAMP_STATE_DIR": str(tmp_path / "state"),
+        "CAMP_CONFIG_DIR": str(tmp_path / "config"),
         "CAMP_SHELL_INTEGRATION": "1",
     }
+
+
+def _write_group_config(env: dict[str, str], name: str, *, binary: str) -> None:
+    """Configure the group *name* to run the harness binary *binary*."""
+    groups_dir = Path(env["CAMP_CONFIG_DIR"]) / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    (groups_dir / f"{name}.toml").write_text(
+        f'[group]\nname = "{name}"\n\n'
+        '[[members]]\nname = "repo_a"\nrepo_root = "/nonexistent/repo"\n\n'
+        f'[harness]\nbinary = "{binary}"\n'
+    )
 
 
 def _workspace(env: dict[str, str], group: str, slug: str) -> Path:
@@ -98,7 +115,7 @@ def test_emits_exactly_two_lines(
     from camp.bookmark.resume import cmd_resume
 
     _seed(env, tmp_path=tmp_path)
-    cmd_resume(["alpha"], group, env)
+    cmd_resume(["alpha"], env)
 
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 2
@@ -110,7 +127,7 @@ def test_first_line_is_the_absolute_workspace_root(
     from camp.bookmark.resume import cmd_resume
 
     _seed(env, tmp_path=tmp_path)
-    cmd_resume(["alpha"], group, env)
+    cmd_resume(["alpha"], env)
 
     first = capsys.readouterr().out.splitlines()[0]
     assert Path(first).is_absolute()
@@ -126,7 +143,7 @@ def test_second_line_round_trips_to_the_harness_argv(
     from camp.bookmark.resume import cmd_resume
 
     _seed(env, tmp_path=tmp_path)
-    cmd_resume(["alpha"], group, env)
+    cmd_resume(["alpha"], env)
 
     second = capsys.readouterr().out.splitlines()[1]
     assert shlex.split(second) == get_harness("claude").session_resume("sess-alpha")
@@ -139,7 +156,7 @@ def test_resume_leaves_the_bookmark_unmodified(
     from camp.bookmark.store import get_by_ref
 
     before = _seed(env, tmp_path=tmp_path)
-    cmd_resume(["alpha"], group, env)
+    cmd_resume(["alpha"], env)
     assert get_by_ref("alpha", env=env) == before
 
 
@@ -160,7 +177,7 @@ def test_metacharacter_workspace_path_stays_one_safe_line(
     from camp.bookmark.resume import cmd_resume
 
     _seed(env, slug=slug, tmp_path=tmp_path)
-    cmd_resume(["alpha"], group, env)
+    cmd_resume(["alpha"], env)
 
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 2
@@ -177,7 +194,7 @@ def test_a_newline_in_the_workspace_path_is_refused(
 
     _seed(env, slug="a\nb", tmp_path=tmp_path)
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha"], group, env)
+        cmd_resume(["alpha"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -193,7 +210,7 @@ def test_a_metacharacter_session_id_is_refused_not_quoted(
 
     _seed(env, session_id="sess;touch pwned", tmp_path=tmp_path)
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha"], group, env)
+        cmd_resume(["alpha"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -214,7 +231,7 @@ def test_missing_shell_integration_errors_with_shellenv_guidance(
     del env["CAMP_SHELL_INTEGRATION"]
 
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha"], group, env)
+        cmd_resume(["alpha"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -229,7 +246,7 @@ def test_unknown_ref_errors_naming_it(
     from camp.bookmark.resume import cmd_resume
 
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["nope"], group, env)
+        cmd_resume(["nope"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -246,7 +263,7 @@ def test_missing_workspace_errors(
     _workspace(env, "demo", "alpha").rmdir()
 
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha"], group, env)
+        cmd_resume(["alpha"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -263,7 +280,7 @@ def test_pruned_transcript_errors_hinting_bookmark_rm(
     Path(record["transcript_path"]).unlink()
 
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha"], group, env)
+        cmd_resume(["alpha"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -274,14 +291,18 @@ def test_pruned_transcript_errors_hinting_bookmark_rm(
 def test_harness_without_resume_support_says_unsupported(
     env: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """A group whose harness binary camp does not recognize cannot be resumed."""
+    """A group whose harness binary camp does not recognize cannot be resumed.
+
+    The harness is read off the group RECORDED ON THE BOOKMARK — resolved from
+    that group's own config — so this holds no matter where the command is run.
+    """
     from camp.bookmark.resume import cmd_resume
 
     _seed(env, tmp_path=tmp_path)
-    group = {"group": {"name": "demo"}, "harness": {"binary": "some-other-agent"}}
+    _write_group_config(env, "demo", binary="some-other-agent")
 
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha"], group, env)
+        cmd_resume(["alpha"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -303,7 +324,7 @@ def test_seam_returning_none_says_unsupported(
     monkeypatch.setattr(ClaudeCodeHarness, "session_resume", lambda self, sid: None)
 
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha"], group, env)
+        cmd_resume(["alpha"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -322,7 +343,7 @@ def test_requires_a_ref_argument(
     from camp.bookmark.resume import cmd_resume
 
     with pytest.raises(SystemExit) as exc:
-        cmd_resume([], group, env)
+        cmd_resume([], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -336,7 +357,7 @@ def test_rejects_an_unexpected_extra_argument(
 
     _seed(env, tmp_path=tmp_path)
     with pytest.raises(SystemExit) as exc:
-        cmd_resume(["alpha", "extra"], group, env)
+        cmd_resume(["alpha", "extra"], env)
 
     captured = capsys.readouterr()
     assert exc.value.code != 0
@@ -353,7 +374,7 @@ def test_the_already_resolved_group_flag_is_not_a_stray_argument(
     from camp.bookmark.resume import cmd_resume
 
     _seed(env, tmp_path=tmp_path)
-    cmd_resume(["alpha", "--group", "demo"], group, env)
+    cmd_resume(["alpha", "--group", "demo"], env)
 
     assert len(capsys.readouterr().out.splitlines()) == 2
 
@@ -364,6 +385,6 @@ def test_the_group_flag_is_accepted_in_equals_form_too(
     from camp.bookmark.resume import cmd_resume
 
     _seed(env, tmp_path=tmp_path)
-    cmd_resume(["--group=demo", "alpha"], group, env)
+    cmd_resume(["--group=demo", "alpha"], env)
 
     assert len(capsys.readouterr().out.splitlines()) == 2

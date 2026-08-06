@@ -486,12 +486,21 @@ def test_group_path_resume_prints_nothing_on_stdout_when_it_refuses(
     assert result.stdout == ""
 
 
-def test_resume_without_a_group_says_so(tmp_path: Path) -> None:
-    """With no group resolvable, camp resume emits the needs-group error."""
-    result = _run(["resume", "x"], env={"CAMP_CONFIG_DIR": str(tmp_path / "empty")})
+def test_resume_without_a_group_reaches_its_handler(tmp_path: Path) -> None:
+    """With no group resolvable, camp resume still answers on its own terms: a ref
+    is addressed without knowing its group, so the refusal names the REF."""
+    result = _run(
+        ["resume", "x"],
+        env={
+            "CAMP_CONFIG_DIR": str(tmp_path / "empty"),
+            "CAMP_STATE_DIR": str(tmp_path / "state"),
+            "CAMP_SHELL_INTEGRATION": "1",
+        },
+    )
     combined = result.stdout + result.stderr
     assert result.returncode != 0
-    assert "group" in combined.lower()
+    assert "no bookmark named 'x'" in combined
+    assert "no group resolved" not in combined
     assert "bare slug dispatch is no longer supported" not in combined
 
 

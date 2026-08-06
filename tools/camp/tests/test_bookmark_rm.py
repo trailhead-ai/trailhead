@@ -56,7 +56,7 @@ def test_cmd_bookmark_rm_removes_exactly_that_ref(
     upsert(_record("alpha"), env=env)
     upsert(_record("bravo"), env=env)
 
-    cmd_bookmark_rm(["alpha"], group, env)
+    cmd_bookmark_rm(["alpha"], env)
 
     assert get_by_ref("alpha", env=env) is None
     assert get_by_ref("bravo", env=env) is not None
@@ -69,7 +69,7 @@ def test_cmd_bookmark_rm_confirms_on_stdout(
     from camp.bookmark.store import upsert
 
     upsert(_record("alpha"), env=env)
-    cmd_bookmark_rm(["alpha"], group, env)
+    cmd_bookmark_rm(["alpha"], env)
 
     assert "alpha" in capsys.readouterr().out
 
@@ -80,7 +80,7 @@ def test_cmd_bookmark_rm_nonexistent_ref_errors_naming_it(
     from camp.bookmark.render import cmd_bookmark_rm
 
     with pytest.raises(SystemExit) as exc:
-        cmd_bookmark_rm(["nope"], group, env)
+        cmd_bookmark_rm(["nope"], env)
     assert exc.value.code != 0
     assert "nope" in capsys.readouterr().err
 
@@ -91,7 +91,7 @@ def test_cmd_bookmark_rm_requires_a_ref_argument(
     from camp.bookmark.render import cmd_bookmark_rm
 
     with pytest.raises(SystemExit) as exc:
-        cmd_bookmark_rm([], group, env)
+        cmd_bookmark_rm([], env)
     assert exc.value.code != 0
 
 
@@ -103,6 +103,27 @@ def test_cmd_bookmark_rm_rejects_unexpected_extra_argument(
 
     upsert(_record("alpha"), env=env)
     with pytest.raises(SystemExit) as exc:
-        cmd_bookmark_rm(["alpha", "extra"], group, env)
+        cmd_bookmark_rm(["alpha", "extra"], env)
     assert exc.value.code != 0
     assert "extra" in capsys.readouterr().err
+
+
+def test_cmd_bookmark_rm_corrupt_store_prints_one_clean_line(
+    env: dict[str, str], capsys: pytest.CaptureFixture
+) -> None:
+    """A corrupt store is a named, user-fixable condition — it must reach the user
+    as camp's own error line, not as a JSON traceback out of the store layer."""
+    from camp.bookmark.render import cmd_bookmark_rm
+    from camp.bookmark.store import store_path
+
+    path = store_path(env=env)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{oh no")
+
+    with pytest.raises(SystemExit) as exc:
+        cmd_bookmark_rm(["alpha"], env)
+
+    err = capsys.readouterr().err
+    assert exc.value.code != 0
+    assert str(path) in err
+    assert "Traceback" not in err

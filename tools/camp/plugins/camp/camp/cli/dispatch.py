@@ -319,27 +319,26 @@ def _dispatch_group_command(
         _cmd_pwd_group_cli(rest, group, group_env)
         return
     if cmd == "bookmark":
+        from ..bookmark import groupless_subverb
         from ..bookmark.capture import cmd_bookmark
-        from ..bookmark.render import cmd_bookmark_ls, cmd_bookmark_rm
         from ..spine import _consume_flag_value
 
-        # The subverb is recognized off the FIRST token only, before --group is
-        # dropped, so `camp bookmark --group g` still captures rather than being
-        # read as a subverb named '--group'.
-        subverbs = {"ls": cmd_bookmark_ls, "rm": cmd_bookmark_rm}
+        # ls/rm address the global store and take no group; bare capture is
+        # cwd-scoped. The same classifier runs on the spine path, so the two entry
+        # points cannot disagree about which subverbs need a group.
+        groupless = groupless_subverb(list(rest))
+        if groupless is not None:
+            handler, sub_args = groupless
+            handler(sub_args, group_env)
+            return
         sub_rest = list(rest)
-        handler = subverbs.get(sub_rest[0]) if sub_rest else None
-        if handler is not None:
-            del sub_rest[0]
-        else:
-            handler = cmd_bookmark
         _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
-        handler(sub_rest, group, group_env)
+        cmd_bookmark(sub_rest, group, group_env)
         return
     if cmd == "resume":
         from ..bookmark.resume import cmd_resume
 
-        cmd_resume(rest, group, group_env)
+        cmd_resume(rest, group_env)
         return
 
     # Bare slug removed: any non-RESERVED token that isn't a known verb → error

@@ -205,7 +205,7 @@ def test_cmd_bookmark_ls_prints_hint_when_empty(
 ) -> None:
     from camp.bookmark.render import cmd_bookmark_ls
 
-    cmd_bookmark_ls([], group, env)
+    cmd_bookmark_ls([], env)
     out = capsys.readouterr().out
     assert "no bookmarks yet" in out
 
@@ -216,7 +216,7 @@ def test_cmd_bookmark_ls_prints_global_bookmarks(
     from camp.bookmark.render import cmd_bookmark_ls
 
     _seed(env, _record("alpha", group="other-group", slug="alpha"))
-    cmd_bookmark_ls([], group, env)
+    cmd_bookmark_ls([], env)
     out = capsys.readouterr().out
     assert "alpha" in out
     assert "other-group" in out
@@ -228,7 +228,7 @@ def test_cmd_bookmark_ls_rejects_unexpected_argument(
     from camp.bookmark.render import cmd_bookmark_ls
 
     with pytest.raises(SystemExit) as exc:
-        cmd_bookmark_ls(["mystery"], group, env)
+        cmd_bookmark_ls(["mystery"], env)
     assert exc.value.code != 0
     assert "mystery" in capsys.readouterr().err
 
@@ -253,7 +253,7 @@ def test_ls_marks_a_transcript_approaching_retention_expiry(env: dict[str, str])
 
     record = _seed(env, _record("alpha"))
     _age_transcript(record, days=9)
-    out = render_bookmarks([record], env=env, retention_days=10)
+    out = render_bookmarks([record], env=env, retention_for=lambda _group: 10)
 
     row = out.splitlines()[1]
     assert "expires ~1d" in row
@@ -264,7 +264,7 @@ def test_ls_omits_the_expiry_marker_below_the_threshold(env: dict[str, str]) -> 
 
     record = _seed(env, _record("alpha"))
     _age_transcript(record, days=2)
-    out = render_bookmarks([record], env=env, retention_days=10)
+    out = render_bookmarks([record], env=env, retention_for=lambda _group: 10)
 
     assert "expires" not in out
 
@@ -277,7 +277,7 @@ def test_ls_omits_the_expiry_marker_when_retention_is_unavailable(
 
     record = _seed(env, _record("alpha"))
     _age_transcript(record, days=900)
-    out = render_bookmarks([record], env=env, retention_days=None)
+    out = render_bookmarks([record], env=env, retention_for=lambda _group: None)
 
     assert "expires" not in out
 
@@ -288,7 +288,7 @@ def test_ls_expiry_marker_never_masks_a_gone_transcript(env: dict[str, str]) -> 
     from camp.bookmark.render import render_bookmarks
 
     record = _seed(env, _record("alpha"), transcript=False)
-    out = render_bookmarks([record], env=env, retention_days=10)
+    out = render_bookmarks([record], env=env, retention_for=lambda _group: 10)
 
     row = out.splitlines()[1]
     assert "transcript gone" in row
@@ -301,9 +301,52 @@ def test_ls_expiry_marker_clamps_at_zero_days_left(env: dict[str, str]) -> None:
 
     record = _seed(env, _record("alpha"))
     _age_transcript(record, days=40)
-    out = render_bookmarks([record], env=env, retention_days=10)
+    out = render_bookmarks([record], env=env, retention_for=lambda _group: 10)
 
     assert "expires ~0d" in out.splitlines()[1]
+
+
+def test_ls_resolves_the_retention_window_per_row_group(env: dict[str, str]) -> None:
+    """The listing is global and its rows may span groups running different
+    harnesses; each row's deadline must come from ITS OWN group, not from one
+    window applied to every row."""
+    from camp.bookmark.render import render_bookmarks
+
+    short = _seed(env, _record("short", group="short-g", slug="short"))
+    long_ = _seed(env, _record("long", group="long-g", slug="long"))
+    _age_transcript(short, days=9)
+    _age_transcript(long_, days=9)
+
+    windows = {"short-g": 10, "long-g": 400}
+    out = render_bookmarks(
+        [short, long_], env=env, retention_for=lambda group: windows[group]
+    )
+
+    rows = {line.split()[0]: line for line in out.splitlines()[1:]}
+    assert "expires ~1d" in rows["short"]
+    assert "expires" not in rows["long"]
+
+
+def test_retention_resolver_memoizes_per_group(env: dict[str, str]) -> None:
+    """A listing is many rows over few groups — resolving a group's window costs a
+    config load plus a settings read, so it happens once per group, not per row."""
+    import camp.bookmark.render as render
+
+    calls: list[str] = []
+
+    def fake(group_name: str, *, env: dict[str, str] | None = None) -> int | None:
+        calls.append(group_name)
+        return 10
+
+    original = render.retention_days_for_group
+    render.retention_days_for_group = fake
+    try:
+        resolve = render.retention_resolver(env=env)
+        assert [resolve("g"), resolve("g"), resolve("h")] == [10, 10, 10]
+    finally:
+        render.retention_days_for_group = original
+
+    assert calls == ["g", "h"]
 
 
 def test_expiry_threshold_matches_the_harness_seam() -> None:
@@ -313,3 +356,23 @@ def test_expiry_threshold_matches_the_harness_seam() -> None:
     from trailhead.harness.base import SESSION_RETENTION_WARNING_FRACTION
 
     assert _RETENTION_WARNING_FRACTION == SESSION_RETENTION_WARNING_FRACTION
+
+
+def test_cmd_bookmark_ls_corrupt_store_prints_one_clean_line(
+    env: dict[str, str], capsys: pytest.CaptureFixture
+) -> None:
+    """The listing degrades to camp's own named error rather than a traceback."""
+    from camp.bookmark.render import cmd_bookmark_ls
+    from camp.bookmark.store import store_path
+
+    path = store_path(env=env)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{oh no")
+
+    with pytest.raises(SystemExit) as exc:
+        cmd_bookmark_ls([], env)
+
+    err = capsys.readouterr().err
+    assert exc.value.code != 0
+    assert str(path) in err
+    assert "Traceback" not in err
