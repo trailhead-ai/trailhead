@@ -44,12 +44,19 @@ executor agent's own operator-question park — the one that writes a
 answer. A portage *monitor*'s ``BLOCKED`` line means a PR it could not get
 green, with no question parked anywhere, so it lands in ``failed``
 (:func:`resolve_monitor_outcome`) rather than sending an operator to a
-re-entry ritual with nothing to answer. ``crashed`` is reserved for a task
+re-entry ritual with nothing to answer. ``crashed`` covers a task
 whose portage *monitor* left no readable outcome file at all — a distinct
 signal from ``monitor-timeout``: a crash is the monitor process itself never
 writing anything (see ``portage.monitor_outcome``'s module docstring), while
 a timeout is this report's own deadline elapsing on a monitor that may still
-be running. ``dropped`` is reserved for a task the drain queue named but
+be running. The same bucket carries the *agent*-crash case — a dispatched
+executor that left no readable outcome file either (see
+:func:`agent_outcome_missing`, which ``ranger.cli.drain``'s ``record`` verb
+asks before it classifies anything): both are "a dispatched process wrote
+nothing", both preserve the workspace, and both send the operator to the
+same crashed re-entry ritual. Routing an agent crash to ``failed`` instead
+would put it under a ritual whose recovery assumes an outcome line to read.
+``dropped`` is reserved for a task the drain queue named but
 never dispatched this run at all (the concurrency cap was already full) —
 distinct from every other bucket in that no agent, and no monitor, ever ran.
 
@@ -100,6 +107,7 @@ __all__ = [
     "outcomes_dir",
     "outcome_path",
     "read_outcome",
+    "agent_outcome_missing",
     "BUCKETS",
     "PUSHED_SUBSTATES",
     "DRAIN_OUTCOME_TOKENS",
@@ -172,6 +180,24 @@ _MONITOR_TOKENS_REQUIRING_ARGUMENT = frozenset({"READY", "BLOCKED", "STOPPED"})
 #: ``monitor-timeout``. Configurable per call (:func:`mark_in_flight`'s
 #: ``deadline_hours``) — this is only the fallback.
 DEFAULT_MONITOR_DEADLINE_HOURS = 2.0
+
+
+def agent_outcome_missing(report_path: Path, task_id: str) -> bool:
+    """Return ``True`` when the dispatched agent left no outcome at all.
+
+    The agent-crash signal, and the reason it is asked separately from
+    :func:`read_outcome`: that function turns a missing or empty file into a
+    synthesized ``FAILED`` line — the right *text* to show an operator, but
+    the wrong *bucket*, because an agent that wrote nothing is a crashed
+    dispatch (workspace preserved, run claim still standing) rather than a
+    build that reported a reason. ``record`` asks this first and routes the
+    crash to the ``crashed`` bucket, carrying the synthesized line along as
+    the reason.
+    """
+    try:
+        return not outcome_path(report_path, task_id).read_text(encoding="utf-8").strip()
+    except OSError:
+        return True
 
 
 def parse_drain_outcome(line: str) -> tuple[str | None, str]:
@@ -296,7 +322,9 @@ def _render(state: dict) -> str:
         parts.append(
             "\n> **Portage not installed — degraded trust.** This drain ran without portage: "
             "PR pushes could not be monitored, merged, or gated. Every `pushed` line below "
-            "reflects only what the executor agent itself reported.\n"
+            "reflects only what the executor agent itself reported. With no monitor to "
+            "resolve them, pushed tasks stay under **In flight** for the life of this "
+            "report — that is the terminal state of a degraded run, not a stall.\n"
         )
     parts.append("\n")
 
@@ -626,15 +654,18 @@ def mark_in_flight(
     sha: str,
     diffstat: str,
     workspace: str,
-    cap_blocking: bool = True,
     deadline_hours: float | None = None,
     now: datetime | None = None,
 ) -> None:
     """Mark *task_id* as occupying a cap slot, durably, with a monitor deadline.
 
     Called when a task is dispatched to portage's monitor. Also renders the
-    ``in-flight`` pushed-substate line immediately, so the report always
-    reflects the cap's current occupants without a separate render call.
+    ``in-flight`` pushed-substate line immediately — flagged as holding the
+    cap, which every slot opened here does by construction: this is the only
+    function that adds to ``in_flight``, and :func:`in_flight_count` counts
+    exactly what it added. (``append_pushed_in_flight``'s ``cap_blocking``
+    flag is a *rendering* distinction for the other caller — ``record``'s
+    freshly-pushed-but-not-yet-monitored line, which holds no slot.)
 
     **Refused in degraded mode.** A degraded drain (portage absent — see
     ``start``'s ``degraded`` flag) has no monitor outcome file to ever
@@ -663,13 +694,10 @@ def mark_in_flight(
         "sha": sha,
         "diffstat": diffstat,
         "workspace": workspace,
-        "cap_blocking": cap_blocking,
         "deadline": deadline.isoformat(),
     }
     _write_state(report_path, state)
-    append_pushed_in_flight(
-        report_path, task_id, branch, sha, diffstat, cap_blocking=cap_blocking,
-    )
+    append_pushed_in_flight(report_path, task_id, branch, sha, diffstat, cap_blocking=True)
 
 
 def in_flight_count(report_path: Path) -> int:
@@ -716,9 +744,25 @@ def resolve_monitor_outcome(
     this task's own in-flight branch is read from it (never from anything an
     agent wrote) and supplies whichever of ``pr_url`` / ``pr_url_or_number``
     the caller did not pass explicitly.
+
+    **A task holding no slot is refused**, not resolved against an empty
+    entry. The slot may already have been reclaimed by
+    :func:`expire_in_flight`, which rendered a ``monitor-timeout`` line
+    carrying the branch and sha; resolving on top of that would overwrite the
+    only record of the timed-out PR with a line whose branch and sha are
+    empty strings. There is nothing to free either — the refusal cannot wedge
+    a cap.
     """
     state = _load_state(report_path)
-    entry = state["in_flight"].pop(task_id, {})
+    if task_id not in state["in_flight"]:
+        raise ReportError(
+            f"{task_id!r} holds no in-flight slot on this report — nothing to resolve. Its "
+            "slot was never opened, or `inflight expire` already reclaimed it into the "
+            "`monitor-timeout` bucket (which keeps the branch and sha this would erase). To "
+            "report a monitor that left nothing for a task that never held a slot, use "
+            "`ranger drain crashed`."
+        )
+    entry = state["in_flight"].pop(task_id)
     _write_state(report_path, state)
     branch, sha, diffstat = entry.get("branch", ""), entry.get("sha", ""), entry.get("diffstat", "")
 

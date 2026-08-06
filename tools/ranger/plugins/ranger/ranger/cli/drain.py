@@ -29,9 +29,11 @@ JSON drifts from it silently:
   is handed to portage's monitor, ask whether dispatch must pause, close a
   slot against the monitor's own outcome file, and reclaim slots whose
   deadline passed.
-- `drain crashed` / `drain dropped` — the two buckets no outcome file ever
-  produces: a monitor that wrote nothing, and a queued task the drain never
-  dispatched at all.
+- `drain crashed` / `drain dropped` — the two buckets no *readable* outcome
+  file produces: a monitor that wrote nothing for a task holding no cap slot,
+  and a queued task the drain never dispatched at all. (`record
+  --outcome-file` reaches the same `crashed` bucket on its own when the
+  dispatched *agent* left nothing — see `_resolve_outcome`.)
 - `drain sync-gate` — run `camp sync --json` and classify it
   (`ranger.drain.loop.classify_sync`); exit 1 means a member is off
   origin/main, whatever the top-level status said.
@@ -40,7 +42,10 @@ JSON drifts from it silently:
 
 Untrusted text never arrives as a command-line string: a monitor's outcome
 reaches `inflight resolve` as a file path, exactly as an agent's outcome
-reaches `record`.
+reaches `record --outcome-file`. `record`'s `--outcome LINE` remains for
+driving the verb by hand and for a coordinator synthesizing an outcome no
+agent wrote (a provisioning failure, a rebase conflict) — cases where there
+is no agent text to launder.
 """
 
 from __future__ import annotations
@@ -56,6 +61,11 @@ from pathlib import Path
 #: kind of operator-facing rendering a future report writes, so it is held
 #: to the same shell-safe allowlist before it is ever accepted.
 _RECORD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
+
+#: `--outcome-file` given with no PATH: recompute the task's own outcome path
+#: from `--report` and `--task`. Not a path itself, so it can never collide
+#: with one an operator passes.
+_DERIVE_OUTCOME_PATH = object()
 
 
 def add_drain_subparser(sub) -> None:
@@ -112,8 +122,23 @@ def add_drain_subparser(sub) -> None:
     )
     p_record.add_argument("--task", required=True, metavar="ID", help="Task record id")
     p_record.add_argument(
-        "--outcome", required=True, metavar="LINE",
-        help="The dispatched agent's one-line drain outcome",
+        "--outcome", metavar="LINE",
+        help=(
+            "The dispatched agent's one-line drain outcome, on the command line. Kept for "
+            "driving the verb by hand and for a coordinator synthesizing an outcome no agent "
+            "wrote; `--outcome-file` is the form a drain loop uses"
+        ),
+    )
+    p_record.add_argument(
+        "--outcome-file", nargs="?", const=_DERIVE_OUTCOME_PATH, default=None, metavar="PATH",
+        help=(
+            "Read the outcome from a file instead of the command line — the preferred form, "
+            "and the only one where untrusted agent text never becomes part of a command "
+            "string. Bare, the path is recomputed from `--report` and `--task` (the task's "
+            "own file under the report's `.outcomes` directory); with a PATH, that file is "
+            "read instead. A missing or empty file is the agent-crash signal and records "
+            "`crashed`, not `failed`"
+        ),
     )
 
     p_record.add_argument(
@@ -345,6 +370,48 @@ def _cmd_drain_derive(args) -> int:
     return 0
 
 
+def _resolve_outcome(args, report_mod, report_path, task_id):
+    """Return ``(outcome_text, agent_crashed)``, or raise ``ReportError``.
+
+    Three sources, in the order the flags express: the task's own outcome
+    file under the report's ``.outcomes`` directory (bare ``--outcome-file``,
+    the form a drain loop uses — the path is recomputed here rather than
+    formed by hand a second time), an explicitly named file, or a literal
+    ``--outcome`` line. Only the file forms can observe the agent-crash
+    signal, because only a file can be *absent*.
+    """
+    if args.outcome_file is None:
+        if args.outcome is None:
+            raise report_mod.ReportError(
+                "--outcome or --outcome-file is required — `--outcome-file` is the form a "
+                "drain loop uses, so agent-written text never becomes part of a command string"
+            )
+        return args.outcome, False
+
+    if args.outcome_file is _DERIVE_OUTCOME_PATH:
+        if report_path is None:
+            raise report_mod.ReportError(
+                "--outcome-file with no PATH recomputes the task's outcome path from "
+                "--report and --task; pass --report, or name the file explicitly"
+            )
+        return (
+            report_mod.read_outcome(report_path, task_id),
+            report_mod.agent_outcome_missing(report_path, task_id),
+        )
+
+    path = Path(args.outcome_file)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if not text.strip():
+        return (
+            f"no outcome written to {path.name} — agent died, timed out, or never ran",
+            True,
+        )
+    return text, False
+
+
 def _cmd_drain_record(args) -> int:
     from ..drain import report as drain_report_mod
 
@@ -353,7 +420,29 @@ def _cmd_drain_record(args) -> int:
     except ValueError as exc:
         return _fail(str(exc))
 
-    token, argument = drain_report_mod.parse_drain_outcome(args.outcome)
+    report_path = Path(args.report) if args.report else None
+    try:
+        outcome, agent_crashed = _resolve_outcome(
+            args, drain_report_mod, report_path, task_id
+        )
+    except drain_report_mod.ReportError as exc:
+        return _fail(str(exc))
+
+    # An agent that left nothing at all is a crashed dispatch, not a build
+    # that reported a reason: its workspace is preserved and its run claim
+    # still stands, which is the crashed re-entry ritual. The `failed`
+    # ritual's recovery assumes an outcome line to read.
+    if agent_crashed:
+        reason = outcome[len("FAILED "):] if outcome.startswith("FAILED ") else outcome
+        if report_path is not None:
+            try:
+                drain_report_mod.append_crashed(report_path, task_id, reason)
+            except drain_report_mod.ReportError as exc:
+                return _fail(str(exc))
+        print(json.dumps({"task": task_id, "bucket": "crashed", "crashed": True, "reason": reason}))
+        return 0
+
+    token, argument = drain_report_mod.parse_drain_outcome(outcome)
     pushed_fields = (
         drain_report_mod.parse_pushed_argument(argument) if token == "PUSHED" else None
     )
@@ -366,21 +455,22 @@ def _cmd_drain_record(args) -> int:
     # like any other untrusted text by the report's own append funnel).
     unparseable = token is None or (token == "PUSHED" and pushed_fields is None)
     if unparseable:
-        raw = args.outcome.strip().splitlines()[0].strip() if args.outcome.strip() else ""
+        raw = outcome.strip().splitlines()[0].strip() if outcome.strip() else ""
         reason = (
             f"unparseable outcome line: {raw}" if raw else "no outcome written"
         )
         token, argument = "FAILED", reason
 
-    payload = {"task": task_id, "token": token, "argument": argument}
+    payload = {
+        "task": task_id, "token": token, "argument": argument, "bucket": token.lower(),
+    }
     if unparseable:
         payload["unparseable"] = True
     if pushed_fields:
         payload["branch"], payload["sha"], payload["diffstat"] = pushed_fields
 
-    if args.report:
+    if report_path is not None:
         try:
-            report_path = Path(args.report)
             if token == "PUSHED":
                 branch, sha, diffstat = pushed_fields
                 pr_url = None

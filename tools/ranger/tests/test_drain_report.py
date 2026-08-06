@@ -15,8 +15,8 @@ Test contract:
   fresh state-file read alone). Degraded mode has no in-flight bucketing.
 - Pushed-bucket split: merged / in-flight / awaiting-human-approval /
   monitor-timeout each render a distinct line shape; awaiting-approval
-  carries the ``gh pr edit ... --add-label human-approved`` command;
-  cap-blocking entries are flagged.
+  carries the ``gh pr edit ... --add-label human-approved`` command; a
+  cap-holding in-flight line is flagged as such.
 - Still-standing workspaces render one ``camp remove <slug>`` line each;
   the degraded banner renders iff the drain ran degraded; an empty queue
   renders a clean, valid, no-op report.
@@ -220,11 +220,11 @@ def test_merged_renders_a_distinct_line(tmp_path):
     assert "branch-a" in text
 
 
-def test_in_flight_renders_cap_blocking_flag(tmp_path):
+def test_in_flight_renders_the_cap_holding_flag(tmp_path):
     report_path = report.start("g", "v", 1, env=_env(tmp_path))
     report.mark_in_flight(
         report_path, "task/a", branch="branch-a", sha="sha1", diffstat="1 file changed",
-        workspace="ws-a", cap_blocking=True,
+        workspace="ws-a",
     )
     text = report_path.read_text()
     assert "### In flight" in text
@@ -435,3 +435,90 @@ def test_empty_queue_renders_a_clean_no_op_report(tmp_path):
     # Valid, parseable JSON state alongside it.
     state = json.loads(report_path.with_suffix(".state.json").read_text())
     assert state["finished"] is True
+
+
+# ---------------------------------------------------------------------------
+# Resolving a slot that is not held
+# ---------------------------------------------------------------------------
+
+
+def test_resolving_a_task_that_holds_no_slot_is_refused_by_name(tmp_path):
+    # `expire_in_flight` already reclaimed the slot and rendered the
+    # `monitor-timeout` line. A later `inflight resolve` would read an empty
+    # entry and overwrite that line with an empty branch/sha, destroying the
+    # only record of the timed-out PR. Refuse instead.
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    now = datetime.now(timezone.utc)
+    report.mark_in_flight(
+        report_path, "task/a", branch="branch-a", sha="sha1", diffstat="1 file changed",
+        workspace="ws-a", deadline_hours=1, now=now - timedelta(hours=2),
+    )
+    report.expire_in_flight(report_path, now=now)
+
+    with pytest.raises(report.ReportError, match="holds no in-flight slot"):
+        report.resolve_monitor_outcome(report_path, "task/a", "MERGED")
+
+    text = report_path.read_text()
+    assert "Monitor timeout" in text
+    assert "branch-a" in text
+
+
+def test_resolving_a_task_that_was_never_marked_is_refused_by_name(tmp_path):
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    with pytest.raises(report.ReportError, match="holds no in-flight slot"):
+        report.resolve_monitor_outcome(report_path, "task/never", "MERGED")
+
+
+# ---------------------------------------------------------------------------
+# The agent-crash signal
+# ---------------------------------------------------------------------------
+
+
+def test_agent_outcome_missing_is_true_for_an_absent_file(tmp_path):
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    assert report.agent_outcome_missing(report_path, "task/a") is True
+
+
+def test_agent_outcome_missing_is_true_for_an_empty_file(tmp_path):
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    report.outcome_path(report_path, "task/a").write_text("   \n", encoding="utf-8")
+    assert report.agent_outcome_missing(report_path, "task/a") is True
+
+
+def test_agent_outcome_missing_is_false_once_the_agent_wrote_a_line(tmp_path):
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    report.outcome_path(report_path, "task/a").write_text("FAILED nope\n", encoding="utf-8")
+    assert report.agent_outcome_missing(report_path, "task/a") is False
+
+
+# ---------------------------------------------------------------------------
+# Cap accounting carries no dead field
+# ---------------------------------------------------------------------------
+
+
+def test_an_in_flight_entry_carries_no_cap_blocking_field(tmp_path):
+    # Every entry in `in_flight` holds the cap by construction — nothing ever
+    # opens a non-blocking slot — so a persisted `cap_blocking` flag would be a
+    # field the count neither reads nor could act on.
+    report_path = report.start("g", "v", 1, env=_env(tmp_path))
+    report.mark_in_flight(
+        report_path, "task/a", branch="b", sha="s", diffstat="d", workspace="ws-a",
+    )
+    entry = report._load_state(report_path)["in_flight"]["task/a"]
+    assert "cap_blocking" not in entry
+    assert report.in_flight_count(report_path) == 1
+
+
+# ---------------------------------------------------------------------------
+# The degraded banner names its own in-flight substate
+# ---------------------------------------------------------------------------
+
+
+def test_degraded_banner_names_pushed_tasks_staying_in_flight(tmp_path):
+    # In degraded mode nothing is ever handed to a monitor, so no pushed line
+    # can ever leave the `In flight` substate. Unsaid, an operator reads a
+    # finished degraded report as a drain that stalled mid-monitor.
+    report_path = report.start("g", "v", 0, degraded=True, env=_env(tmp_path))
+    text = report_path.read_text()
+    assert "In flight" in text
+    assert "not a stall" in text

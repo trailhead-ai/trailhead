@@ -925,3 +925,113 @@ def test_start_refuses_a_non_positive_bound(tmp_path, flag, value):
     assert res.returncode != 0
     assert res.stderr.startswith("ranger: ")
     drain.assert_nothing_created()
+
+
+# ---------------------------------------------------------------------------
+# record — the outcome file, and the agent-crash bucket
+# ---------------------------------------------------------------------------
+
+
+def _outcomes_dir(start_payload: dict) -> Path:
+    return Path(start_payload["outcomes_dir"])
+
+
+def test_record_reads_the_outcome_from_the_task_s_own_outcome_file(tmp_path):
+    # The preferred form: the coordinator never interpolates agent-written
+    # text into a command string, and the path is recomputed here rather than
+    # formed by hand twice.
+    drain = _drain(tmp_path)
+    payload = json.loads(drain.start().stdout)
+    (_outcomes_dir(payload) / "t1.outcome").write_text(
+        "PUSHED worktree-t1 a1b2c3d 2 files changed\n", encoding="utf-8"
+    )
+
+    res = drain.run(
+        "drain", "record", "--report", payload["report_path"],
+        "--task", "task/t1", "--outcome-file",
+    )
+
+    assert res.returncode == 0, res.stderr
+    out = json.loads(res.stdout)
+    assert out["token"] == "PUSHED"
+    assert out["bucket"] == "pushed"
+    assert "worktree-t1" in Path(payload["report_path"]).read_text()
+
+
+def test_record_reads_an_explicitly_named_outcome_file(tmp_path):
+    drain = _drain(tmp_path)
+    payload = json.loads(drain.start().stdout)
+    elsewhere = tmp_path / "elsewhere.outcome"
+    elsewhere.write_text("BLOCKED needs a human\n", encoding="utf-8")
+
+    res = drain.run(
+        "drain", "record", "--report", payload["report_path"],
+        "--task", "task/t1", "--outcome-file", str(elsewhere),
+    )
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout)["bucket"] == "blocked"
+
+
+@pytest.mark.parametrize("content", [None, "", "   \n"], ids=["absent", "empty", "blank"])
+def test_a_missing_or_empty_agent_outcome_file_buckets_crashed(tmp_path, content):
+    # An agent that wrote nothing died, timed out, or never ran — its
+    # workspace is preserved and its run claim still stands, which is the
+    # crashed ritual, not the failed one (whose recovery assumes an outcome
+    # line to read).
+    drain = _drain(tmp_path)
+    payload = json.loads(drain.start().stdout)
+    if content is not None:
+        (_outcomes_dir(payload) / "t1.outcome").write_text(content, encoding="utf-8")
+
+    res = drain.run(
+        "drain", "record", "--report", payload["report_path"],
+        "--task", "task/t1", "--outcome-file",
+    )
+
+    assert res.returncode == 0, res.stderr
+    out = json.loads(res.stdout)
+    assert out["bucket"] == "crashed"
+    text = Path(payload["report_path"]).read_text()
+    crashed_section = text.split("## Crashed\n", 1)[1].split("## ", 1)[0]
+    assert "task/t1" in crashed_section
+    failed_section = text.split("## Failed\n", 1)[1].split("## ", 1)[0]
+    assert "task/t1" not in failed_section
+
+
+def test_record_requires_an_outcome_or_an_outcome_file(tmp_path):
+    drain = _drain(tmp_path)
+
+    res = drain.run("drain", "record", "--task", "task/t1")
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+
+
+def test_the_bare_outcome_file_form_needs_a_report_to_recompute_the_path_from(tmp_path):
+    drain = _drain(tmp_path)
+
+    res = drain.run("drain", "record", "--task", "task/t1", "--outcome-file")
+
+    assert res.returncode != 0
+    assert res.stderr.startswith("ranger: ")
+
+
+# ---------------------------------------------------------------------------
+# inflight resolve — a slot that is not held
+# ---------------------------------------------------------------------------
+
+
+def test_inflight_resolve_refuses_a_task_that_holds_no_slot(tmp_path):
+    drain = _drain(tmp_path)
+    payload = json.loads(drain.start().stdout)
+    monitor_outcome = tmp_path / "monitor.outcome"
+    monitor_outcome.write_text("MERGED\n", encoding="utf-8")
+
+    res = drain.run(
+        "drain", "inflight", "resolve", "--report", payload["report_path"],
+        "--task", "task/t1", "--monitor-outcome-file", str(monitor_outcome),
+    )
+
+    assert res.returncode != 0
+    assert "holds no in-flight slot" in res.stderr
