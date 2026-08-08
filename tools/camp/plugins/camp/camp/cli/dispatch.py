@@ -241,7 +241,25 @@ def main() -> None:
         "help", "--help", "-h", "doctor",
         "foreach", "path", "which",
         "--version", "version",
+        "resume",  # fully groupless: spine's cmd_resume(rest) handles it unconditionally
     })
+    # `camp bookmark ls`/`rm` are also fully groupless (global-store, ref-
+    # addressed), but bare `camp bookmark` (capture) still needs a group
+    # resolved from cwd — so bookmark cannot join _SKIP_GROUP_RESOLVE outright.
+    # Classify with the SAME groupless_subverb used by item 6 so this special
+    # case can never disagree with the dispatcher it hands off to: if the
+    # remaining args name ls/rm, dispatch straight there, bypassing
+    # _resolve_group_for_command entirely so a corrupt sibling group toml
+    # elsewhere in the config dir can't abort a command that never needed any
+    # group's config in the first place.
+    if first == "bookmark":
+        from ..bookmark import groupless_subverb
+
+        groupless = groupless_subverb(argv[1:])
+        if groupless is not None:
+            handler, sub_args = groupless
+            handler(sub_args, None)
+            return
     if first and first not in _SKIP_GROUP_RESOLVE:
         try:
             group, group_env = _resolve_group_for_command(argv)
@@ -317,6 +335,28 @@ def _dispatch_group_command(
         return
     if cmd == "pwd":
         _cmd_pwd_group_cli(rest, group, group_env)
+        return
+    if cmd == "bookmark":
+        from ..bookmark import groupless_subverb
+        from ..bookmark.capture import cmd_bookmark
+        from ..spine import _consume_flag_value
+
+        # ls/rm address the global store and take no group; bare capture is
+        # cwd-scoped. The same classifier runs on the spine path, so the two entry
+        # points cannot disagree about which subverbs need a group.
+        groupless = groupless_subverb(list(rest))
+        if groupless is not None:
+            handler, sub_args = groupless
+            handler(sub_args, group_env)
+            return
+        sub_rest = list(rest)
+        _consume_flag_value(sub_rest, "--group")  # already resolved upstream; drop it
+        cmd_bookmark(sub_rest, group, group_env)
+        return
+    if cmd == "resume":
+        from ..bookmark.resume import cmd_resume
+
+        cmd_resume(rest, group_env)
         return
 
     # Bare slug removed: any non-RESERVED token that isn't a known verb → error

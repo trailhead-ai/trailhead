@@ -8,7 +8,10 @@ new aliases (rm→remove, ls→list) resolve to their canonical verbs.
 Contract:
 - VERB_ALIASES maps the short aliases rm→remove, ls→list.
 - canonical_verb normalizes an alias to its canonical verb (identity otherwise).
-- NEEDS_GROUP_VERBS is the canonical set {new, remove, pwd, activate, setup}.
+- NEEDS_GROUP_VERBS is the canonical set {new, remove, pwd, activate, setup,
+  bookmark} — `resume` is absent because it addresses a session by ref and is
+  served from any cwd, and `bookmark` is listed only for its cwd-scoped bare
+  capture spelling.
 - LEGACY_REDIRECTS points directly at the renamed canonicals (open→new,
   break→remove, init→group, ai→new, enter→activate) — never at a removed verb
   (the dispatcher does not support chained redirects).
@@ -65,7 +68,22 @@ def test_needs_group_verbs_is_canonical_set() -> None:
     """NEEDS_GROUP_VERBS is the renamed canonical set (no ai/rm/enter)."""
     from camp.workspace.verb_taxonomy import NEEDS_GROUP_VERBS
 
-    assert set(NEEDS_GROUP_VERBS) == {"new", "remove", "pwd", "activate", "setup"}
+    assert set(NEEDS_GROUP_VERBS) == {
+        "new",
+        "remove",
+        "pwd",
+        "activate",
+        "setup",
+        "bookmark",
+    }
+
+
+def test_resume_is_not_a_needs_group_verb() -> None:
+    """`camp resume <ref>` reads the group off the bookmark record, so gating it
+    on a group resolving from cwd would break the ref's whole purpose."""
+    from camp.workspace.verb_taxonomy import NEEDS_GROUP_VERBS
+
+    assert "resume" not in NEEDS_GROUP_VERBS
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +192,7 @@ def test_reserved_membership_is_pinned() -> None:
             "pwd",
             "activate",
             "setup",
+            "bookmark",
             # Static: canonical/fleet verbs, meta verbs, hook handlers.
             "group",
             "list",
@@ -183,6 +202,7 @@ def test_reserved_membership_is_pinned() -> None:
             "path",
             "foreach",
             "doctor",
+            "resume",
             "help",
             "version",
             "which",

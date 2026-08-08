@@ -50,6 +50,12 @@ UNSUPPORTED_RULESET_NOTICE = (
     "trailhead: this harness has no user-level ruleset support; nothing was installed."
 )
 
+#: Fraction of a harness's transcript-retention window after which a session is
+#: "approaching expiry".  Lives here, beside ``session_retention_days``, because
+#: two independent surfaces warn off it — ``trailhead doctor`` and
+#: ``camp bookmark ls`` — and a user reading both must see the same cutoff.
+SESSION_RETENTION_WARNING_FRACTION = 0.8
+
 
 class Harness(ABC):
     """Abstract installer for one AI code harness.
@@ -173,3 +179,97 @@ class Harness(ABC):
     def user_ruleset_status(self, name: str, content: str) -> str:
         """One of ``current`` / ``stale`` / ``missing`` / ``unsupported``."""
         return "unsupported"
+
+    # -- session transcripts --------------------------------------------------
+    #
+    # A *session transcript* is the harness's on-disk record of one agent
+    # session.  Same asymmetry as the user-ruleset trio above: CONCRETE with a
+    # safe default, so a harness with no transcript concept doesn't have to
+    # implement it.  Everything about a harness's transcript LAYOUT (config dir,
+    # directory munging, file extension) lives in that harness's module — the
+    # core only ever receives a resolved path or ``None``.
+    #
+    # The default degrades to ``None`` — "this harness cannot tell you where the
+    # transcript is".  Callers must treat ``None`` as unresolvable and say so;
+    # they must never synthesize a path of their own.
+
+    def session_transcript_path(
+        self, session_id: str, workspace: Path, *, env: dict[str, str] | None = None
+    ) -> Path | None:
+        """Resolve the on-disk transcript for ``session_id``, or ``None``.
+
+        ``workspace`` is the session's START-OF-SESSION working directory (for
+        camp, the workspace root) — harnesses that key their transcript layout on
+        the launch cwd need it, and it must never be inferred from the CALLER's
+        cwd, which has usually moved by capture time.
+
+        Returns ``None`` when the harness has no transcript concept, when the
+        transcript does not exist, or when ``session_id`` is not a usable path
+        component.  Never raises for an absent transcript.
+
+        ``env`` overrides the process environment (hermetic tests, and callers
+        that already carry an injected env); ``None`` means ``os.environ``.
+        """
+        return None
+
+    # -- session resume -------------------------------------------------------
+    #
+    # Resuming a session means re-entering it as a fresh foreground process.  The
+    # seam owns the ARGV — the exact binary, flag spelling, and argument order are
+    # harness-specific knowledge and live in that harness's module only (Axiom 1).
+    # A caller receives an already-safe token list and passes it through
+    # untouched; it must never assemble, edit, or re-quote one of its own.
+    #
+    # Same degrading default as the transcript seam: ``None`` means "this harness
+    # cannot be resumed", which a caller must report rather than paper over.
+    #
+    # The seam does NOT exec.  Deciding where and how to run the argv (in-process,
+    # via a shell wrapper, not at all) belongs to the caller; splitting it this way
+    # is what lets a core that must never exec still offer resume.
+
+    def session_resume(self, session_id: str) -> list[str] | None:
+        """Return the argv that re-enters ``session_id``, or ``None``.
+
+        The argv is a list of individually-quoted-free tokens suitable for a
+        direct ``exec``: no shell is implied and no element needs further
+        escaping.
+
+        Returns ``None`` when the harness has no resume concept, or when
+        ``session_id`` is not a shape the harness accepts — a malformed id must
+        never be smuggled into an argv a caller will run.
+        """
+        return None
+
+    # -- session retention ----------------------------------------------------
+    #
+    # Harnesses delete their own session transcripts on a schedule.  A caller
+    # holding a long-lived pointer at a transcript (camp's bookmarks) wants to
+    # warn BEFORE that deletion, which needs the window — expressed here in days
+    # and read from wherever the harness configures it (that location, and the
+    # setting's name, are harness knowledge and stay in the harness module).
+    #
+    # Same degrading default as the two seams above: ``None`` means "this harness
+    # has no retention window to report".  A caller must then skip its warning
+    # silently — a guessed window would warn about deletions that never come.
+
+    def session_retention_days(self, *, env: dict[str, str] | None = None) -> int | None:
+        """Days a session transcript survives before the harness cleans it up.
+
+        Returns ``None`` when the harness does not expire transcripts or cannot
+        report the window.  Implementations return their own documented default
+        when the setting is simply unset, and never raise for an unreadable or
+        malformed config — a retention hint is advisory, and crashing a report
+        over it is worse than not showing it.
+        """
+        return None
+
+    def session_retention_setting(self) -> str | None:
+        """Name of the setting controlling the retention window, or ``None``.
+
+        A warning that a transcript is about to be deleted is only actionable if
+        it says what to change — but the SPELLING of that setting is
+        harness-specific knowledge, so a core caller asks for it here rather than
+        naming any harness's key itself.  ``None`` means "not reportable", and a
+        caller must then omit the remedy rather than invent one.
+        """
+        return None

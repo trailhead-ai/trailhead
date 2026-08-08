@@ -94,7 +94,7 @@ KNOWN_HOOK_KINDS = frozenset({"dep-install"})
 # ---------------------------------------------------------------------------
 
 # Placeholders task step argv may reference. Distinct from _HARNESS_PLACEHOLDERS
-# (harness.cwd's {slug}/{workspace}/{session_id}) — task steps run in a specific
+# (harness.cwd's {slug}/{workspace}) — task steps run in a specific
 # member's worktree, so they additionally get {repo_root}/{worktree}.
 _TASK_PLACEHOLDERS = frozenset({"repo_root", "worktree", "workspace", "slug"})
 
@@ -411,7 +411,7 @@ def load_group(path: Path) -> dict[str, Any]:
 
 # Placeholders the launch templates / cwd may reference. Any other {token} is a
 # misconfiguration (would KeyError at substitution time) → rejected at load.
-_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace", "session_id"})
+_HARNESS_PLACEHOLDERS = frozenset({"slug", "workspace"})
 
 # Mid-session context-injection strategies. "stdout" is the universal
 # floor; "claude-hook" opts into the Claude Code PostToolUse → additionalContext

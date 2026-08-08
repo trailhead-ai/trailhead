@@ -9,12 +9,16 @@ The harness surface is `harness_profile.py` — its profile-config surface
 - no stray references: no production module imports session_lock/session_identity
   or names a `harness_launch` module; no launch-seam literal (os.execvp / claude
   --resume / --session-id) appears.
+- no argv composition or exec in core: camp neither builds the harness command
+  line nor runs it. `camp resume` prints what a shell wrapper should exec, and
+  takes the argv itself from the harness seam whole.
 - pretrust: the default claude profile pretrusts — should_pretrust() reads the
   binary basename, which the _CLAUDE_DEFAULT / HarnessProfile.binary field feeds.
 """
 
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -80,6 +84,55 @@ class TestSeamAbsence:
             if hits:
                 offenders[p.name] = hits
         assert offenders == {}, f"launch-seam literal survived: {offenders}"
+
+    def test_no_module_composes_or_runs_a_command(self):
+        """camp core neither BUILDS a command line nor RUNS one for the harness.
+
+        `camp resume` prints what a shell wrapper should exec; the argv itself
+        comes from the harness seam whole, and the exec belongs to the wrapper.
+        Both halves are easy to quietly re-absorb into core — a `["claude", …]`
+        literal here, an `execv` there — so both are pinned.
+
+        This scans the camp package sources ONLY. The harness seam
+        (`trailhead/harness/claude_code.py`) is deliberately outside it: composing
+        the argv is exactly its job, and the whole point of the boundary is that
+        the literals live there and nowhere else.
+        """
+        # Parsed, not grepped. Several modules legitimately DESCRIBE the wrapper's
+        # exec in prose, and `"claude"` on its own is the configured harness binary
+        # NAME (launch/profile.py's default) — both are text about the boundary,
+        # not a crossing of it. Only real syntax counts: an `os.exec*` call, or
+        # that name in ARGV position as the head of a list literal.
+        offenders: dict[str, list[str]] = {}
+        for p in _production_sources():
+            hits: list[str] = []
+            for node in ast.walk(ast.parse(p.read_text())):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr.startswith("exec")
+                ):
+                    hits.append(f"exec call: {node.func.attr}")
+                if (
+                    isinstance(node, ast.List)
+                    and node.elts
+                    and isinstance(node.elts[0], ast.Constant)
+                    and node.elts[0].value == "claude"
+                ):
+                    hits.append("argv literal")
+            if hits:
+                offenders[p.name] = sorted(set(hits))
+        assert offenders == {}, f"argv-composition/exec surface in camp core: {offenders}"
+
+    def test_resume_takes_its_argv_from_the_seam(self):
+        """`camp resume` asks the harness for the command; it does not build one.
+
+        A future edit that inlines the flag spelling here — rather than widening
+        the seam — is exactly the regression the boundary exists to prevent, and
+        it would not trip the literal scans above if the harness were renamed.
+        """
+        source = (_CAMP_PKG_DIR / "bookmark" / "resume.py").read_text()
+        assert "harness.session_resume(" in source
 
 
 # ---------------------------------------------------------------------------

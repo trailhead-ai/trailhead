@@ -201,14 +201,15 @@ class TestCraftInventory:
 
 
 class TestOtherInventories:
-    def test_camp_has_no_selectable_skills(self):
-        # camp ships only a CLI (bin) + hooks — no base, no subagents, no skills.
-        # The worktree SKILL was removed: the workspace exists before the harness
-        # opens, so worktree orchestration is operator-facing (README), not a skill.
+    def test_camp_inventory(self):
+        # camp is a CLI (bin) + hooks tool: no always-on base and no subagents.
+        # Its one selectable skill is `bookmark`, which wraps the bookmark/resume
+        # CLI verbs — the operator-facing worktree orchestration stays in the
+        # README, since a workspace exists before the harness opens.
         m = load_manifest(_CAMP_MANIFEST)
         assert m.base == []
         assert m.subagents == {}
-        assert m.skills == {}
+        assert m.skills == {"bookmark": "skills/bookmark"}
 
     def test_portage_inventory(self):
         # The four legacy skills (open/update/monitor/merge) collapsed into one

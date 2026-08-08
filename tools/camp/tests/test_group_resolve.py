@@ -473,3 +473,55 @@ def test_resolve_derives_state_dir_from_env(tmp_path: Path) -> None:
     group, slug = resolve_from_cwd(ws, configs, env=env)
     assert group == "envgroup"
     assert slug == "wt-slug"
+
+
+# ---------------------------------------------------------------------------
+# workspace_dir slug confinement — a stored bookmark's slug is untrusted input
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_slug",
+    [
+        "",
+        "..",
+        ".",
+        "../escape",
+        "a/../../escape",
+        "foo/bar",
+        "foo\\bar",
+        "foo\x00bar",
+    ],
+)
+def test_workspace_dir_rejects_traversal_slug(tmp_path: Path, bad_slug: str) -> None:
+    """A slug re-derived from a hand-edited stored record (a bookmark, not a
+    freshly-validated CLI argument) must not be able to walk `workspace_dir`'s
+    result outside the group's worktrees root."""
+    from camp.group.manifest import workspace_dir
+    from camp.group.resolve import GroupConfinementError
+
+    env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+    with pytest.raises(GroupConfinementError):
+        workspace_dir("demo", bad_slug, env=env)
+
+
+@pytest.mark.parametrize(
+    "ok_slug",
+    [
+        "alpha",
+        "a-b-c",
+        # A stored slug may already carry the wider metacharacter set spine
+        # forbids at capture time (pre-existing bookmarks, or a harness that
+        # wrote one before validation tightened) — workspace_dir only guards
+        # path confinement, not the full capture-time charset.
+        "a b",
+        "a;touch pwned",
+        "a$(whoami)",
+    ],
+)
+def test_workspace_dir_accepts_non_traversal_slug(tmp_path: Path, ok_slug: str) -> None:
+    from camp.group.manifest import workspace_dir
+
+    env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+    result = workspace_dir("demo", ok_slug, env=env)
+    assert result == tmp_path / "state" / "demo" / "worktrees" / ok_slug

@@ -70,6 +70,32 @@ _RULES_SUBDIR = "rules"
 
 _TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
+#: Subdir under the Claude dir holding one directory of session transcripts per
+#: project (``~/.claude/projects/<munged-cwd>/<session-id>.jsonl``).
+_PROJECTS_SUBDIR = "projects"
+
+#: A session id must be a single, inert path COMPONENT before it is joined onto
+#: the transcripts root.  Anything else (``..``, a separator, an empty string)
+#: would escape the projects dir, so it resolves to "unknown session" instead.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _is_session_id(session_id: object) -> bool:
+    """Whether ``session_id`` is a plain token safe to use as a path or an argv.
+
+    One predicate for both uses on purpose: an id is either inert enough to be
+    joined onto the transcripts root AND handed to a caller's argv, or it is not
+    a session id this harness recognizes at all.
+    """
+    return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
+
+#: The user-level settings file under the Claude dir, and the top-level key in it
+#: that sets how many days a session transcript is kept before cleanup.  Claude
+#: Code's own default when the key is absent is 30 days (minimum accepted: 1).
+_SETTINGS_FILENAME = "settings.json"
+_CLEANUP_PERIOD_KEY = "cleanupPeriodDays"
+_DEFAULT_CLEANUP_PERIOD_DAYS = 30
+
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "lore": (
         "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall."
@@ -103,10 +129,13 @@ def _claude_dir(env: dict[str, str]) -> Path:
     """Resolve Claude Code's config dir (``~/.claude``) from *env*.
 
     Honors the ``TRAILHEAD_CLAUDE_DIR`` override (tests redirect it here), then
-    ``HOME``/``USERPROFILE``, falling back to the real home.  Single source of
-    truth for both ``detect`` and the user-ruleset methods.
+    ``CLAUDE_CONFIG_DIR`` (Claude Code's OWN relocation env var — when a user
+    sets it, the config dir really has moved, so every path derived here must
+    follow), then ``HOME``/``USERPROFILE``, falling back to the real home.
+    Single source of truth for ``detect``, the user-ruleset methods, and the
+    session-transcript lookup.
     """
-    override = env.get("TRAILHEAD_CLAUDE_DIR")
+    override = env.get("TRAILHEAD_CLAUDE_DIR") or env.get("CLAUDE_CONFIG_DIR")
     if override:
         return Path(override)
     home = env.get("HOME") or env.get("USERPROFILE")
@@ -344,3 +373,96 @@ class ClaudeCodeHarness(Harness):
         if not target.is_file():
             return "missing"
         return "current" if target.read_text() == content else "stale"
+
+    # -- session transcripts --------------------------------------------------
+    #
+    # Claude Code writes one JSONL transcript per session at
+    # ``<claude-dir>/projects/<munged>/<session-id>.jsonl``, where ``<munged>`` is
+    # the session's start-of-session working directory with BOTH ``/`` and ``.``
+    # replaced by ``-`` (so ``/Users/x/.local`` → ``-Users-x--local``: the ``/.``
+    # pair yields a DOUBLE dash).  That layout is Claude-Code-specific knowledge
+    # and lives here only (Axiom 1); callers receive a resolved path or None.
+
+    def session_transcript_path(
+        self, session_id: str, workspace: Path, *, env: dict[str, str] | None = None
+    ) -> Path | None:
+        """Resolve the transcript for ``session_id`` under ``workspace``, or None.
+
+        ``workspace`` must be the session's START cwd — the munge key is baked in
+        when the session starts, so a caller that has since changed directory must
+        still pass the launch dir.
+
+        Returns None when the session id is not a usable path component or the
+        transcript file does not exist.  Existence is checked rather than assumed:
+        transcripts are subject to Claude Code's retention cleanup, and a path to
+        a file that is gone is worse than an honest "unresolvable".
+        """
+        if not _is_session_id(session_id):
+            return None
+        _env = env if env is not None else dict(os.environ)
+        munged = str(Path(workspace).resolve()).replace("/", "-").replace(".", "-")
+        candidate = _claude_dir(_env) / _PROJECTS_SUBDIR / munged / f"{session_id}.jsonl"
+        return candidate if candidate.is_file() else None
+
+    # -- session resume -------------------------------------------------------
+    #
+    # ``claude --resume <session-id>`` re-enters a session.  (``-r`` is the
+    # documented short alias; the long form is used here because the argv is read
+    # by humans debugging a wrapper.)  The command MUST run with the working
+    # directory set to the session's ORIGINAL start cwd — Claude Code indexes
+    # sessions per project directory, and resuming from anywhere else fails with
+    # "No conversation found".  Setting that cwd is the caller's half of the
+    # contract; this method only supplies the tokens.
+    #
+    # Known limitation: some child/subagent transcripts are not resumable even
+    # from the correct cwd (``--resume`` indexes top-level sessions).  Claude
+    # Code's own error surfaces that at resume time, so nothing is filtered here.
+
+    def session_resume(self, session_id: str) -> list[str] | None:
+        """Return ``["claude", "--resume", <session-id>]``, or None.
+
+        The session-id guard is the same one the transcript lookup applies: an id
+        that is not a plain token is rejected outright rather than passed into an
+        argv, so no id can ever contribute an extra argument or a shell-active
+        character to the command a caller runs.
+        """
+        if not _is_session_id(session_id):
+            return None
+        return ["claude", "--resume", session_id]
+
+    # -- session retention ----------------------------------------------------
+    #
+    # Claude Code deletes transcripts older than the top-level
+    # ``cleanupPeriodDays`` settings key (minimum 1); when the key is unset its
+    # own default is 30 days.  The key may also appear in project, local, and
+    # managed settings, which override the user file — but those are per-project
+    # and this seam is asked machine-globally (doctor and `camp bookmark ls` both
+    # span every workspace), so the USER settings file is the one source read
+    # here.  A project that shortens its own window is therefore reported
+    # optimistically; the warning is advisory, and over-warning every project
+    # from one project's setting would be worse.
+
+    def session_retention_days(self, *, env: dict[str, str] | None = None) -> int | None:
+        """Return the transcript-retention window in days (never ``None``).
+
+        Anything unreadable, absent, or not a positive int falls back to Claude
+        Code's documented 30-day default: a caller asking for a retention hint
+        must not be handed an exception, and "no setting" genuinely means 30.
+        """
+        _env = env if env is not None else dict(os.environ)
+        settings = _claude_dir(_env) / _SETTINGS_FILENAME
+        try:
+            data = json.loads(settings.read_text())
+        except (OSError, ValueError):
+            return _DEFAULT_CLEANUP_PERIOD_DAYS
+        if not isinstance(data, dict):
+            return _DEFAULT_CLEANUP_PERIOD_DAYS
+        value = data.get(_CLEANUP_PERIOD_KEY)
+        # bool is an int subclass — `true` is a malformed value, not a 1-day window.
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return _DEFAULT_CLEANUP_PERIOD_DAYS
+        return value
+
+    def session_retention_setting(self) -> str | None:
+        """The settings key a user raises to keep transcripts longer."""
+        return _CLEANUP_PERIOD_KEY

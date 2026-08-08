@@ -1283,3 +1283,60 @@ class TestManifestAPI:
 
         manifest_path = tmp_path / "nonexistent.json"
         remove_central_manifest(manifest_path)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# reconcile_worktree must not disturb the global bookmark store
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileLeavesBookmarksAlone:
+    """reconcile_worktree fires on every SessionStart and rebuilds each member's
+    manifest entry from scratch. The bookmark store lives in the same state dir
+    but is owned by a different subsystem — a reconcile run must leave it byte
+    for byte untouched (the manifest carry-forward bug taught this the hard way).
+    """
+
+    def _seed_bookmark(self, env: dict[str, str], slug: str) -> Path:
+        from camp.bookmark.store import store_path, upsert
+
+        upsert(
+            {
+                "ref": "alpha",
+                "group": "testgroup",
+                "slug": slug,
+                "session_id": "sess-alpha",
+                "transcript_path": "/nonexistent/alpha.jsonl",
+                "note": "mid-refactor",
+                "created_at": "2026-08-03T00:00:00Z",
+                "updated_at": "2026-08-03T00:00:00Z",
+            },
+            env=env,
+        )
+        return store_path(env=env)
+
+    def test_reconcile_leaves_bookmarks_json_byte_identical(self, two_member_group):
+        from camp.provision.reconcile import reconcile_worktree
+
+        g = two_member_group
+        slug = "feat-x"
+        path = self._seed_bookmark(g["env"], slug)
+        before = path.read_bytes()
+
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        assert path.read_bytes() == before, "reconcile_worktree must not rewrite bookmarks.json"
+
+    def test_second_reconcile_leaves_bookmarks_json_byte_identical(self, two_member_group):
+        """The wipe-on-second-run failure mode: reconcile again after provisioning."""
+        from camp.provision.reconcile import reconcile_worktree
+
+        g = two_member_group
+        slug = "feat-x"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+        path = self._seed_bookmark(g["env"], slug)
+        before = path.read_bytes()
+
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        assert path.read_bytes() == before, "a repeat reconcile must not touch bookmarks.json"

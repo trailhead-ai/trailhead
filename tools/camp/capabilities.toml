@@ -1,5 +1,6 @@
 # camp — group worktree orchestration.
-# One selectable skill (worktree), no subagents. No always-on base.
+# Selectable skills (skills/*/ with SKILL.md) are discovered on disk; no
+# subagents and no always-on base. The product surface is the CLI.
 
 [tool]
 name = "camp"
