@@ -300,7 +300,9 @@ def test_skill_inlined_values_present(stem: str):
     (Small ≤30 / Medium 30-200 / Large 200+ or 5+ files) that no
     tokens-absent or visible-skip check would catch.
     """
-    skill_md = SKILLS_DIR / stem / "SKILL.md"
+    # execute's review-threshold table lives in `_shared/execute.md` (the single
+    # source of truth `execute/SKILL.md` wraps) since the shared-procedure extraction.
+    skill_md = SKILLS_DIR / "_shared" / "execute.md" if stem == "execute" else SKILLS_DIR / stem / "SKILL.md"
     assert skill_md.exists(), (
         f"Expected skill {stem}/SKILL.md to exist in {SKILLS_DIR}. "
         "Add the genericized skill before this test can pass."

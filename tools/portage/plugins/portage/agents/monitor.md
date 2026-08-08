@@ -40,6 +40,8 @@ profile, so invoke it as bare `portage <subcommand>`.
 - `group_toml_path` — absolute path to the group TOML file (used for `[release]` config including
   `review_bot_login`, `external_tracker`, `merge_order`, and `green_driver_agent`)
 - `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
+- `outcome_file` — absolute path to a machine-readable completion channel (optional — see
+  "Outcome file" below)
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
 `{schema_version:1, group, slug, branch, members:[{name, repo_root, worktree_path}]}`.
@@ -67,6 +69,32 @@ Read `review_bot_login` and `external_tracker` from the `[release]` block of the
 the TOML path as an explicit arg — read via stdlib `tomllib`). If the `[release]` block is absent
 or a key is missing, treat that key as `none`. When both are absent, the summary reads:
 `release config: review_bot=none, tracker=none — configure in [release] of the group TOML`
+
+## Outcome file
+
+When the dispatcher supplies `outcome_file`, monitor is that caller's machine-readable
+completion channel — its own reply is prose a background dispatch may never surface
+synchronously, so an unattended caller (e.g. a ranger drain loop) polls this file instead.
+
+If `outcome_file` was provided, monitor writes exactly one line to that file.
+
+Monitor writes the outcome file only once it reaches a terminal state — never before, and
+never more than once. "Terminal state" means the same four outcomes the "Report structure"
+section below reports in prose: merged, ready-to-merge-but-stopped,
+ready-awaiting-human-approval, or blocked after N cycles. The line is one of:
+
+- `MERGED` — all PRs merged.
+- `READY <reason>` — a terminal-but-unmerged state the caller asked not to wait forever on,
+  e.g. `READY awaiting-human-approval`.
+- `BLOCKED <reason>` — blocked after 3 fix cycles without progress.
+- `STOPPED <reason>` — stopped for an operator reason short of blocked, e.g.
+  `STOPPED auto_merge disabled`.
+
+Monitor uses the path verbatim and never creates its parent directory — the caller
+pre-creates it (ranger's 0700 outcomes-directory pattern), so a missing directory means the
+caller's contract was violated, not something monitor should paper over with its own mkdir.
+A missing or empty outcome file is the caller's crashed signal; monitor's job is only to
+write the file, never to pre-create or clean it up.
 
 ## Green-driver dispatch
 
@@ -143,7 +171,44 @@ again (or stop, per that threshold) rather than looping back to `portage wait-fo
 (intra-portage, pinned haiku/low) to compose the blocker report rather than writing it inline —
 keeps this loop's context lean. Then stop.
 
-When **all** PRs report `done`, merge them in dependency order:
+### Human-approval merge gate
+
+Before calling `portage merge` on any PR, check its human-authored approval signal:
+
+```bash
+portage approvals <repo_path> <pr_number>
+```
+
+Exit 0 means approved (an approving review by a human reviewer, or the operator-applied
+`human-approved` label) — proceed to merge. Exit 1 means not yet approved: **hold that PR,
+do not merge it**, and report it as `ready-awaiting-human-approval`. Exit 2 is a loud
+usage or API error — a bad repo path, a malformed PR number, or an unreachable API — and
+means the question was never answered, not that the answer was no: treat it the same as
+not-approved (hold, don't merge) and surface the error.
+Monitor never merges a PR without a passing `portage approvals` check.
+
+**The approval is pinned to the commit it was given on.** A review counts only for its own
+`commit_id`, and the `human-approved` label only for the head commit standing when it was
+applied — GitHub dismisses neither on a push, so an unpinned check would approve code no
+human ever saw. When the signal exists but predates the current head, `portage approvals`
+exits 1 with `"stale": true` in its JSON and names the remedy on stderr. Treat it as its own
+outcome: **hold the PR** exactly as for any other exit 1, and report it as
+`ready-awaiting-human-approval` with a **(stale)** note saying the approval was given on an
+earlier commit and the operator must review the commits pushed since, then re-approve or
+re-apply the `human-approved` label. Never read a stale signal as approval, and never
+"refresh" it yourself — re-applying the label is applying the signal, which the rule below
+forbids absolutely.
+
+This is why a `fix_ci` or `review` cycle on an already-approved PR sends it back to the
+gate: the fix pushed new commits, so the approval that stood before it is stale by
+construction.
+
+**Monitor never applies the approval signal itself.** The `human-approved` label and the
+approving review are human-applied only — no drain, portage, or dispatched-agent component
+(including this one) may add the label or post the approving review, even to unblock a
+stalled merge.
+
+When **all** PRs report `done` AND pass the approvals check, merge them in dependency order:
 
 ```bash
 portage merge \
@@ -202,7 +267,7 @@ external_tracker = { kind = "...", ... }  # optional
 When you finish (all merged, stopped ready-to-merge, or blocked), return a short summary:
 
 ```
-**Watch result:** merged | ready-to-merge (auto_merge disabled) | blocked after N cycles
+**Watch result:** merged | ready-to-merge (auto_merge disabled) | ready-awaiting-human-approval | blocked after N cycles
 **Group/Slug:** <group>/<slug>
 **PRs:** <urls + final state>
 **Fix cycles run:** <count per PR>
@@ -218,6 +283,13 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
 - Don't dispatch an unverified `green_driver_agent` — confirm its `agents/<name>.md` file exists
   before entering the watch loop. A misconfigured name must surface as the named `BLOCKED` config
   error above, never a silent no-op or a dispatch failure discovered mid-loop.
+- Don't merge a PR that hasn't passed `portage approvals` — a `done` CI/review state is not a
+  substitute for the human-approval gate; hold it as `ready-awaiting-human-approval` instead.
+- Don't apply the `human-approved` label or post an approving review yourself, and don't dispatch
+  another agent to do so — the approval signal is human-applied only, with no exception for
+  unblocking a stalled merge. This is a manual-bypass weakness: automation running under the
+  operator's own GitHub credentials could still self-approve; that residual is accepted as risk
+  within single-operator scope, not something this loop is meant to close.
 - Don't exceed 3 fix cycles per PR without progress — stop and report.
 - Don't merge a PR that isn't `done` — if it's still `review`/`fix_ci`/`rebase`, handle that action first.
 - Don't treat the green-driver agent's verdict as pure fact without applying `receiving-code-review`
@@ -225,3 +297,6 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
   comments) that may itself have been hostile or mistaken.
 - Don't loop back to `portage wait-for-actionable` on a `blocked` green-driver verdict — that's a fix
   cycle, not a `done`-eligible state.
+- Don't create the `outcome_file`'s parent directory, and don't write to it before reaching a
+  terminal state — the caller pre-creates the directory, and a mid-loop write would let a poller
+  observe a non-final result.

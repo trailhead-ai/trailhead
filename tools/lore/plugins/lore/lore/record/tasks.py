@@ -11,7 +11,9 @@ from . import graph as graph_mod
 from . import guards as guards_mod
 
 
-def list_tasks(vault_root: str, *, statuses: list[str] | None = None) -> list[dict]:
+def list_tasks(
+    vault_root: str, *, statuses: list[str] | None = None, runnable_only: bool = False
+) -> list[dict]:
     """Return every task in *vault_root* as a flat list of listing entries.
 
     Each entry carries exactly seven keys: ``name``, ``status``,
@@ -29,14 +31,22 @@ def list_tasks(vault_root: str, *, statuses: list[str] | None = None) -> list[di
     the CLI's repeatable ``--status`` filter. A malformed sidecar is already
     excluded upstream by :func:`guards.load_task_sidecars` (skipped, not
     raised), so this function never sees it.
+
+    ``runnable_only``, when true, keeps only tasks in :func:`graph.runnable`'s
+    result (``ready`` status with every ``depends-on`` target ``done``;
+    parent/child containment is untouched — a runnable parent still lists).
+    Mutually exclusive with ``statuses`` at the CLI layer, not enforced here.
     """
     graph = guards_mod.load_task_sidecars(vault_root)
     wanted = set(statuses) if statuses else None
+    runnable_names = set(graph_mod.runnable(graph)) if runnable_only else None
 
     entries: list[dict] = []
     for name, sidecar in graph.items():
         status = sidecar.get("status")
         if wanted is not None and status not in wanted:
+            continue
+        if runnable_names is not None and name not in runnable_names:
             continue
         entries.append({
             "name": name,

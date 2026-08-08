@@ -79,18 +79,20 @@ def test_execute_dispatched_agents_resolve():
     each dispatched agent name is both named in the skill AND installed as
     `plugins/craft/agents/<name>.md`.
     """
-    skill_md = SKILLS_DIR / "execute" / "SKILL.md"
-    assert skill_md.exists(), f"Expected execute/SKILL.md in {SKILLS_DIR}."
+    # The actual dispatches live in `_shared/execute.md` (the single source of truth
+    # `execute/SKILL.md` wraps) since the shared-procedure extraction.
+    skill_md = SKILLS_DIR / "_shared" / "execute.md"
+    assert skill_md.exists(), f"Expected _shared/execute.md in {SKILLS_DIR}."
     text = skill_md.read_text()
     for agent in _EXECUTE_DISPATCHED_AGENTS:
         assert agent in text, (
-            f"execute/SKILL.md does not dispatch "
+            f"_shared/execute.md does not dispatch "
             f"{agent!r} — update _EXECUTE_DISPATCHED_AGENTS if the dispatch was "
             "intentionally removed, or restore the dispatch."
         )
         agent_file = AGENTS_DIR / f"{agent}.md"
         assert agent_file.exists(), (
-            f"execute/SKILL.md dispatches {agent!r} but "
+            f"_shared/execute.md dispatches {agent!r} but "
             f"{agent_file} does not exist. A dispatch must not dead-end — "
             "install the agent or rename the dispatch to an installed one."
         )

@@ -107,3 +107,5 @@ loop back to `portage wait-for-actionable`. `blocked` means you could not reach 
   subagents don't have the `Skill` tool, so a skill dispatch from here silently fails. Use
   `Agent` with the agent's name.
 - Don't merge or decide merge order — that's `monitor`'s call once you report `ready`.
+- Don't apply the `human-approved` label or post an approving review on any PR — the approval
+  signal is human-applied only; no drain, portage, or dispatched-agent component ever applies it.

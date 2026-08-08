@@ -32,7 +32,10 @@ SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 DRIFT_GATE_MD = AGENTS_DIR / "drift-gate.md"
 CODE_REVIEWER_MD = AGENTS_DIR / "code-reviewer.md"
 SIMPLIFIER_MD = AGENTS_DIR / "simplifier.md"
-EXECUTE_SKILL_MD = SKILLS_DIR / "execute" / "SKILL.md"
+# The per-slice loop, phase pipeline, and status-handling content this file pins
+# lives in `_shared/execute.md` (the single source of truth `execute/SKILL.md`
+# wraps) — read from there so these pins hold after the shared-procedure extraction.
+EXECUTE_SKILL_MD = SKILLS_DIR / "_shared" / "execute.md"
 REVIEW_SKILL_MD = SKILLS_DIR / "review" / "SKILL.md"
 
 

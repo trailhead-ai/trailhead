@@ -1,5 +1,5 @@
-"""``portage`` PR subcommands: check-status, evaluate-status, merge, summarize,
-and the ``sidecar`` read/write pair.
+"""``portage`` PR subcommands: check-status, evaluate-status, merge, approvals,
+summarize, and the ``sidecar`` read/write pair.
 
 All are thin consumers of ``trailhead.vcs``: each parses argv, calls the matching
 ``get_provider().pr`` method, and reproduces the JSON output shape + exit codes.
@@ -35,6 +35,7 @@ def add_pr_subparsers(sub) -> None:
     _add_check_status(sub)
     _add_evaluate_status(sub)
     _add_merge(sub)
+    _add_approvals(sub)
     _add_summarize(sub)
     _add_sidecar(sub)
 
@@ -134,8 +135,8 @@ def _add_merge(sub) -> None:
     p.add_argument(
         "pairs",
         nargs="*",
-        metavar="path:pr_number",
-        help="One or more repo-path:pr-number[:member_name] pairs.",
+        metavar="path:pr_number:member_name",
+        help="One or more repo-path:pr-number:member_name pairs.",
     )
     p.set_defaults(func=cmd_merge)
 
@@ -148,8 +149,15 @@ def cmd_merge(args: argparse.Namespace) -> int:
         except PairFormatError as e:
             print(f"merge: {e}", file=sys.stderr)
             return 2
-        repo_path, pr_number = parts[0], parts[1]
-        member_name = parts[2] if len(parts) > 2 else repo_path.rstrip("/").split("/")[-1]
+        if len(parts) < 3:
+            print(
+                f"merge: pair {pair_str!r} is missing member_name — expected "
+                "path:pr_number:member_name (2-field basename back-fill has been removed "
+                "because it silently corrupts merge_order keying)",
+                file=sys.stderr,
+            )
+            return 2
+        repo_path, pr_number, member_name = parts[0], parts[1], parts[2]
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
 
     try:
@@ -169,6 +177,62 @@ def cmd_merge(args: argparse.Namespace) -> int:
     if result.get("failed") or result.get("skipped"):
         return 1
     return 0
+
+
+# ---------------------------------------------------------------------------
+# approvals
+# ---------------------------------------------------------------------------
+
+
+def _add_approvals(sub) -> None:
+    p = sub.add_parser(
+        "approvals",
+        help="Check whether a PR carries a human-authored approval signal.",
+        description=(
+            "Answers whether a PR carries a human-authored approval signal for its "
+            "CURRENT head commit — an approving review by a User (non-bot) reviewer "
+            "whose commit_id is the head SHA, or the human-approved label applied by "
+            "a User actor after the head commit was pushed. An older signal is "
+            "reported as stale, not as approved. This is the merge gate monitor "
+            "checks before calling `portage merge`; it never applies the signal "
+            "itself. Exits 0 approved, 1 not approved (including stale), 2 on a "
+            "usage or IO error."
+        ),
+    )
+    p.add_argument("repo_path")
+    p.add_argument("pr_number")
+    p.set_defaults(func=cmd_approvals)
+
+
+def cmd_approvals(args: argparse.Namespace) -> int:
+    # Exit codes are a three-way answer, not a boolean: 0 approved, 1 asked
+    # and not approved, 2 never asked (usage or IO error). A caller gating a
+    # merge on this verb must not read "could not ask" as "not approved" —
+    # or, worse, collapse a bad path into the same code as a real refusal.
+    if not Path(args.repo_path).is_dir():
+        print(json.dumps({"error": f"not a directory: {args.repo_path}"}))
+        return 2
+    try:
+        result = get_provider().pr.approval(args.repo_path, args.pr_number)
+    except (RuntimeError, InvalidInputError) as e:
+        print(json.dumps({"error": str(e)}))
+        return 2
+    print(json.dumps(result, indent=2))
+    if result.get("approved"):
+        return 0
+    # Stale stays inside the not-approved family — a caller that gates on
+    # exit 0 must hold either way, and a fourth code would silently read as
+    # "approved" to any caller that only tests for nonzero. What separates
+    # the two is the remedy, so the remedy is what gets said out loud.
+    if result.get("stale"):
+        print(
+            f"portage approvals: approval is stale — the {result.get('source')} signal "
+            f"from {result.get('actor')} predates the current head commit "
+            f"{result.get('head_sha')}. Re-approve (or re-apply the `human-approved` "
+            "label) after reviewing the commits pushed since.",
+            file=sys.stderr,
+        )
+    return 1
 
 
 # ---------------------------------------------------------------------------

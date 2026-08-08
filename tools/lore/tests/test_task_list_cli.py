@@ -277,6 +277,137 @@ def test_task_list_registered_in_task_help(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# --runnable filter
+# ---------------------------------------------------------------------------
+
+
+def test_runnable_includes_ready_task_with_done_dep(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    _write_task(vault, "dep", {"status": "done", "created-at": "2026-01-01T00:00:00Z"})
+    _write_task(vault, "a", {
+        "status": "ready", "created-at": "2026-01-02T00:00:00Z", "depends-on": ["dep"],
+    })
+
+    res = _run(["task", "list", "--vault", "default", "--runnable", "--json"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    entries = json.loads(res.stdout)
+    assert {e["name"] for e in entries} == {"a"}
+
+
+def test_runnable_excludes_ready_task_with_not_done_dep(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    _write_task(vault, "dep", {"status": "in-progress", "created-at": "2026-01-01T00:00:00Z"})
+    _write_task(vault, "a", {
+        "status": "ready", "created-at": "2026-01-02T00:00:00Z", "depends-on": ["dep"],
+    })
+
+    res = _run(["task", "list", "--vault", "default", "--runnable", "--json"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    entries = json.loads(res.stdout)
+    assert {e["name"] for e in entries} == set()
+
+
+def test_runnable_excludes_ready_task_with_missing_dep(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    _write_task(vault, "a", {
+        "status": "ready", "created-at": "2026-01-02T00:00:00Z", "depends-on": ["ghost"],
+    })
+
+    res = _run(["task", "list", "--vault", "default", "--runnable", "--json"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    entries = json.loads(res.stdout)
+    assert {e["name"] for e in entries} == set()
+
+
+def test_runnable_includes_ready_task_with_no_deps(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    _write_task(vault, "a", {"status": "ready", "created-at": "2026-01-01T00:00:00Z"})
+
+    res = _run(["task", "list", "--vault", "default", "--runnable", "--json"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    entries = json.loads(res.stdout)
+    assert {e["name"] for e in entries} == {"a"}
+
+
+def test_runnable_excludes_non_ready_status_regardless_of_deps(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    _write_task(vault, "a", {"status": "open", "created-at": "2026-01-01T00:00:00Z"})
+    _write_task(vault, "b", {"status": "done", "created-at": "2026-01-02T00:00:00Z"})
+
+    res = _run(["task", "list", "--vault", "default", "--runnable", "--json"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    entries = json.loads(res.stdout)
+    assert entries == []
+
+
+def test_runnable_json_entry_shape_is_unchanged(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    _write_task(vault, "a", {"status": "ready", "created-at": "2026-01-01T00:00:00Z"})
+
+    res = _run(["task", "list", "--vault", "default", "--runnable", "--json"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    entries = json.loads(res.stdout)
+    assert set(entries[0].keys()) == _SEVEN_FIELDS
+
+
+def test_runnable_combined_with_status_refuses_loudly(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    res = _run(
+        ["task", "list", "--vault", "default", "--runnable", "--status", "ready", "--json"],
+        state=state, config=config,
+    )
+    assert res.returncode != 0
+    assert res.stderr.startswith("lore: ")
+    assert "--runnable" in res.stderr
+    assert "--status" in res.stderr
+
+
+def test_runnable_parent_task_is_not_filtered_out(tmp_path):
+    state, config = _dirs(tmp_path)
+    vault = tmp_path / "v-default"
+    vault.mkdir()
+    _write_config(config, [{"name": "default", "scope": "default", "path": str(vault)}])
+
+    _write_task(vault, "parent", {"status": "ready", "created-at": "2026-01-01T00:00:00Z"})
+    _write_task(vault, "child", {
+        "status": "ready", "created-at": "2026-01-02T00:00:00Z", "parent": "parent",
+    })
+
+    res = _run(["task", "list", "--vault", "default", "--runnable", "--json"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    entries = json.loads(res.stdout)
+    assert {e["name"] for e in entries} == {"parent", "child"}
+
+
 def test_human_rendering_without_json_is_one_line_per_task(tmp_path):
     state, config = _dirs(tmp_path)
     vault = tmp_path / "v-default"

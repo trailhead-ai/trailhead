@@ -742,6 +742,200 @@ def _merge_prs(
     return {"merged": merged, "failed": failed, "skipped": skipped}
 
 
+HUMAN_APPROVED_LABEL = "human-approved"
+
+#: The review states that change where a reviewer stands. `COMMENTED` (and
+#: `PENDING`) leave a standing approval untouched — GitHub itself keeps the
+#: approval when the same reviewer later leaves a plain comment — so only
+#: these three ever supersede an earlier review.
+_DECISIVE_REVIEW_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
+
+
+def _latest_decisive_reviews(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return each `User` reviewer's most recent decisive review, in first-seen order.
+
+    The reviews API returns every review a PR ever collected, including
+    approvals their author has since withdrawn, so "any APPROVED anywhere in
+    the list" is not the reviewer's current position. Collapsing to the
+    latest decisive state per reviewer mirrors the label path's
+    last-event-wins rule below: a later `CHANGES_REQUESTED` or a dismissal
+    supersedes the earlier `APPROVED`, and a later approval supersedes an
+    earlier objection. Sorted by `submitted_at` first (with the API's own
+    order as the tiebreak) so an out-of-order page cannot invert the result.
+    """
+    ordered = sorted(
+        enumerate(reviews),
+        key=lambda pair: (str((pair[1] or {}).get("submitted_at") or ""), pair[0]),
+    )
+    latest: dict[str, dict[str, Any]] = {}
+    for _index, review in ordered:
+        user = (review or {}).get("user") or {}
+        if user.get("type") != "User":
+            continue
+        if review.get("state") not in _DECISIVE_REVIEW_STATES:
+            continue
+        latest[str(user.get("login"))] = review
+    return list(latest.values())
+
+
+def _head_commit(
+    owner_repo: str, repo_path: str, pr_number: str, *, runner: rp.Runner
+) -> tuple[str, str]:
+    """Return the PR's ``(head_sha, head_committed_at)``.
+
+    Both halves are what pins an approval to a commit. The SHA comes from the
+    PR object; the timestamp comes from the PR's own commits list — the
+    mechanism chosen over the timeline's `committed` events because the
+    commits list is a plain, paginated, always-present collection whose
+    entries carry the SHA and the commit date together, so the head can be
+    matched exactly rather than inferred from event ordering.
+
+    A head commit absent from that list means the answer could not be
+    determined (a PR beyond the commits endpoint's cap, or a force-push
+    racing this read). That raises rather than degrading to "not stale":
+    every caller of this function is a merge gate, and a gate that guesses
+    is the vulnerability it exists to close.
+    """
+    pr = _gh(["api", f"repos/{owner_repo}/pulls/{pr_number}"], cwd=repo_path, runner=runner)
+    head_sha = ((pr or {}).get("head") or {}).get("sha") if isinstance(pr, dict) else None
+    if not head_sha:
+        raise RuntimeError(
+            f"approval: could not read the head SHA of PR #{pr_number} in {repo_path} — "
+            "an approval cannot be pinned to a commit without it"
+        )
+
+    commits = _gh(
+        ["api", f"repos/{owner_repo}/pulls/{pr_number}/commits", "--paginate"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if not isinstance(commits, list):
+        raise RuntimeError(
+            f"approval: could not fetch the commits of PR #{pr_number} in {repo_path}"
+        )
+
+    for commit in commits:
+        if (commit or {}).get("sha") == head_sha:
+            date = (((commit.get("commit") or {}).get("committer") or {}).get("date")) or ""
+            if date:
+                return head_sha, date
+            break
+
+    raise RuntimeError(
+        f"approval: head commit {head_sha} of PR #{pr_number} in {repo_path} carries no "
+        "readable timestamp in the PR's commits list — cannot tell whether the "
+        "`human-approved` label predates it"
+    )
+
+
+def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dict[str, Any]:
+    """Read-only check: does this PR carry a human-authored approval signal *for its head*?
+
+    Checked in order: a `User` (non-bot) reviewer whose *latest* decisive
+    review is `APPROVED` (see :func:`_latest_decisive_reviews` — a withdrawn
+    or dismissed approval never counts); then the `human-approved` label,
+    current-state-per-timeline, applied by a `User` actor with no
+    `performed_via_github_app`. Both paths are last-event-wins, deliberately:
+    a signal its author has taken back is not a signal. The label path exists
+    because GitHub 422s an approving review by the PR's own author, so a
+    self-authored PR can never satisfy the review signal.
+
+    **Every signal is pinned to the PR's current head commit.** GitHub does
+    not dismiss reviews on a new push unless branch protection is configured
+    to, and it never un-applies a label, so an unpinned check answers
+    "approved" for code no human ever saw: approve at commit A, push commit
+    B, merge B. A review therefore counts only when its ``commit_id`` is the
+    head SHA, and a label only when its `labeled` event postdates the head
+    commit's own timestamp (inclusive — a label stamped in the same second as
+    the push was not applied before it).
+
+    A signal that exists but predates the head is its own answer, distinct
+    from having none: the result carries ``stale: True`` with the source and
+    actor that produced it, so the operator is told to re-approve after
+    reviewing the new commits rather than to go find an approver.
+    """
+    validate_pr_number(pr_number)
+    owner_repo = _get_owner_repo(repo_path, runner)
+    if not owner_repo:
+        raise RuntimeError(f"approval: could not resolve owner/repo for {repo_path}")
+
+    head_sha, head_committed_at = _head_commit(
+        owner_repo, repo_path, pr_number, runner=runner
+    )
+
+    reviews = _gh(
+        ["api", f"repos/{owner_repo}/pulls/{pr_number}/reviews", "--paginate"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if reviews is None:
+        raise RuntimeError(f"approval: could not fetch reviews for PR #{pr_number} in {repo_path}")
+
+    # A stale signal is remembered, not returned yet: a *fresh* signal from
+    # the other path still approves the PR, so the label check below gets to
+    # run before staleness becomes the answer.
+    stale: dict[str, Any] | None = None
+
+    for review in _latest_decisive_reviews(reviews):
+        if review.get("state") != "APPROVED":
+            continue
+        user = review.get("user") or {}
+        signal_sha = review.get("commit_id")
+        if signal_sha == head_sha:
+            return {
+                "approved": True, "stale": False, "source": "review",
+                "actor": user.get("login"), "head_sha": head_sha, "signal_sha": signal_sha,
+            }
+        if stale is None:
+            stale = {
+                "approved": False, "stale": True, "source": "review",
+                "actor": user.get("login"), "head_sha": head_sha, "signal_sha": signal_sha,
+            }
+
+    timeline = _gh(
+        ["api", f"repos/{owner_repo}/issues/{pr_number}/timeline", "--paginate"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if timeline is None:
+        raise RuntimeError(f"approval: could not fetch timeline for PR #{pr_number} in {repo_path}")
+
+    label_events = [
+        e
+        for e in timeline
+        if e.get("event") in ("labeled", "unlabeled")
+        and (e.get("label") or {}).get("name") == HUMAN_APPROVED_LABEL
+    ]
+    label_events.sort(key=lambda e: e.get("created_at") or "")
+
+    if label_events:
+        last = label_events[-1]
+        if last.get("event") == "labeled":
+            actor = last.get("actor") or {}
+            if actor.get("type") == "User" and last.get("performed_via_github_app") is None:
+                labeled_at = str(last.get("created_at") or "")
+                # ISO-8601 UTC timestamps, as GitHub returns them, order
+                # correctly as plain strings — no parsing, no timezone
+                # arithmetic, and no dependency on a clock this process reads.
+                fresh = bool(labeled_at) and labeled_at >= head_committed_at
+                result = {
+                    "approved": fresh, "stale": not fresh, "source": "label",
+                    "actor": actor.get("login"), "head_sha": head_sha,
+                    "signal_at": labeled_at, "head_committed_at": head_committed_at,
+                }
+                if fresh:
+                    return result
+                stale = result
+
+    if stale is not None:
+        return stale
+
+    return {
+        "approved": False, "stale": False, "source": None, "actor": None,
+        "head_sha": head_sha,
+    }
+
+
 # ---------------------------------------------------------------------------
 # prs.json sidecar — ported from release_prs_sidecar.py
 # ---------------------------------------------------------------------------
@@ -845,6 +1039,9 @@ class _GitHubPR(PRSurface):
         toml_path: str | None = None,
     ) -> dict[str, Any]:
         return _merge_prs(list(pr_pairs), manifest_path, toml_path, self._runner)
+
+    def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:
+        return _check_approval(repo_path, pr_number, runner=self._runner)
 
 
 class _GitHubCI(CISurface):

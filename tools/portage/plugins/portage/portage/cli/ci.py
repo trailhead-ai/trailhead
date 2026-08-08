@@ -37,10 +37,11 @@ def cmd_wait_for_actionable(args: argparse.Namespace) -> int:
     pr_pairs: list[tuple[str, str]] = []
     for pair in args.pairs:
         try:
-            repo, pr = split_pair(pair)
+            parts = split_pair(pair, max_parts=3)
         except PairFormatError as e:
             print(f"wait-for-actionable: {e}", file=sys.stderr)
             return 2
+        repo, pr = parts[0], parts[1]
         pr_pairs.append((repo, pr))
 
     result = get_provider().ci.wait(

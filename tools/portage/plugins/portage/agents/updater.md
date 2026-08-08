@@ -111,9 +111,10 @@ subagent lose their notification channel when the subagent returns — the backg
 "parent" is this already-completed updater, not the top-level session, so user-visible
 notifications never arrive. The caller (main session) must launch monitor itself.
 
-Build a comma-separated list of `<repo_path>:<pr_number>` pairs for every PR created or updated
-in Step 2 and surface it in the report as `pr_pairs:`. The caller will use this to dispatch the
-monitor background agent from the top-level session.
+Build a comma-separated list of `repo:pr:member` pairs (`<repo_path>:<pr_number>:<member_name>`,
+`member_name` from the manifest's `members[].name`) for every PR created or updated in Step 2 and
+surface it in the report as `pr_pairs:`. The caller will use this to dispatch the monitor
+background agent from the top-level session.
 
 ## Repo rules
 
@@ -131,7 +132,7 @@ monitor background agent from the top-level session.
 **PRs:** <urls or "updated existing">
 **Linked siblings:** yes | n/a
 **Sidecar written:** <manifest_dir>/prs.json | skipped (no PRs)
-**pr_pairs:** `<repo1_path>:<pr1>, <repo2_path>:<pr2>, ...` (empty if no PRs to watch)
+**pr_pairs:** `<repo1_path>:<pr1>:<member1>, <repo2_path>:<pr2>:<member2>, ...` (empty if no PRs to watch)
 **Next step for caller:** launch monitor background agent with the `pr_pairs` above from the top-level session
 ```
 
@@ -145,3 +146,5 @@ Keep it under 15 lines.
 - Don't launch monitor from inside this subagent — return `pr_pairs` to the caller so it can
   launch monitor from the top-level session where notifications are visible.
 - Don't treat any one repo as special or privileged. Every member of a camp group is a peer.
+- Don't apply the `human-approved` label or post an approving review on any PR — the approval
+  signal is human-applied only; no drain, portage, or dispatched-agent component ever applies it.

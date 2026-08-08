@@ -185,6 +185,12 @@ If `pr_pairs` is unknown (i.e. `rest` was empty), the agent will detect it via
 `[release].review_bot_login`) and external tracker (if configured in
 `[release].external_tracker`) take no action when absent from the group TOML.
 
+An unattended caller (e.g. a ranger drain loop) that cannot wait on this dispatch's prose
+reply passes `outcome_file: <absolute path>` too — an optional machine-readable completion
+channel monitor writes exactly one line to at its terminal state (see `agents/monitor.md`'s
+"Outcome file" section for the grammar). The caller pre-creates the file's parent directory;
+monitor never does.
+
 `<repo_path>` in `pr_pairs` is a LOCAL filesystem path. The downstream scripts use
 it as `cwd=` for `gh` calls. `portage evaluate-status` fails fast with a clear error
 if the path is not a directory.
