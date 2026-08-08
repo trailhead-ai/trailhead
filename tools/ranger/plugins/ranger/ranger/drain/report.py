@@ -87,6 +87,7 @@ never resolves those states on its own.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -232,6 +233,77 @@ def parse_pushed_argument(argument: str) -> tuple[str, str, str] | None:
     if len(parts) < 3 or not parts[2].strip():
         return None
     return parts[0], parts[1], parts[2].strip()
+
+
+#: A git-ref-safe branch name, as strict as this project ever needs one to be:
+#: alphanumeric-leading, then alphanumerics, ``.``, ``_``, ``-`` and ``/``.
+#: Deliberately an allowlist rather than a blocklist of git's own refusals —
+#: the value arrives in an agent-written outcome line, and every shell
+#: metacharacter (space, quote, backtick, ``$``, ``;``, newline) is outside
+#: the set by construction. ``\Z`` anchors the true end of string so a
+#: trailing newline cannot ride along.
+BRANCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
+
+#: An abbreviated-or-full lowercase-or-upper hex object name. Git abbreviates
+#: to 7 at minimum and never exceeds 40 for SHA-1.
+SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}\Z")
+
+#: Git's own ref-name refusals that the allowlist above cannot express as a
+#: character class: a ``..`` range operator, an empty path component, a
+#: trailing separator or dot, and the reserved ``.lock`` suffix.
+_BRANCH_FORBIDDEN = ("..", "//")
+
+
+def branch_is_ref_safe(branch: str, *, workspace: str | None = None) -> bool:
+    """Is *branch* a git-ref-safe name this drain is willing to handle?
+
+    When *workspace* is known, the answer is narrower still: a drain's push
+    only ever lands on that workspace's own ``worktree-<slug>`` branch, so
+    any other name — however well-formed — is a value that did not come from
+    where the caller thinks it did.
+    """
+    if not branch or len(branch) > 255:
+        return False
+    if not BRANCH_NAME_RE.match(branch):
+        return False
+    if any(bad in branch for bad in _BRANCH_FORBIDDEN):
+        return False
+    if branch.endswith((".", "/", ".lock")):
+        return False
+    if workspace is not None and branch != f"worktree-{workspace}":
+        return False
+    return True
+
+
+def sha_is_hex(sha: str) -> bool:
+    """Is *sha* an abbreviated-or-full hex object name?"""
+    return bool(SHA_RE.match(sha or ""))
+
+
+def refuse_unsafe_pushed_refs(
+    branch: str, sha: str, *, workspace: str | None = None
+) -> str | None:
+    """Return a named refusal for an unsafe ``PUSHED`` branch/sha, or ``None``.
+
+    The shape check both `drain record` and `drain inflight mark` run before
+    either value is stored or rendered. A refusal is a *string*, not an
+    exception, because ``record``'s answer to one is to bucket the task
+    ``failed`` — never to exit nonzero and leave a finished build with no
+    line in the report at all.
+    """
+    if not branch_is_ref_safe(branch, workspace=workspace):
+        expected = (
+            f"expected `worktree-{workspace}`"
+            if workspace is not None
+            else f"expected a git-ref-safe name matching {BRANCH_NAME_RE.pattern}"
+        )
+        return f"refused unsafe PUSHED branch {branch!r} — {expected}"
+    if not sha_is_hex(sha):
+        return (
+            f"refused unsafe PUSHED sha {sha!r} — expected 7-40 hex characters "
+            f"matching {SHA_RE.pattern}"
+        )
+    return None
 
 
 def parse_monitor_outcome(line: str) -> tuple[str | None, str]:
@@ -567,8 +639,37 @@ def append_dropped(report_path: Path, task_id: str, reason: str) -> None:
     _append(report_path, "dropped", task_id, lambda safe: f"- `{task_id}` — {safe}\n", reason)
 
 
+def _safe_branch(branch: str) -> str:
+    """Scrub *branch* before it is rendered, exactly as a diffstat is.
+
+    The branch is agent-written text like every other field of the ``PUSHED``
+    line, so the credential tripwire runs over it too — belt, worn alongside
+    the suspenders of :func:`refuse_unsafe_pushed_refs` at the CLI boundary.
+    Two independent layers, because either one can be reached without the
+    other: a caller that constructs a report line directly bypasses the CLI's
+    shape check, and a shape-valid name can still be a credential.
+    """
+    return scrub_credentials(branch)
+
+
+def _safe_sha(sha: str) -> str:
+    """Scrub *sha* before it is rendered, unless it is a well-formed hex sha.
+
+    Same belt as :func:`_safe_branch`, with one carve-out the scrubber's
+    deliberate over-matching forces: its ``[A-Fa-f0-9]{40,}`` bulk-secret
+    pattern matches a *full* 40-character object name, so scrubbing
+    unconditionally would redact the very commit the report exists to name.
+    A value that already satisfies :func:`sha_is_hex` cannot carry a
+    credential — it is hex and nothing else — so the tripwire is only run on
+    values that fail that check, which is precisely the set that could.
+    """
+    return sha if sha_is_hex(sha) else scrub_credentials(sha)
+
+
 def _pushed_line(task_id: str, branch: str, sha: str, diffstat: str, *, extra: str = "") -> str:
-    return f"- `{task_id}` — `{branch}` @ `{sha}` — {diffstat}{extra}\n"
+    return (
+        f"- `{task_id}` — `{_safe_branch(branch)}` @ `{_safe_sha(sha)}` — {diffstat}{extra}\n"
+    )
 
 
 def _append_pushed(
@@ -626,7 +727,10 @@ def append_pushed_awaiting_approval(
         )
 
     def render(safe_diffstat: str) -> str:
-        return f"- `{task_id}` — `{branch}` @ `{sha}` — {safe_diffstat}{extra}"
+        return (
+            f"- `{task_id}` — `{_safe_branch(branch)}` @ `{_safe_sha(sha)}` — "
+            f"{safe_diffstat}{extra}"
+        )
 
     _set_pushed(report_path, task_id, "awaiting-human-approval", render, diffstat)
 
@@ -655,6 +759,7 @@ def mark_in_flight(
     diffstat: str,
     workspace: str,
     deadline_hours: float | None = None,
+    pr_url: str | None = None,
     now: datetime | None = None,
 ) -> None:
     """Mark *task_id* as occupying a cap slot, durably, with a monitor deadline.
@@ -697,7 +802,9 @@ def mark_in_flight(
         "deadline": deadline.isoformat(),
     }
     _write_state(report_path, state)
-    append_pushed_in_flight(report_path, task_id, branch, sha, diffstat, cap_blocking=True)
+    append_pushed_in_flight(
+        report_path, task_id, branch, sha, diffstat, pr_url=pr_url, cap_blocking=True,
+    )
 
 
 def in_flight_count(report_path: Path) -> int:

@@ -25,10 +25,14 @@ exposed here rather than left to the coordinator's prose, because prose
 cannot hold state across a restart and prose that re-derives another tool's
 JSON drifts from it silently:
 
-- `drain inflight mark|count|resolve|expire` — open a cap slot when a task
-  is handed to portage's monitor, ask whether dispatch must pause, close a
-  slot against the monitor's own outcome file, and reclaim slots whose
-  deadline passed.
+- `drain inflight mark|count|resolve|expire` — open a cap slot by hand, ask
+  whether dispatch must pause, close a slot against the monitor's own
+  outcome file, and reclaim slots whose deadline passed. A drain loop never
+  calls `mark`: `record --mark-inflight` opens the slot *in this process*
+  from the branch/sha/diffstat it just parsed out of the outcome file, so
+  those three agent-written values are never reassembled into a second
+  command string by the coordinator. `mark` stays for by-hand recovery, and
+  holds its own arguments to the same shapes `record` does.
 - `drain crashed` / `drain dropped` — the two buckets no *readable* outcome
   file produces: a monitor that wrote nothing for a task holding no cap slot,
   and a queued task the drain never dispatched at all. (`record
@@ -139,6 +143,32 @@ def add_drain_subparser(sub) -> None:
             "read instead. A missing or empty file is the agent-crash signal and records "
             "`crashed`, not `failed`"
         ),
+    )
+
+    # The in-flight mark, folded into `record` itself. Its whole point is
+    # that the coordinator never handles the branch/sha/diffstat: they are
+    # parsed from the outcome file inside this process and passed to the cap
+    # substrate as values, never reassembled into a second command string.
+    p_record.add_argument(
+        "--mark-inflight", action="store_true",
+        help=(
+            "On a `PUSHED` outcome, open the task's monitor cap slot in-process — the same "
+            "slot `drain inflight mark` opens, but without the branch/sha/diffstat ever "
+            "being retyped into a command line by the caller. Requires --report and "
+            "--workspace"
+        ),
+    )
+    p_record.add_argument(
+        "--workspace", metavar="SLUG",
+        help=(
+            "The task's ephemeral camp workspace. Required by --mark-inflight, and the "
+            "expected shape of the outcome's branch: a drain's push only ever lands on "
+            "`worktree-<slug>`"
+        ),
+    )
+    p_record.add_argument(
+        "--deadline-hours", type=float, default=None, metavar="HOURS",
+        help="Override this one slot's deadline; defaults to the drain's `--monitor-deadline`",
     )
 
     p_record.add_argument(
@@ -420,6 +450,15 @@ def _cmd_drain_record(args) -> int:
     except ValueError as exc:
         return _fail(str(exc))
 
+    mark_inflight = getattr(args, "mark_inflight", False)
+    workspace = getattr(args, "workspace", None)
+    if mark_inflight and (not args.report or not workspace):
+        return _fail(
+            "--mark-inflight opens a durable cap slot, so it needs both --report (the "
+            "drain whose cap it counts against) and --workspace (the ephemeral workspace "
+            "named if the slot times out)"
+        )
+
     report_path = Path(args.report) if args.report else None
     try:
         outcome, agent_crashed = _resolve_outcome(
@@ -461,11 +500,28 @@ def _cmd_drain_record(args) -> int:
         )
         token, argument = "FAILED", reason
 
+    # Shape validation at the boundary, before either value is stored in the
+    # cap state or rendered into the report. A `PUSHED` line whose branch is
+    # not a git-ref-safe name — or not this workspace's own `worktree-<slug>`
+    # — did not come from where the caller thinks it did, so it is bucketed
+    # `failed` by the same rule an unparseable line is: never refused, always
+    # named, because a finished run with no line in the report is the outcome
+    # an unattended operator cannot recover from.
+    refusal = None
+    if token == "PUSHED":
+        refusal = drain_report_mod.refuse_unsafe_pushed_refs(
+            pushed_fields[0], pushed_fields[1], workspace=workspace,
+        )
+        if refusal is not None:
+            token, argument, pushed_fields = "FAILED", refusal, None
+
     payload = {
         "task": task_id, "token": token, "argument": argument, "bucket": token.lower(),
     }
     if unparseable:
         payload["unparseable"] = True
+    if refusal is not None:
+        payload["refused"] = refusal
     if pushed_fields:
         payload["branch"], payload["sha"], payload["diffstat"] = pushed_fields
 
@@ -478,13 +534,23 @@ def _cmd_drain_record(args) -> int:
                     pr_url, _number = drain_report_mod.pr_url_for_branch(
                         drain_report_mod.read_prs_sidecar(Path(args.prs_json)), branch,
                     )
-                # Rendered as `in-flight` without holding a cap slot: the
-                # branch is pushed, but nothing has been handed to a monitor
-                # yet. `drain inflight mark` is what opens the slot.
-                drain_report_mod.append_pushed_in_flight(
-                    report_path, task_id, branch, sha, diffstat,
-                    pr_url=pr_url, cap_blocking=False,
-                )
+                if mark_inflight:
+                    # The slot opens here, in-process, from the values this
+                    # verb parsed itself — the coordinator never sees them.
+                    drain_report_mod.mark_in_flight(
+                        report_path, task_id, branch=branch, sha=sha, diffstat=diffstat,
+                        workspace=workspace, deadline_hours=args.deadline_hours,
+                        pr_url=pr_url,
+                    )
+                    payload["in_flight"] = drain_report_mod.in_flight_count(report_path)
+                else:
+                    # Rendered as `in-flight` without holding a cap slot: the
+                    # branch is pushed, but nothing has been handed to a
+                    # monitor yet.
+                    drain_report_mod.append_pushed_in_flight(
+                        report_path, task_id, branch, sha, diffstat,
+                        pr_url=pr_url, cap_blocking=False,
+                    )
             elif token == "BLOCKED":
                 drain_report_mod.append_blocked(report_path, task_id, argument)
             elif token == "FAILED":
@@ -523,6 +589,14 @@ def _cmd_drain_inflight_mark(args, report_mod) -> int:
         task_id = _record_id(args.task)
     except ValueError as exc:
         return _fail(str(exc))
+    # Loud here, rather than bucketed: this verb is driven by hand and carries
+    # no outcome to classify, so an unsafe value is a usage error. `record
+    # --mark-inflight` is the path a drain loop uses, and it buckets instead.
+    refusal = report_mod.refuse_unsafe_pushed_refs(
+        args.branch, args.sha, workspace=args.workspace,
+    )
+    if refusal is not None:
+        return _fail(refusal)
     report_mod.mark_in_flight(
         Path(args.report), task_id,
         branch=args.branch, sha=args.sha, diffstat=args.diffstat,

@@ -505,6 +505,135 @@ def test_record_pushed_carries_the_pr_link_from_the_prs_sidecar(tmp_path):
     assert "https://github.com/org/repo/pull/7" in Path(report_path).read_text()
 
 
+class TestRecordMarksInFlightInProcess:
+    """A ``PUSHED`` outcome opens its own cap slot, without a second command.
+
+    The coordinator used to read `record`'s branch/sha/diffstat back out and
+    retype them into `drain inflight mark` — agent-authored free text
+    re-interpolated into a shell command string, which is the one thing the
+    drain's ground rules forbid. With `--mark-inflight` the values never
+    leave this process: they are parsed from the outcome file and handed
+    straight to the same substrate the standalone verb drives.
+    """
+
+    def test_pushed_with_mark_inflight_opens_the_slot(self, tmp_path):
+        drain, payload = _started(tmp_path)
+        report_path = payload["report_path"]
+
+        res = drain.run(
+            "drain", "record", "--report", report_path, "--task", "task/t1",
+            "--outcome", "PUSHED worktree-t1 a1b2c3d 3 files changed",
+            "--mark-inflight", "--workspace", "t1",
+        )
+
+        assert res.returncode == 0, res.stderr
+        assert json.loads(res.stdout)["in_flight"] == 1
+        counted = json.loads(
+            drain.run("drain", "inflight", "count", "--report", report_path).stdout
+        )
+        assert counted["in_flight"] == 1
+        text = Path(report_path).read_text()
+        assert "holding the concurrency cap" in text
+        assert "3 files changed" in text
+
+    def test_pushed_without_mark_inflight_holds_no_slot(self, tmp_path):
+        drain, payload = _started(tmp_path)
+        report_path = payload["report_path"]
+
+        drain.run(
+            "drain", "record", "--report", report_path, "--task", "task/t1",
+            "--outcome", "PUSHED worktree-t1 a1b2c3d 3 files changed",
+        )
+
+        counted = json.loads(
+            drain.run("drain", "inflight", "count", "--report", report_path).stdout
+        )
+        assert counted["in_flight"] == 0
+
+    def test_mark_inflight_requires_the_workspace_it_marks(self, tmp_path):
+        drain, payload = _started(tmp_path)
+
+        res = drain.run(
+            "drain", "record", "--report", payload["report_path"], "--task", "task/t1",
+            "--outcome", "PUSHED worktree-t1 a1b2c3d 3 files changed",
+            "--mark-inflight",
+        )
+
+        assert res.returncode != 0
+        assert "--workspace" in res.stderr
+
+
+class TestRecordRefusesUnsafePushedRefs:
+    """Shape validation at the CLI boundary — the option-(b) backstop.
+
+    A refusal never exits nonzero: it buckets the task ``failed`` with a
+    named reason, for the same reason an unparseable line does — a finished
+    run with no line in the report is the one outcome an unattended operator
+    cannot recover from.
+    """
+
+    @pytest.mark.parametrize(
+        "branch",
+        ["worktree-t1;rm", "worktree-t1`id`", "../../etc", "worktree-t1.lock"],
+        ids=["semicolon", "backtick", "traversal", "reserved-suffix"],
+    )
+    def test_an_unsafe_branch_buckets_failed(self, tmp_path, branch):
+        drain, payload = _started(tmp_path)
+        report_path = payload["report_path"]
+
+        res = drain.run(
+            "drain", "record", "--report", report_path, "--task", "task/t1",
+            "--outcome", f"PUSHED {branch} a1b2c3d 1 file changed",
+        )
+
+        assert res.returncode == 0, res.stderr
+        assert json.loads(res.stdout)["bucket"] == "failed"
+        text = Path(report_path).read_text()
+        assert "refused unsafe PUSHED branch" in text
+        assert "## Pushed" not in text.split("## Failed", 1)[1]
+
+    def test_a_non_hex_sha_buckets_failed(self, tmp_path):
+        drain, payload = _started(tmp_path)
+        report_path = payload["report_path"]
+
+        res = drain.run(
+            "drain", "record", "--report", report_path, "--task", "task/t1",
+            "--outcome", "PUSHED worktree-t1 $(whoami) 1 file changed",
+        )
+
+        assert res.returncode == 0, res.stderr
+        assert json.loads(res.stdout)["bucket"] == "failed"
+        assert "refused unsafe PUSHED sha" in Path(report_path).read_text()
+
+    def test_a_branch_that_is_not_this_workspaces_worktree_buckets_failed(self, tmp_path):
+        drain, payload = _started(tmp_path)
+        report_path = payload["report_path"]
+
+        res = drain.run(
+            "drain", "record", "--report", report_path, "--task", "task/t1",
+            "--outcome", "PUSHED worktree-somewhere-else a1b2c3d 1 file changed",
+            "--mark-inflight", "--workspace", "t1",
+        )
+
+        assert res.returncode == 0, res.stderr
+        assert json.loads(res.stdout)["bucket"] == "failed"
+        assert "expected `worktree-t1`" in Path(report_path).read_text()
+
+    def test_the_standalone_mark_verb_refuses_an_unsafe_branch_loudly(self, tmp_path):
+        # `inflight mark` has no outcome to bucket — it is driven by hand, so
+        # a bad value there is a usage error, not a task result.
+        drain, payload = _started(tmp_path)
+
+        res = drain.run(
+            "drain", "inflight", "mark", "--report", payload["report_path"],
+            "--task", "task/t1", "--branch", "worktree-t1;rm", "--sha", "a1b2c3d",
+            "--diffstat", "1 file changed", "--workspace", "t1",
+        )
+
+        assert res.returncode != 0
+        assert "refused unsafe PUSHED branch" in res.stderr
+
+
 @pytest.mark.parametrize(
     "bad_task",
     ["task/foo`touch pwn`", "task/foo;rm -rf", "task/foo bar", "task/foo\nbar"],
@@ -639,7 +768,7 @@ def test_inflight_count_reports_at_cap_so_the_loop_pauses_dispatch(tmp_path):
     report_path = payload["report_path"]
     drain.run(
         "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
-        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+        "--branch", "worktree-t1", "--sha", "a1b2c3d", "--diffstat", "d", "--workspace", "t1",
     )
 
     counted = json.loads(drain.run("drain", "inflight", "count", "--report", report_path).stdout)
@@ -653,7 +782,7 @@ def test_inflight_mark_is_refused_in_degraded_mode(tmp_path):
 
     res = drain.run(
         "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
-        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+        "--branch", "worktree-t1", "--sha", "a1b2c3d", "--diffstat", "d", "--workspace", "t1",
     )
 
     assert res.returncode != 0
@@ -689,7 +818,7 @@ def test_inflight_resolve_reads_a_missing_monitor_outcome_file_as_crashed(tmp_pa
     report_path = payload["report_path"]
     drain.run(
         "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
-        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+        "--branch", "worktree-t1", "--sha", "a1b2c3d", "--diffstat", "d", "--workspace", "t1",
     )
 
     res = drain.run(
@@ -707,7 +836,7 @@ def test_inflight_resolve_takes_the_approval_pr_link_from_the_sidecar(tmp_path):
     report_path = payload["report_path"]
     drain.run(
         "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
-        "--branch", "worktree-t1", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+        "--branch", "worktree-t1", "--sha", "a1b2c3d", "--diffstat", "d", "--workspace", "t1",
     )
     monitor_outcome = tmp_path / "monitor.outcome"
     monitor_outcome.write_text("READY awaiting the human-approval label\n", encoding="utf-8")
@@ -734,7 +863,7 @@ def test_inflight_expire_reclaims_a_slot_past_its_deadline(tmp_path):
     report_path = payload["report_path"]
     drain.run(
         "drain", "inflight", "mark", "--report", report_path, "--task", "task/t1",
-        "--branch", "b", "--sha", "s", "--diffstat", "d", "--workspace", "t1",
+        "--branch", "worktree-t1", "--sha", "a1b2c3d", "--diffstat", "d", "--workspace", "t1",
         "--deadline-hours", "-1",
     )
 

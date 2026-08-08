@@ -124,6 +124,90 @@ def test_untrusted_text_is_credential_scrubbed(tmp_path):
     assert "[REDACTED]" in text
 
 
+class TestPushedRefsAreScrubbedToo:
+    """The branch and sha of a ``PUSHED`` line are agent-written text.
+
+    They arrive on the same outcome line the diffstat does, so the
+    credential tripwire runs over them too — the belt behind the CLI's
+    shape check. The one carve-out is a well-formed hex object name, which
+    the scrubber's bulk-secret pattern would otherwise redact wholesale.
+    """
+
+    def test_a_credential_shaped_branch_is_redacted(self, tmp_path):
+        report_path = report.start("g", "v", 1, env=_env(tmp_path))
+
+        report.append_pushed_merged(
+            report_path, "task/a", "ghp_" + "a" * 36, "a1b2c3d", "1 file changed",
+        )
+
+        text = report_path.read_text()
+        assert "ghp_" + "a" * 36 not in text
+        assert "[REDACTED]" in text
+
+    def test_a_credential_shaped_sha_is_redacted(self, tmp_path):
+        report_path = report.start("g", "v", 1, env=_env(tmp_path))
+
+        report.append_pushed_merged(
+            report_path, "task/a", "branch-a", "sk_live_abc123", "1 file changed",
+        )
+
+        text = report_path.read_text()
+        assert "sk_live_abc123" not in text
+        assert "[REDACTED]" in text
+
+    def test_a_credential_shaped_branch_is_redacted_in_every_pushed_substate(self, tmp_path):
+        report_path = report.start("g", "v", 1, env=_env(tmp_path))
+        leaked = "ghp_" + "b" * 36
+
+        report.append_pushed_awaiting_approval(
+            report_path, "task/a", leaked, "sk_live_abc123", "1 file changed",
+            pr_url_or_number="7",
+        )
+
+        text = report_path.read_text()
+        assert leaked not in text
+        assert "sk_live_abc123" not in text
+
+    def test_a_full_length_object_name_survives_the_scrubber(self, tmp_path):
+        # The tripwire's bulk-secret pattern matches 40+ hex characters, which
+        # is exactly the shape of a full SHA-1 — redacting it would erase the
+        # commit the report exists to name.
+        report_path = report.start("g", "v", 1, env=_env(tmp_path))
+        full_sha = "0123456789abcdef0123456789abcdef01234567"
+
+        report.append_pushed_merged(
+            report_path, "task/a", "branch-a", full_sha, "1 file changed",
+        )
+
+        assert full_sha in report_path.read_text()
+
+
+class TestUnsafePushedRefsAreRefusedByShape:
+    def test_a_shell_metacharacter_branch_is_refused_by_name(self):
+        refusal = report.refuse_unsafe_pushed_refs("worktree-a; rm -rf /", "a1b2c3d")
+        assert refusal is not None
+        assert "refused unsafe PUSHED branch" in refusal
+
+    def test_a_non_hex_sha_is_refused_by_name(self):
+        refusal = report.refuse_unsafe_pushed_refs("worktree-a", "$(whoami)")
+        assert refusal is not None
+        assert "refused unsafe PUSHED sha" in refusal
+
+    def test_a_well_formed_pair_is_accepted(self):
+        assert report.refuse_unsafe_pushed_refs("worktree-a", "a1b2c3d") is None
+
+    def test_a_branch_that_is_not_this_workspaces_worktree_is_refused(self):
+        refusal = report.refuse_unsafe_pushed_refs(
+            "worktree-other", "a1b2c3d", workspace="a",
+        )
+        assert refusal is not None
+        assert "expected `worktree-a`" in refusal
+
+    @pytest.mark.parametrize("branch", ["a..b", "a//b", "a/", "a.lock", "-lead", ""])
+    def test_git_ref_refusals_the_character_class_cannot_express(self, branch):
+        assert report.refuse_unsafe_pushed_refs(branch, "a1b2c3d") is not None
+
+
 def test_corrupt_state_file_is_refused_by_name_and_names_the_held_lock(tmp_path):
     report_path = report.start("g", "v", 0, env=_env(tmp_path))
     state_path = report_path.with_suffix(".state.json")

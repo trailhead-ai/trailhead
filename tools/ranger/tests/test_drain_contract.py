@@ -178,6 +178,25 @@ def test_skill_calls_the_substrate_verbs_rather_than_re_deriving_them():
         )
 
 
+def test_skill_opens_the_cap_slot_through_record_not_a_retyped_command():
+    # The coordinator must never re-interpolate the agent's own branch/sha/
+    # diffstat into a second command string: `record --mark-inflight` opens the
+    # slot in the process that already parsed those values from the file.
+    _pin(
+        SKILL,
+        "--mark-inflight",
+        "Without it the loop reads branch/sha/diffstat back out of `record`'s JSON and "
+        "retypes them into `drain inflight mark` — agent-authored free text reassembled "
+        "into a shell command, which is exactly what the ground rules forbid.",
+    )
+    _pin(
+        SKILL,
+        "**You never retype the branch, the sha, or the diffstat.**",
+        "The prose has to forbid the substitution explicitly; a flag that merely exists "
+        "does not stop a coordinator from doing it the old way.",
+    )
+
+
 # --- skill: the camp sync gate ------------------------------------------------
 
 

@@ -259,13 +259,28 @@ ritual and the agent reads it in full.
 ## 5. Record it, and write the status edge
 
 ```sh
-ranger drain record --report "<report_path>" --task "task/<name>" --outcome-file --prs-json "<prs_json>"
+ranger drain record --report "<report_path>" --task "task/<name>" --outcome-file --prs-json "<prs_json>" --mark-inflight --workspace "<slug>"
 ```
 
 `--outcome-file` takes no path here: `record` recomputes `<outcomes_dir>/<name>.outcome`
 from `--report` and `--task`, which is exactly why §4.4 forms that path the same way.
 **Never pass the file's contents on the command line** — agent-written text inside a
 command string is the one thing the ground rules forbid, and `$(cat …)` is that.
+
+`--mark-inflight` opens the task's monitor cap slot in the same process that parsed the
+outcome, from the values it parsed.
+**You never retype the branch, the sha, or the diffstat.**
+Those three fields exist only inside the outcome file and the drain's own
+state; they flow file → `record` → state, and never once through a command string you
+compose. Do not read them out of `record`'s JSON to build a follow-up command — that is
+the re-interpolation this flag exists to remove. `--workspace` is the slug §4.2
+provisioned, which is also the shape `record` holds the branch to: a drain's push only
+ever lands on `worktree-<slug>`, so a branch that is anything else is bucketed `failed`
+with a named refusal rather than recorded. A branch carrying shell metacharacters, or a
+sha that is not 7-40 hex characters, is refused the same way.
+
+`--mark-inflight` is a `PUSHED`-only effect: on any other token the flag does nothing, so
+it costs nothing to pass on every call.
 
 The file's first line is held to the drain grammar — `PUSHED <branch> <sha> <diffstat>` /
 `BLOCKED <reason>` / `FAILED <reason>` / `SKIPPED <reason>`. **Content that is not one of
@@ -315,14 +330,18 @@ signal degrades with it.
 
 Dispatch `updater` first, take the `pr_pairs` and the `prs.json` path it returns, then
 dispatch `monitor` in the background from **this** session, handing it an `outcome_file`
-path. The moment `monitor` is dispatched, open the task's cap slot:
+path.
 
-```sh
-ranger drain inflight mark --report "<report_path>" --task "task/<name>" --branch "<branch>" --sha "<sha>" --diffstat "<diffstat>" --workspace "<slug>"
-```
+The task's cap slot is **already open** — §5's `record --mark-inflight` opened it, before
+this section ran. That is deliberate: a slot opened at record time is opened from the
+outcome file's own values, and a slot that exists before the monitor is dispatched can
+never undercount, whereas one opened afterwards is lost entirely if you die in between.
+There is nothing to mark here, and nothing to retype.
 
-Mark it **as you dispatch**, not when the monitor answers: an unmarked slot is a slot the
-cap cannot count, and a cap that undercounts is no cap at all.
+`ranger drain inflight mark` remains as the by-hand form of that same substrate — for a
+recovery where a slot must be opened without a `record` to open it. Driving it means
+supplying the branch and sha yourself, so it refuses loudly on anything that is not the
+workspace's own `worktree-<slug>` and a hex object name; a drain loop never calls it.
 
 **And then ignore the notification.** Dispatched from the top level, `monitor` keeps its
 channel — but
