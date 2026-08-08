@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from portage.monitor_outcome import (
     MONITOR_OUTCOME_TOKENS,

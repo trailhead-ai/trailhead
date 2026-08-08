@@ -352,7 +352,11 @@ def test_start_carries_the_derived_queue(tmp_path):
 def test_drain_start_refuses_while_a_refine_sweep_holds_the_lock(tmp_path):
     drain = _drain(tmp_path)
     drain.install_refine()
-    drain.set_lore_fixture(vault_resolve=_BOUND_RESOLUTION, tasks=[_task("t1", status="open")], bodies={"t1": _BUILDABLE_BODY})
+    drain.set_lore_fixture(
+        vault_resolve=_BOUND_RESOLUTION,
+        tasks=[_task("t1", status="open")],
+        bodies={"t1": _BUILDABLE_BODY},
+    )
     sweep_res = drain.run("sweep", "start", "--holder-pid", str(os.getpid()))
     assert sweep_res.returncode == 0, sweep_res.stderr
 
@@ -366,7 +370,11 @@ def test_drain_start_refuses_while_a_refine_sweep_holds_the_lock(tmp_path):
 def test_drain_start_reports_a_stale_refine_lock_with_the_rm_ritual(tmp_path):
     drain = _drain(tmp_path)
     drain.install_refine()
-    drain.set_lore_fixture(vault_resolve=_BOUND_RESOLUTION, tasks=[_task("t1", status="open")], bodies={"t1": _BUILDABLE_BODY})
+    drain.set_lore_fixture(
+        vault_resolve=_BOUND_RESOLUTION,
+        tasks=[_task("t1", status="open")],
+        bodies={"t1": _BUILDABLE_BODY},
+    )
     dead = _dead_pid()
     sweep_res = drain.run("sweep", "start", "--holder-pid", str(dead))
     assert sweep_res.returncode == 0, sweep_res.stderr
