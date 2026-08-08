@@ -187,6 +187,22 @@ means the question was never answered, not that the answer was no: treat it the 
 not-approved (hold, don't merge) and surface the error.
 Monitor never merges a PR without a passing `portage approvals` check.
 
+**The approval is pinned to the commit it was given on.** A review counts only for its own
+`commit_id`, and the `human-approved` label only for the head commit standing when it was
+applied — GitHub dismisses neither on a push, so an unpinned check would approve code no
+human ever saw. When the signal exists but predates the current head, `portage approvals`
+exits 1 with `"stale": true` in its JSON and names the remedy on stderr. Treat it as its own
+outcome: **hold the PR** exactly as for any other exit 1, and report it as
+`ready-awaiting-human-approval` with a **(stale)** note saying the approval was given on an
+earlier commit and the operator must review the commits pushed since, then re-approve or
+re-apply the `human-approved` label. Never read a stale signal as approval, and never
+"refresh" it yourself — re-applying the label is applying the signal, which the rule below
+forbids absolutely.
+
+This is why a `fix_ci` or `review` cycle on an already-approved PR sends it back to the
+gate: the fix pushed new commits, so the approval that stood before it is stale by
+construction.
+
 **Monitor never applies the approval signal itself.** The `human-approved` label and the
 approving review are human-applied only — no drain, portage, or dispatched-agent component
 (including this one) may add the label or post the approving review, even to unblock a

@@ -216,6 +216,41 @@ class TestApprovals:
         out = json.loads(capsys.readouterr().out)
         assert out["approved"] is False
 
+    def test_stale_exits_1_and_names_the_remedy_distinctly(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        # A stale approval stays in the not-approved family — a fourth exit
+        # code would read as "not 1, not 2, so probably fine" to a caller
+        # testing for nonzero. What differs is the remedy, and the remedy is
+        # what the operator has to be told.
+        provider = _FakeProvider()
+        provider.pr.approval_result = {
+            "approved": False, "stale": True, "source": "review", "actor": "tom",
+            "head_sha": "commitB", "signal_sha": "commitA",
+        }
+        _install(monkeypatch, provider)
+
+        rc = dispatch.main(["approvals", str(tmp_path), "42"])
+
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["stale"] is True
+        assert "approval is stale" in captured.err
+        assert "Re-approve" in captured.err
+        assert "commitB" in captured.err
+
+    def test_plain_not_approved_says_nothing_about_staleness(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        provider = _FakeProvider()
+        provider.pr.approval_result = {
+            "approved": False, "stale": False, "source": None, "actor": None,
+        }
+        _install(monkeypatch, provider)
+
+        assert dispatch.main(["approvals", str(tmp_path), "42"]) == 1
+        assert "stale" not in capsys.readouterr().err
+
     def test_not_a_directory_exits_2_distinct_from_not_approved(
         self, tmp_path, monkeypatch, capsys
     ):

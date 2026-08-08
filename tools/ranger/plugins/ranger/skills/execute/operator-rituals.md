@@ -104,6 +104,16 @@ No drain component, executor, or portage agent ever applies that label or approv
 
 Applying the label frees the cap slot the stalled task is holding, unblocking the next dispatch.
 
+**The signal is pinned to the commit it was given on.** A review approves its `commit_id`,
+and a label approves the head commit standing when it was applied — so any push after that
+point makes the signal stale, and `portage approvals` reports it as stale rather than
+approved. That is deliberate: without it, a fix cycle that pushes new commits inherits an
+approval no human gave those commits.
+So **after every fix cycle on an approved PR, re-approve it** — leave a fresh review, or
+remove and re-apply the `human-approved` label — once you have reviewed the commits that
+landed since. Nothing else clears a stale signal, and nothing in the automation may clear
+it for you.
+
 ## 6. Corrupt state file
 
 The drain's `.state.json` sidecar failed to parse.

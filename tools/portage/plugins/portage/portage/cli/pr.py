@@ -189,11 +189,14 @@ def _add_approvals(sub) -> None:
         "approvals",
         help="Check whether a PR carries a human-authored approval signal.",
         description=(
-            "Answers whether a PR carries a human-authored approval signal — an "
-            "approving review by a User (non-bot) reviewer, or the human-approved "
-            "label applied by a User actor. This is the merge gate monitor checks "
-            "before calling `portage merge`; it never applies the signal itself. "
-            "Exits 0 approved, 1 not approved, 2 on a usage or IO error."
+            "Answers whether a PR carries a human-authored approval signal for its "
+            "CURRENT head commit — an approving review by a User (non-bot) reviewer "
+            "whose commit_id is the head SHA, or the human-approved label applied by "
+            "a User actor after the head commit was pushed. An older signal is "
+            "reported as stale, not as approved. This is the merge gate monitor "
+            "checks before calling `portage merge`; it never applies the signal "
+            "itself. Exits 0 approved, 1 not approved (including stale), 2 on a "
+            "usage or IO error."
         ),
     )
     p.add_argument("repo_path")
@@ -215,7 +218,21 @@ def cmd_approvals(args: argparse.Namespace) -> int:
         print(json.dumps({"error": str(e)}))
         return 2
     print(json.dumps(result, indent=2))
-    return 0 if result.get("approved") else 1
+    if result.get("approved"):
+        return 0
+    # Stale stays inside the not-approved family — a caller that gates on
+    # exit 0 must hold either way, and a fourth code would silently read as
+    # "approved" to any caller that only tests for nonzero. What separates
+    # the two is the remedy, so the remedy is what gets said out loud.
+    if result.get("stale"):
+        print(
+            f"portage approvals: approval is stale — the {result.get('source')} signal "
+            f"from {result.get('actor')} predates the current head commit "
+            f"{result.get('head_sha')}. Re-approve (or re-apply the `human-approved` "
+            "label) after reviewing the commits pushed since.",
+            file=sys.stderr,
+        )
+    return 1
 
 
 # ---------------------------------------------------------------------------

@@ -60,6 +60,43 @@ def test_monitor_holds_and_reports_awaiting_human_approval():
     )
 
 
+def test_monitor_treats_a_stale_approval_as_its_own_outcome():
+    # An approval approves a commit. GitHub dismisses neither a review nor a
+    # label on a push, so without this the mainline attack is: get approved at
+    # commit A, push commit B, merge B.
+    _pin(
+        MONITOR,
+        "**The approval is pinned to the commit it was given on.**",
+        "the commit-pinning rule is what makes the gate mean anything after a push.",
+    )
+    _pin(
+        MONITOR,
+        "`ready-awaiting-human-approval` with a **(stale)** note",
+        "stale is a distinct outcome from never-approved; the operator's remedy differs "
+        "(re-approve after reviewing the new commits, not go find an approver).",
+    )
+    _pin(
+        MONITOR,
+        'exits 1 with `"stale": true`',
+        "the exit contract must be pinned: stale stays inside the not-approved family, so "
+        "a caller gating on exit 0 holds either way.",
+    )
+
+
+def test_operator_rituals_tell_the_operator_to_re_approve_after_a_fix_cycle():
+    rituals = (
+        _REPO_ROOT / "tools" / "ranger" / "plugins" / "ranger" / "skills" / "execute"
+        / "operator-rituals.md"
+    )
+    _pin(
+        rituals,
+        "after every fix cycle on an approved PR, re-approve it",
+        "a fix cycle pushes new commits, which makes the standing approval stale by "
+        "construction — the operator has to be told that re-approval is now part of the "
+        "ritual, or every fixed PR silently stalls at the gate.",
+    )
+
+
 def test_monitor_never_applies_the_approval_signal_itself():
     _pin(
         MONITOR,

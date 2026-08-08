@@ -778,8 +778,58 @@ def _latest_decisive_reviews(reviews: list[dict[str, Any]]) -> list[dict[str, An
     return list(latest.values())
 
 
+def _head_commit(
+    owner_repo: str, repo_path: str, pr_number: str, *, runner: rp.Runner
+) -> tuple[str, str]:
+    """Return the PR's ``(head_sha, head_committed_at)``.
+
+    Both halves are what pins an approval to a commit. The SHA comes from the
+    PR object; the timestamp comes from the PR's own commits list — the
+    mechanism chosen over the timeline's `committed` events because the
+    commits list is a plain, paginated, always-present collection whose
+    entries carry the SHA and the commit date together, so the head can be
+    matched exactly rather than inferred from event ordering.
+
+    A head commit absent from that list means the answer could not be
+    determined (a PR beyond the commits endpoint's cap, or a force-push
+    racing this read). That raises rather than degrading to "not stale":
+    every caller of this function is a merge gate, and a gate that guesses
+    is the vulnerability it exists to close.
+    """
+    pr = _gh(["api", f"repos/{owner_repo}/pulls/{pr_number}"], cwd=repo_path, runner=runner)
+    head_sha = ((pr or {}).get("head") or {}).get("sha") if isinstance(pr, dict) else None
+    if not head_sha:
+        raise RuntimeError(
+            f"approval: could not read the head SHA of PR #{pr_number} in {repo_path} — "
+            "an approval cannot be pinned to a commit without it"
+        )
+
+    commits = _gh(
+        ["api", f"repos/{owner_repo}/pulls/{pr_number}/commits", "--paginate"],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if not isinstance(commits, list):
+        raise RuntimeError(
+            f"approval: could not fetch the commits of PR #{pr_number} in {repo_path}"
+        )
+
+    for commit in commits:
+        if (commit or {}).get("sha") == head_sha:
+            date = (((commit.get("commit") or {}).get("committer") or {}).get("date")) or ""
+            if date:
+                return head_sha, date
+            break
+
+    raise RuntimeError(
+        f"approval: head commit {head_sha} of PR #{pr_number} in {repo_path} carries no "
+        "readable timestamp in the PR's commits list — cannot tell whether the "
+        "`human-approved` label predates it"
+    )
+
+
 def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dict[str, Any]:
-    """Read-only check: does this PR carry a human-authored approval signal?
+    """Read-only check: does this PR carry a human-authored approval signal *for its head*?
 
     Checked in order: a `User` (non-bot) reviewer whose *latest* decisive
     review is `APPROVED` (see :func:`_latest_decisive_reviews` — a withdrawn
@@ -789,11 +839,29 @@ def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dic
     a signal its author has taken back is not a signal. The label path exists
     because GitHub 422s an approving review by the PR's own author, so a
     self-authored PR can never satisfy the review signal.
+
+    **Every signal is pinned to the PR's current head commit.** GitHub does
+    not dismiss reviews on a new push unless branch protection is configured
+    to, and it never un-applies a label, so an unpinned check answers
+    "approved" for code no human ever saw: approve at commit A, push commit
+    B, merge B. A review therefore counts only when its ``commit_id`` is the
+    head SHA, and a label only when its `labeled` event postdates the head
+    commit's own timestamp (inclusive — a label stamped in the same second as
+    the push was not applied before it).
+
+    A signal that exists but predates the head is its own answer, distinct
+    from having none: the result carries ``stale: True`` with the source and
+    actor that produced it, so the operator is told to re-approve after
+    reviewing the new commits rather than to go find an approver.
     """
     validate_pr_number(pr_number)
     owner_repo = _get_owner_repo(repo_path, runner)
     if not owner_repo:
         raise RuntimeError(f"approval: could not resolve owner/repo for {repo_path}")
+
+    head_sha, head_committed_at = _head_commit(
+        owner_repo, repo_path, pr_number, runner=runner
+    )
 
     reviews = _gh(
         ["api", f"repos/{owner_repo}/pulls/{pr_number}/reviews", "--paginate"],
@@ -803,10 +871,26 @@ def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dic
     if reviews is None:
         raise RuntimeError(f"approval: could not fetch reviews for PR #{pr_number} in {repo_path}")
 
+    # A stale signal is remembered, not returned yet: a *fresh* signal from
+    # the other path still approves the PR, so the label check below gets to
+    # run before staleness becomes the answer.
+    stale: dict[str, Any] | None = None
+
     for review in _latest_decisive_reviews(reviews):
-        if review.get("state") == "APPROVED":
-            user = review.get("user") or {}
-            return {"approved": True, "source": "review", "actor": user.get("login")}
+        if review.get("state") != "APPROVED":
+            continue
+        user = review.get("user") or {}
+        signal_sha = review.get("commit_id")
+        if signal_sha == head_sha:
+            return {
+                "approved": True, "stale": False, "source": "review",
+                "actor": user.get("login"), "head_sha": head_sha, "signal_sha": signal_sha,
+            }
+        if stale is None:
+            stale = {
+                "approved": False, "stale": True, "source": "review",
+                "actor": user.get("login"), "head_sha": head_sha, "signal_sha": signal_sha,
+            }
 
     timeline = _gh(
         ["api", f"repos/{owner_repo}/issues/{pr_number}/timeline", "--paginate"],
@@ -829,9 +913,27 @@ def _check_approval(repo_path: str, pr_number: str, *, runner: rp.Runner) -> dic
         if last.get("event") == "labeled":
             actor = last.get("actor") or {}
             if actor.get("type") == "User" and last.get("performed_via_github_app") is None:
-                return {"approved": True, "source": "label", "actor": actor.get("login")}
+                labeled_at = str(last.get("created_at") or "")
+                # ISO-8601 UTC timestamps, as GitHub returns them, order
+                # correctly as plain strings — no parsing, no timezone
+                # arithmetic, and no dependency on a clock this process reads.
+                fresh = bool(labeled_at) and labeled_at >= head_committed_at
+                result = {
+                    "approved": fresh, "stale": not fresh, "source": "label",
+                    "actor": actor.get("login"), "head_sha": head_sha,
+                    "signal_at": labeled_at, "head_committed_at": head_committed_at,
+                }
+                if fresh:
+                    return result
+                stale = result
 
-    return {"approved": False, "source": None, "actor": None}
+    if stale is not None:
+        return stale
+
+    return {
+        "approved": False, "stale": False, "source": None, "actor": None,
+        "head_sha": head_sha,
+    }
 
 
 # ---------------------------------------------------------------------------

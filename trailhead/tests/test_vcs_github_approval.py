@@ -18,7 +18,24 @@ import pytest
 from trailhead.vcs import get_provider
 
 
-def _make_stub(reviews: list[dict] | None = None, timeline: list[dict] | None = None, fail_reviews=False, fail_timeline=False):
+#: The stub PR's current head commit, and when it was pushed. An approval
+#: signal counts only if it is pinned to this SHA (a review) or postdates this
+#: timestamp (a label).
+_HEAD_SHA = "headsha1"
+_HEAD_DATE = "2026-07-01T00:00:00Z"
+
+
+def _make_stub(
+    reviews: list[dict] | None = None,
+    timeline: list[dict] | None = None,
+    fail_reviews=False,
+    fail_timeline=False,
+    fail_pr=False,
+    fail_commits=False,
+    head_sha: str = _HEAD_SHA,
+    head_date: str = _HEAD_DATE,
+    commits: list[dict] | None = None,
+):
     def stub(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
         cmd_str = " ".join(cmd)
         if "remote" in cmd_str and "get-url" in cmd_str:
@@ -31,16 +48,38 @@ def _make_stub(reviews: list[dict] | None = None, timeline: list[dict] | None = 
             if fail_timeline:
                 return subprocess.CompletedProcess(cmd, 1, "", "boom")
             return subprocess.CompletedProcess(cmd, 0, json.dumps(timeline or []), "")
+        if "api" in cmd_str and "/commits" in cmd_str:
+            if fail_commits:
+                return subprocess.CompletedProcess(cmd, 1, "", "boom")
+            payload = commits if commits is not None else [_commit(head_sha, head_date)]
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+        if "api" in cmd_str and "/pulls/" in cmd_str:
+            if fail_pr:
+                return subprocess.CompletedProcess(cmd, 1, "", "boom")
+            return subprocess.CompletedProcess(
+                cmd, 0, json.dumps({"head": {"sha": head_sha}}), ""
+            )
         return subprocess.CompletedProcess(cmd, 0, "[]", "")
 
     return stub
 
 
-def _review(login: str, user_type: str, state: str, submitted_at: str = "") -> dict[str, Any]:
+def _commit(sha: str, date: str) -> dict[str, Any]:
+    return {"sha": sha, "commit": {"committer": {"date": date}}}
+
+
+def _review(
+    login: str,
+    user_type: str,
+    state: str,
+    submitted_at: str = "",
+    commit_id: str = _HEAD_SHA,
+) -> dict[str, Any]:
     return {
         "user": {"login": login, "type": user_type},
         "state": state,
         "submitted_at": submitted_at,
+        "commit_id": commit_id,
     }
 
 
@@ -254,6 +293,149 @@ class TestApprovalLabelPath:
         assert result["approved"] is True
 
 
+class TestApprovalIsPinnedToTheHeadCommit:
+    """An approval approves a commit, not a pull request.
+
+    GitHub does not dismiss reviews on a new push unless branch protection
+    says so, and it never un-applies a label. Without pinning, the mainline
+    attack is trivial: get approved at commit A, push commit B, merge
+    whatever B contains. So a review counts only when its `commit_id` is the
+    PR's current head, and a label counts only when it was applied after the
+    head commit was pushed. Neither is a refusal — the signal exists, it is
+    simply stale, and the operator's answer is to re-approve after reviewing
+    the new commits.
+    """
+
+    def test_approve_at_a_then_push_b_is_stale_not_approved(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[_review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z",
+                                 commit_id="commitA")],
+                timeline=[],
+                head_sha="commitB",
+                head_date="2026-08-02T00:00:00Z",
+            ),
+        )
+
+        result = provider.pr.approval("some/path", "42")
+
+        assert result["approved"] is False
+        assert result["stale"] is True
+        assert result["source"] == "review"
+        assert result["actor"] == "tom"
+        assert result["head_sha"] == "commitB"
+        assert result["signal_sha"] == "commitA"
+
+    def test_a_review_on_the_head_commit_is_approved(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[_review("tom", "User", "APPROVED", commit_id="commitB")],
+                head_sha="commitB",
+            ),
+        )
+
+        result = provider.pr.approval("some/path", "42")
+
+        assert result["approved"] is True
+        assert result["stale"] is False
+
+    def test_a_second_reviewer_at_head_outranks_a_stale_one(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[
+                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z",
+                            commit_id="commitA"),
+                    _review("ada", "User", "APPROVED", "2026-08-03T00:00:00Z",
+                            commit_id="commitB"),
+                ],
+                head_sha="commitB",
+            ),
+        )
+
+        result = provider.pr.approval("some/path", "42")
+
+        assert result["approved"] is True
+        assert result["actor"] == "ada"
+
+    def test_a_label_applied_before_the_head_commit_is_stale(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[],
+                timeline=[_labeled("tom", "User", "2026-08-01T00:00:00Z")],
+                head_sha="commitB",
+                head_date="2026-08-02T00:00:00Z",
+            ),
+        )
+
+        result = provider.pr.approval("some/path", "42")
+
+        assert result["approved"] is False
+        assert result["stale"] is True
+        assert result["source"] == "label"
+        assert result["actor"] == "tom"
+
+    def test_a_label_applied_after_the_head_commit_is_approved(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[],
+                timeline=[_labeled("tom", "User", "2026-08-03T00:00:00Z")],
+                head_sha="commitB",
+                head_date="2026-08-02T00:00:00Z",
+            ),
+        )
+
+        result = provider.pr.approval("some/path", "42")
+
+        assert result["approved"] is True
+        assert result["stale"] is False
+
+    def test_a_label_applied_in_the_same_second_as_the_push_is_approved(self) -> None:
+        # The boundary is inclusive: a label carrying the head commit's own
+        # timestamp was not applied before it, and refusing there would make
+        # the gate flap on second-granularity timestamps.
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[],
+                timeline=[_labeled("tom", "User", "2026-08-02T00:00:00Z")],
+                head_sha="commitB",
+                head_date="2026-08-02T00:00:00Z",
+            ),
+        )
+
+        assert provider.pr.approval("some/path", "42")["approved"] is True
+
+    def test_a_stale_review_and_a_fresh_label_is_approved(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[_review("tom", "User", "APPROVED", commit_id="commitA")],
+                timeline=[_labeled("tom", "User", "2026-08-03T00:00:00Z")],
+                head_sha="commitB",
+                head_date="2026-08-02T00:00:00Z",
+            ),
+        )
+
+        result = provider.pr.approval("some/path", "42")
+
+        assert result["approved"] is True
+        assert result["source"] == "label"
+
+    def test_no_signal_at_all_is_not_stale(self) -> None:
+        provider = get_provider("github", runner=_make_stub(reviews=[], timeline=[]))
+
+        result = provider.pr.approval("some/path", "42")
+
+        assert result["approved"] is False
+        assert result["stale"] is False
+        assert result["source"] is None
+
+
 class TestApprovalApiError:
     def test_reviews_fetch_failure_raises(self) -> None:
         provider = get_provider("github", runner=_make_stub(fail_reviews=True))
@@ -262,5 +444,26 @@ class TestApprovalApiError:
 
     def test_timeline_fetch_failure_raises(self) -> None:
         provider = get_provider("github", runner=_make_stub(reviews=[], fail_timeline=True))
+        with pytest.raises(RuntimeError):
+            provider.pr.approval("some/path", "42")
+
+    def test_head_sha_fetch_failure_raises(self) -> None:
+        # Without the head SHA there is nothing to pin an approval to, and a
+        # gate that answers "approved" when it could not read the head is the
+        # whole vulnerability. Never answered is not the same as no.
+        provider = get_provider("github", runner=_make_stub(fail_pr=True))
+        with pytest.raises(RuntimeError):
+            provider.pr.approval("some/path", "42")
+
+    def test_a_head_commit_missing_from_the_commits_list_raises(self) -> None:
+        provider = get_provider(
+            "github",
+            runner=_make_stub(
+                reviews=[],
+                timeline=[_labeled("tom", "User", "2026-08-03T00:00:00Z")],
+                head_sha="commitB",
+                commits=[_commit("someOtherCommit", "2026-08-01T00:00:00Z")],
+            ),
+        )
         with pytest.raises(RuntimeError):
             provider.pr.approval("some/path", "42")
