@@ -102,7 +102,11 @@ def resolve_committer_email() -> str:
     are followed). Deliberately **not** a bare ``git config user.email`` — that would silently
     inherit a repo-local override from whatever working repo the CLI was invoked
     in (e.g. stamp ``dev@client.com`` when run inside a client repo). The
-    ``--global`` scope pins the human's identity regardless of cwd.
+    ``--global`` scope pins the file this reads from regardless of cwd, but
+    following includes means a conditional ``includeIf "gitdir:…"`` (or
+    ``onbranch:``) directive can still make the resolved identity depend on
+    the invocation directory — matching plain git's own behavior, and exactly
+    what a work/personal ``includeIf`` split intends.
 
     Returns the email, or the **empty string** when unset (no silent fallback —
     the empty-email decision belongs to ``record_store.validate_and_write``,

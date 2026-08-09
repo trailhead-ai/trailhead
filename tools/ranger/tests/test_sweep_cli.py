@@ -583,6 +583,30 @@ def test_start_ignores_a_repo_local_committer_email(tmp_path):
     sweep.assert_nothing_created()
 
 
+def test_start_accepts_a_committer_email_from_a_matching_includeif_gitdir(tmp_path):
+    """A conditional ``includeIf "gitdir:…"`` whose condition matches cwd is followed.
+
+    ``--includes`` activates conditional includes the same way plain
+    ``git config --global`` does — mirrors lore's own
+    `resolve_committer_email` pin (see `tools/lore/tests/test_record_store.py`)
+    that this check must accept exactly what lore itself will accept.
+    """
+    sweep = _sweep(tmp_path)
+    setup = subprocess.run(["git", "init", "-q"], cwd=sweep.repo, capture_output=True, text=True)
+    assert setup.returncode == 0, setup.stderr
+    conditional_cfg = tmp_path / "gitconfig-work"
+    conditional_cfg.write_text("[user]\n\temail = work@example.invalid\n", encoding="utf-8")
+    gitconfig = tmp_path / "gitconfig-global"
+    gitconfig.write_text(
+        f'[includeIf "gitdir:{sweep.repo.resolve()}/"]\n\tpath = {conditional_cfg}\n',
+        encoding="utf-8",
+    )
+
+    res = sweep.start_without_provenance(git_config=gitconfig)
+
+    assert res.returncode == 0, res.stderr
+
+
 def test_start_refuses_on_a_whitespace_only_committer_email(tmp_path):
     sweep = _sweep(tmp_path)
 

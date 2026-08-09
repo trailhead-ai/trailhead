@@ -119,12 +119,16 @@ def check_provenance(
     """Return the committer email this sweep's writes will be stamped with, or refuse.
 
     Resolves in lore's own order — ``$LORE_EMAIL`` first, then
-    ``git config --global user.email`` — because that is the identity every
-    ``lore record update`` a dispatched agent makes will be stamped with. The
-    ``--global`` scope is lore's, not an accident: a bare ``git config
-    user.email`` would inherit whatever repo-local override the sweep happens
-    to be running inside, so checking it here would pass on an identity lore
-    will not use.
+    ``git config --global --includes user.email`` — because that is the
+    identity every ``lore record update`` a dispatched agent makes will be
+    stamped with. The ``--global`` scope is lore's, not an accident: a bare
+    ``git config user.email`` would inherit whatever repo-local override the
+    sweep happens to be running inside, so checking it here would pass on an
+    identity lore will not use. Following includes means a conditional
+    ``includeIf "gitdir:…"`` (or ``onbranch:``) directive can still make the
+    resolved identity depend on the invocation directory — matching plain
+    git's own behavior, and exactly what a work/personal ``includeIf`` split
+    intends.
 
     Absent or unrunnable ``git`` is treated as "unresolved" rather than
     surfaced as its own error: the operator's next action is identical either
