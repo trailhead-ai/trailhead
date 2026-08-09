@@ -119,7 +119,7 @@ def resolve_committer_email() -> str:
 
     try:
         result = subprocess.run(
-            ["git", "config", "--global", "user.email"],
+            ["git", "config", "--global", "--includes", "user.email"],
             capture_output=True,
             text=True,
             timeout=5,

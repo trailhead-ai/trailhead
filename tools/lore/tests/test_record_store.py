@@ -187,6 +187,19 @@ def test_resolve_committer_email_ignores_repo_local_override(rs, monkeypatch, tm
     assert rs.resolve_committer_email() == "global@example.com"
 
 
+def test_resolve_committer_email_follows_include_directive(rs, monkeypatch, tmp_path):
+    """A global config that only [include]s user.email must still resolve it."""
+    monkeypatch.delenv("LORE_EMAIL", raising=False)
+    included_cfg = tmp_path / "gitconfig-included"
+    included_cfg.write_text("[user]\n\temail = included@example.com\n")
+
+    global_cfg = tmp_path / "gitconfig-global"
+    global_cfg.write_text(f"[include]\n\tpath = {included_cfg}\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_cfg))
+
+    assert rs.resolve_committer_email() == "included@example.com"
+
+
 # ---------------------------------------------------------------------------
 # validate_and_write — round-trip + provenance
 # ---------------------------------------------------------------------------
