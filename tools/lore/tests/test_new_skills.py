@@ -35,6 +35,10 @@ def _skill_text(name: str) -> str:
     return (SKILLS_DIR / name / "SKILL.md").read_text()
 
 
+def _agent_text(name: str) -> str:
+    return (AGENTS_DIR / f"{name}.md").read_text()
+
+
 def _frontmatter(name: str) -> str:
     text = _skill_text(name)
     assert text.startswith("---\n"), f"{name}/SKILL.md must open with `---` frontmatter"
@@ -117,6 +121,33 @@ def test_search_documents_kql_subset_query_shape():
     )
     assert "--json" in text and "--limit" in text, (
         "search/SKILL.md must document the `--json` and `--limit` flags"
+    )
+
+
+def test_search_json_field_is_shared_not_layer():
+    """search/SKILL.md must describe the real `shared` (0/1) field a `--json`
+    hit carries, and must NOT tell an agent to inspect a nonexistent `layer`
+    key on a `--json` hit."""
+    text = _skill_text("search")
+    assert "`layer`" not in text, (
+        "search/SKILL.md must not reference a `layer` field — no such key exists "
+        "on a --json hit"
+    )
+    assert "shared" in text, (
+        "search/SKILL.md must describe the `shared` field a --json hit carries"
+    )
+
+
+def test_librarian_json_field_is_shared_not_layer():
+    """librarian.md must describe the real `shared` (0/1) field a `--json` hit
+    carries, and must NOT tell an agent to inspect a nonexistent `layer` key."""
+    text = _agent_text("librarian")
+    assert "`layer`" not in text, (
+        "librarian.md must not reference a `layer` field — no such key exists "
+        "on a --json hit"
+    )
+    assert "shared" in text, (
+        "librarian.md must describe the `shared` field a --json hit carries"
     )
 
 
