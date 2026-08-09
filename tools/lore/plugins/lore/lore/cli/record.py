@@ -798,6 +798,29 @@ def _resolve_destination_root(merged_sidecar: dict, kind: str) -> tuple[str, int
     return str(resolution.chosen.path), vault_config_mod.shared_flag(resolution.chosen)
 
 
+def _resolve_current_vault_shared(location) -> tuple[str, int]:
+    """Destination = the record's current vault, unchanged, with its trust flag.
+
+    Used when no explicit ``--repo/--product/--suite/--team`` flag accompanied
+    this ``record update`` call: there is nothing to re-route on, so the
+    destination is simply where the record already lives — never re-derived
+    from stale sidecar scope fields (see :func:`_resolve_destination_root`,
+    which a stored ``repo``/``product``/``suite``/``team`` data field would
+    otherwise feed into a fresh resolution and silently relocate the record).
+    """
+    from ..vault import config as vault_config_mod
+
+    loaded = _load_vault_config()
+    if loaded is None:
+        return location.vault_root, 0
+    _, vaults = loaded
+    current = Path(location.vault_root).resolve()
+    for v in vaults:
+        if Path(v.path).resolve() == current:
+            return location.vault_root, vault_config_mod.shared_flag(v)
+    return location.vault_root, 0
+
+
 class _UpdateAborted(Exception):
     """An update step already reported its own error; carries the exit code.
 
@@ -850,14 +873,22 @@ def _cmd_record_update(args) -> int:
     explicit destination scope flag alongside ``--vault`` still means "re-route"
     exactly as before — the two concerns compose, they don't gate each other.
 
-    **Scope flags drive automatic relocation.**
-    ``--team/--suite/--product/--repo`` are field-setters that also re-resolve the
-    destination vault from the **merged scope** (existing sidecar scope fields
-    overlaid with the new flag values). The flow: (1) locate the record's CURRENT
-    vault via a config scan (decoupled from the now-destination-meaning scope flags
-    — :func:`_find_current_record_location`); (2) apply ALL field mutations in
+    **Scope flags drive automatic relocation — and ONLY an explicit scope flag
+    on THIS call does.** ``--team/--suite/--product/--repo`` are field-setters
+    that, when passed on this invocation, also re-resolve the destination vault
+    from the **merged scope** (existing sidecar scope fields overlaid with the
+    new flag values). When none of those four flags is passed, the destination
+    re-resolution is skipped entirely and the destination is simply the
+    record's current vault (:func:`_resolve_current_vault_shared`) — the merged
+    sidecar is NEVER fed back into the create-side resolver on its own, so a
+    stored ``repo``/``product``/``suite``/``team`` data field (ordinary content,
+    not a routing request) can never silently relocate the record on a
+    metadata-only update. The flow: (1) locate the record's CURRENT vault via a
+    config scan (decoupled from the now-destination-meaning scope flags —
+    :func:`_find_current_record_location`); (2) apply ALL field mutations in
     memory; (3) re-resolve the destination via the create-side resolver
-    (:func:`_resolve_destination_root`); (4) validate + stamp + neutralize the
+    (:func:`_resolve_destination_root`) only if a scope flag was passed this
+    call, else keep the current vault; (4) validate + stamp + neutralize the
     mutated record, then write it ONCE at its final location:
 
       - destination == current vault (compared on ``Path.resolve()``-normalized
@@ -1052,17 +1083,26 @@ def _cmd_record_update(args) -> int:
 
             sidecar, new_body, guard_notices = read_apply_and_guard()
 
-            # (3) re-resolve the DESTINATION (root + shared trust). When --vault named
-            # the current location AND no explicit destination scope flag was given on
-            # this call, the destination IS that named vault -- skip the merged-scope
-            # re-resolution entirely. Without this, a record whose sidecar carries no
-            # repo/product/suite/team scope field (e.g. a legacy/unstamped record)
-            # would resolve fresh off an EMPTY scope, which always lands on the default
-            # vault (vault/resolve.py's totality floor), silently moving it OUT of the
-            # vault the caller explicitly targeted with --vault, even though nothing
-            # asked for a re-route. An explicit scope flag still means "re-route",
-            # --vault or not, so it takes the merged-scope resolution below exactly
-            # as before.
+            # (3) re-resolve the DESTINATION (root + shared trust), gated on an
+            # explicit --repo/--product/--suite/--team flag being passed THIS call.
+            #
+            # When --vault named the current location AND no explicit destination
+            # scope flag was given on this call, the destination IS that named vault
+            # -- skip the merged-scope re-resolution entirely. Without this, a record
+            # whose sidecar carries no repo/product/suite/team scope field (e.g. a
+            # legacy/unstamped record) would resolve fresh off an EMPTY scope, which
+            # always lands on the default vault (vault/resolve.py's totality floor),
+            # silently moving it OUT of the vault the caller explicitly targeted with
+            # --vault, even though nothing asked for a re-route.
+            #
+            # Otherwise, with no --vault in play: no explicit scope flag this call
+            # means no re-resolution at all -- the destination is just the record's
+            # current vault (_resolve_current_vault_shared), never re-derived from
+            # merged_sidecar. A stored repo/product/suite/team field is ordinary data,
+            # not a standing routing request, so it must not feed the create-side
+            # resolver on its own (that was the bug: a metadata-only update silently
+            # relocated a record off a stale/unconfigured stored scope value). An
+            # explicit scope flag still means "re-route", --vault or not.
             def resolve_destination(sidecar: dict) -> tuple[str, bool]:
                 explicit_destination_flag = any(
                     getattr(args, flag, None) for flag in _SCOPE_FLAGS
@@ -1071,6 +1111,8 @@ def _cmd_record_update(args) -> int:
                     return str(named_vault.path), vault_config_mod.shared_flag(
                         named_vault
                     )
+                if not explicit_destination_flag:
+                    return _resolve_current_vault_shared(location)
                 return _resolve_destination_root(sidecar, location.kind)
 
             dest_root, dest_shared = resolve_destination(sidecar)

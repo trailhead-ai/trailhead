@@ -570,6 +570,113 @@ def test_update_no_scope_change_stays_in_place_no_moved_line(tmp_path):
     assert "moved:" not in r.stderr
 
 
+# ---------------------------------------------------------------------------
+# A stored scope field (repo/product/suite/team) is ordinary data, not a
+# standing routing request. Re-resolution must only fire when THIS call
+# explicitly passes one of the four scope flags -- never off whatever
+# already happens to be sitting in the merged sidecar.
+# ---------------------------------------------------------------------------
+
+
+def _two_repo_config(tmp_path):
+    """Active vault A (default) and vault B (repo:widgets), with config."""
+    vault_a, state = _make_vault(tmp_path)
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault_a)},
+            {"name": "widgets", "scope": "repo", "records": ["decision"], "path": str(vault_b)},
+        ],
+    )
+    return vault_a, vault_b, state, config_home
+
+
+def test_update_stored_repo_field_no_flag_stays_put(tmp_path):
+    """A stored ``repo`` field resolving to a DIFFERENT vault than where the
+    record physically lives does not move it on a metadata-only update that
+    passes no scope flag at all -- the sidecar value is inert data until an
+    explicit ``--repo`` flag asks for relocation."""
+    vault_a, vault_b, state, config_home = _two_repo_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=[])
+    kind, name = rid.split("/", 1)
+    sidecar_path = vault_a / kind / f"{name}.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["repo"] = "widgets"
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+
+    r = _run_cfg(
+        ["record", "update", rid, "--unset-label", "area"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_a / kind / f"{name}.md").exists()
+    assert not (vault_b / kind / f"{name}.md").exists()
+    assert _find_sidecar(vault_a, rid)["repo"] == "widgets"
+    assert "moved:" not in r.stdout
+
+
+def test_update_stored_repo_field_explicit_flag_still_moves(tmp_path):
+    """The same stored-scope record DOES move when the matching flag is passed
+    explicitly on this call -- the existing auto-move behavior is unchanged."""
+    vault_a, vault_b, state, config_home = _two_repo_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=[])
+    kind, name = rid.split("/", 1)
+    assert (vault_a / kind / f"{name}.md").exists()
+
+    r = _run_cfg(
+        ["record", "update", rid, "--repo", "widgets"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_b / kind / f"{name}.md").exists()
+    assert not (vault_a / kind / f"{name}.md").exists()
+    assert f"moved: {rid} →" in r.stdout
+
+
+def test_update_stored_repo_no_matching_vault_no_flag_stays_put(tmp_path):
+    """A stored ``repo`` value with no repo-scoped vault configured stays in its
+    current vault on a bare metadata-only update -- repro of the reported bug
+    (a stray ``repo:`` data field silently falling through to the default
+    vault via ``--unset-label``)."""
+    vault_a, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [{"name": "default", "scope": "default", "path": str(vault_a)}],
+    )
+    rid = _create_routed(vault_a, state, config_home, scope_args=[])
+    kind, name = rid.split("/", 1)
+    sidecar_path = vault_a / kind / f"{name}.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["repo"] = "home-manager"
+    sidecar["labels"] = {"area": "auth"}
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+
+    r = _run_cfg(
+        ["record", "update", rid, "--unset-label", "area"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_a / kind / f"{name}.md").exists()
+    assert _find_sidecar(vault_a, rid)["repo"] == "home-manager"
+    assert "moved:" not in r.stdout
+
+
 def test_update_same_scope_is_noop_with_symlinked_vault_root(tmp_path):
     """``update --team alpha`` on a record already in A is a no-op (normalized-path eq).
 
