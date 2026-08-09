@@ -201,11 +201,13 @@ def _run_init(
     config_dir: Path,
     state_dir: Path,
     cwd: Path | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run `camp group <args>` via cli/camp with config/state overrides."""
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
+    env.update(env_extra or {})
     return subprocess.run(
         [sys.executable, str(_CLI_CAMP), "group", *args],
         capture_output=True,
@@ -381,6 +383,72 @@ def test_force_redefine_preserves_hand_added_release_table(author_env):
         "auto_merge": True,
         "merge_order": ["alpha", "beta"],
     }
+
+
+def test_force_redefine_preserves_hand_added_top_level_keys(author_env):
+    """Hand-edited top-level bare keys — a scalar, an array of scalars, an empty
+    array, and a date literal — survive a --force re-author without a traceback."""
+    import datetime
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        "version = 1\n"
+        'tags = ["a", "b"]\n'
+        "empty = []\n"
+        "cutoff = 2026-01-01\n" + toml_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+    assert "Traceback" not in second.stderr
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["version"] == 1
+    assert rewritten["tags"] == ["a", "b"]
+    assert rewritten["empty"] == []
+    assert rewritten["cutoff"] == datetime.date(2026, 1, 1)
+    assert _load_written_group(g["groups_dir"], "mygroup")
+
+
+def test_force_redefine_preserves_non_ascii_hand_added_table(author_env):
+    """A hand-added table carrying non-ASCII text survives a --force re-author —
+    the existing config is read as UTF-8 regardless of the platform locale."""
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8") + '\n[release]\nowner = "Åsa Ünïcode ✓"\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+        env_extra={"LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0"},
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["release"] == {"owner": "Åsa Ünïcode ✓"}
 
 
 def test_force_redefine_preserves_hand_added_tasks_table(author_env):

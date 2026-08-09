@@ -645,20 +645,24 @@ def test_update_stored_repo_field_explicit_flag_still_moves(tmp_path):
 
 
 def test_update_stored_repo_no_matching_vault_no_flag_stays_put(tmp_path):
-    """A stored ``repo`` value with no repo-scoped vault configured stays in its
-    current vault on a bare metadata-only update -- repro of the reported bug
-    (a stray ``repo:`` data field silently falling through to the default
-    vault via ``--unset-label``)."""
-    vault_a, state = _make_vault(tmp_path)
-    config_home = tmp_path / "config"
-    _write_config(
-        config_home,
-        [{"name": "default", "scope": "default", "path": str(vault_a)}],
-    )
-    rid = _create_routed(vault_a, state, config_home, scope_args=[])
+    """A record living in a NON-default vault whose only scope field is a stray
+    ``repo`` value with no repo-scoped vault configured stays put on a bare
+    metadata-only update -- repro of the reported bug, where re-resolving off the
+    merged scope hit the default-vault floor and silently dragged the record out
+    of the vault it lived in via ``--unset-label``."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    # The record lives in the NON-default vault (team:beta -> vault B), so a
+    # fall-through to the default vault is observable as a relocation into A.
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "beta"])
     kind, name = rid.split("/", 1)
-    sidecar_path = vault_a / kind / f"{name}.json"
+    assert (vault_b / kind / f"{name}.md").exists()
+
+    sidecar_path = vault_b / kind / f"{name}.json"
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    # The only scope field left is a stray ``repo`` naming a vault that is not
+    # configured, so re-resolving off the merged scope would land on the default
+    # vault (A) and drag the record out of the vault it actually lives in.
+    sidecar.pop("team", None)
     sidecar["repo"] = "home-manager"
     sidecar["labels"] = {"area": "auth"}
     sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
@@ -672,8 +676,9 @@ def test_update_stored_repo_no_matching_vault_no_flag_stays_put(tmp_path):
     )
     assert r.returncode == 0, r.stderr
 
-    assert (vault_a / kind / f"{name}.md").exists()
-    assert _find_sidecar(vault_a, rid)["repo"] == "home-manager"
+    assert (vault_b / kind / f"{name}.md").exists()
+    assert not (vault_a / kind / f"{name}.md").exists()
+    assert _find_sidecar(vault_b, rid)["repo"] == "home-manager"
     assert "moved:" not in r.stdout
 
 

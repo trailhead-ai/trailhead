@@ -149,6 +149,11 @@ def test_librarian_json_field_is_shared_not_layer():
     assert "shared" in text, (
         "librarian.md must describe the `shared` field a --json hit carries"
     )
+    assert 'layer="personal"' not in text, (
+        "librarian.md must not claim personal hits carry a layer= attribute — "
+        "xml_escape.py emits layer= only on the shared <external-memory> fence; "
+        "personal hits are unfenced"
+    )
 
 
 # ---------------------------------------------------------------------------

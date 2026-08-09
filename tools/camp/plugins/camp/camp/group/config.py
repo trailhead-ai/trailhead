@@ -164,7 +164,7 @@ def load_group(path: Path) -> dict[str, Any]:
         )
 
     try:
-        raw = tomllib.loads(path.read_text())
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         raise GroupConfigError(f"{path}: TOML parse error — {e}") from e
 

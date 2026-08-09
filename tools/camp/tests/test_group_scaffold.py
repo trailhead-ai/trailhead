@@ -195,6 +195,108 @@ def test_render_group_toml_extra_tables_harness_and_shared_vaults_round_trip(
     assert cfg["shared_vaults"] == [{"name": "trailhead", "root": "/tmp/vaults/trailhead"}]
 
 
+def test_render_group_toml_extra_top_level_scalar_round_trips(tmp_path: Path) -> None:
+    """A hand-edited top-level scalar (`version = 1`) survives carry-through.
+
+    It must be emitted BEFORE the [group] header — appended after the extra
+    tables it would be reparented under whichever table was emitted last.
+    """
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    toml_str = render_group_toml(
+        "mygroup",
+        members,
+        "worktree-{slug}",
+        extra_tables={"version": 1, "harness": {"binary": "claude"}},
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["version"] == 1
+    assert parsed["harness"] == {"binary": "claude"}
+
+
+def test_render_group_toml_extra_top_level_scalar_array_round_trips() -> None:
+    """A hand-edited top-level array of scalars (`tags = ["a"]`) survives."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    toml_str = render_group_toml(
+        "mygroup",
+        members,
+        "worktree-{slug}",
+        extra_tables={"tags": ["a", "b"], "release": {"auto_merge": True}},
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["tags"] == ["a", "b"]
+    assert parsed["release"] == {"auto_merge": True}
+
+
+def test_render_group_toml_extra_top_level_empty_array_round_trips() -> None:
+    """A top-level empty array is emitted as `x = []`, not silently dropped."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables={"x": []}
+    )
+
+    assert tomllib.loads(toml_str)["x"] == []
+
+
+def test_render_group_toml_extra_datetime_values_round_trip() -> None:
+    """TOML date/time/datetime literals (which tomllib yields as datetime
+    objects) re-serialize as bare TOML literals, not as quoted strings."""
+    import datetime
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    original = tomllib.loads(
+        "[window]\n"
+        "cutoff = 2026-01-01\n"
+        "at = 09:30:00\n"
+        "local = 2026-01-01T09:30:00\n"
+        "offset = 2026-01-01T09:30:00Z\n"
+    )
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=original
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["window"] == original["window"]
+    assert isinstance(parsed["window"]["cutoff"], datetime.date)
+
+
+def test_render_group_toml_top_level_datetime_round_trips() -> None:
+    """A top-level datetime literal is emitted before [group] and round-trips."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    original = tomllib.loads("cutoff = 2026-01-01\n[harness]\nbinary = 'claude'\n")
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=original
+    )
+
+    assert tomllib.loads(toml_str)["cutoff"] == original["cutoff"]
+
+
+def test_render_group_toml_unserializable_value_raises_scaffold_error() -> None:
+    """A genuinely unserializable value surfaces as a clean camp: error rather
+    than a raw traceback out of the renderer."""
+    from camp.group.scaffold import ScaffoldError, render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    with pytest.raises(ScaffoldError) as exc:
+        render_group_toml(
+            "mygroup", members, "worktree-{slug}", extra_tables={"bad": {"k": object()}}
+        )
+
+    assert str(exc.value).startswith("camp: ")
+    assert "bad" in str(exc.value)
+
+
 def test_render_group_toml_path_with_spaces_round_trips(tmp_path: Path) -> None:
     """A repo_root with spaces in the path is correctly escaped and round-trips."""
     from camp.group.config import load_group

@@ -13,6 +13,7 @@ No file I/O in this module — callers write the rendered string atomically.
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from typing import Any
 
@@ -102,8 +103,8 @@ def render_group_toml(
     `extra_tables` generalizes that same carry-through to every OTHER top-level
     table this function does not itself know how to render (e.g. `[tasks.*]`,
     `[harness]`, `[release]`, `[[shared_vaults]]`) — a raw tomllib-parsed dict
-    keyed by top-level table name, re-emitted generically (nested tables, arrays
-    of tables, and scalar/array values) rather than by adding another
+    keyed by top-level name, re-emitted generically (nested tables, arrays of
+    tables, and bare scalar/array/datetime keys) rather than by adding another
     table-specific parameter. Callers are expected to pass the raw parse of the
     existing config, minus the keys this function already renders itself
     ("group", "members", "branch", "lore_scopes"), so a --force re-author never
@@ -116,16 +117,31 @@ def render_group_toml(
         branch_pattern: Value for [branch].pattern.
         lore_scopes:    Optional list of {"scope", "name"} dicts to emit as
                         [[lore_scopes]] entries (declared order preserved).
-        extra_tables:   Optional dict of {table_name: value} for any other
-                        top-level table to re-emit verbatim (value is a dict for
-                        a table, or a list of dicts for an array of tables).
+        extra_tables:   Optional dict of {key: value} for anything else at the
+                        top level of the existing config: a dict for a table, a
+                        list of dicts for an array of tables, or a scalar /
+                        array-of-scalars / datetime for a bare top-level key
+                        (emitted before the [group] header so it is not
+                        reparented under a preceding table).
 
     Returns:
         A TOML string that round-trips through load_group.
+
+    Raises:
+        ScaffoldError: If a carried value has no TOML representation.
     """
     normalized = _normalize_members(members)
 
     lines: list[str] = []
+
+    # Bare top-level keys (scalars, arrays of scalars, datetimes) go first, before
+    # any table header. Emitted alongside the extra tables at the bottom instead,
+    # TOML would reparent them under whichever table header preceded them.
+    extra_scalars, extra_nested = _split_table(extra_tables or {})
+    if extra_scalars:
+        for key, scalar in extra_scalars.items():
+            lines.append(f"{key} = {_toml_value_at(key, scalar)}")
+        lines.append("")
 
     lines.append("[group]")
     lines.append(f"name = {_toml_string(group_name)}")
@@ -148,12 +164,7 @@ def render_group_toml(
         lines.append(f"name = {_toml_string(ls['name'])}")
         lines.append("")
 
-    for table_name, value in (extra_tables or {}).items():
-        if not isinstance(value, (dict, list)):
-            raise TypeError(
-                f"extra_tables[{table_name!r}] must be a dict or list of dicts, "
-                f"got {type(value).__name__}"
-            )
+    for table_name, value in extra_nested.items():
         _render_table(table_name, value, lines)
 
     return "\n".join(lines)
@@ -165,20 +176,34 @@ def render_group_toml(
 
 
 def _toml_value(value: Any) -> str:
-    """Render a scalar or list-of-scalars as a TOML value literal."""
+    """Render a scalar, date/time, or list of those as a TOML value literal.
+
+    tomllib yields TOML date/time literals as datetime objects, so they are
+    re-emitted bare via isoformat() rather than quoted as strings.
+    """
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, str):
         return _toml_string(value)
     if isinstance(value, (int, float)):
         return str(value)
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
     if isinstance(value, list):
         return "[" + ", ".join(_toml_value(item) for item in value) + "]"
-    raise TypeError(f"unsupported TOML value type: {type(value).__name__}")
+    raise ScaffoldError(f"unsupported TOML value type {type(value).__name__}")
+
+
+def _toml_value_at(dotted_key: str, value: Any) -> str:
+    """Render a value literal, naming the offending key if it cannot be rendered."""
+    try:
+        return _toml_value(value)
+    except ScaffoldError as e:
+        raise ScaffoldError(f"camp: cannot render key {dotted_key!r}: {e}") from e
 
 
 def _split_table(table: dict[str, Any]) -> tuple[dict, dict]:
-    """Split a table dict into (inline scalars/arrays, nested tables).
+    """Split a table dict (or the top-level mapping) into (inline scalars/arrays, nested tables).
 
     A value is a nested table when it is a dict (`[key.sub]`) or a non-empty
     list of dicts (`[[key.sub]]`); everything else — including an empty list and
@@ -214,7 +239,7 @@ def _render_table(dotted_key: str, value: Any, lines: list[str]) -> None:
 
         lines.append(header)
         for key, scalar in scalars.items():
-            lines.append(f"{key} = {_toml_value(scalar)}")
+            lines.append(f"{key} = {_toml_value_at(f'{dotted_key}.{key}', scalar)}")
         lines.append("")
 
         for key, nested in tables.items():

@@ -27,6 +27,14 @@ def _skill_text() -> str:
     return _SKILL_MD.read_text()
 
 
+def _write_path_section() -> str:
+    """Return just the `### 4. Write path …` section body of the skill."""
+    text = _skill_text()
+    start = text.index("\n### 4. Write path")
+    end = text.index("\n### 5.", start)
+    return text[start:end]
+
+
 # ---------------------------------------------------------------------------
 # Anatomy
 # ---------------------------------------------------------------------------
@@ -121,6 +129,15 @@ class TestWritePathContract:
         text = _skill_text()
         assert re.search(r"re-?read", text, re.IGNORECASE)
         assert re.search(r"verify", text, re.IGNORECASE)
+
+    def test_body_reaches_the_cli_via_a_tmpfile_not_a_heredoc(self):
+        """A quoted heredoc suppresses variable expansion but not delimiter
+        matching, so a spec body containing a bare `EOF` line would truncate the
+        write. The write-path section must redirect a temp file into the CLI and
+        must not itself demonstrate a heredoc."""
+        section = _write_path_section()
+        assert '< "$tmpfile"' in section
+        assert "<<'EOF'" not in section
 
     def test_daemon_is_never_a_write_path(self):
         text = _skill_text()

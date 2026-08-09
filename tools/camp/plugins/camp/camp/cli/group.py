@@ -353,7 +353,7 @@ def _author_group(
     # already produce from its own parameters.
     existing_extra_tables: dict = {}
     if config_path.exists():
-        raw_existing = tomllib.loads(config_path.read_text())
+        raw_existing = tomllib.loads(config_path.read_text(encoding="utf-8"))
         core_keys = {"group", "members", "branch", "lore_scopes"}
         existing_extra_tables = {k: v for k, v in raw_existing.items() if k not in core_keys}
 
@@ -368,18 +368,22 @@ def _author_group(
         print(f"camp group: {e}", file=sys.stderr)
         sys.exit(1)
 
-    rendered = group_scaffold.render_group_toml(
-        group_name,
-        members,
-        branch_pattern,
-        lore_scopes=existing_lore_scopes,
-        extra_tables=existing_extra_tables,
-    )
+    try:
+        rendered = group_scaffold.render_group_toml(
+            group_name,
+            members,
+            branch_pattern,
+            lore_scopes=existing_lore_scopes,
+            extra_tables=existing_extra_tables,
+        )
+    except group_scaffold.ScaffoldError as e:
+        print(f"camp group: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Atomic write: tmp → round-trip gate via load_group → os.replace.
     config_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = config_path.with_suffix(config_path.suffix + ".tmp")
-    tmp_path.write_text(rendered)
+    tmp_path.write_text(rendered, encoding="utf-8")
     try:
         load_group(tmp_path)
     except Exception as e:
