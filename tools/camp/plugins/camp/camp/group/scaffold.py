@@ -14,8 +14,11 @@ No file I/O in this module — callers write the rendered string atomically.
 from __future__ import annotations
 
 import datetime
+import re
 from pathlib import Path
 from typing import Any
+
+_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +54,19 @@ def _escape_toml_basic_string(value: str) -> str:
 def _toml_string(value: str) -> str:
     """Return value as a TOML basic string (double-quoted, escaped)."""
     return f'"{_escape_toml_basic_string(value)}"'
+
+
+def _toml_key(key: str) -> str:
+    """Return key as a bare TOML key when it matches [A-Za-z0-9_-]+, else a
+    quoted TOML basic string.
+
+    A bare key emitted unquoted (e.g. a carried "release-1.0") reparses as a
+    dotted key path instead of one literal key — silent structural corruption
+    rather than a round-trip failure, since the result is still valid TOML.
+    """
+    if _BARE_KEY_RE.match(key):
+        return key
+    return _toml_string(key)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +156,7 @@ def render_group_toml(
     extra_scalars, extra_nested = _split_table(extra_tables or {})
     if extra_scalars:
         for key, scalar in extra_scalars.items():
-            lines.append(f"{key} = {_toml_value_at(key, scalar)}")
+            lines.append(f"{_toml_key(key)} = {_toml_value_at(key, scalar)}")
         lines.append("")
 
     lines.append("[group]")
@@ -165,7 +181,7 @@ def render_group_toml(
         lines.append("")
 
     for table_name, value in extra_nested.items():
-        _render_table(table_name, value, lines)
+        _render_table((table_name,), value, lines)
 
     return "\n".join(lines)
 
@@ -199,7 +215,7 @@ def _toml_value_at(dotted_key: str, value: Any) -> str:
     try:
         return _toml_value(value)
     except ScaffoldError as e:
-        raise ScaffoldError(f"camp: cannot render key {dotted_key!r}: {e}") from e
+        raise ScaffoldError(f"cannot render key {dotted_key!r}: {e}") from e
 
 
 def _split_table(table: dict[str, Any]) -> tuple[dict, dict]:
@@ -221,29 +237,37 @@ def _split_table(table: dict[str, Any]) -> tuple[dict, dict]:
     return scalars, tables
 
 
-def _render_table(dotted_key: str, value: Any, lines: list[str]) -> None:
+def _render_table(key_parts: tuple[str, ...], value: Any, lines: list[str]) -> None:
     """Append a TOML table (and every table nested inside it) to lines.
 
     A dict emits one `[dotted_key]` table; a list of dicts emits one
     `[[dotted_key]]` entry per item. Nested tables are emitted after their
     parent's inline keys, in source order, so a hand-authored config's layout
     survives a re-render.
+
+    Each segment of key_parts is quoted independently (via _toml_key) when it
+    is not a bare TOML key, so a carried non-bare key like "release-1.0" is
+    re-emitted as one literal key instead of reparsing as a dotted key path.
     """
+    dotted_key = ".".join(key_parts)
+    header_key = ".".join(_toml_key(part) for part in key_parts)
     if isinstance(value, list):
-        header, items = f"[[{dotted_key}]]", value
+        header, items = f"[[{header_key}]]", value
     else:
-        header, items = f"[{dotted_key}]", [value]
+        header, items = f"[{header_key}]", [value]
 
     for item in items:
         scalars, tables = _split_table(item)
 
         lines.append(header)
         for key, scalar in scalars.items():
-            lines.append(f"{key} = {_toml_value_at(f'{dotted_key}.{key}', scalar)}")
+            lines.append(
+                f"{_toml_key(key)} = {_toml_value_at(f'{dotted_key}.{key}', scalar)}"
+            )
         lines.append("")
 
         for key, nested in tables.items():
-            _render_table(f"{dotted_key}.{key}", nested, lines)
+            _render_table((*key_parts, key), nested, lines)
 
 
 # ---------------------------------------------------------------------------
@@ -327,11 +351,11 @@ def validate_scaffold(
             rr = Path(m["repo_root"])
             if not rr.exists():
                 raise ScaffoldError(
-                    f"camp: repo_root {str(rr)!r} for member {m['name']!r} does not exist"
+                    f"repo_root {str(rr)!r} for member {m['name']!r} does not exist"
                 )
             if not (rr / ".git").exists():
                 raise ScaffoldError(
-                    f"camp: repo_root {str(rr)!r} for member {m['name']!r} is not a git repo "
+                    f"repo_root {str(rr)!r} for member {m['name']!r} is not a git repo "
                     "(no .git found)"
                 )
 
@@ -341,7 +365,7 @@ def validate_scaffold(
         rr = m["repo_root"]
         if rr in seen_roots:
             raise ScaffoldError(
-                f"camp: repo_root {rr!r} is listed twice in group {group_name!r} "
+                f"repo_root {rr!r} is listed twice in group {group_name!r} "
                 f"(members {seen_roots[rr]!r} and {m['name']!r})"
             )
         seen_roots[rr] = m["name"]

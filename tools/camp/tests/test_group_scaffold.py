@@ -148,6 +148,49 @@ def test_render_group_toml_extra_tables_tasks_round_trip(tmp_path: Path) -> None
     load_group(f)  # does not raise — the unreferenced task def still validates
 
 
+def test_render_group_toml_non_bare_table_key_round_trips(tmp_path: Path) -> None:
+    """A carried [tasks."release-1.0"] table (a dotted, non-bare TOML key) must
+    be re-emitted quoted so it reparses as one key, not nested under a bare
+    `release-1` / `0` split — the exact silent-corruption case a bare-key
+    renderer produces."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "tasks": {
+            "release-1.0": {
+                "phase": "provision",
+                "steps": [{"name": "seed", "cmd": ["echo", "hi"]}],
+            }
+        }
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["tasks"] == extra_tables["tasks"]
+
+
+def test_render_group_toml_non_bare_scalar_key_round_trips(tmp_path: Path) -> None:
+    """A top-level scalar key with a space in it (`"my key" = 1`) is not a bare
+    TOML key and must be quoted on re-render, or the output is invalid TOML."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {"my key": 1}
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["my key"] == 1
+
+
 def test_render_group_toml_extra_tables_release_round_trips_via_tomllib(
     tmp_path: Path,
 ) -> None:
@@ -283,8 +326,10 @@ def test_render_group_toml_top_level_datetime_round_trips() -> None:
 
 
 def test_render_group_toml_unserializable_value_raises_scaffold_error() -> None:
-    """A genuinely unserializable value surfaces as a clean camp: error rather
-    than a raw traceback out of the renderer."""
+    """A genuinely unserializable value surfaces as a clean error naming the
+    offending key, with no `camp: ` prefix baked into the message — the CLI
+    caller supplies that prefix itself, so the renderer must not double it up
+    (`camp group: camp: ...`)."""
     from camp.group.scaffold import ScaffoldError, render_group_toml
 
     members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
@@ -293,7 +338,8 @@ def test_render_group_toml_unserializable_value_raises_scaffold_error() -> None:
             "mygroup", members, "worktree-{slug}", extra_tables={"bad": {"k": object()}}
         )
 
-    assert str(exc.value).startswith("camp: ")
+    assert not str(exc.value).startswith("camp: ")
+    assert "bad" in str(exc.value)
     assert "bad" in str(exc.value)
 
 

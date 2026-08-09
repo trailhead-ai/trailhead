@@ -158,7 +158,7 @@ def _cmd_group_cli(args: list[str]) -> None:
             )
             sys.exit(1)
         config_dir.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(group_scaffold.build_stub_toml(group_name))
+        config_path.write_text(group_scaffold.build_stub_toml(group_name), encoding="utf-8")
         print(f"camp group: wrote stub {config_path!s}")
         print(f"  edit this then re-run `camp group {group_name} --member NAME=PATH ...`")
         return

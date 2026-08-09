@@ -719,3 +719,32 @@ def test_init_help_documents_new_flags() -> None:
     out = result.stdout + result.stderr
     for token in ("--member", "--scaffold", "--force"):
         assert token in out, f"expected {token!r} in group --help:\n{out}"
+
+
+def test_scaffold_stub_write_uses_utf8_encoding() -> None:
+    """Every group-config write_text() call in cli/group.py must pin
+    encoding="utf-8" explicitly rather than relying on the platform's
+    preferred locale encoding — including the --scaffold stub write, the
+    one remaining call that didn't."""
+    import ast
+
+    src_path = (
+        Path(__file__).resolve().parents[1]
+        / "plugins"
+        / "camp"
+        / "camp"
+        / "cli"
+        / "group.py"
+    )
+    tree = ast.parse(src_path.read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "write_text"
+        ):
+            kwarg_names = {kw.arg for kw in node.keywords}
+            assert "encoding" in kwarg_names, (
+                f"write_text() call at {src_path}:{node.lineno} is missing "
+                "encoding=\"utf-8\""
+            )
