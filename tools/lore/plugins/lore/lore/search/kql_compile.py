@@ -106,7 +106,7 @@ node at all) orders by ``updated_at DESC, last_referenced_at DESC`` (no bm25).
 
   *FTS MATCH strings* are bound as ``?`` params, but the FTS5 ``MATCH`` mini-language
   interprets the string contents, so each token is run through a STRICT ALLOWLIST
-  sanitizer: a token that does not fully match ``^[-A-Za-z0-9._]+$`` (or that is a
+  sanitizer: a token that does not fully match ``^[A-Za-z0-9_]+$`` (or that is a
   reserved bare operator ``AND``/``OR``/``NOT``) is wrapped as a quoted FTS5 string
   literal (``"…"`` with internal ``"`` stripped) so it is treated as a literal token,
   never as FTS5 syntax (``*``, ``(``, ``)``, ``NEAR(…)``, ``^``, ``col:`` filter,
@@ -151,9 +151,13 @@ _VALID_OPS = frozenset({">=", "<=", ">", "<"})
 # FTS token sanitizers (strict allowlist)
 # ---------------------------------------------------------------------------
 
-# A token that fully matches this is a safe bare FTS5 term (unicode61 splits on
-# hyphen/dot/underscore so these are inert as far as the MATCH grammar goes).
-_FTS_BARE_SAFE = re.compile(r"^[-A-Za-z0-9._]+$")
+# A token that fully matches this is a safe bare FTS5 term. Hyphen and dot are
+# excluded even though unicode61 splits on them at the tokenizer level: FTS5's
+# *query-expression* grammar re-parses an unquoted hyphenated/dotted bareword as a
+# column-filter reference (e.g. "auth-service" -> "no such column: service",
+# "phi-scrubber.v2" -> "fts5: syntax error near \".\""), so such tokens must fall
+# through to the quoted-literal path instead.
+_FTS_BARE_SAFE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # Reserved bare FTS5 operators — must be wrapped even though they pass the regex.
 _FTS5_RESERVED_OPS = frozenset({"AND", "OR", "NOT"})
@@ -171,7 +175,7 @@ def _clean_for_literal(raw: str) -> str:
 def _sanitize_bare_term(raw: str) -> str:
     """Sanitize a bare ``FullText`` term into a single-token MATCH string.
 
-    Strict allowlist: a token that fully matches ``^[-A-Za-z0-9._]+$`` and is not a
+    Strict allowlist: a token that fully matches ``^[A-Za-z0-9_]+$`` and is not a
     reserved bare operator is emitted as-is (so ``foo`` → ``foo`` per the
     MATCH encoding). Anything else is wrapped as a quoted FTS5 string literal so it
     is treated as a literal token, never FTS5 syntax. Raises ``ValueError`` on a

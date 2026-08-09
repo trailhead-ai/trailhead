@@ -51,7 +51,10 @@ implementation.
 
 Execution: shell=False, cwd=worktree, output captured (text mode). A
 TimeoutExpired is treated exactly like a failing step (it fails the task
-just the same).
+just the same). An OSError raised by subprocess.run itself — most notably
+FileNotFoundError when a step's argv[0] names a binary missing from PATH —
+is likewise treated as a failing step rather than allowed to escape
+run_member_tasks, so the `required` flag still governs the outcome.
 
 Persisted output: `TaskResult.stderr_excerpt` is capped at
 STDERR_EXCERPT_MAX_CHARS — these excerpts land in a durable, re-displayed
@@ -175,6 +178,13 @@ def run_member_tasks(
             except subprocess.TimeoutExpired:
                 failing_step = argv
                 stderr_excerpt = _cap_excerpt(f"step timed out after {timeout}s: {argv}")
+                break
+            except OSError as exc:
+                # Also catches a bad/missing `cwd` (subprocess raises
+                # FileNotFoundError for that too, a subclass of OSError) —
+                # accepted, since phase 1 is what creates `worktree`.
+                failing_step = argv
+                stderr_excerpt = _cap_excerpt(f"step failed to start: {argv}: {exc}")
                 break
 
             if proc.returncode != 0:

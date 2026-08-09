@@ -655,7 +655,7 @@ class TestUnknownColumnGuard:
 
 
 class TestFtsSanitizer:
-    """Strict allowlist: tokens not matching ^[-A-Za-z0-9._]+$ become quoted literals."""
+    """Strict allowlist: tokens not matching ^[A-Za-z0-9_]+$ become quoted literals."""
 
     _INJECTION_TERMS = [
         "*",
@@ -667,6 +667,9 @@ class TestFtsSanitizer:
         "body:zephyr",
         "col:nonexistent",
         "(foo OR bar)",
+        "auth-service",
+        "operational-state",
+        "phi-scrubber.v2",
     ]
 
     @pytest.mark.parametrize("term", _INJECTION_TERMS)
@@ -693,11 +696,43 @@ class TestFtsSanitizer:
         cq = compiler.compile(kql_mod.FullText(term="AND"))
         assert '"AND"' in cq.params
 
-    def test_dotted_term_stays_unquoted(self, kql, compiler):
-        """A token matching the allowlist (dot/hyphen/underscore) stays bare."""
+    def test_dotted_term_becomes_quoted_literal(self, kql, compiler):
+        """Hyphen/dot are re-parsed as column filters by FTS5's query grammar, so
+        such tokens must fall through to the quoted-literal path."""
         kql_mod = load_script("lore.search.kql")
         cq = compiler.compile(kql_mod.FullText(term="phi-scrubber.v2"))
-        assert "phi-scrubber.v2" in cq.params
+        assert '"phi-scrubber.v2"' in cq.params
+
+    def test_hyphenated_term_finds_matching_record(self, tmp_path, kql, compiler, index_store):
+        """The quoted-literal fallback must still MATCH — not just avoid erroring.
+
+        A record whose body contains the hyphenated token is the positive
+        counterpart to the injection-term sweep above, which only proves no
+        `OperationalError` and no spurious rows against terms absent from the
+        fixture.
+        """
+        vault = tmp_path / "vault"
+        fake_state = tmp_path / "xdg-state"
+        fake_state.mkdir()
+        env = dict(os.environ)
+        env["XDG_STATE_HOME"] = str(fake_state)
+        _write_record(
+            vault,
+            "spec",
+            "gamma",
+            _sidecar(kind="spec", title="Gamma Spec", status="active"),
+            "the auth-service handles login",
+        )
+        conn = index_store.open_index(env=env)
+        index_store.rebuild([str(vault)], conn)
+        conn.commit()
+
+        kql_mod = load_script("lore.search.kql")
+        cq = compiler.compile(kql_mod.FullText(term="auth-service"))
+        rows = conn.execute(cq.full_query(), cq.params).fetchall()
+
+        assert len(rows) == 1
+        assert rows[0][0].endswith("spec/gamma")
 
     def test_single_quote_term_becomes_quoted_literal(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
