@@ -31,13 +31,13 @@ If any of those are missing or ambiguous, stop and report `NEEDS_CONTEXT`. Do no
 
 Duplication detection needs to see code that already landed elsewhere in the repo — read scope is the whole repo, not just this change's diff. But you may only **edit, add, or delete files that are already part of this change's footprint** — the set of files touched between base SHA and pre-simplify SHA. Repo-wide refactoring, or touching a file this change never touched, is out of scope no matter how tempting the duplication looks.
 
-This is not a prompt-only rule. `plugins/craft/scripts/footprint_guard.py` mechanically enforces it:
+This is not a prompt-only rule. `${CLAUDE_PLUGIN_ROOT}/scripts/footprint_guard.py` mechanically enforces it:
 
 ```
-footprint_guard.py <base-sha> <pre-simplify-sha> <post-simplify-ref>
+${CLAUDE_PLUGIN_ROOT}/scripts/footprint_guard.py <base-sha> <pre-simplify-sha> <post-simplify-ref>
 ```
 
-Run it from the repo root before you commit anything, passing the pre-simplify SHA itself as `<post-simplify-ref>` — you haven't committed yet, so there is no later ref to name, and the guard already inspects your uncommitted working-tree edits (staged, unstaged, and untracked) in addition to the `pre-simplify..post-simplify-ref` diff. It computes the footprint from the `base..pre-simplify` diff, compares it against everything you've touched, and exits 0 only if every touched file is inside the footprint. Exit 1 means you touched something outside scope — drop that edit. Exit 2 means it could not certify the tree (bad SHA, not a repo) — **treat exit 2 the same as exit 1: it is not a clean pass, do not commit.**
+Run it before you commit anything, passing the pre-simplify SHA itself as `<post-simplify-ref>` — you haven't committed yet, so there is no later ref to name, and the guard already inspects your uncommitted working-tree edits (staged, unstaged, and untracked) in addition to the `pre-simplify..post-simplify-ref` diff. It computes the footprint from the `base..pre-simplify` diff, compares it against everything you've touched, and exits 0 only if every touched file is inside the footprint. Exit 1 means you touched something outside scope — drop that edit. Exit 2 means it could not certify the tree (bad SHA, not a repo) — **treat exit 2 the same as exit 1: it is not a clean pass, do not commit.**
 
 A non-zero exit from footprint_guard.py is a **failed re-green**, exactly like a failed test run: revert to the pre-simplify state (see below) and return the attempted change as a flagged suggestion instead of committing it.
 

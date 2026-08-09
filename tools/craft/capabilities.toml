@@ -3,9 +3,9 @@
 # selectable subagents from agents/*.md. No capability groups — install selects
 # subagents/skills by name (see trailhead/install_config.py).
 #
-# Two directories ship always (base), because both hold files that shipped skills
-# READ at runtime — omit either and a selected skill points at a path that is not
-# there:
+# Three directories ship always (base), because all three hold files that shipped
+# skills/agents READ at runtime — omit any and a selected skill/agent points at a
+# path that is not there:
 #   - skills/_shared — council.md (the review-panel roster + dispatch contract), read
 #     by the plan, consult, and gauntlet skills; status-ownership.md (the task-status
 #     ownership contract, read by execute); refine.md (the standalone-task
@@ -19,6 +19,10 @@
 #     appended to a standalone task that lacks one), and refine (task.md's payload
 #     labels + plan.md's Flow-out checklist). They are runtime inputs to those skills
 #     and agents, not install-time scaffolding, which is why selection cannot drop them.
+#   - scripts — footprint_guard.py, resolved at runtime through
+#     ${CLAUDE_PLUGIN_ROOT}/scripts/footprint_guard.py by the simplifier agent and by
+#     execute's After-All-Slices simplify phase. Selecting `simplifier` without this
+#     directory would leave that path unresolvable in a composed install.
 #
 # Dependency worth knowing when hand-picking a selection: the `gauntlet` skill owns
 # the spec's draft -> ready edge (brainstorm and plan deliberately cannot freeze a
@@ -31,4 +35,4 @@
 
 [tool]
 name = "craft"
-base = ["skills/_shared", "templates"]
+base = ["skills/_shared", "templates", "scripts"]
