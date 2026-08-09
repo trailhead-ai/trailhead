@@ -57,6 +57,10 @@ def _sleep_step(seconds: float) -> list[str]:
     return [_PY, "-c", f"import time; time.sleep({seconds})"]
 
 
+def _missing_binary_step() -> list[str]:
+    return ["this-binary-does-not-exist-anywhere-on-path"]
+
+
 def _context(worktree: Path, **extra: str) -> dict[str, str]:
     ctx = {
         "repo_root": "/repos/upstream",
@@ -256,6 +260,49 @@ def test_optional_task_failure_returns_failed_result_without_raising(tmp_path: P
             stderr_excerpt="boom",
         )
     ]
+
+
+def test_optional_task_missing_binary_returns_failed_result_without_raising(
+    tmp_path: Path,
+):
+    tasks = [
+        {
+            "name": "seed",
+            "phase": "provision",
+            "required": False,
+            "steps": [_missing_binary_step()],
+        }
+    ]
+    results = run_member_tasks(tasks, "provision", _context(tmp_path), completed={})
+    assert len(results) == 1
+    assert results[0].name == "seed"
+    assert results[0].state == "failed"
+    assert results[0].failing_step == _missing_binary_step()
+    assert "this-binary-does-not-exist-anywhere-on-path" in results[0].stderr_excerpt
+
+
+def test_required_task_missing_binary_raises_task_error(tmp_path: Path):
+    tasks = [
+        {
+            "name": "seed",
+            "phase": "provision",
+            "required": True,
+            "steps": [_missing_binary_step()],
+        }
+    ]
+    ctx = _context(tmp_path, member="trailhead")
+
+    with pytest.raises(TaskError) as exc_info:
+        run_member_tasks(tasks, "provision", ctx, completed={})
+
+    message = str(exc_info.value)
+    assert "trailhead" in message
+    assert "seed" in message
+    assert len(exc_info.value.results) == 1
+    result = exc_info.value.results[0]
+    assert result.state == "failed"
+    assert result.failing_step == _missing_binary_step()
+    assert "this-binary-does-not-exist-anywhere-on-path" in result.stderr_excerpt
 
 
 # ---------------------------------------------------------------------------
