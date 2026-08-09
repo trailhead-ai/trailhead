@@ -149,15 +149,12 @@ def render_group_toml(
         lines.append("")
 
     for table_name, value in (extra_tables or {}).items():
-        if isinstance(value, list):
-            _render_array_table(table_name, value, lines)
-        elif isinstance(value, dict):
-            _render_table(table_name, value, lines)
-        else:
+        if not isinstance(value, (dict, list)):
             raise TypeError(
                 f"extra_tables[{table_name!r}] must be a dict or list of dicts, "
                 f"got {type(value).__name__}"
             )
+        _render_table(table_name, value, lines)
 
     return "\n".join(lines)
 
@@ -180,50 +177,48 @@ def _toml_value(value: Any) -> str:
     raise TypeError(f"unsupported TOML value type: {type(value).__name__}")
 
 
-def _split_table(table: dict[str, Any]) -> tuple[dict, dict, dict]:
-    """Split a table dict into (scalars, subtables, array-of-subtables)."""
+def _split_table(table: dict[str, Any]) -> tuple[dict, dict]:
+    """Split a table dict into (inline scalars/arrays, nested tables).
+
+    A value is a nested table when it is a dict (`[key.sub]`) or a non-empty
+    list of dicts (`[[key.sub]]`); everything else — including an empty list and
+    a list of scalars — is an inline `key = value` line.
+    """
     scalars: dict[str, Any] = {}
-    subtables: dict[str, Any] = {}
-    array_tables: dict[str, Any] = {}
+    tables: dict[str, Any] = {}
     for key, value in table.items():
-        if isinstance(value, dict):
-            subtables[key] = value
-        elif isinstance(value, list) and value and isinstance(value[0], dict):
-            array_tables[key] = value
+        if isinstance(value, dict) or (
+            isinstance(value, list) and value and isinstance(value[0], dict)
+        ):
+            tables[key] = value
         else:
             scalars[key] = value
-    return scalars, subtables, array_tables
+    return scalars, tables
 
 
-def _render_table(dotted_key: str, table: dict[str, Any], lines: list[str]) -> None:
-    """Append a `[dotted_key]` table (and any nested tables) to lines."""
-    scalars, subtables, array_tables = _split_table(table)
+def _render_table(dotted_key: str, value: Any, lines: list[str]) -> None:
+    """Append a TOML table (and every table nested inside it) to lines.
 
-    lines.append(f"[{dotted_key}]")
-    for key, value in scalars.items():
-        lines.append(f"{key} = {_toml_value(value)}")
-    lines.append("")
+    A dict emits one `[dotted_key]` table; a list of dicts emits one
+    `[[dotted_key]]` entry per item. Nested tables are emitted after their
+    parent's inline keys, in source order, so a hand-authored config's layout
+    survives a re-render.
+    """
+    if isinstance(value, list):
+        header, items = f"[[{dotted_key}]]", value
+    else:
+        header, items = f"[{dotted_key}]", [value]
 
-    for key, value in subtables.items():
-        _render_table(f"{dotted_key}.{key}", value, lines)
-    for key, value in array_tables.items():
-        _render_array_table(f"{dotted_key}.{key}", value, lines)
-
-
-def _render_array_table(dotted_key: str, items: list[dict[str, Any]], lines: list[str]) -> None:
-    """Append `[[dotted_key]]` entries (and any nested tables) to lines."""
     for item in items:
-        scalars, subtables, array_tables = _split_table(item)
+        scalars, tables = _split_table(item)
 
-        lines.append(f"[[{dotted_key}]]")
-        for key, value in scalars.items():
-            lines.append(f"{key} = {_toml_value(value)}")
+        lines.append(header)
+        for key, scalar in scalars.items():
+            lines.append(f"{key} = {_toml_value(scalar)}")
         lines.append("")
 
-        for key, value in subtables.items():
-            _render_table(f"{dotted_key}.{key}", value, lines)
-        for key, value in array_tables.items():
-            _render_array_table(f"{dotted_key}.{key}", value, lines)
+        for key, nested in tables.items():
+            _render_table(f"{dotted_key}.{key}", nested, lines)
 
 
 # ---------------------------------------------------------------------------
