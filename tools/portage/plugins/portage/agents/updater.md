@@ -66,7 +66,7 @@ push-ready state:
 - All intended changes are committed (no stray uncommitted work the PR should include);
   commits are GPG-signed with Conventional-Commit prefixes. Check signature *presence*, not
   local verification status: confirm the commit carries a `gpgsig` header via
-  `git cat-file -p <sha>` or `git log --pretty=%GK`/`%GF`. Never use `git log --pretty=%G?` for
+  `git cat-file -p <sha> | grep '^gpgsig'`. Never use `git log --pretty=%G?` for
   this — it reports whether *this machine* can verify the signature (depends on
   `gpg.ssh.allowedSignersFile`, which is commonly unset and orthogonal to whether the commit
   was signed), so it reports `N`/`E` even for properly signed commits. If a commit genuinely

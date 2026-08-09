@@ -133,7 +133,7 @@ def check_provenance(
     environ = os.environ if env is None else env
     email = (environ.get(_PROVENANCE_ENV) or "").strip()
     if not email:
-        cmd = ["git", "config", "--global", _PROVENANCE_GIT_KEY]
+        cmd = ["git", "config", "--global", "--includes", _PROVENANCE_GIT_KEY]
         effective = runner if runner is not None else _default_git_runner
         try:
             result = effective(cmd)

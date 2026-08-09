@@ -180,6 +180,9 @@ def run_member_tasks(
                 stderr_excerpt = _cap_excerpt(f"step timed out after {timeout}s: {argv}")
                 break
             except OSError as exc:
+                # Also catches a bad/missing `cwd` (subprocess raises
+                # FileNotFoundError for that too, a subclass of OSError) —
+                # accepted, since phase 1 is what creates `worktree`.
                 failing_step = argv
                 stderr_excerpt = _cap_excerpt(f"step failed to start: {argv}: {exc}")
                 break

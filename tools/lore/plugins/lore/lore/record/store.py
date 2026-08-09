@@ -24,7 +24,8 @@ messages and write nothing. We do not re-implement validation.
 
 **Provenance posture.** ``created-by``/``updated-by`` are
 written from :func:`resolve_committer_email` — ``$LORE_EMAIL`` then
-``git config --global user.email`` — which is **deterministic, not cwd-dependent**
+``git config --global --includes user.email`` (``[include]``/``[includeIf]``
+directives are followed) — which is **deterministic, not cwd-dependent**
 (a repo-local ``user.email`` override cannot change the stamped value). An empty
 email is a **hard error** (:class:`ProvenanceError`): we write nothing,
 because a placeholder would silently pollute provenance. ``*-by`` is
@@ -406,7 +407,8 @@ _JOINER = "⁠"
 def resolve_committer_email() -> str:
     """Return the committer email for ``*-by`` provenance (delegates to vault_mod).
 
-    Deterministic source (``$LORE_EMAIL`` → ``git config --global user.email``),
+    Deterministic source (``$LORE_EMAIL`` → ``git config --global --includes
+    user.email``, following ``[include]``/``[includeIf]`` directives),
     cwd-independent; empty when unset. See
     :func:`vault.resolve_committer_email`. Exposed here so ``validate_and_write``
     calls a patchable module-level seam.

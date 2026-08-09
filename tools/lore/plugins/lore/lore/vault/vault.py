@@ -97,8 +97,9 @@ def resolve_committer_email() -> str:
     """Return the committer email for record provenance (``*-by`` fields).
 
     **Deterministic, not cwd-dependent.** Fixed
-    order: ``$LORE_EMAIL`` (test/override) → ``git config --global user.email``.
-    Deliberately **not** a bare ``git config user.email`` — that would silently
+    order: ``$LORE_EMAIL`` (test/override) → ``git config --global --includes
+    user.email`` (``[include]``/``[includeIf]`` directives in the global config
+    are followed). Deliberately **not** a bare ``git config user.email`` — that would silently
     inherit a repo-local override from whatever working repo the CLI was invoked
     in (e.g. stamp ``dev@client.com`` when run inside a client repo). The
     ``--global`` scope pins the human's identity regardless of cwd.

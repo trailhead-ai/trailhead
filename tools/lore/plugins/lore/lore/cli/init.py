@@ -225,7 +225,8 @@ def cmd_init(args) -> int:
     # Step 7: first-run git-identity advisory.
     # `lore init` only bootstraps — it does NOT require a git identity (the
     # `*-by` author fallback is the write-path's concern). But when no
-    # identity resolves ($LORE_EMAIL → `git config --global user.email`, both
+    # identity resolves ($LORE_EMAIL → `git config --global --includes
+    # user.email`, following `[include]`/`[includeIf]` directives, both
     # empty) the FIRST record write would fail with a typed error; surface a
     # one-line advisory now so that failure isn't a surprise. Routed to STDERR
     # so it survives even if `trailhead install`
@@ -233,7 +234,7 @@ def cmd_init(args) -> int:
     if not vault_mod.resolve_committer_email():
         print(
             "lore: advisory: no git identity set "
-            "($LORE_EMAIL / `git config --global user.email` are empty) "
+            "($LORE_EMAIL / `git config --global user.email` (includes followed) are empty) "
             "— set one before your first record write, or it will be rejected",
             file=sys.stderr,
         )

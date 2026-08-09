@@ -537,6 +537,24 @@ def test_start_accepts_a_committer_email_from_git_config(tmp_path):
     assert res.returncode == 0, res.stderr
 
 
+def test_start_accepts_a_committer_email_from_an_included_git_config(tmp_path):
+    """A global config that only [include]s user.email must still resolve it.
+
+    Mirrors lore's own `resolve_committer_email` include-following (see
+    `tools/lore/tests/test_record_store.py`) — this check must accept exactly
+    what lore itself will accept, or it refuses starts that would succeed.
+    """
+    sweep = _sweep(tmp_path)
+    included_cfg = tmp_path / "gitconfig-included"
+    included_cfg.write_text("[user]\n\temail = included@example.invalid\n", encoding="utf-8")
+    gitconfig = tmp_path / "gitconfig-global"
+    gitconfig.write_text(f"[include]\n\tpath = {included_cfg}\n", encoding="utf-8")
+
+    res = sweep.start_without_provenance(git_config=gitconfig)
+
+    assert res.returncode == 0, res.stderr
+
+
 def test_start_ignores_a_repo_local_committer_email(tmp_path):
     """Lore stamps from `git config --global`, so that is what must be checked.
 
