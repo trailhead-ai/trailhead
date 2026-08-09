@@ -191,6 +191,24 @@ def test_render_group_toml_non_bare_scalar_key_round_trips(tmp_path: Path) -> No
     assert parsed["my key"] == 1
 
 
+def test_render_group_toml_control_char_value_round_trips(tmp_path: Path) -> None:
+    """A carried value containing a raw C0 control character must be escaped as
+    \\uXXXX — TOML basic strings forbid unescaped control characters, so an
+    unescaped one makes the whole rendered document unparseable."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {"release": {"note": "before\x01after"}}
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["release"]["note"] == "before\x01after"
+
+
 def test_render_group_toml_extra_tables_release_round_trips_via_tomllib(
     tmp_path: Path,
 ) -> None:

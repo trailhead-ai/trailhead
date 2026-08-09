@@ -40,6 +40,10 @@ def _escape_toml_basic_string(value: str) -> str:
 
     TOML basic-string escape sequences (spec 1.0):
       \\, \", \b, \f, \n, \r, \t, \uXXXX, \UXXXXXXXX
+
+    Every remaining control character (C0 minus the ones with a short escape,
+    plus DEL) is emitted as \uXXXX: TOML forbids them raw inside a basic
+    string, so leaving one through would render a document tomllib rejects.
     """
     value = value.replace("\\", "\\\\")
     value = value.replace('"', '\\"')
@@ -48,7 +52,10 @@ def _escape_toml_basic_string(value: str) -> str:
     value = value.replace("\n", "\\n")
     value = value.replace("\r", "\\r")
     value = value.replace("\t", "\\t")
-    return value
+    return "".join(
+        f"\\u{ord(ch):04X}" if (ord(ch) < 0x20 or ord(ch) == 0x7F) else ch
+        for ch in value
+    )
 
 
 def _toml_string(value: str) -> str:
