@@ -64,7 +64,14 @@ Run a minimal per-repo preflight before pushing — confirm the working tree is 
 push-ready state:
 
 - All intended changes are committed (no stray uncommitted work the PR should include);
-  commits are GPG-signed with Conventional-Commit prefixes.
+  commits are GPG-signed with Conventional-Commit prefixes. Check signature *presence*, not
+  local verification status: confirm the commit carries a `gpgsig` header via
+  `git cat-file -p <sha>` or `git log --pretty=%GK`/`%GF`. Never use `git log --pretty=%G?` for
+  this — it reports whether *this machine* can verify the signature (depends on
+  `gpg.ssh.allowedSignersFile`, which is commonly unset and orthogonal to whether the commit
+  was signed), so it reports `N`/`E` even for properly signed commits. If a commit genuinely
+  lacks a `gpgsig` header, state only that finding in the failure message — do not infer a
+  root cause (e.g. citing `ssh-add -l` output) that hasn't been independently confirmed.
 - Local checks pass (lint / typecheck / tests as the repo defines them).
 - The branch is rebased/up to date enough to push without a forced overwrite of others' work.
 - For `mode=create`: the branch is not yet on origin → push and open a PR.
