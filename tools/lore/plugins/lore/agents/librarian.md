@@ -49,6 +49,8 @@ A record's `kind` is one of nine. Each carries a `status` from its own vocabular
    - "Did we decide Z?" → `kind:decision`
    - "Anything pending / being watched on W?" → `kind:task` (look at `status`)
    - "Recent sessions touching X?" → `kind:session`
+   - "Have we made this mistake before?" / "what went wrong last time we did X?" → `kind:lesson`
+   - "How does Tom like to approach X?" / "what are the conventions for working on X?" → `kind:collaboration`
 
 2. **Search with the KQL-subset facade.** Run one or more `lore search` queries, combining facets with `and`:
    ```bash
