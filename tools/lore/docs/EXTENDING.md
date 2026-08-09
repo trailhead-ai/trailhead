@@ -39,8 +39,9 @@ Adoption is a stack of three layers with a strict, one-directional dependency:
 ```
 
 **lore** is the bottom, fully portable layer: capture commands, automatic
-session notes, branch/keyword recall, and a vault with a status guard. It has
-**no** dependency on craft and no knowledge of your app.
+session notes, on-demand recall (`lore areas` / `lore search`), and a vault
+with a status guard. It has **no** dependency on craft and no knowledge of
+your app.
 
 **craft** is the dev-agent layer: planning, code review, subagent-driven
 development, and the helper agents (`test-runner`, `log-sifter`,

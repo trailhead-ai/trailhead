@@ -18,9 +18,8 @@ task record surfaces — is not yet ported to lore.
 requires a UserPromptSubmit hook, which depends on infrastructure not yet
 in place.
 
-**How to turn it on:** Port the UserPromptSubmit classifier hook, then flip
-the capability flag in the config domain (`plugins/lore/lore/config/`):
-
-```python
-RECALL_CLASSIFIER_ENABLED = True
-```
+**How to turn it on:** Port the UserPromptSubmit classifier hook and register
+it in the plugin's hook manifest (`plugins/lore/hooks/hooks.json`); no
+capability flag gates it today — the hook's absence from the manifest is the
+only thing turning it off. See `ROADMAP.md`'s Tier 1.5 entry for the
+implementation shape.

@@ -45,9 +45,10 @@ lore init   # scaffold the default vault
 `lore init` scaffolds the vault; subsequent commands find it automatically —
 nothing to export or configure.
 
-Open Claude Code in any project. Orientation (the area map and vault index)
-is loaded via the agent-rules surface, and agents pull prior context on demand
-with `lore search`.
+Open Claude Code in any project. The agent-rules surface carries a short
+disposition primer (what lore is, when to capture, when to record directly)
+plus the mandatory vault-write rules — not an area map or a vault index.
+Agents pull prior context on demand with `lore areas` and `lore search`.
 
 ## Skills
 

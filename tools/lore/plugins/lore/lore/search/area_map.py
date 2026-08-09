@@ -1,9 +1,8 @@
-"""Area-map menu + SessionStart pointer for the lore vault.
+"""Area-map menu for the lore vault.
 
-This module provides the **area-map path** — the compact on-demand area menu and
-the always-injected SessionStart pointer that sends the agent to ``lore search``.
-``lore search`` is the general query interface; area-membered memory lookup is
-``lore search 'area:<name>'``:
+This module provides the **area-map path** — the compact on-demand area menu
+served by `lore areas`. ``lore search`` is the general query interface;
+area-membered memory lookup is ``lore search 'area:<name>'``:
 
   1. build_area_map(vault)          -> list[AreaEntry]
      Scans area/*.md, reads name/keywords/one-liner per area, returns the
@@ -14,15 +13,15 @@ the always-injected SessionStart pointer that sends the agent to ``lore search``
      Renders the full on-demand menu (called by `lore areas`).
 
   3. render_area_pointer(vault)     -> str
-     Single-line pointer for the SessionStart injection: emits the area count
-     and a trigger cue so the agent knows when/how to run `lore areas` and then
-     `lore search 'area:<name>'` without inlining the full menu. Returns "" for
-     0 areas.
+     Single-line pointer summarizing the area count and a trigger cue for
+     `lore areas` / `lore search 'area:<name>'`. Not currently wired to any
+     caller — lore has no push hook to inject it into; see its own docstring.
+     Returns "" for 0 areas.
 
 Security: area resolution is a LOOKUP into the enumerated area names from
-build_area_map — never a path built from a caller-supplied string. Only the area
-count (not names) reaches the SessionStart injection, so untrusted frontmatter
-does not flow into the injected context via the pointer.
+build_area_map — never a path built from a caller-supplied string. Only the
+area count (not names) would reach any future injection point, so untrusted
+frontmatter cannot flow out through the pointer.
 
 Interpreter gotcha: ``@dataclass`` + ``importlib``-loaded module +
 ``from __future__ import annotations`` crashes the local interpreter's dataclass
@@ -172,19 +171,21 @@ def render_area_menu(entries: list[AreaEntry]) -> str:
 
 
 def render_area_pointer(vault: Path) -> str:
-    """Return a single-line pointer to `lore areas` for the SessionStart injection.
+    """Return a single-line pointer to `lore areas`.
 
     Emits the area count plus a trigger cue and the commands to use so the
     agent knows when and how to discover areas without inlining the full menu.
     Returns empty string when there are 0 areas (matching today's empty-menu
-    behavior — the hook then omits the block).
+    behavior).
 
-    May raise (like build_area_map). The sole caller build_context wraps this
-    in a try/except that prints a stderr diagnostic and degrades gracefully
-    (pointer omitted, vault index intact).
+    Orphaned: lore installs no push hook, so nothing calls this today — its
+    only caller is `tests/test_recall_retired.py`, which pins its output
+    shape in case a future caller (e.g. a UserPromptSubmit hook, see
+    ROADMAP.md) wires it in. May raise (like build_area_map); any future
+    caller should wrap it and degrade gracefully rather than propagate.
 
     Security: only the count is emitted, not area names, so untrusted
-    frontmatter does not reach the injection via this path.
+    frontmatter would not reach any future caller through this path.
 
     The per-area memory lookup is ``lore search 'area:<name>'`` (``recall`` is
     retired in favor of the ``search`` facade).
