@@ -394,7 +394,7 @@ Record the current `HEAD` as the **pre-simplify SHA**, then dispatch `simplifier
 When it returns, **re-run the guard yourself against a clean working tree** — never with stray uncommitted changes present, since the guard unions any working-tree drift into its check and would false-positive:
 
 ```
-plugins/craft/scripts/footprint_guard.py <base-sha> <pre-simplify-sha> HEAD
+${CLAUDE_PLUGIN_ROOT}/scripts/footprint_guard.py <base-sha> <pre-simplify-sha> HEAD
 ```
 
 **Any non-zero exit maps to the same remediation: revert the simplify commit** (`git revert` or reset back to the pre-simplify SHA) and surface the attempted simplification as a **flagged suggestion** in the completion report. Distinguish the two cases in the report wording even though the remediation is identical:
