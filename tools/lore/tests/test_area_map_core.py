@@ -1,7 +1,8 @@
 """area_map.py core: area-map build (the kept area-menu path).
 
-Covers ``build_area_map`` — the on-demand area menu served by ``lore areas`` and
-the SessionStart pointer. ``lore search`` is the query interface.
+Covers ``build_area_map`` — the on-demand area menu served by ``lore areas``.
+It formerly also served a SessionStart pointer; that hook has been retired.
+``lore search`` is the query interface.
 
   build_area_map:
     - reads name + keywords + one-liner from area/*.md

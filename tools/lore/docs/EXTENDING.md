@@ -34,12 +34,12 @@ Adoption is a stack of three layers with a strict, one-directional dependency:
 │                    subagent-driven dev, test-runner, …)   │
 ├─────────────────────────────────────────────────────────┤
 │  lore            — portable PKM (capture, session notes,  │
-│                    recall, status guard, the `lore` CLI)  │
+│                    search, status guard, the `lore` CLI)  │
 └─────────────────────────────────────────────────────────┘
 ```
 
 **lore** is the bottom, fully portable layer: capture commands, automatic
-session notes, on-demand recall (`lore areas` / `lore search`), and a vault
+session notes, on-demand lookup (`lore areas` / `lore search`), and a vault
 with a status guard. It has **no** dependency on craft and no knowledge of
 your app.
 

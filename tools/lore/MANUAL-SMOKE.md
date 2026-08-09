@@ -57,14 +57,15 @@ Pass criteria: no error; plugin named `lore` is listed as installed.
 
 lore is fully pull — it registers zero hooks. Orientation lives in the
 installed agent-rules ruleset, and session finalization is explicit
-(`lore flush`). Check the plugin's hook manifest:
+(`lore flush`). This is pinned by `tests/test_manifest_validity.py`, which
+asserts the installed plugin's `hooks/hooks.json` has an empty `hooks` dict
+(no `SessionStart`, `PostToolUse`, or `WorktreeRemove` entries) — run it:
 
 ```
-cat plugins/lore/hooks/hooks.json
+python -m pytest tools/lore/tests/test_manifest_validity.py -v
 ```
 
-Pass criteria: the file is `{"hooks": {}}` — no `SessionStart`, `PostToolUse`,
-or `WorktreeRemove` entries.
+Pass criteria: the test passes.
 
 ---
 
