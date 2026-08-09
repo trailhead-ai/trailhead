@@ -811,6 +811,16 @@ def _resolve_current_vault_shared(location) -> tuple[str, int]:
     This also covers ``--vault NAME`` with no scope flag: the record was located
     in exactly the named vault, so its current vault IS that vault — pinning the
     destination there needs no separate branch.
+
+    **Path-aliased entries refuse rather than guess.** ``config.json`` enforces
+    unique vault *names*, not unique vault *paths*, so two entries can name one
+    directory carrying different ``shared`` flags. The trust flag returned here
+    is stamped onto the index row by the caller's write, so taking the
+    config-order first match would let whichever alias happens to be listed
+    first silently re-classify the record — downgrading fenced ``shared: true``
+    content to trusted. When the aliases disagree there is no defensible answer,
+    so this aborts with a clean ``lore: `` error naming the entries; aliases that
+    agree on ``shared`` are unambiguous and resolve normally.
     """
     from ..vault import config as vault_config_mod
 
@@ -819,10 +829,23 @@ def _resolve_current_vault_shared(location) -> tuple[str, int]:
         return location.vault_root, 0
     _, vaults = loaded
     current = Path(location.vault_root).resolve()
-    for v in vaults:
-        if Path(v.path).resolve() == current:
-            return location.vault_root, vault_config_mod.shared_flag(v)
-    return location.vault_root, 0
+    matches = [v for v in vaults if Path(v.path).resolve() == current]
+    if not matches:
+        return location.vault_root, 0
+    flags = {vault_config_mod.shared_flag(v) for v in matches}
+    if len(flags) > 1:
+        names = ", ".join(repr(v.name) for v in matches)
+        raise _UpdateAborted(
+            _fail(
+                [
+                    f"vault entries {names} all resolve to {current} but disagree "
+                    "on their 'shared' flag; fix config.json so path-aliased "
+                    "entries agree before updating records there"
+                ],
+                prefix="lore: ",
+            )
+        )
+    return location.vault_root, flags.pop()
 
 
 class _UpdateAborted(Exception):

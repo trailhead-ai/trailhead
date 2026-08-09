@@ -1776,3 +1776,111 @@ def test_guard_error_messages_share_one_format(tmp_path):
     assert lines, "expected at least one graph-guard line"
     for ln in lines:
         assert shape.match(ln), f"malformed guard line: {ln!r}"
+
+
+# ---------------------------------------------------------------------------
+# Path-aliased vault entries: trust resolution must refuse ambiguity
+#
+# ``validate_config`` enforces unique vault *names*, not unique vault *paths*,
+# so two entries can name one directory with disagreeing ``shared`` flags. A
+# no-scope-flag ``record update`` re-stamps the index row's trust from the
+# record's current vault, so silently taking the config-order first match would
+# let an alias downgrade fenced shared content to trusted.
+# ---------------------------------------------------------------------------
+
+
+def _index_shared(state: Path, vault: Path, kind: str, name: str) -> list:
+    """Return the ``shared`` trust flags of the keyed record's index rows."""
+    conn = _open_index(state)
+    try:
+        return [
+            row[0]
+            for row in conn.execute(
+                "SELECT shared FROM records WHERE vault=? AND kind=? AND name=?",
+                (str(vault), kind, name),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _aliased_shared_config(tmp_path, *, alias_shared: bool):
+    """Vault A (default) plus two team entries that both alias vault B.
+
+    ``gamma`` precedes ``beta`` in config order, so a first-match scan of the
+    record's current path hits ``gamma`` — whose ``shared`` flag is the knob
+    under test — while the record itself was routed to ``beta``.
+    """
+    vault_a, state = _make_vault(tmp_path)
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault_a)},
+            {
+                "name": "gamma", "scope": "team", "records": ["decision"],
+                "path": str(vault_b), "shared": alias_shared,
+            },
+            {
+                "name": "beta", "scope": "team", "records": ["decision"],
+                "path": str(vault_b), "shared": True,
+            },
+        ],
+    )
+    return vault_a, vault_b, state, config_home
+
+
+def test_update_refuses_conflicting_shared_flags_on_aliased_path(tmp_path):
+    """Aliased path + disagreeing ``shared`` → clean error, nothing written."""
+    vault_a, vault_b, state, config_home = _aliased_shared_config(
+        tmp_path, alias_shared=False
+    )
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "beta"])
+    kind, name = rid.split("/", 1)
+    body_path = vault_b / kind / f"{name}.md"
+    before_body = body_path.read_bytes()
+    before_sidecar = (vault_b / kind / f"{name}.json").read_bytes()
+    assert _index_shared(state, vault_b, kind, name) == [1]
+
+    r = _run_cfg(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+
+    assert r.returncode != 0
+    assert any(ln.startswith("lore: ") for ln in r.stderr.splitlines())
+    assert "Traceback" not in r.stderr
+    # The error names both aliased entries so the config is fixable.
+    assert "gamma" in r.stderr
+    assert "beta" in r.stderr
+
+    # Record byte-for-byte unmodified; index trust flag not downgraded.
+    assert body_path.read_bytes() == before_body
+    assert (vault_b / kind / f"{name}.json").read_bytes() == before_sidecar
+    assert _index_shared(state, vault_b, kind, name) == [1]
+
+
+def test_update_allows_aliased_path_when_shared_flags_agree(tmp_path):
+    """Aliased path whose entries agree on ``shared`` resolves normally."""
+    vault_a, vault_b, state, config_home = _aliased_shared_config(
+        tmp_path, alias_shared=True
+    )
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "beta"])
+    kind, name = rid.split("/", 1)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault_b, rid)["status"] == "superseded"
+    assert _index_shared(state, vault_b, kind, name) == [1]
