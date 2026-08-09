@@ -655,7 +655,7 @@ class TestUnknownColumnGuard:
 
 
 class TestFtsSanitizer:
-    """Strict allowlist: tokens not matching ^[-A-Za-z0-9._]+$ become quoted literals."""
+    """Strict allowlist: tokens not matching ^[A-Za-z0-9_]+$ become quoted literals."""
 
     _INJECTION_TERMS = [
         "*",
@@ -667,6 +667,9 @@ class TestFtsSanitizer:
         "body:zephyr",
         "col:nonexistent",
         "(foo OR bar)",
+        "auth-service",
+        "operational-state",
+        "phi-scrubber.v2",
     ]
 
     @pytest.mark.parametrize("term", _INJECTION_TERMS)
@@ -693,11 +696,12 @@ class TestFtsSanitizer:
         cq = compiler.compile(kql_mod.FullText(term="AND"))
         assert '"AND"' in cq.params
 
-    def test_dotted_term_stays_unquoted(self, kql, compiler):
-        """A token matching the allowlist (dot/hyphen/underscore) stays bare."""
+    def test_dotted_term_becomes_quoted_literal(self, kql, compiler):
+        """Hyphen/dot are re-parsed as column filters by FTS5's query grammar, so
+        such tokens must fall through to the quoted-literal path."""
         kql_mod = load_script("lore.search.kql")
         cq = compiler.compile(kql_mod.FullText(term="phi-scrubber.v2"))
-        assert "phi-scrubber.v2" in cq.params
+        assert '"phi-scrubber.v2"' in cq.params
 
     def test_single_quote_term_becomes_quoted_literal(self, kql, compiler, fixture_index):
         conn, vault, env = fixture_index
