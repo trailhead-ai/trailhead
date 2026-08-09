@@ -88,6 +88,7 @@ def render_group_toml(
     members: list[dict[str, Any]],
     branch_pattern: str,
     lore_scopes: list[dict[str, Any]] | None = None,
+    extra_tables: dict[str, Any] | None = None,
 ) -> str:
     """Render a deterministic TOML string for a group config.
 
@@ -98,7 +99,15 @@ def render_group_toml(
     plus any [[lore_scopes]] (scope, name) entries supplied — so re-authoring a
     group preserves a hand-added binding instead of silently dropping it.
 
-    Never emits [[shared_vaults]] or [dev_env].
+    `extra_tables` generalizes that same carry-through to every OTHER top-level
+    table this function does not itself know how to render (e.g. `[tasks.*]`,
+    `[harness]`, `[release]`, `[[shared_vaults]]`) — a raw tomllib-parsed dict
+    keyed by top-level table name, re-emitted generically (nested tables, arrays
+    of tables, and scalar/array values) rather than by adding another
+    table-specific parameter. Callers are expected to pass the raw parse of the
+    existing config, minus the keys this function already renders itself
+    ("group", "members", "branch", "lore_scopes"), so a --force re-author never
+    silently drops a hand-added table.
 
     Args:
         group_name:     Group name for [group].name.
@@ -107,6 +116,9 @@ def render_group_toml(
         branch_pattern: Value for [branch].pattern.
         lore_scopes:    Optional list of {"scope", "name"} dicts to emit as
                         [[lore_scopes]] entries (declared order preserved).
+        extra_tables:   Optional dict of {table_name: value} for any other
+                        top-level table to re-emit verbatim (value is a dict for
+                        a table, or a list of dicts for an array of tables).
 
     Returns:
         A TOML string that round-trips through load_group.
@@ -136,7 +148,82 @@ def render_group_toml(
         lines.append(f"name = {_toml_string(ls['name'])}")
         lines.append("")
 
+    for table_name, value in (extra_tables or {}).items():
+        if isinstance(value, list):
+            _render_array_table(table_name, value, lines)
+        elif isinstance(value, dict):
+            _render_table(table_name, value, lines)
+        else:
+            raise TypeError(
+                f"extra_tables[{table_name!r}] must be a dict or list of dicts, "
+                f"got {type(value).__name__}"
+            )
+
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Generic TOML sub-tree serialization (for extra_tables carry-through)
+# ---------------------------------------------------------------------------
+
+
+def _toml_value(value: Any) -> str:
+    """Render a scalar or list-of-scalars as a TOML value literal."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return _toml_string(value)
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    raise TypeError(f"unsupported TOML value type: {type(value).__name__}")
+
+
+def _split_table(table: dict[str, Any]) -> tuple[dict, dict, dict]:
+    """Split a table dict into (scalars, subtables, array-of-subtables)."""
+    scalars: dict[str, Any] = {}
+    subtables: dict[str, Any] = {}
+    array_tables: dict[str, Any] = {}
+    for key, value in table.items():
+        if isinstance(value, dict):
+            subtables[key] = value
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            array_tables[key] = value
+        else:
+            scalars[key] = value
+    return scalars, subtables, array_tables
+
+
+def _render_table(dotted_key: str, table: dict[str, Any], lines: list[str]) -> None:
+    """Append a `[dotted_key]` table (and any nested tables) to lines."""
+    scalars, subtables, array_tables = _split_table(table)
+
+    lines.append(f"[{dotted_key}]")
+    for key, value in scalars.items():
+        lines.append(f"{key} = {_toml_value(value)}")
+    lines.append("")
+
+    for key, value in subtables.items():
+        _render_table(f"{dotted_key}.{key}", value, lines)
+    for key, value in array_tables.items():
+        _render_array_table(f"{dotted_key}.{key}", value, lines)
+
+
+def _render_array_table(dotted_key: str, items: list[dict[str, Any]], lines: list[str]) -> None:
+    """Append `[[dotted_key]]` entries (and any nested tables) to lines."""
+    for item in items:
+        scalars, subtables, array_tables = _split_table(item)
+
+        lines.append(f"[[{dotted_key}]]")
+        for key, value in scalars.items():
+            lines.append(f"{key} = {_toml_value(value)}")
+        lines.append("")
+
+        for key, value in subtables.items():
+            _render_table(f"{dotted_key}.{key}", value, lines)
+        for key, value in array_tables.items():
+            _render_array_table(f"{dotted_key}.{key}", value, lines)
 
 
 # ---------------------------------------------------------------------------

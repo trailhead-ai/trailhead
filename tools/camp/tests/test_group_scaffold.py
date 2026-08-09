@@ -115,6 +115,86 @@ def test_render_group_toml_no_lore_scopes_when_absent(tmp_path: Path) -> None:
     assert load_group(f)["lore_scopes"] == []
 
 
+def test_render_group_toml_extra_tables_tasks_round_trip(tmp_path: Path) -> None:
+    """A hand-added [tasks.<name>] block (with nested [[tasks.<name>.steps]])
+    passed via extra_tables survives re-authoring byte-for-byte in structure —
+    the same task/steps parse out of the rewritten file as parsed out of the
+    original — and the rewritten file still loads cleanly."""
+    import tomllib
+
+    from camp.group.config import load_group
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "tasks": {
+            "graphify": {
+                "phase": "provision",
+                "required": False,
+                "steps": [
+                    {"name": "seed", "cmd": ["rsync", "-a", "src/", "dst/"]},
+                ],
+            }
+        }
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    assert tomllib.loads(toml_str)["tasks"] == extra_tables["tasks"]
+
+    f = tmp_path / "mygroup.toml"
+    f.write_text(toml_str)
+    load_group(f)  # does not raise — the unreferenced task def still validates
+
+
+def test_render_group_toml_extra_tables_release_round_trips_via_tomllib(
+    tmp_path: Path,
+) -> None:
+    """A hand-added [release] block passed via extra_tables survives, readable
+    directly by tomllib (mirrors how portage reads [release] — load_group
+    itself does not know this table)."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "release": {"auto_merge": True, "merge_order": ["alpha", "beta"]},
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["release"] == {"auto_merge": True, "merge_order": ["alpha", "beta"]}
+
+
+def test_render_group_toml_extra_tables_harness_and_shared_vaults_round_trip(
+    tmp_path: Path,
+) -> None:
+    """A hand-added [harness] block and [[shared_vaults]] entries passed via
+    extra_tables survive and are readable through load_group."""
+    from camp.group.config import load_group
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "harness": {"binary": "claude"},
+        "shared_vaults": [{"name": "trailhead", "root": "/tmp/vaults/trailhead"}],
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    f = tmp_path / "mygroup.toml"
+    f.write_text(toml_str)
+
+    cfg = load_group(f)
+    assert cfg["harness"] == {"binary": "claude"}
+    assert cfg["shared_vaults"] == [{"name": "trailhead", "root": "/tmp/vaults/trailhead"}]
+
+
 def test_render_group_toml_path_with_spaces_round_trips(tmp_path: Path) -> None:
     """A repo_root with spaces in the path is correctly escaped and round-trips."""
     from camp.group.config import load_group

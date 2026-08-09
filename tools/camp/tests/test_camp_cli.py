@@ -350,6 +350,112 @@ def test_force_redefine_preserves_hand_added_lore_scopes(author_env):
     assert cfg["lore_scopes"] == [{"scope": "product", "name": "trailhead"}]
 
 
+def test_force_redefine_preserves_hand_added_release_table(author_env):
+    """A hand-added [release] block survives a --force re-author instead of
+    being silently dropped by the renderer (mirrors how portage reads
+    [release] directly via tomllib — camp itself does not know this table)."""
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8")
+        + '\n[release]\nauto_merge = true\nmerge_order = ["alpha", "beta"]\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["release"] == {
+        "auto_merge": True,
+        "merge_order": ["alpha", "beta"],
+    }
+
+
+def test_force_redefine_preserves_hand_added_tasks_table(author_env):
+    """A hand-added [tasks.<name>] block, with nested [[tasks.<name>.steps]],
+    survives a --force re-author instead of being silently dropped."""
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8")
+        + "\n[tasks.graphify]\n"
+        + "phase = \"provision\"\n"
+        + "required = false\n"
+        + "\n[[tasks.graphify.steps]]\n"
+        + 'name = "seed"\n'
+        + 'cmd = ["rsync", "-a", "src/", "dst/"]\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["tasks"] == {
+        "graphify": {
+            "phase": "provision",
+            "required": False,
+            "steps": [{"name": "seed", "cmd": ["rsync", "-a", "src/", "dst/"]}],
+        }
+    }
+    # The rewritten config still loads cleanly end to end.
+    assert _load_written_group(g["groups_dir"], "mygroup")
+
+
+def test_force_redefine_preserves_hand_added_harness_and_shared_vaults(author_env):
+    """A hand-added [harness] block and [[shared_vaults]] entries survive a
+    --force re-author instead of being silently dropped."""
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8")
+        + '\n[harness]\nbinary = "claude"\n'
+        + '\n[[shared_vaults]]\nname = "trailhead"\nroot = "/tmp/vaults/trailhead"\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    cfg = _load_written_group(g["groups_dir"], "mygroup")
+    assert cfg["harness"] == {"binary": "claude"}
+    assert cfg["shared_vaults"] == [
+        {"name": "trailhead", "root": "/tmp/vaults/trailhead"}
+    ]
+
+
 def test_existing_config_without_force_errors_and_preserves_file(author_env):
     """Existing config + --member WITHOUT --force → non-zero, file unchanged."""
     g = author_env

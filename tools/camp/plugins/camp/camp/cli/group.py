@@ -314,6 +314,8 @@ def _author_group(
     config_path,
 ) -> None:
     """Validate + atomically write a group config TOML. Exits non-zero on failure."""
+    import tomllib
+
     from ..group.config import load_all_groups, load_group, GroupConfigError
     from ..group.resolve import GroupConfinementError
     from ..group import scaffold as group_scaffold
@@ -342,6 +344,19 @@ def _author_group(
     )
     existing_lore_scopes = existing_group.get("lore_scopes", []) if existing_group else []
 
+    # render_group_toml also knows only the core schema for every OTHER
+    # top-level table, so a --force re-author would otherwise silently drop
+    # any hand-added table it doesn't itself render (e.g. [tasks.*],
+    # [harness], [release], [[shared_vaults]]). Read the raw TOML directly
+    # (not load_group's normalized shape, which reshapes/loses some of these)
+    # and carry through every top-level table render_group_toml doesn't
+    # already produce from its own parameters.
+    existing_extra_tables: dict = {}
+    if config_path.exists():
+        raw_existing = tomllib.loads(config_path.read_text())
+        core_keys = {"group", "members", "branch", "lore_scopes"}
+        existing_extra_tables = {k: v for k, v in raw_existing.items() if k not in core_keys}
+
     try:
         group_scaffold.validate_scaffold(
             group_name,
@@ -354,7 +369,11 @@ def _author_group(
         sys.exit(1)
 
     rendered = group_scaffold.render_group_toml(
-        group_name, members, branch_pattern, lore_scopes=existing_lore_scopes
+        group_name,
+        members,
+        branch_pattern,
+        lore_scopes=existing_lore_scopes,
+        extra_tables=existing_extra_tables,
     )
 
     # Atomic write: tmp → round-trip gate via load_group → os.replace.
