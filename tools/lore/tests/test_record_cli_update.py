@@ -570,6 +570,118 @@ def test_update_no_scope_change_stays_in_place_no_moved_line(tmp_path):
     assert "moved:" not in r.stderr
 
 
+# ---------------------------------------------------------------------------
+# A stored scope field (repo/product/suite/team) is ordinary data, not a
+# standing routing request. Re-resolution must only fire when THIS call
+# explicitly passes one of the four scope flags -- never off whatever
+# already happens to be sitting in the merged sidecar.
+# ---------------------------------------------------------------------------
+
+
+def _two_repo_config(tmp_path):
+    """Active vault A (default) and vault B (repo:widgets), with config."""
+    vault_a, state = _make_vault(tmp_path)
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault_a)},
+            {"name": "widgets", "scope": "repo", "records": ["decision"], "path": str(vault_b)},
+        ],
+    )
+    return vault_a, vault_b, state, config_home
+
+
+def test_update_stored_repo_field_no_flag_stays_put(tmp_path):
+    """A stored ``repo`` field resolving to a DIFFERENT vault than where the
+    record physically lives does not move it on a metadata-only update that
+    passes no scope flag at all -- the sidecar value is inert data until an
+    explicit ``--repo`` flag asks for relocation."""
+    vault_a, vault_b, state, config_home = _two_repo_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=[])
+    kind, name = rid.split("/", 1)
+    sidecar_path = vault_a / kind / f"{name}.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["repo"] = "widgets"
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+
+    r = _run_cfg(
+        ["record", "update", rid, "--unset-label", "area"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_a / kind / f"{name}.md").exists()
+    assert not (vault_b / kind / f"{name}.md").exists()
+    assert _find_sidecar(vault_a, rid)["repo"] == "widgets"
+    assert "moved:" not in r.stdout
+
+
+def test_update_stored_repo_field_explicit_flag_still_moves(tmp_path):
+    """The same stored-scope record DOES move when the matching flag is passed
+    explicitly on this call -- the existing auto-move behavior is unchanged."""
+    vault_a, vault_b, state, config_home = _two_repo_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=[])
+    kind, name = rid.split("/", 1)
+    assert (vault_a / kind / f"{name}.md").exists()
+
+    r = _run_cfg(
+        ["record", "update", rid, "--repo", "widgets"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_b / kind / f"{name}.md").exists()
+    assert not (vault_a / kind / f"{name}.md").exists()
+    assert f"moved: {rid} →" in r.stdout
+
+
+def test_update_stored_repo_no_matching_vault_no_flag_stays_put(tmp_path):
+    """A record living in a NON-default vault whose only scope field is a stray
+    ``repo`` value with no repo-scoped vault configured stays put on a bare
+    metadata-only update -- repro of the reported bug, where re-resolving off the
+    merged scope hit the default-vault floor and silently dragged the record out
+    of the vault it lived in via ``--unset-label``."""
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    # The record lives in the NON-default vault (team:beta -> vault B), so a
+    # fall-through to the default vault is observable as a relocation into A.
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "beta"])
+    kind, name = rid.split("/", 1)
+    assert (vault_b / kind / f"{name}.md").exists()
+
+    sidecar_path = vault_b / kind / f"{name}.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    # The only scope field left is a stray ``repo`` naming a vault that is not
+    # configured, so re-resolving off the merged scope would land on the default
+    # vault (A) and drag the record out of the vault it actually lives in.
+    sidecar.pop("team", None)
+    sidecar["repo"] = "home-manager"
+    sidecar["labels"] = {"area": "auth"}
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+
+    r = _run_cfg(
+        ["record", "update", rid, "--unset-label", "area"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+
+    assert (vault_b / kind / f"{name}.md").exists()
+    assert not (vault_a / kind / f"{name}.md").exists()
+    assert _find_sidecar(vault_b, rid)["repo"] == "home-manager"
+    assert "moved:" not in r.stdout
+
+
 def test_update_same_scope_is_noop_with_symlinked_vault_root(tmp_path):
     """``update --team alpha`` on a record already in A is a no-op (normalized-path eq).
 
@@ -1664,3 +1776,111 @@ def test_guard_error_messages_share_one_format(tmp_path):
     assert lines, "expected at least one graph-guard line"
     for ln in lines:
         assert shape.match(ln), f"malformed guard line: {ln!r}"
+
+
+# ---------------------------------------------------------------------------
+# Path-aliased vault entries: trust resolution must refuse ambiguity
+#
+# ``validate_config`` enforces unique vault *names*, not unique vault *paths*,
+# so two entries can name one directory with disagreeing ``shared`` flags. A
+# no-scope-flag ``record update`` re-stamps the index row's trust from the
+# record's current vault, so silently taking the config-order first match would
+# let an alias downgrade fenced shared content to trusted.
+# ---------------------------------------------------------------------------
+
+
+def _index_shared(state: Path, vault: Path, kind: str, name: str) -> list:
+    """Return the ``shared`` trust flags of the keyed record's index rows."""
+    conn = _open_index(state)
+    try:
+        return [
+            row[0]
+            for row in conn.execute(
+                "SELECT shared FROM records WHERE vault=? AND kind=? AND name=?",
+                (str(vault), kind, name),
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _aliased_shared_config(tmp_path, *, alias_shared: bool):
+    """Vault A (default) plus two team entries that both alias vault B.
+
+    ``gamma`` precedes ``beta`` in config order, so a first-match scan of the
+    record's current path hits ``gamma`` — whose ``shared`` flag is the knob
+    under test — while the record itself was routed to ``beta``.
+    """
+    vault_a, state = _make_vault(tmp_path)
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault_a)},
+            {
+                "name": "gamma", "scope": "team", "records": ["decision"],
+                "path": str(vault_b), "shared": alias_shared,
+            },
+            {
+                "name": "beta", "scope": "team", "records": ["decision"],
+                "path": str(vault_b), "shared": True,
+            },
+        ],
+    )
+    return vault_a, vault_b, state, config_home
+
+
+def test_update_refuses_conflicting_shared_flags_on_aliased_path(tmp_path):
+    """Aliased path + disagreeing ``shared`` → clean error, nothing written."""
+    vault_a, vault_b, state, config_home = _aliased_shared_config(
+        tmp_path, alias_shared=False
+    )
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "beta"])
+    kind, name = rid.split("/", 1)
+    body_path = vault_b / kind / f"{name}.md"
+    before_body = body_path.read_bytes()
+    before_sidecar = (vault_b / kind / f"{name}.json").read_bytes()
+    assert _index_shared(state, vault_b, kind, name) == [1]
+
+    r = _run_cfg(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+
+    assert r.returncode != 0
+    assert any(ln.startswith("lore: ") for ln in r.stderr.splitlines())
+    assert "Traceback" not in r.stderr
+    # The error names both aliased entries so the config is fixable.
+    assert "gamma" in r.stderr
+    assert "beta" in r.stderr
+
+    # Record byte-for-byte unmodified; index trust flag not downgraded.
+    assert body_path.read_bytes() == before_body
+    assert (vault_b / kind / f"{name}.json").read_bytes() == before_sidecar
+    assert _index_shared(state, vault_b, kind, name) == [1]
+
+
+def test_update_allows_aliased_path_when_shared_flags_agree(tmp_path):
+    """Aliased path whose entries agree on ``shared`` resolves normally."""
+    vault_a, vault_b, state, config_home = _aliased_shared_config(
+        tmp_path, alias_shared=True
+    )
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "beta"])
+    kind, name = rid.split("/", 1)
+
+    r = _run_cfg(
+        ["record", "update", rid, "--status", "superseded"],
+        vault=vault_a,
+        state=state,
+        config_home=config_home,
+        stdin_text="",
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault_b, rid)["status"] == "superseded"
+    assert _index_shared(state, vault_b, kind, name) == [1]

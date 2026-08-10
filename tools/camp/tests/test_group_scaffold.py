@@ -115,6 +115,252 @@ def test_render_group_toml_no_lore_scopes_when_absent(tmp_path: Path) -> None:
     assert load_group(f)["lore_scopes"] == []
 
 
+def test_render_group_toml_extra_tables_tasks_round_trip(tmp_path: Path) -> None:
+    """A hand-added [tasks.<name>] block (with nested [[tasks.<name>.steps]])
+    passed via extra_tables survives re-authoring byte-for-byte in structure —
+    the same task/steps parse out of the rewritten file as parsed out of the
+    original — and the rewritten file still loads cleanly."""
+    import tomllib
+
+    from camp.group.config import load_group
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "tasks": {
+            "graphify": {
+                "phase": "provision",
+                "required": False,
+                "steps": [
+                    {"name": "seed", "cmd": ["rsync", "-a", "src/", "dst/"]},
+                ],
+            }
+        }
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    assert tomllib.loads(toml_str)["tasks"] == extra_tables["tasks"]
+
+    f = tmp_path / "mygroup.toml"
+    f.write_text(toml_str)
+    load_group(f)  # does not raise — the unreferenced task def still validates
+
+
+def test_render_group_toml_non_bare_table_key_round_trips(tmp_path: Path) -> None:
+    """A carried [tasks."release-1.0"] table (a dotted, non-bare TOML key) must
+    be re-emitted quoted so it reparses as one key, not nested under a bare
+    `release-1` / `0` split — the exact silent-corruption case a bare-key
+    renderer produces."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "tasks": {
+            "release-1.0": {
+                "phase": "provision",
+                "steps": [{"name": "seed", "cmd": ["echo", "hi"]}],
+            }
+        }
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["tasks"] == extra_tables["tasks"]
+
+
+def test_render_group_toml_non_bare_scalar_key_round_trips(tmp_path: Path) -> None:
+    """A top-level scalar key with a space in it (`"my key" = 1`) is not a bare
+    TOML key and must be quoted on re-render, or the output is invalid TOML."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {"my key": 1}
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["my key"] == 1
+
+
+def test_render_group_toml_control_char_value_round_trips(tmp_path: Path) -> None:
+    """A carried value containing a raw C0 control character must be escaped as
+    \\uXXXX — TOML basic strings forbid unescaped control characters, so an
+    unescaped one makes the whole rendered document unparseable."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {"release": {"note": "before\x01after"}}
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["release"]["note"] == "before\x01after"
+
+
+def test_render_group_toml_extra_tables_release_round_trips_via_tomllib(
+    tmp_path: Path,
+) -> None:
+    """A hand-added [release] block passed via extra_tables survives, readable
+    directly by tomllib (mirrors how portage reads [release] — load_group
+    itself does not know this table)."""
+    import tomllib
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "release": {"auto_merge": True, "merge_order": ["alpha", "beta"]},
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["release"] == {"auto_merge": True, "merge_order": ["alpha", "beta"]}
+
+
+def test_render_group_toml_extra_tables_harness_and_shared_vaults_round_trip(
+    tmp_path: Path,
+) -> None:
+    """A hand-added [harness] block and [[shared_vaults]] entries passed via
+    extra_tables survive and are readable through load_group."""
+    from camp.group.config import load_group
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    extra_tables = {
+        "harness": {"binary": "claude"},
+        "shared_vaults": [{"name": "trailhead", "root": "/tmp/vaults/trailhead"}],
+    }
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=extra_tables
+    )
+
+    f = tmp_path / "mygroup.toml"
+    f.write_text(toml_str)
+
+    cfg = load_group(f)
+    assert cfg["harness"] == {"binary": "claude"}
+    assert cfg["shared_vaults"] == [{"name": "trailhead", "root": "/tmp/vaults/trailhead"}]
+
+
+def test_render_group_toml_extra_top_level_scalar_round_trips(tmp_path: Path) -> None:
+    """A hand-edited top-level scalar (`version = 1`) survives carry-through.
+
+    It must be emitted BEFORE the [group] header — appended after the extra
+    tables it would be reparented under whichever table was emitted last.
+    """
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    toml_str = render_group_toml(
+        "mygroup",
+        members,
+        "worktree-{slug}",
+        extra_tables={"version": 1, "harness": {"binary": "claude"}},
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["version"] == 1
+    assert parsed["harness"] == {"binary": "claude"}
+
+
+def test_render_group_toml_extra_top_level_scalar_array_round_trips() -> None:
+    """A hand-edited top-level array of scalars (`tags = ["a"]`) survives."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    toml_str = render_group_toml(
+        "mygroup",
+        members,
+        "worktree-{slug}",
+        extra_tables={"tags": ["a", "b"], "release": {"auto_merge": True}},
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["tags"] == ["a", "b"]
+    assert parsed["release"] == {"auto_merge": True}
+
+
+def test_render_group_toml_extra_top_level_empty_array_round_trips() -> None:
+    """A top-level empty array is emitted as `x = []`, not silently dropped."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables={"x": []}
+    )
+
+    assert tomllib.loads(toml_str)["x"] == []
+
+
+def test_render_group_toml_extra_datetime_values_round_trip() -> None:
+    """TOML date/time/datetime literals (which tomllib yields as datetime
+    objects) re-serialize as bare TOML literals, not as quoted strings."""
+    import datetime
+
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    original = tomllib.loads(
+        "[window]\n"
+        "cutoff = 2026-01-01\n"
+        "at = 09:30:00\n"
+        "local = 2026-01-01T09:30:00\n"
+        "offset = 2026-01-01T09:30:00Z\n"
+    )
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=original
+    )
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["window"] == original["window"]
+    assert isinstance(parsed["window"]["cutoff"], datetime.date)
+
+
+def test_render_group_toml_top_level_datetime_round_trips() -> None:
+    """A top-level datetime literal is emitted before [group] and round-trips."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    original = tomllib.loads("cutoff = 2026-01-01\n[harness]\nbinary = 'claude'\n")
+    toml_str = render_group_toml(
+        "mygroup", members, "worktree-{slug}", extra_tables=original
+    )
+
+    assert tomllib.loads(toml_str)["cutoff"] == original["cutoff"]
+
+
+def test_render_group_toml_unserializable_value_raises_scaffold_error() -> None:
+    """A genuinely unserializable value surfaces as a clean error naming the
+    offending key, with no `camp: ` prefix baked into the message — the CLI
+    caller supplies that prefix itself, so the renderer must not double it up
+    (`camp group: camp: ...`)."""
+    from camp.group.scaffold import ScaffoldError, render_group_toml
+
+    members = [{"name": "alpha", "repo_root": "/tmp/alpha"}]
+    with pytest.raises(ScaffoldError) as exc:
+        render_group_toml(
+            "mygroup", members, "worktree-{slug}", extra_tables={"bad": {"k": object()}}
+        )
+
+    assert not str(exc.value).startswith("camp: ")
+    assert "bad" in str(exc.value)
+    assert "bad" in str(exc.value)
+
+
 def test_render_group_toml_path_with_spaces_round_trips(tmp_path: Path) -> None:
     """A repo_root with spaces in the path is correctly escaped and round-trips."""
     from camp.group.config import load_group

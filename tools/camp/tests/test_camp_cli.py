@@ -201,11 +201,13 @@ def _run_init(
     config_dir: Path,
     state_dir: Path,
     cwd: Path | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run `camp group <args>` via cli/camp with config/state overrides."""
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
+    env.update(env_extra or {})
     return subprocess.run(
         [sys.executable, str(_CLI_CAMP), "group", *args],
         capture_output=True,
@@ -348,6 +350,178 @@ def test_force_redefine_preserves_hand_added_lore_scopes(author_env):
     assert {m["name"] for m in cfg["members"]} == {"alpha", "beta"}
     # The binding must survive the re-author rather than being dropped.
     assert cfg["lore_scopes"] == [{"scope": "product", "name": "trailhead"}]
+
+
+def test_force_redefine_preserves_hand_added_release_table(author_env):
+    """A hand-added [release] block survives a --force re-author instead of
+    being silently dropped by the renderer (mirrors how portage reads
+    [release] directly via tomllib — camp itself does not know this table)."""
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8")
+        + '\n[release]\nauto_merge = true\nmerge_order = ["alpha", "beta"]\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["release"] == {
+        "auto_merge": True,
+        "merge_order": ["alpha", "beta"],
+    }
+
+
+def test_force_redefine_preserves_hand_added_top_level_keys(author_env):
+    """Hand-edited top-level bare keys — a scalar, an array of scalars, an empty
+    array, and a date literal — survive a --force re-author without a traceback."""
+    import datetime
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        "version = 1\n"
+        'tags = ["a", "b"]\n'
+        "empty = []\n"
+        "cutoff = 2026-01-01\n" + toml_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+    assert "Traceback" not in second.stderr
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["version"] == 1
+    assert rewritten["tags"] == ["a", "b"]
+    assert rewritten["empty"] == []
+    assert rewritten["cutoff"] == datetime.date(2026, 1, 1)
+    assert _load_written_group(g["groups_dir"], "mygroup")
+
+
+def test_force_redefine_preserves_non_ascii_hand_added_table(author_env):
+    """A hand-added table carrying non-ASCII text survives a --force re-author —
+    the existing config is read as UTF-8 regardless of the platform locale."""
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8") + '\n[release]\nowner = "Åsa Ünïcode ✓"\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+        env_extra={"LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0"},
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["release"] == {"owner": "Åsa Ünïcode ✓"}
+
+
+def test_force_redefine_preserves_hand_added_tasks_table(author_env):
+    """A hand-added [tasks.<name>] block, with nested [[tasks.<name>.steps]],
+    survives a --force re-author instead of being silently dropped."""
+    import tomllib
+
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8")
+        + "\n[tasks.graphify]\n"
+        + "phase = \"provision\"\n"
+        + "required = false\n"
+        + "\n[[tasks.graphify.steps]]\n"
+        + 'name = "seed"\n'
+        + 'cmd = ["rsync", "-a", "src/", "dst/"]\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    rewritten = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    assert rewritten["tasks"] == {
+        "graphify": {
+            "phase": "provision",
+            "required": False,
+            "steps": [{"name": "seed", "cmd": ["rsync", "-a", "src/", "dst/"]}],
+        }
+    }
+    # The rewritten config still loads cleanly end to end.
+    assert _load_written_group(g["groups_dir"], "mygroup")
+
+
+def test_force_redefine_preserves_hand_added_harness_and_shared_vaults(author_env):
+    """A hand-added [harness] block and [[shared_vaults]] entries survive a
+    --force re-author instead of being silently dropped."""
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    toml_path.write_text(
+        toml_path.read_text(encoding="utf-8")
+        + '\n[harness]\nbinary = "claude"\n'
+        + '\n[[shared_vaults]]\nname = "trailhead"\nroot = "/tmp/vaults/trailhead"\n',
+        encoding="utf-8",
+    )
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    cfg = _load_written_group(g["groups_dir"], "mygroup")
+    assert cfg["harness"] == {"binary": "claude"}
+    assert cfg["shared_vaults"] == [
+        {"name": "trailhead", "root": "/tmp/vaults/trailhead"}
+    ]
 
 
 def test_existing_config_without_force_errors_and_preserves_file(author_env):
@@ -545,3 +719,32 @@ def test_init_help_documents_new_flags() -> None:
     out = result.stdout + result.stderr
     for token in ("--member", "--scaffold", "--force"):
         assert token in out, f"expected {token!r} in group --help:\n{out}"
+
+
+def test_scaffold_stub_write_uses_utf8_encoding() -> None:
+    """Every group-config write_text() call in cli/group.py must pin
+    encoding="utf-8" explicitly rather than relying on the platform's
+    preferred locale encoding — including the --scaffold stub write, the
+    one remaining call that didn't."""
+    import ast
+
+    src_path = (
+        Path(__file__).resolve().parents[1]
+        / "plugins"
+        / "camp"
+        / "camp"
+        / "cli"
+        / "group.py"
+    )
+    tree = ast.parse(src_path.read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "write_text"
+        ):
+            kwarg_names = {kw.arg for kw in node.keywords}
+            assert "encoding" in kwarg_names, (
+                f"write_text() call at {src_path}:{node.lineno} is missing "
+                "encoding=\"utf-8\""
+            )
