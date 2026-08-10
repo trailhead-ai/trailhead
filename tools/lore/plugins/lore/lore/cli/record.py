@@ -537,6 +537,20 @@ def _cmd_record_create(args) -> int:
     concurrent creates read the same highest number, so it is that write-time
     lock that makes exactly one of them win and the other refuse cleanly —
     never a silent suffix, and never a clobber.
+
+    ``--vault NAME`` names the destination vault directly via
+    :func:`_resolve_named_vault`, bypassing :func:`vault_resolve.explain_resolution`'s
+    scope-based routing computation entirely — explicit vault targeting wins
+    over routing, the same precedence ``record show``/``record update --vault``
+    already give explicit targeting over their scans. ``--repo``/``--product``/
+    ``--suite``/``--team``, if also passed, keep stamping their own sidecar
+    fields (:func:`record.fields.apply_record_fields` fields are unaffected);
+    that effect is orthogonal to which vault the record lands in — the same
+    "field-setter vs. routing" split ``record update`` already draws between
+    scope flags and ``--vault``. The routing confirmation line still prints,
+    naming the ``--vault``-selected vault. An unknown ``--vault`` name errors
+    ``lore: <msg>`` + nonzero, nothing written. Omitting ``--vault`` preserves
+    the existing scope-routing/vanilla-fallback behavior unchanged.
     """
     from .. import locking as locking_mod
     from ..record import fields as fields_mod
@@ -604,7 +618,18 @@ def _cmd_record_create(args) -> int:
     shared_flag = 0
     routing_line: str | None = None
     seeded_scopes: set[str] = set()
-    if loaded is not None:
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        # Explicit vault targeting wins over scope-based routing entirely —
+        # scope flags above already stamped their sidecar fields; only the
+        # destination-vault computation below is bypassed.
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        vault_root = Path(named_vault.path)
+        shared_flag = vault_config_mod.shared_flag(named_vault)
+        routing_line = f"Routed to vault: {named_vault.name} (--vault)"
+    elif loaded is not None:
         # Group-default seeding: a record created inside a camp workspace whose
         # group declares a [[lore_scopes]] binding inherits that scope when no
         # explicit flag selects it. ``setdefault`` on BOTH ``participating_scopes``
@@ -1346,6 +1371,13 @@ def add_record_subparser(sub) -> None:
     p_record_create.add_argument(
         "--team", default=None,
         help="Routing scope: restrict to this team's vault",
+    )
+    p_record_create.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Create the record in exactly this configured vault by name, "
+             "bypassing scope-based routing entirely. Combine with "
+             "--repo/--product/--suite/--team to still stamp their sidecar "
+             "fields.",
     )
     _add_record_field_flags(p_record_create)
     # Map flags (labels/annotations): dedicated branch.

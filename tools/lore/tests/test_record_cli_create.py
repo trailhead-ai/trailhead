@@ -1004,6 +1004,131 @@ def test_scope_no_other_team_field_flag(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# --vault: explicit vault targeting, bypassing scope-based routing entirely
+# ---------------------------------------------------------------------------
+
+
+def test_vault_flag_creates_directly_in_named_vault_no_scope_flags(tmp_path):
+    """``--vault beta`` (no scope flags) creates directly in beta, regardless
+    of config declaration order."""
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+
+    r = _run_with_config(
+        ["record", "create", "--kind", "decision", "--title", "T", "--vault", "beta"],
+        vault=vault, state=state, config_home=config_home, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+
+    kind, name = record_id.split("/", 1)
+    assert (beta_vault / kind / f"{name}.md").exists()
+    assert not (alpha_vault / kind / f"{name}.md").exists()
+    assert not (vault / kind / f"{name}.md").exists()
+
+
+def test_vault_flag_composes_with_scope_flag_field_write(tmp_path):
+    """``--team alpha --vault beta`` creates in beta while still stamping
+    ``team: alpha`` into the sidecar -- scope flags set fields, ``--vault``
+    wins routing."""
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+
+    r = _run_with_config(
+        [
+            "record", "create", "--kind", "decision", "--title", "T",
+            "--team", "alpha", "--vault", "beta",
+        ],
+        vault=vault, state=state, config_home=config_home, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+
+    kind, name = record_id.split("/", 1)
+    assert (beta_vault / kind / f"{name}.md").exists()
+    assert not (alpha_vault / kind / f"{name}.md").exists()
+
+    sidecar = _find_sidecar(beta_vault, record_id)
+    assert sidecar.get("team") == "alpha"
+
+
+def test_vault_flag_unknown_name_errors_nothing_written(tmp_path):
+    """An unconfigured ``--vault`` name errors ``lore: <msg>`` nonzero, and
+    nothing is written anywhere."""
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [{"name": "default", "scope": "default", "path": str(vault)}],
+    )
+
+    r = _run_with_config(
+        ["record", "create", "--kind", "decision", "--title", "T", "--vault", "nope"],
+        vault=vault, state=state, config_home=config_home, stdin_text="body\n",
+    )
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+    assert "nope" in r.stderr
+    assert not (vault / "decision").exists()
+
+
+def test_vault_flag_omitted_preserves_scope_routing_behavior(tmp_path):
+    """Omitting ``--vault`` preserves the existing scope-routing behavior
+    unchanged (mirrors test_scope_team_with_config_writes_field_and_routes)."""
+    vault, state = _make_vault(tmp_path)
+    config_home = tmp_path / "config"
+
+    scoped_vault = tmp_path / "team_alpha_vault"
+    scoped_vault.mkdir(parents=True)
+
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(vault)},
+            {"name": "alpha", "scope": "team", "records": ["decision"], "path": str(scoped_vault)},
+        ],
+    )
+
+    r = _run_with_config(
+        ["record", "create", "--kind", "decision", "--title", "T", "--team", "alpha"],
+        vault=vault, state=state, config_home=config_home, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+
+    record_id = r.stdout.strip()
+    kind, name = record_id.split("/", 1)
+    assert (scoped_vault / kind / f"{name}.md").exists()
+
+
 def test_adr_create_defaults_status_to_draft(tmp_path):
     """A freshly created adr, with no --status flag, defaults to draft."""
     vault, state = _make_vault(tmp_path)

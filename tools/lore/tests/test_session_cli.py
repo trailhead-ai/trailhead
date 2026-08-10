@@ -138,6 +138,113 @@ class TestFenceNeutralization:
 
 
 # ---------------------------------------------------------------------------
+# --vault: explicit destination-vault targeting for ``session candidate``
+# ---------------------------------------------------------------------------
+
+
+def _write_config(config_home: Path, vaults: list) -> Path:
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    cfg_path = lore_cfg / "config.json"
+    cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
+    return cfg_path
+
+
+def _run_cfg(args, *, vault, state, config_home, stdin_text=None):
+    return _run(
+        args, vault=vault, state_dir=state, stdin_text=stdin_text,
+        env_extra={"XDG_CONFIG_HOME": str(config_home)},
+    )
+
+
+class TestSessionCandidateVaultFlag:
+
+    def test_vault_flag_materializes_in_named_vault_not_active(self, tmp_path):
+        """``--vault beta`` dirties/materializes the session record under
+        beta's ``session/`` dir, not the active-vault resolution's target."""
+        active_vault, state = _make_vault(tmp_path)
+        beta_vault = tmp_path / "vault_beta"
+        beta_vault.mkdir(parents=True)
+        config_home = tmp_path / "config"
+        _write_config(
+            config_home,
+            [
+                {"name": "default", "scope": "default", "path": str(active_vault)},
+                {"name": "beta", "scope": "team", "path": str(beta_vault)},
+            ],
+        )
+
+        r = _run_cfg(
+            ["session", "candidate", "--session-id", SID, "--kind", "spec",
+             "--phase", "Plan", "--vault", "beta"],
+            vault=active_vault, state=state, config_home=config_home,
+            stdin_text="a candidate finding\n",
+        )
+        assert r.returncode == 0, f"candidate failed: {r.stderr}"
+        assert _session_note(beta_vault, SID).exists()
+        assert not _session_note(active_vault, SID).exists()
+        assert "a candidate finding" in _session_note(beta_vault, SID).read_text()
+
+    def test_vault_flag_unknown_name_errors_before_any_write(self, tmp_path):
+        """An unconfigured ``--vault`` name errors nonzero before any write --
+        no session note materializes anywhere."""
+        active_vault, state = _make_vault(tmp_path)
+        config_home = tmp_path / "config"
+        _write_config(
+            config_home,
+            [{"name": "default", "scope": "default", "path": str(active_vault)}],
+        )
+
+        r = _run_cfg(
+            ["session", "candidate", "--session-id", SID, "--kind", "spec",
+             "--phase", "Plan", "--vault", "nope"],
+            vault=active_vault, state=state, config_home=config_home,
+            stdin_text="a candidate finding\n",
+        )
+        assert r.returncode != 0
+        assert r.stderr.startswith("lore: ")
+        assert not _session_note(active_vault, SID).exists()
+
+    def test_vault_flag_composes_with_session_id(self, tmp_path):
+        """``--vault`` selects which vault; ``--session-id`` still selects
+        which session key -- the two compose independently."""
+        active_vault, state = _make_vault(tmp_path)
+        beta_vault = tmp_path / "vault_beta"
+        beta_vault.mkdir(parents=True)
+        config_home = tmp_path / "config"
+        _write_config(
+            config_home,
+            [
+                {"name": "default", "scope": "default", "path": str(active_vault)},
+                {"name": "beta", "scope": "team", "path": str(beta_vault)},
+            ],
+        )
+        other_sid = "22222222-3333-4444-8555-666666666666"
+
+        r = _run_cfg(
+            ["session", "candidate", "--session-id", other_sid, "--kind", "spec",
+             "--phase", "Plan", "--vault", "beta"],
+            vault=active_vault, state=state, config_home=config_home,
+            stdin_text="finding\n",
+        )
+        assert r.returncode == 0, r.stderr
+        assert _session_note(beta_vault, other_sid).exists()
+        assert not _session_note(beta_vault, SID).exists()
+
+    def test_vault_flag_omitted_preserves_active_vault_resolution(self, tmp_path):
+        """Omitting ``--vault`` preserves the existing active-vault-resolution
+        behavior unchanged."""
+        vault, state = _make_vault(tmp_path)
+        r = _run(
+            ["session", "candidate", "--session-id", SID, "--kind", "spec",
+             "--phase", "Plan"],
+            vault=vault, state_dir=state, stdin_text="a candidate finding\n",
+        )
+        assert r.returncode == 0, f"candidate failed: {r.stderr}"
+        assert _session_note(vault, SID).exists()
+
+
+# ---------------------------------------------------------------------------
 # ``session`` subcommand routing
 # ---------------------------------------------------------------------------
 
