@@ -129,8 +129,15 @@ def _run_cold(bootstrap: Path, *, env_overrides: dict[str, str], cwd: Path):
     """Run a cold child interpreter that bootstraps trailhead via ``bootstrap``.
 
     Tier-1 is defeated by using a child process with PYTHONPATH stripped (the
-    parent pytest process has trailhead imported; the child must not). On
-    success the child prints ``OK:<resolved repo root>``.
+    parent pytest process has trailhead imported; the child must not) *and*
+    ``-S`` (skip the implicit ``site`` import). PYTHONPATH alone does not
+    defeat an editable install: `pip install -e .` registers `trailhead` via
+    a site-packages `.pth`/finder hook that `site` processes regardless of
+    PYTHONPATH, so without `-S` `import trailhead.paths` would succeed
+    unconditionally in the cold child even with no walk target — `-S`
+    restores the "trailhead not yet importable" cold-start precondition this
+    whole class assumes. On success the child prints
+    ``OK:<resolved repo root>``.
     """
     driver = textwrap.dedent(
         f"""
@@ -147,7 +154,7 @@ def _run_cold(bootstrap: Path, *, env_overrides: dict[str, str], cwd: Path):
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env.update(env_overrides)
     return subprocess.run(
-        [sys.executable, "-c", driver],
+        [sys.executable, "-S", "-c", driver],
         env=env,
         cwd=str(cwd),
         capture_output=True,
