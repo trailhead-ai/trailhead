@@ -629,6 +629,133 @@ class TestPrMerge:
         with pytest.raises(InvalidInputError):
             provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
 
+    def test_stacked_pr_refused_before_do_merge(self, tmp_path: Path) -> None:
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+            ],
+        )
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+        merge_calls: list[str] = []
+
+        def stub(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "config" in cmd and "user.email" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+            if "remote" in cmd and "get-url" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd, 0, "git@github.com:acme/alpha.git\n", ""
+                )
+            if "pr" in cmd and "view" in cmd and "--json" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "state": "OPEN",
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "headRefName": "feat",
+                        }
+                    ),
+                    "",
+                )
+            if "graphql" in cmd_str:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "data": {
+                                "repository": {
+                                    "pullRequest": {
+                                        "stackEntry": {"stack": {"number": 7, "size": 3}}
+                                    }
+                                }
+                            }
+                        }
+                    ),
+                    "",
+                )
+            if "pr" in cmd and "merge" in cmd:
+                merge_calls.append("merged")
+                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="55", member_name="alpha")]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        assert merge_calls == []
+        failed_msg = next(v for k, v in result["failed"].items() if "55" in k)
+        assert "55" in failed_msg
+        assert "stack" in failed_msg.lower()
+        assert result["merged"] == []
+
+    def test_no_stack_signal_merges_as_before(self, tmp_path: Path) -> None:
+        wt = tmp_path / "wt" / "alpha"
+        wt.mkdir(parents=True)
+        manifest = _write_manifest(
+            tmp_path,
+            [
+                {"name": "alpha", "repo_root": str(tmp_path), "worktree_path": str(wt)},
+            ],
+        )
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+        merge_calls: list[str] = []
+
+        def stub(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "config" in cmd and "user.email" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+            if "remote" in cmd and "get-url" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd, 0, "git@github.com:acme/alpha.git\n", ""
+                )
+            if "pr" in cmd and "view" in cmd and "--json" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "state": "OPEN",
+                            "mergeable": "MERGEABLE",
+                            "mergeStateStatus": "CLEAN",
+                            "isDraft": False,
+                            "headRefName": "feat",
+                        }
+                    ),
+                    "",
+                )
+            if "graphql" in cmd_str:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    json.dumps(
+                        {
+                            "data": {
+                                "repository": {
+                                    "pullRequest": {"stackEntry": None}
+                                }
+                            }
+                        }
+                    ),
+                    "",
+                )
+            if "pr" in cmd and "merge" in cmd:
+                merge_calls.append("merged")
+                return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        pr_pairs = [PRPair(repo_path=str(wt), pr_number="56", member_name="alpha")]
+        result = provider.pr.merge(pr_pairs, str(manifest), toml_path=str(toml))
+        assert merge_calls == ["merged"]
+        assert any("56" in m for m in result["merged"])
+
     def test_branch_with_leading_dash_skips_delete(self, tmp_path: Path) -> None:
         wt = tmp_path / "wt" / "alpha"
         wt.mkdir(parents=True)

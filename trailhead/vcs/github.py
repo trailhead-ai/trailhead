@@ -609,6 +609,66 @@ def _get_pr_state(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | N
         return None
 
 
+_STACK_ENTRY_QUERY = (
+    "query($owner: String!, $name: String!, $number: Int!) {"
+    " repository(owner: $owner, name: $name) {"
+    "  pullRequest(number: $number) { stackEntry { stack { number size } } }"
+    " }"
+    "}"
+)
+
+
+def _get_stack_entry(repo_path: str, pr_number: str, runner: rp.Runner) -> dict | None:
+    """Return the stack a PR belongs to, or None if it isn't a stack member.
+
+    Stack membership (GitHub stacked PRs, public preview 2026-07-30) is not
+    exposed by ``gh pr view --json`` — confirmed against the CLI's own
+    supported field list (no ``stack``/``stackEntry`` entry as of gh 2.96.0).
+    It IS exposed by the GraphQL API's ``PullRequest.stackEntry`` field
+    (confirmed via GraphQL schema introspection), so that's the surface this
+    reads. Returns None — treated as "not a stack member" — both when the PR
+    genuinely isn't stacked and when the signal can't be resolved (owner/repo
+    unresolvable, API error, unexpected shape); this call is best-effort
+    on top of the mergeable/mergeState/isDraft gates that already run, not a
+    replacement for them.
+    """
+    owner_repo = _get_owner_repo(repo_path, runner)
+    if not owner_repo:
+        return None
+    owner, sep, name = owner_repo.partition("/")
+    if not sep or not owner or not name:
+        return None
+    data = _gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"query={_STACK_ENTRY_QUERY}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={pr_number}",
+        ],
+        cwd=repo_path,
+        runner=runner,
+    )
+    if not isinstance(data, dict):
+        return None
+    try:
+        pr = data["data"]["repository"]["pullRequest"]
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(pr, dict):
+        return None
+    entry = pr.get("stackEntry")
+    if not isinstance(entry, dict):
+        return None
+    stack = entry.get("stack")
+    return stack if isinstance(stack, dict) else None
+
+
 def _do_merge(
     repo_path: str, pr_number: str, author_email: str, runner: rp.Runner
 ) -> tuple[bool, str]:
@@ -726,6 +786,18 @@ def _merge_prs(
         merge_state = state.get("mergeStateStatus")
         if mergeable != "MERGEABLE" or merge_state != "CLEAN":
             failed[key] = f"not ready: mergeable={mergeable}, mergeState={merge_state}"
+            _skip_remaining(ordered, merged, failed, skipped, pair)
+            break
+
+        stack = _get_stack_entry(pair.repo_path, pair.pr_number, runner)
+        if stack is not None:
+            stack_number = stack.get("number", "?")
+            failed[key] = (
+                f"PR #{pair.pr_number} is a member of stacked-PR chain #{stack_number} — "
+                "refusing to merge: legacy merge endpoints (`gh pr merge`) cannot merge "
+                "a stacked PR and a single merge call would cascade lower PRs in the "
+                "stack past the human-approval gate"
+            )
             _skip_remaining(ordered, merged, failed, skipped, pair)
             break
 
