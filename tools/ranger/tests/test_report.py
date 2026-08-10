@@ -29,6 +29,7 @@ Test contract:
 
 from __future__ import annotations
 
+import inspect
 import os
 import stat
 import sys
@@ -688,3 +689,48 @@ def test_start_refuses_shell_metacharacters_in_group(tmp_path, bad_group):
         report.start(bad_group, "myvault", 0, env=env)
 
     assert not (tmp_path / "state").exists()
+
+
+# ---------------------------------------------------------------------------
+# `_append`'s scrub funnel is a mechanical (structural) property of its
+# signature, not a docstring convention: it takes a `str.format` template
+# plus positional untrusted strings, never a callable a future `append_*`
+# could use to close over unscrubbed text and bypass the funnel. Asserting
+# that structurally — via the signature itself — is what closes the bypass
+# class this task exists to close, matching the `_ROUTED_FENCE_TARGETS`
+# fixed-literal pattern already used for `append_routed`'s trusted-vs-
+# untrusted split.
+# ---------------------------------------------------------------------------
+
+
+def test_append_signature_carries_no_callable_typed_parameter():
+    signature = inspect.signature(report._append)
+
+    for name, parameter in signature.parameters.items():
+        annotation = parameter.annotation
+        assert annotation is not inspect.Parameter.empty, (
+            f"parameter {name!r} of _append must be annotated to prove it isn't a "
+            "closure-shaped bypass"
+        )
+        rendered = annotation if isinstance(annotation, str) else repr(annotation)
+        assert "Callable" not in rendered, (
+            f"parameter {name!r} of _append is Callable-typed ({rendered!r}) — this is "
+            "exactly the closure shape the task's mechanical enforcement replaces"
+        )
+
+
+def test_append_scrubs_untrusted_arg_passed_directly_to_the_new_api(tmp_path):
+    """The scrub funnel applies to any caller of the new `_append` shape, not
+    only to today's `append_*` wrappers — proving the funnel still holds
+    under the new shape, not only under today's callers."""
+    env = _env(tmp_path)
+    report_path = report.start("mygroup", "myvault", 1, env=env)
+    credential = "AKIA1234567890ABCDEF"
+
+    report._append(report_path, "skipped", "task/direct", "- `{}` — {}\n", "task/direct", credential)
+
+    text = report_path.read_text()
+    assert credential not in text
+    assert "[REDACTED]" in text
+    state_text = report_path.with_suffix(".state.json").read_text()
+    assert credential not in state_text
