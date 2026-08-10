@@ -1285,6 +1285,23 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
+# Shared by both ``record create`` and ``record update`` --help epilogs: the two
+# verbs accept the same --label/--related/--annotation flags, and an agent that
+# reaches for ``update`` (the most common verb for writing labels) must see the
+# same choosing rule ``create`` carries, not a partial or drifted copy of it.
+_LABELS_FLAG_MECHANISM_RULE = (
+    "Choosing a labels flag: a value naming another record — a task, a "
+    "decision, an area — is a relation, not an attribute; use --related "
+    "KIND=NAME instead of a label. A free attribute is a label; use "
+    "--label KEY=VALUE. A labels key that shadows a record kind or a "
+    "query field name (e.g. 'area', 'phase', 'status', 'kind') is refused "
+    "at write time; the refusal names a runnable fix — --annotation "
+    "KEY=VALUE for a free attribute whose natural name is taken, or a "
+    "namespaced key (<ns>/<key>, e.g. craft/subsystems) to keep it "
+    "queryable as a label."
+)
+
+
 def add_record_subparser(sub) -> None:
     """Register the ``record`` command parser and its create/update/delete/show actions."""
     # record subcommand: ``lore record create``.
@@ -1298,15 +1315,7 @@ def add_record_subparser(sub) -> None:
 
     p_record_create = p_record_sub.add_parser(
         "create", help="Create a new vault record",
-        epilog="Choosing a labels flag: a value naming another record — a task, a "
-               "decision, an area — is a relation, not an attribute; use --related "
-               "KIND=NAME instead of a label. A free attribute is a label; use "
-               "--label KEY=VALUE. A labels key that shadows a record kind or a "
-               "query field name (e.g. 'area', 'phase', 'status', 'kind') is refused "
-               "at write time; the refusal names a runnable fix — --annotation "
-               "KEY=VALUE for a free attribute whose natural name is taken, or a "
-               "namespaced key (<ns>/<key>, e.g. craft/subsystems) to keep it "
-               "queryable as a label.",
+        epilog=_LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_create.add_argument(
         "--kind", required=True,
@@ -1344,7 +1353,8 @@ def add_record_subparser(sub) -> None:
     p_record_update = p_record_sub.add_parser(
         "update", help="Update an existing vault record (full-body / --diff / metadata-only)",
         epilog="Group-default scope routing applies to 'create' only; "
-               "update (and delete) are unaffected and never seed scopes from a camp group.",
+               "update (and delete) are unaffected and never seed scopes from a camp group. "
+               + _LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_update.add_argument(
         "record_id",
