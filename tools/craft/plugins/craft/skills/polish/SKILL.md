@@ -53,7 +53,7 @@ If the user invoked `/polish` with no items in the same message, ask for the bat
 
 Before writing anything, identify the plan these follow-ups belong to — a plan is a parent `task` record — so the followup brief links back to its parent via a `--related task=<parent-task-name>` edge on the `lore record create` command in step 4.
 
-Resolve the active session note (e.g. `lore current`) and read the plan task it links to (the `related` task on the session note, or the task named in its frontmatter):
+Resolve the active session note (e.g. `lore current`) and read the plan task it links to (the `related` task on the session note):
 
 - **Exactly one plan task** → that's the parent. Use its record name (e.g. `2026-04-27-survey-config-activation-cascade`) as `<parent-slug>`.
 - **Multiple plan tasks** → ask the user which one these follow-ups apply to in your clarifying turn (step 2).
