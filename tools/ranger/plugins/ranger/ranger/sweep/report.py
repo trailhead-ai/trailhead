@@ -55,12 +55,16 @@ alnum run with no separator required, and a task id or the answer command's
 own fixed ``lore record update ... --diff`` syntax can be exactly that long
 — scrubbing the whole rendered line would occasionally redact the id itself
 or the runnable command around it, not just the secret sitting next to them.
-Each ``append_*`` function hands ``_append`` a ``render`` callable plus its
-one untrusted string; ``_append`` scrubs the string and calls ``render`` with
-the scrubbed result, so trusted structural text (the task id, the backticks,
-the command syntax) never passes through the scrubber at all, and a future
-bucket-writer still cannot land raw untrusted text in a bucket without
-routing it through this same funnel. The answer command's diff carries **no
+Each ``append_*`` function hands ``_append`` a plain ``str.format`` template
+plus its untrusted string(s) positionally; ``_append`` scrubs each one and
+substitutes it into the template, so trusted structural text (the task id,
+the backticks, the command syntax) is baked into the template directly and
+never passes through the scrubber at all. This is a mechanical property of
+the signature, not a convention a future bucket-writer has to remember:
+``_append`` takes no callable, so there is no closure a caller could use to
+smuggle unscrubbed free text past the funnel — the only way free text
+reaches a bucket is as a positional *untrusted* argument, and every one of
+those is scrubbed before it ever reaches ``str.format``. The answer command's diff carries **no
 context lines at all** — it is a pure positional insertion (``old_count=0``)
 that names only the line number to insert after, never the original line's
 text — so the one place a raw, unscrubbed secret could otherwise leak (the
@@ -78,7 +82,6 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -511,38 +514,47 @@ def _append(
     report_path: Path,
     bucket: str,
     task_id: str,
-    render: Callable[[str], str],
-    untrusted: str = "",
+    template: str,
+    *untrusted: str,
 ) -> None:
-    """Render one bucket line from *render* + *untrusted*, scrubbed, and persist.
+    """Render one bucket line from *template* + *untrusted*, scrubbed, and persist.
 
     This is the sole place any bucket-writer's free text reaches a bucket —
     every ``append_*`` function funnels through it — so scrubbing here,
-    rather than at each caller, is what makes the scrub bypass-proof: a
-    future bucket-writer cannot forget to scrub its own free text, because
-    ``render`` is only ever called with the already-scrubbed string, never
-    the raw one. ``render`` must build the line using only that scrubbed
-    string plus fixed/trusted text (the task id, backticks, command syntax)
-    — never close over unscrubbed free text of its own, or it defeats the
-    funnel this function exists to be.
+    rather than at each caller, is what makes the scrub bypass-proof. Unlike
+    the closure-pair shape this replaced, there is no callable a future
+    ``append_*`` could hand this function that closes over unscrubbed text
+    of its own: *template* is a plain ``str.format`` template, and the only
+    way free text reaches the rendered line is by being passed positionally
+    in *untrusted*, which this function scrubs before it ever touches
+    ``str.format``. A caller that wants to land free text in a bucket has
+    no path that skips scrubbing — the signature itself is the enforcement,
+    not a docstring convention about how to use a closure responsibly.
 
-    Scrubbing is applied to *untrusted* alone, not to ``render``'s output —
-    see the module docstring for why: the high-entropy pattern matches any
-    32+ character alnum run, and a task id or the answer command's own fixed
-    syntax can be exactly that long, so scrubbing the assembled line would
-    occasionally redact trusted text along with any real secret next to it.
+    *template* may only place ``{}`` where a scrubbed *untrusted* value
+    belongs — every other character, including the task id, backticks, and
+    command syntax, is fixed/trusted text the caller has already baked in
+    before calling this function.
+
+    Scrubbing is applied to each *untrusted* value alone, not to the
+    assembled line — see the module docstring for why: the high-entropy
+    pattern matches any 32+ character alnum run, and a task id or the
+    answer command's own fixed syntax can be exactly that long, so scrubbing
+    the assembled line would occasionally redact trusted text along with any
+    real secret next to it.
     """
     state = _load_state(report_path)
     if task_id in state["appended_task_ids"]:
         return
     state["appended_task_ids"].append(task_id)
-    state["buckets"][bucket].append(render(scrub_credentials(untrusted)))
+    scrubbed = tuple(scrub_credentials(text) for text in untrusted)
+    state["buckets"][bucket].append(template.format(*scrubbed))
     _write_state(report_path, state)
     _write_report(report_path, state)
 
 
 def append_promoted(report_path: Path, task_id: str) -> None:
-    _append(report_path, "promoted", task_id, lambda _safe: f"- `{task_id}`\n")
+    _append(report_path, "promoted", task_id, f"- `{task_id}`\n")
 
 
 _ROUTED_FENCE_TARGETS = ("/craft:plan", "/craft:brainstorm")
@@ -556,7 +568,7 @@ def append_routed(report_path: Path, task_id: str, target: str) -> None:
     The fence match is on the raw *target*, before it reaches ``_append``'s
     scrub, and is decided once here as a fixed literal (``fence_target`` is
     either ``None`` or one of the two tuple members) — never the scrubbed
-    ``safe_target`` the bullet uses. That is what keeps the fenced command
+    substitution the bullet uses. That is what keeps the fenced command
     built entirely from trusted text (``task_id`` plus the matched literal),
     never from unscrubbed input, while any other target — including the
     "the parent record" case the agent contract also allows — keeps today's
@@ -564,29 +576,27 @@ def append_routed(report_path: Path, task_id: str, target: str) -> None:
     """
     fence_target = target if target in _ROUTED_FENCE_TARGETS else None
 
-    def render(safe_target: str) -> str:
-        lines = [f"- `{task_id}` — routed to {safe_target}\n"]
-        if fence_target is not None:
-            lines += [
-                "\n",
-                "```\n",
-                f"{fence_target} {task_id}\n",
-                "```\n",
-                "\n",
-            ]
-        return "".join(lines)
+    template = f"- `{task_id}` — routed to {{}}\n"
+    if fence_target is not None:
+        template += (
+            "\n"
+            "```\n"
+            f"{fence_target} {task_id}\n"
+            "```\n"
+            "\n"
+        )
 
-    _append(report_path, "routed", task_id, render, target)
+    _append(report_path, "routed", task_id, template, target)
 
 
 def append_blocked_answered(report_path: Path, task_id: str) -> None:
-    _append(report_path, "blocked-answered", task_id, lambda _safe: f"- `{task_id}`\n")
+    _append(report_path, "blocked-answered", task_id, f"- `{task_id}`\n")
 
 
 def append_skipped(report_path: Path, task_id: str, reason: str) -> None:
     _append(
         report_path, "skipped", task_id,
-        lambda safe_reason: f"- `{task_id}` — {safe_reason}\n",
+        f"- `{task_id}` — {{}}\n",
         reason,
     )
 
@@ -594,15 +604,15 @@ def append_skipped(report_path: Path, task_id: str, reason: str) -> None:
 def append_failed(report_path: Path, task_id: str, reason: str) -> None:
     _append(
         report_path, "failed", task_id,
-        lambda safe_reason: f"- `{task_id}` — {safe_reason} {_FAILED_RETRY_SENTENCE}\n",
+        f"- `{task_id}` — {{}} {_FAILED_RETRY_SENTENCE}\n",
         reason,
     )
 
 
 def _question_entry(
     task_id: str, record_body: str, vault: str, *, near_miss: bool
-) -> tuple[Callable[[str], str], str]:
-    """Return the ``(render, untrusted)`` pair ``_append`` needs for a question line.
+) -> tuple[str, tuple[str, ...]]:
+    """Return the ``(template, untrusted)`` pair ``_append`` needs for a question line.
 
     Two shapes, and which one is used is decided by the record, not the
     caller. A parseable question renders the question plus the exact
@@ -614,8 +624,8 @@ def _question_entry(
 
     The question text is the only untrusted piece — the task id, the answer
     command's syntax, and the near-miss hint are all fixed/trusted, so
-    ``render`` closes over them directly and only ever receives the
-    (already-scrubbed) question as its argument.
+    *template* bakes them in directly and carries a single ``{}`` for the
+    (already-scrubbed) question, or none at all in the unparseable case.
 
     **The invocation renders at column 0**, outside the bullet's indentation,
     because the operator copies it out of the raw markdown: a heredoc whose
@@ -626,49 +636,44 @@ def _question_entry(
     try:
         question, line_no = extract_question(record_body)
     except QuestionExtractionError:
-        def render(_safe: str) -> str:
-            lines = [f"- `{task_id}` — {_MISSING_QUESTION_LINE}\n"]
-            if near_miss:
-                lines.append(f"\n{_NEAR_MISS_LINE}\n")
-            lines.append("\n")
-            return "".join(lines)
-
-        return render, ""
+        template = f"- `{task_id}` — {_MISSING_QUESTION_LINE}\n"
+        if near_miss:
+            template += f"\n{_NEAR_MISS_LINE}\n"
+        template += "\n"
+        return template, ()
 
     answer_command = _build_answer_command(task_id, line_no, vault)
 
-    def render(safe_question: str) -> str:
-        lines = [
-            f"- `{task_id}` — {safe_question}\n\n",
-            "Answer with:\n\n",
-            "```\n",
-            *(f"{line}\n" for line in answer_command.splitlines()),
-            "```\n",
-        ]
-        if near_miss:
-            lines.append(f"\n{_NEAR_MISS_LINE}\n")
-        lines.append("\n")
-        return "".join(lines)
+    template = (
+        f"- `{task_id}` — {{}}\n\n"
+        "Answer with:\n\n"
+        "```\n"
+        + "".join(f"{line}\n" for line in answer_command.splitlines())
+        + "```\n"
+    )
+    if near_miss:
+        template += f"\n{_NEAR_MISS_LINE}\n"
+    template += "\n"
 
-    return render, question
+    return template, (question,)
 
 
 def append_escalated(
     report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
-    render, untrusted = _question_entry(
+    template, untrusted = _question_entry(
         task_id, record_body, elected_vault(report_path), near_miss=near_miss
     )
-    _append(report_path, "escalated-awaiting-operator", task_id, render, untrusted)
+    _append(report_path, "escalated-awaiting-operator", task_id, template, *untrusted)
 
 
 def append_blocked_still_waiting(
     report_path: Path, task_id: str, record_body: str, *, near_miss: bool = False
 ) -> None:
-    render, untrusted = _question_entry(
+    template, untrusted = _question_entry(
         task_id, record_body, elected_vault(report_path), near_miss=near_miss
     )
-    _append(report_path, "blocked-still-waiting", task_id, render, untrusted)
+    _append(report_path, "blocked-still-waiting", task_id, template, *untrusted)
 
 
 def append_unreadable_record(report_path: Path, bucket: str, task_id: str) -> None:
@@ -680,5 +685,5 @@ def append_unreadable_record(report_path: Path, bucket: str, task_id: str) -> No
     """
     _append(
         report_path, bucket, task_id,
-        lambda _safe: f"- `{task_id}` — {_UNREADABLE_RECORD_LINE}\n\n",
+        f"- `{task_id}` — {_UNREADABLE_RECORD_LINE}\n\n",
     )
