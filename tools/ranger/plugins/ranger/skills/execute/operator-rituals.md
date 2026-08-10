@@ -89,30 +89,21 @@ runs that command by hand.
 
 **Nothing in the drain ever removes a lock file itself, stale or not** — an automated removal race would let two drains hold the same vault at once.
 
-## 5. Awaiting-approval / cap-stall
+## 5. Ready-but-unmerged / cap-stall
 
-A `PUSHED` task's monitor outcome is `READY <reason>`: CI is green and the PR is waiting on
-the human-approval gate.
+A `PUSHED` task's monitor outcome is `READY <reason>`: CI is green but the PR did not merge.
 
 The pushed bucket splits into a `merged` / `in-flight` / `awaiting-human-approval` / `monitor-timeout` substate, each flagged when it is the thing holding the in-flight cap.
 
-To grant the signal, the operator applies the `human-approved` label
-by hand — `gh pr edit <pr> --add-label human-approved` — or leaves an approving review.
-`portage approvals` is what verifies the signal before monitor will merge.
+Merge authorization is the group TOML's `[release] auto_merge` flag: with `auto_merge = true`,
+monitor merges a `done` PR without any human-approval check; with it unset/false, nothing merges
+automatically and the operator merges by hand after reviewing the PR. A `READY` outcome under
+`auto_merge = true` therefore points at something else holding the merge (branch protection, a
+merge-order refusal, a legacy monitor) — read the reason it carries.
 
-No drain component, executor, or portage agent ever applies that label or approves a PR itself — a gate the automation building the change can open is not a gate.
+No drain component, executor, or portage agent ever applies the `human-approved` label or approves a PR itself — the signal no longer gates portage's merges, but branch protection or the operator's own review may still consume it, so fabricating it stays forbidden.
 
-Applying the label frees the cap slot the stalled task is holding, unblocking the next dispatch.
-
-**The signal is pinned to the commit it was given on.** A review approves its `commit_id`,
-and a label approves the head commit standing when it was applied — so any push after that
-point makes the signal stale, and `portage approvals` reports it as stale rather than
-approved. That is deliberate: without it, a fix cycle that pushes new commits inherits an
-approval no human gave those commits.
-So **after every fix cycle on an approved PR, re-approve it** — leave a fresh review, or
-remove and re-apply the `human-approved` label — once you have reviewed the commits that
-landed since. Nothing else clears a stale signal, and nothing in the automation may clear
-it for you.
+Resolving whatever the `READY` reason names (or merging by hand) frees the cap slot the stalled task is holding, unblocking the next dispatch.
 
 ## 6. Corrupt state file
 

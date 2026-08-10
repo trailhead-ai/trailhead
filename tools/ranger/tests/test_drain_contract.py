@@ -807,17 +807,12 @@ def test_rituals_doc_names_the_stale_lock_ritual_and_crash_signal():
 def test_rituals_doc_names_the_approval_and_cap_stall_ritual():
     _pin(
         RITUALS,
-        "`gh pr edit <pr> --add-label human-approved`",
-        "The approval ritual's exact grant command must be named.",
+        "monitor merges a `done` PR without any human-approval check",
+        "The rituals doc must state the auto_merge merge policy monitor enforces.",
     )
     _pin(
         RITUALS,
-        "`portage approvals`",
-        "The verification surface for the approval signal must be named.",
-    )
-    _pin(
-        RITUALS,
-        "No drain component, executor, or portage agent ever applies that label",
+        "No drain component, executor, or portage agent ever applies the `human-approved` label",
         "The prohibition on automated self-approval must be explicit.",
     )
     _pin(

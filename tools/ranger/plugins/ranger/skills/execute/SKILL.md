@@ -3,8 +3,8 @@ name: execute
 description: >
   Drain a camp group's buildable queue unattended — build every runnable standalone task in
   the group's elected lore vault through craft's execute ritual, one dispatched agent per
-  task in its own ephemeral camp workspace, push each to a PR behind a human-approval merge
-  gate, and hand back a durable exit report.
+  task in its own ephemeral camp workspace, push each to a PR that merges automatically
+  under the group's auto_merge authorization, and hand back a durable exit report.
   TRIGGER when: user says "run the execute drain", "drain the ready queue", "build the
   backlog", "drain the buildable tasks", "build whatever is runnable", or invokes
   /ranger:execute explicitly.
@@ -27,8 +27,8 @@ to read that file, hand the pushed branch to portage, and finish with a durable 
   report. Its files, not your transcript, are the drain's state.
 - **The dispatched executor agent** owns one task's build, in its own context and its own
   workspace. Task details never reach you.
-- **Portage's `updater` and `monitor`** own the PR tail — push to PR, CI, the
-  human-approval gate, merge. You dispatch them; they report through an outcome file.
+- **Portage's `updater` and `monitor`** own the PR tail — push to PR, CI, merge under
+  the group's auto_merge authorization. You dispatch them; they report through an outcome file.
 - **You** own the loop: sync, provision, dispatch, record, every task status edge, and
   teardown. You do not interpret anything.
 
@@ -373,12 +373,14 @@ never held a cap slot at all, report it directly:
 ranger drain crashed --report "<report_path>" --task "task/<name>" --reason "<reason>"
 ```
 
-`READY` is the human-approval gate holding: the PR is green and waiting for the
-operator's signal. The report renders that as `awaiting-human-approval` with the exact
-`gh pr edit … --add-label human-approved` command inline — and **the drain
+`READY` is a green PR the monitor could not merge. With `[release] auto_merge = true`
+the monitor merges a `done` PR without gating on human approval, so a `READY` names some
+other holder — branch protection, a merge-order refusal, a legacy monitor; with
+`auto_merge` unset/false nothing merges automatically and the operator merges by hand.
+The report renders it as `awaiting-human-approval` with the reason inline — and **the drain
 never applies the approval signal itself**, in any component. Not you, not the executor,
-not portage's agents. A gate that the automation building the change can open is not a
-gate.
+not portage's agents: the `human-approved` label no longer gates portage's merges, but
+branch protection or the operator's own review may still consume it.
 
 **The in-flight cap.** Every task handed to a monitor holds a cap slot, tracked durably by
 the CLI so it survives a restart. Ask the CLI before every dispatch — never count slots in

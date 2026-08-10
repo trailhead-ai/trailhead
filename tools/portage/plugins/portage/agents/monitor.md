@@ -79,13 +79,12 @@ synchronously, so an unattended caller (e.g. a ranger drain loop) polls this fil
 If `outcome_file` was provided, monitor writes exactly one line to that file.
 
 Monitor writes the outcome file only once it reaches a terminal state — never before, and
-never more than once. "Terminal state" means the same four outcomes the "Report structure"
+never more than once. "Terminal state" means the same outcomes the "Report structure"
 section below reports in prose: merged, ready-to-merge-but-stopped,
-ready-awaiting-human-approval, or blocked after N cycles. The line is one of:
+or blocked after N cycles. The line is one of:
 
 - `MERGED` — all PRs merged.
-- `READY <reason>` — a terminal-but-unmerged state the caller asked not to wait forever on,
-  e.g. `READY awaiting-human-approval`.
+- `READY <reason>` — a terminal-but-unmerged state the caller asked not to wait forever on.
 - `BLOCKED <reason>` — blocked after 3 fix cycles without progress.
 - `STOPPED <reason>` — stopped for an operator reason short of blocked, e.g.
   `STOPPED auto_merge disabled`.
@@ -171,44 +170,26 @@ again (or stop, per that threshold) rather than looping back to `portage wait-fo
 (intra-portage, pinned haiku/low) to compose the blocker report rather than writing it inline —
 keeps this loop's context lean. Then stop.
 
-### Human-approval merge gate
+### Merge policy — `auto_merge` is the gate
 
-Before calling `portage merge` on any PR, check its human-authored approval signal:
+`[release] auto_merge = true` in the group TOML is the operator's standing authorization to merge.
+With auto_merge enabled, monitor does not gate on human approval: when a PR reports `done`, it is
+merge-eligible as it stands — no `portage approvals` check, no `human-approved` label, no approving
+review required. When `auto_merge` is unset or `false`, nothing merges automatically — `portage
+merge` refuses fail-closed (the structural backstop below) and the operator merges by hand after
+their own review.
 
-```bash
-portage approvals <repo_path> <pr_number>
-```
-
-Exit 0 means approved (an approving review by a human reviewer, or the operator-applied
-`human-approved` label) — proceed to merge. Exit 1 means not yet approved: **hold that PR,
-do not merge it**, and report it as `ready-awaiting-human-approval`. Exit 2 is a loud
-usage or API error — a bad repo path, a malformed PR number, or an unreachable API — and
-means the question was never answered, not that the answer was no: treat it the same as
-not-approved (hold, don't merge) and surface the error.
-Monitor never merges a PR without a passing `portage approvals` check.
-
-**The approval is pinned to the commit it was given on.** A review counts only for its own
-`commit_id`, and the `human-approved` label only for the head commit standing when it was
-applied — GitHub dismisses neither on a push, so an unpinned check would approve code no
-human ever saw. When the signal exists but predates the current head, `portage approvals`
-exits 1 with `"stale": true` in its JSON and names the remedy on stderr. Treat it as its own
-outcome: **hold the PR** exactly as for any other exit 1, and report it as
-`ready-awaiting-human-approval` with a **(stale)** note saying the approval was given on an
-earlier commit and the operator must review the commits pushed since, then re-approve or
-re-apply the `human-approved` label. Never read a stale signal as approval, and never
-"refresh" it yourself — re-applying the label is applying the signal, which the rule below
-forbids absolutely.
-
-This is why a `fix_ci` or `review` cycle on an already-approved PR sends it back to the
-gate: the fix pushed new commits, so the approval that stood before it is stale by
-construction.
+`portage approvals` remains available as a read-only query for an operator who wants to know
+whether a human-authored approval signal exists on a PR's current head; it is no longer part of
+this loop's merge path.
 
 **Monitor never applies the approval signal itself.** The `human-approved` label and the
 approving review are human-applied only — no drain, portage, or dispatched-agent component
-(including this one) may add the label or post the approving review, even to unblock a
-stalled merge.
+(including this one) may add the label or post the approving review. The signal no longer gates
+this loop's merges, but branch-protection rules or an operator's by-hand review may still read
+it, so fabricating it remains forbidden.
 
-When **all** PRs report `done` AND pass the approvals check, merge them in dependency order:
+When **all** PRs report `done`, merge them in dependency order:
 
 ```bash
 portage merge \
@@ -267,7 +248,7 @@ external_tracker = { kind = "...", ... }  # optional
 When you finish (all merged, stopped ready-to-merge, or blocked), return a short summary:
 
 ```
-**Watch result:** merged | ready-to-merge (auto_merge disabled) | ready-awaiting-human-approval | blocked after N cycles
+**Watch result:** merged | ready-to-merge (auto_merge disabled) | blocked after N cycles
 **Group/Slug:** <group>/<slug>
 **PRs:** <urls + final state>
 **Fix cycles run:** <count per PR>
@@ -283,12 +264,14 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
 - Don't dispatch an unverified `green_driver_agent` — confirm its `agents/<name>.md` file exists
   before entering the watch loop. A misconfigured name must surface as the named `BLOCKED` config
   error above, never a silent no-op or a dispatch failure discovered mid-loop.
-- Don't merge a PR that hasn't passed `portage approvals` — a `done` CI/review state is not a
-  substitute for the human-approval gate; hold it as `ready-awaiting-human-approval` instead.
+- Don't merge outside `portage merge`'s answer — its fail-closed `auto_merge` check is the merge
+  gate; with auto_merge enabled a `done` PR needs no further approval, and with it disabled no PR
+  merges automatically at all.
 - Don't apply the `human-approved` label or post an approving review yourself, and don't dispatch
-  another agent to do so — the approval signal is human-applied only, with no exception for
-  unblocking a stalled merge. This is a manual-bypass weakness: automation running under the
-  operator's own GitHub credentials could still self-approve; that residual is accepted as risk
+  another agent to do so — the approval signal is human-applied only. It no longer gates this
+  loop, but branch protection or an operator's own review may still consume it. This is a
+  manual-bypass weakness: automation running under the operator's own GitHub credentials could
+  still self-approve; that residual is accepted as risk
   within single-operator scope, not something this loop is meant to close.
 - Don't exceed 3 fix cycles per PR without progress — stop and report.
 - Don't merge a PR that isn't `done` — if it's still `review`/`fix_ci`/`rebase`, handle that action first.

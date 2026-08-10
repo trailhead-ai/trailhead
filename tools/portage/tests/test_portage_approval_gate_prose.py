@@ -1,11 +1,15 @@
-"""Contract pin: the human-approval merge gate's prose surfaces.
+"""Contract pin: the merge-policy prose surfaces.
 
-`monitor` gates `portage merge` on `portage approvals`; absent approval it must
-hold and report `ready-awaiting-human-approval`, never merge. Council C3 pin:
-no drain, portage, or dispatched-agent component ever applies the approval
-signal — the signal is human-applied only. These are prose-only invariants
-(nothing but agent adherence enforces them at runtime), so a pinned literal is
-the only thing keeping them from silently drifting.
+`[release] auto_merge = true` is the operator's standing authorization to
+merge: monitor merges a `done` PR without gating on human approval. With
+`auto_merge` unset/false, nothing merges automatically — `portage merge`
+refuses fail-closed and the operator merges by hand. The C3 council pin
+survives in narrowed form: no drain, portage, or dispatched-agent component
+ever applies the approval signal (the signal no longer gates portage's
+merges, but branch protection or an operator's own review may still consume
+it). These are prose-only invariants (nothing but agent adherence enforces
+them at runtime), so a pinned literal is the only thing keeping them from
+silently drifting.
 
 Every pinned span is asserted as a contiguous substring within one physical
 line, per the wrap-safety lesson the ranger sweep's own pin harness encodes
@@ -39,61 +43,26 @@ def _pin(path: Path, phrase: str, why: str) -> None:
     pytest.fail(f"{path.name}: missing the pinned span {phrase!r}. {why}")
 
 
-def test_monitor_gates_merge_on_approvals_check():
+def test_monitor_pins_auto_merge_as_the_merge_gate():
     _pin(
         MONITOR,
-        "Before calling `portage merge` on any PR, check its human-authored approval signal:",
-        "the merge gate must run before every merge call, not just be documented nearby.",
-    )
-    _pin(
-        MONITOR,
-        "Monitor never merges a PR without a passing `portage approvals` check.",
-        "the never-merge-without-approval rule must be pinned verbatim so it can't erode.",
-    )
-
-
-def test_monitor_holds_and_reports_awaiting_human_approval():
-    _pin(
-        MONITOR,
-        "report it as `ready-awaiting-human-approval`",
-        "absent approval, monitor must hold and surface this exact token, never merge.",
-    )
-
-
-def test_monitor_treats_a_stale_approval_as_its_own_outcome():
-    # An approval approves a commit. GitHub dismisses neither a review nor a
-    # label on a push, so without this the mainline attack is: get approved at
-    # commit A, push commit B, merge B.
-    _pin(
-        MONITOR,
-        "**The approval is pinned to the commit it was given on.**",
-        "the commit-pinning rule is what makes the gate mean anything after a push.",
+        "`[release] auto_merge = true` in the group TOML is the operator's standing authorization to merge.",
+        "auto_merge carrying the merge authorization is the load-bearing policy statement.",
     )
     _pin(
         MONITOR,
-        "`ready-awaiting-human-approval` with a **(stale)** note",
-        "stale is a distinct outcome from never-approved; the operator's remedy differs "
-        "(re-approve after reviewing the new commits, not go find an approver).",
+        "monitor does not gate on human approval",
+        "with auto_merge enabled, the human-approval gate must be explicitly absent, "
+        "not merely undocumented — otherwise the old gate silently reasserts itself.",
     )
+
+
+def test_monitor_pins_the_fail_closed_disabled_branch():
     _pin(
         MONITOR,
-        'exits 1 with `"stale": true`',
-        "the exit contract must be pinned: stale stays inside the not-approved family, so "
-        "a caller gating on exit 0 holds either way.",
-    )
-
-
-def test_operator_rituals_tell_the_operator_to_re_approve_after_a_fix_cycle():
-    rituals = (
-        _REPO_ROOT / "tools" / "ranger" / "plugins" / "ranger" / "skills" / "execute"
-        / "operator-rituals.md"
-    )
-    _pin(
-        rituals,
-        "after every fix cycle on an approved PR, re-approve it",
-        "a fix cycle pushes new commits, which makes the standing approval stale by "
-        "construction — the operator has to be told that re-approval is now part of the "
-        "ritual, or every fixed PR silently stalls at the gate.",
+        "nothing merges automatically",
+        "auto_merge unset/false must keep today's fail-closed behavior: no automatic "
+        "merge of any kind; the operator merges by hand.",
     )
 
 
@@ -101,7 +70,8 @@ def test_monitor_never_applies_the_approval_signal_itself():
     _pin(
         MONITOR,
         "Monitor never applies the approval signal itself.",
-        "the C3 council pin — no drain/portage/agent component ever applies the signal.",
+        "the narrowed C3 pin — the signal no longer gates portage's merges, but no "
+        "drain/portage/agent component ever fabricates it.",
     )
     _pin(
         MONITOR,
@@ -120,6 +90,19 @@ def test_monitor_anti_pattern_pins_the_prohibition_and_the_manual_bypass_residua
         MONITOR,
         "that residual is accepted as risk",
         "the manual-bypass weakness (operator-credential self-approval) must be documented.",
+    )
+
+
+def test_operator_rituals_pin_the_auto_merge_policy():
+    rituals = (
+        _REPO_ROOT / "tools" / "ranger" / "plugins" / "ranger" / "skills" / "execute"
+        / "operator-rituals.md"
+    )
+    _pin(
+        rituals,
+        "monitor merges a `done` PR without any human-approval check",
+        "the operator rituals must describe the same merge policy monitor enforces, or "
+        "the operator is sent hunting for an approval gate that no longer exists.",
     )
 
 
