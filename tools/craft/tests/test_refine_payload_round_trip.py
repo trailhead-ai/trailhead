@@ -12,9 +12,20 @@ refine's own Re-refine idempotency check) actually rely on.
 This module builds synthetic bodies the way Step 4/5 specify and exercises the
 line-start/fenced-code-aware counter the Re-refine section describes, so the parsing
 contract itself — not just its presence in prose — is under test.
+
+`PAYLOAD_LABELS`, `FLOW_OUT_HEADING`, and `ESCALATION_HEADING` below are pinned
+against the source documents that specify them
+(`_shared/refine.md`, `templates/task.md`) by the `test_*_strings_match_source_*`
+tests at the bottom of this module, so a contract-side rename breaks this module
+instead of leaving it silently stale.
 """
 
 import re
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).parent.parent
+REFINE_DOC = REPO_ROOT / "plugins" / "craft" / "skills" / "_shared" / "refine.md"
+TASK_TEMPLATE = REPO_ROOT / "plugins" / "craft" / "templates" / "task.md"
 
 PAYLOAD_LABELS = ["**Delivers:**", "**Test contract:**", "**Files:**"]
 FLOW_OUT_HEADING = "## Flow-out"
@@ -118,4 +129,52 @@ def test_two_payload_sets_count_as_two_conflict_signal():
         "a hand-edited body carrying two concatenated payload sets must count "
         "**Delivers:** as 2 — this is the signal Re-refine's conflict branch "
         "keys off to report rather than guess which set is canonical"
+    )
+
+
+def test_raw_captured_prose_counts_zero_for_each_label():
+    body = "Fix the widget so it stops crashing on empty input.\n"
+    for label in PAYLOAD_LABELS:
+        assert count_line_anchored(body, label) == 0, (
+            f"a raw captured-prose body with no payload must count {label!r} "
+            "as 0 — this is the signal refine's append-vs-update branch keys "
+            "off to know a fresh payload has never been written"
+        )
+
+
+def test_indented_occurrence_does_not_count():
+    body = "  **Delivers:** this is indented, not a line-start payload label.\n"
+    assert count_line_anchored(body, "**Delivers:**") == 0, (
+        "an indented occurrence does not begin a line — column-0 anchoring "
+        "is the intended reading of 'begins a line', so it must not count"
+    )
+
+
+def test_payload_labels_match_source_documents():
+    refine_text = REFINE_DOC.read_text()
+    task_template_text = TASK_TEMPLATE.read_text()
+    for label in PAYLOAD_LABELS:
+        assert label in refine_text, (
+            f"{label!r} must appear verbatim in {REFINE_DOC} — "
+            "PAYLOAD_LABELS is pinned against that source"
+        )
+        assert label in task_template_text, (
+            f"{label!r} must appear verbatim in {TASK_TEMPLATE} — "
+            "PAYLOAD_LABELS is pinned against that source"
+        )
+
+
+def test_flow_out_heading_matches_source_document():
+    refine_text = REFINE_DOC.read_text()
+    assert FLOW_OUT_HEADING in refine_text, (
+        f"{FLOW_OUT_HEADING!r} must appear verbatim in {REFINE_DOC} — "
+        "FLOW_OUT_HEADING is pinned against that source"
+    )
+
+
+def test_escalation_heading_matches_source_document():
+    refine_text = REFINE_DOC.read_text()
+    assert ESCALATION_HEADING in refine_text, (
+        f"{ESCALATION_HEADING!r} must appear verbatim in {REFINE_DOC} — "
+        "ESCALATION_HEADING is pinned against that source"
     )

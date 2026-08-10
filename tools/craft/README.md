@@ -11,7 +11,7 @@ codebase they're in.
 
 ## What craft covers
 
-craft's agents and skills organize into six areas. craft owns the
+craft's agents and skills organize into seven areas. craft owns the
 **plan → execute → review** development loop; shipping (PR lifecycle) lives in
 the sibling [portage](../portage) plugin. (These are conceptual areas, not
 install units — `trailhead install` selects individual subagents and skills,
@@ -23,6 +23,7 @@ named below, by name; the default installs them all.)
 | Execute | TDD subagent-driven implementation, slice by slice, gated per-slice by a conformance check; once every slice lands, a whole-change simplify → correctness → conditional-security pipeline runs before close |
 | Review | Whole-change/PR adversarial review, dispatched standalone before merge or as execute's correctness phase |
 | Council | Four-lens review panel (builder / reliability / security / advocate) |
+| Spec gauntlet | Adversarial spec/ADR review passes (premise, consistency, divergence) dispatched alongside the council quartet |
 | Design | Design-doc authoring and structured spec artifacts |
 | Helpers | Cheap specialist subagents for docs, logs, research, tests, security |
 
