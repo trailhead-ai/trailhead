@@ -166,8 +166,9 @@ class TestVaultGitignoreScaffolding:
     def test_fresh_vault_ignores_lock_files(self, tmp_path):
         """A freshly-initialized vault scaffolds a .gitignore ignoring *.lock.
 
-        `lore sync`'s `git add -A` would otherwise commit the session/<key>.lock
-        flock sidecars. Uses tmp_path only — never the real vault (Axiom 6).
+        `lore sync`'s `git add -A` would otherwise commit the vault-root
+        `.lore.lock` write lock (the one flock sidecar still written inside the
+        vault tree). Uses tmp_path only — never the real vault (Axiom 6).
         """
         installer = load_script("lore.config.installer")
         vaults_root = tmp_path / "vaults"

@@ -263,14 +263,11 @@ def lock_root_for_vault(vault_root: str | Path, *, env: dict[str, str] | None = 
         _bootstrap.ensure_trailhead_importable()
         import trailhead.paths as _paths
 
-        if env is not None:
-            base = _paths.state_dir("lore", env=env)
-        else:
-            base = _paths.state_dir("lore")
+        # ``state_dir`` already treats ``env=None`` as "read os.environ", so the
+        # injected dict is passed straight through.
+        base = _paths.state_dir("lore", env=env)
     except (ImportError, SystemExit):
-        raw = env.get("XDG_STATE_HOME", "") if env is not None else os.environ.get(
-            "XDG_STATE_HOME", ""
-        )
+        raw = (os.environ if env is None else env).get("XDG_STATE_HOME", "")
         if raw and os.path.isabs(raw):
             base = Path(raw) / "lore"
         else:

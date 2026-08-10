@@ -106,38 +106,26 @@ def apply_record_fields(
             if isinstance(current, list) and value in current:
                 result[key] = [v for v in current if v != value]
 
-    # --- --related <kind>=<name> map flag (append name to that kind) -------
+    # --- --related / --unset-related <kind>=<name> map flags ---------------
+    # The set and unset halves of one map field: they share the KIND=NAME split,
+    # one working copy (so appends and removals in the same call compose), and
+    # one omit-when-empty tail.
     related_pairs = getattr(args, "related_pairs", None) or []
-    if related_pairs:
+    unset_related_pairs = getattr(args, "unset_related_pairs", None) or []
+    if related_pairs or unset_related_pairs:
         related: dict = dict(result.get("related") or {})
         for pair in related_pairs:
-            kind, sep, name = pair.partition("=")
-            if not sep or not kind or not name:
-                errors.append(
-                    f"error: --related {pair!r} must be KIND=NAME with a "
-                    f"non-empty kind and name"
-                )
+            split = _split_related_pair("--related", pair, errors)
+            if split is None:
                 continue
+            kind, name = split
             related[kind] = list(related.get(kind, [])) + [name]
-        if related:
-            result["related"] = related
-
-    # --- --unset-related <kind>=<name> map flag (remove name from kind) ----
-    unset_related_pairs = getattr(args, "unset_related_pairs", None) or []
-    if unset_related_pairs:
-        related = dict(result.get("related") or {})
         for pair in unset_related_pairs:
-            kind, sep, name = pair.partition("=")
-            if not sep or not kind or not name:
-                errors.append(
-                    f"error: --unset-related {pair!r} must be KIND=NAME with a "
-                    f"non-empty kind and name"
-                )
+            split = _split_related_pair("--unset-related", pair, errors)
+            if split is None:
                 continue
-            current = related.get(kind)
-            if not current:
-                continue
-            remaining = [v for v in current if v != name]
+            kind, name = split
+            remaining = [v for v in related.get(kind, []) if v != name]
             if remaining:
                 related[kind] = remaining
             else:
@@ -148,6 +136,26 @@ def apply_record_fields(
             result.pop("related", None)
 
     return result, errors
+
+
+def _split_related_pair(
+    flag: str, pair: str, errors: list[str]
+) -> tuple[str, str] | None:
+    """Split a ``KIND=NAME`` pair on the FIRST ``=``; ``None`` when degenerate.
+
+    An empty kind (``=foo``) or empty name (``task=``) appends an error naming
+    *flag* to *errors* and returns ``None`` — the degenerate split ``validate()``
+    downstream could not name. Shared by ``--related`` and ``--unset-related``
+    so the two halves of the map field cannot drift in what they accept.
+    """
+    kind, sep, name = pair.partition("=")
+    if not sep or not kind or not name:
+        errors.append(
+            f"error: {flag} {pair!r} must be KIND=NAME with a "
+            f"non-empty kind and name"
+        )
+        return None
+    return kind, name
 
 
 def apply_map_labels_annotations(
