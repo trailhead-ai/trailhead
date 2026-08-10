@@ -102,7 +102,8 @@ def _add_record_field_flags(parser) -> None:
     Adds the non-scope field flags common to ``create`` and ``update``:
     the ``--status`` scalar, the
     repeatable list flags with their per-item ``--unset-<field> VALUE`` removers,
-    and the ``--related <kind>=<name>`` map flag. ``--title`` is NOT added here —
+    and the ``--related``/``--unset-related <kind>=<name>`` map flag pair.
+    ``--title`` is NOT added here —
     create declares it as a required argument and update as an optional setter.
     Scope flags (``--team`` etc.) are NOT added here either.
     """
@@ -156,10 +157,12 @@ def _add_record_field_flags(parser) -> None:
     parser.add_argument(
         "--unset-related", dest="unset_related_pairs", action="append", default=[],
         metavar="KIND=NAME",
-        help="Remove NAME from the related[KIND] list (repeatable). Split on the first "
-             "'='; both KIND and NAME must be non-empty. Dropping the last name in a "
-             "kind removes that kind; dropping the last kind omits related entirely. "
-             "A pair not present is a silent no-op.",
+        help="Remove matching NAME(s) from the related[KIND] list (repeatable). Split on "
+             "the first '='; both KIND and NAME must be non-empty. Removes every "
+             "occurrence of NAME (--related appends without dedupe, so a name can occur "
+             "more than once). Dropping the last name in a kind removes that kind; "
+             "dropping the last kind omits related entirely. A pair not present is a "
+             "silent no-op.",
     )
     # Task graph edges (task-only; rejected on other kinds by validate()).
     parser.add_argument(
@@ -728,9 +731,9 @@ def _resolve_named_vault(name: str):
     """Resolve a ``--vault NAME`` argument to its configured :class:`vault_config.Vault`.
 
     The single *locate-by-vault* path, shared by every verb that takes a
-    ``--vault NAME`` argument (``record update``'s current-location targeting
-    and ``lore task list``'s per-vault listing — see
-    ``cli/task.py:_cmd_task_list``): loads ``config.json`` via
+    ``--vault NAME`` argument (``record show``'s, ``record delete``'s, and
+    ``record update``'s current-location targeting, and ``lore task list``'s
+    per-vault listing — see ``cli/task.py:_cmd_task_list``): loads ``config.json`` via
     :func:`vault_config.load_config` and matches on the normalized name. An
     unreadable config or a name absent from it prints ``lore: <msg>`` to stderr
     and returns ``None`` — callers treat ``None`` as "stop, nothing located,

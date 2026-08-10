@@ -229,6 +229,33 @@ def test_unset_related_pair_malformed_no_equals_is_rejected():
     assert result["related"] == {"decision": ["good-id"]}
 
 
+def test_related_and_unset_related_compose_in_the_same_call():
+    """``--related`` and ``--unset-related`` share one working copy, so an
+    append and a removal in the same call compose rather than clobber."""
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["stale-id"]}},
+        _args(
+            related_pairs=["task=fresh-id"],
+            unset_related_pairs=["decision=stale-id"],
+        ),
+    )
+    assert errors == []
+    assert result["related"] == {"task": ["fresh-id"]}
+
+
+def test_unset_related_pair_on_pre_existing_empty_kind_drops_the_key():
+    """A pre-existing empty-list kind (e.g. left behind by an earlier unset)
+    is dropped by a later unset targeting it, same as a freshly-emptied one."""
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": []}},
+        _args(unset_related_pairs=["decision=anything"]),
+    )
+    assert errors == []
+    assert "related" not in result
+
+
 # ---------------------------------------------------------------------------
 # apply_map_labels_annotations
 # ---------------------------------------------------------------------------

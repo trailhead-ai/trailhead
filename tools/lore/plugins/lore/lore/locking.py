@@ -280,6 +280,7 @@ def session_write_lock(
     key: str,
     *,
     notice_after: float = LOCK_WAIT_NOTICE_SECONDS,
+    env: dict[str, str] | None = None,
 ):
     """Serialize session-record writes for one (vault, session-key) pair.
 
@@ -287,6 +288,10 @@ def session_write_lock(
     ``sanitize_worktree_name``) — it becomes a filename verbatim. The lock
     sidecar lives at ``state_dir("lore")/locks/<vault>/session/<key>.lock``
     (see :func:`lock_root_for_vault`), never inside the vault tree.
+
+    *env*: optional environment dict for test isolation (``XDG_STATE_HOME``),
+    threaded straight through to :func:`lock_root_for_vault`. ``None`` (the
+    production default) reads ``os.environ``.
     """
-    session_dir = lock_root_for_vault(vault_root) / "session"
+    session_dir = lock_root_for_vault(vault_root, env=env) / "session"
     return _flock(session_dir / f"{key}.lock", "session", f"session/{key}", notice_after)

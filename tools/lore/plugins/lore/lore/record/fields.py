@@ -54,9 +54,10 @@ def apply_record_fields(
         appends ``name`` to ``related[kind]``. An empty kind (``=foo``) or empty
         name (``task=``) is rejected HERE, before ``validate()`` ever sees it.
       - ``--unset-related <kind>=<name>`` (repeatable) is the removal counterpart:
-        it removes one matching ``name`` from ``related[kind]``, drops ``kind``
-        when its list empties, and omits ``related`` entirely when the whole map
-        empties (omit-when-empty, matching ``_unset`` in
+        it removes every matching ``name`` from ``related[kind]`` (``--related``
+        appends without dedupe, so a name can occur more than once), drops
+        ``kind`` when its list empties, and omits ``related`` entirely when the
+        whole map empties (omit-when-empty, matching ``_unset`` in
         :func:`apply_map_labels_annotations`). A pair naming an absent kind or
         name is a silent no-op; a malformed pair is rejected the same way as
         ``--related``.

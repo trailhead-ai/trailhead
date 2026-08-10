@@ -595,7 +595,9 @@ def _adr_number_occupied(kind_dir: Path, number: int) -> bool:
     return any(found == number for found, _ in _numbered_adr_artifacts(kind_dir))
 
 
-def _adr_lock_path(kind_dir: Path, vault_root: str | Path, number: int) -> Path:
+def _adr_lock_path(
+    kind_dir: Path, vault_root: str | Path, number: int, *, env: dict[str, str] | None = None
+) -> Path:
     """The canonical per-number lock path two racing adr writers contend on.
 
     Derived from the number alone (no zero-padding, no title), so every writer
@@ -604,13 +606,19 @@ def _adr_lock_path(kind_dir: Path, vault_root: str | Path, number: int) -> Path:
     (see :func:`locking.lock_root_for_vault`) — machine-local operational
     state, never inside the vault tree, so it carries no ``.gitignore``
     dependency. Dotted so it also stays out of a plain directory listing.
+
+    *env*: optional environment dict for test isolation (``XDG_STATE_HOME``),
+    threaded straight through to :func:`locking.lock_root_for_vault`. ``None``
+    (the production default) reads ``os.environ``.
     """
     kind_name = Path(kind_dir).name
-    return locking.lock_root_for_vault(vault_root) / kind_name / f".adr-{number}.lock"
+    return locking.lock_root_for_vault(vault_root, env=env) / kind_name / f".adr-{number}.lock"
 
 
 @contextmanager
-def adr_number_claim(kind_dir: Path, vault_root: str | Path, number: int) -> Iterator[Path]:
+def adr_number_claim(
+    kind_dir: Path, vault_root: str | Path, number: int, *, env: dict[str, str] | None = None
+) -> Iterator[Path]:
     """Hold the exclusive claim on adr sequence *number* for a write's duration.
 
     The **number-scoped** half of the adr create guard, and the only part of it
@@ -642,10 +650,14 @@ def adr_number_claim(kind_dir: Path, vault_root: str | Path, number: int) -> Ite
     artifact, an interrupted write can never strand a lock that wedges its
     number. It is also, deliberately, not counted by :func:`next_adr_number`: a
     lock records contention, not a record's existence.
+
+    *env*: optional environment dict for test isolation (``XDG_STATE_HOME``),
+    threaded straight through to :func:`_adr_lock_path`. ``None`` (the
+    production default) reads ``os.environ``.
     """
     kind_dir = Path(kind_dir)
     kind_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = _adr_lock_path(kind_dir, vault_root, number)
+    lock_path = _adr_lock_path(kind_dir, vault_root, number, env=env)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = open(lock_path, "a")  # create-or-open, no truncate; held until unlock
     try:
@@ -942,7 +954,7 @@ def validate_stamp_neutralize(
     return stamped, safe_body
 
 
-def _number_claim_for(location: RecordLocation):
+def _number_claim_for(location: RecordLocation, *, env: dict[str, str] | None = None):
     """Return the number-scoped claim context for *location*, else a no-op.
 
     The bridge between the generic ``require_new`` write path and the adr
@@ -952,11 +964,16 @@ def _number_claim_for(location: RecordLocation):
     say so. Every other kind (and any unnumbered adr stem) gets
     :func:`contextlib.nullcontext` — number scoping means nothing there, and the
     stem-scoped claims alone remain the guard.
+
+    *env*: optional environment dict for test isolation, threaded straight
+    through to :func:`adr_number_claim`.
     """
     match = _ADR_STEM_NUMBER_RE.match(location.name)
     if location.kind != "adr" or match is None:
         return nullcontext()
-    return adr_number_claim(location.body_path.parent, location.vault_root, int(match.group(1)))
+    return adr_number_claim(
+        location.body_path.parent, location.vault_root, int(match.group(1)), env=env
+    )
 
 
 def _write_new_artifacts(location: RecordLocation, safe_body: str, sidecar_text: str) -> None:
@@ -992,6 +1009,7 @@ def validate_and_write(
     conn,
     shared: int = 0,
     require_new: bool = False,
+    env: dict[str, str] | None = None,
 ) -> RecordId:
     """Validate, stamp provenance, and durably write a record.
 
@@ -1029,6 +1047,11 @@ def validate_and_write(
         create-only claim, which also covers every non-adr ``require_new``
         caller, where number scoping does not apply.
 
+    ``env`` is an optional environment dict for test isolation (``XDG_STATE_HOME``),
+    threaded straight through to :func:`adr_number_claim` via
+    :func:`_number_claim_for`. ``None`` (the production default) reads
+    ``os.environ``.
+
     Returns the vault-relative ``RecordId``.
     """
     stamped, safe_body = validate_stamp_neutralize(location, sidecar, body)
@@ -1043,7 +1066,7 @@ def validate_and_write(
         # diff/grep and round-trip asserts.
         sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
         if require_new:
-            with _number_claim_for(location):
+            with _number_claim_for(location, env=env):
                 _write_new_artifacts(location, safe_body, sidecar_text)
         else:
             write_temp_then_rename(location.body_path, safe_body)

@@ -163,19 +163,28 @@ def test_stranded_number_lock_does_not_wedge_the_number(tmp_path):
 
 def test_number_lock_is_not_counted_as_a_record(tmp_path):
     """The lock sidecar is not a record: it never consumes a sequence number and
-    is not itself indexed or listed as an adr artifact."""
+    is not itself indexed or listed as an adr artifact.
+
+    Also seeds a legacy in-vault lock (``adr/.adr-1.lock``) — real vaults
+    written before locks moved to the state dir still carry these, committed
+    to git — and asserts ``next_adr_number`` ignores it too.
+    """
     vault, state = _make_vault(tmp_path)
+    (vault / "adr").mkdir(parents=True, exist_ok=True)
+    (vault / "adr" / ".adr-1.lock").write_text("", encoding="utf-8")
+
     first = _create_adr(vault, state, "First decision")
     assert first.returncode == 0, first.stderr
     assert first.stdout.strip() == "adr/adr-001-first-decision"
 
     # No lock file lands inside the vault's adr/ dir at all — it lives under
-    # the state dir now, so the vault listing is nothing but the record pair.
+    # the state dir now, so the vault listing is nothing but the record pair
+    # plus the legacy lock seeded above.
     assert [p.name for p in sorted(adr_records(vault))] == [
         "adr-001-first-decision.json",
         "adr-001-first-decision.md",
     ]
-    assert list((vault / "adr").glob("*.lock")) == []
+    assert [p.name for p in (vault / "adr").glob("*.lock")] == [".adr-1.lock"]
     second = _create_adr(vault, state, "Second decision")
     assert second.returncode == 0, second.stderr
     assert second.stdout.strip() == "adr/adr-002-second-decision"
@@ -319,6 +328,7 @@ def _race_two_creates(rs, index_mod, vault: Path, state: Path, titles: tuple[str
                 body=body_text,
                 conn=conn,
                 require_new=True,
+                env={"XDG_STATE_HOME": str(state)},
             )
             conn.commit()
             results[idx] = ("ok", record_id)
@@ -436,6 +446,7 @@ def test_number_occupied_by_other_title_refuses_transactionally(tmp_path, monkey
                 body="second body",
                 conn=conn,
                 require_new=True,
+                env={"XDG_STATE_HOME": str(state)},
             )
     finally:
         conn.close()
