@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .common import _add_session_selectors, _read_stdin_body
-from .record import _render_record
+from .record import _render_record, _resolve_named_vault
 
 
 def _session_id_from_args_or_env(args) -> str:
@@ -149,7 +149,7 @@ def _open_session_index():
 
 
 def _cmd_session_candidate(args) -> int:
-    """``lore session candidate --session-id ID --kind KIND --phase PHASE``.
+    """``lore session candidate --session-id ID --kind KIND --phase PHASE [--vault NAME]``.
 
     Body from stdin. The first candidate for the resolved KEY materializes the
     singular session record ``session/<key>.{md,json}`` born ``dirty``; a candidate
@@ -158,11 +158,30 @@ def _cmd_session_candidate(args) -> int:
     reindexed. The body is fence-neutralized via
     ``record_store.neutralize_fences``; the sidecar-ensure-dirty + body-append +
     reindex are ONE race-safe critical section via ``session_store.capture_candidate``.
+
+    ``--vault NAME`` resolves the destination vault via
+    :func:`record._resolve_named_vault` instead of
+    ``vault_config.resolve_active_vault()`` — the same cwd-blind hazard those
+    other ``--vault`` flags close: a dispatched agent's cwd is not the
+    operator's, so the active-vault resolution can silently pick a vault other
+    than the one the caller elected. An unknown ``--vault`` name errors
+    ``lore: <msg>`` + nonzero before any session-key resolution or write.
+    Omitting ``--vault`` preserves the existing active-vault-resolution
+    behavior unchanged.
     """
     from ..record import store as record_store_mod
     from ..session import store as session_store_mod
     from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
+
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        vault_root = str(named_vault.path)
+    else:
+        vault_root = str(vault_config_mod.resolve_active_vault())
 
     key, rc = _resolve_session_key(args)
     if key is None:
@@ -188,7 +207,6 @@ def _cmd_session_candidate(args) -> int:
         entry_lines.append(f"  {line}")
     entry = "\n".join(entry_lines)
 
-    vault_root = str(vault_config_mod.resolve_active_vault())
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
     try:
         session_store_mod.capture_candidate(
@@ -281,6 +299,11 @@ def add_session_subparser(sub) -> None:
     p_session_candidate.add_argument(
         "--phase", required=True,
         help="The session phase the candidate was proposed in (e.g. Plan, Build).",
+    )
+    p_session_candidate.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Write the candidate into exactly this configured vault by name, "
+             "instead of the cwd-blind active-vault resolution.",
     )
     p_session_candidate.set_defaults(func=cmd_session)
 

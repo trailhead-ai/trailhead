@@ -22,6 +22,9 @@ to the real vault: the CLI resolves the test vault from a seeded config.json
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from conftest import load_script, make_vault as _make_vault, run_cli as _run  # noqa: F401
 
 
@@ -218,6 +221,121 @@ def test_walk_never_calls_graph_children_directly(monkeypatch):
     assert lines[1].strip().startswith("child-a [ready]")
     assert lines[2].strip().startswith("grandchild [ready]")
     assert lines[3].strip().startswith("child-b [ready]")
+
+
+# ---------------------------------------------------------------------------
+# --vault: explicit vault targeting (read-side collision hazard)
+# ---------------------------------------------------------------------------
+
+
+def _write_config(config_home: Path, vaults: list) -> Path:
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    cfg_path = lore_cfg / "config.json"
+    cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
+    return cfg_path
+
+
+def _run_cfg(args, *, vault, state, config_home, stdin_text=None):
+    return _run(
+        args, vault=vault, state_dir=state, stdin_text=stdin_text,
+        env_extra={"XDG_CONFIG_HOME": str(config_home)},
+    )
+
+
+def _duplicate_named_task_two_vaults(tmp_path, *, title="Dup Task"):
+    """Two team vaults (config order alpha, beta), each holding an
+    independently-created task record of the same name -- the collision case
+    the cwd-blind scan cannot disambiguate."""
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    for team, status in (("alpha", "open"), ("beta", "in-progress")):
+        r = _run_cfg(
+            ["record", "create", "--kind", "task", "--title", title,
+             "--team", team, "--status", status],
+            vault=default_vault, state=state, config_home=config_home, stdin_text="body\n",
+        )
+        assert r.returncode == 0, r.stderr
+    return default_vault, alpha_vault, beta_vault, state, config_home
+
+
+def test_task_graph_vault_flag_targets_named_vault_on_collision(tmp_path):
+    """``task graph NAME --vault beta`` renders beta's subtree, not alpha's
+    (the first-configured match a cwd-blind scan would otherwise pick)."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+
+    r = _run_cfg(
+        ["task", "graph", "dup-task", "--vault", "beta"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "dup-task [in-progress]"
+
+
+def test_task_graph_vault_flag_record_absent_in_named_vault_errors_without_scan_fallback(tmp_path):
+    """``--vault`` naming a vault that lacks the task errors plainly -- it
+    never falls back to scanning the other configured vaults."""
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    r = _run_cfg(
+        ["record", "create", "--kind", "task", "--title", "Solo", "--team", "alpha"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="body\n",
+    )
+    assert r.returncode == 0, r.stderr
+
+    r = _run_cfg(
+        ["task", "graph", "solo", "--vault", "beta"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+
+
+def test_task_graph_vault_flag_unknown_name_errors(tmp_path):
+    """An unconfigured ``--vault`` name errors with ``lore: <msg>`` -- nonzero."""
+    vault, state = _make_vault(tmp_path)
+    _build_fixture(vault, state)
+
+    r = _run(["task", "graph", "root", "--vault", "nope"], vault=vault, state_dir=state)
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+    assert "nope" in r.stderr
+
+
+def test_task_graph_vault_flag_omitted_preserves_scan_behavior(tmp_path):
+    """Omitting ``--vault`` keeps rendering via the cwd-blind scan, unchanged."""
+    vault, state = _make_vault(tmp_path)
+    _build_fixture(vault, state)
+
+    r = _run(["task", "graph", "root"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[0] == "root [in-progress]"
 
 
 def test_adjacency_map_orders_children_same_as_graph_children(tmp_path):

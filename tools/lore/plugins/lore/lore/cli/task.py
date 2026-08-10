@@ -82,7 +82,8 @@ def _render_task_graph(graph: dict, root: str) -> str:
 
 
 def _cmd_task_graph(args) -> int:
-    """``lore task graph NAME`` — print the containment subtree rooted at NAME.
+    """``lore task graph NAME [--vault NAME]`` — print the containment subtree
+    rooted at NAME.
 
     NAME is ordinarily a bare task name (resolved as ``task/NAME``); it may
     also be given as an explicit ``<kind>/<name>`` (the same grammar
@@ -91,20 +92,46 @@ def _cmd_task_graph(args) -> int:
     misleading "no task named" one. Resolution scans every configured vault
     (:func:`record._find_current_record_location`), matching how every other
     read/update path locates a record without routing flags.
+
+    ``--vault NAME`` mirrors ``record show --vault`` exactly: resolved via
+    :func:`record._resolve_named_vault`, then a direct
+    ``record_store.locate_record(vault_root=...)`` in exactly that vault — no
+    scan fallback. This is the same collision fix ``record show --vault``
+    applies: a same-named task across more than one configured vault, where
+    the cwd-blind scan's first match may not be the vault the caller means.
+    An unknown ``--vault`` name, or a named vault that does not hold the
+    task, errors ``lore: <msg>`` + nonzero — no scan fallback. Omitting
+    ``--vault`` preserves the current scan behavior unchanged.
     """
     from ..record import store as record_store_mod
 
     name = getattr(args, "name", None)
     record_id = name if "/" in name else f"task/{name}"
 
-    try:
-        location = _find_current_record_location(record_id)
-    except record_store_mod.RecordNotFoundError:
-        print(f"error: no task named {name!r}", file=sys.stderr)
-        return 1
-    except record_store_mod.InvalidRecordIdError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        try:
+            location = record_store_mod.locate_record(
+                record_id, vault_root=str(named_vault.path)
+            )
+        except record_store_mod.RecordNotFoundError:
+            print(f"lore: no task named {name!r}", file=sys.stderr)
+            return 1
+        except record_store_mod.InvalidRecordIdError as exc:
+            print(f"lore: {exc}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            location = _find_current_record_location(record_id)
+        except record_store_mod.RecordNotFoundError:
+            print(f"error: no task named {name!r}", file=sys.stderr)
+            return 1
+        except record_store_mod.InvalidRecordIdError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
     if location.kind != "task":
         print(
@@ -199,6 +226,11 @@ def add_task_subparser(sub) -> None:
         "name",
         metavar="NAME",
         help="Task name to root the graph at (or an explicit <kind>/<name>)",
+    )
+    p_task_graph.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Locate the root task in exactly this configured vault by name, "
+             "instead of scanning every vault in config order.",
     )
     p_task_graph.set_defaults(func=cmd_task)
 
