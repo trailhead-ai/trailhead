@@ -145,6 +145,91 @@ def test_related_pair_empty_name_is_rejected():
 
 
 # ---------------------------------------------------------------------------
+# apply_record_fields — --unset-related KIND=NAME map removal
+# ---------------------------------------------------------------------------
+
+
+def test_unset_related_pair_removes_one_name_from_kind():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["stale-id", "good-id"]}},
+        _args(unset_related_pairs=["decision=stale-id"]),
+    )
+    assert errors == []
+    assert result["related"] == {"decision": ["good-id"]}
+
+
+def test_unset_related_pair_drops_kind_key_when_list_empties():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["only-id"], "task": ["other"]}},
+        _args(unset_related_pairs=["decision=only-id"]),
+    )
+    assert errors == []
+    assert result["related"] == {"task": ["other"]}
+
+
+def test_unset_related_pair_omits_related_field_when_map_empties():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["only-id"]}},
+        _args(unset_related_pairs=["decision=only-id"]),
+    )
+    assert errors == []
+    assert "related" not in result
+
+
+def test_unset_related_pair_absent_is_a_silent_noop():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["good-id"]}},
+        _args(unset_related_pairs=["decision=ghost"]),
+    )
+    assert errors == []
+    assert result["related"] == {"decision": ["good-id"]}
+
+
+def test_unset_related_pair_absent_kind_is_a_silent_noop():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["good-id"]}},
+        _args(unset_related_pairs=["task=ghost"]),
+    )
+    assert errors == []
+    assert result["related"] == {"decision": ["good-id"]}
+
+
+def test_unset_related_pair_empty_kind_is_rejected():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["good-id"]}},
+        _args(unset_related_pairs=["=name"]),
+    )
+    assert errors
+    assert result["related"] == {"decision": ["good-id"]}
+
+
+def test_unset_related_pair_empty_name_is_rejected():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["good-id"]}},
+        _args(unset_related_pairs=["decision="]),
+    )
+    assert errors
+    assert result["related"] == {"decision": ["good-id"]}
+
+
+def test_unset_related_pair_malformed_no_equals_is_rejected():
+    f = _fields()
+    result, errors = f.apply_record_fields(
+        {"related": {"decision": ["good-id"]}},
+        _args(unset_related_pairs=["decision-good-id"]),
+    )
+    assert errors
+    assert result["related"] == {"decision": ["good-id"]}
+
+
+# ---------------------------------------------------------------------------
 # apply_map_labels_annotations
 # ---------------------------------------------------------------------------
 

@@ -12,7 +12,8 @@ Two intentionally separate branches:
 
   - :func:`apply_record_fields` — scalars (``--status``/``--title``/``--parent``),
     repeatable list flags (``--keyword``/``--related-*``/``--depends-on`` with
-    per-item ``--unset-*`` removers), and the ``--related KIND=NAME`` map builder.
+    per-item ``--unset-*`` removers), and the ``--related``/``--unset-related
+    KIND=NAME`` map builder/remover.
   - :func:`apply_map_labels_annotations` — the ``--label``/``--annotation`` maps
     with upsert-or-remove-with-omit-when-empty semantics.
 """
@@ -52,6 +53,13 @@ def apply_record_fields(
       - ``--related <kind>=<name>`` (repeatable) splits on the FIRST ``=`` and
         appends ``name`` to ``related[kind]``. An empty kind (``=foo``) or empty
         name (``task=``) is rejected HERE, before ``validate()`` ever sees it.
+      - ``--unset-related <kind>=<name>`` (repeatable) is the removal counterpart:
+        it removes one matching ``name`` from ``related[kind]``, drops ``kind``
+        when its list empties, and omits ``related`` entirely when the whole map
+        empties (omit-when-empty, matching ``_unset`` in
+        :func:`apply_map_labels_annotations`). A pair naming an absent kind or
+        name is a silent no-op; a malformed pair is rejected the same way as
+        ``--related``.
 
     All mutations still flow through ``validate()`` downstream: off-vocab
     ``--status`` and bad ``related`` kinds are caught there. This helper only
@@ -113,6 +121,31 @@ def apply_record_fields(
             related[kind] = list(related.get(kind, [])) + [name]
         if related:
             result["related"] = related
+
+    # --- --unset-related <kind>=<name> map flag (remove name from kind) ----
+    unset_related_pairs = getattr(args, "unset_related_pairs", None) or []
+    if unset_related_pairs:
+        related = dict(result.get("related") or {})
+        for pair in unset_related_pairs:
+            kind, sep, name = pair.partition("=")
+            if not sep or not kind or not name:
+                errors.append(
+                    f"error: --unset-related {pair!r} must be KIND=NAME with a "
+                    f"non-empty kind and name"
+                )
+                continue
+            current = related.get(kind)
+            if not current:
+                continue
+            remaining = [v for v in current if v != name]
+            if remaining:
+                related[kind] = remaining
+            else:
+                related.pop(kind, None)
+        if related:
+            result["related"] = related
+        else:
+            result.pop("related", None)
 
     return result, errors
 

@@ -153,6 +153,14 @@ def _add_record_field_flags(parser) -> None:
         help="Append NAME to the related[KIND] list (repeatable). Split on the first '='; "
              "KIND must be a valid record kind and both KIND and NAME must be non-empty.",
     )
+    parser.add_argument(
+        "--unset-related", dest="unset_related_pairs", action="append", default=[],
+        metavar="KIND=NAME",
+        help="Remove NAME from the related[KIND] list (repeatable). Split on the first "
+             "'='; both KIND and NAME must be non-empty. Dropping the last name in a "
+             "kind removes that kind; dropping the last kind omits related entirely. "
+             "A pair not present is a silent no-op.",
+    )
     # Task graph edges (task-only; rejected on other kinds by validate()).
     parser.add_argument(
         "--depends-on", dest="depends_on", action="append", default=[], metavar="TASK",
