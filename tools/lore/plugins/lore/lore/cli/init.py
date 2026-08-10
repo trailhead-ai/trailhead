@@ -110,12 +110,14 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
          POSIX path, so a vault path containing ':' is not corrupted). The hook
          ``realpath``s these on every call, so the ``default`` symlink's *current*
          real target is always covered — never an install-time snapshot.
-      3. Symmetric coarse static ``permissions.deny`` over ``vaults/**`` for both
-         ``Write`` and ``Edit`` as **defense-in-depth only** (it cannot cover a
-         symlink's real target, so the runtime hook above is the
-         security-sufficient mechanism). Note the ``//`` double-slash
-         absolute-path grammar (single ``/`` is project-root-relative — a silent
-         footgun).
+      3. Coarse static ``permissions.deny`` ``Edit(...)`` rule over ``vaults/**``
+         as **defense-in-depth only** (it cannot cover a symlink's real target,
+         so the runtime hook above is the security-sufficient mechanism).
+         ``Edit(path)`` rules cover all file-editing tools (Write/Edit/
+         MultiEdit/NotebookEdit); a ``Write(path)`` rule never matches and makes
+         Claude Code warn at startup, so any legacy ``Write(...)`` rule from an
+         earlier install is removed. Note the ``//`` double-slash absolute-path
+         grammar (single ``/`` is project-root-relative — a silent footgun).
 
     Idempotent: re-runs add no duplicate entries. All three upserts go through
     ``settings_writer`` (stdlib json, atomic write, preserves unrelated keys);
@@ -133,11 +135,14 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     settings_writer_mod.set_env_var(
         settings_path, "LORE_VAULT_GUARD_ROOT", guard_root_value
     )
-    # Defense-in-depth (breadth-only): symmetric static deny over Write AND Edit.
-    # The runtime hook above is the security-sufficient primary; these coarse
-    # //abs prefix rules cannot cover a symlink's real target.
+    # Defense-in-depth (breadth-only): a static Edit( deny over vaults/**. Claude
+    # Code matches file-editing tools (Write/Edit/MultiEdit/NotebookEdit) against
+    # Edit(path) rules only — a Write(path) rule never matches and triggers a
+    # startup warning, so earlier installs' Write( rule is removed here.
+    # The runtime hook above is the security-sufficient primary; this coarse
+    # //abs prefix rule cannot cover a symlink's real target.
     vaults_glob = f"//{str(vaults_root).lstrip('/')}/**"
-    settings_writer_mod.upsert_permission_deny(settings_path, f"Write({vaults_glob})")
+    settings_writer_mod.remove_permission_deny(settings_path, f"Write({vaults_glob})")
     settings_writer_mod.upsert_permission_deny(settings_path, f"Edit({vaults_glob})")
 
 

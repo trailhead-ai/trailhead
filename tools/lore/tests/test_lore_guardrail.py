@@ -472,6 +472,34 @@ class TestSettingsWriterPermissionDeny:
             sw.upsert_permission_deny(settings, "Write(//x/**)")
         assert settings.read_text() == corrupt, "corrupt settings clobbered"
 
+    def test_remove_permission_deny_removes_rule(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps(
+                {"permissions": {"deny": ["Write(//abs/vaults/**)", "Bash(rm:*)"]}}
+            )
+        )
+        sw.remove_permission_deny(settings, "Write(//abs/vaults/**)")
+        data = json.loads(settings.read_text())
+        assert data["permissions"]["deny"] == ["Bash(rm:*)"]
+
+    def test_remove_permission_deny_noop_when_absent(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        before = json.dumps({"permissions": {"deny": ["Bash(rm:*)"]}})
+        settings.write_text(before)
+        sw.remove_permission_deny(settings, "Write(//abs/vaults/**)")
+        assert settings.read_text() == before, "no-op removal rewrote the file"
+
+    def test_remove_permission_deny_noop_when_file_missing(self, tmp_path):
+        sw = self._sw()
+        settings = tmp_path / ".claude" / "settings.json"
+        sw.remove_permission_deny(settings, "Write(//abs/vaults/**)")
+        assert not settings.exists(), "removal created a settings file"
+
     def test_set_env_var_sets_and_preserves(self, tmp_path):
         sw = self._sw()
         settings = tmp_path / ".claude" / "settings.json"
@@ -625,9 +653,11 @@ class TestInitInstallsGuardrail:
             f"expected a //abs vaults static deny rule, got {deny!r}"
         )
 
-    def test_init_adds_symmetric_write_and_edit_deny(self, tmp_path):
-        """The static deny must cover both Write( and Edit( over vaults/**,
-        each anchored with the // double-slash absolute grammar."""
+    def test_init_adds_edit_deny_only(self, tmp_path):
+        """The static deny is a single Edit( rule over vaults/** (Edit(path)
+        rules cover all file-editing tools; a Write(path) rule never matches
+        and makes Claude Code warn at startup), anchored with the //
+        double-slash absolute grammar."""
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
@@ -636,8 +666,31 @@ class TestInitInstallsGuardrail:
         deny = data.get("permissions", {}).get("deny", [])
         write_rules = [r for r in deny if r.startswith("Write(//") and "vaults" in r]
         edit_rules = [r for r in deny if r.startswith("Edit(//") and "vaults" in r]
-        assert write_rules, f"missing Write(//…vaults/**) static deny: {deny!r}"
-        assert edit_rules, f"missing symmetric Edit(//…vaults/**) static deny: {deny!r}"
+        assert edit_rules, f"missing Edit(//…vaults/**) static deny: {deny!r}"
+        assert not write_rules, f"unmatched Write(//…) rule present: {deny!r}"
+
+    def test_init_removes_legacy_write_deny(self, tmp_path):
+        """A Write(//…/vaults/**) rule left by an earlier install is removed on
+        re-init — it never matches file-editing tools and triggers a Claude Code
+        startup warning."""
+        state, config, home = _dirs(tmp_path)
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+
+        settings, data = self._read_user_settings(home)
+        edit_rule = next(
+            r for r in data["permissions"]["deny"] if r.startswith("Edit(//")
+        )
+        legacy = "Write(" + edit_rule[len("Edit("):]
+        data["permissions"]["deny"].insert(0, legacy)
+        settings.write_text(json.dumps(data))
+
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+        _, data = self._read_user_settings(home)
+        deny = data["permissions"]["deny"]
+        assert legacy not in deny, f"legacy Write rule not removed: {deny!r}"
+        assert edit_rule in deny, f"Edit rule missing after cleanup: {deny!r}"
 
     def test_rerun_installs_no_duplicate_guard(self, tmp_path):
         state, config, home = _dirs(tmp_path)
@@ -651,9 +704,11 @@ class TestInitInstallsGuardrail:
         assert len(guard_cmds) == 1, f"re-run duplicated the guard entry: {guard_cmds!r}"
         deny = data.get("permissions", {}).get("deny", [])
         vault_denies = [r for r in deny if "vaults" in r]
-        # Two rules expected (Write + Edit); re-run must not duplicate either.
-        assert len(vault_denies) == 2, f"re-run changed the deny rules: {vault_denies!r}"
-        assert len(set(vault_denies)) == 2, f"re-run duplicated a deny rule: {vault_denies!r}"
+        # One Edit( rule expected; re-run must not duplicate it.
+        assert vault_denies == list(dict.fromkeys(vault_denies)), (
+            f"re-run duplicated a deny rule: {vault_denies!r}"
+        )
+        assert len(vault_denies) == 1, f"re-run changed the deny rules: {vault_denies!r}"
 
     def test_init_preserves_unrelated_settings(self, tmp_path):
         """An existing unrelated hook + permission rule survive the guardrail install."""

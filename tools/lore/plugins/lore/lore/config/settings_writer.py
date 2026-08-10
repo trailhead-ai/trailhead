@@ -167,7 +167,7 @@ def upsert_permission_deny(settings_path: Path, rule: str) -> None:
     Defense-in-depth only: the static ``permissions.deny`` prefix
     cannot cover an arbitrary symlink's real target, so it is breadth-only — the
     runtime PreToolUse vault-guard hook is the mandatory primary mechanism. This
-    coarse rule (``Write(//abs/.../vaults/**)`` — note the ``//`` double-slash for
+    coarse rule (``Edit(//abs/.../vaults/**)`` — note the ``//`` double-slash for
     absolute paths) adds belt-and-braces breadth on top of the hook.
 
     If the rule is already present, leave it untouched. Preserves all unrelated
@@ -175,7 +175,7 @@ def upsert_permission_deny(settings_path: Path, rule: str) -> None:
 
     Args:
         settings_path: Path to the settings.json (or settings.local.json) file.
-        rule:          The permission rule string (e.g. ``"Write(//x/vaults/**)"``).
+        rule:          The permission rule string (e.g. ``"Edit(//x/vaults/**)"``).
     """
     data = _load(settings_path)
     permissions = data.setdefault("permissions", {})
@@ -185,6 +185,29 @@ def upsert_permission_deny(settings_path: Path, rule: str) -> None:
         return
 
     deny.append(rule)
+    _save(settings_path, data)
+
+
+def remove_permission_deny(settings_path: Path, rule: str) -> None:
+    """Remove *rule* from ``permissions.deny`` if present.
+
+    Used to retire stale deny rules from earlier installs (e.g. a
+    ``Write(//…/vaults/**)`` rule, which Claude Code never matches for
+    file-editing tools and warns about at startup). No-op (no file write) when
+    the rule — or the file — is absent. Preserves all unrelated keys and
+    permission rules. Writes atomically.
+
+    Args:
+        settings_path: Path to the settings.json (or settings.local.json) file.
+        rule:          The exact permission rule string to remove.
+    """
+    data = _load(settings_path)
+    deny = data.get("permissions", {}).get("deny", [])
+
+    if rule not in deny:
+        return
+
+    deny[:] = [r for r in deny if r != rule]
     _save(settings_path, data)
 
 
