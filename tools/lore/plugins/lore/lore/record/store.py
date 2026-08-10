@@ -299,6 +299,16 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
         elif current is not None:
             if raw_stripped.startswith(("--- ", "+++ ")):
                 continue
+            if raw_stripped.startswith("\\"):
+                # GNU-diff "\ No newline at end of file" marker: applies to the
+                # immediately preceding hunk line, telling us that line's
+                # trailing newline (kept when we appended it above) isn't
+                # really there. Strip it so Phase 1's verbatim comparison and
+                # Phase 2's replacement both reflect the no-newline body/hunk
+                # side instead of a spurious extra "\n".
+                if current.lines:
+                    current.lines[-1] = current.lines[-1].rstrip("\r\n")
+                continue
             if raw and raw[0] in (" ", "-", "+"):
                 current.lines.append(raw)
 

@@ -1231,6 +1231,26 @@ class TestApplierTrailingNewline:
         with pytest.raises(rs.DiffFormatError):
             rs.apply_unified_diff(body_no_nl, diff)
 
+    def test_no_newline_marker_applies_against_no_trailing_newline_body(self, rs):
+        """GNU-diff's '\\ No newline at end of file' marker must be honored,
+        not silently dropped — the lesson's exact repro."""
+        body_no_nl = "first line\nsecond line"  # lacks trailing newline
+        diff = (
+            "--- a\n"
+            "+++ b\n"
+            "@@ -1,2 +1,2 @@\n"
+            " first line\n"
+            "-second line\n"
+            "\\ No newline at end of file\n"
+            "+SECOND LINE\n"
+            "\\ No newline at end of file\n"
+        )
+        result, rejected = rs.apply_unified_diff(body_no_nl, diff)
+        assert rejected == []
+        assert result == "first line\nSECOND LINE"
+        # The marker on the '+' side must not silently add a trailing newline.
+        assert not result.endswith("\n")
+
 
 class TestApplierBareHunkHeader:
     """A hunk header lacking line ranges must raise, never silently no-op."""
