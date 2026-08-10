@@ -7,6 +7,11 @@ dist/
 *.pyc
 *.log
 
+# This repo is stdlib+pytest only (no uv tooling); agents that mistakenly run
+# `uv` regenerate this lockfile, and a stray untracked copy trips
+# footprint_guard.py during execute's simplify phase.
+uv.lock
+
 .claude
 
 # User/agent-authored install configs live in config/ but must not be committed.
