@@ -414,7 +414,8 @@ def _cmd_record_show(args) -> int:
 
 
 def _cmd_record_delete(args) -> int:
-    """``lore record delete RECORD_ID`` — thin shell over ``record_store``.
+    """``lore record delete RECORD_ID [--vault NAME]`` — thin shell over
+    ``record_store``.
 
     Removes the body (``.md``), sidecar (``.json``), and index row for RECORD_ID
     in one operation. Uses :func:`record_store.delete_record`, which is the
@@ -423,6 +424,18 @@ def _cmd_record_delete(args) -> int:
 
     RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
     An invalid format or nonexistent record → non-zero + clear stderr.
+
+    ``--vault NAME`` mirrors ``record show --vault`` exactly: resolved via
+    :func:`_resolve_named_vault`, then a direct
+    ``record_store.locate_record(vault_root=...)`` in exactly that vault — no
+    :func:`_resolve_record_op_vault` scan fallback. This is the delete-side fix
+    for the same collision ``show``/``update --vault`` address: a same-named
+    record across more than one configured vault, where the cwd-blind scan's
+    first match may not be the vault the caller means. An unknown ``--vault``
+    name, or a named vault that does not hold the record, errors
+    ``lore: <msg>`` + nonzero — never falling back to the scan. Omitting
+    ``--vault`` preserves :func:`_resolve_record_op_vault`'s scan exactly as
+    before.
     """
     from .. import locking as locking_mod
     from ..record import guards as guards_mod
@@ -432,12 +445,27 @@ def _cmd_record_delete(args) -> int:
     if record_id is None:
         return 1
 
-    # Resolve the target vault: see _resolve_record_op_vault for the two-path
-    # contract (config-driven scan when no scope flag is given, explicit-flag
-    # routing otherwise). A record whose vault was removed from config resolves
-    # to the default floor and surfaces a clean RecordNotFoundError below rather
-    # than acting on an orphaned target.
-    vault_root = _resolve_record_op_vault(record_id, args)
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        try:
+            record_store_mod.locate_record(record_id, vault_root=str(named_vault.path))
+        except (
+            record_store_mod.RecordNotFoundError,
+            record_store_mod.InvalidRecordIdError,
+        ) as exc:
+            print(f"lore: {exc}", file=sys.stderr)
+            return 1
+        vault_root = str(named_vault.path)
+    else:
+        # Resolve the target vault: see _resolve_record_op_vault for the
+        # two-path contract (config-driven scan when no scope flag is given,
+        # explicit-flag routing otherwise). A record whose vault was removed
+        # from config resolves to the default floor and surfaces a clean
+        # RecordNotFoundError below rather than acting on an orphaned target.
+        vault_root = _resolve_record_op_vault(record_id, args)
 
     # Dependent-warning: deleting a task that others depend-on is allowed (delete
     # is never blocked) but warns, listing the dependents. Computed before the
@@ -1375,6 +1403,11 @@ def add_record_subparser(sub) -> None:
         "record_id",
         metavar="RECORD_ID",
         help="The vault-relative record ID to delete (<kind>/<name>)",
+    )
+    p_record_delete.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Delete the record from exactly this configured vault by name, "
+             "instead of scanning every vault in config order.",
     )
     # Routing flags (symmetric with create/update): when a config exists they
     # select which vault the record lives in (a record routed to a scoped vault

@@ -254,3 +254,130 @@ def test_delete_inside_group_still_locates_and_removes_record(tmp_path):
     assert d.returncode == 0, d.stderr
     assert not (vault / kind / f"{name}.md").exists()
     assert not (vault / kind / f"{name}.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# --vault: explicit current-location targeting (mirrors ``record show
+# --vault``) -- delete must locate the record in exactly the named configured
+# vault, never falling back to the cwd-blind config-order scan.
+# ---------------------------------------------------------------------------
+
+
+def _write_config(config_home: Path, vaults: list) -> Path:
+    lore_cfg = config_home / "lore"
+    lore_cfg.mkdir(parents=True, exist_ok=True)
+    cfg_path = lore_cfg / "config.json"
+    cfg_path.write_text(json.dumps({"vaults": vaults}, indent=2), encoding="utf-8")
+    return cfg_path
+
+
+def _run_cfg(args, *, vault, state, config_home, stdin_text=None):
+    return _run(
+        args, vault=vault, state_dir=state, stdin_text=stdin_text,
+        env_extra={"XDG_CONFIG_HOME": str(config_home)},
+    )
+
+
+def _duplicate_named_task_two_vaults(tmp_path, *, title="Dup Task"):
+    """Two team vaults (config order alpha, beta), each holding an
+    independently-created task record of the same name -- the collision case
+    the cwd-blind scan cannot disambiguate."""
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    for team, vault in (("alpha", alpha_vault), ("beta", beta_vault)):
+        r = _run_cfg(
+            ["record", "create", "--kind", "task", "--title", title, "--team", team],
+            vault=default_vault, state=state, config_home=config_home, stdin_text="body\n",
+        )
+        assert r.returncode == 0, r.stderr
+    return default_vault, alpha_vault, beta_vault, state, config_home
+
+
+def test_delete_vault_flag_targets_named_vault_on_collision(tmp_path):
+    """``delete --vault beta`` removes beta's copy and leaves the
+    first-declared (alpha) vault's copy untouched -- proving it does not fall
+    back to config-order first-match."""
+    default_vault, alpha_vault, beta_vault, state, config_home = (
+        _duplicate_named_task_two_vaults(tmp_path)
+    )
+    record_id = "task/dup-task"
+
+    r = _run_cfg(
+        ["record", "delete", record_id, "--vault", "beta"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert not (beta_vault / "task" / "dup-task.md").exists()
+    assert (alpha_vault / "task" / "dup-task.md").exists()
+
+
+def test_delete_vault_flag_record_absent_in_named_vault_errors_without_scan_fallback(tmp_path):
+    """``--vault`` naming a vault that lacks the record errors plainly --
+    neither vault's copy is deleted."""
+    default_vault, state = _make_vault(tmp_path)
+    alpha_vault = tmp_path / "vault_alpha"
+    beta_vault = tmp_path / "vault_beta"
+    alpha_vault.mkdir(parents=True)
+    beta_vault.mkdir(parents=True)
+    config_home = tmp_path / "config"
+    _write_config(
+        config_home,
+        [
+            {"name": "default", "scope": "default", "path": str(default_vault)},
+            {"name": "alpha", "scope": "team", "path": str(alpha_vault)},
+            {"name": "beta", "scope": "team", "path": str(beta_vault)},
+        ],
+    )
+    r = _run_cfg(
+        ["record", "create", "--kind", "task", "--title", "Solo", "--team", "alpha"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="solo body\n",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = "task/solo"
+
+    r = _run_cfg(
+        ["record", "delete", record_id, "--vault", "beta"],
+        vault=default_vault, state=state, config_home=config_home, stdin_text="",
+    )
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+    assert (alpha_vault / "task" / "solo.md").exists()
+    assert not (beta_vault / "task" / "solo.md").exists()
+
+
+def test_delete_vault_flag_unknown_name_errors(tmp_path):
+    """An unconfigured ``--vault`` name errors with ``lore: <msg>`` --
+    nonzero."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create_record(vault, state)
+
+    r = _run(["record", "delete", record_id, "--vault", "nope"], vault=vault, state_dir=state)
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: ")
+    assert "nope" in r.stderr
+
+
+def test_delete_vault_flag_omitted_preserves_scan_behavior(tmp_path):
+    """Omitting ``--vault`` still deletes via the existing config-order
+    scan -- unchanged regression guard."""
+    vault, state = _make_vault(tmp_path)
+    record_id = _create_record(vault, state)
+    kind, name = record_id.split("/", 1)
+    body_path = vault / kind / f"{name}.md"
+    assert body_path.exists()
+
+    r = _run(["record", "delete", record_id], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert not body_path.exists()
