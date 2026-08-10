@@ -531,13 +531,14 @@ class TestLockContract:
         t.join(timeout=5)
         assert done.is_set(), "two spellings of one vault self-deadlocked"
 
-    def test_session_wait_notice_names_the_session_scope(self, tmp_path):
+    def test_session_wait_notice_names_the_session_scope(self, tmp_path, monkeypatch):
         """A session-key wait must NOT read as a vault-lock wait.
 
         Operators (and ranger's mass-timeout triage) key on the vault-lock
         wording to mean "the whole vault is contended"; a per-session-key wait,
         which blocks only that one session's writers, must say so instead.
         """
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
         locking = load_script("lore.locking")
         vault = tmp_path / "vault"
         vault.mkdir()

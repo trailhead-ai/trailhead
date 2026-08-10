@@ -383,6 +383,26 @@ def test_related_url_flag_appends_and_unsets(tmp_path):
     assert sidecar["related-urls"] == ["https://b.example"]
 
 
+def test_unset_related_flag_removes_one_name_via_update(tmp_path):
+    """--unset-related KIND=NAME removes one name from related[KIND] on update."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        _BASE_ARGS + ["--related", "task=alpha", "--related", "task=beta"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    r2 = _run(
+        ["record", "update", record_id, "--unset-related", "task=alpha"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert r2.returncode == 0, r2.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["related"] == {"task": ["beta"]}
+
+
 def test_related_file_flag_maps_to_related_files_or_folders(tmp_path):
     """--related-file appends to the related-files-or-folders sidecar key."""
     vault, state = _make_vault(tmp_path)

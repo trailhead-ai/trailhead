@@ -39,3 +39,14 @@ def test_brief_template_drops_the_old_headings():
             "surviving old spelling alongside the new bold labels leaves two "
             "payload formats in the same file"
         )
+
+
+def test_brief_template_carries_no_yaml_frontmatter_fence():
+    """Session-note records are stored verbatim, never frontmatter-parsed —
+    the brief template must not model a frontmatter block for its payload."""
+    text = POLISH_SKILL.read_text()
+    assert "---\ntype: task" not in text, (
+        "polish/SKILL.md must not carry a YAML frontmatter fence in its brief "
+        "template — session-note records are stored verbatim, never "
+        "frontmatter-parsed, so a frontmatter-shaped payload would be dead weight"
+    )

@@ -73,6 +73,34 @@ def test_record_create_help_documents_the_mechanism_rule():
     assert "namespaced key" in help_text
 
 
+def test_record_update_help_documents_the_mechanism_rule():
+    """lore record update --help must carry the same mechanism rule as create —
+    update is the verb an agent most often reaches for to write labels, so it
+    must not be the one place the rule is missing."""
+    parser = build_parser()
+    leaves = _leaf_parsers(parser)
+    help_text = _normalize(leaves["record update"].format_help())
+
+    assert "--related KIND=NAME" in help_text
+    assert "--label KEY=VALUE" in help_text
+    assert "--annotation KEY=VALUE" in help_text
+    assert "namespaced key" in help_text
+
+
+def test_record_create_and_update_epilogs_share_the_mechanism_rule_text():
+    """The mechanism rule must be a single source of truth (a shared
+    module-level constant), not two independently-maintained copies that can
+    drift apart."""
+    parser = build_parser()
+    leaves = _leaf_parsers(parser)
+    create_help = _normalize(leaves["record create"].format_help())
+    update_help = _normalize(leaves["record update"].format_help())
+
+    rule_sentence = "Choosing a labels flag:"
+    assert rule_sentence in create_help
+    assert rule_sentence in update_help
+
+
 def test_search_skill_documents_the_label_query_syntax():
     """search/SKILL.md must document the label query facets and the
     dot-for-slash convention that makes a namespaced label key retrievable —

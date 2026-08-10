@@ -102,7 +102,8 @@ def _add_record_field_flags(parser) -> None:
     Adds the non-scope field flags common to ``create`` and ``update``:
     the ``--status`` scalar, the
     repeatable list flags with their per-item ``--unset-<field> VALUE`` removers,
-    and the ``--related <kind>=<name>`` map flag. ``--title`` is NOT added here —
+    and the ``--related``/``--unset-related <kind>=<name>`` map flag pair.
+    ``--title`` is NOT added here —
     create declares it as a required argument and update as an optional setter.
     Scope flags (``--team`` etc.) are NOT added here either.
     """
@@ -152,6 +153,16 @@ def _add_record_field_flags(parser) -> None:
         "--related", dest="related_pairs", action="append", default=[], metavar="KIND=NAME",
         help="Append NAME to the related[KIND] list (repeatable). Split on the first '='; "
              "KIND must be a valid record kind and both KIND and NAME must be non-empty.",
+    )
+    parser.add_argument(
+        "--unset-related", dest="unset_related_pairs", action="append", default=[],
+        metavar="KIND=NAME",
+        help="Remove matching NAME(s) from the related[KIND] list (repeatable). Split on "
+             "the first '='; both KIND and NAME must be non-empty. Removes every "
+             "occurrence of NAME (--related appends without dedupe, so a name can occur "
+             "more than once). Dropping the last name in a kind removes that kind; "
+             "dropping the last kind omits related entirely. A pair not present is a "
+             "silent no-op.",
     )
     # Task graph edges (task-only; rejected on other kinds by validate()).
     parser.add_argument(
@@ -406,7 +417,8 @@ def _cmd_record_show(args) -> int:
 
 
 def _cmd_record_delete(args) -> int:
-    """``lore record delete RECORD_ID`` — thin shell over ``record_store``.
+    """``lore record delete RECORD_ID [--vault NAME]`` — thin shell over
+    ``record_store``.
 
     Removes the body (``.md``), sidecar (``.json``), and index row for RECORD_ID
     in one operation. Uses :func:`record_store.delete_record`, which is the
@@ -415,6 +427,18 @@ def _cmd_record_delete(args) -> int:
 
     RECORD_ID must be in ``<kind>/<name>`` format and refer to an existing record.
     An invalid format or nonexistent record → non-zero + clear stderr.
+
+    ``--vault NAME`` mirrors ``record show --vault`` exactly: resolved via
+    :func:`_resolve_named_vault`, then a direct
+    ``record_store.locate_record(vault_root=...)`` in exactly that vault — no
+    :func:`_resolve_record_op_vault` scan fallback. This is the delete-side fix
+    for the same collision ``show``/``update --vault`` address: a same-named
+    record across more than one configured vault, where the cwd-blind scan's
+    first match may not be the vault the caller means. An unknown ``--vault``
+    name, or a named vault that does not hold the record, errors
+    ``lore: <msg>`` + nonzero — never falling back to the scan. Omitting
+    ``--vault`` preserves :func:`_resolve_record_op_vault`'s scan exactly as
+    before.
     """
     from .. import locking as locking_mod
     from ..record import guards as guards_mod
@@ -424,12 +448,27 @@ def _cmd_record_delete(args) -> int:
     if record_id is None:
         return 1
 
-    # Resolve the target vault: see _resolve_record_op_vault for the two-path
-    # contract (config-driven scan when no scope flag is given, explicit-flag
-    # routing otherwise). A record whose vault was removed from config resolves
-    # to the default floor and surfaces a clean RecordNotFoundError below rather
-    # than acting on an orphaned target.
-    vault_root = _resolve_record_op_vault(record_id, args)
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        try:
+            record_store_mod.locate_record(record_id, vault_root=str(named_vault.path))
+        except (
+            record_store_mod.RecordNotFoundError,
+            record_store_mod.InvalidRecordIdError,
+        ) as exc:
+            print(f"lore: {exc}", file=sys.stderr)
+            return 1
+        vault_root = str(named_vault.path)
+    else:
+        # Resolve the target vault: see _resolve_record_op_vault for the
+        # two-path contract (config-driven scan when no scope flag is given,
+        # explicit-flag routing otherwise). A record whose vault was removed
+        # from config resolves to the default floor and surfaces a clean
+        # RecordNotFoundError below rather than acting on an orphaned target.
+        vault_root = _resolve_record_op_vault(record_id, args)
 
     # Dependent-warning: deleting a task that others depend-on is allowed (delete
     # is never blocked) but warns, listing the dependents. Computed before the
@@ -692,9 +731,9 @@ def _resolve_named_vault(name: str):
     """Resolve a ``--vault NAME`` argument to its configured :class:`vault_config.Vault`.
 
     The single *locate-by-vault* path, shared by every verb that takes a
-    ``--vault NAME`` argument (``record update``'s current-location targeting
-    and ``lore task list``'s per-vault listing — see
-    ``cli/task.py:_cmd_task_list``): loads ``config.json`` via
+    ``--vault NAME`` argument (``record show``'s, ``record delete``'s, and
+    ``record update``'s current-location targeting, and ``lore task list``'s
+    per-vault listing — see ``cli/task.py:_cmd_task_list``): loads ``config.json`` via
     :func:`vault_config.load_config` and matches on the normalized name. An
     unreadable config or a name absent from it prints ``lore: <msg>`` to stderr
     and returns ``None`` — callers treat ``None`` as "stop, nothing located,
@@ -1249,6 +1288,23 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
+# Shared by both ``record create`` and ``record update`` --help epilogs: the two
+# verbs accept the same --label/--related/--annotation flags, and an agent that
+# reaches for ``update`` (the most common verb for writing labels) must see the
+# same choosing rule ``create`` carries, not a partial or drifted copy of it.
+_LABELS_FLAG_MECHANISM_RULE = (
+    "Choosing a labels flag: a value naming another record — a task, a "
+    "decision, an area — is a relation, not an attribute; use --related "
+    "KIND=NAME instead of a label. A free attribute is a label; use "
+    "--label KEY=VALUE. A labels key that shadows a record kind or a "
+    "query field name (e.g. 'area', 'phase', 'status', 'kind') is refused "
+    "at write time; the refusal names a runnable fix — --annotation "
+    "KEY=VALUE for a free attribute whose natural name is taken, or a "
+    "namespaced key (<ns>/<key>, e.g. craft/subsystems) to keep it "
+    "queryable as a label."
+)
+
+
 def add_record_subparser(sub) -> None:
     """Register the ``record`` command parser and its create/update/delete/show actions."""
     # record subcommand: ``lore record create``.
@@ -1262,15 +1318,7 @@ def add_record_subparser(sub) -> None:
 
     p_record_create = p_record_sub.add_parser(
         "create", help="Create a new vault record",
-        epilog="Choosing a labels flag: a value naming another record — a task, a "
-               "decision, an area — is a relation, not an attribute; use --related "
-               "KIND=NAME instead of a label. A free attribute is a label; use "
-               "--label KEY=VALUE. A labels key that shadows a record kind or a "
-               "query field name (e.g. 'area', 'phase', 'status', 'kind') is refused "
-               "at write time; the refusal names a runnable fix — --annotation "
-               "KEY=VALUE for a free attribute whose natural name is taken, or a "
-               "namespaced key (<ns>/<key>, e.g. craft/subsystems) to keep it "
-               "queryable as a label.",
+        epilog=_LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_create.add_argument(
         "--kind", required=True,
@@ -1308,7 +1356,8 @@ def add_record_subparser(sub) -> None:
     p_record_update = p_record_sub.add_parser(
         "update", help="Update an existing vault record (full-body / --diff / metadata-only)",
         epilog="Group-default scope routing applies to 'create' only; "
-               "update (and delete) are unaffected and never seed scopes from a camp group.",
+               "update (and delete) are unaffected and never seed scopes from a camp group. "
+               + _LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_update.add_argument(
         "record_id",
@@ -1367,6 +1416,11 @@ def add_record_subparser(sub) -> None:
         "record_id",
         metavar="RECORD_ID",
         help="The vault-relative record ID to delete (<kind>/<name>)",
+    )
+    p_record_delete.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Delete the record from exactly this configured vault by name, "
+             "instead of scanning every vault in config order.",
     )
     # Routing flags (symmetric with create/update): when a config exists they
     # select which vault the record lives in (a record routed to a scoped vault
