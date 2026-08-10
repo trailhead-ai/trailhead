@@ -180,36 +180,33 @@ class TestVaultGitignoreScaffolding:
             f"*.lock not ignored by scaffolded .gitignore: {patterns!r}"
         )
 
-    def test_lock_file_is_git_ignored_in_fresh_vault(self, tmp_path):
-        """The scaffolded ignore actually causes git to ignore a *.lock file.
+    def test_session_write_lock_never_lands_inside_the_vault_tree(
+        self, tmp_path, monkeypatch
+    ):
+        """``session_write_lock`` creates its sidecar under the state dir, never
+        inside the vault tree — so it needs no ``.gitignore`` cooperation at all.
 
-        Uses --ignored=matching so git reports individual ignored files rather
-        than collapsing a directory of only-ignored files into '!! dir/' — the
-        matching mode reports each file even when its parent dir is otherwise
-        empty.
+        Formerly this test seeded ``session/deadbeef.lock`` inside the vault by
+        hand and asserted the scaffolded ``.gitignore`` kept it out of `git
+        status`. Now that the session lock convention lives entirely outside
+        the vault tree (see ``locking.lock_root_for_vault``), the meaningful
+        assertion is that the real lock-acquisition path never writes there.
         """
-        import subprocess
-
+        locking = load_script("lore.locking")
         installer = load_script("lore.config.installer")
         vaults_root = tmp_path / "vaults"
         vault = installer.bootstrap_vault(vaults_root, vault_path=None)
+        state = tmp_path / "state"
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
 
-        (vault / "session").mkdir(parents=True, exist_ok=True)
-        lock = vault / "session" / "deadbeef.lock"
-        lock.write_text("", encoding="utf-8")
+        with locking.session_write_lock(vault, "deadbeef"):
+            pass
 
-        result = subprocess.run(
-            ["git", "-C", str(vault), "status", "--porcelain", "--ignored=matching"],
-            capture_output=True,
-            text=True,
-        )
-        # The lock file must appear as ignored (!!), never as untracked (??).
-        assert "?? session/deadbeef.lock" not in result.stdout, (
-            f"lock file is tracked-as-untracked, not ignored:\n{result.stdout}"
-        )
-        assert "!! session/deadbeef.lock" in result.stdout, (
-            f"lock file is not reported ignored by git:\n{result.stdout}"
-        )
+        assert not (vault / "session").exists() or list(
+            (vault / "session").glob("*.lock")
+        ) == [], "a session lock sidecar was written inside the vault tree"
+        lock_path = state / "lore" / "locks" / vault.name / "session" / "deadbeef.lock"
+        assert lock_path.is_file(), "lock sidecar was not created under the state dir"
 
     def test_vault_root_write_lock_is_git_ignored(self, tmp_path):
         """The vault-root ``.lore.lock`` write lock is never staged.

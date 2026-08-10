@@ -8,11 +8,13 @@ Two lock scopes, one primitive:
     within a vault, closing the check-then-act stem collision in
     ``record.store.place_record`` and ``move_record``'s copy/repoint/delete
     non-atomicity.
-  - :func:`session_write_lock` — ``<vault_root>/session/<key>.lock``, the
-    (vault, session-key) granularity the session-store primitives already relied
-    on (``capture_candidate`` / ``flush_session`` / ``revert_flush`` /
+  - :func:`session_write_lock` — ``state_dir("lore")/locks/<vault>/session/<key>.lock``,
+    the (vault, session-key) granularity the session-store primitives already
+    relied on (``capture_candidate`` / ``flush_session`` / ``revert_flush`` /
     ``capture_referenced``, formerly four copy-pasted flock blocks). Session
     writes are keyed, not vault-wide: two different sessions never contend.
+    Machine-local operational state, not vault content — see
+    :func:`lock_root_for_vault` for why it lives outside the vault tree.
   - :func:`vault_write_locks` — several vault locks at once, acquired in **sorted
     path order**. A cross-vault ``move_record`` touches two vaults, and two
     opposed moves between the same pair would deadlock under
@@ -55,6 +57,7 @@ the vault is local). darwin ``LOCK_UN == 8``.
 from __future__ import annotations
 
 import fcntl
+import os
 import sys
 import threading
 import time
@@ -226,6 +229,55 @@ def vault_write_locks(
         yield
 
 
+def lock_root_for_vault(vault_root: str | Path, *, env: dict[str, str] | None = None) -> Path:
+    """Return ``state_dir("lore")/locks/<vault>`` for *vault_root*.
+
+    ``<vault>`` is ``Path(vault_root).name`` — matching how
+    ``lore.vault.config`` already keys per-vault state under
+    ``state_dir("lore")``. Both machine-local flock conventions
+    (:func:`adr_number_claim` in ``record.store`` and :func:`session_write_lock`
+    below) resolve their lock root through this one function, so a future third
+    lock convention has a single place to hook into rather than a third
+    copy-pasted resolver.
+
+    Lock files are machine-local operational state with no post-release value:
+    flock state is fd-scoped and dies with the process, so keeping them inside
+    the git-synced vault tree served no purpose beyond a ``.gitignore``
+    dependency — a vault that predates that scaffolding leaks them into git.
+    Moving them under ``state_dir("lore")`` (never synced) removes that
+    dependency entirely.
+
+    Uses the same lazy-import resolver pattern as ``search.index``'s
+    ``_resolve_index_path`` and ``vault.config``'s ``_resolve_vaults_root``:
+    lazy-import ``_bootstrap`` + ``trailhead.paths``, catch
+    ``(ImportError, SystemExit)`` and fall back to the XDG default directly.
+
+    Args:
+        vault_root: The vault root whose lock directory is being resolved.
+        env: Optional environment dict for test isolation (``XDG_STATE_HOME``).
+             When ``None``, ``os.environ`` is used.
+    """
+    try:
+        import _bootstrap
+
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+
+        if env is not None:
+            base = _paths.state_dir("lore", env=env)
+        else:
+            base = _paths.state_dir("lore")
+    except (ImportError, SystemExit):
+        raw = env.get("XDG_STATE_HOME", "") if env is not None else os.environ.get(
+            "XDG_STATE_HOME", ""
+        )
+        if raw and os.path.isabs(raw):
+            base = Path(raw) / "lore"
+        else:
+            base = Path.home() / ".local" / "state" / "lore"
+    return base / "locks" / Path(vault_root).name
+
+
 def session_write_lock(
     vault_root: str | Path,
     key: str,
@@ -235,7 +287,9 @@ def session_write_lock(
     """Serialize session-record writes for one (vault, session-key) pair.
 
     *key* MUST already be sanitized (``session.store.sanitize_session_id`` /
-    ``sanitize_worktree_name``) — it becomes a filename verbatim.
+    ``sanitize_worktree_name``) — it becomes a filename verbatim. The lock
+    sidecar lives at ``state_dir("lore")/locks/<vault>/session/<key>.lock``
+    (see :func:`lock_root_for_vault`), never inside the vault tree.
     """
-    session_dir = Path(vault_root) / "session"
+    session_dir = lock_root_for_vault(vault_root) / "session"
     return _flock(session_dir / f"{key}.lock", "session", f"session/{key}", notice_after)

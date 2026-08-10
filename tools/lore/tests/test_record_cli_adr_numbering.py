@@ -146,11 +146,15 @@ def test_stranded_number_lock_does_not_wedge_the_number(tmp_path):
     once a number has been issued, and what a crashed write leaves — is simply
     re-locked. Pins the reason a released-on-close lock was chosen over an
     unlink-on-exit claim artifact, which would have wedged its number on a crash.
+
+    The lock lives under ``$XDG_STATE_HOME/lore/locks/<vault>/adr/``, not
+    inside the vault tree — a stranded lock is seeded there, matching where a
+    real crashed write would leave it.
     """
     vault, state = _make_vault(tmp_path)
-    adr_dir = vault / "adr"
-    adr_dir.mkdir(parents=True)
-    (adr_dir / ".adr-1.lock").write_text("")
+    lock_dir = state / "lore" / "locks" / vault.name / "adr"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / ".adr-1.lock").write_text("")
 
     r = _create_adr(vault, state, "First decision")
     assert r.returncode == 0, r.stderr
@@ -165,15 +169,28 @@ def test_number_lock_is_not_counted_as_a_record(tmp_path):
     assert first.returncode == 0, first.stderr
     assert first.stdout.strip() == "adr/adr-001-first-decision"
 
-    # The lock is a dotfile ending in .lock — never mistaken for a record half,
-    # so the next number is 002 rather than skipping over the lock.
+    # No lock file lands inside the vault's adr/ dir at all — it lives under
+    # the state dir now, so the vault listing is nothing but the record pair.
     assert [p.name for p in sorted(adr_records(vault))] == [
         "adr-001-first-decision.json",
         "adr-001-first-decision.md",
     ]
+    assert list((vault / "adr").glob("*.lock")) == []
     second = _create_adr(vault, state, "Second decision")
     assert second.returncode == 0, second.stderr
     assert second.stdout.strip() == "adr/adr-002-second-decision"
+
+
+def test_adr_lock_never_lands_inside_the_vault_adr_dir(tmp_path):
+    """The per-number lock sidecar is created under the state dir, never under
+    the vault's ``adr/`` directory — the leak this task fixes."""
+    vault, state = _make_vault(tmp_path)
+    r = _create_adr(vault, state, "First decision")
+    assert r.returncode == 0, r.stderr
+
+    assert list((vault / "adr").glob("*.lock")) == []
+    lock_path = state / "lore" / "locks" / vault.name / "adr" / ".adr-1.lock"
+    assert lock_path.is_file(), "lock sidecar was not created under the state dir"
 
 
 # ---------------------------------------------------------------------------
