@@ -8,7 +8,7 @@
     {
       "name": "lore",
       "source": "./tools/lore/plugins/lore",
-      "description": "Portable knowledge-management plugin: session lifecycle, capture skills, and vault recall for any Claude Code project."
+      "description": "Portable knowledge-management plugin: session lifecycle, capture skills, and on-demand vault search for any Claude Code project."
     },
     {
       "name": "camp",

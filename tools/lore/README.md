@@ -45,9 +45,10 @@ lore init   # scaffold the default vault
 `lore init` scaffolds the vault; subsequent commands find it automatically —
 nothing to export or configure.
 
-Open Claude Code in any project. Orientation (the area map and vault index)
-is loaded via the agent-rules surface, and agents pull prior context on demand
-with `lore search`.
+Open Claude Code in any project. The agent-rules surface carries a short
+disposition primer (what lore is, when to capture, when to record directly)
+plus the mandatory vault-write rules — not an area map or a vault index.
+Agents pull prior context on demand with `lore areas` and `lore search`.
 
 ## Skills
 
@@ -78,12 +79,11 @@ Run `lore <subcommand> --help` for full options.
 
 ## How search works
 
-Your next session loads what's relevant without you asking — explained, not
-guessed.
+The agent pulls what's relevant when it needs it — explained, not guessed.
 
 Lore keeps an **area map**: a compact menu of every area profile in your vault,
 listing each area's name, one-line summary, and keywords. It is available on
-demand via `lore areas` and surfaced through lore's agent-rules orientation.
+demand via `lore areas`.
 
 The agent reads the area map as part of its normal task analysis, matches the
 current task to one or more areas, and runs `lore search 'area:<name>'` to

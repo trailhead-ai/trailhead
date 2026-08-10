@@ -5,18 +5,19 @@ a tier are roughly ordered by value, not necessarily by implementation order.
 
 ## Tier 1 (shipped)
 
-Session lifecycle, five capture skills, subsystem recall via branch-keyword
-matching, `lore` CLI, pre-commit status guard, vault-sync, and the
-librarian agent. See the README for the full feature list.
+Session lifecycle, five capture skills, `lore` CLI, pre-commit status guard,
+vault-sync, and the librarian agent. See the README for the full feature list.
 
 ## Tier 1.5 — Near-term additions
 
 ### UserPromptSubmit classifier for live recall
 
-Today, subsystem recall fires once at SessionStart based on the git branch
-name. A UserPromptSubmit hook could re-run recall mid-session when the user's
-prompt contains a subsystem keyword — loading the profile at the moment it
-becomes relevant rather than only at session start.
+Today, recall is pull-only: an agent runs `lore areas` / `lore search` on
+demand — there is no push hook that surfaces a subsystem profile
+automatically. A UserPromptSubmit hook could run recall mid-session when the
+user's prompt contains a subsystem keyword — surfacing the profile at the
+moment it becomes relevant instead of leaving it to the agent to think to
+search.
 
 Implementation note: UserPromptSubmit hooks run on every prompt and add latency.
 The classifier must be cheap:
@@ -28,14 +29,15 @@ The classifier must be cheap:
   opt-in flag (`$LORE_SMART_RECALL=1`) to avoid per-prompt LLM cost for
   adopters who don't want it.
 
-The branch-name recall at SessionStart is the safe default; this tier adds
-in-session refinement.
+Pull-based `lore search` is the safe default today; this tier adds automatic,
+in-session triggering on top of it.
 
 ### Worktree derivation reconciliation (watch item)
 
-`cli/lore` derives the current worktree name from `Path.cwd().name`. The
-SessionStart hook uses `CLAUDE_PROJECT_DIR or cwd`. These agree in normal use
-but may diverge when:
+`cli/lore` derives the current worktree name from `Path.cwd().name`. A future
+UserPromptSubmit hook would need the same stable worktree identity that
+`CLAUDE_PROJECT_DIR or cwd` resolves elsewhere in the codebase — these agree
+in normal use but may diverge when:
 
 - Claude Code is opened from a directory that is not the git worktree root.
 - `CLAUDE_PROJECT_DIR` is set to a path whose basename differs from `cwd`.

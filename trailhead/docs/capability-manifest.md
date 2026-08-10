@@ -171,5 +171,5 @@ skills read at runtime:
 # tools/craft/capabilities.toml
 [tool]
 name = "craft"
-base = ["skills/_shared", "templates"]
+base = ["skills/_shared", "templates", "scripts"]
 ```

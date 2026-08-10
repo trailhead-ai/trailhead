@@ -4,12 +4,11 @@ The destructive cutover: the `recall` COMMAND surface is gone (`cmd_recall`, the
 `recall` subparser, and the recall-command machinery in `recall.py`). The
 unknown-command hint machinery redirects an agent that types the old command to
 `lore search`. Every executable `lore recall` reference in `hooks/` + `cli/` is
-removed, and the SessionStart area-pointer path now points at `lore search`.
+removed, and the SessionStart hook itself has been retired.
 
 The area-map path (`cmd_areas`, `build_area_map`, `render_area_pointer`,
-`render_area_menu`, `AreaEntry`) is KEPT — it serves `lore areas` and the
-SessionStart pointer, not the recall command — and is covered by
-`test_area_map_core.py`.
+`render_area_menu`, `AreaEntry`) is KEPT — it serves `lore areas`, not the
+recall command — and is covered by `test_area_map_core.py`.
 """
 
 from __future__ import annotations

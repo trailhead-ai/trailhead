@@ -53,31 +53,51 @@ Pass criteria: no error; plugin named `lore` is listed as installed.
 
 ---
 
-### 3. Confirm PostToolUse hook fires on Agent/Task tool use
+### 3. Confirm no hooks are registered
 
-After installing, run an Agent or Task tool call and check the tool-use log.
-The PostToolUse hook (`plugins/lore/hooks/harvest-candidates.py`) runs on
-every `Agent|Task` tool result and scans for a `## Harvest candidates` block.
+lore is fully pull — it registers zero hooks. Orientation lives in the
+installed agent-rules ruleset, and session finalization is explicit
+(`lore flush`). `tests/test_manifest_validity.py` pins this for the shipped
+source manifest (it reads `tools/lore/plugins/lore/hooks/hooks.json` in the
+repo tree) — run it:
 
-Pass criteria: no Python traceback or import error in the tool-use log.
+```
+python -m pytest tools/lore/tests/test_manifest_validity.py -v
+```
 
-Note (S5, F5): lore is fully pull — the SessionStart and WorktreeRemove hooks
-were retired. Orientation lives in agent-rules and S6 skill descriptions;
-session finalization is explicit (`lore finish`). Only the PostToolUse
-harvest hook remains.
+Pass criteria: the test passes.
+
+That test can't reach the installed boundary this document exists for. To
+confirm the *installed* plugin carries the same empty hooks dict, find the
+install location (e.g. under the harness's plugin directory for `lore@trailhead-local`)
+and inspect its `hooks/hooks.json` directly:
+
+```
+cat <installed-lore-plugin-dir>/hooks/hooks.json
+```
+
+Pass criteria: the file exists and its `hooks` value is `{}`.
 
 ---
 
-### 4. Confirm ${CLAUDE_PLUGIN_ROOT} resolved and sibling import succeeded
+### 4. Confirm ${CLAUDE_PLUGIN_ROOT} resolves for the `lore` CLI
 
-The PostToolUse hook (`plugins/lore/hooks/harvest-candidates.py`) runs via
-`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/harvest-candidates.py"`. It imports
-sibling modules from the plugin's `lore/` package.
+Run a `lore` command (e.g. `lore --help`) from within the installed plugin
+context and confirm it resolves `${CLAUDE_PLUGIN_ROOT}` and imports sibling
+modules from the plugin's `lore/` package without error.
 
-For explicit confirmation, look at the tool-use log for any Python traceback
-or import error. There should be none.
+`bin/lore` falls back to a self-relative path when `${CLAUDE_PLUGIN_ROOT}`
+isn't set, so a bare pass/fail can't tell you which path resolved. Make the
+step tell them apart by echoing the resolved CLI path, e.g.:
 
-Pass criteria: no import errors; the hook completes without error on Agent/Task.
+```
+lore --help; python3 -c "import os; print(os.environ.get('CLAUDE_PLUGIN_ROOT', '<unset>'))"
+```
+
+Pass criteria: no import errors; the command completes and prints help
+output; `CLAUDE_PLUGIN_ROOT` is set and non-empty (confirming
+`${CLAUDE_PLUGIN_ROOT}` resolution was exercised, not the self-relative
+fallback).
 
 ---
 
