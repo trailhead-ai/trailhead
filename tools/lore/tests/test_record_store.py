@@ -125,6 +125,24 @@ def test_place_record_orphan_json_occupies_stem(rs, tmp_path):
     assert loc.name == "lore-search-2"
 
 
+def test_place_record_symlink_occupies_stem_without_following_it(rs, tmp_path):
+    """A symlink at <stem>.md occupies the stem even when its target is absent.
+
+    Occupancy is decided by the link itself, never by whether it resolves: a
+    dangling or escaping symlink planted in a kind directory would otherwise
+    read as a free stem, and the placement that followed would write THROUGH it
+    to whatever path it names — outside the vault. Testing the link rather than
+    its target also keeps placement from reporting whether an arbitrary external
+    file exists.
+    """
+    vault = tmp_path / "vault"
+    (vault / "spec").mkdir(parents=True)
+    (vault / "spec" / "lore-search.md").symlink_to(tmp_path / "outside" / "absent.md")
+
+    loc = rs.place_record("Lore Search", "spec", None, str(vault))
+    assert loc.name == "lore-search-2"
+
+
 def test_place_record_session_keeps_guid_verbatim(rs, tmp_path):
     """session kind uses the session_id GUID verbatim — no slug, no suffix."""
     vault = tmp_path / "vault"
@@ -358,62 +376,6 @@ def test_validation_failure_raises_typed_error_nothing_written(rs, conn, tmp_pat
 
     assert not (vault / "spec" / "my-spec.md").exists()
     assert not (vault / "spec" / "my-spec.json").exists()
-    assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 0
-
-
-# ---------------------------------------------------------------------------
-# require_new — stem-scoped exclusive claim (non-adr callers)
-# ---------------------------------------------------------------------------
-
-
-def _spec_location(rs, vault: Path, stem: str):
-    """A ``require_new`` write target built directly, bypassing place_record.
-
-    ``place_record`` suffixes a colliding non-adr stem (``my-spec-2``), so it can
-    never hand back an occupied target. Constructing the location is how a
-    non-adr ``require_new`` caller's claim-loses path gets exercised at all.
-    """
-    return rs.RecordLocation(
-        vault_root=str(vault),
-        kind="spec",
-        name=stem,
-        record_id=f"spec/{stem}",
-        body_path=vault / "spec" / f"{stem}.md",
-        sidecar_path=vault / "spec" / f"{stem}.json",
-    )
-
-
-def test_require_new_refuses_occupied_stem_leaving_it_intact(rs, conn, tmp_path):
-    """An occupied body stem refuses rather than clobbering the incumbent."""
-    vault = tmp_path / "vault"
-    (vault / "spec").mkdir(parents=True)
-    (vault / "spec" / "my-spec.md").write_text("incumbent body")
-
-    with pytest.raises(rs.RecordAlreadyExistsError):
-        rs.validate_and_write(
-            _spec_location(rs, vault, "my-spec"), _sidecar(), "new body", conn, require_new=True
-        )
-
-    assert (vault / "spec" / "my-spec.md").read_text() == "incumbent body"
-    assert not (vault / "spec" / "my-spec.json").exists()
-    assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 0
-
-
-def test_require_new_rolls_back_body_when_sidecar_claim_loses(rs, conn, tmp_path):
-    """An orphaned ``.json`` refuses AFTER the body was claimed — and the
-    just-claimed body is unlinked, so the refusal leaves nothing written."""
-    vault = tmp_path / "vault"
-    (vault / "spec").mkdir(parents=True)
-    (vault / "spec" / "my-spec.json").write_text('{"pre": "existing"}')
-
-    with pytest.raises(rs.RecordAlreadyExistsError):
-        rs.validate_and_write(
-            _spec_location(rs, vault, "my-spec"), _sidecar(), "new body", conn, require_new=True
-        )
-
-    assert (vault / "spec" / "my-spec.json").read_text() == '{"pre": "existing"}'
-    assert not (vault / "spec" / "my-spec.md").exists()
-    assert list((vault / "spec").glob("*.tmp")) == []
     assert conn.execute("SELECT COUNT(*) FROM records").fetchone()[0] == 0
 
 

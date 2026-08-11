@@ -262,10 +262,6 @@ def _handle_write_error(exc: Exception, op: str) -> int:
     a :class:`record_store.RecordValidationError` surfaces every message (prefixed
     ``error: ``); a :class:`record_store.ProvenanceError` and any other unexpected
     error each print one framed line, the catch-all naming *op*.
-    :class:`record_store.RecordAlreadyExistsError` (create's sequence-number
-    collision refusal — today only reachable via ``--kind adr``) gets the
-    ``lore: `` prefix instead of ``error: ``, matching the CLI's explicit
-    clean-refusal convention elsewhere (``_resolve_named_vault`` etc.).
     ``update``'s ``RecordNotFoundError``/``InvalidRecordIdError`` clause is NOT
     routed here — it is update-specific and caught before this handler.
     """
@@ -275,9 +271,6 @@ def _handle_write_error(exc: Exception, op: str) -> int:
         return _fail(exc.errors, prefix="error: ")
     if isinstance(exc, record_store_mod.ProvenanceError):
         print(f"error: {exc}", file=sys.stderr)
-        return 1
-    if isinstance(exc, record_store_mod.RecordAlreadyExistsError):
-        print(f"lore: {exc}", file=sys.stderr)
         return 1
     print(f"error: record {op} failed: {exc}", file=sys.stderr)
     return 1
@@ -310,10 +303,12 @@ def cmd_record(args) -> int:
         return _cmd_record_delete(args)
     if action == "show":
         return _cmd_record_show(args)
+    if action == "rename":
+        return _cmd_record_rename(args)
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"'lore record delete', or 'lore record show'.",
+        f"'lore record rename', 'lore record delete', or 'lore record show'.",
         file=sys.stderr,
     )
     return 1
@@ -509,6 +504,136 @@ def _cmd_record_delete(args) -> int:
     return 0
 
 
+def _cmd_record_rename(args) -> int:
+    """``lore record rename RECORD_ID --title "<new title>"`` — thin shell.
+
+    Renames the record's stem + sidecar title within its own vault and rewrites
+    every inbound reference to it across the configured vaults. All of the logic
+    lives in ``record.rename``; this handler is an argv→library adapter that
+    owns only the output contract:
+
+      - **stdout**: the new RECORD_ID, and nothing else — the sole parseable
+        line, matching ``record create``.
+      - **stderr**: the ``renamed:`` line (naming the source vault) plus one
+        line per referencing record the sweep touched, named individually with
+        its vault, so a partial failure names exactly what did and did not
+        land. References in ``shared: true`` vaults are listed as skipped
+        unless ``--include-shared`` is passed; a record that references the old
+        stem and could not be written is listed as ``failed:`` with its reason;
+        a record the sweep could not READ is listed as ``unchecked:``.
+
+    The sweep is fault-isolated, so one bad record no longer aborts a rename
+    whose primary move has already landed. The full accumulated list is printed
+    whether or not every record succeeded — a partial failure must be
+    diagnosable from the output alone.
+
+    **Exit status** tracks dangling references only. A ``failed:`` record is a
+    known-dangling one, so it exits non-zero. An ``unchecked:`` record is not:
+    its body could not be read, so nothing is known about its references, and an
+    unrelated corrupt file elsewhere in a vault must not report a clean rename
+    as broken. Those are surfaced as a ``warning:`` line naming the count.
+
+    ``--vault NAME`` names the vault holding the record to rename, mirroring
+    ``record show``/``record delete --vault``: with the same stem in more than
+    one configured vault, config order alone may pick the wrong one. It narrows
+    only the lookup of the record being renamed; the inbound-reference sweep
+    still covers every configured vault.
+
+    ``--dry-run`` writes nothing and prints the *predicted* new RECORD_ID —
+    computed through the same ``_unique_stem`` path the real run uses, so the
+    prediction (including a ``-2`` collision suffix) is what a subsequent real
+    run produces.
+
+    Re-running an identical rename is safe: the sweep re-runs and matches
+    nothing, so a rename interrupted between the move and the rewrite is
+    repaired by simply issuing it again.
+    """
+    from ..record import rename as rename_mod
+    from ..record import store as record_store_mod
+
+    record_id = _require_record_id(args)
+    if record_id is None:
+        return 1
+    new_title = getattr(args, "title", None)
+    if not new_title:
+        print("error: --title is required for 'record rename'", file=sys.stderr)
+        return 1
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    include_shared = bool(getattr(args, "include_shared", False))
+
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        vault_name = named_vault.name
+
+    try:
+        with record_store_mod.index_transaction() as conn:
+            report = rename_mod.rename_record(
+                record_id, new_title, conn,
+                dry_run=dry_run, include_shared=include_shared,
+                vault_name=vault_name,
+            )
+            if not dry_run:
+                conn.commit()
+    except rename_mod.RenameError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record rename failed: {exc}", file=sys.stderr)
+        return 1
+
+    verb = "would rename" if dry_run else "renamed"
+    print(
+        f"{verb}: {report.old_id} -> {report.new_id} (vault: {report.vault})",
+        file=sys.stderr,
+    )
+    failures = 0
+    unchecked = 0
+    for rw in report.rewrites:
+        if rw.unchecked:
+            unchecked += 1
+            print(
+                f"unchecked: {rw.vault}: {rw.record_id}: {rw.error}", file=sys.stderr
+            )
+        elif rw.error is not None:
+            failures += 1
+            print(f"failed: {rw.vault}: {rw.record_id}: {rw.error}", file=sys.stderr)
+        elif rw.skipped:
+            print(
+                f"skipped (shared vault; pass --include-shared to rewrite): "
+                f"{rw.vault}: {rw.record_id}",
+                file=sys.stderr,
+            )
+        else:
+            action = "would rewrite" if dry_run else "rewrote"
+            print(f"{action}: {rw.vault}: {rw.record_id}", file=sys.stderr)
+
+    print(report.new_id)
+    if unchecked:
+        print(
+            f"warning: {unchecked} record(s) could not be read and were not "
+            f"checked for references to {report.old_id}",
+            file=sys.stderr,
+        )
+    if failures:
+        print(
+            f"error: {failures} record(s) still reference {report.old_id}; "
+            f"rerun the same rename once the cause is fixed",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def _cmd_record_create(args) -> int:
     """``lore record create`` — thin shell over ``record_store``.
 
@@ -528,16 +653,10 @@ def _cmd_record_create(args) -> int:
     per-field flags (``--status``, ``--keyword``, ``--related-*``, ``--related``)
     applied by :func:`record.fields.apply_record_fields`.
 
-    ``--kind adr`` assigns its own per-vault sequence number: the title is
-    rewritten to ``"ADR-NNN: <title>"`` (:func:`record_store.format_adr_title`,
-    scanning the DESTINATION vault's ``adr/`` directory via
-    :func:`record_store.next_adr_number`) before ``place_record`` derives the
-    slug from it, and the write goes through
-    ``validate_and_write(require_new=True)``, which holds a lock on the number
-    itself for the write's duration. The scan only picks a candidate: two
-    concurrent creates read the same highest number, so it is that write-time
-    lock that makes exactly one of them win and the other refuse cleanly —
-    never a silent suffix, and never a clobber.
+    ``--kind adr`` is an ordinary kind here: the title lands verbatim in the
+    sidecar and ``place_record`` derives its stem the same way it does for
+    every other non-session kind (``_kebab(title)``, ``-2`` suffix on
+    collision).
 
     ``--vault NAME`` names the destination vault directly via
     :func:`_resolve_named_vault`, bypassing :func:`vault_resolve.explain_resolution`'s
@@ -688,21 +807,6 @@ def _cmd_record_create(args) -> int:
         or None
     )
 
-    # ADR per-vault sequence numbering: assigned here (not inside
-    # place_record) because the numbered title must land in the sidecar
-    # ("title") AND drive the slug place_record derives from ``name`` — two
-    # effects from one computed value, same one-input-drives-both-effects
-    # shape as the scope flags above. Scanning the DESTINATION vault's adr/
-    # directory (not the active vault) matters when routing sends this record
-    # somewhere other than the default vault. The write-time collision guard
-    # (validate_and_write's ``require_new``, below) is what actually makes the
-    # refusal atomic — this scan only picks a candidate number.
-    if kind == "adr":
-        adr_kind_dir = vault_root / "adr"
-        adr_number = record_store_mod.next_adr_number(adr_kind_dir)
-        title = record_store_mod.format_adr_title(adr_number, title)
-        sidecar["title"] = title
-
     guard_notices: list[str] = []
     try:
         # The create critical section starts at ``place_record``, not at the write:
@@ -738,7 +842,6 @@ def _cmd_record_create(args) -> int:
                 body=body,
                 conn=conn,
                 shared=shared_flag,
-                require_new=(kind == "adr"),
             )
             conn.commit()
     except Exception as exc:
@@ -1448,6 +1551,39 @@ def add_record_subparser(sub) -> None:
     # Map flags (labels/annotations): dedicated branch.
     _add_map_field_flags(p_record_update)
     p_record_update.set_defaults(func=cmd_record)
+
+    # ``lore record rename RECORD_ID --title "<new title>"``.
+    p_record_rename = p_record_sub.add_parser(
+        "rename",
+        help="Rename a record's stem + title and rewrite inbound references",
+    )
+    p_record_rename.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID to rename (<kind>/<name>)",
+    )
+    p_record_rename.add_argument(
+        "--title", required=True,
+        help="The record's new title; the new stem is derived from it "
+             "(kebab-case, with a -2/-3 suffix on collision).",
+    )
+    p_record_rename.add_argument(
+        "--dry-run", dest="dry_run", action="store_true", default=False,
+        help="Print the would-be new RECORD_ID and the full would-be rewrite "
+             "list without writing anything.",
+    )
+    p_record_rename.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Name the configured vault holding the record to rename (use when "
+             "the same stem exists in more than one vault). The inbound-reference "
+             "sweep still covers every configured vault.",
+    )
+    p_record_rename.add_argument(
+        "--include-shared", dest="include_shared", action="store_true", default=False,
+        help="Also rewrite inbound references inside 'shared: true' vaults. "
+             "By default those are skipped and only reported.",
+    )
+    p_record_rename.set_defaults(func=cmd_record)
 
     # ``lore record delete RECORD_ID``.
     p_record_delete = p_record_sub.add_parser(

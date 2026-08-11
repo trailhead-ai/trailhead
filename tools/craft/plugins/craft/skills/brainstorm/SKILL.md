@@ -204,8 +204,8 @@ file and fill in the body sections.
    printf '%s' "$ADR_BODY" | lore record create --kind adr --title "<decision>"
    ```
 
-   The create path assigns the `ADR-NNN` number itself and leaves the record at its default
-   status, `draft` — there is no `--status` flag to set here, and brainstorm never flips it.
+   The create path leaves the record at its default status, `draft` — there is no `--status`
+   flag to set here, and brainstorm never flips it.
 
    **If this decision supersedes an existing `active` ADR**, carry that from birth too: the create
    call adds `--related adr=<predecessor-adr-id>`, the same edge convention every other provenance

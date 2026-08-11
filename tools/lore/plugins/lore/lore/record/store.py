@@ -36,18 +36,9 @@ for humans and **nothing keys trust on it**; it is never an authz/authn signal.
 :func:`write_temp_then_rename` — write a sibling temp file, ``fsync``, then
 ``os.replace`` it onto the target. A crash before the rename leaves only the temp
 file (or nothing), never a half-written target. ``os.replace`` always succeeds by
-clobbering, which is exactly what an update/move needs but never what a
-NEW record should tolerate. ``validate_and_write(require_new=True)`` instead
-uses :func:`write_temp_then_create_exclusive` — the same temp-write-then-fsync,
-but claims the target via ``os.link`` (atomically create-only, raising
-``FileExistsError`` rather than clobbering) — the exclusivity guard behind
-adr sequence-numbered creates (``cli/record.py``'s ``--kind adr`` branch): a
-losing concurrent writer gets a named :class:`RecordAlreadyExistsError`
-instead of silently overwriting the winner. For adr the contended resource is
-the sequence NUMBER rather than the stem, so that per-artifact claim sits inside
-a number-scoped one (:func:`adr_number_claim`, an ``fcntl.flock`` on a canonical
-per-number sidecar) — without it, two creates that computed the same number from
-different titles claim different stems and both succeed.
+clobbering; a create never lands on an occupied stem in the first place because
+:func:`place_record` resolves a free stem (``-2``/``-3`` suffix on collision)
+before the write.
 
 **Fence neutralization.** The injection fence token is the literal
 ``<external-memory …>`` / ``</external-memory>`` pair (the output-wrapping
@@ -62,22 +53,19 @@ durable and indexed), self-healing via ``lore reindex``. Callers holding the old
 ID must re-read.
 
 Pure stdlib (``json``, ``sqlite3`` via ``index_store``, ``os``/``pathlib``,
-``subprocess`` for git identity, ``datetime``, ``fcntl`` for the adr
-sequence-number lock).
+``subprocess`` for git identity, ``datetime``).
 """
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
 import re
-import uuid
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 from .. import locking
 from ..search import index as index_store
@@ -133,25 +121,6 @@ class RecordValidationError(RecordStoreError):
 
 class RecordNotFoundError(RecordStoreError):
     """The record ID does not resolve to an on-disk record."""
-
-
-class RecordAlreadyExistsError(RecordStoreError):
-    """A ``require_new=True`` write found its target already occupied.
-
-    Raised by :func:`validate_and_write`'s exclusive-create path (today: adr
-    sequence-numbered creates) when either claim loses — a concurrent writer,
-    or a pre-existing stray file, already holds the resource:
-
-      - the **sequence number** (:func:`adr_number_claim`): another writer holds
-        the number's claim, or an ``adr-<n>-*`` record already carries it under
-        some other title.
-      - the **stem** (:func:`_write_new_artifacts`): ``location.body_path`` or
-        ``location.sidecar_path`` already exists.
-
-    Nothing from THIS call is left written in either case: an exclusive claim
-    never touches an occupied target, and a body claimed just before a losing
-    sidecar claim is rolled back before this raises.
-    """
 
 
 class InvalidRecordIdError(RecordStoreError):
@@ -474,36 +443,6 @@ def write_temp_then_rename(path: Path, text: str) -> None:
         raise
 
 
-def write_temp_then_create_exclusive(path: Path, text: str) -> None:
-    """Atomically write *text* to *path* IFF *path* does not already exist.
-
-    The create-only sibling of :func:`write_temp_then_rename`. Writes a
-    sibling temp file (name-uniqued with a UUID, not just the PID, so two
-    threads in the same process never collide on the temp name), ``fsync``s
-    it, then claims *path* via ``os.link`` — a single atomic syscall that
-    creates the hard link only if the target name is free, raising
-    ``FileExistsError`` when it is not. Unlike ``os.replace`` (used by
-    :func:`write_temp_then_rename`, which always succeeds by silently
-    clobbering an existing target), a losing concurrent writer gets a clean,
-    detectable failure instead of overwriting the winner. The temp file is
-    always removed; on a collision *path* is left completely untouched.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(text)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.link(tmp, path)
-    finally:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-
-
 def _now_utc_z() -> str:
     """Return the current time as an ISO-8601 UTC ``…Z`` string (second precision)."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -539,171 +478,22 @@ def _kebab(title: str) -> str:
     return slug
 
 
-#: Matches the sequence number at the front of an adr stem (e.g.
-#: ``adr-007-some-decision`` → ``"007"``). Zero-padding is cosmetic here —
-#: ``int()`` tolerates the leading zeros. The number may be followed by a
-#: hyphen (the common case) or by the end of the stem — a kebab-empty title
-#: (all-punctuation / non-Latin) falls back through ``_kebab`` to a bare
-#: ``adr-<n>`` with no trailing hyphen, and that stem must still be visible to
-#: the number scan and claim, not silently invisible to both.
-_ADR_STEM_NUMBER_RE = re.compile(r"^adr-(\d+)(?:-|$)")
-
-#: Strips a user-supplied numbered prefix (``"ADR-9: "``, any case, any
-#: digit count) from a raw title before the CLI's own ``ADR-NNN:`` prefix is
-#: applied — the override is deliberate, not a merge (see
-#: :func:`format_adr_title`).
-_ADR_TITLE_PREFIX_RE = re.compile(r"^adr-\d+:\s*", re.IGNORECASE)
-
-
-def _numbered_adr_artifacts(kind_dir: Path) -> Iterator[tuple[int, Path]]:
-    """Yield ``(number, path)`` for every numbered adr artifact in *kind_dir*.
-
-    **Both stems count.** A crash between the body claim and the sidecar claim
-    can leave an orphaned ``.json`` (or, after a manual body deletion, an
-    orphaned ``.md``); either one still occupies its sequence number, so a scan
-    that looked only at ``.md`` would hand that number out again and the write
-    would then refuse on a collision the scan could have seen. Same pair-aware
-    rule as :func:`_stem_occupied`, applied per NUMBER instead of per stem.
-
-    A missing ``kind_dir`` yields nothing. Zero-padding is normalized away by
-    ``int()``, so ``adr-1-x`` and ``adr-001-x`` both report number 1.
-    """
-    kind_dir = Path(kind_dir)
-    if not kind_dir.is_dir():
-        return
-    for pattern in ("*.md", "*.json"):
-        for path in kind_dir.glob(pattern):
-            match = _ADR_STEM_NUMBER_RE.match(path.stem)
-            if match:
-                yield int(match.group(1)), path
-
-
-def next_adr_number(kind_dir: Path) -> int:
-    """Return the next per-vault adr sequence number: highest existing + 1.
-
-    Scans ``kind_dir`` (the vault's ``adr/`` directory) for stems matching
-    ``^adr-(\\d+)-`` (:func:`_numbered_adr_artifacts` — both the ``.md`` and the
-    ``.json`` half) and returns ``max(numbers) + 1``, or ``1`` when the
-    directory is missing or holds no numbered adr. A dropped/superseded number
-    is never reused — the scan only ever looks at what currently exists on
-    disk, so a gap (e.g. ``adr-003`` deleted) stays a gap.
-
-    This picks a *candidate* only; it is not the collision guard. Two writers
-    scanning concurrently both see the same highest number, so the atomic
-    refusal lives at write time (:func:`adr_number_claim`).
-    """
-    return max((number for number, _ in _numbered_adr_artifacts(kind_dir)), default=0) + 1
-
-
-def _adr_number_occupied(kind_dir: Path, number: int) -> bool:
-    """Whether any ``adr-<number>-*`` artifact already exists in *kind_dir*.
-
-    Number-scoped, not stem-scoped: ``adr-001-decision-a.md`` occupies number 1
-    against a write of ``adr-001-decision-b`` — the sequence number is the
-    identity being reserved, and a title cannot make a second ADR-001 legal.
-    """
-    return any(found == number for found, _ in _numbered_adr_artifacts(kind_dir))
-
-
-def _adr_lock_path(
-    kind_dir: Path, vault_root: str | Path, number: int, *, env: dict[str, str] | None = None
-) -> Path:
-    """The canonical per-number lock path two racing adr writers contend on.
-
-    Derived from the number alone (no zero-padding, no title), so every writer
-    that computed the same number contends on the same single path whatever its
-    title. Lives at ``state_dir("lore")/locks/<vault>/adr/.adr-<number>.lock``
-    (see :func:`locking.lock_root_for_vault`) — machine-local operational
-    state, never inside the vault tree, so it carries no ``.gitignore``
-    dependency. Dotted so it also stays out of a plain directory listing.
-
-    *env*: optional environment dict for test isolation (``XDG_STATE_HOME``),
-    threaded straight through to :func:`locking.lock_root_for_vault`. ``None``
-    (the production default) reads ``os.environ``.
-    """
-    kind_name = Path(kind_dir).name
-    return locking.lock_root_for_vault(vault_root, env=env) / kind_name / f".adr-{number}.lock"
-
-
-@contextmanager
-def adr_number_claim(
-    kind_dir: Path, vault_root: str | Path, number: int, *, env: dict[str, str] | None = None
-) -> Iterator[Path]:
-    """Hold the exclusive claim on adr sequence *number* for a write's duration.
-
-    The **number-scoped** half of the adr create guard, and the only part of it
-    that serializes anything. The stem-scoped claims in
-    :func:`_write_new_artifacts` cannot separate two concurrent creates that
-    computed the same number from DIFFERENT titles: their stems differ, so both
-    claims succeed and two records ship carrying the same number. A post-write
-    re-scan cannot repair that either — each writer would see the other and
-    both could refuse, or neither. So the contended resource is made the number
-    itself:
-
-      1. Take ``fcntl.flock`` LOCK_EX on :func:`_adr_lock_path` — the same
-         sidecar-lock primitive the session capture path uses. Exactly one
-         writer holds a given number at a time; the other blocks here.
-      2. **Inside** the lock, check number occupancy
-         (:func:`_adr_number_occupied`): an existing ``adr-<number>-*`` record
-         refuses whatever title it carries, via
-         :class:`RecordAlreadyExistsError`, with nothing written.
-
-    Together those make the two-writer outcome deterministic rather than
-    interleaving-dependent: the winner writes its artifacts inside the lock, so
-    the loser's occupancy check — which cannot run until the winner releases —
-    always sees them and always refuses.
-
-    The lock is an empty sidecar, never a record: it is opened ``"a"`` (never
-    truncated, so it is safe to reuse), released via LOCK_UN + close on every
-    exit path, and left on disk deliberately. The kernel drops a held flock when
-    the fd closes — including on a crash — so unlike an unlink-on-exit claim
-    artifact, an interrupted write can never strand a lock that wedges its
-    number. It is also, deliberately, not counted by :func:`next_adr_number`: a
-    lock records contention, not a record's existence.
-
-    *env*: optional environment dict for test isolation (``XDG_STATE_HOME``),
-    threaded straight through to :func:`_adr_lock_path`. ``None`` (the
-    production default) reads ``os.environ``.
-    """
-    kind_dir = Path(kind_dir)
-    kind_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = _adr_lock_path(kind_dir, vault_root, number, env=env)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(lock_path, "a")  # create-or-open, no truncate; held until unlock
-    try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)  # blocks until exclusive
-        if _adr_number_occupied(kind_dir, number):
-            raise RecordAlreadyExistsError(
-                f"an adr already carries number {number} in {str(kind_dir)!r} — "
-                f"refusing to issue that number twice"
-            )
-        yield lock_path
-    finally:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        lock_fd.close()
-
-
-def format_adr_title(number: int, title: str) -> str:
-    """Return *title* rewritten as ``"ADR-NNN: <title>"`` (zero-padded to 3).
-
-    Any existing ``"ADR-<digits>: "`` prefix on *title* is stripped first —
-    a user-supplied already-numbered title (e.g. ``"ADR-9: foo"``) has its
-    number overridden by *number*, deliberately: the CLI's per-vault sequence
-    always wins over an operator-typed number, which cannot itself be
-    verified collision-free.
-    """
-    stripped = _ADR_TITLE_PREFIX_RE.sub("", title, count=1)
-    return f"ADR-{number:03d}: {stripped}"
-
-
 def _stem_occupied(kind_dir: Path, stem: str) -> bool:
     """A stem is occupied if EITHER ``<stem>.md`` or ``<stem>.json`` exists.
 
     The pair-aware occupancy check: a crash can leave an orphaned ``<stem>.json``
     with no ``.md``; treating the slot as free on ``.md``-absence alone would
     silently overwrite that orphan.
+
+    Existence is tested on the directory entry itself (``lexists``), never
+    through it: a symlink occupies its stem whether or not it resolves. A
+    dangling or vault-escaping link would otherwise read as free, and the
+    placement that followed would write THROUGH it to the path it names — and
+    the resolving variant would report whether that external path exists.
     """
-    return (kind_dir / f"{stem}.md").exists() or (kind_dir / f"{stem}.json").exists()
+    return os.path.lexists(kind_dir / f"{stem}.md") or os.path.lexists(
+        kind_dir / f"{stem}.json"
+    )
 
 
 def _unique_stem(kind_dir: Path, base: str) -> str:
@@ -754,7 +544,10 @@ def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, 
         raise InvalidRecordIdError(f"RECORD_ID must be vault-relative: {record_id!r}")
     # Every path segment of both halves must be a real name — no empty, ".", or
     # ".." segments (Path(...).parts splits on "/", so segments never contain it).
-    segments = [kind, *Path(name).parts]
+    # ``name`` itself is checked alongside its parts because a degenerate name
+    # yields no parts at all (``Path("").parts == ()``), which would otherwise
+    # let ``<kind>/`` through as a well-formed ID pointing at ``<kind>/.md``.
+    segments = [kind, name, *Path(name).parts]
     if not segments or any(seg in ("", ".", "..") for seg in segments):
         raise InvalidRecordIdError(f"illegal RECORD_ID segment in {record_id!r}")
 
@@ -797,15 +590,10 @@ def place_record(
     Resolves the target vault (``vault_root`` when given, else the config-resolved
     active vault via :func:`_active_vault_root` — the multi-vault eligibility
     hook). The vault-relative name is ``_kebab(name)`` with a ``-2``/``-3``
-    collision suffix, **except**: ``session`` kind, whose name is the
-    ``session_id`` GUID **verbatim** (no slug, no suffix); and ``adr`` kind,
-    whose stem is ``_kebab(name)`` **without** a suffix — the caller (``lore
-    record create``) has already rewritten ``name`` into its numbered
-    ``"ADR-NNN: <title>"`` form, and a colliding sequence NUMBER must surface as
-    a refusal at write time (:func:`validate_and_write`'s ``require_new`` path),
-    never be silently papered over by a suffix — a suffixed ``adr-001-x-2``
-    would be a second record carrying number 1. Collision occupancy for every
-    other kind checks both the ``.md`` and ``.json`` stem.
+    collision suffix, **except** ``session`` kind, whose name is the
+    ``session_id`` GUID **verbatim** (no slug, no suffix). Every other kind —
+    including ``adr``, an ordinary kind here — gets the standard suffix rule.
+    Collision occupancy checks both the ``.md`` and ``.json`` stem.
 
     ``scope`` is accepted for the multi-vault routing hook; it is currently unused.
     Returns a :class:`RecordLocation` whose ``record_id`` is ``<kind>/<name>``.
@@ -816,9 +604,6 @@ def place_record(
     if kind == "session":
         # The GUID is the identity; never slugged, never suffixed.
         stem = name
-    elif kind == "adr":
-        # Already-numbered by the caller; a collision refuses, it never suffixes.
-        stem = _kebab(name)
     else:
         stem = _unique_stem(kind_dir, _kebab(name))
 
@@ -964,62 +749,12 @@ def validate_stamp_neutralize(
     return stamped, safe_body
 
 
-def _number_claim_for(location: RecordLocation, *, env: dict[str, str] | None = None):
-    """Return the number-scoped claim context for *location*, else a no-op.
-
-    The bridge between the generic ``require_new`` write path and the adr
-    sequence-number guard. The number is derived from the resolved stem rather
-    than passed in as an argument, deliberately: any caller writing an
-    ``adr-<n>-*`` stem exclusively is claiming that number and cannot forget to
-    say so. Every other kind (and any unnumbered adr stem) gets
-    :func:`contextlib.nullcontext` — number scoping means nothing there, and the
-    stem-scoped claims alone remain the guard.
-
-    *env*: optional environment dict for test isolation, threaded straight
-    through to :func:`adr_number_claim`.
-    """
-    match = _ADR_STEM_NUMBER_RE.match(location.name)
-    if location.kind != "adr" or match is None:
-        return nullcontext()
-    return adr_number_claim(
-        location.body_path.parent, location.vault_root, int(match.group(1)), env=env
-    )
-
-
-def _write_new_artifacts(location: RecordLocation, safe_body: str, sidecar_text: str) -> None:
-    """Claim both stem artifacts exclusively, or leave nothing behind.
-
-    The stem-scoped half of the create guard: each artifact lands via
-    :func:`write_temp_then_create_exclusive`, so an occupied target raises
-    rather than clobbering. The body is claimed first; if the sidecar claim then
-    loses (an orphan ``.json`` with no matching ``.md`` — the same edge
-    :func:`_stem_occupied` guards elsewhere), the just-claimed body is unlinked
-    before the error propagates, so "nothing written on refusal" holds even for
-    that partial-claim case.
-    """
-    try:
-        write_temp_then_create_exclusive(location.body_path, safe_body)
-    except FileExistsError as exc:
-        raise RecordAlreadyExistsError(
-            f"a record already exists at {location.record_id!r} — refusing to overwrite it"
-        ) from exc
-    try:
-        write_temp_then_create_exclusive(location.sidecar_path, sidecar_text)
-    except FileExistsError as exc:
-        location.body_path.unlink(missing_ok=True)
-        raise RecordAlreadyExistsError(
-            f"a record already exists at {location.record_id!r} — refusing to overwrite it"
-        ) from exc
-
-
 def validate_and_write(
     location: RecordLocation,
     sidecar: dict[str, Any],
     body: str,
     conn,
     shared: int = 0,
-    require_new: bool = False,
-    env: dict[str, str] | None = None,
 ) -> RecordId:
     """Validate, stamp provenance, and durably write a record.
 
@@ -1028,12 +763,11 @@ def validate_and_write(
          :func:`validate_stamp_neutralize` (the shared pre-write step). Non-empty
          validation errors → :class:`RecordValidationError`, an empty committer
          email → :class:`ProvenanceError` — **nothing written** in either case.
-      5. Atomically write body then sidecar — via ``write_temp_then_rename``
-         (default: always succeeds, clobbering any existing target — the
-         update/move semantics every other kind relies on) or, when
-         ``require_new`` is set, via :func:`_write_new_artifacts` under
-         :func:`_number_claim_for` (never clobbers; a losing race raises
-         :class:`RecordAlreadyExistsError` instead).
+      5. Atomically write body then sidecar via ``write_temp_then_rename`` —
+         always succeeds, clobbering any existing target (the create/update/move
+         semantics every kind relies on; ``place_record``'s collision suffix is
+         what keeps a create from landing on an occupied stem in the first
+         place).
       6. Update the index with the resolved vault's ``shared`` trust flag
          (default 0/own preserves vanilla). **If this raises, the text is already
          durable and wins** — we do not roll back; the exception propagates.
@@ -1041,26 +775,6 @@ def validate_and_write(
     ``shared`` is the trust flag for the destination vault (0 = own/trusted, 1 =
     untrusted/shared). The caller (the CLI) computes it from
     ``vault_config.is_shared(resolved_vault)`` when a config is present, else 0.
-
-    ``require_new`` is the create-time exclusivity guard (today: adr
-    sequence-numbered creates — see ``cli/record.py``'s ``--kind adr`` branch).
-    It must NEVER be set on an update: an in-place update's whole point is to
-    write over the record's own existing artifacts, which ``require_new``
-    would refuse as a collision against itself. It layers two claims, both
-    raising :class:`RecordAlreadyExistsError` with nothing written:
-
-      - **number-scoped** (:func:`adr_number_claim`, adr stems only) — the
-        atomic one. Exactly one concurrent writer can hold a given ADR number,
-        so two creates that computed the same number from different titles
-        cannot both ship.
-      - **stem-scoped** (:func:`_write_new_artifacts`) — the per-artifact
-        create-only claim, which also covers every non-adr ``require_new``
-        caller, where number scoping does not apply.
-
-    ``env`` is an optional environment dict for test isolation (``XDG_STATE_HOME``),
-    threaded straight through to :func:`adr_number_claim` via
-    :func:`_number_claim_for`. ``None`` (the production default) reads
-    ``os.environ``.
 
     Returns the vault-relative ``RecordId``.
     """
@@ -1075,12 +789,8 @@ def validate_and_write(
         # Compact format: single-line, sorted keys, no trailing newline — stable bytes for
         # diff/grep and round-trip asserts.
         sidecar_text = json.dumps(stamped, sort_keys=True, separators=(",", ":"))
-        if require_new:
-            with _number_claim_for(location, env=env):
-                _write_new_artifacts(location, safe_body, sidecar_text)
-        else:
-            write_temp_then_rename(location.body_path, safe_body)
-            write_temp_then_rename(location.sidecar_path, sidecar_text)
+        write_temp_then_rename(location.body_path, safe_body)
+        write_temp_then_rename(location.sidecar_path, sidecar_text)
 
         # 6 — index last; on failure the text already won (no rollback).
         # ``shared`` is the resolved vault's trust flag: default 0 (own/trusted)

@@ -70,6 +70,7 @@ _HELP_LEVELS = [
     (["record", "update"], "lore record update"),
     (["record", "delete"], "lore record delete"),
     (["record", "show"], "lore record show"),
+    (["record", "rename"], "lore record rename"),
     (["session"], "lore session"),
     (["session", "candidate"], "lore session candidate"),
     (["session", "referenced"], "lore session referenced"),

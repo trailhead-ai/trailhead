@@ -4,7 +4,7 @@
 attaches on write (name/summary/keywords) — and keep the `## Overview` heading exactly as
 spelled below, since the area map's one-liner extraction reads the first real sentence
 after it verbatim. Cite ADRs and other records inline as [[wikilinks]] (e.g.
-[[adr/adr-003-example]]) so a reader can drill in. -->
+[[adr/adr-example-decision]]) so a reader can drill in. -->
 
 ## Overview
 <!-- One clear lead sentence: what this area is and why it exists — becomes the area menu's one-liner (or the `summary:` frontmatter field, if set). Keep it a real sentence, not a placeholder. -->

@@ -72,7 +72,7 @@ lore record create --kind decision --title "Use frontmatter for session status" 
 ```
 
 Run `lore record create --help` for the full flag set. Related sub-actions:
-`lore record show`, `lore record update`, `lore record delete`.
+`lore record show`, `lore record update`, `lore record rename`, `lore record delete`.
 
 ## Choosing a flag for a value: edge, label, or reserved
 
