@@ -503,6 +503,7 @@ def test_restart_running_daemon_builds_before_stopping(outpost, tmp_path):
     assert new_pid != old_pid
     assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
     assert _wait_until(lambda: not _pid_alive(old_pid), timeout=3.0)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=3.0)
 
 
 def test_restart_output_includes_asset_filenames(outpost, tmp_path):
@@ -545,6 +546,54 @@ def test_restart_when_stopped_builds_then_starts(outpost, tmp_path):
     assert pidfile.exists()
     new_pid = int(pidfile.read_text().strip())
     assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
+
+
+# A stand-in for a daemon that spawns (so its pid is alive) but never binds its
+# HTTP server — simulates a new process that dies/hangs post-EADDRINUSE before
+# it can serve /health.
+_HUNG_DAEMON = """\
+import signal
+import threading
+
+stop = threading.Event()
+signal.signal(signal.SIGTERM, lambda *a: stop.set())
+stop.wait()
+"""
+
+
+def test_restart_raises_when_new_daemon_never_answers_health(outpost, tmp_path):
+    # Simulate a rebuild that succeeds but whose restarted process never comes
+    # up healthy (e.g. died on EADDRINUSE against a still-alive old daemon).
+    outpost.entry.write_text(_HUNG_DAEMON)
+
+    build_cmd = _build_script(tmp_path)
+    result = _restart(outpost, build_cmd)
+
+    assert result.returncode != 0
+    assert "OutpostLifecycleError" in result.stderr
+    assert "health" in result.stderr.lower()
+
+
+def test_restart_missing_build_command_raises_named_error(outpost):
+    with pytest.raises(OutpostLifecycleError, match="not-a-real-build-command"):
+        outpost_lifecycle.restart(
+            env=outpost.env,
+            build_cmd=["not-a-real-build-command"],
+            port=outpost.port,
+        )
+
+
+def test_restart_build_failure_includes_stdout_diagnostics(outpost, tmp_path):
+    script = tmp_path / "fake_build_stdout.py"
+    script.write_text(
+        "import sys\n"
+        "print('tsc: error TS2322 something is wrong')\n"
+        "sys.exit(1)\n"
+    )
+    build_cmd = [sys.executable, str(script)]
+
+    with pytest.raises(OutpostLifecycleError, match="TS2322"):
+        outpost_lifecycle.restart(env=outpost.env, build_cmd=build_cmd, port=outpost.port)
 
 
 # ---------------------------------------------------------------------------

@@ -38,11 +38,20 @@ Contract & invariants
 * **Rebuild-before-restart.** ``restart`` resolves the checkout, runs the (injectable,
   default ``["npm", "run", "build"]``) full build with ``cwd=<checkout>``, THEN calls
   ``stop`` then ``start``. The build runs *before* stop: a nonzero build exit raises
-  :class:`OutpostLifecycleError` and neither stop nor start ever runs, so a running
-  daemon is left untouched on a broken build. Because ``stop`` on a stopped daemon is
+  :class:`OutpostLifecycleError` (including both stdout and stderr, since tsc/vite
+  diagnostics land on stdout) and neither stop nor start ever runs, so a running
+  daemon is left untouched on a broken build. A missing build tool (e.g. no ``npm``
+  on PATH) is likewise wrapped in :class:`OutpostLifecycleError` rather than
+  propagating a raw ``FileNotFoundError``. Because ``stop`` on a stopped daemon is
   already a no-op, ``restart`` also serves as "build and start" when nothing is
   running. On success it prints the hashed web bundle filenames found under
   ``<checkout>/dist-web/assets/`` so a stale-looking UI is diagnosable at a glance.
+  ``restart`` does not trust ``start``'s return value alone: it polls ``/health``
+  briefly afterward (allowing for startup latency) and raises
+  :class:`OutpostLifecycleError` if the new process never answers — otherwise a
+  doomed spawn (e.g. dying on EADDRINUSE against a not-yet-dead old daemon) would
+  be reported as a successful restart while the old daemon keeps serving stale
+  content.
 
 status exit codes (structured, so callers/tests can branch on state):
     EXIT_RUNNING (0)  pid alive
@@ -217,6 +226,19 @@ def _probe_health(port: int, timeout: float) -> dict | None:
         return None
 
 
+def _wait_for_health(port: int, total_timeout: float, poll_interval: float = 0.1) -> dict | None:
+    """Poll /health repeatedly, allowing for startup latency, until it answers
+    or ``total_timeout`` elapses. Returns the parsed payload, or None on timeout."""
+    deadline = time.time() + total_timeout
+    while True:
+        health = _probe_health(port, poll_interval)
+        if health is not None:
+            return health
+        if time.time() >= deadline:
+            return None
+        time.sleep(poll_interval)
+
+
 # ---------------------------------------------------------------------------
 # Verbs
 # ---------------------------------------------------------------------------
@@ -352,6 +374,7 @@ def restart(
     port: int = DAEMON_PORT,
     health_timeout: float = 2.0,
     stop_timeout: float = _STOP_TIMEOUT_SECONDS,
+    restart_health_timeout: float = 5.0,
 ) -> int:
     """Rebuild the outpost checkout, then stop and restart the daemon.
 
@@ -361,19 +384,33 @@ def restart(
     OutpostLifecycleError and stop/start never run, leaving any running daemon
     untouched. ``stop`` on a stopped daemon is already a no-op, so this also works
     as "build and start" when nothing is running.
+
+    After ``start``, restart does not simply trust its return value: a doomed
+    spawn (e.g. the new process dying on EADDRINUSE against a not-yet-dead old
+    daemon) would otherwise be reported as a successful restart while the old
+    process keeps serving the stale bundle. So restart polls ``/health`` for up
+    to ``restart_health_timeout`` seconds (allowing for normal startup latency)
+    and raises OutpostLifecycleError, naming the situation, if it never answers.
     """
     checkout = _resolve_checkout(env)
     cmd = build_cmd if build_cmd is not None else list(DEFAULT_BUILD_CMD)
 
-    result = subprocess.run(
-        cmd,
-        cwd=str(checkout),
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(checkout),
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise OutpostLifecycleError(
+            f"outpost build command {cmd!r} could not be run: {exc}. "
+            "Is npm installed and on PATH?"
+        )
     if result.returncode != 0:
         raise OutpostLifecycleError(
             f"outpost build failed (exit {result.returncode}): {' '.join(cmd)}\n"
+            f"{result.stdout.strip()}\n"
             f"{result.stderr.strip()}"
         )
 
@@ -385,4 +422,13 @@ def restart(
         print(f"outpost build ok; no assets found under {assets_dir}.")
 
     stop(env=env, port=port, timeout=stop_timeout, health_timeout=health_timeout)
-    return start(env=env, node_bin=node_bin, port=port, health_timeout=health_timeout)
+    rc = start(env=env, node_bin=node_bin, port=port, health_timeout=health_timeout)
+
+    if _wait_for_health(port, restart_health_timeout) is None:
+        raise OutpostLifecycleError(
+            f"outpost restart: rebuilt and spawned a new process but /health never "
+            f"answered on port {port} within {restart_health_timeout:.0f}s; the new "
+            "daemon may have failed to start (check the outpost log)."
+        )
+
+    return rc
