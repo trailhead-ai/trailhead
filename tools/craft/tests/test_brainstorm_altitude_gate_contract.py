@@ -62,7 +62,7 @@ def test_altitude_gate_creates_a_draft_adr_via_lore_record_create():
     text = _text()
     assert "--kind adr" in text, (
         "brainstorm/SKILL.md must create the altitude-gate's ADR via "
-        "`lore record create --kind adr` — the CLI assigns the ADR-NNN number"
+        "`lore record create --kind adr`"
     )
     assert "templates/adr.md" in text, (
         "brainstorm/SKILL.md must render the ADR body from templates/adr.md, the "

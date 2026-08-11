@@ -67,7 +67,7 @@ more records in one sitting than any other in craft, so a shortcut here costs th
 scanning the configured vaults in **config order**, so an unscoped update in a multi-vault install
 lands wherever the scan happens to hit first — which is not necessarily where the record lives.
 `--vault` disambiguates the record's CURRENT location; it is not the same flag as `--product`/`--team`
-on a `create`, which instead selects the DESTINATION vault (the ADR's numbering namespace — see step
+on a `create`, which instead selects the DESTINATION vault (see step
 1). Read each record's vault from the sidecar that `lore record show <record-id> --json` already
 returned during the queue pass, and pass it back as `--vault` on every update against that record.
 
@@ -208,9 +208,8 @@ claims `complete` until everything behind it landed.
    approved draft, carrying its provenance as edges: `--related spec=<member>` for each member spec,
    `--related decision=<absorbed>` for each absorbed decision, and — when this ADR supersedes an
    existing one — `--related adr=<predecessor>`. The scope flag is not optional here either — on
-   create it selects the destination vault, which is the per-vault `ADR-NNN` numbering namespace,
-   so an unscoped create can mint a number in the wrong vault. The create path assigns the `ADR-NNN`
-   number itself. Distilled ADRs do not route through `/craft:gauntlet`; this disposition owns their flip.
+   create it selects the destination vault, so an unscoped create can land the ADR in the wrong
+   vault. Distilled ADRs do not route through `/craft:gauntlet`; this disposition owns their flip.
 
 2. Then **absorbed `decision` records are flipped `superseded` with a `related: adr=` edge** back to
    the ADR that subsumed them, so no competing owner of the same decision is left `active`.
