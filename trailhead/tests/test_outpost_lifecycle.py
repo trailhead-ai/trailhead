@@ -1,5 +1,5 @@
 """Behavioral tests for trailhead/outpost_lifecycle.py — the
-``trailhead outpost start|stop|status`` verbs.
+``trailhead outpost start|stop|status|restart`` verbs.
 
 TDD: written before the implementation. The real daemon is a Node dist build;
 these tests stand a tiny stdlib ``http.server`` in for it (spawned via the
@@ -176,29 +176,38 @@ def outpost(tmp_path):
 _REPO_ROOT = Path(trailhead.__file__).resolve().parent.parent
 
 
-def _start(o) -> int:
-    """Run ``start`` in a short-lived subprocess so the daemon is genuinely
-    orphaned to init on exit — exactly as the real CLI process does. Running it
-    in-process would leave the daemon as pytest's own child, where a killed
-    process lingers as an unreaped zombie and os.kill(pid, 0) never reports it
-    dead (masking the very liveness primitive under test)."""
+def _run_verb(
+    o, call: str, *, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """Run a lifecycle verb (``call`` is the ``ol.<verb>(...)`` expression) in a
+    short-lived subprocess, so any daemon it spawns is genuinely orphaned to init
+    on exit — exactly as the real CLI process does. Running it in-process would
+    leave the daemon as pytest's own child, where a killed process lingers as an
+    unreaped zombie and os.kill(pid, 0) never reports it dead (masking the very
+    liveness primitive under test)."""
     code = (
         "import os, sys\n"
         "from trailhead import outpost_lifecycle as ol\n"
-        "sys.exit(ol.start(node_bin=sys.executable, "
-        "port=int(os.environ['OUTPOST_TEST_PORT'])))\n"
+        f"sys.exit(ol.{call})\n"
     )
     proc_env = {
         **o.env,
+        **(extra_env or {}),
         "OUTPOST_TEST_PORT": str(o.port),
         "PYTHONPATH": str(_REPO_ROOT),
     }
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-c", code],
         env=proc_env,
         capture_output=True,
         text=True,
         timeout=15,
+    )
+
+
+def _start(o) -> int:
+    result = _run_verb(
+        o, "start(node_bin=sys.executable, port=int(os.environ['OUTPOST_TEST_PORT']))"
     )
     assert result.returncode == 0, f"start subprocess failed: {result.stderr}"
     return result.returncode
@@ -463,31 +472,18 @@ def _build_script(
     return [sys.executable, str(script)]
 
 
-def _restart(o, build_cmd: list[str], extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    """Run ``restart`` in a short-lived subprocess, mirroring ``_start`` — so the
-    freshly (re)spawned daemon is genuinely orphaned to init on exit rather than
-    left as pytest's own child."""
-    code = (
-        "import os, sys\n"
-        "from trailhead import outpost_lifecycle as ol\n"
-        "sys.exit(ol.restart(node_bin=sys.executable, "
+def _restart(
+    o, build_cmd: list[str], extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """Run ``restart`` the same orphaning way ``_start`` does. No cwd is set:
+    ``restart`` runs the build with ``cwd=<checkout>`` itself, so the fake build
+    script's relative writes land in the checkout regardless of the caller's cwd."""
+    return _run_verb(
+        o,
+        "restart(node_bin=sys.executable, "
         "build_cmd=eval(os.environ['OUTPOST_TEST_BUILD_CMD']), "
-        "port=int(os.environ['OUTPOST_TEST_PORT'])))\n"
-    )
-    proc_env = {
-        **o.env,
-        **(extra_env or {}),
-        "OUTPOST_TEST_PORT": str(o.port),
-        "OUTPOST_TEST_BUILD_CMD": repr(build_cmd),
-        "PYTHONPATH": str(_REPO_ROOT),
-    }
-    return subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=str(o.checkout),
-        env=proc_env,
-        capture_output=True,
-        text=True,
-        timeout=15,
+        "port=int(os.environ['OUTPOST_TEST_PORT']))",
+        extra_env={**(extra_env or {}), "OUTPOST_TEST_BUILD_CMD": repr(build_cmd)},
     )
 
 
