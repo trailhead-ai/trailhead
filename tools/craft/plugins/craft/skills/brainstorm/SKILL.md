@@ -270,7 +270,7 @@ spec, and every draft ADR, passes before it freezes.
 > separately, once you pick it up."
 
 **Print the handoff command fully formed** — substitute the real record id (e.g. `/craft:gauntlet
-spec/streaming-export` or `/craft:gauntlet adr/adr-001-streaming-export-decision`), never a `<placeholder>`,
+spec/streaming-export` or `/craft:gauntlet adr/streaming-export-decision`), never a `<placeholder>`,
 so the user can paste it into a fresh session as-is.
 
 **Do not flip the spec to `ready` yourself** — and the same discipline holds for the ADR branch:
