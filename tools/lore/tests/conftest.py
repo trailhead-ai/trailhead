@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
 CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
@@ -17,6 +19,33 @@ CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
 # (the sole remaining bare-stem load target) importable too.
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ambient_env(tmp_path, monkeypatch):
+    """Pin HOME/XDG_STATE_HOME/XDG_CONFIG_HOME to tmp_path-scoped dirs.
+
+    Autouse guard against any in-process call that reads these vars ambiently
+    (the ``env=None`` default — e.g. ``lore.locking.session_write_lock``,
+    ``lore.record.store.validate_and_write``) resolving the real
+    ``~/.local/state/lore`` or ``~/.config/lore`` on a shell where they are
+    unset. Subprocess-based tests are unaffected: ``run_cli`` (below) already
+    overrides ``XDG_STATE_HOME``/``XDG_CONFIG_HOME`` explicitly per call,
+    which continues to take precedence over these ambient defaults.
+
+    ``XDG_STATE_HOME`` is pinned to ``tmp_path / "state"``, matching the
+    suite's existing convention (see ``make_vault`` below) — the same value
+    tests that build their own state dir under ``tmp_path`` already use, so
+    this fixture never creates the directories itself (state_dir/config_dir
+    are documented as pure — "never creates anything on disk" — and several
+    tests ``mkdir()`` these paths themselves without ``exist_ok``).
+    """
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
 
 
 def write_default_config(config_home: Path, vault_path: Path) -> None:

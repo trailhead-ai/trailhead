@@ -538,7 +538,6 @@ class TestLockContract:
         wording to mean "the whole vault is contended"; a per-session-key wait,
         which blocks only that one session's writers, must say so instead.
         """
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
         locking = load_script("lore.locking")
         vault = tmp_path / "vault"
         vault.mkdir()
