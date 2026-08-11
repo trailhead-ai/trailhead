@@ -845,3 +845,88 @@ def test_resume_adopts_the_suffixed_stem_the_move_actually_landed_on(install):
     assert install.body("default", "spec/ref") == "see [[adr/target-name-2]]"
     # The stranger is untouched.
     assert install.body("default", "adr/target-name") == "the stranger"
+
+
+# ---------------------------------------------------------------------------
+# Symlink confinement
+# ---------------------------------------------------------------------------
+
+
+def test_symlinked_record_outside_the_vault_is_never_read(install):
+    """A record symlink escaping the vault root is skipped, silently.
+
+    Following it would read an arbitrary external path, and reporting the read
+    error would echo that path back — an existence/readability oracle over any
+    file the process can stat. Confinement applies to EVERY vault, shared or
+    not, and it is enforced at discovery time rather than at write-back.
+    """
+    outside = install.tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.md"
+    secret.write_text("see [[adr/old-name]]", encoding="utf-8")
+
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+    (install.roots["default"] / "spec" / "leak.md").symlink_to(secret)
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+
+    # The honest record was rewritten; the escaping one was not read or written.
+    assert proc.returncode == 0, proc.stderr
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
+    assert secret.read_text(encoding="utf-8") == "see [[adr/old-name]]"
+
+    # Nothing about the external target — or the symlink — reaches the operator.
+    combined = proc.stdout + proc.stderr
+    assert str(secret) not in combined
+    assert "outside" not in combined
+    assert "spec/leak" not in combined
+
+
+def test_symlinked_kind_directory_is_not_descended(install):
+    """A symlinked kind directory is refused at the top of the walk."""
+    outside = install.tmp_path / "outside"
+    (outside / "lesson").mkdir(parents=True)
+    planted = outside / "lesson" / "planted.md"
+    planted.write_text("see [[adr/old-name]]", encoding="utf-8")
+
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+    (install.roots["other"] / "lesson").symlink_to(outside / "lesson")
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+
+    assert proc.returncode == 0, proc.stderr
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
+    assert planted.read_text(encoding="utf-8") == "see [[adr/old-name]]"
+    combined = proc.stdout + proc.stderr
+    assert "lesson/planted" not in combined
+    assert str(planted) not in combined
+
+
+def test_symlinked_sidecar_outside_the_vault_is_never_read(install):
+    """An escaping ``.json`` sidecar is skipped even when its body is honest."""
+    outside = install.tmp_path / "outside"
+    outside.mkdir()
+    external = outside / "external.json"
+    external.write_text(
+        json.dumps({"title": "External", "related": {"adr": ["old-name"]}}),
+        encoding="utf-8",
+    )
+
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+    ref_json = install.roots["other"] / "spec"
+    ref_json.mkdir(parents=True, exist_ok=True)
+    (ref_json / "bait.md").write_text("see [[adr/old-name]]", encoding="utf-8")
+    (ref_json / "bait.json").symlink_to(external)
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+
+    assert proc.returncode == 0, proc.stderr
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
+    assert json.loads(external.read_text())["related"]["adr"] == ["old-name"]
+    # The whole record is skipped — a record is only swept when BOTH of its
+    # artifacts are confined, so the honest body is left alone too.
+    assert (ref_json / "bait.md").read_text(encoding="utf-8") == "see [[adr/old-name]]"
+    assert str(external) not in proc.stdout + proc.stderr

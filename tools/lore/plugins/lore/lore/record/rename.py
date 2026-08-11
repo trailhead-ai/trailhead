@@ -27,6 +27,14 @@ order:
 opts in with ``include_shared``. The primary rename itself is never skipped —
 the operator named that record explicitly.
 
+**Confinement.** Independently of that trust split, the sweep never reads
+outside the vault it is walking: every kind directory, body, and sidecar is
+realpath-descendant checked against the vault root before it is opened, and
+anything escaping is skipped silently. This holds for ALL vaults, not just
+shared ones — a symlink planted in any vault would otherwise turn the sweep
+into a reader of arbitrary files, and its error reporting into an
+existence oracle for the paths it was pointed at.
+
 **Idempotency and crash-resume.** Re-running the same rename after a crash is a
 no-op that still completes the sweep: when the old ID is gone but a record with
 the new title already sits at the new stem, the primary rename is reported as
@@ -51,6 +59,7 @@ does not change are never written, so their bytes and provenance are untouched.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -221,26 +230,58 @@ def _find_vault(vaults, kind: str, stem: str) -> SweepVault | None:
     return None
 
 
-def _iter_records(root: Path):
-    """Yield ``(record_id, kind, body_path)`` for every record under *root*.
-
-    Only directories named for one of :data:`model.KINDS` are descended, so
-    stray top-level files and non-record directories (``.git``, editor state)
-    never enter the sweep. Every real kind IS descended — ``blob`` included: a
-    blob is an ordinary record whose body and sidecar can carry references like
-    any other.
+def _confined_kind_dirs(root: Path):
+    """Yield each kind directory directly under *root* that is safe to descend.
 
     A *root* that does not exist yields nothing rather than raising: a vault can
     be configured before it is created, and that must not abort a rename whose
     primary move has already landed.
+
+    Only directories named for one of :data:`model.KINDS` are yielded, so stray
+    top-level files and non-record directories (``.git``, editor state) never
+    enter the sweep. Every real kind IS yielded — ``blob`` included: a blob is an
+    ordinary record whose body and sidecar can carry references like any other.
+
+    **Confinement.** A kind directory whose realpath is not a descendant of the
+    vault root is skipped, silently. A vault is attacker-influenced content —
+    emphatically so when it is ``shared: true`` — and descending a symlinked
+    kind directory would walk an arbitrary external tree, reading whatever it
+    holds. The check is the same realpath-descendant rule
+    (:func:`store._realpath_is_descendant`) that confines every write, applied
+    here at discovery so nothing outside the vault is ever opened.
     """
     root = Path(root)
     if not root.is_dir():
         return
+    root_real = os.path.realpath(root)
     for kind_dir in sorted(root.iterdir()):
         if not kind_dir.is_dir() or kind_dir.name not in record_model.KINDS:
             continue
+        if not store._realpath_is_descendant(kind_dir, root_real):
+            continue
+        yield kind_dir, root_real
+
+
+def _iter_records(root: Path):
+    """Yield ``(record_id, kind, body_path)`` for every confined record under *root*.
+
+    Discovery walks only the kind directories :func:`_confined_kind_dirs`
+    approves, and a record is yielded only when **both** of its artifacts —
+    ``<stem>.md`` and ``<stem>.json`` — resolve inside the vault root. Either one
+    escaping skips the whole record, silently: reading the escaping artifact
+    would leak an external file into the sweep, and reporting the skip by name
+    would echo the attacker's chosen path (and the OS error text for it) back to
+    the operator as an existence oracle. A record that is skipped is simply not
+    swept, so nothing about it is read, written, or named.
+    """
+    for kind_dir, root_real in _confined_kind_dirs(root):
         for body_path in sorted(kind_dir.rglob("*.md")):
+            if not store._realpath_is_descendant(body_path, root_real):
+                continue
+            if not store._realpath_is_descendant(
+                body_path.with_suffix(".json"), root_real
+            ):
+                continue
             name = body_path.relative_to(kind_dir).with_suffix("").as_posix()
             yield f"{kind_dir.name}/{name}", kind_dir.name, body_path
 
@@ -363,13 +404,23 @@ def _read_sidecar(sidecar_path: Path) -> dict:
 
 
 def _title_matches(vaults, kind: str, new_title: str) -> list[tuple[SweepVault, str]]:
-    """Every ``(vault, stem)`` of *kind* whose sidecar ``title`` is *new_title*."""
+    """Every ``(vault, stem)`` of *kind* whose sidecar ``title`` is *new_title*.
+
+    Confined exactly like the sweep's own discovery: a symlinked kind directory
+    is not descended, and a sidecar resolving outside the vault root is skipped
+    rather than read (see :func:`_iter_records`).
+    """
     matches = []
     for vault in vaults:
+        root_real = os.path.realpath(vault.root)
         kind_dir = Path(vault.root) / kind
         if not kind_dir.is_dir():
             continue
+        if not store._realpath_is_descendant(kind_dir, root_real):
+            continue
         for sidecar_path in sorted(kind_dir.rglob("*.json")):
+            if not store._realpath_is_descendant(sidecar_path, root_real):
+                continue
             if _read_sidecar(sidecar_path).get("title") == new_title:
                 stem = sidecar_path.relative_to(kind_dir).with_suffix("").as_posix()
                 matches.append((vault, stem))

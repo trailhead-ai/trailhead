@@ -484,8 +484,16 @@ def _stem_occupied(kind_dir: Path, stem: str) -> bool:
     The pair-aware occupancy check: a crash can leave an orphaned ``<stem>.json``
     with no ``.md``; treating the slot as free on ``.md``-absence alone would
     silently overwrite that orphan.
+
+    Existence is tested on the directory entry itself (``lexists``), never
+    through it: a symlink occupies its stem whether or not it resolves. A
+    dangling or vault-escaping link would otherwise read as free, and the
+    placement that followed would write THROUGH it to the path it names — and
+    the resolving variant would report whether that external path exists.
     """
-    return (kind_dir / f"{stem}.md").exists() or (kind_dir / f"{stem}.json").exists()
+    return os.path.lexists(kind_dir / f"{stem}.md") or os.path.lexists(
+        kind_dir / f"{stem}.json"
+    )
 
 
 def _unique_stem(kind_dir: Path, base: str) -> str:

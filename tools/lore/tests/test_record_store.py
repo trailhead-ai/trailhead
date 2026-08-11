@@ -125,6 +125,24 @@ def test_place_record_orphan_json_occupies_stem(rs, tmp_path):
     assert loc.name == "lore-search-2"
 
 
+def test_place_record_symlink_occupies_stem_without_following_it(rs, tmp_path):
+    """A symlink at <stem>.md occupies the stem even when its target is absent.
+
+    Occupancy is decided by the link itself, never by whether it resolves: a
+    dangling or escaping symlink planted in a kind directory would otherwise
+    read as a free stem, and the placement that followed would write THROUGH it
+    to whatever path it names — outside the vault. Testing the link rather than
+    its target also keeps placement from reporting whether an arbitrary external
+    file exists.
+    """
+    vault = tmp_path / "vault"
+    (vault / "spec").mkdir(parents=True)
+    (vault / "spec" / "lore-search.md").symlink_to(tmp_path / "outside" / "absent.md")
+
+    loc = rs.place_record("Lore Search", "spec", None, str(vault))
+    assert loc.name == "lore-search-2"
+
+
 def test_place_record_session_keeps_guid_verbatim(rs, tmp_path):
     """session kind uses the session_id GUID verbatim — no slug, no suffix."""
     vault = tmp_path / "vault"
