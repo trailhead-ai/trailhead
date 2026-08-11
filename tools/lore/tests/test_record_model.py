@@ -665,6 +665,19 @@ def test_related_prefix_reserves_beyond_the_derived_set():
     assert any("related-subsystems" in e for e in result.errors)
 
 
+def test_bare_related_label_key_is_reserved():
+    """The bare key ``related`` shadows the ``related`` edge-map sidecar field
+    (``record/model.py:171``) even though it is absent from ``KINDS`` and
+    ``kql.VALID_FIELDS`` and does not match the ``related-`` prefix — nothing
+    but a direct reservation can catch it."""
+    mod = rm()
+    assert "related" not in mod.KINDS
+    assert "related" not in _kql_module().VALID_FIELDS
+    assert "related" not in mod.RESERVED_LABEL_KEYS
+    result = mod.validate(_base_sidecar_with(labels={"related": "x"}))
+    assert any("related" in e for e in result.errors)
+
+
 def test_related_spec_label_key_still_refused():
     """``related-spec`` is now ALSO an exact-match member of ``VALID_FIELDS``
     (it names a real KQL query field, ``search/kql.py``'s kind-derived
@@ -785,6 +798,7 @@ def _every_refusable_label_key() -> list[str]:
     field cannot land without a message that names an alternative.
     """
     extra = {
+        "related",
         "related-subsystems",
         "related-file",
         "related-url",
@@ -849,6 +863,15 @@ def test_related_prefixed_kind_suffix_points_at_the_related_flag():
     assert _label_key_error("related-area") == (
         "labels: `related-area` names a relation — use `--related area=<name>`."
         " Already storing it? `--unset-label related-area` clears the key."
+    )
+
+
+def test_bare_related_label_key_points_at_the_related_flag():
+    """The bare ``related`` key's refusal names ``--related KIND=NAME`` as the
+    fix — the real edge-map field it collides with."""
+    assert _label_key_error("related") == (
+        "labels: `related` names a relation — use `--related KIND=NAME`."
+        " Already storing it? `--unset-label related` clears the key."
     )
 
 

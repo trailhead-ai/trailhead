@@ -381,9 +381,16 @@ def _is_reserved_label_key(map_key: str) -> bool:
     The union of both reservation sources — the ``related-`` prefix and the
     derived exact-match set — as a single predicate, so the validator and any
     other reader of the rule (e.g. a doc audit) test the same condition rather
-    than each restating it.
+    than each restating it. The bare key ``related`` is reserved explicitly
+    here: it collides with the real ``related`` edge-map sidecar field but sits
+    in neither the prefix rule (which requires the hyphen) nor the derived set
+    (it names no record kind and no queryable field).
     """
-    return map_key.startswith(_RELATED_KEY_PREFIX) or map_key in RESERVED_LABEL_KEYS
+    return (
+        map_key == "related"
+        or map_key.startswith(_RELATED_KEY_PREFIX)
+        or map_key in RESERVED_LABEL_KEYS
+    )
 
 #: ``related-<suffix>`` keys whose suffix names no record kind but does have a
 #: dedicated repeatable setter. Source of truth: the flag→field map in
@@ -423,16 +430,19 @@ def _reserved_key_alternative(map_key: str) -> str:
     belong to *both* reservation sources and the prefix reading is the one that
     names a flag an operator can run:
 
-    1. ``related-<suffix>`` — an edge (``--related``), a dedicated list flag, or
+    1. the bare ``related`` key — the edge map itself (``--related``).
+    2. ``related-<suffix>`` — an edge (``--related``), a dedicated list flag, or
        (no such field exists) a free attribute.
-    2. a record kind — an edge.
-    3. a settable field — the flag that sets it.
-    4. anything else — a free attribute, with no flag named.
+    3. a record kind — an edge.
+    4. a settable field — the flag that sets it.
+    5. anything else — a free attribute, with no flag named.
     """
     free_attribute = (
         f"use `--annotation {map_key}=<value>` for a free attribute, or a"
         f" namespaced key (`<ns>/{map_key}`)"
     )
+    if map_key == "related":
+        return f"`{map_key}` names a relation — use `--related KIND=NAME`."
     if map_key.startswith(_RELATED_KEY_PREFIX):
         suffix = map_key[len(_RELATED_KEY_PREFIX):]
         if is_valid_kind(suffix):
