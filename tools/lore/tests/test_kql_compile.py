@@ -868,7 +868,7 @@ def label_index(tmp_path, index_store):
     - spec/has-s5      labels={"worktree":"s5"}
     - spec/has-s6      labels={"worktree":"s6"}
     - spec/namespaced  labels={"claude-code/model":"opus"}
-    - spec/two-labels  labels={"worktree":"s5","phase":"build"}
+    - spec/two-labels  labels={"worktree":"s5","env":"build"}
     - spec/no-labels   annotations={"note":"x"} only (no labels)
     """
     vault = tmp_path / "vault"
@@ -902,7 +902,7 @@ def label_index(tmp_path, index_store):
         vault,
         "spec",
         "two-labels",
-        _label_sidecar(title="Two", labels={"worktree": "s5", "phase": "build"}),
+        _label_sidecar(title="Two", labels={"worktree": "s5", "env": "build"}),
         "body two",
     )
     _write_record(
@@ -984,9 +984,9 @@ class TestLabelCompile:
 
     def test_two_label_terms_and_together(self, kql, compiler, label_index):
         conn, vault, env = label_index
-        cq = compiler.compile(kql.parse("label.worktree:s5 label.phase:build"))
+        cq = compiler.compile(kql.parse("label.worktree:s5 label.env:build"))
         ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
-        # only two-labels has BOTH worktree=s5 and phase=build
+        # only two-labels has BOTH worktree=s5 and env=build
         assert ids == [i for i in ids if i.endswith("/spec/two-labels")]
         assert any(i.endswith("/spec/two-labels") for i in ids), ids
 

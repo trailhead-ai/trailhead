@@ -836,3 +836,64 @@ def test_remove_vault_missing_root_returns_zero(tmp_path):
         conn.close()
 
     assert removed == 0
+
+
+# ---------------------------------------------------------------------------
+# reserved label keys: raise at projection, never silently written
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_row_reserved_label_key_raises(tmp_path):
+    """A sidecar carrying a reserved ``labels`` key raises instead of inserting."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    conn = mod.open_index(env=env)
+    try:
+        sidecar = _make_sidecar()
+        sidecar["labels"] = {"area": "x"}
+        with pytest.raises(ValueError):
+            mod.upsert_row(conn, "/vault", "spec", "my-spec", sidecar, "body")
+        conn.commit()
+        record_count = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+        label_count = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert record_count == 0
+    assert label_count == 0
+
+
+def test_rebuild_skips_reserved_label_key_sidecar(tmp_path):
+    """rebuild skips a record whose sidecar carries a reserved ``labels`` key."""
+    mod = load_index_store()
+    env = dict(os.environ)
+    env["XDG_STATE_HOME"] = str(tmp_path / "xdg-state")
+    (tmp_path / "xdg-state").mkdir()
+
+    vault_root = tmp_path / "vault"
+    good_sidecar = _make_sidecar(kind="spec", name="good", title="Good")
+    bad_sidecar = _make_sidecar(kind="spec", name="bad", title="Bad")
+    bad_sidecar["labels"] = {"area": "x"}
+    _write_fixture_vault(
+        vault_root,
+        [
+            ("spec", "good", good_sidecar, "ok"),
+            ("spec", "bad", bad_sidecar, "ok"),
+        ],
+    )
+
+    conn = mod.open_index(env=env)
+    try:
+        count = mod.rebuild([str(vault_root)], conn)
+        conn.commit()
+        names = {r[0] for r in conn.execute("SELECT name FROM records")}
+        label_count = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert count == 1
+    assert names == {"good"}
+    assert label_count == 0
