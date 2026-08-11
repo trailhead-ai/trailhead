@@ -102,4 +102,4 @@ def write_workspace_doc(
         profile = resolve_harness_profile(group)
     content = _render_doc(group, slug)
     for filename in profile.doc_files:
-        (workspace_dir / filename).write_text(content)
+        (workspace_dir / filename).write_text(content, encoding="utf-8")

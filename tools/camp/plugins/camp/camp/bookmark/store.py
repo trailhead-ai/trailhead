@@ -117,7 +117,7 @@ def store_lock(*, env: dict[str, str] | None = None) -> Iterator[None]:
 def _read_unlocked(path: Path) -> dict[str, dict[str, Any]]:
     """Return the ref → record mapping. An absent store reads as empty."""
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}
     except OSError as e:

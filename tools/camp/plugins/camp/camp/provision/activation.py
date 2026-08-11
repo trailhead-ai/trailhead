@@ -121,7 +121,7 @@ def _member_doc_content(member_name: str, wt_path: Path) -> str:
     """Return the member's CLAUDE.md content, or a fallback notice."""
     claude_md = wt_path / "CLAUDE.md"
     if claude_md.is_file():
-        return claude_md.read_text()
+        return claude_md.read_text(encoding="utf-8")
     return (
         f"# {member_name}\n\n"
         f"Member worktree activated: {wt_path}\n"
