@@ -95,7 +95,7 @@ def read_central_manifest(path: Path) -> dict[str, Any]:
         ManifestError: If the file is missing, unreadable, or contains malformed JSON.
     """
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError as e:
         raise ManifestError(f"camp: cannot read manifest at {path}: {e}") from e
 

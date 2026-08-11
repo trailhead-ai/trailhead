@@ -68,7 +68,7 @@ def enqueue_doc(workspace_dir: Path, doc: str) -> Path:
     qdir.mkdir(parents=True, exist_ok=True)
     prefix = str(time.time_ns()).zfill(_NS_WIDTH)
     qfile = qdir / f"{prefix}-{uuid.uuid4().hex}.md"
-    qfile.write_text(doc)
+    qfile.write_text(doc, encoding="utf-8")
     return qfile
 
 
@@ -90,7 +90,7 @@ def drain_queue(workspace_dir: Path) -> int:
         if not files:
             return 0
 
-        docs = [f.read_text() for f in files]
+        docs = [f.read_text(encoding="utf-8") for f in files]
         combined = _DOC_SEPARATOR.join(docs)
 
         payload = {

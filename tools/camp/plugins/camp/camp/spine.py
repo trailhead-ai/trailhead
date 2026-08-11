@@ -246,7 +246,7 @@ def _consume_flag_value(args: list[str], flag: str) -> str | None:
 def _read_manifest(path: Path) -> dict[str, Any] | None:
     """Read and parse a manifest file; return None on any error."""
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -270,7 +270,7 @@ def _resolve_worktree_from(start: Path) -> tuple[Path, dict[str, Any]] | None:
         marker_path = current / _SIBLING_MARKER
         if marker_path.is_file():
             try:
-                target = Path(marker_path.read_text().strip())
+                target = Path(marker_path.read_text(encoding="utf-8").strip())
             except OSError:
                 pass
             else:

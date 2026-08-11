@@ -32,7 +32,7 @@ def _load_settings(settings_path: Path) -> dict:
     if not settings_path.is_file():
         return {}
     try:
-        return json.loads(settings_path.read_text())
+        return json.loads(settings_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
 
