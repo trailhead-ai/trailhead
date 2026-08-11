@@ -173,6 +173,49 @@ def test_mixed_files_line_with_one_member_repo_path_is_buildable():
     assert drain_queue.is_buildable_payload(body) is True
 
 
+def test_bulleted_files_list_under_bare_header_is_buildable():
+    body = (
+        "# t\n\n**Files:**\n"
+        "- `outpost/server/index.ts` (edit)\n"
+        "- `outpost/server/api/pr-envelope.ts` (edit)\n"
+    )
+    assert drain_queue.is_buildable_payload(body) is True
+
+
+def test_bulleted_files_list_without_backticks_is_buildable():
+    body = "# t\n\n**Files:**\n- outpost/server/index.ts (edit)\n- outpost/server/api/x.ts\n"
+    assert drain_queue.is_buildable_payload(body) is True
+
+
+def test_bulleted_files_list_naming_only_record_ids_is_not_buildable():
+    body = "# t\n\n**Files:**\n- `task/some-task` (edit)\n- `adr/some-decision`\n"
+    assert drain_queue.is_buildable_payload(body) is False
+
+
+def test_bulleted_list_ends_at_first_non_bullet_line():
+    body = (
+        "# t\n\n**Files:**\n- `task/some-task` (edit)\n\n"
+        "## Test contract\n- `tools/ranger/tests/test_x.py` is not a Files entry\n"
+    )
+    assert drain_queue.is_buildable_payload(body) is False
+
+
+def test_inline_unbackticked_comma_separated_paths_are_buildable():
+    body = "# t\n\n**Files:** server/index.ts, server/api/pr-envelope.ts (edit).\n"
+    assert drain_queue.is_buildable_payload(body) is True
+
+
+@pytest.mark.parametrize("tail", ["None expected", "none", "n/a", "TBD", "-"])
+def test_files_line_with_a_none_marker_is_not_buildable(tail):
+    body = f"# t\n\n**Files:** {tail}\n"
+    assert drain_queue.is_buildable_payload(body) is False
+
+
+def test_bare_header_with_no_bullets_is_not_buildable():
+    body = "# t\n\n**Files:**\n\nJust prose after the header.\n"
+    assert drain_queue.is_buildable_payload(body) is False
+
+
 # ---------------------------------------------------------------------------
 # Slug collision
 # ---------------------------------------------------------------------------
