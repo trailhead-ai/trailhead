@@ -15,9 +15,13 @@ children is a plan, owned by `execute`'s slice-by-slice loop, never a single
 buildable unit.
 
 **Buildable payload.** A refined standalone task's body carries a
-`**Files:**` line naming the paths its `**Delivers:**` touches, in
-backtick-quoted, comma-separated form (see `craft/refine`'s payload shape).
-A task is buildable when at least one of those paths looks like a
+`**Files:**` payload naming the paths its `**Delivers:**` touches. Refine
+runs render it in two shapes, both accepted: comma-separated tokens inline
+on the `**Files:**` line, or a bulleted list directly under a bare
+`**Files:**` header. Tokens may be backtick-quoted or bare; bare tokens
+must be whitespace-free and are dropped when they are a none-marker
+(`none`, `n/a`, `tbd`, `-`), so a verification-only `**Files:** None
+expected` stays not-buildable. A task is buildable when at least one of those paths looks like a
 member-repo file — anything that is not itself a lore record id (`task/…`,
 `spec/…`, …) or a path through a vault's own storage tree. A task refined to
 touch only its own record, or another record, produces nothing `ranger
@@ -82,6 +86,8 @@ DRAIN_BUCKETS = ("buildable", "skipped:not-buildable", "skipped:collision")
 
 _FILES_LINE_RE = re.compile(r"^\*\*Files:\*\*\s*(.*)$")
 _BACKTICK_RE = re.compile(r"`([^`]+)`")
+_TRAILING_ANNOTATION_RE = re.compile(r"\([^)]*\)\s*$")
+_NONE_MARKERS = frozenset({"none", "n/a", "tbd", "-"})
 
 #: A backtick-quoted token that names a lore record rather than a
 #: member-repo file — either a record-id-shaped path (`task/…`, `spec/…`,
@@ -153,12 +159,58 @@ def derive_slug(task_name: str) -> str:
     return replaced.strip("-")
 
 
+def _parse_files_tokens(text: str) -> list[str]:
+    """Return the path tokens named in one Files fragment (a line or bullet).
+
+    Backtick-quoted tokens win when present. Otherwise the fragment is split
+    on commas and each piece is kept only if it still looks like a path once
+    trailing annotations (`(new)`, `(edit)`, …) and punctuation are dropped:
+    no internal whitespace, and not a none-marker (`none`, `n/a`, `tbd`, `-`).
+    The whitespace rule is what keeps prose like `None expected` out.
+    """
+    backticked = _BACKTICK_RE.findall(text)
+    if backticked:
+        return backticked
+    tokens: list[str] = []
+    for part in text.split(","):
+        token = _TRAILING_ANNOTATION_RE.sub("", part.strip()).strip().rstrip(".;:")
+        if not token or any(ch.isspace() for ch in token):
+            continue
+        if token.lower() in _NONE_MARKERS:
+            continue
+        tokens.append(token)
+    return tokens
+
+
 def _extract_files_paths(body: str) -> list[str]:
-    """Return every backtick-quoted token on the body's `**Files:**` line, if any."""
-    for line in body.splitlines():
+    """Return every path token in the body's `**Files:**` payload, if any.
+
+    Two producer shapes are accepted (both observed from `craft/refine`):
+    inline — tokens on the `**Files:**` line itself — and a bulleted list
+    directly under a bare `**Files:**` header (blank lines before the first
+    bullet are tolerated; the list ends at the first non-bullet, non-blank
+    line). Tokens may be backtick-quoted or bare — see `_parse_files_tokens`.
+    """
+    lines = body.splitlines()
+    for index, line in enumerate(lines):
         match = _FILES_LINE_RE.match(line.strip())
-        if match:
-            return _BACKTICK_RE.findall(match.group(1))
+        if not match:
+            continue
+        tail = match.group(1).strip()
+        if tail:
+            return _parse_files_tokens(tail)
+        paths: list[str] = []
+        for following in lines[index + 1 :]:
+            stripped = following.strip()
+            if not stripped:
+                if paths:
+                    break
+                continue
+            if stripped.startswith(("- ", "* ")):
+                paths.extend(_parse_files_tokens(stripped[2:].strip()))
+            else:
+                break
+        return paths
     return []
 
 
