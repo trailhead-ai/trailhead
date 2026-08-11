@@ -372,6 +372,11 @@ def test_derive_slug_delegates_to_camp_spine_normalize_slug(monkeypatch):
     """`derive_slug` is not its own regex — it calls camp's own normalizer.
     Monkeypatch that call to a distinguishable stub and confirm the drain
     module reflects it, proving there is no local reimplementation left."""
+    # Ensure camp's plugin root is on sys.path before importing it directly —
+    # this test must not depend on an earlier test in this module having
+    # already run `_import_camp_spine()` and mutated `sys.path` as a
+    # side effect (targeted/`-k`/xdist runs may not run in file order).
+    drain_queue._import_camp_spine()
     import camp.spine as camp_spine
 
     monkeypatch.setattr(
@@ -384,19 +389,21 @@ def test_derive_slug_delegates_to_camp_spine_normalize_slug(monkeypatch):
 def test_derive_slug_raises_named_error_when_camp_bootstrap_fails(monkeypatch):
     """When camp is not importable, `derive_slug` raises `QueueDeriveError`
     naming the same remediation `ranger.sweep.preflight` already uses,
-    rather than letting a raw ImportError escape."""
+    rather than letting a raw ImportError escape.
 
-    def boom():
-        raise drain_queue.QueueDeriveError(
-            "camp is not importable, so no slug can be normalized (no module "
-            "named 'camp'); install camp first: trailhead install --plugin camp"
-        )
-
-    monkeypatch.setattr(drain_queue, "_import_camp_spine", boom)
+    Forces a *real* `ImportError` (rather than hand-stubbing
+    `_import_camp_spine` to raise a pre-written `QueueDeriveError`) so this
+    test actually exercises `_import_camp_spine`'s own except-ImportError
+    conversion, not just a restatement of its expected message."""
+    monkeypatch.setattr(drain_queue, "_CAMP_PLUGIN_ROOT", None)
+    for name in [n for n in sys.modules if n == "camp" or n.startswith("camp.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if "camp" not in Path(p).parts])
 
     with pytest.raises(drain_queue.QueueDeriveError) as exc:
         drain_queue.derive_slug("Fix Bug!!")
 
+    assert "camp is not importable" in str(exc.value)
     assert "install camp first: trailhead install --plugin camp" in str(exc.value)
 
 
@@ -410,9 +417,11 @@ def test_run_camps_default_runner_is_sweep_queues_shared_default_runner():
 
 
 def test_run_camp_picks_up_a_patched_sweep_default_runner(monkeypatch):
-    """Patching `ranger.sweep.queue.default_runner` and re-binding the name
-    in the drain module is what `run_camp`'s no-runner path actually calls —
-    confirms it is the shared object, not a frozen local copy."""
+    """Patching `drain_queue.default_runner` (the name `run_camp`'s
+    no-runner path actually calls) and asserting the injected stub's cmd
+    comes back confirms it is live-called, not shadowed by some other
+    resolution path — the identity assert above this one already proves it
+    is the shared object, not a frozen local copy."""
     captured = {}
 
     def fake_default_runner(cmd, **kwargs):
