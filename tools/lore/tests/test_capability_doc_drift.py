@@ -26,6 +26,7 @@ outside tests/, so the denylist needs no allowlist within its scanned scope.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 # tests/ -> tools/lore
@@ -51,10 +52,17 @@ _DENYLIST: list[tuple[re.Pattern[str], str]] = [
     # example, a user-installable project hook, prose describing its absence) —
     # only flag it co-occurring with recall/fires/injection/pointer, the shape of
     # the false "lore pushes recall at SessionStart" claim this guard exists for.
+    #
+    # The co-occurrence window (``.{0,60}``) runs with re.DOTALL so hard-wrapped
+    # prose that splits the two halves across a line break (e.g. "... recall\n
+    # fires at SessionStart") still matches — this pattern is applied to the
+    # whole-document text (see _scan below), not per-line, so the window can
+    # span the newline.
     (
         re.compile(
-            r"(?:recall|fires?)\b.{0,60}\bSessionStart|\bSessionStart\b.{0,60}\b(?:recall|fires?|injection|pointer)\b",
-            re.IGNORECASE,
+            r"(?:recall|fires?)\b.{0,60}\bSessionStart"
+            r"|\bSessionStart\b.{0,60}\b(?:recall|fires?|injection|pointer)\b",
+            re.IGNORECASE | re.DOTALL,
         ),
         "SessionStart recall/injection claim (no push hook is installed)",
     ),
@@ -62,7 +70,18 @@ _DENYLIST: list[tuple[re.Pattern[str], str]] = [
 
 
 def _scan() -> list[str]:
-    """Return ``relpath:lineno: <label> — <line>`` for every drifted claim found."""
+    """Return ``relpath:lineno: <label> — <line>`` for every drifted claim found.
+
+    Runs each denylist pattern against the **whole-document text**, not a
+    per-line loop — a per-line loop cannot see a match whose two halves are
+    split across a hard-wrapped line break (the SessionStart co-occurrence
+    pattern above relies on this: its ``.{0,60}`` window runs with
+    ``re.DOTALL`` precisely so it can cross a newline). The reported line
+    number is derived from the match's offset into the full text, and the
+    reported "line" text is the first line the match starts on (a
+    cross-line match's second half is elided from the report, but the
+    citation still points a reader at the right place).
+    """
     offenders: list[str] = []
     candidates: list[Path] = []
     if DOCS_ROOT.exists():
@@ -88,11 +107,11 @@ def _scan() -> list[str]:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            for pattern, label in _DENYLIST:
-                if pattern.search(line):
-                    offenders.append(f"{rel}:{lineno}: {label} — {line.strip()}")
-                    break
+        for pattern, label in _DENYLIST:
+            for match in pattern.finditer(text):
+                lineno = text.count("\n", 0, match.start()) + 1
+                line_text = text.splitlines()[lineno - 1].strip() if text.splitlines() else ""
+                offenders.append(f"{rel}:{lineno}: {label} — {line_text}")
     return offenders
 
 
@@ -103,4 +122,32 @@ def test_agent_facing_docs_have_no_capability_drift():
         "refactor — an agent trusting this prose will assert something false. "
         "Correct the prose (or, if the capability shipped again, drop it from "
         "this denylist):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_scan_catches_session_start_split_across_hard_wrap(tmp_path, monkeypatch):
+    """Meta-test: the SessionStart co-occurrence catch spans a hard-wrapped line break.
+
+    A per-line-only scan would miss "recall" and "SessionStart" split across a
+    newline within the existing 60-char co-occurrence window — regressing to a
+    line-scoped ``.{0,60}`` (no ``re.DOTALL``, matched per-line) would silently
+    pass this test's setup without ever finding the offender.
+    """
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "hooks.md").write_text(
+        "lore configures a hook that triggers recall\n"
+        "at SessionStart to seed the agent's context.\n"
+    )
+    plugin_dir = tmp_path / "plugins" / "lore"
+    plugin_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(sys.modules[__name__], "LORE_ROOT", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "DOCS_ROOT", docs_dir)
+    monkeypatch.setattr(sys.modules[__name__], "PLUGIN_ROOT", plugin_dir)
+
+    offenders = _scan()
+    assert any("SessionStart recall/injection claim" in o for o in offenders), (
+        "widened cross-line matching did not catch a 'recall' / 'SessionStart' "
+        "pair split across a hard-wrapped line break: " + repr(offenders)
     )
