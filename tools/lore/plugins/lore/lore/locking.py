@@ -234,11 +234,9 @@ def lock_root_for_vault(vault_root: str | Path, *, env: dict[str, str] | None = 
 
     ``<vault>`` is ``Path(vault_root).name`` — matching how
     ``lore.vault.config`` already keys per-vault state under
-    ``state_dir("lore")``. Both machine-local flock conventions
-    (:func:`adr_number_claim` in ``record.store`` and :func:`session_write_lock`
-    below) resolve their lock root through this one function, so a future third
-    lock convention has a single place to hook into rather than a third
-    copy-pasted resolver.
+    ``state_dir("lore")``. :func:`session_write_lock` below resolves its lock
+    root through this one function, so a future machine-local flock convention
+    has a single place to hook into rather than a copy-pasted resolver.
 
     Lock files are machine-local operational state with no post-release value:
     flock state is fd-scoped and dies with the process, so keeping them inside

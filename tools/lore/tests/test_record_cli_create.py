@@ -1629,3 +1629,123 @@ def test_vanilla_no_config_does_not_stamp_group_default(tmp_path):
     sidecar = _find_sidecar(floor_vault, record_id)
     assert "product" not in sidecar
     assert "(via group default)" not in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# ``--kind adr`` is an ordinary kind on create: plain title, plain kebab stem,
+# standard -2 collision suffix, no per-number lock.
+# ---------------------------------------------------------------------------
+
+
+def test_adr_create_stores_title_verbatim_and_plain_kebab_stem(tmp_path):
+    """``adr`` title lands verbatim (no numbered prefix); stem is plain kebab."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", "My decision"],
+        vault=vault,
+        state_dir=state,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    assert record_id == "adr/my-decision"
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["title"] == "My decision"
+
+
+def test_adr_create_does_not_strip_user_typed_adr_prefix(tmp_path):
+    """A user-typed ``"ADR-9: Foo"`` title is stored verbatim, no stripping."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", "ADR-9: Foo"],
+        vault=vault,
+        state_dir=state,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    record_id = r.stdout.strip()
+    assert record_id == "adr/adr-9-foo"
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["title"] == "ADR-9: Foo"
+
+
+def test_adr_create_second_same_title_gets_dash_2_suffix(tmp_path):
+    """Two same-title adr creates: the second lands as ``<stem>-2`` (suffix, not
+    refusal) — the standard non-adr collision rule, no exclusivity guard."""
+    vault, state = _make_vault(tmp_path)
+    first = _run(
+        ["record", "create", "--kind", "adr", "--title", "Repeat"],
+        vault=vault,
+        state_dir=state,
+        stdin_text="",
+    )
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.strip() == "adr/repeat"
+
+    second = _run(
+        ["record", "create", "--kind", "adr", "--title", "Repeat"],
+        vault=vault,
+        state_dir=state,
+        stdin_text="",
+    )
+    assert second.returncode == 0, second.stderr
+    assert second.stdout.strip() == "adr/repeat-2"
+
+
+def test_adr_create_leaves_no_lock_file_under_state_dir(tmp_path):
+    """No ``.adr-*.lock`` file is created anywhere under the state dir on an
+    adr create — the per-number flock is gone entirely."""
+    vault, state = _make_vault(tmp_path)
+    r = _run(
+        ["record", "create", "--kind", "adr", "--title", "First decision"],
+        vault=vault,
+        state_dir=state,
+        stdin_text="",
+    )
+    assert r.returncode == 0, r.stderr
+    assert list(state.rglob("*.adr-*.lock")) == []
+    assert list(state.rglob("*.lock")) == []
+
+
+def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):
+    """A legacy numbered stem (``adr/adr-001-x``) stays readable via ``record
+    show`` and updatable via ``record update`` — the locate path is untouched."""
+    vault, state = _make_vault(tmp_path)
+    adr_dir = vault / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "adr-001-legacy-decision.md").write_text("legacy body\n", encoding="utf-8")
+    (adr_dir / "adr-001-legacy-decision.json").write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "kind": "adr",
+                "title": "ADR-001: Legacy decision",
+                "status": "accepted",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    show = _run(
+        ["record", "show", "adr/adr-001-legacy-decision"],
+        vault=vault,
+        state_dir=state,
+    )
+    assert show.returncode == 0, show.stderr
+    assert "legacy body" in show.stdout
+
+    update = _run(
+        [
+            "record",
+            "update",
+            "adr/adr-001-legacy-decision",
+            "--status",
+            "superseded",
+        ],
+        vault=vault,
+        state_dir=state,
+        stdin_text="legacy body\n",
+    )
+    assert update.returncode == 0, update.stderr
+    sidecar = _find_sidecar(vault, "adr/adr-001-legacy-decision")
+    assert sidecar["status"] == "superseded"

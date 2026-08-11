@@ -262,10 +262,6 @@ def _handle_write_error(exc: Exception, op: str) -> int:
     a :class:`record_store.RecordValidationError` surfaces every message (prefixed
     ``error: ``); a :class:`record_store.ProvenanceError` and any other unexpected
     error each print one framed line, the catch-all naming *op*.
-    :class:`record_store.RecordAlreadyExistsError` (create's sequence-number
-    collision refusal — today only reachable via ``--kind adr``) gets the
-    ``lore: `` prefix instead of ``error: ``, matching the CLI's explicit
-    clean-refusal convention elsewhere (``_resolve_named_vault`` etc.).
     ``update``'s ``RecordNotFoundError``/``InvalidRecordIdError`` clause is NOT
     routed here — it is update-specific and caught before this handler.
     """
@@ -275,9 +271,6 @@ def _handle_write_error(exc: Exception, op: str) -> int:
         return _fail(exc.errors, prefix="error: ")
     if isinstance(exc, record_store_mod.ProvenanceError):
         print(f"error: {exc}", file=sys.stderr)
-        return 1
-    if isinstance(exc, record_store_mod.RecordAlreadyExistsError):
-        print(f"lore: {exc}", file=sys.stderr)
         return 1
     print(f"error: record {op} failed: {exc}", file=sys.stderr)
     return 1
@@ -528,16 +521,10 @@ def _cmd_record_create(args) -> int:
     per-field flags (``--status``, ``--keyword``, ``--related-*``, ``--related``)
     applied by :func:`record.fields.apply_record_fields`.
 
-    ``--kind adr`` assigns its own per-vault sequence number: the title is
-    rewritten to ``"ADR-NNN: <title>"`` (:func:`record_store.format_adr_title`,
-    scanning the DESTINATION vault's ``adr/`` directory via
-    :func:`record_store.next_adr_number`) before ``place_record`` derives the
-    slug from it, and the write goes through
-    ``validate_and_write(require_new=True)``, which holds a lock on the number
-    itself for the write's duration. The scan only picks a candidate: two
-    concurrent creates read the same highest number, so it is that write-time
-    lock that makes exactly one of them win and the other refuse cleanly —
-    never a silent suffix, and never a clobber.
+    ``--kind adr`` is an ordinary kind here: the title lands verbatim in the
+    sidecar and ``place_record`` derives its stem the same way it does for
+    every other non-session kind (``_kebab(title)``, ``-2`` suffix on
+    collision).
 
     ``--vault NAME`` names the destination vault directly via
     :func:`_resolve_named_vault`, bypassing :func:`vault_resolve.explain_resolution`'s
@@ -688,21 +675,6 @@ def _cmd_record_create(args) -> int:
         or None
     )
 
-    # ADR per-vault sequence numbering: assigned here (not inside
-    # place_record) because the numbered title must land in the sidecar
-    # ("title") AND drive the slug place_record derives from ``name`` — two
-    # effects from one computed value, same one-input-drives-both-effects
-    # shape as the scope flags above. Scanning the DESTINATION vault's adr/
-    # directory (not the active vault) matters when routing sends this record
-    # somewhere other than the default vault. The write-time collision guard
-    # (validate_and_write's ``require_new``, below) is what actually makes the
-    # refusal atomic — this scan only picks a candidate number.
-    if kind == "adr":
-        adr_kind_dir = vault_root / "adr"
-        adr_number = record_store_mod.next_adr_number(adr_kind_dir)
-        title = record_store_mod.format_adr_title(adr_number, title)
-        sidecar["title"] = title
-
     guard_notices: list[str] = []
     try:
         # The create critical section starts at ``place_record``, not at the write:
@@ -738,7 +710,6 @@ def _cmd_record_create(args) -> int:
                 body=body,
                 conn=conn,
                 shared=shared_flag,
-                require_new=(kind == "adr"),
             )
             conn.commit()
     except Exception as exc:
