@@ -31,9 +31,10 @@ drain` can push as a member-repo change, so it is parked in
 **Slug collision.** Each drained task gets its own ephemeral camp workspace
 inside the group drain is running in, named by camp's own slug
 normalization (lowercase, non-`[a-z0-9-]` squashed to `-`, trimmed) of the
-task's record name — mirrored here rather than imported, since camp's
-normalizer (`camp/spine.py`'s `_normalize_slug`) is not exposed as a library
-call ranger can import without reaching into camp's CLI-private module.
+task's record name — `derive_slug` below delegates to camp's own public
+`camp.spine.normalize_slug`, reached as a library import the same way
+`ranger.sweep.preflight._import_camp` already reaches `camp.group.config`/
+`camp.group.resolve`, rather than reimplementing the regex here.
 Two different sources of collision, both reported `skipped:collision`:
 
 - **Intra-queue.** Two tasks in the *same* derive pass whose names normalize
@@ -69,10 +70,11 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
-from ..sweep.queue import QueueDeriveError, Runner, run_lore
+from ..sweep.queue import QueueDeriveError, Runner, default_runner, run_lore
 
 __all__ = [
     "QueueDeriveError",
@@ -91,26 +93,39 @@ _NONE_MARKERS = frozenset({"none", "n/a", "tbd", "-"})
 
 #: A backtick-quoted token that names a lore record rather than a
 #: member-repo file — either a record-id-shaped path (`task/…`, `spec/…`,
-#: …) or a path running through a vault's own on-disk storage tree.
+#: …) or a path through a vault's own on-disk storage tree.
 _RECORD_KIND_PREFIXES = (
     "task/", "spec/", "adr/", "area/", "decision/", "lesson/", "follow-up/", "session/",
 )
 _VAULT_PATH_MARKER = "/vaults/"
 
-_SLUG_INVALID_RE = re.compile(r"[^a-z0-9-]+")
+# Walk upward from this file for the trailhead repo root (the directory that
+# contains trailhead/paths.py), then derive camp's plugin root from it —
+# the same bootstrap `ranger.sweep.preflight._import_camp` already uses to
+# reach `camp.group.config`/`camp.group.resolve` as a library.
+_TRAILHEAD_ROOT: Path | None = None
+for _p in (Path(__file__).resolve(), *Path(__file__).resolve().parents):
+    if (_p / "trailhead" / "paths.py").exists():
+        _TRAILHEAD_ROOT = _p
+        break
 
-def _default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-    """Production runner: subprocess.run with shell=False, output captured as text.
+_CAMP_PLUGIN_ROOT: Path | None = (
+    _TRAILHEAD_ROOT / "tools" / "camp" / "plugins" / "camp" if _TRAILHEAD_ROOT else None
+)
 
-    Duplicated from `ranger.sweep.queue._default_runner` rather than
-    imported — that name is module-private there, and this is the identical
-    shape (`trailhead.vcs.runner`'s Runner protocol), just bound to `camp`
-    instead of `lore`.
-    """
-    kwargs.setdefault("capture_output", True)
-    kwargs.setdefault("text", True)
-    kwargs.setdefault("check", False)
-    return subprocess.run(cmd, **kwargs)
+
+def _import_camp_spine() -> Any:
+    """Put camp's plugin root on ``sys.path`` and return the ``camp.spine`` module."""
+    if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
+        sys.path.append(str(_CAMP_PLUGIN_ROOT))
+    try:
+        import camp.spine as camp_spine
+    except ImportError as exc:
+        raise QueueDeriveError(
+            f"camp is not importable, so no slug can be normalized ({exc}); "
+            "install camp first: trailhead install --plugin camp"
+        ) from exc
+    return camp_spine
 
 
 def run_camp(argv: list[str], *, runner: Runner | None) -> Any:
@@ -122,7 +137,7 @@ def run_camp(argv: list[str], *, runner: Runner | None) -> Any:
     shape every drain precondition and read already uses, never a raw
     subprocess exception reaching an unattended operator.
     """
-    effective = runner if runner is not None else _default_runner
+    effective = runner if runner is not None else default_runner
     cmd = ["camp", *argv]
     try:
         result = effective(cmd)
@@ -149,14 +164,13 @@ def run_camp(argv: list[str], *, runner: Runner | None) -> Any:
 def derive_slug(task_name: str) -> str:
     """Return camp's own slug normalization of *task_name*.
 
-    Mirrors `camp/spine.py`'s `_normalize_slug`: lowercase, every run of
-    characters outside `[a-z0-9-]` collapsed to a single `-`, leading and
-    trailing `-` trimmed. Reimplemented rather than imported — see the
-    module docstring's Slug collision section for why.
+    Delegates to `camp.spine.normalize_slug` via `_import_camp_spine` — see
+    the module docstring's Slug collision section for the import shape.
+    Raises `QueueDeriveError` when camp is not importable.
     """
-    lowered = task_name.lower()
-    replaced = _SLUG_INVALID_RE.sub("-", lowered)
-    return replaced.strip("-")
+    camp_spine = _import_camp_spine()
+    normalized, _changed = camp_spine.normalize_slug(task_name)
+    return normalized
 
 
 def _parse_files_tokens(text: str) -> list[str]:

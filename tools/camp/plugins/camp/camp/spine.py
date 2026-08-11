@@ -173,7 +173,7 @@ def _dry_run_print(cmd: list[str], *, env_extras: dict[str, str] | None = None) 
 # ---------------------------------------------------------------------------
 
 
-def _normalize_slug(raw: str) -> tuple[str, bool]:
+def normalize_slug(raw: str) -> tuple[str, bool]:
     """Return (normalized, was_changed).
 
     Lowercases, replaces non-[a-z0-9-] with '-', trims leading/trailing '-'.
@@ -212,7 +212,7 @@ def _resolve_slug(raw: str, *, context: str = "argument") -> str:
             f"(no '..', '/', '\\\\', '$', '`', '|', ';', '&')"
         )
 
-    normalized, changed = _normalize_slug(raw)
+    normalized, changed = normalize_slug(raw)
     if not normalized:
         _die(f"camp: slug from {context}: {raw!r} has no usable characters after normalization")
     if changed:
