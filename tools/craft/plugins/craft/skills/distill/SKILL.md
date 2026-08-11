@@ -302,5 +302,5 @@ End with the read command for each ADR written, **fully formed** — the real re
 placeholder — so the reader can paste it into a fresh session as-is:
 
 ```
-lore record show adr/adr-014-record-ops-locate-by-config-order-scan
+lore record show adr/record-ops-locate-by-config-order-scan
 ```
