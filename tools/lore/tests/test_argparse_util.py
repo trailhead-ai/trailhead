@@ -22,6 +22,7 @@ def test_leaf_parsers_covers_real_cli_leaves():
         "search",
         "record create",
         "record delete",
+        "record rename",
         "record show",
         "record update",
         "session candidate",

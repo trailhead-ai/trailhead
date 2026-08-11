@@ -303,10 +303,12 @@ def cmd_record(args) -> int:
         return _cmd_record_delete(args)
     if action == "show":
         return _cmd_record_show(args)
+    if action == "rename":
+        return _cmd_record_rename(args)
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"'lore record delete', or 'lore record show'.",
+        f"'lore record rename', 'lore record delete', or 'lore record show'.",
         file=sys.stderr,
     )
     return 1
@@ -499,6 +501,82 @@ def _cmd_record_delete(args) -> int:
 
     _print_guard_notices(guard_notices)
 
+    return 0
+
+
+def _cmd_record_rename(args) -> int:
+    """``lore record rename RECORD_ID --title "<new title>"`` — thin shell.
+
+    Renames the record's stem + sidecar title within its own vault and rewrites
+    every inbound reference to it across the configured vaults. All of the logic
+    lives in ``record.rename``; this handler is an argv→library adapter that
+    owns only the output contract:
+
+      - **stdout**: the new RECORD_ID, and nothing else — the sole parseable
+        line, matching ``record create``.
+      - **stderr**: the ``renamed:`` line plus one line per referencing record
+        rewritten, named individually with its vault, so a partial failure
+        names exactly what did and did not land. References in ``shared: true``
+        vaults are listed as skipped unless ``--include-shared`` is passed.
+
+    ``--dry-run`` writes nothing and prints the *predicted* new RECORD_ID —
+    computed through the same ``_unique_stem`` path the real run uses, so the
+    prediction (including a ``-2`` collision suffix) is what a subsequent real
+    run produces.
+
+    Re-running an identical rename is safe: the sweep re-runs and matches
+    nothing, so a rename interrupted between the move and the rewrite is
+    repaired by simply issuing it again.
+    """
+    from ..record import rename as rename_mod
+    from ..record import store as record_store_mod
+
+    record_id = _require_record_id(args)
+    if record_id is None:
+        return 1
+    new_title = getattr(args, "title", None)
+    if not new_title:
+        print("error: --title is required for 'record rename'", file=sys.stderr)
+        return 1
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    include_shared = bool(getattr(args, "include_shared", False))
+
+    try:
+        with record_store_mod.index_transaction() as conn:
+            report = rename_mod.rename_record(
+                record_id, new_title, conn,
+                dry_run=dry_run, include_shared=include_shared,
+            )
+            if not dry_run:
+                conn.commit()
+    except rename_mod.RenameError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"error: record rename failed: {exc}", file=sys.stderr)
+        return 1
+
+    verb = "would rename" if dry_run else "renamed"
+    print(f"{verb}: {report.old_id} -> {report.new_id}", file=sys.stderr)
+    for rw in report.rewrites:
+        if rw.skipped:
+            print(
+                f"skipped (shared vault; pass --include-shared to rewrite): "
+                f"{rw.vault}: {rw.record_id}",
+                file=sys.stderr,
+            )
+        else:
+            action = "would rewrite" if dry_run else "rewrote"
+            print(f"{action}: {rw.vault}: {rw.record_id}", file=sys.stderr)
+
+    print(report.new_id)
     return 0
 
 
@@ -1419,6 +1497,33 @@ def add_record_subparser(sub) -> None:
     # Map flags (labels/annotations): dedicated branch.
     _add_map_field_flags(p_record_update)
     p_record_update.set_defaults(func=cmd_record)
+
+    # ``lore record rename RECORD_ID --title "<new title>"``.
+    p_record_rename = p_record_sub.add_parser(
+        "rename",
+        help="Rename a record's stem + title and rewrite inbound references",
+    )
+    p_record_rename.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID to rename (<kind>/<name>)",
+    )
+    p_record_rename.add_argument(
+        "--title", required=True,
+        help="The record's new title; the new stem is derived from it "
+             "(kebab-case, with a -2/-3 suffix on collision).",
+    )
+    p_record_rename.add_argument(
+        "--dry-run", dest="dry_run", action="store_true", default=False,
+        help="Print the would-be new RECORD_ID and the full would-be rewrite "
+             "list without writing anything.",
+    )
+    p_record_rename.add_argument(
+        "--include-shared", dest="include_shared", action="store_true", default=False,
+        help="Also rewrite inbound references inside 'shared: true' vaults. "
+             "By default those are skipped and only reported.",
+    )
+    p_record_rename.set_defaults(func=cmd_record)
 
     # ``lore record delete RECORD_ID``.
     p_record_delete = p_record_sub.add_parser(
