@@ -6,7 +6,12 @@ import os
 import sys
 from pathlib import Path
 
-from .common import StdinSilentError, _add_session_selectors, _read_stdin_body
+from .common import (
+    StdinSilentError,
+    _add_session_selectors,
+    _read_stdin_body,
+    _resolve_all_vaults,
+)
 from .record import _render_record, _resolve_named_vault
 
 
@@ -64,36 +69,86 @@ def cmd_session(args) -> int:
 def _cmd_session_show(args) -> int:
     """``lore session show [--json]`` — read THIS worktree's session record.
 
-    Resolves the live session record via :func:`vault.resolve_session_note`
-    (session-id first, worktree fallback), then renders it through the same path
-    as ``lore record show`` (plain body, or ``{record_id, kind, name, sidecar,
-    body}`` with ``--json``). The CLI-only way to read the current session — its
-    sidecar carries the ``flushed-at`` watermark that flush needs and that never
-    lands in the index. This is the one useful behavior the retired
-    ``session-note`` command carried, now a first-class session subcommand.
+    Resolves the live session record via :func:`vault.resolve_session_notes`
+    (session-id first, worktree fallback) across EVERY configured vault, then
+    renders it through the same path as ``lore record show`` (plain body, or
+    ``{record_id, kind, name, sidecar, body}`` with ``--json``). The CLI-only way
+    to read the current session — its sidecar carries the ``flushed-at``
+    watermark that flush needs and that never lands in the index.
 
-    An unresolvable session → non-zero + a stderr diagnostic naming what was tried.
+    **All vaults, not just the active one.** ``lore session candidate --vault
+    NAME`` elects the destination vault deliberately (a dispatched agent's cwd is
+    not the operator's, so active-vault resolution is cwd-blind), so a session can
+    legitimately live outside the active vault. Reading only the active vault
+    reported "no session record resolved" for a session that plainly exists.
+
+    **Multi-hit:** the same key captured into more than one vault splits the
+    session across them. Exactly one record is rendered — the active vault's if it
+    holds the key, else the first hit in config order — and a stderr notice NAMES
+    every vault holding it, so the operator can see that what they are reading is
+    a part rather than the whole. Rendering is unambiguous; the ambiguity is
+    reported rather than hidden.
+
+    An unresolvable session → non-zero + a stderr diagnostic naming what was tried
+    and every vault searched.
     """
     from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
 
     as_json = bool(getattr(args, "json", False))
-    vault = Path(vault_config_mod.resolve_active_vault())
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"notice: cannot read the vault config — {error}", file=sys.stderr)
+
     session_id = _session_id_from_args_or_env(args)
     worktree_name = getattr(args, "worktree", None) or vault_mod.detect_worktree_name()
-    note = vault_mod.resolve_session_note(
-        vault, session_id=session_id, worktree_name=worktree_name
+    hits = vault_mod.resolve_session_notes(
+        [path for _, path in vaults],
+        session_id=session_id,
+        worktree_name=worktree_name,
     )
-    if note is None:
+    if not hits:
+        searched = "\n              ".join(str(path / "session") for _, path in vaults)
         print(
             "lore session show: no session record resolved.\n"
             f"  session_id: {session_id or '<unset>'}\n"
             f"  worktree:   {worktree_name or '<unknown>'}\n"
-            f"  searched:   {vault / 'session'}",
+            f"  searched:   {searched}",
             file=sys.stderr,
         )
         return 1
+
+    vault, note = _select_session_hit(hits, vaults)
     return _render_record(f"session/{note.stem}", str(vault), as_json)
+
+
+def _select_session_hit(hits, vaults) -> tuple[Path, Path]:
+    """Pick the ONE ``(vault_root, note)`` to render from a cross-vault resolution.
+
+    Prefers the active vault when it is among the holders — that is the vault the
+    operator's other commands act on, so rendering it keeps ``session show``
+    consistent with the rest of the session surface — and otherwise takes the
+    first hit in config order (a stable, config-authored tiebreak rather than
+    filesystem order). When more than one vault holds the key, a stderr notice
+    names them all; the split is a real condition the operator needs to see, and
+    it must never be silently collapsed to whichever record happened to win.
+    """
+    from ..vault import config as vault_config_mod
+
+    names = {str(path): name for name, path in vaults}
+    if len(hits) > 1:
+        print(
+            f"notice: session {hits[0][1].stem!r} exists in multiple vaults "
+            f"({', '.join(names.get(str(root), str(root)) for root, _ in hits)}) — "
+            "showing one; the session is split across them.",
+            file=sys.stderr,
+        )
+
+    active = Path(vault_config_mod.resolve_active_vault())
+    for root, note in hits:
+        if root == active:
+            return root, note
+    return hits[0]
 
 
 def _resolve_session_key(args) -> tuple[str | None, int]:

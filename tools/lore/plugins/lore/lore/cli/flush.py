@@ -229,26 +229,65 @@ def cmd_flush(args) -> int:
 def _flush_current_session(args) -> int:
     """Flush the CURRENT session record: dirty → clean + commit, else no-op.
 
-    Reads `session/<key>.json` for the resolved current-session key:
+    Reads `session/<key>.json` for the resolved current-session key, in EVERY
+    configured vault that holds it:
 
-      - no record → exit 0 with a "no session exists" notice (distinct from a
-        clean session); writes nothing, no commit.
+      - no record in any vault → exit 0 with a "no session exists" notice
+        (distinct from a clean session); writes nothing, no commit.
       - already `clean` → exit 0 with a "clean — nothing to flush" notice; an
         idempotent no-op, no commit.
       - `dirty` → flip `status` to `clean`, stamp `annotations[flushed-at]` (the
         pinned key/ISO-UTC format), reindex the one record, then commit the
         record's EXPLICIT paths only (the `.json` + `.md`; never `git add -A`).
+
+    **All vaults, not just the active one.** `lore session candidate --vault NAME`
+    writes the session record into the ELECTED vault, so pinning the flush to the
+    active vault left such a session permanently un-flushable — reported as "no
+    session exists" while sitting `dirty` on disk with an empty watermark. The
+    session KEY itself is vault-independent (a session id or the worktree name),
+    so resolution is simply "which vaults hold `session/<key>`".
+
+    A key held by more than one vault is a session split across them: EVERY dirty
+    instance is flushed, each as its own flip + commit in its own vault. Flushing
+    only one would leave the other half dirty and re-trigger the same dead end.
+    A per-vault failure does not abort the rest — the remaining vaults are still
+    flushed and the command exits non-zero.
     """
     from ..session import store as session_store_mod
-    from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
 
-    vault = Path(vault_config_mod.resolve_active_vault())
     key, rc = _resolve_session_key(args)
     if key is None:
         return rc
 
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"notice: cannot read the vault config — {error}", file=sys.stderr)
+
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
+
+    holders = [path for _, path in vaults if session_store_mod.session_exists(str(path), key)]
+    if not holders:
+        print(f"notice: no session exists for {key!r} — nothing to flush.")
+        return 0
+
+    worst = 0
+    for vault in holders:
+        rc = _flush_one_session(vault, key, committer)
+        if rc != 0:
+            worst = rc
+    return worst
+
+
+def _flush_one_session(vault: Path, key: str, committer: str) -> int:
+    """Flush `session/<key>` in ONE vault: flip + commit as a unit, then push.
+
+    The per-vault primitive behind the current-session path — extracted so a key
+    held by several vaults is flushed once per vault, each with its own atomic
+    flip + commit and its own rollback on commit failure, rather than N flips
+    against one vault. Returns the exit code for this vault alone.
+    """
+    from ..session import store as session_store_mod
 
     # Probed BEFORE the lock so a flush with no session here creates nothing —
     # not even the lock sidecar. `flush_session` re-checks under the lock.
@@ -318,8 +357,8 @@ def _flush_current_session(args) -> int:
 _FLUSH_DISCOVERY_LIMIT = 100_000
 
 
-def _discover_dirty_session_keys(query: str) -> list[str]:
-    """Run *query* through the search facade and return the matching DIRTY session keys.
+def _discover_dirty_session_keys(query: str) -> list[tuple[Path, str]]:
+    """Run *query* through the search facade and return the matching DIRTY sessions.
 
     REUSES the KQL search facade (`search.run_search`) — never a second query engine.
     The facade is the injection boundary: it compiles *query*
@@ -335,6 +374,14 @@ def _discover_dirty_session_keys(query: str) -> list[str]:
     clean sessions still only flushes the dirty ones: a hit is kept iff its `kind` is
     `session` AND its `status` is `dirty`. The session KEY is the last path segment of
     the index `id` (`<vault>/session/<key>`); session keys never contain `/`.
+
+    Returns `(vault_root, key)` pairs, NOT bare keys. The index spans every vault,
+    so discovery legitimately returns sessions from several — and the caller must
+    flush each in the vault that actually holds it. Dropping the vault and running
+    every key against the active one both misses non-default-vault sessions and
+    reports success for a flush that never happened. The vault comes from the hit's
+    own `vault` column (the vault ROOT path the record was indexed under), falling
+    back to the `id` prefix, which encodes the same value.
     """
     from ..search import engine as search_mod
 
@@ -349,12 +396,14 @@ def _discover_dirty_session_keys(query: str) -> list[str]:
             f"dirty-session discovery exceeded {_FLUSH_DISCOVERY_LIMIT} results — "
             "refusing to flush a partial set; narrow the <search> scope"
         )
-    keys: list[str] = []
+    hits: list[tuple[Path, str]] = []
     for hit in payload.get("hits", []):
         if hit.get("kind") != "session" or hit.get("status") != "dirty":
             continue
-        keys.append(hit["id"].rsplit("/", 1)[-1])
-    return keys
+        record_id = hit["id"]
+        vault_root = hit.get("vault") or record_id.rsplit("/", 2)[0]
+        hits.append((Path(vault_root), record_id.rsplit("/", 1)[-1]))
+    return hits
 
 
 def _flush_batch(args, *, query: str, scope_label: str) -> int:
@@ -372,26 +421,36 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     pushed by the next successful run or `lore sync`), and exits non-zero. An empty
     match set is a clean no-op (exit 0). A roll-up of the flushed count closes a
     successful batch.
+
+    **Each session is flushed in the vault that HOLDS it.** The index spans every
+    vault, so discovery returns `(vault_root, key)` pairs that may name several;
+    the flip, the commit, and the session-key lock all follow the hit's own vault.
+    Running the batch against the active vault instead skipped every session a
+    `--vault` capture had routed elsewhere while still reporting them flushed. The
+    push stays hoisted out of the loop, now ONCE PER TOUCHED VAULT — a commit is
+    only pushable by the repo that carries it.
     """
     from ..session import store as session_store_mod
-    from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
 
-    vault = Path(vault_config_mod.resolve_active_vault())
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 
     try:
-        keys = _discover_dirty_session_keys(query)
+        discovered = _discover_dirty_session_keys(query)
     except ValueError as exc:
         print(f"error: flush {scope_label} — search failed: {exc}", file=sys.stderr)
         return 1
 
-    if not keys:
+    if not discovered:
         print(f"notice: no dirty sessions match {scope_label} — nothing to flush.")
         return 0
 
     flushed: list[str] = []
-    for key in keys:
+    # Insertion-ordered so the end-of-batch pushes run in discovery order; keyed by
+    # the resolved path string so one vault is pushed once however many of its
+    # sessions the batch flushed.
+    touched_vaults: dict[str, Path] = {}
+    for vault, key in discovered:
         flipped = False
         try:
             # Flip + commit as ONE unit under the session-key lock, so a
@@ -450,14 +509,15 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
             )
             return 1
         flushed.append(key)
+        touched_vaults[str(vault)] = vault
         print(f"Flushed: session/{key} (dirty -> clean)")
 
     print(f"Flushed {len(flushed)} session(s) [{scope_label}].")
-    # One push for the whole batch (efficiency follow-up): every session was
-    # committed locally above; push them together rather than once per session.
-    # Only probe/push when something actually committed — an all-raced-clean batch
-    # (every verdict != FLUSH_FLUSHED) leaves nothing to push.
-    if flushed:
+    # One push per TOUCHED VAULT after the batch: every session was committed
+    # locally above; push them together rather than once per session. A vault the
+    # batch never committed to is never probed — an all-raced-clean batch (every
+    # verdict != FLUSH_FLUSHED) touches nothing and pushes nothing.
+    for vault in touched_vaults.values():
         _flush_push(vault)
     return 0
 
