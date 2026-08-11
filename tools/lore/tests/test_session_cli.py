@@ -35,7 +35,13 @@ from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
+from conftest import (  # noqa: F401
+    load_script,
+    make_vault as _make_vault,
+    run_cli as _run,
+    run_cli_with_silent_pipe as _run_silent_pipe,
+    write_default_config,
+)
 
 # A canonical UUID-shaped session_id (Claude Code session IDs are UUIDs).
 SID = "11111111-2222-4333-8444-555555555555"
@@ -112,6 +118,28 @@ class TestFenceNeutralization:
         assert "</external-memory>" not in text
         # The legible content survives.
         assert "secret" in text
+
+    def test_candidate_silent_open_stdin_refuses_instead_of_blocking(self, tmp_path):
+        """A real, open, never-EOF'ing pipe on stdin must not hang ``session candidate``.
+
+        Regression test for lesson/lore-record-update-blocks-forever-on-a-
+        silent-open-stdin (the pattern generalizes to every
+        ``_read_stdin_body`` caller, ``session candidate`` included).
+        """
+        vault, state = _make_vault(tmp_path)
+        note_path = _session_note(vault, SID)
+        assert not note_path.exists()
+
+        r, elapsed = _run_silent_pipe(
+            ["session", "candidate", "--session-id", SID,
+             "--kind", "spec", "--phase", "Plan"],
+            vault=vault, state_dir=state, timeout=5.0,
+        )
+
+        assert elapsed < 2.0, f"took {elapsed}s — looks like it blocked on stdin"
+        assert r.returncode != 0
+        assert "stdin" in r.stderr.lower()
+        assert not note_path.exists()  # no write happened
 
     def test_referenced_record_id_fence_neutralized(self, tmp_path):
         """A RECORD_ID carrying a fence token is neutralized at the referenced boundary.

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import (
+    StdinSilentError,
     _load_vault_config,
     _read_stdin_body,
     _resolve_config_path,
@@ -596,7 +597,11 @@ def _cmd_record_create(args) -> int:
 
     # Body from stdin. No stdin → empty body.  The leading ``---``
     # check is intentionally absent — we read verbatim.
-    body = _read_stdin_body()
+    try:
+        body = _read_stdin_body()
+    except StdinSilentError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
 
     # --- vault routing -----------------------------------------------------
     # ``participating_scopes`` is built from the routing FLAGS
@@ -1036,7 +1041,11 @@ def _cmd_record_update(args) -> int:
     # — distinct from a non-empty body replace. An intentional
     # empty-body replace is degenerate and out of scope; clear the body via a
     # ``--diff`` deleting every line instead.
-    stdin_text = _read_stdin_body()
+    try:
+        stdin_text = _read_stdin_body()
+    except StdinSilentError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
     has_stdin = stdin_text != ""
 
     guard_notices: list[str] = []

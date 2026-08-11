@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -97,6 +98,45 @@ def run_cli(args, *, vault, state_dir, stdin_text=None, env_extra=None, cwd=None
         input=stdin_text,
         cwd=str(cwd) if cwd is not None else None,
     )
+
+
+def run_cli_with_silent_pipe(args, *, vault, state_dir, timeout=5.0):
+    """Run the CLI with stdin attached to a real, open, never-EOF'ing pipe.
+
+    Regression harness for the "``lore record update`` blocks forever on a
+    silent open stdin" class of bug: opens an actual OS pipe via ``os.pipe()``,
+    hands the CLI subprocess the *read* end as its stdin, and — deliberately —
+    never writes to or closes the *write* end while the subprocess runs. A
+    buggy ``sys.stdin.read()`` blocks forever on this; the fix must return
+    within ``timeout`` instead.
+
+    Returns ``(CompletedProcess, elapsed_seconds)``. Guards itself with
+    ``subprocess.run(..., timeout=timeout)`` so a regression fails this test
+    with a clear ``TimeoutExpired`` rather than hanging the whole suite.
+    """
+    full_env = dict(os.environ)
+    full_env["XDG_STATE_HOME"] = str(state_dir)
+    _xdg_config = Path(state_dir) / "_xdg_config"
+    full_env["XDG_CONFIG_HOME"] = str(_xdg_config)
+    full_env["LORE_EMAIL"] = "tester@example.com"
+    write_default_config(_xdg_config, Path(vault))
+
+    read_fd, write_fd = os.pipe()
+    start = time.monotonic()
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(CLI_PATH), *args],
+            capture_output=True,
+            text=True,
+            env=full_env,
+            stdin=read_fd,
+            timeout=timeout,
+        )
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)  # never written to — this is the "silent, open" pipe
+    elapsed = time.monotonic() - start
+    return proc, elapsed
 
 
 def make_vault(tmp_path: Path) -> tuple[Path, Path]:

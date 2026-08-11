@@ -20,11 +20,30 @@ the command modules stay free of cross-imports for generic plumbing:
 from __future__ import annotations
 
 import os
+import select
 import subprocess
 import sys
 from pathlib import Path
 
 from ..vault import config as vault_config_mod
+
+
+#: How long ``_read_stdin_body`` waits for stdin to become ready (data or EOF)
+#: before concluding it is a silent, never-EOF'ing pipe. Kept short: a closed
+#: pipe / ``/dev/null`` / a heredoc's already-written bytes all show up as
+#: "ready" near-instantly, so this only ever costs real wall-clock time on the
+#: pathological case it exists to catch.
+_STDIN_READY_TIMEOUT_S = 0.5
+
+
+class StdinSilentError(Exception):
+    """Raised by ``_read_stdin_body`` instead of blocking in ``.read()``.
+
+    Fires when stdin is a non-tty pipe that is open, has delivered no data, and
+    has not closed (no EOF) within :data:`_STDIN_READY_TIMEOUT_S` — the
+    never-EOF case in lesson/lore-record-update-blocks-forever-on-a-silent-open-stdin.
+    Callers catch this and refuse the write rather than hanging in ``.read()``.
+    """
 
 
 def _read_stdin_body() -> str:
@@ -34,8 +53,20 @@ def _read_stdin_body() -> str:
     return covers both a TTY and an empty/closed pipe — callers that need to tell
     "no stdin" from "empty body" key on ``== ""`` (see the record-update metadata-
     only path).
+
+    Raises :class:`StdinSilentError` rather than blocking when stdin is a
+    non-tty pipe that is open but silent (no data, no EOF) past the ready
+    timeout — see the class docstring.
     """
-    return "" if sys.stdin.isatty() else sys.stdin.read()
+    if sys.stdin.isatty():
+        return ""
+    ready, _, _ = select.select([sys.stdin], [], [], _STDIN_READY_TIMEOUT_S)
+    if not ready:
+        raise StdinSilentError(
+            "stdin is open but silent — pass a body, redirect from a source "
+            "that closes (e.g. `</dev/null`), or omit the pipe"
+        )
+    return sys.stdin.read()
 
 
 def _resolve_xdg_dir(
