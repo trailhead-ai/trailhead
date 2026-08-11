@@ -80,6 +80,7 @@ fallback, no GNU `readlink -f`, macOS-safe).
   stderr and exits nonzero — never a raw traceback. Normal output goes to stdout.
   No ANSI/color.
 
+<!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
 This project has a knowledge graph MCP server. Prefer its tools
