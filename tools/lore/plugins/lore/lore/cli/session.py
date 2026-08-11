@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from .common import _add_session_selectors, _read_stdin_body
+from .common import StdinSilentError, _add_session_selectors, _read_stdin_body
 from .record import _render_record, _resolve_named_vault
 
 
@@ -196,7 +196,12 @@ def _cmd_session_candidate(args) -> int:
         print("error: --phase is required", file=sys.stderr)
         return 1
 
-    safe_body = record_store_mod.neutralize_fences(_read_stdin_body())
+    try:
+        raw_body = _read_stdin_body()
+    except StdinSilentError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+    safe_body = record_store_mod.neutralize_fences(raw_body)
 
     now = dt.datetime.now(dt.timezone.utc).strftime(session_store_mod.FLUSHED_AT_FORMAT)
     # A single record-candidate entry: a one-line header carrying KIND + PHASE +

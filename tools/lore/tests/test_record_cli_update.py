@@ -33,7 +33,13 @@ from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_vault as _make_vault, run_cli as _run, write_default_config  # noqa: F401
+from conftest import (  # noqa: F401
+    load_script,
+    make_vault as _make_vault,
+    run_cli as _run,
+    run_cli_with_silent_pipe as _run_silent_pipe,
+    write_default_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +214,38 @@ def test_update_metadata_only_prints_no_stdin_notice_to_stderr(tmp_path):
     assert "metadata-only" in r.stderr.lower()
     # The notice must NOT pollute stdout.
     assert "no stdin" not in r.stdout.lower()
+
+
+def test_update_silent_open_stdin_refuses_instead_of_blocking(tmp_path):
+    """A real, open, never-EOF'ing pipe on stdin must not hang ``record update``.
+
+    Regression test for lesson/lore-record-update-blocks-forever-on-a-silent-
+    open-stdin: opens an actual ``os.pipe()``, hands the read end to the CLI as
+    stdin, and never writes to or closes the write end. The fix must detect the
+    silent pipe and refuse quickly instead of blocking in ``sys.stdin.read()``.
+    """
+    vault, state = _make_vault(tmp_path)
+    body = "untouched body\n"
+    record_id = _create(vault, state, body=body)
+    before = _find_sidecar(vault, record_id)
+
+    r, elapsed = _run_silent_pipe(
+        ["record", "update", record_id, "--keyword", "bar"],
+        vault=vault,
+        state_dir=state,
+        timeout=5.0,
+    )
+
+    # Must return well within the harness's own timeout budget, not merely
+    # "before subprocess.run kills it" — that would still count a near-timeout
+    # hang as a pass.
+    assert elapsed < 2.0, f"took {elapsed}s — looks like it blocked on stdin"
+    assert r.returncode != 0
+    assert "stdin" in r.stderr.lower()
+
+    # No write happened: body and sidecar are byte-for-byte unchanged.
+    assert _find_body(vault, record_id) == body
+    assert _find_sidecar(vault, record_id) == before
 
 
 def test_update_metadata_only_advances_updated_keeps_created(tmp_path):

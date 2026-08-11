@@ -53,6 +53,7 @@ from conftest import (  # noqa: F401
     load_script,
     make_vault as _make_vault,
     run_cli as _run,
+    run_cli_with_silent_pipe as _run_silent_pipe,
     write_default_config,
 )
 
@@ -216,6 +217,25 @@ def test_create_no_stdin_sidecar_has_auto_fields_only(tmp_path):
     # Required operator fields present.
     assert sidecar["kind"] == "spec"
     assert sidecar["title"] == "My Record"
+
+
+def test_create_silent_open_stdin_refuses_instead_of_blocking(tmp_path):
+    """A real, open, never-EOF'ing pipe on stdin must not hang ``record create``.
+
+    Regression test for lesson/lore-record-update-blocks-forever-on-a-silent-
+    open-stdin (the pattern generalizes to every ``_read_stdin_body`` caller,
+    ``record create`` included).
+    """
+    vault, state = _make_vault(tmp_path)
+    existing = sorted(p.name for p in (vault / "spec").glob("*.json")) if (vault / "spec").exists() else []
+
+    r, elapsed = _run_silent_pipe(_BASE_ARGS, vault=vault, state_dir=state, timeout=5.0)
+
+    assert elapsed < 2.0, f"took {elapsed}s — looks like it blocked on stdin"
+    assert r.returncode != 0
+    assert "stdin" in r.stderr.lower()
+    after = sorted(p.name for p in (vault / "spec").glob("*.json")) if (vault / "spec").exists() else []
+    assert after == existing  # nothing created
 
 
 # ---------------------------------------------------------------------------
