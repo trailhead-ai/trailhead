@@ -10,7 +10,7 @@ from .common import (
     StdinSilentError,
     _add_session_selectors,
     _read_stdin_body,
-    _resolve_all_vaults,
+    _resolve_all_vaults_strict,
 )
 from .record import _render_record, _resolve_named_vault
 
@@ -90,15 +90,16 @@ def _cmd_session_show(args) -> int:
     reported rather than hidden.
 
     An unresolvable session → non-zero + a stderr diagnostic naming what was tried
-    and every vault searched.
+    and every vault searched. An unreadable vault config is a REFUSAL, not a
+    degrade to the default vault: the searched set would be a guess, and "no
+    session record resolved" would be a confident wrong answer.
     """
-    from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
 
     as_json = bool(getattr(args, "json", False))
-    vaults, error = _resolve_all_vaults()
-    if error is not None:
-        print(f"notice: cannot read the vault config — {error}", file=sys.stderr)
+    vaults = _resolve_all_vaults_strict("read a session")
+    if vaults is None:
+        return 1
 
     session_id = _session_id_from_args_or_env(args)
     worktree_name = getattr(args, "worktree", None) or vault_mod.detect_worktree_name()
@@ -289,10 +290,19 @@ def _cmd_session_referenced(args) -> int:
     appends the reference line and bumps ``last-referenced-at`` in the sidecar
     ``annotations`` map, but **never flips status**. The append + bump + reindex are
     one race-safe critical section via ``session_store.capture_referenced``.
+
+    **Resolved across EVERY configured vault**, exactly as ``show`` and ``flush``
+    are: ``session candidate --vault NAME`` elects where the session record lives,
+    so pinning ``referenced`` to the active vault meant a ``--vault``-captured
+    session had no record where this looked — and the no-op-on-non-existent
+    contract then swallowed the write silently, everywhere. The reference is
+    appended to the existing record in EVERY vault holding the key, consistent
+    with flush flushing every dirty instance of a split session; a key no vault
+    holds is still the inert no-op (exit 0, nothing created). An unreadable vault
+    config is a refusal, not a degrade to the default vault.
     """
     from ..record import store as record_store_mod
     from ..session import store as session_store_mod
-    from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
 
     key, rc = _resolve_session_key(args)
@@ -310,19 +320,31 @@ def _cmd_session_referenced(args) -> int:
     # the referenced boundary neutralizes uniformly like candidate/create/blob.
     entry = record_store_mod.neutralize_fences(f"- referenced {now} {record_id}")
 
-    vault_root = str(vault_config_mod.resolve_active_vault())
-    committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
-    try:
-        session_store_mod.capture_referenced(
-            key, entry,
-            vault_root=vault_root,
-            committer=committer,
-            open_index=_open_session_index,
-        )
-    except Exception as exc:
-        print(f"error: session referenced write failed: {exc}", file=sys.stderr)
+    vaults = _resolve_all_vaults_strict("log a session reference")
+    if vaults is None:
         return 1
-    return 0
+
+    committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
+    # `capture_referenced` is itself the no-op-on-non-existent guard, so every
+    # vault is offered the entry and only the holders take it. A per-vault failure
+    # does not abort the rest — the remaining holders are still logged and the
+    # command exits non-zero.
+    worst = 0
+    for _, vault in vaults:
+        try:
+            session_store_mod.capture_referenced(
+                key, entry,
+                vault_root=str(vault),
+                committer=committer,
+                open_index=_open_session_index,
+            )
+        except Exception as exc:
+            print(
+                f"error: session referenced write failed in {vault}: {exc}",
+                file=sys.stderr,
+            )
+            worst = 1
+    return worst
 
 
 def add_session_subparser(sub) -> None:

@@ -192,6 +192,31 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
     return [(v.name, Path(v.path)) for v in vaults], None
 
 
+def _resolve_all_vaults_strict(what: str) -> list[tuple[str, Path]] | None:
+    """``_resolve_all_vaults`` that REFUSES on an unreadable config.
+
+    Returns the ``(name, path)`` pairs, or ``None`` after printing the diagnostic —
+    the caller then exits non-zero without touching a vault.
+
+    The session surface resolves a key by asking every configured vault whether it
+    holds it, so a config that will not load makes "no vault holds it" unknowable
+    rather than false. Degrading to the floor list turned that into a confident
+    wrong answer: ``lore flush`` printed "no session exists — nothing to flush" and
+    exited 0 for a session sitting ``dirty`` in a vault the broken config never
+    named. Same refusing posture as ``lore sync``'s ``_select_targets`` — *what*
+    names the operation being refused (e.g. ``"flush"``).
+    """
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"error: {error}", file=sys.stderr)
+        print(
+            f"  Aborting — refusing to {what} against a partial vault set.",
+            file=sys.stderr,
+        )
+        return None
+    return vaults
+
+
 def _git(vault: Path, *args: str) -> tuple[int, str, str]:
     """Run a git command in the vault. Returns (returncode, stdout, stderr)."""
     try:

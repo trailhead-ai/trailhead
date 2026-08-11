@@ -12,6 +12,7 @@ from .common import (
     _add_session_selectors,
     _git,
     _resolve_all_vaults,
+    _resolve_all_vaults_strict,
     _vault_drift,
     _vault_is_git_toplevel,
 )
@@ -252,6 +253,11 @@ def _flush_current_session(args) -> int:
     only one would leave the other half dirty and re-trigger the same dead end.
     A per-vault failure does not abort the rest — the remaining vaults are still
     flushed and the command exits non-zero.
+
+    An unreadable vault config REFUSES (non-zero, nothing flipped) rather than
+    degrading to the default vault: with the vault set unknown, "no session
+    exists — nothing to flush" is a false success over a session that may be
+    sitting `dirty` in a vault the broken config never named.
     """
     from ..session import store as session_store_mod
     from ..vault import vault as vault_mod
@@ -260,9 +266,9 @@ def _flush_current_session(args) -> int:
     if key is None:
         return rc
 
-    vaults, error = _resolve_all_vaults()
-    if error is not None:
-        print(f"notice: cannot read the vault config — {error}", file=sys.stderr)
+    vaults = _resolve_all_vaults_strict("flush")
+    if vaults is None:
+        return 1
 
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 
