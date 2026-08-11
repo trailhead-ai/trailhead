@@ -301,7 +301,14 @@ def capture_candidate(
         body = body_path.read_text()
         conn = open_index()
         try:
-            _reindex(conn, str(vault_root), key, sidecar, body)
+            # A reserved-key label row (or any other malformed-projection
+            # exception) degrades to a skipped index row for this one record
+            # rather than failing the whole capture — mirrors rebuild()'s
+            # existing per-record skip-on-exception guard.
+            try:
+                _reindex(conn, str(vault_root), key, sidecar, body)
+            except Exception:
+                pass
         finally:
             conn.close()
 
@@ -385,7 +392,13 @@ def flush_session(
         body = body_path.read_text() if body_path.exists() else ""
         conn = open_index()
         try:
-            _reindex(conn, str(vault_root), key, sidecar, body)
+            # See capture_candidate: a malformed-projection exception (e.g. a
+            # reserved-key label row) degrades to a skipped index row rather
+            # than failing the flush.
+            try:
+                _reindex(conn, str(vault_root), key, sidecar, body)
+            except Exception:
+                pass
         finally:
             conn.close()
         return FLUSH_FLUSHED
@@ -442,7 +455,13 @@ def revert_flush(
         body = body_path.read_text() if body_path.exists() else ""
         conn = open_index()
         try:
-            _reindex(conn, str(vault_root), key, sidecar, body)
+            # See capture_candidate: a malformed-projection exception (e.g. a
+            # reserved-key label row) degrades to a skipped index row rather
+            # than failing the revert.
+            try:
+                _reindex(conn, str(vault_root), key, sidecar, body)
+            except Exception:
+                pass
         finally:
             conn.close()
 

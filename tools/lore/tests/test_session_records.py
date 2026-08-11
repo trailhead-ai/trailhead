@@ -148,6 +148,111 @@ class TestFirstCandidate:
 
 
 # ---------------------------------------------------------------------------
+# Reserved label keys: session store's incremental reindex degrades to a
+# per-record skip rather than failing the capture/flush/revert call.
+# ---------------------------------------------------------------------------
+
+def _open_index_factory(state: Path):
+    index_store = load_script("lore.search.index")
+
+    def _open():
+        return index_store.open_index(env={"XDG_STATE_HOME": str(state)})
+
+    return _open
+
+
+def _write_poisoned_session(vault: Path, key: str, *, status: str) -> None:
+    """Write a session sidecar+body carrying a reserved ``labels`` key on disk."""
+    session_dir = vault / "session"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = {
+        "version": "v1",
+        "kind": "session",
+        "title": f"session {key}",
+        "status": status,
+        "created-at": "2026-08-10T00:00:00Z",
+        "created-by": "tom@example.com",
+        "updated-at": "2026-08-10T00:00:00Z",
+        "updated-by": "tom@example.com",
+        "annotations": {},
+        "labels": {"area": "x"},
+    }
+    (session_dir / f"{key}.json").write_text(json.dumps(sidecar))
+    (session_dir / f"{key}.md").write_text(f"# session {key}\n")
+
+
+class TestReservedLabelKeyDegradesToSkip:
+
+    def test_capture_candidate_reserved_label_key_does_not_raise(self, tmp_path):
+        vault, state = _make_vault(tmp_path)
+        key = SID
+        _write_poisoned_session(vault, key, status="clean")
+
+        store = load_script("lore.session.store")
+        store.capture_candidate(
+            key, "- candidate entry\n",
+            vault_root=str(vault),
+            committer="tom@example.com",
+            open_index=_open_index_factory(state),
+        )
+
+        # No raise; the record's labels never reach record_labels.
+        assert _sidecar(vault, key)["status"] == "dirty"
+        index_store = load_script("lore.search.index")
+        conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+        finally:
+            conn.close()
+        assert count == 0
+
+    def test_flush_session_reserved_label_key_does_not_raise(self, tmp_path):
+        vault, state = _make_vault(tmp_path)
+        key = SID
+        _write_poisoned_session(vault, key, status="dirty")
+
+        store = load_script("lore.session.store")
+        verdict = store.flush_session(
+            key,
+            vault_root=str(vault),
+            committer="tom@example.com",
+            open_index=_open_index_factory(state),
+        )
+
+        assert verdict == store.FLUSH_FLUSHED
+        assert _sidecar(vault, key)["status"] == "clean"
+        index_store = load_script("lore.search.index")
+        conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+        finally:
+            conn.close()
+        assert count == 0
+
+    def test_revert_flush_reserved_label_key_does_not_raise(self, tmp_path):
+        vault, state = _make_vault(tmp_path)
+        key = SID
+        _write_poisoned_session(vault, key, status="clean")
+
+        store = load_script("lore.session.store")
+        store.revert_flush(
+            key,
+            vault_root=str(vault),
+            committer="tom@example.com",
+            open_index=_open_index_factory(state),
+        )
+
+        assert _sidecar(vault, key)["status"] == "dirty"
+        index_store = load_script("lore.search.index")
+        conn = index_store.open_index(env={"XDG_STATE_HOME": str(state)})
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM record_labels").fetchone()[0]
+        finally:
+            conn.close()
+        assert count == 0
+
+
+# ---------------------------------------------------------------------------
 # Two distinct session-ids → two records
 # ---------------------------------------------------------------------------
 

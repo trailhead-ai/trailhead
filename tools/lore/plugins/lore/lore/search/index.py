@@ -110,6 +110,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..record.model import _is_reserved_label_key
+
 #: Busy timeout for every index connection. Generous on purpose: a writer waiting
 #: on a peer in another vault must queue, never fail.
 #:
@@ -459,6 +461,15 @@ def _project_record(
     labels = sidecar.get("labels")
     if isinstance(labels, dict):
         for key, value in labels.items():
+            if _is_reserved_label_key(key):
+                # Undo the records/record_facet/record_fts rows already inserted
+                # above for this id before raising — an ingest rejection means the
+                # WHOLE record is absent from the index, not partially projected.
+                _delete_projection(conn, record_id)
+                raise ValueError(
+                    f"reserved label key {key!r} on {record_id!r} would shadow a "
+                    "first-class record concept"
+                )
             conn.execute(
                 "INSERT INTO record_labels(id, key, value) VALUES (?, ?, ?)",
                 (record_id, key, value),
