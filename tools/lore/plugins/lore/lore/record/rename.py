@@ -173,28 +173,15 @@ def rewrite_sidecar(
 # ---------------------------------------------------------------------------
 
 
-def _target_location(root: Path, kind: str, stem: str) -> store.RecordLocation:
-    """Build the :class:`store.RecordLocation` for ``<kind>/<stem>`` under *root*."""
-    kind_dir = Path(root) / kind
-    return store.RecordLocation(
-        vault_root=str(root),
-        kind=kind,
-        name=stem,
-        record_id=f"{kind}/{stem}",
-        body_path=kind_dir / f"{stem}.md",
-        sidecar_path=kind_dir / f"{stem}.json",
-    )
-
-
-def _exists(root: Path, kind: str, stem: str) -> bool:
-    kind_dir = Path(root) / kind
-    return (kind_dir / f"{stem}.md").exists() or (kind_dir / f"{stem}.json").exists()
-
-
 def _find_vault(vaults, kind: str, stem: str) -> SweepVault | None:
-    """First configured vault (config order) holding ``<kind>/<stem>``, or None."""
+    """First configured vault (config order) holding ``<kind>/<stem>``, or None.
+
+    Occupancy is :func:`store._stem_occupied` — the pair-aware rule, so a record
+    left holding only one of its two artifacts by an interrupted write is still
+    found rather than reported missing.
+    """
     for vault in vaults:
-        if _exists(vault.root, kind, stem):
+        if store._stem_occupied(Path(vault.root) / kind, stem):
             return vault
     return None
 
@@ -314,12 +301,17 @@ def rename_record(
             ),
         )
 
-    # A rename that keeps the current stem must not collide with itself.
-    new_stem = (
-        old_stem
+    # A rename that keeps the current stem must not collide with itself, so that
+    # case skips placement entirely (``None`` destination = nothing to move). Any
+    # other title is placed exactly the way a create places one — the same
+    # ``_kebab`` + ``-2``/``-3`` collision suffix, via :func:`store.place_record`
+    # — so a rename and a create of the same title land on the same stem.
+    dest = (
+        None
         if old_stem == base
-        else store._unique_stem(Path(source.root) / kind, base)
+        else store.place_record(new_title, kind, None, vault_root=str(source.root))
     )
+    new_stem = old_stem if dest is None else dest.name
     new_id = f"{kind}/{new_stem}"
 
     if dry_run:
@@ -342,14 +334,14 @@ def rename_record(
     body = location.body_path.read_text(encoding="utf-8") if location.body_path.exists() else ""
 
     shared = 1 if source.shared else 0
-    moved = new_stem != old_stem
+    moved = dest is not None
     if moved:
         # Stamp + neutralize BEFORE the move so the mutated record is written
         # once, at its destination — move_record writes overrides verbatim.
         stamped, safe_body = store.validate_stamp_neutralize(location, sidecar, body)
         store.move_record(
             record_id,
-            _target_location(source.root, kind, new_stem),
+            dest,
             conn,
             old_vault_root=str(source.root),
             new_sidecar=stamped,
