@@ -161,6 +161,30 @@ def test_librarian_json_field_is_shared_not_layer():
     )
 
 
+def test_investigator_no_layer_personal_claim():
+    """investigator.md must not claim personal-vault hits carry a layer= attribute —
+    xml_escape.py emits layer= only on the shared <external-memory> fence; personal
+    hits are unfenced."""
+    text = _agent_text("investigator")
+    assert 'layer="personal"' not in text, (
+        "investigator.md must not claim personal hits carry a layer= attribute — "
+        "xml_escape.py emits layer= only on the shared <external-memory> fence; "
+        "personal hits are unfenced"
+    )
+
+
+def test_researcher_no_layer_personal_claim():
+    """researcher.md must not claim personal-vault hits carry a layer= attribute —
+    xml_escape.py emits layer= only on the shared <external-memory> fence; personal
+    hits are unfenced."""
+    text = _agent_text("researcher")
+    assert 'layer="personal"' not in text, (
+        "researcher.md must not claim personal hits carry a layer= attribute — "
+        "xml_escape.py emits layer= only on the shared <external-memory> fence; "
+        "personal hits are unfenced"
+    )
+
+
 # ---------------------------------------------------------------------------
 # record — single deliberate capture; scope-disjoint from checkpoint
 # ---------------------------------------------------------------------------
