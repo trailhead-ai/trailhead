@@ -536,7 +536,10 @@ def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, 
         raise InvalidRecordIdError(f"RECORD_ID must be vault-relative: {record_id!r}")
     # Every path segment of both halves must be a real name — no empty, ".", or
     # ".." segments (Path(...).parts splits on "/", so segments never contain it).
-    segments = [kind, *Path(name).parts]
+    # ``name`` itself is checked alongside its parts because a degenerate name
+    # yields no parts at all (``Path("").parts == ()``), which would otherwise
+    # let ``<kind>/`` through as a well-formed ID pointing at ``<kind>/.md``.
+    segments = [kind, name, *Path(name).parts]
     if not segments or any(seg in ("", ".", "..") for seg in segments):
         raise InvalidRecordIdError(f"illegal RECORD_ID segment in {record_id!r}")
 

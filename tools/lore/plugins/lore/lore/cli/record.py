@@ -518,14 +518,20 @@ def _cmd_record_rename(args) -> int:
         line per referencing record the sweep touched, named individually with
         its vault, so a partial failure names exactly what did and did not
         land. References in ``shared: true`` vaults are listed as skipped
-        unless ``--include-shared`` is passed, and a record the sweep could not
-        read or write is listed as ``failed:`` with its reason.
+        unless ``--include-shared`` is passed; a record that references the old
+        stem and could not be written is listed as ``failed:`` with its reason;
+        a record the sweep could not READ is listed as ``unchecked:``.
 
     The sweep is fault-isolated, so one bad record no longer aborts a rename
     whose primary move has already landed. The full accumulated list is printed
     whether or not every record succeeded — a partial failure must be
-    diagnosable from the output alone — and the exit status is non-zero when
-    any record failed, so a caller cannot mistake it for a clean run.
+    diagnosable from the output alone.
+
+    **Exit status** tracks dangling references only. A ``failed:`` record is a
+    known-dangling one, so it exits non-zero. An ``unchecked:`` record is not:
+    its body could not be read, so nothing is known about its references, and an
+    unrelated corrupt file elsewhere in a vault must not report a clean rename
+    as broken. Those are surfaced as a ``warning:`` line naming the count.
 
     ``--vault NAME`` names the vault holding the record to rename, mirroring
     ``record show``/``record delete --vault``: with the same stem in more than
@@ -591,8 +597,14 @@ def _cmd_record_rename(args) -> int:
         file=sys.stderr,
     )
     failures = 0
+    unchecked = 0
     for rw in report.rewrites:
-        if rw.error is not None:
+        if rw.unchecked:
+            unchecked += 1
+            print(
+                f"unchecked: {rw.vault}: {rw.record_id}: {rw.error}", file=sys.stderr
+            )
+        elif rw.error is not None:
             failures += 1
             print(f"failed: {rw.vault}: {rw.record_id}: {rw.error}", file=sys.stderr)
         elif rw.skipped:
@@ -606,6 +618,12 @@ def _cmd_record_rename(args) -> int:
             print(f"{action}: {rw.vault}: {rw.record_id}", file=sys.stderr)
 
     print(report.new_id)
+    if unchecked:
+        print(
+            f"warning: {unchecked} record(s) could not be read and were not "
+            f"checked for references to {report.old_id}",
+            file=sys.stderr,
+        )
     if failures:
         print(
             f"error: {failures} record(s) still reference {report.old_id}; "

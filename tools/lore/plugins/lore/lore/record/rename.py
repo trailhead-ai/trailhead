@@ -73,17 +73,22 @@ class SweepVault(NamedTuple):
 
 
 class Rewrite(NamedTuple):
-    """One referencing record the sweep touched, skipped, or failed on.
+    """One referencing record the sweep touched, skipped, could not check, or failed on.
 
-    Exactly one of the three outcomes holds: ``skipped`` (a shared vault, not
-    opted into), ``error`` set (the record could not be read or written — the
-    sweep moved on), or neither (rewritten).
+    Exactly one of four outcomes holds: ``skipped`` (a shared vault, not opted
+    into), ``unchecked`` (the record could not be read at all, so whether it
+    references the old stem is unknown), ``error`` set without ``unchecked``
+    (the record DOES reference the old stem and the rewrite failed), or none of
+    them (rewritten). ``unchecked`` entries carry their reason in ``error`` too,
+    but they are not evidence of a dangling reference and must not be reported
+    as one.
     """
 
     vault: str
     record_id: str
     skipped: bool
     error: str | None = None
+    unchecked: bool = False
 
 
 class RenameReport(NamedTuple):
@@ -268,8 +273,16 @@ def sweep_references(
     unreadable body (missing, or not UTF-8), an invalid sidecar, or a failed
     ``validate_and_write`` is recorded as a :class:`Rewrite` carrying ``error``
     and the sweep moves to the next record. The caller reports every entry —
-    rewritten, skipped, and failed alike — so a partial failure names exactly
-    which records still point at the old stem.
+    rewritten, skipped, unchecked, and failed alike — so a partial failure names
+    exactly which records still point at the old stem. A record whose body could
+    not be READ is reported ``unchecked`` rather than failed: nothing is known
+    about its references, so it is not a dangling one.
+
+    **Commit boundary.** Each vault's rewrites are committed before the next
+    vault is entered. The rewrites are durable on disk the moment they are
+    written, so holding every vault's index upserts in one transaction would let
+    an abort in a later vault discard index rows for files that already changed,
+    leaving the index disagreeing with the vault it describes.
 
     **Session bodies** are appended to concurrently by live agent sessions, so a
     session record is rewritten while holding its
@@ -284,7 +297,13 @@ def sweep_references(
                 body = body_path.read_text(encoding="utf-8")
             except (OSError, ValueError, UnicodeDecodeError) as exc:
                 rewrites.append(
-                    Rewrite(vault.name, record_id, False, f"unreadable body: {exc}")
+                    Rewrite(
+                        vault.name,
+                        record_id,
+                        False,
+                        f"unreadable body: {exc}",
+                        unchecked=True,
+                    )
                 )
                 continue
 
@@ -313,6 +332,8 @@ def sweep_references(
                 rewrites.append(Rewrite(vault.name, record_id, False, str(exc)))
                 continue
             rewrites.append(Rewrite(vault.name, record_id, False))
+        if not dry_run:
+            conn.commit()
     return tuple(rewrites)
 
 
@@ -449,7 +470,9 @@ def rename_record(
     that configured vault, mirroring ``record show``/``delete --vault``: with
     the same stem in two vaults, config order alone picks the wrong one. It
     narrows only the SOURCE lookup — the inbound-reference sweep still covers
-    every configured vault, since references live wherever they live.
+    every configured vault, since references live wherever they live. A record
+    absent from the named vault but present in another one is refused, naming
+    the vault that holds it: it is a mis-aimed rename, not a crash to resume.
 
     **Commit boundary.** Once the primary move is durable on disk, its index
     repoint is committed before the sweep starts. The sweep is fault-isolated
@@ -472,10 +495,36 @@ def rename_record(
         if not search:
             raise RenameError(f"unknown vault: {vault_name}")
 
+    # A slash alone does not make an ID well-formed: ``adr/`` and ``adr/../x``
+    # both carry one, and both would otherwise reach the resume path — where a
+    # unique title match would be adopted and every inbound reference repointed
+    # at a record the operator never named. Confinement is checked against every
+    # searched vault root, the same guard every other RECORD_ID-bearing caller
+    # uses, so a traversal is refused before anything is read or written.
+    for vault in search:
+        try:
+            store.confine_record_id(record_id, str(vault.root))
+        except store.InvalidRecordIdError as exc:
+            raise RenameError(str(exc)) from exc
+
     base = store._kebab(new_title)
     source = _find_vault(search, kind, old_stem)
 
     if source is None:
+        # Resume answers "the move already landed" — it is only ever the right
+        # reading when the record is gone from EVERY configured vault. With
+        # ``--vault`` narrowing the search, a record alive and well elsewhere
+        # would otherwise be resolved by title inside the named vault, adopting
+        # an unrelated record and repointing every inbound reference at it.
+        elsewhere = (
+            None if search is vaults else _find_vault(vaults, kind, old_stem)
+        )
+        if elsewhere is not None:
+            raise RenameError(
+                f"{kind}/{old_stem} is not in vault {vault_name!r}; it lives in "
+                f"vault {elsewhere.name!r}. Re-issue the rename with "
+                f"--vault {elsewhere.name}."
+            )
         return _resume(
             vaults, search, kind, old_stem, new_title, conn,
             dry_run=dry_run, include_shared=include_shared,

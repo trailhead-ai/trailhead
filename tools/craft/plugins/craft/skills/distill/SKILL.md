@@ -289,8 +289,8 @@ Before drafting anything for a re-surfaced cluster,
 writes the edge on the ADR (`--related spec=<member>`), never on the spec, so the member specs'
 sidecars carry nothing to detect from; the query above reads the side that actually carries it. A
 run that finds one resumes rather than restarts: it **completes the remaining writes** from
-wherever the order stopped. Do not draft a second ADR — it would burn a second sequence number and
-split one decision across two immutable records, and there is no clean way to undo either.
+wherever the order stopped. Do not draft a second ADR — it would split one decision across two records that
+readers will find independently, and there is no clean way to undo either.
 
 ## Outcome report
 

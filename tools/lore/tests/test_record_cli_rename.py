@@ -464,11 +464,44 @@ def test_one_unreadable_record_does_not_abort_the_sweep(install):
     assert install.sidecar("default", "adr/new-name")["title"] == "New Name"
     assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
 
-    # The one failure is named on stderr, alongside what DID land, and the
-    # exit status reports the partial failure.
-    assert proc.returncode != 0
+    # The unreadable record is named on stderr alongside what DID land, but as
+    # "could not check" — it is not evidence that anything still references the
+    # old stem, so it does not fail the run.
+    assert proc.returncode == 0, proc.stderr
     assert "spec/bad" in proc.stderr
     assert "spec/ref" in proc.stderr
+    unchecked_line = next(
+        line for line in proc.stderr.splitlines() if "spec/bad" in line
+    )
+    assert unchecked_line.startswith("unchecked:")
+    assert "could not" in proc.stderr
+
+
+def test_a_reference_that_cannot_be_rewritten_fails_the_run(install):
+    """A record that DOES reference the old stem and cannot be written exits 1.
+
+    This is the real dangling-reference case, distinct from a record the sweep
+    could not read at all: here the reference is known to be there and known to
+    be un-rewritten, so the operator must be told the rename is incomplete.
+    """
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+    install.create("other", "spec", "Stuck", body="see [[adr/old-name]]")
+    # Make the write fail without disturbing the read.
+    (install.roots["other"] / "spec").chmod(0o500)
+    try:
+        proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    finally:
+        (install.roots["other"] / "spec").chmod(0o700)
+
+    assert proc.returncode != 0
+    failed_line = next(
+        line for line in proc.stderr.splitlines() if "spec/stuck" in line
+    )
+    assert failed_line.startswith("failed:")
+    assert "still reference" in proc.stderr
+    # What could land, did.
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
 
 
 def test_a_configured_vault_with_no_directory_is_skipped(install):
@@ -526,6 +559,69 @@ def test_vault_flag_targets_the_named_source_vault(install):
         line for line in proc.stderr.splitlines() if line.startswith("renamed:")
     )
     assert "other" in renamed_line
+
+
+def test_vault_flag_refuses_when_another_vault_holds_the_record(install):
+    """A narrowed search must never fall through to resume-by-title.
+
+    The record still exists — just not in the named vault. Resume exists to
+    finish a move that already landed, so reaching it here would adopt whatever
+    record in the named vault happens to carry the new title and repoint every
+    inbound reference at that stranger. The rename refuses instead, naming the
+    vault that actually holds the record.
+    """
+    install.create("other", "adr", "Old Name", body="the real record")
+    install.create("default", "adr", "New Name", body="an unrelated stranger")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+    before = install.snapshot()
+
+    proc = install.cli(
+        ["record", "rename", "adr/old-name", "--vault", "default", "--title", "New Name"]
+    )
+    assert proc.returncode != 0
+    assert "error:" in proc.stderr
+    # The refusal names the vault that actually holds it.
+    assert "other" in proc.stderr
+    assert install.snapshot() == before
+
+
+def test_structurally_invalid_record_ids_never_reach_resume(install):
+    """A malformed ID is refused outright, not resolved by title.
+
+    ``adr/`` and ``adr/../x`` carry a slash, so a bare slash check lets them
+    through to the resume path — where a unique title match would be adopted
+    and every inbound reference repointed at it.
+    """
+    install.create("default", "adr", "Nope", body="the stranger")
+    install.create("default", "spec", "Ref", body="see [[adr/nope]]")
+    before = install.snapshot()
+
+    for bad in ("adr/", "adr/../x", "adr/x/../../escape", "adr/../../etc/passwd"):
+        proc = install.cli(["record", "rename", bad, "--title", "Nope"])
+        assert proc.returncode != 0, bad
+        assert "error:" in proc.stderr, bad
+        assert install.snapshot() == before, bad
+
+
+def test_a_record_in_a_shared_vault_is_still_renamed(install):
+    """Shared vaults gate the SWEEP, never the primary rename.
+
+    The operator named that record explicitly, so it moves; only the inbound
+    rewrites in shared vaults need the ``--include-shared`` opt-in.
+    """
+    old_id = install.create("upstream", "adr", "Old Name", body="lives upstream")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+
+    proc = install.cli(
+        ["record", "rename", old_id, "--vault", "upstream", "--title", "New Name"]
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "adr/new-name"
+    assert install.body("upstream", "adr/new-name") == "lives upstream"
+    assert install.sidecar("upstream", "adr/new-name")["title"] == "New Name"
+    assert install.index_names("upstream", "adr") == ["new-name"]
+    # The sweep still covers the non-shared vault that references it.
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
 
 
 def test_vault_flag_rejects_a_vault_that_does_not_hold_the_record(install):
@@ -648,6 +744,80 @@ def test_session_bodies_are_rewritten_under_the_session_lock(tmp_path, monkeypat
     body = (vault / "session" / "sess-guid-1.md").read_text(encoding="utf-8")
     assert body == "see [[adr/new-name]]"
     assert keys == ["sess-guid-1"]
+
+
+def test_sweep_commits_each_vault_before_moving_to_the_next(tmp_path, monkeypatch):
+    """A vault's rewrites are published before the next vault is touched.
+
+    The sweep spans every configured vault and its rewrites are real index
+    upserts. Holding them all in one transaction means an abort partway through
+    the last vault discards the index rows for rewrites that are already durable
+    on disk in the earlier ones — files and index silently disagree.
+    """
+    rename = load_script("lore.record.rename")
+    store = rename.store
+    index = load_script("lore.search.index")
+
+    roots = {}
+    entries = []
+    for name, scope in (("first", "default"), ("second", "repo")):
+        root = tmp_path / "vaults" / name
+        root.mkdir(parents=True)
+        roots[name] = root
+        entries.append({"name": name, "scope": scope, "path": str(root)})
+    cfg_home = tmp_path / "cfg"
+    (cfg_home / "lore").mkdir(parents=True)
+    (cfg_home / "lore" / "config.json").write_text(
+        json.dumps({"vaults": entries}), encoding="utf-8"
+    )
+    state = tmp_path / "state"
+    state.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+    conn = index.open_index()
+    try:
+        def write(vault, kind, title, body):
+            loc = store.place_record(title, kind, None, str(roots[vault]))
+            store.validate_and_write(
+                loc, {"kind": kind, "title": title, "status": "draft"}, body, conn
+            )
+            return loc
+
+        write("first", "adr", "Old Name", "x")
+        write("first", "spec", "Ref A", "see [[adr/old-name]]")
+        write("second", "spec", "Ref B", "see [[adr/old-name]]")
+        conn.commit()
+
+        real_write = store.validate_and_write
+
+        def boom(location, *a, **kw):
+            # An abort the fault-isolated sweep cannot swallow.
+            if str(location.body_path).startswith(str(roots["second"])):
+                raise KeyboardInterrupt("interrupted mid-sweep")
+            return real_write(location, *a, **kw)
+
+        monkeypatch.setattr(store, "validate_and_write", boom)
+
+        with pytest.raises(KeyboardInterrupt):
+            rename.rename_record("adr/old-name", "Much Newer Name", conn)
+    finally:
+        # Closing rolls back anything still uncommitted.
+        conn.close()
+
+    ref_a = roots["first"] / "spec" / "ref-a.md"
+    assert ref_a.read_text(encoding="utf-8") == "see [[adr/much-newer-name]]"
+
+    fresh = sqlite3.connect(str(state / "lore" / "index.sqlite"))
+    try:
+        row = fresh.execute(
+            "SELECT src_size FROM records WHERE vault=? AND kind='spec' AND name='ref-a'",
+            (str(roots["first"]),),
+        ).fetchone()
+    finally:
+        fresh.close()
+    assert row is not None
+    assert row[0] == ref_a.stat().st_size
 
 
 def test_resume_adopts_the_suffixed_stem_the_move_actually_landed_on(install):
