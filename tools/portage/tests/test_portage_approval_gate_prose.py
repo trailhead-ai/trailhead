@@ -114,3 +114,24 @@ def test_pr_touching_agent_docs_never_apply_the_approval_signal(path):
         "every PR-touching portage agent doc must carry the never-apply-the-signal prohibition, "
         "not just monitor.",
     )
+
+
+def test_updater_pins_the_gpgsig_presence_preflight_rule():
+    _pin(
+        UPDATER,
+        "confirm the commit carries a `gpgsig` header via",
+        "the preflight must check signature presence via the gpgsig header directly, "
+        "not a local-verification proxy.",
+    )
+    _pin(
+        UPDATER,
+        "Never use `git log --pretty=%G?` for",
+        "the prohibition on %G? must stay verbatim — it read as a signature check but is "
+        "a local-verifiability check, which false-negates properly signed commits.",
+    )
+    _pin(
+        UPDATER,
+        "so it reports `N`/`E` even for properly signed commits",
+        "the false-negative rationale must stay pinned — it's what makes the %G? "
+        "prohibition non-optional rather than a style preference.",
+    )
