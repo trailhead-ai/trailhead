@@ -352,10 +352,36 @@ def _author_group(
     # and carry through every top-level table render_group_toml doesn't
     # already produce from its own parameters.
     existing_extra_tables: dict = {}
+    existing_members_by_name: dict[str, dict] = {}
     if config_path.exists():
         raw_existing = tomllib.loads(config_path.read_text(encoding="utf-8"))
         core_keys = {"group", "members", "branch", "lore_scopes"}
         existing_extra_tables = {k: v for k, v in raw_existing.items() if k not in core_keys}
+
+        # render_group_toml's [[members]] loop only ever knew "name" and
+        # "repo_root", so a --force re-author would otherwise silently drop a
+        # member's hand-authored/legacy "base", "tasks" reference list,
+        # "hooks", and "bootstrap" fields. Read the raw (not load_group's
+        # resolved-tasks) member tables and carry those fields through by
+        # member name, mirroring the extra_tables carry-through above.
+        for raw_member in raw_existing.get("members", []):
+            if not isinstance(raw_member, dict):
+                continue
+            name = raw_member.get("name")
+            if not isinstance(name, str):
+                continue
+            carried = {
+                k: v for k, v in raw_member.items() if k in ("base", "tasks", "hooks", "bootstrap")
+            }
+            if carried:
+                existing_members_by_name[name] = carried
+
+    # Merge the carried per-member fields (by name) into the freshly-parsed
+    # --member NAME=PATH list. A brand-new member (not present in the prior
+    # config) has no entry here, so it keeps render_group_toml's own defaults.
+    members = [
+        {**m, **existing_members_by_name.get(m["name"], {})} for m in members
+    ]
 
     try:
         group_scaffold.validate_scaffold(

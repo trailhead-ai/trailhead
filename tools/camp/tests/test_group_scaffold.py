@@ -415,6 +415,102 @@ def test_render_group_toml_bootstrap_always_empty_list(tmp_path: Path) -> None:
     assert parsed["members"][0]["bootstrap"] == []
 
 
+def test_render_group_toml_member_base_round_trips(tmp_path: Path) -> None:
+    """A member dict carrying "base" renders a `base = ` line that round-trips."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "myrepo", "repo_root": "/tmp/myrepo", "base": "release/1.0"}]
+    toml_str = render_group_toml("testgroup", members, "worktree-{slug}")
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["members"][0]["base"] == "release/1.0"
+
+
+def test_render_group_toml_member_without_base_omits_base_line(tmp_path: Path) -> None:
+    """A member dict with no "base" key emits no base line (load_group's own default applies)."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "myrepo", "repo_root": "/tmp/myrepo"}]
+    toml_str = render_group_toml("testgroup", members, "worktree-{slug}")
+
+    parsed = tomllib.loads(toml_str)
+    assert "base" not in parsed["members"][0]
+
+
+def test_render_group_toml_member_tasks_reference_round_trips(tmp_path: Path) -> None:
+    """A member dict carrying "tasks" renders a `tasks = [...]` reference list."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [{"name": "myrepo", "repo_root": "/tmp/myrepo", "tasks": ["graphify"]}]
+    toml_str = render_group_toml("testgroup", members, "worktree-{slug}")
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["members"][0]["tasks"] == ["graphify"]
+
+
+def test_render_group_toml_member_bootstrap_round_trips(tmp_path: Path) -> None:
+    """A member dict carrying a non-empty "bootstrap" list renders it verbatim
+    instead of the default empty-list bootstrap line."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [
+        {"name": "myrepo", "repo_root": "/tmp/myrepo", "bootstrap": ["echo", "hi"]}
+    ]
+    toml_str = render_group_toml("testgroup", members, "worktree-{slug}")
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["members"][0]["bootstrap"] == ["echo", "hi"]
+
+
+def test_render_group_toml_member_hooks_round_trip(tmp_path: Path) -> None:
+    """A member dict carrying "hooks" renders [[members.hooks]] entries."""
+    from camp.group.scaffold import render_group_toml
+
+    members = [
+        {
+            "name": "myrepo",
+            "repo_root": "/tmp/myrepo",
+            "hooks": [{"kind": "dep-install", "cmd": ["npm", "install"]}],
+        }
+    ]
+    toml_str = render_group_toml("testgroup", members, "worktree-{slug}")
+
+    parsed = tomllib.loads(toml_str)
+    assert parsed["members"][0]["hooks"] == [
+        {"kind": "dep-install", "cmd": ["npm", "install"]}
+    ]
+
+
+def test_render_group_toml_member_all_carried_fields_round_trip_through_load_group(
+    tmp_path: Path,
+) -> None:
+    """A member carrying base/tasks/hooks/bootstrap together renders TOML that
+    load_group resolves cleanly end to end."""
+    from camp.group.config import load_group
+    from camp.group.scaffold import render_group_toml
+
+    members = [
+        {
+            "name": "myrepo",
+            "repo_root": "/tmp/myrepo",
+            "base": "release/1.0",
+            "tasks": [],
+            "hooks": [{"kind": "dep-install", "cmd": ["npm", "install"]}],
+            "bootstrap": ["echo", "hi"],
+        }
+    ]
+    toml_str = render_group_toml("testgroup", members, "worktree-{slug}")
+
+    toml_path = tmp_path / "testgroup.toml"
+    toml_path.write_text(toml_str, encoding="utf-8")
+    loaded = load_group(toml_path)
+
+    member = loaded["members"][0]
+    assert member["base"] == "release/1.0"
+    task_names = {t["name"] for t in member["tasks"]}
+    assert task_names == {"bootstrap", "dep-install"}
+
+
 def test_render_group_toml_no_shared_vaults_or_dev_env(tmp_path: Path) -> None:
     """Authoring never emits [[shared_vaults]] or [dev_env] sections."""
     from camp.group.scaffold import render_group_toml

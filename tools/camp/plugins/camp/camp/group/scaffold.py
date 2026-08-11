@@ -90,15 +90,25 @@ def _normalize_repo_root(repo_root: str) -> str:
 
 
 def _normalize_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return a new list of member dicts with repo_root expanded and resolved."""
+    """Return a new list of member dicts with repo_root expanded and resolved.
+
+    "name" and "repo_root" are always carried through. The optional
+    "base" / "tasks" / "hooks" / "bootstrap" keys — a caller's carry-through of
+    a hand-authored member's existing fields on a --force re-author — pass
+    through unchanged when present, so a member re-passed by name doesn't lose
+    them; a brand-new member simply omits these keys and gets the render
+    loop's own documented defaults.
+    """
     result = []
     for m in members:
-        result.append(
-            {
-                "name": m["name"],
-                "repo_root": _normalize_repo_root(m["repo_root"]),
-            }
-        )
+        normalized = {
+            "name": m["name"],
+            "repo_root": _normalize_repo_root(m["repo_root"]),
+        }
+        for key in ("base", "tasks", "hooks", "bootstrap"):
+            if key in m:
+                normalized[key] = m[key]
+        result.append(normalized)
     return result
 
 
@@ -118,7 +128,8 @@ def render_group_toml(
 
     Emits the core schema:
       [group].name
-      [[members]] name, repo_root, bootstrap = []
+      [[members]] name, repo_root, base (if carried), bootstrap = [] (or carried),
+                  tasks (if carried), [[members.hooks]] (if carried)
       [branch].pattern
     plus any [[lore_scopes]] (scope, name) entries supplied — so re-authoring a
     group preserves a hand-added binding instead of silently dropping it.
@@ -137,6 +148,16 @@ def render_group_toml(
         group_name:     Group name for [group].name.
         members:        List of dicts with "name" and "repo_root" keys.
                         repo_root values are passed through expanduser().resolve().
+                        Each dict MAY also carry "base" (str), "tasks" (list of
+                        str task-name references), "hooks" (list of
+                        {"kind", "cmd"} dicts), and/or "bootstrap" (list of
+                        str) — a caller's carry-through of that member's raw
+                        existing TOML fields on a --force re-author, keyed by
+                        member name. Any of these omitted on a member (e.g. a
+                        brand-new member from --force --member NEW=PATH) falls
+                        back to the documented default: no "base" line
+                        (load_group defaults to "origin/main"), "bootstrap = []",
+                        no "tasks" line, no [[members.hooks]] entries.
         branch_pattern: Value for [branch].pattern.
         lore_scopes:    Optional list of {"scope", "name"} dicts to emit as
                         [[lore_scopes]] entries (declared order preserved).
@@ -174,8 +195,20 @@ def render_group_toml(
         lines.append("[[members]]")
         lines.append(f"name = {_toml_string(m['name'])}")
         lines.append(f"repo_root = {_toml_string(m['repo_root'])}")
-        lines.append("bootstrap = []")
+        if "base" in m:
+            lines.append(f"base = {_toml_value_at('members.base', m['base'])}")
+        lines.append(
+            f"bootstrap = {_toml_value_at('members.bootstrap', m.get('bootstrap', []))}"
+        )
+        if "tasks" in m:
+            lines.append(f"tasks = {_toml_value_at('members.tasks', m['tasks'])}")
         lines.append("")
+
+        for hook in m.get("hooks") or []:
+            lines.append("[[members.hooks]]")
+            lines.append(f"kind = {_toml_value_at('members.hooks.kind', hook['kind'])}")
+            lines.append(f"cmd = {_toml_value_at('members.hooks.cmd', hook['cmd'])}")
+            lines.append("")
 
     lines.append("[branch]")
     lines.append(f"pattern = {_toml_string(branch_pattern)}")
