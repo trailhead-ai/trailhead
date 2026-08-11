@@ -286,14 +286,15 @@ def _flush_one_session(vault: Path, key: str, committer: str) -> int:
     held by several vaults is flushed once per vault, each with its own atomic
     flip + commit and its own rollback on commit failure, rather than N flips
     against one vault. Returns the exit code for this vault alone.
+
+    The caller has ALREADY established that this vault holds the key (that is how
+    it picked the vaults to iterate), so no pre-lock existence probe runs here —
+    a vault without the session never reaches this function and so never creates
+    even a lock sidecar. The record vanishing between that probe and the lock is
+    covered by `flush_session`'s own check under the lock, whose
+    ``FLUSH_NO_SESSION`` verdict is handled below.
     """
     from ..session import store as session_store_mod
-
-    # Probed BEFORE the lock so a flush with no session here creates nothing —
-    # not even the lock sidecar. `flush_session` re-checks under the lock.
-    if not session_store_mod.session_exists(str(vault), key):
-        print(f"notice: no session exists for {key!r} — nothing to flush.")
-        return 0
 
     # The flip and the commit are ONE unit under the session-key lock: a
     # `session candidate` that landed between them would flip the sidecar back to
@@ -327,26 +328,44 @@ def _flush_one_session(vault: Path, key: str, committer: str) -> int:
         if _vault_is_git_toplevel(vault):
             _flush_push(vault)
     else:
-        # Same orphan-gap guarantee as the batch path: `flush_session` flips the
-        # record `clean` on disk BEFORE the commit, so a commit failure would leave
-        # a clean-on-disk-but-uncommitted record that `status:dirty` re-discovery
-        # could never re-find. Revert the flip so a re-run can retry it
-        # (the single path shares the batch's atomicity need).
-        try:
-            session_store_mod.revert_flush(
-                key,
-                vault_root=str(vault),
-                committer=committer,
-                open_index=_open_session_index,
-            )
-        except Exception as exc:
-            print(
-                f"warning: flush commit failed AND rollback failed for session/{key}: "
-                f"{exc}\n  the record may be clean-on-disk but uncommitted — inspect "
-                "manually before re-running.",
-                file=sys.stderr,
-            )
+        _revert_flip(vault, key, committer)
     return rc
+
+
+def _revert_flip(vault: Path, key: str, committer: str) -> None:
+    """Roll a flushed session record back to `dirty` after its commit failed.
+
+    `flush_session` flips the record `clean` on disk BEFORE the commit, so a
+    commit failure would otherwise leave a clean-on-disk-but-uncommitted record
+    that a re-run's `status:dirty` discovery could never re-find. Reverting the
+    flip keeps the failed session retry-discoverable — the orphan gap both flush
+    paths have to close.
+
+    Shared by BOTH paths (single-session and the batch loop) deliberately: the
+    guarantee is identical, and a second copy would be an unexercised second
+    implementation of it that could silently drift.
+
+    A failed rollback re-creates the very orphan this exists to prevent, so it is
+    never swallowed: the warning names the record and states what condition it may
+    be left in. Never raises — the caller is already on a failure path and owns
+    the exit code.
+    """
+    from ..session import store as session_store_mod
+
+    try:
+        session_store_mod.revert_flush(
+            key,
+            vault_root=str(vault),
+            committer=committer,
+            open_index=_open_session_index,
+        )
+    except Exception as exc:
+        print(
+            f"warning: flush commit failed AND rollback failed for session/{key}: "
+            f"{exc}\n  the record may be clean-on-disk but uncommitted — inspect "
+            "manually before re-running.",
+            file=sys.stderr,
+        )
 
 
 # Discovery must return EVERY dirty session, not the search facade's default page
@@ -476,28 +495,10 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
                     raise RuntimeError(f"commit failed (rc={rc})")
         except Exception as exc:
             # Per-session atomicity: the flip happened before the commit, so on a
-            # commit failure roll the flip BACK to `dirty` — otherwise the session
-            # is clean-on-disk-but-uncommitted and a re-run's discovery query
-            # (`status:dirty`) could never re-find it. Reverting keeps the failed
-            # session retry-discoverable.
+            # commit failure roll the flip BACK to `dirty` (shared with the
+            # single-session path — see :func:`_revert_flip`).
             if flipped:
-                try:
-                    session_store_mod.revert_flush(
-                        key,
-                        vault_root=str(vault),
-                        committer=committer,
-                        open_index=_open_session_index,
-                    )
-                except Exception as revert_exc:
-                    # A failed rollback re-creates the very orphan revert exists to
-                    # prevent — never swallow it silently; surface it so the operator
-                    # knows this session may be clean-on-disk but uncommitted.
-                    print(
-                        f"warning: rollback failed for session/{key}: {revert_exc}\n"
-                        f"  the record may be clean-on-disk but uncommitted — inspect "
-                        "manually.",
-                        file=sys.stderr,
-                    )
+                _revert_flip(vault, key, committer)
             print(f"Flushed: {len(flushed)} session(s) before the failure:")
             for done in flushed:
                 print(f"  - session/{done} (dirty -> clean)")

@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 from conftest import (
     load_script,
@@ -527,13 +528,26 @@ class TestKqlInjectionSafety:
 # `lore session show` and permanently un-flushable by every flush scope.
 # These tests pin the vault-aware resolution that closes that.
 
-def _two_vault_install(tmp_path):
-    """Return ``(config_home, state, default_vault, other_vault)``.
+class _Install(NamedTuple):
+    """A provisioned two-vault install: the paths every cross-vault test threads.
 
-    A two-vault install — a ``default``-scope vault plus a ``product``-scope
-    ``trailhead`` vault — both git toplevels so the flush commit path runs for
-    real. Mirrors the shape that exposed the defect: the operator's active vault
-    is ``default`` while the session lives in ``trailhead``.
+    Carried as ONE value rather than passed as separate ``config_home`` /
+    ``state`` / ``default_vault`` arguments, so a test reads as what it exercises
+    instead of as parameter plumbing.
+    """
+    config_home: Path
+    state: Path
+    default_vault: Path
+    other: Path
+
+
+def _two_vault_install(tmp_path) -> _Install:
+    """Provision a two-vault install.
+
+    A ``default``-scope vault plus a ``product``-scope ``trailhead`` vault — both
+    git toplevels so the flush commit path runs for real. Mirrors the shape that
+    exposed the defect: the operator's active vault is ``default`` while the
+    session lives in ``trailhead``.
     """
     config_home = tmp_path / "config"
     state = tmp_path / "state"
@@ -550,10 +564,10 @@ def _two_vault_install(tmp_path):
             ("trailhead", "product", other_vault),
         ],
     )
-    return config_home, state, default_vault, other_vault
+    return _Install(config_home, state, default_vault, other_vault)
 
 
-def _run_cfg(args, *, config_home, state, default_vault, stdin_text=None):
+def _run_cfg(args, inst: _Install, *, stdin_text=None):
     """Run the CLI against a multi-vault install.
 
     ``run_cli`` seeds its own single-vault config and applies ``env_extra``
@@ -561,16 +575,17 @@ def _run_cfg(args, *, config_home, state, default_vault, stdin_text=None):
     multi-vault ``config.json`` instead.
     """
     extra = dict(_NO_AMBIENT_SID)
-    extra["XDG_CONFIG_HOME"] = str(config_home)
-    return _run(args, vault=default_vault, state_dir=state,
+    extra["XDG_CONFIG_HOME"] = str(inst.config_home)
+    return _run(args, vault=inst.default_vault, state_dir=inst.state,
                 stdin_text=stdin_text, env_extra=extra)
 
 
-def _candidate_into(vault_name, *, config_home, state, default_vault, sid):
+def _candidate_into(vault_name, inst: _Install, sid):
+    """Capture a candidate into the NAMED vault via `session candidate --vault`."""
     return _run_cfg(
         ["session", "candidate", "--session-id", sid, "--kind", "spec",
          "--phase", "Plan", "--vault", vault_name],
-        config_home=config_home, state=state, default_vault=default_vault,
+        inst,
         stdin_text="a candidate\n",
     )
 
@@ -578,14 +593,12 @@ def _candidate_into(vault_name, *, config_home, state, default_vault, sid):
 class TestCrossVaultSessionResolution:
 
     def test_session_show_resolves_a_non_default_vault_session(self, tmp_path):
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_A).returncode == 0
-        assert (other / "session" / f"{SID_A}.json").exists()
-        assert not (default_vault / "session" / f"{SID_A}.json").exists()
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
+        assert (inst.other / "session" / f"{SID_A}.json").exists()
+        assert not (inst.default_vault / "session" / f"{SID_A}.json").exists()
 
-        r = _run_cfg(["session", "show", "--session-id", SID_A],
-                     config_home=config_home, state=state, default_vault=default_vault)
+        r = _run_cfg(["session", "show", "--session-id", SID_A], inst)
         assert r.returncode == 0, r.stderr
         assert SID_A in r.stdout
 
@@ -593,96 +606,81 @@ class TestCrossVaultSessionResolution:
         """The incident's observed index miss: `kind:session status:dirty` found
         nothing in the non-default vault. Capture indexes globally with the
         ELECTED vault root, so the record must be discoverable immediately."""
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_A).returncode == 0
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
 
-        r = _run_cfg(["search", "kind:session status:dirty", "--json"],
-                     config_home=config_home, state=state, default_vault=default_vault)
+        r = _run_cfg(["search", "kind:session status:dirty", "--json"], inst)
         assert r.returncode == 0, r.stderr
         ids = [h["id"] for h in json.loads(r.stdout)["hits"]]
-        assert f"{other}/session/{SID_A}" in ids, ids
+        assert f"{inst.other}/session/{SID_A}" in ids, ids
 
     def test_no_arg_flush_flushes_the_non_default_vault_session(self, tmp_path):
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_A).returncode == 0
-        _commit_baseline(other)
-        before = _commit_count(other)
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
+        _commit_baseline(inst.other)
+        before = _commit_count(inst.other)
 
-        r = _run_cfg(["flush", "--session-id", SID_A],
-                     config_home=config_home, state=state, default_vault=default_vault)
+        r = _run_cfg(["flush", "--session-id", SID_A], inst)
         assert r.returncode == 0, r.stderr
 
-        sidecar = _sidecar(other, SID_A)
+        sidecar = _sidecar(inst.other, SID_A)
         assert sidecar["status"] == "clean"
         assert sidecar["annotations"]["flushed-at"]
-        assert _commit_count(other) == before + 1, "flush must commit in the holding vault"
+        assert _commit_count(inst.other) == before + 1, (
+            "flush must commit in the holding vault"
+        )
 
     def test_flush_all_reaches_the_non_default_vault_session(self, tmp_path):
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_A).returncode == 0
-        _commit_baseline(other)
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
+        _commit_baseline(inst.other)
 
-        r = _run_cfg(["flush", "all"], config_home=config_home, state=state,
-                     default_vault=default_vault)
+        r = _run_cfg(["flush", "all"], inst)
         assert r.returncode == 0, r.stderr
-        assert _sidecar(other, SID_A)["status"] == "clean"
+        assert _sidecar(inst.other, SID_A)["status"] == "clean"
 
     def test_flush_kql_scope_reaches_the_non_default_vault_session(self, tmp_path):
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_A).returncode == 0
-        _commit_baseline(other)
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
+        _commit_baseline(inst.other)
 
-        r = _run_cfg(["flush", "kind:session"], config_home=config_home, state=state,
-                     default_vault=default_vault)
+        r = _run_cfg(["flush", "kind:session"], inst)
         assert r.returncode == 0, r.stderr
-        assert _sidecar(other, SID_A)["status"] == "clean"
+        assert _sidecar(inst.other, SID_A)["status"] == "clean"
 
     def test_batch_flush_spanning_two_vaults_flushes_both(self, tmp_path):
         """A batch whose hits span vaults must flush each in ITS OWN vault —
         not run every key against the active one."""
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("default", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_A).returncode == 0
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_B).returncode == 0
-        _commit_baseline(default_vault)
-        _commit_baseline(other)
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("default", inst, SID_A).returncode == 0
+        assert _candidate_into("trailhead", inst, SID_B).returncode == 0
+        _commit_baseline(inst.default_vault)
+        _commit_baseline(inst.other)
 
-        r = _run_cfg(["flush", "all"], config_home=config_home, state=state,
-                     default_vault=default_vault)
+        r = _run_cfg(["flush", "all"], inst)
         assert r.returncode == 0, r.stderr
-        assert _sidecar(default_vault, SID_A)["status"] == "clean"
-        assert _sidecar(other, SID_B)["status"] == "clean"
+        assert _sidecar(inst.default_vault, SID_A)["status"] == "clean"
+        assert _sidecar(inst.other, SID_B)["status"] == "clean"
 
     def test_same_key_in_two_vaults_flushes_both(self, tmp_path):
         """The split-session case: one session key captured into two vaults.
         No-arg flush flushes every dirty instance, each in its own vault."""
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("default", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_C).returncode == 0
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_C).returncode == 0
-        _commit_baseline(default_vault)
-        _commit_baseline(other)
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("default", inst, SID_C).returncode == 0
+        assert _candidate_into("trailhead", inst, SID_C).returncode == 0
+        _commit_baseline(inst.default_vault)
+        _commit_baseline(inst.other)
 
-        r = _run_cfg(["flush", "--session-id", SID_C],
-                     config_home=config_home, state=state, default_vault=default_vault)
+        r = _run_cfg(["flush", "--session-id", SID_C], inst)
         assert r.returncode == 0, r.stderr
-        assert _sidecar(default_vault, SID_C)["status"] == "clean"
-        assert _sidecar(other, SID_C)["status"] == "clean"
+        assert _sidecar(inst.default_vault, SID_C)["status"] == "clean"
+        assert _sidecar(inst.other, SID_C)["status"] == "clean"
 
     def test_session_show_renders_one_and_warns_naming_both_vaults(self, tmp_path):
-        config_home, state, default_vault, other = _two_vault_install(tmp_path)
-        assert _candidate_into("default", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_C).returncode == 0
-        assert _candidate_into("trailhead", config_home=config_home, state=state,
-                               default_vault=default_vault, sid=SID_C).returncode == 0
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("default", inst, SID_C).returncode == 0
+        assert _candidate_into("trailhead", inst, SID_C).returncode == 0
 
-        r = _run_cfg(["session", "show", "--session-id", SID_C],
-                     config_home=config_home, state=state, default_vault=default_vault)
+        r = _run_cfg(["session", "show", "--session-id", SID_C], inst)
         assert r.returncode == 0, r.stderr
         assert "default" in r.stderr and "trailhead" in r.stderr, r.stderr
