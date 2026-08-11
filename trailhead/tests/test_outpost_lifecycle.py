@@ -473,16 +473,25 @@ def _build_script(
 
 
 def _restart(
-    o, build_cmd: list[str], extra_env: dict[str, str] | None = None
+    o,
+    build_cmd: list[str],
+    extra_env: dict[str, str] | None = None,
+    restart_health_timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """Run ``restart`` the same orphaning way ``_start`` does. No cwd is set:
     ``restart`` runs the build with ``cwd=<checkout>`` itself, so the fake build
     script's relative writes land in the checkout regardless of the caller's cwd."""
-    return _run_verb(
-        o,
+    call = (
         "restart(node_bin=sys.executable, "
         "build_cmd=eval(os.environ['OUTPOST_TEST_BUILD_CMD']), "
-        "port=int(os.environ['OUTPOST_TEST_PORT']))",
+        "port=int(os.environ['OUTPOST_TEST_PORT'])"
+    )
+    if restart_health_timeout is not None:
+        call += f", restart_health_timeout={restart_health_timeout!r}"
+    call += ")"
+    return _run_verb(
+        o,
+        call,
         extra_env={**(extra_env or {}), "OUTPOST_TEST_BUILD_CMD": repr(build_cmd)},
     )
 
@@ -572,6 +581,37 @@ def test_restart_raises_when_new_daemon_never_answers_health(outpost, tmp_path):
     assert result.returncode != 0
     assert "OutpostLifecycleError" in result.stderr
     assert "health" in result.stderr.lower()
+
+
+def test_restart_raises_when_new_process_dies_but_stale_process_still_answers_health(
+    outpost, tmp_path
+):
+    # An unmanaged process is already bound to the port (not tracked by any
+    # pidfile trailhead knows about — e.g. a daemon started outside trailhead,
+    # or one whose pidfile was lost). restart's spawn dies immediately on
+    # EADDRINUSE, but /health keeps answering because the unmanaged process
+    # answers it. restart must not report success: the pid it recorded is
+    # dead, so it isn't the process actually serving /health.
+    unmanaged_script = tmp_path / "unmanaged_daemon.py"
+    unmanaged_script.write_text(FAKE_DAEMON)
+    unmanaged = subprocess.Popen(
+        [sys.executable, str(unmanaged_script)],
+        env={**os.environ, "HTTP_PORT": str(outpost.port)},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert _wait_until(lambda: _health_reachable(outpost.port), timeout=3.0)
+
+        build_cmd = _build_script(tmp_path)
+        result = _restart(outpost, build_cmd, restart_health_timeout=1.0)
+
+        assert result.returncode != 0
+        assert "OutpostLifecycleError" in result.stderr
+    finally:
+        unmanaged.kill()
+        unmanaged.wait(timeout=5)
 
 
 def test_restart_missing_build_command_raises_named_error(outpost):

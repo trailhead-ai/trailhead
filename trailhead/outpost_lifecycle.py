@@ -47,11 +47,13 @@ Contract & invariants
   running. On success it prints the hashed web bundle filenames found under
   ``<checkout>/dist-web/assets/`` so a stale-looking UI is diagnosable at a glance.
   ``restart`` does not trust ``start``'s return value alone: it polls ``/health``
-  briefly afterward (allowing for startup latency) and raises
-  :class:`OutpostLifecycleError` if the new process never answers — otherwise a
-  doomed spawn (e.g. dying on EADDRINUSE against a not-yet-dead old daemon) would
-  be reported as a successful restart while the old daemon keeps serving stale
-  content.
+  briefly afterward (allowing for startup latency), proving *some* process is
+  answering on the port, and then confirms the pid ``start()`` recorded is
+  still alive, proving it's *our* spawn that answered rather than an
+  unmanaged/old process still holding the port. :class:`OutpostLifecycleError`
+  is raised if either check fails — otherwise a doomed spawn (e.g. dying on
+  EADDRINUSE against a not-yet-dead old daemon) would be reported as a
+  successful restart while the old daemon keeps serving stale content.
 
 status exit codes (structured, so callers/tests can branch on state):
     EXIT_RUNNING (0)  pid alive
@@ -194,6 +196,19 @@ def _resolve_entrypoint(env: dict[str, str] | None) -> tuple[Path, Path]:
 
 
 def _pid_alive(pid: int) -> bool:
+    # If pid is our own child (e.g. the process start() just spawned, checked
+    # later in the same restart() call), a dead-but-unreaped child is a zombie:
+    # os.kill(pid, 0) reports zombies as alive since the OS still holds the
+    # process table entry until it's waited on. Reap opportunistically first so
+    # a crashed spawn (e.g. EADDRINUSE) is detected as dead promptly rather than
+    # appearing alive until something else reaps it.
+    try:
+        reaped_pid, _status = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        pass  # not our child — e.g. pid read from a pidfile written by a prior process
+    else:
+        if reaped_pid == pid:
+            return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -237,6 +252,26 @@ def _wait_for_health(port: int, total_timeout: float, poll_interval: float = 0.1
         if time.time() >= deadline:
             return None
         time.sleep(poll_interval)
+
+
+# A spawn that's about to die on EADDRINUSE typically crashes within tens of ms
+# of the bind attempt. /health can answer (from a stale process still holding
+# the port) before that crash lands, so the pid-liveness check settles briefly
+# rather than sampling once — a single immediate sample would race the crash.
+_PID_SETTLE_SECONDS = 0.3
+_PID_SETTLE_POLL_INTERVAL = 0.02
+
+
+def _settled_pid_alive(pid: int, timeout: float = _PID_SETTLE_SECONDS) -> bool:
+    """Poll pid liveness for a short settle window. Returns False as soon as
+    the pid is observed dead; returns True only if it stayed alive throughout."""
+    deadline = time.time() + timeout
+    while True:
+        if not _pid_alive(pid):
+            return False
+        if time.time() >= deadline:
+            return True
+        time.sleep(_PID_SETTLE_POLL_INTERVAL)
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +425,10 @@ def restart(
     daemon) would otherwise be reported as a successful restart while the old
     process keeps serving the stale bundle. So restart polls ``/health`` for up
     to ``restart_health_timeout`` seconds (allowing for normal startup latency)
-    and raises OutpostLifecycleError, naming the situation, if it never answers.
+    to prove the port answers, then reads back the pid ``start()`` recorded and
+    confirms it is still alive, to prove it's our spawn — not a stale process
+    still holding the port — that answered. OutpostLifecycleError is raised,
+    naming what happened, if either check fails.
     """
     checkout = _resolve_checkout(env)
     cmd = build_cmd if build_cmd is not None else list(DEFAULT_BUILD_CMD)
@@ -429,6 +467,18 @@ def restart(
             f"outpost restart: rebuilt and spawned a new process but /health never "
             f"answered on port {port} within {restart_health_timeout:.0f}s; the new "
             "daemon may have failed to start (check the outpost log)."
+        )
+
+    # /health answering alone doesn't prove OUR spawn is what answered it — an
+    # unmanaged/old process could still be holding the port, in which case our
+    # spawn just died on EADDRINUSE while the stale process keeps serving.
+    # Confirm the pid start() recorded is still alive before trusting success.
+    new_pid = _read_pid(_pidfile(env))
+    if new_pid is None or not _settled_pid_alive(new_pid):
+        raise OutpostLifecycleError(
+            "outpost restart: /health answered but the process start() spawned "
+            f"(pid {new_pid}) is not alive; another process is likely still "
+            f"holding port {port} (check the outpost log)."
         )
 
     return rc
