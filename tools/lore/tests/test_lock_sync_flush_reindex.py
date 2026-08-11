@@ -1258,7 +1258,6 @@ class TestFlushCommitLockGranularity:
         flush's explicit-paths-only contract. The order is fixed session-key →
         vault so the two can never be taken in opposition.
         """
-        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
         flush = load_script("lore.cli.flush")
         locking = _locking()
         vault = _git_vault(tmp_path / "vault")
