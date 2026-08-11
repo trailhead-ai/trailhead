@@ -422,13 +422,143 @@ def test_entrypoint_outside_checkout_raises_named_error_nothing_spawned(tmp_path
 
 
 # ---------------------------------------------------------------------------
+# restart — rebuild-then-restart
+# ---------------------------------------------------------------------------
+
+
+def _build_script(
+    tmp_path: Path,
+    *,
+    exit_code: int = 0,
+    assets: tuple[str, ...] = ("index-abc123.js", "index-def456.css"),
+    record_old_pid_env: str | None = None,
+) -> list[str]:
+    """A fake build_cmd: writes dist-web/assets/* under cwd, then exits.
+
+    When ``record_old_pid_env`` names an env var holding a pid, the script also
+    writes ``build_order.txt`` recording whether that pid was still alive at the
+    moment the build ran — used to prove build-before-stop ordering.
+    """
+    script = tmp_path / "fake_build.py"
+    lines = [
+        "import os, pathlib, sys",
+        "assets = pathlib.Path('dist-web/assets')",
+        "assets.mkdir(parents=True, exist_ok=True)",
+    ]
+    for name in assets:
+        lines.append(f"(assets / {name!r}).write_text('built')")
+    if record_old_pid_env:
+        lines += [
+            f"old_pid = os.environ.get({record_old_pid_env!r})",
+            "alive = True",
+            "if old_pid:",
+            "    try:",
+            "        os.kill(int(old_pid), 0)",
+            "    except ProcessLookupError:",
+            "        alive = False",
+            "    pathlib.Path('build_order.txt').write_text('alive' if alive else 'dead')",
+        ]
+    lines.append(f"sys.exit({exit_code})")
+    script.write_text("\n".join(lines) + "\n")
+    return [sys.executable, str(script)]
+
+
+def _restart(o, build_cmd: list[str], extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """Run ``restart`` in a short-lived subprocess, mirroring ``_start`` — so the
+    freshly (re)spawned daemon is genuinely orphaned to init on exit rather than
+    left as pytest's own child."""
+    code = (
+        "import os, sys\n"
+        "from trailhead import outpost_lifecycle as ol\n"
+        "sys.exit(ol.restart(node_bin=sys.executable, "
+        "build_cmd=eval(os.environ['OUTPOST_TEST_BUILD_CMD']), "
+        "port=int(os.environ['OUTPOST_TEST_PORT'])))\n"
+    )
+    proc_env = {
+        **o.env,
+        **(extra_env or {}),
+        "OUTPOST_TEST_PORT": str(o.port),
+        "OUTPOST_TEST_BUILD_CMD": repr(build_cmd),
+        "PYTHONPATH": str(_REPO_ROOT),
+    }
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(o.checkout),
+        env=proc_env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+
+def test_restart_running_daemon_builds_before_stopping(outpost, tmp_path):
+    assert _start(outpost) == 0
+    old_pid = _pid(outpost)
+    assert _wait_until(lambda: _pid_alive(old_pid), timeout=3.0)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+
+    build_cmd = _build_script(tmp_path, record_old_pid_env="OUTPOST_TEST_OLD_PID")
+    result = _restart(outpost, build_cmd, extra_env={"OUTPOST_TEST_OLD_PID": str(old_pid)})
+
+    assert result.returncode == 0, result.stderr
+    assert (outpost.checkout / "build_order.txt").read_text() == "alive"
+
+    new_pid = _pid(outpost)
+    assert new_pid != old_pid
+    assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
+    assert _wait_until(lambda: not _pid_alive(old_pid), timeout=3.0)
+
+
+def test_restart_output_includes_asset_filenames(outpost, tmp_path):
+    assert _start(outpost) == 0
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+
+    build_cmd = _build_script(tmp_path, assets=("index-abc123.js", "index-def456.css"))
+    result = _restart(outpost, build_cmd)
+
+    assert result.returncode == 0, result.stderr
+    assert "index-abc123.js" in result.stdout
+    assert "index-def456.css" in result.stdout
+
+
+def test_restart_build_failure_raises_named_error_daemon_untouched(outpost, tmp_path):
+    assert _start(outpost) == 0
+    old_pid = _pid(outpost)
+    assert _wait_until(lambda: _pid_alive(old_pid), timeout=3.0)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+
+    build_cmd = _build_script(tmp_path, exit_code=1)
+
+    with pytest.raises(OutpostLifecycleError):
+        outpost_lifecycle.restart(env=outpost.env, build_cmd=build_cmd, port=outpost.port)
+
+    assert _pid_alive(old_pid)
+    pidfile = outpost.state_dir / "outpost.pid"
+    assert pidfile.exists()
+    assert int(pidfile.read_text().strip()) == old_pid
+
+
+def test_restart_when_stopped_builds_then_starts(outpost, tmp_path):
+    assert not (outpost.state_dir / "outpost.pid").exists()
+
+    build_cmd = _build_script(tmp_path)
+    result = _restart(outpost, build_cmd)
+
+    assert result.returncode == 0, result.stderr
+    pidfile = outpost.state_dir / "outpost.pid"
+    assert pidfile.exists()
+    new_pid = int(pidfile.read_text().strip())
+    assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
+
+
+# ---------------------------------------------------------------------------
 # CLI wiring
 # ---------------------------------------------------------------------------
 
 
 def test_outpost_verbs_parse():
     parser = cli._build_parser()
-    for verb in ("start", "stop", "status"):
+    for verb in ("start", "stop", "status", "restart"):
         args = parser.parse_args(["outpost", verb])
         assert args.command == "outpost"
         assert args.outpost_command == verb

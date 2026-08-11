@@ -1,7 +1,7 @@
-"""Lifecycle management for the outpost daemon: ``trailhead outpost start|stop|status``.
+"""Lifecycle management for the outpost daemon: ``trailhead outpost start|stop|status|restart``.
 
 Outpost is a long-running local Node/TS daemon (loopback only, port 7313) plus a
-web UI. There is no supervisor (no launchd/systemd) in this version — these three
+web UI. There is no supervisor (no launchd/systemd) in this version — these four
 verbs ARE the stable management interface. A supervised backend can slot in behind
 the same verbs later.
 
@@ -35,6 +35,14 @@ Contract & invariants
   this via its own ``/health`` probe.
 * **Idempotence.** A second ``start`` while already running is a no-op. ``stop`` on a
   stopped daemon is a no-op.
+* **Rebuild-before-restart.** ``restart`` resolves the checkout, runs the (injectable,
+  default ``["npm", "run", "build"]``) full build with ``cwd=<checkout>``, THEN calls
+  ``stop`` then ``start``. The build runs *before* stop: a nonzero build exit raises
+  :class:`OutpostLifecycleError` and neither stop nor start ever runs, so a running
+  daemon is left untouched on a broken build. Because ``stop`` on a stopped daemon is
+  already a no-op, ``restart`` also serves as "build and start" when nothing is
+  running. On success it prints the hashed web bundle filenames found under
+  ``<checkout>/dist-web/assets/`` so a stale-looking UI is diagnosable at a glance.
 
 status exit codes (structured, so callers/tests can branch on state):
     EXIT_RUNNING (0)  pid alive
@@ -68,6 +76,14 @@ DAEMON_ENTRYPOINT_PARTS = ("dist", "server", "index.js")
 DAEMON_HOST = "127.0.0.1"
 DAEMON_PORT = 7313
 
+# `npm run build` chains build:web + tsc + the migrations copy, producing both the
+# compiled dist/server/index.js entrypoint and the dist-web/ static bundle.
+DEFAULT_BUILD_CMD = ["npm", "run", "build"]
+
+# vite emits content-hashed asset filenames under this directory relative to the
+# checkout root; printing them after a build makes staleness visible at a glance.
+WEB_ASSETS_DIR_PARTS = ("dist-web", "assets")
+
 EXIT_RUNNING = 0
 EXIT_STOPPED = 3
 EXIT_STALE = 4
@@ -93,13 +109,15 @@ def _pidfile(env: dict[str, str] | None) -> Path:
     return state_dir(APP, env=env) / PIDFILE_NAME
 
 
-def _resolve_entrypoint(env: dict[str, str] | None) -> tuple[Path, Path]:
-    """Read the outpost config, resolve + validate the daemon entrypoint.
+def _resolve_checkout(env: dict[str, str] | None) -> Path:
+    """Read the outpost config and resolve+validate just the checkout directory.
 
-    Returns ``(checkout, entrypoint)``, both canonicalized. Raises
-    OutpostLifecycleError if the config is missing/malformed, the checkout key is
-    absent or not absolute, or the resolved entrypoint escapes the checkout, does
-    not exist, or is not a regular file.
+    Returns the canonicalized checkout path. Raises OutpostLifecycleError if the
+    config is missing/malformed or the checkout key is absent, not absolute, or
+    not an existing directory. Does not touch the built entrypoint — callers that
+    need it (e.g. before spawning) should go through :func:`_resolve_entrypoint`;
+    callers that are about to *build* it (e.g. ``restart``) should not require it
+    to already exist.
     """
     config_path = config_dir(APP, env=env) / CONFIG_FILENAME
     if not config_path.is_file():
@@ -130,7 +148,18 @@ def _resolve_entrypoint(env: dict[str, str] | None) -> tuple[Path, Path]:
             f"outpost checkout {checkout} does not exist or is not a directory."
         )
 
-    checkout = checkout.resolve()
+    return checkout.resolve()
+
+
+def _resolve_entrypoint(env: dict[str, str] | None) -> tuple[Path, Path]:
+    """Read the outpost config, resolve + validate the daemon entrypoint.
+
+    Returns ``(checkout, entrypoint)``, both canonicalized. Raises
+    OutpostLifecycleError if the config is missing/malformed, the checkout key is
+    absent or not absolute, or the resolved entrypoint escapes the checkout, does
+    not exist, or is not a regular file.
+    """
+    checkout = _resolve_checkout(env)
     entrypoint = checkout.joinpath(*DAEMON_ENTRYPOINT_PARTS).resolve()
 
     if not entrypoint.is_relative_to(checkout):
@@ -313,3 +342,47 @@ def status(
     contract_version = health.get("contract_version")
     print(f"outpost: running (pid {pid}); /health ok, contract_version={contract_version}.")
     return EXIT_RUNNING
+
+
+def restart(
+    *,
+    env: dict[str, str] | None = None,
+    node_bin: str = "node",
+    build_cmd: list[str] | None = None,
+    port: int = DAEMON_PORT,
+    health_timeout: float = 2.0,
+    stop_timeout: float = _STOP_TIMEOUT_SECONDS,
+) -> int:
+    """Rebuild the outpost checkout, then stop and restart the daemon.
+
+    Resolves + validates the checkout first (not the built entrypoint — the build
+    about to run is what produces it). Runs the full build with ``cwd=<checkout>``
+    BEFORE touching the running daemon: a nonzero build exit raises
+    OutpostLifecycleError and stop/start never run, leaving any running daemon
+    untouched. ``stop`` on a stopped daemon is already a no-op, so this also works
+    as "build and start" when nothing is running.
+    """
+    checkout = _resolve_checkout(env)
+    cmd = build_cmd if build_cmd is not None else list(DEFAULT_BUILD_CMD)
+
+    result = subprocess.run(
+        cmd,
+        cwd=str(checkout),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise OutpostLifecycleError(
+            f"outpost build failed (exit {result.returncode}): {' '.join(cmd)}\n"
+            f"{result.stderr.strip()}"
+        )
+
+    assets_dir = checkout.joinpath(*WEB_ASSETS_DIR_PARTS)
+    asset_names = sorted(p.name for p in assets_dir.glob("*") if p.is_file()) if assets_dir.is_dir() else []
+    if asset_names:
+        print(f"outpost build ok; web bundle: {', '.join(asset_names)}")
+    else:
+        print(f"outpost build ok; no assets found under {assets_dir}.")
+
+    stop(env=env, port=port, timeout=stop_timeout, health_timeout=health_timeout)
+    return start(env=env, node_bin=node_bin, port=port, health_timeout=health_timeout)
