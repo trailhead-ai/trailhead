@@ -514,10 +514,24 @@ def _cmd_record_rename(args) -> int:
 
       - **stdout**: the new RECORD_ID, and nothing else — the sole parseable
         line, matching ``record create``.
-      - **stderr**: the ``renamed:`` line plus one line per referencing record
-        rewritten, named individually with its vault, so a partial failure
-        names exactly what did and did not land. References in ``shared: true``
-        vaults are listed as skipped unless ``--include-shared`` is passed.
+      - **stderr**: the ``renamed:`` line (naming the source vault) plus one
+        line per referencing record the sweep touched, named individually with
+        its vault, so a partial failure names exactly what did and did not
+        land. References in ``shared: true`` vaults are listed as skipped
+        unless ``--include-shared`` is passed, and a record the sweep could not
+        read or write is listed as ``failed:`` with its reason.
+
+    The sweep is fault-isolated, so one bad record no longer aborts a rename
+    whose primary move has already landed. The full accumulated list is printed
+    whether or not every record succeeded — a partial failure must be
+    diagnosable from the output alone — and the exit status is non-zero when
+    any record failed, so a caller cannot mistake it for a clean run.
+
+    ``--vault NAME`` names the vault holding the record to rename, mirroring
+    ``record show``/``record delete --vault``: with the same stem in more than
+    one configured vault, config order alone may pick the wrong one. It narrows
+    only the lookup of the record being renamed; the inbound-reference sweep
+    still covers every configured vault.
 
     ``--dry-run`` writes nothing and prints the *predicted* new RECORD_ID —
     computed through the same ``_unique_stem`` path the real run uses, so the
@@ -542,11 +556,19 @@ def _cmd_record_rename(args) -> int:
     dry_run = bool(getattr(args, "dry_run", False))
     include_shared = bool(getattr(args, "include_shared", False))
 
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        vault_name = named_vault.name
+
     try:
         with record_store_mod.index_transaction() as conn:
             report = rename_mod.rename_record(
                 record_id, new_title, conn,
                 dry_run=dry_run, include_shared=include_shared,
+                vault_name=vault_name,
             )
             if not dry_run:
                 conn.commit()
@@ -564,9 +586,16 @@ def _cmd_record_rename(args) -> int:
         return 1
 
     verb = "would rename" if dry_run else "renamed"
-    print(f"{verb}: {report.old_id} -> {report.new_id}", file=sys.stderr)
+    print(
+        f"{verb}: {report.old_id} -> {report.new_id} (vault: {report.vault})",
+        file=sys.stderr,
+    )
+    failures = 0
     for rw in report.rewrites:
-        if rw.skipped:
+        if rw.error is not None:
+            failures += 1
+            print(f"failed: {rw.vault}: {rw.record_id}: {rw.error}", file=sys.stderr)
+        elif rw.skipped:
             print(
                 f"skipped (shared vault; pass --include-shared to rewrite): "
                 f"{rw.vault}: {rw.record_id}",
@@ -577,6 +606,13 @@ def _cmd_record_rename(args) -> int:
             print(f"{action}: {rw.vault}: {rw.record_id}", file=sys.stderr)
 
     print(report.new_id)
+    if failures:
+        print(
+            f"error: {failures} record(s) still reference {report.old_id}; "
+            f"rerun the same rename once the cause is fixed",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -1517,6 +1553,12 @@ def add_record_subparser(sub) -> None:
         "--dry-run", dest="dry_run", action="store_true", default=False,
         help="Print the would-be new RECORD_ID and the full would-be rewrite "
              "list without writing anything.",
+    )
+    p_record_rename.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Name the configured vault holding the record to rename (use when "
+             "the same stem exists in more than one vault). The inbound-reference "
+             "sweep still covers every configured vault.",
     )
     p_record_rename.add_argument(
         "--include-shared", dest="include_shared", action="store_true", default=False,

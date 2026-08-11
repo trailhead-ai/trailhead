@@ -3,12 +3,23 @@
 Covers the rename subcommand end-to-end through the CLI: the primary rename
 (stem + sidecar title + index row), the cross-vault inbound-reference sweep
 (bare/kind-qualified wikilinks, ``related.<kind>`` sidecar lists, task
-``depends-on`` lists), the shared-vault skip/opt-in split, ``--dry-run``,
-idempotent re-run, collision suffixing, refusals, and provenance.
+``depends-on`` lists and ``parent`` edges), the shared-vault skip/opt-in split,
+``--dry-run``, ``--vault`` source targeting, collision suffixing, refusals, and
+provenance.
 
-The sweep's write-order safety (copy → repoint → delete) is exercised
-in-process at the bottom of the file, since the failure it guards against is
-an index write that raises mid-move.
+Crash-resume gets its own section: the identity gate that decides whether a
+record sitting at the new stem IS the one that moved, the index repoint a
+resumed run owes the interrupted one, and the refusal when two records share
+the new title and the landed one cannot be told apart.
+
+Sweep fault isolation is covered too — one unreadable record, or a configured
+vault whose directory does not exist, must not abort a rename whose primary
+move has already landed.
+
+Lock scope and the sweep's write-order safety (copy → repoint → delete) are
+exercised in-process at the bottom of the file, since the behaviors they guard
+(a lock held across placement, an index write that raises mid-move) are not
+observable from a subprocess.
 """
 
 import json
@@ -319,6 +330,11 @@ def test_provenance_restamped_on_touched_records_only(install):
     after_ref = install.sidecar("default", "spec/ref")
     assert after_ref["created-at"] == before_ref["created-at"]
     assert after_ref["updated-by"] == "tester@example.com"
+    # The rewrite is a real update, so the touched record's clock advanced.
+    # (Provenance is second-precision, so a same-second rewrite compares equal —
+    # the assertion is that it never goes backwards and is always re-stamped.)
+    assert "updated-at" in after_ref
+    assert after_ref["updated-at"] >= before_ref["updated-at"]
     # Untouched record is byte-identical.
     assert before_untouched.read_bytes() == before_untouched_bytes
 
@@ -367,3 +383,295 @@ def test_move_order_leaves_no_data_loss_when_the_index_repoint_fails(tmp_path, m
         assert (vault / "adr" / "old-name.md").read_text() == "body"
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Crash-resume identity
+# ---------------------------------------------------------------------------
+
+
+def _strand(install, vault, record_id):
+    """Delete a record's artifacts, emulating a move that landed elsewhere."""
+    kind, name = record_id.split("/", 1)
+    for suffix in (".md", ".json"):
+        (install.roots[vault] / kind / f"{name}{suffix}").unlink()
+
+
+def test_resume_refuses_when_the_landed_record_is_ambiguous(install):
+    """The base stem may be held by a stranger; resume must not adopt it.
+
+    Faithful replay of the reported failure: a first run collided with an
+    existing ``Target Name``, suffixed to ``target-name-2``, and then failed
+    mid-sweep. Re-issuing the command must not silently repoint every inbound
+    reference at the stranger sitting on the unsuffixed stem. Two records
+    legitimately share the title here, so the landed one cannot be identified —
+    the rename refuses rather than guessing.
+    """
+    install.create("default", "adr", "Target Name", body="the stranger")
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+
+    adr_dir = install.roots["default"] / "adr"
+    sidecar = json.loads((adr_dir / "old-name.json").read_text())
+    sidecar["title"] = "Target Name"
+    (adr_dir / "target-name-2.md").write_text("x")
+    (adr_dir / "target-name-2.json").write_text(json.dumps(sidecar))
+    _strand(install, "default", old_id)
+
+    proc = install.cli(["record", "rename", old_id, "--title", "Target Name"])
+    assert proc.returncode != 0
+    assert "error:" in proc.stderr
+    # Nothing was repointed at the stranger.
+    assert install.body("default", "spec/ref") == "see [[adr/old-name]]"
+    assert install.body("default", "adr/target-name") == "the stranger"
+
+
+def test_resume_completes_when_the_landed_record_is_the_renamed_one(install):
+    """A genuine crash-resume — same title at the base stem — still repairs."""
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+
+    # Emulate a crash after the primary move landed but before the sweep ran.
+    adr_dir = install.roots["default"] / "adr"
+    sidecar = json.loads((adr_dir / "old-name.json").read_text())
+    sidecar["title"] = "New Name"
+    (adr_dir / "new-name.md").write_text((adr_dir / "old-name.md").read_text())
+    (adr_dir / "new-name.json").write_text(json.dumps(sidecar))
+    _strand(install, "default", old_id)
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "adr/new-name"
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
+    # The stale index row is repointed rather than left as a ghost.
+    assert install.index_names("default", "adr") == ["new-name"]
+
+
+# ---------------------------------------------------------------------------
+# Sweep fault isolation
+# ---------------------------------------------------------------------------
+
+
+def test_one_unreadable_record_does_not_abort_the_sweep(install):
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+    install.create("other", "spec", "Bad", body="see [[adr/old-name]]")
+    (install.roots["other"] / "spec" / "bad.md").write_bytes(b"\xff\xfe not utf-8")
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+
+    # The primary move landed and every readable reference was still rewritten.
+    assert install.sidecar("default", "adr/new-name")["title"] == "New Name"
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
+
+    # The one failure is named on stderr, alongside what DID land, and the
+    # exit status reports the partial failure.
+    assert proc.returncode != 0
+    assert "spec/bad" in proc.stderr
+    assert "spec/ref" in proc.stderr
+
+
+def test_a_configured_vault_with_no_directory_is_skipped(install):
+    """A configured-but-not-yet-created vault contributes nothing, and is benign."""
+    cfg_path = install.config_home / "lore" / "config.json"
+    cfg = json.loads(cfg_path.read_text())
+    cfg["vaults"].append(
+        {"name": "ghost", "scope": "team", "path": str(install.tmp_path / "nope")}
+    )
+    cfg_path.write_text(json.dumps(cfg, indent=2))
+
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+
+    proc = install.cli(["record", "rename", old_id, "--title", "New Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.body("default", "spec/ref") == "see [[adr/new-name]]"
+
+
+# ---------------------------------------------------------------------------
+# Task graph edges
+# ---------------------------------------------------------------------------
+
+
+def test_task_parent_edge_is_rewritten(install):
+    parent_id = install.create("default", "task", "Parent Task", body="x")
+    install.create(
+        "default", "task", "Child", body="x", extra=["--parent", "parent-task"]
+    )
+
+    proc = install.cli(["record", "rename", parent_id, "--title", "Renamed Parent"])
+    assert proc.returncode == 0, proc.stderr
+    assert install.sidecar("default", "task/child")["parent"] == "renamed-parent"
+
+
+# ---------------------------------------------------------------------------
+# --vault
+# ---------------------------------------------------------------------------
+
+
+def test_vault_flag_targets_the_named_source_vault(install):
+    install.create("default", "adr", "Dup", body="in default")
+    install.create("other", "adr", "Dup", body="in other")
+
+    proc = install.cli(
+        ["record", "rename", "adr/dup", "--vault", "other", "--title", "Renamed"]
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "adr/renamed"
+    # The named vault's record moved; the same-named record in `default` did not.
+    assert install.body("other", "adr/renamed") == "in other"
+    assert install.body("default", "adr/dup") == "in default"
+    # The source vault is named on the `renamed:` line.
+    renamed_line = next(
+        line for line in proc.stderr.splitlines() if line.startswith("renamed:")
+    )
+    assert "other" in renamed_line
+
+
+def test_vault_flag_rejects_a_vault_that_does_not_hold_the_record(install):
+    install.create("default", "adr", "Dup", body="in default")
+    before = install.snapshot()
+
+    proc = install.cli(
+        ["record", "rename", "adr/dup", "--vault", "other", "--title", "Renamed"]
+    )
+    assert proc.returncode != 0
+    assert install.snapshot() == before
+
+
+# ---------------------------------------------------------------------------
+# Locking (in-process)
+# ---------------------------------------------------------------------------
+
+
+def _single_vault_install(tmp_path, monkeypatch):
+    """A one-vault install wired through env, for in-process library calls."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    cfg_home = tmp_path / "cfg"
+    (cfg_home / "lore").mkdir(parents=True)
+    (cfg_home / "lore" / "config.json").write_text(
+        json.dumps({"vaults": [{"name": "default", "scope": "default",
+                                "path": str(vault)}]}),
+        encoding="utf-8",
+    )
+    state = tmp_path / "state"
+    state.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    return vault
+
+
+def test_placement_and_move_run_under_the_vault_write_lock(tmp_path, monkeypatch):
+    """The stem is claimed and consumed inside one held vault lock.
+
+    Otherwise a concurrent create can take the placed stem in the window between
+    ``place_record`` returning it and ``move_record`` writing there.
+    """
+    rename = load_script("lore.record.rename")
+    store = rename.store
+    index = load_script("lore.search.index")
+
+    vault = _single_vault_install(tmp_path, monkeypatch)
+    conn = index.open_index()
+    try:
+        loc = store.place_record("Old Name", "adr", None, str(vault))
+        store.validate_and_write(
+            loc, {"kind": "adr", "title": "Old Name", "status": "draft"}, "x", conn
+        )
+        conn.commit()
+
+        held = {}
+        real_place = store.place_record
+        real_move = store.move_record
+
+        def lock_depth():
+            key = str(store.locking._resolve_key(vault / store.locking.VAULT_LOCK_NAME))
+            return store.locking._depths().get(key, 0)
+
+        def spy_place(*a, **kw):
+            held["place"] = lock_depth()
+            return real_place(*a, **kw)
+
+        def spy_move(*a, **kw):
+            held["move"] = lock_depth()
+            return real_move(*a, **kw)
+
+        monkeypatch.setattr(store, "place_record", spy_place)
+        monkeypatch.setattr(store, "move_record", spy_move)
+
+        rename.rename_record("adr/old-name", "New Name", conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert held["place"] >= 1, "place_record ran outside the vault write lock"
+    assert held["move"] >= 1, "move_record ran outside the vault write lock"
+
+
+def test_session_bodies_are_rewritten_under_the_session_lock(tmp_path, monkeypatch):
+    """A session body is appended to by a live agent; the sweep must serialize."""
+    rename = load_script("lore.record.rename")
+    store = rename.store
+    index = load_script("lore.search.index")
+
+    vault = _single_vault_install(tmp_path, monkeypatch)
+    conn = index.open_index()
+    keys = []
+    try:
+        loc = store.place_record("Old Name", "adr", None, str(vault))
+        store.validate_and_write(
+            loc, {"kind": "adr", "title": "Old Name", "status": "draft"}, "x", conn
+        )
+        sess = store.place_record("sess-guid-1", "session", None, str(vault))
+        store.validate_and_write(
+            sess,
+            {"kind": "session", "title": "A Session", "status": "dirty"},
+            "see [[adr/old-name]]",
+            conn,
+        )
+        conn.commit()
+
+        real_lock = rename.locking.session_write_lock
+
+        def spy_lock(vault_root, key, **kw):
+            keys.append(key)
+            return real_lock(vault_root, key, **kw)
+
+        monkeypatch.setattr(rename.locking, "session_write_lock", spy_lock)
+
+        rename.rename_record("adr/old-name", "New Name", conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    body = (vault / "session" / "sess-guid-1.md").read_text(encoding="utf-8")
+    assert body == "see [[adr/new-name]]"
+    assert keys == ["sess-guid-1"]
+
+
+def test_resume_adopts_the_suffixed_stem_the_move_actually_landed_on(install):
+    """The landed record is found by title, so a collision-suffixed move resumes.
+
+    The base stem is held by a stranger whose own title differs (it merely slugs
+    to the same stem), so exactly one record carries the new title and the
+    resume is unambiguous — it adopts the ``-2`` stem the move actually used.
+    """
+    install.create("default", "adr", "Target: Name", body="the stranger")
+    old_id = install.create("default", "adr", "Old Name", body="x")
+    install.create("default", "spec", "Ref", body="see [[adr/old-name]]")
+
+    # Emulate a crash after the suffixed move landed but before the sweep ran.
+    adr_dir = install.roots["default"] / "adr"
+    sidecar = json.loads((adr_dir / "old-name.json").read_text())
+    sidecar["title"] = "Target Name"
+    (adr_dir / "target-name-2.md").write_text((adr_dir / "old-name.md").read_text())
+    (adr_dir / "target-name-2.json").write_text(json.dumps(sidecar))
+    _strand(install, "default", old_id)
+
+    proc = install.cli(["record", "rename", old_id, "--title", "Target Name"])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "adr/target-name-2"
+    assert install.body("default", "spec/ref") == "see [[adr/target-name-2]]"
+    # The stranger is untouched.
+    assert install.body("default", "adr/target-name") == "the stranger"
