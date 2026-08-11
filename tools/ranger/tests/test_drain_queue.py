@@ -363,5 +363,68 @@ def test_absent_camp_cli_raises_a_named_error_with_remediation(monkeypatch, tmp_
     assert "install camp or adjust PATH" in str(exc.value)
 
 
+# ---------------------------------------------------------------------------
+# Slug normalization delegates to camp.spine, and shared default runner
+# ---------------------------------------------------------------------------
+
+
+def test_derive_slug_delegates_to_camp_spine_normalize_slug(monkeypatch):
+    """`derive_slug` is not its own regex — it calls camp's own normalizer.
+    Monkeypatch that call to a distinguishable stub and confirm the drain
+    module reflects it, proving there is no local reimplementation left."""
+    import camp.spine as camp_spine
+
+    monkeypatch.setattr(
+        camp_spine, "normalize_slug", lambda raw: ("stubbed-slug-value", True)
+    )
+
+    assert drain_queue.derive_slug("Fix Bug!!") == "stubbed-slug-value"
+
+
+def test_derive_slug_raises_named_error_when_camp_bootstrap_fails(monkeypatch):
+    """When camp is not importable, `derive_slug` raises `QueueDeriveError`
+    naming the same remediation `ranger.sweep.preflight` already uses,
+    rather than letting a raw ImportError escape."""
+
+    def boom():
+        raise drain_queue.QueueDeriveError(
+            "camp is not importable, so no slug can be normalized (no module "
+            "named 'camp'); install camp first: trailhead install --plugin camp"
+        )
+
+    monkeypatch.setattr(drain_queue, "_import_camp_spine", boom)
+
+    with pytest.raises(drain_queue.QueueDeriveError) as exc:
+        drain_queue.derive_slug("Fix Bug!!")
+
+    assert "install camp first: trailhead install --plugin camp" in str(exc.value)
+
+
+def test_run_camps_default_runner_is_sweep_queues_shared_default_runner():
+    """`run_camp`'s no-runner-injected path resolves to
+    `ranger.sweep.queue.default_runner` — proves the duplicate
+    `_default_runner` copy is gone rather than merely renamed in place."""
+    from ranger.sweep import queue as sweep_queue
+
+    assert drain_queue.default_runner is sweep_queue.default_runner
+
+
+def test_run_camp_picks_up_a_patched_sweep_default_runner(monkeypatch):
+    """Patching `ranger.sweep.queue.default_runner` and re-binding the name
+    in the drain module is what `run_camp`'s no-runner path actually calls —
+    confirms it is the shared object, not a frozen local copy."""
+    captured = {}
+
+    def fake_default_runner(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(drain_queue, "default_runner", fake_default_runner)
+
+    drain_queue.run_camp(["list", "--json"], runner=None)
+
+    assert captured["cmd"] == ["camp", "list", "--json"]
+
+
 # The drain outcome grammar lives in `ranger.drain.report`, and so do its
 # tests (`test_drain_report.py`) — this module only derives the queue.

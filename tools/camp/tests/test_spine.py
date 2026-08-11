@@ -51,33 +51,33 @@ def test_no_dev_env_in_sys_modules_after_import() -> None:
 
 
 def test_normalize_slug_lowercases() -> None:
-    from camp.spine import _normalize_slug
+    from camp.spine import normalize_slug
 
-    result, changed = _normalize_slug("MySlug")
+    result, changed = normalize_slug("MySlug")
     assert result == "myslug"
     assert changed is True
 
 
 def test_normalize_slug_replaces_non_alnum() -> None:
-    from camp.spine import _normalize_slug
+    from camp.spine import normalize_slug
 
-    result, changed = _normalize_slug("my feature branch")
+    result, changed = normalize_slug("my feature branch")
     assert result == "my-feature-branch"
     assert changed is True
 
 
 def test_normalize_slug_trims_dashes() -> None:
-    from camp.spine import _normalize_slug
+    from camp.spine import normalize_slug
 
-    result, changed = _normalize_slug("-hello-")
+    result, changed = normalize_slug("-hello-")
     assert result == "hello"
     assert changed is True
 
 
 def test_normalize_slug_already_clean() -> None:
-    from camp.spine import _normalize_slug
+    from camp.spine import normalize_slug
 
-    result, changed = _normalize_slug("clean-slug-123")
+    result, changed = normalize_slug("clean-slug-123")
     assert result == "clean-slug-123"
     assert changed is False
 

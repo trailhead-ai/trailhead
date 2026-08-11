@@ -92,8 +92,13 @@ class QueueDeriveError(Exception):
     as JSON."""
 
 
-def _default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-    """Production runner: subprocess.run with shell=False, output captured as text."""
+def default_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """Production runner: subprocess.run with shell=False, output captured as text.
+
+    Public so `ranger.drain.queue.run_camp` can share this exact runner
+    rather than carrying its own duplicate copy — see that module's
+    docstring for why the two are meant to be the same seam.
+    """
     kwargs.setdefault("capture_output", True)
     kwargs.setdefault("text", True)
     kwargs.setdefault("check", False)
@@ -106,7 +111,7 @@ def run_lore(argv: list[str], *, runner: Runner | None) -> Any:
     Shared with `ranger.sweep.preflight`, which shells to `lore vault resolve`
     through the same seam so a sweep's every lore call is stubbable at one point.
     """
-    effective = runner if runner is not None else _default_runner
+    effective = runner if runner is not None else default_runner
     cmd = ["lore", *argv]
     # An absent (or unexecutable) `lore` is a dependency failure, not a bug:
     # nothing enforces plugin dependencies at install time, so these runtime
