@@ -524,6 +524,160 @@ def test_force_redefine_preserves_hand_added_harness_and_shared_vaults(author_en
     ]
 
 
+def test_force_redefine_preserves_member_base(author_env):
+    """A hand-authored member `base` survives a --force re-author when that
+    member is re-passed by name, instead of being silently dropped back to
+    the "origin/main" default."""
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    assert 'repo_root = ' in text
+    text = text.replace(
+        f'repo_root = "{repos["alpha"]}"\n',
+        f'repo_root = "{repos["alpha"]}"\nbase = "release/1.0"\n',
+        1,
+    )
+    toml_path.write_text(text, encoding="utf-8")
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    cfg = _load_written_group(g["groups_dir"], "mygroup")
+    by_name = {m["name"]: m for m in cfg["members"]}
+    assert by_name["alpha"]["base"] == "release/1.0"
+    # Untouched member keeps the documented default.
+    assert by_name["beta"]["base"] == "origin/main"
+
+
+def test_force_redefine_preserves_member_tasks_reference(author_env):
+    """A member's `tasks = ["<name>"]` reference into a `[tasks.<name>]` block
+    survives --force — proving a member's REFERENCE into the table, not just
+    the top-level [tasks.*] table itself (already covered separately)."""
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    text = text.replace(
+        f'repo_root = "{repos["alpha"]}"\n',
+        f'repo_root = "{repos["alpha"]}"\ntasks = ["graphify"]\n',
+        1,
+    )
+    text += (
+        "\n[tasks.graphify]\n"
+        'phase = "provision"\n'
+        "required = false\n"
+        "\n[[tasks.graphify.steps]]\n"
+        'name = "seed"\n'
+        'cmd = ["rsync", "-a", "src/", "dst/"]\n'
+    )
+    toml_path.write_text(text, encoding="utf-8")
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    cfg = _load_written_group(g["groups_dir"], "mygroup")
+    by_name = {m["name"]: m for m in cfg["members"]}
+    alpha_task_names = [t["name"] for t in by_name["alpha"]["tasks"]]
+    assert "graphify" in alpha_task_names
+    assert by_name["beta"]["tasks"] == []
+
+
+def test_force_redefine_preserves_member_bootstrap_and_hooks(author_env):
+    """A member's `bootstrap = [...]` and `[[members.hooks]]` entries survive
+    --force — the reloaded member's resolved `tasks` list still carries the
+    implicit "bootstrap" / "dep-install" legacy tasks with the same argv."""
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "bootstrap = []",
+        'bootstrap = ["echo", "hi"]',
+        1,
+    )
+    text = text.replace(
+        'bootstrap = ["echo", "hi"]\n\n[branch]',
+        'bootstrap = ["echo", "hi"]\n\n'
+        "[[members.hooks]]\n"
+        'kind = "dep-install"\n'
+        'cmd = ["npm", "install"]\n'
+        "\n[branch]",
+        1,
+    )
+    toml_path.write_text(text, encoding="utf-8")
+
+    second = _run_init(
+        base + ["--member", f"beta={repos['beta']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    cfg = _load_written_group(g["groups_dir"], "mygroup")
+    by_name = {m["name"]: m for m in cfg["members"]}
+    alpha_tasks = {t["name"]: t for t in by_name["alpha"]["tasks"]}
+    assert "bootstrap" in alpha_tasks
+    assert alpha_tasks["bootstrap"]["steps"][0]["cmd"] == ["echo", "hi"]
+    assert "dep-install" in alpha_tasks
+    assert alpha_tasks["dep-install"]["steps"][0]["cmd"] == ["npm", "install"]
+    # Untouched member keeps no implicit legacy tasks.
+    assert by_name["beta"]["tasks"] == []
+
+
+def test_force_redefine_new_member_gets_defaults_not_inherited_fields(author_env):
+    """A brand-new member added via --force --member NEW=PATH gets the
+    documented defaults rather than inheriting another member's carried
+    base/tasks/hooks/bootstrap fields."""
+    g = author_env
+    repos = g["repos"]
+    base = ["mygroup", "--member", f"alpha={repos['alpha']}"]
+    first = _run_init(base, config_dir=g["config_dir"], state_dir=g["state_dir"])
+    assert first.returncode == 0, f"first exit {first.returncode}: {first.stderr}"
+
+    toml_path = g["groups_dir"] / "mygroup.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    text = text.replace(
+        f'repo_root = "{repos["alpha"]}"\n',
+        f'repo_root = "{repos["alpha"]}"\nbase = "release/1.0"\n',
+        1,
+    )
+    text = text.replace("bootstrap = []", 'bootstrap = ["echo", "hi"]', 1)
+    toml_path.write_text(text, encoding="utf-8")
+
+    second = _run_init(
+        base + ["--member", f"gamma={repos['gamma']}", "--force"],
+        config_dir=g["config_dir"],
+        state_dir=g["state_dir"],
+    )
+    assert second.returncode == 0, f"redefine exit {second.returncode}: {second.stderr}"
+
+    cfg = _load_written_group(g["groups_dir"], "mygroup")
+    by_name = {m["name"]: m for m in cfg["members"]}
+    assert by_name["gamma"]["base"] == "origin/main"
+    assert by_name["gamma"]["tasks"] == []
+
+
 def test_existing_config_without_force_errors_and_preserves_file(author_env):
     """Existing config + --member WITHOUT --force → non-zero, file unchanged."""
     g = author_env
