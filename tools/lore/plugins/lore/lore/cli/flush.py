@@ -11,6 +11,7 @@ from .common import (
     DRIFT_SYNC_FIXABLE,
     _add_session_selectors,
     _git,
+    _partition_writable_vaults,
     _resolve_all_vaults,
     _resolve_all_vaults_strict,
     _vault_drift,
@@ -254,6 +255,12 @@ def _flush_current_session(args) -> int:
     A per-vault failure does not abort the rest — the remaining vaults are still
     flushed and the command exits non-zero.
 
+    **`shared: true` vaults are excluded.** A shared vault is untrusted,
+    multi-user content, and a flush is a WRITE that also commits and pushes under
+    this operator's git identity — so a dirty session record planted there must
+    never actuate one. The skip is announced by name (`_writable_vaults`),
+    never silent.
+
     An unreadable vault config REFUSES (non-zero, nothing flipped) rather than
     degrading to the default vault: with the vault set unknown, "no session
     exists — nothing to flush" is a false success over a session that may be
@@ -272,9 +279,22 @@ def _flush_current_session(args) -> int:
 
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 
-    holders = [path for _, path in vaults if session_store_mod.session_exists(str(path), key)]
+    all_holders = [
+        (name, path) for name, path in vaults
+        if session_store_mod.session_exists(str(path), key)
+    ]
+    holding_pairs, shared_holders = _partition_writable_vaults(all_holders)
+    if shared_holders:
+        print(
+            f"notice: session {key!r} also exists in shared vault(s) "
+            f"({', '.join(name for name, _ in shared_holders)}) — not flushed; "
+            "a flush writes, commits and pushes, and shared vaults are untrusted.",
+            file=sys.stderr,
+        )
+    holders = [path for _, path in holding_pairs]
     if not holders:
-        print(f"notice: no session exists for {key!r} — nothing to flush.")
+        if not shared_holders:
+            print(f"notice: no session exists for {key!r} — nothing to flush.")
         return 0
 
     worst = 0
@@ -431,6 +451,44 @@ def _discover_dirty_session_keys(query: str) -> list[tuple[Path, str]]:
     return hits
 
 
+def _keep_writable_hits(
+    discovered: list[tuple[Path, str]],
+    writable: set[str],
+    shared_names: dict[str, str],
+) -> list[tuple[Path, str]]:
+    """Keep only the discovery hits whose vault is a live, writable vault.
+
+    *writable* holds the resolved paths of the currently configured non-shared
+    vaults; *shared_names* maps the resolved path of each configured
+    ``shared: true`` vault to its name. A hit in neither is a STALE index row —
+    the vault it names is not part of this install any more (or never was) — and
+    a hit in *shared_names* is untrusted content that must not actuate a commit.
+
+    Both are dropped WITH a notice naming the vault: an unflushed dirty session
+    the operator cannot see is exactly how the original defect (a permanently
+    un-flushable session reported as absent) manifested.
+    """
+    kept: list[tuple[Path, str]] = []
+    for vault, key in discovered:
+        resolved = str(Path(vault).resolve())
+        if resolved in writable:
+            kept.append((vault, key))
+        elif resolved in shared_names:
+            print(
+                f"notice: skipping session/{key} in shared vault "
+                f"{shared_names[resolved]!r} — a flush writes, commits and pushes, "
+                "and shared vaults are untrusted.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"notice: skipping session/{key} — its indexed vault is not a "
+                f"configured vault (stale index row): {vault}",
+                file=sys.stderr,
+            )
+    return kept
+
+
 def _flush_batch(args, *, query: str, scope_label: str) -> int:
     """Flush every DIRTY session matching *query*, one atomic unit at a time.
 
@@ -454,17 +512,36 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     `--vault` capture had routed elsewhere while still reporting them flushed. The
     push stays hoisted out of the loop, now ONCE PER TOUCHED VAULT — a commit is
     only pushable by the repo that carries it.
+
+    **The hit's own `vault` column is never trusted as a write destination.**
+    It is an index row — index state outlives the config that produced it, so a
+    stale (or planted) row can name a path this install no longer governs, and
+    acting on it verbatim would steer a flip + commit at an arbitrary location.
+    Every hit is intersected with the LIVE configured vault set, minus the
+    `shared: true` vaults a flush must never write/commit/push into
+    (`_partition_writable_vaults`). Each dropped hit is NAMED, so a session that
+    really is sitting dirty somewhere unreachable is visible rather than silently
+    passed over.
     """
     from ..session import store as session_store_mod
     from ..vault import vault as vault_mod
 
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 
+    vaults = _resolve_all_vaults_strict(f"flush {scope_label}")
+    if vaults is None:
+        return 1
+    writable_pairs, shared_pairs = _partition_writable_vaults(vaults)
+    writable = {str(Path(path).resolve()) for _, path in writable_pairs}
+    shared_names = {str(Path(path).resolve()): name for name, path in shared_pairs}
+
     try:
         discovered = _discover_dirty_session_keys(query)
     except ValueError as exc:
         print(f"error: flush {scope_label} — search failed: {exc}", file=sys.stderr)
         return 1
+
+    discovered = _keep_writable_hits(discovered, writable, shared_names)
 
     if not discovered:
         print(f"notice: no dirty sessions match {scope_label} — nothing to flush.")

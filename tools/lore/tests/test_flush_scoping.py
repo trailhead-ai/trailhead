@@ -541,13 +541,17 @@ class _Install(NamedTuple):
     other: Path
 
 
-def _two_vault_install(tmp_path) -> _Install:
+def _two_vault_install(tmp_path, *, other_shared: bool = False) -> _Install:
     """Provision a two-vault install.
 
     A ``default``-scope vault plus a ``product``-scope ``trailhead`` vault — both
     git toplevels so the flush commit path runs for real. Mirrors the shape that
     exposed the defect: the operator's active vault is ``default`` while the
     session lives in ``trailhead``.
+
+    ``other_shared`` marks the second vault ``shared: true`` — an untrusted,
+    multi-user vault. ``write_vault_config`` writes ``(name, scope, path)``
+    triples only, so the flag is stamped onto the written config afterwards.
     """
     config_home = tmp_path / "config"
     state = tmp_path / "state"
@@ -564,7 +568,36 @@ def _two_vault_install(tmp_path) -> _Install:
             ("trailhead", "product", other_vault),
         ],
     )
+    if other_shared:
+        _set_vault_shared(config_home, "trailhead")
     return _Install(config_home, state, default_vault, other_vault)
+
+
+def _config_path(config_home: Path) -> Path:
+    return config_home / "lore" / "config.json"
+
+
+def _set_vault_shared(config_home: Path, name: str) -> None:
+    """Mark the named vault ``shared: true`` in an already-written config."""
+    path = _config_path(config_home)
+    cfg = json.loads(path.read_text())
+    for entry in cfg["vaults"]:
+        if entry["name"] == name:
+            entry["shared"] = True
+    path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def _drop_vault_from_config(config_home: Path, name: str) -> None:
+    """Remove the named vault from the config, leaving its index rows behind.
+
+    Reproduces a STALE index row: the record was captured while the vault was
+    configured, so the global index still carries the row and its ``vault``
+    column, but the vault is no longer part of this install.
+    """
+    path = _config_path(config_home)
+    cfg = json.loads(path.read_text())
+    cfg["vaults"] = [e for e in cfg["vaults"] if e["name"] != name]
+    path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 def _run_cfg(args, inst: _Install, *, stdin_text=None, env_extra=None):
@@ -883,3 +916,123 @@ class TestUnreadableConfigFailsClosed:
                       "--session-id", SID_A], inst)
         assert r.returncode != 0, r.stdout
         assert "config" in r.stderr.lower(), r.stderr
+
+
+# ---------------------------------------------------------------------------
+# shared vaults — untrusted content never actuates a write / commit / push
+# ---------------------------------------------------------------------------
+#
+# A `shared: true` vault is a multi-user vault whose content is untrusted input.
+# Cross-vault session resolution made every configured vault a WRITE target: a
+# dirty session record planted in a shared vault would be flipped, committed and
+# pushed under the local user's git identity by a bare `lore flush`. The write /
+# push fan-out therefore excludes shared vaults by default — and says so, rather
+# than skipping silently, so an operator whose session really does live there is
+# not left wondering why nothing happened.
+
+class TestSharedVaultsAreNotWritten:
+
+    def _dirty_session_in_shared_vault(self, tmp_path, sid=SID_A) -> _Install:
+        """A dirty session record sitting in the `shared: true` vault.
+
+        Captured while the vault is still trusted, then flipped shared — the
+        capture path is not what is under test here; the flush fan-out is.
+        """
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, sid).returncode == 0
+        _commit_baseline(inst.other)
+        _set_vault_shared(inst.config_home, "trailhead")
+        return inst
+
+    def test_no_arg_flush_skips_a_shared_vault_session(self, tmp_path):
+        inst = self._dirty_session_in_shared_vault(tmp_path)
+        before = _commit_count(inst.other)
+
+        r = _run_cfg(["flush", "--session-id", SID_A], inst)
+        assert r.returncode == 0, r.stderr
+        assert _sidecar(inst.other, SID_A)["status"] == "dirty", (
+            "a shared vault's session must not be flipped by a local flush"
+        )
+        assert _commit_count(inst.other) == before, (
+            "a shared vault must not be committed to under the local identity"
+        )
+
+    def test_no_arg_flush_names_the_skipped_shared_vault(self, tmp_path):
+        inst = self._dirty_session_in_shared_vault(tmp_path)
+        r = _run_cfg(["flush", "--session-id", SID_A], inst)
+        output = r.stdout + r.stderr
+        assert "shared" in output.lower(), output
+        assert "trailhead" in output, output
+
+    def test_flush_all_skips_a_shared_vault_session(self, tmp_path):
+        inst = self._dirty_session_in_shared_vault(tmp_path)
+        before = _commit_count(inst.other)
+
+        r = _run_cfg(["flush", "all"], inst)
+        assert r.returncode == 0, r.stderr
+        assert _sidecar(inst.other, SID_A)["status"] == "dirty"
+        assert _commit_count(inst.other) == before
+        output = r.stdout + r.stderr
+        assert "shared" in output.lower() and "trailhead" in output, output
+
+    def test_flush_all_still_flushes_the_trusted_vault_alongside(self, tmp_path):
+        """Excluding shared vaults must not weaken the trusted fan-out."""
+        inst = self._dirty_session_in_shared_vault(tmp_path)
+        assert _candidate_into("default", inst, SID_B).returncode == 0
+        _commit_baseline(inst.default_vault)
+
+        r = _run_cfg(["flush", "all"], inst)
+        assert r.returncode == 0, r.stderr
+        assert _sidecar(inst.default_vault, SID_B)["status"] == "clean"
+        assert _sidecar(inst.other, SID_A)["status"] == "dirty"
+
+    def test_session_referenced_does_not_write_into_a_shared_vault(self, tmp_path):
+        inst = self._dirty_session_in_shared_vault(tmp_path)
+        body_before = (inst.other / "session" / f"{SID_A}.md").read_text()
+
+        r = _run_cfg(["session", "referenced", "task/some-task",
+                      "--session-id", SID_A], inst)
+        assert r.returncode == 0, r.stderr
+        assert (inst.other / "session" / f"{SID_A}.md").read_text() == body_before, (
+            "referenced must not append into an untrusted vault's session record"
+        )
+
+
+# ---------------------------------------------------------------------------
+# stale index rows — the `vault` column is cross-checked against live config
+# ---------------------------------------------------------------------------
+
+class TestStaleIndexRowIsSkipped:
+    """Batch discovery reads the index's `vault` column; the index outlives config.
+
+    A row indexed under a vault that has since been removed from `config.json`
+    named a path this install no longer governs. Acting on it verbatim let a
+    stale (or planted) row steer a flip + commit at an arbitrary path, so hits
+    are intersected with the live configured vault set and anything else is
+    skipped with a notice.
+    """
+
+    def test_flush_all_skips_a_hit_whose_vault_left_the_config(self, tmp_path):
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
+        _commit_baseline(inst.other)
+        before = _commit_count(inst.other)
+        _drop_vault_from_config(inst.config_home, "trailhead")
+
+        r = _run_cfg(["flush", "all"], inst)
+        assert r.returncode == 0, r.stderr
+        assert _sidecar(inst.other, SID_A)["status"] == "dirty", (
+            "an unconfigured vault must not be written to"
+        )
+        assert _commit_count(inst.other) == before
+
+    def test_the_skipped_stale_hit_is_named(self, tmp_path):
+        inst = _two_vault_install(tmp_path)
+        assert _candidate_into("trailhead", inst, SID_A).returncode == 0
+        _commit_baseline(inst.other)
+        _drop_vault_from_config(inst.config_home, "trailhead")
+
+        r = _run_cfg(["flush", "all"], inst)
+        output = r.stdout + r.stderr
+        assert str(inst.other) in output, output
+        assert "configured" in output.lower(), output

@@ -9,6 +9,7 @@ from pathlib import Path
 from .common import (
     StdinSilentError,
     _add_session_selectors,
+    _partition_writable_vaults,
     _read_stdin_body,
     _resolve_all_vaults_strict,
 )
@@ -42,13 +43,16 @@ def cmd_session(args) -> int:
     sidecar-ensure-dirty + body-append + reindex are one race-safe critical section
     via the ``session_store`` capture primitives (``fcntl.flock``).
 
-    **Confinement:** the session KEY becomes the record
-    filename, so it is sanitized at this entry point BEFORE any path is constructed.
-    A GUID key goes through ``session_store.sanitize_session_id``; the worktree-name
+    **Confinement:** the session KEY becomes the record filename, so it is
+    sanitized at this entry point BEFORE any path is constructed — on the READ
+    action (``show``) exactly as on the write actions, because both join the key
+    into ``session/<key>.{md,json}`` and an absolute key silently RESETS a
+    ``pathlib`` join (``/etc/passwd`` → probing ``/etc/passwd.md``). A GUID key
+    goes through ``session_store.sanitize_session_id``; the worktree-name
     fallback key through ``session_store.sanitize_worktree_name`` (the GUID guard
-    cannot guard a worktree name). A key containing a path separator, ``..``, a NUL
-    byte, or otherwise off-shape is rejected non-zero with a clear stderr — a session
-    write can never escape ``session/``.
+    cannot guard a worktree name). A key containing a path separator, ``..``, a
+    NUL byte, or otherwise off-shape is rejected non-zero with a clear stderr —
+    no session command, read or write, can escape ``session/``.
     """
     action = getattr(args, "session_action", None)
     if action == "candidate":
@@ -89,6 +93,18 @@ def _cmd_session_show(args) -> int:
     a part rather than the whole. Rendering is unambiguous; the ambiguity is
     reported rather than hidden.
 
+    **Shared vaults are READ.** Unlike the write surfaces (``flush``,
+    ``referenced``), which exclude ``shared: true`` vaults because a write there
+    commits and pushes untrusted content under this operator's identity, a read
+    is safe to span them: rendering is fenced on the read side, and a session an
+    operator captured into a shared vault should still be legible. What ``show``
+    renders is content, never an instruction.
+
+    **Confinement:** both selectors are sanitized before resolution
+    (:func:`_sanitized_session_selectors`) — the key is joined into
+    ``session/<key>.{md,json}``, and an absolute ``--session-id`` would RESET the
+    join and probe outside the vault entirely.
+
     An unresolvable session → non-zero + a stderr diagnostic naming what was tried
     and every vault searched. An unreadable vault config is a REFUSAL, not a
     degrade to the default vault: the searched set would be a guess, and "no
@@ -101,8 +117,10 @@ def _cmd_session_show(args) -> int:
     if vaults is None:
         return 1
 
-    session_id = _session_id_from_args_or_env(args)
-    worktree_name = getattr(args, "worktree", None) or vault_mod.detect_worktree_name()
+    selectors = _sanitized_session_selectors(args)
+    if selectors is None:
+        return 1
+    session_id, worktree_name = selectors
     hits = vault_mod.resolve_session_notes(
         [path for _, path in vaults],
         session_id=session_id,
@@ -150,6 +168,52 @@ def _select_session_hit(hits, vaults) -> tuple[Path, Path]:
         if root == active:
             return root, note
     return hits[0]
+
+
+def _sanitized_session_selectors(args) -> tuple[str, str] | None:
+    """Sanitize BOTH session selectors for the read path, or ``None`` on rejection.
+
+    :func:`_resolve_session_key` collapses the selectors to the ONE key a write
+    targets. A read cannot use that: :func:`vault.resolve_session_notes` owns a
+    two-pass resolution order (an exact session-id match anywhere, else the
+    worktree-name pass), so it needs both selectors and collapsing them here
+    would silently delete the fallback pass.
+
+    Both selectors are validated by
+    :func:`session_store.sanitize_worktree_name` — the bounded
+    ``[A-Za-z0-9_-]+`` allowlist that excludes ``/``, ``\\``, ``.`` (hence
+    ``..``), NUL and whitespace by construction. It is the guard that admits BOTH
+    on-disk key shapes: a canonical GUID is a strict subset of that allowlist, so
+    the read side does not additionally demand
+    :func:`session_store.sanitize_session_id`'s GUID shape the way a WRITE does.
+    A read legitimately points ``--session-id`` at any existing record stem,
+    including a worktree-keyed one; what it may never do is name a stem that
+    escapes ``session/``.
+
+    An off-shape value is a hard rejection (``None`` after a clean ``error:``
+    line), never a silently-attempted path: an absolute or ``..``-bearing value
+    would escape the vault, so an unusable selector must not simply "miss".
+
+    Returns ``(session_id, worktree_name)``, either of which may be ``""`` when
+    that selector is unset — the empty case is what makes the pass fall through.
+    """
+    from ..session import store as session_store_mod
+    from ..vault import vault as vault_mod
+
+    raw_id = _session_id_from_args_or_env(args)
+    raw_worktree = getattr(args, "worktree", None) or vault_mod.detect_worktree_name()
+
+    checked = []
+    for label, raw in (("session id", raw_id), ("worktree name", raw_worktree)):
+        if not raw:
+            checked.append("")
+            continue
+        try:
+            checked.append(session_store_mod.sanitize_worktree_name(raw))
+        except session_store_mod.InvalidSessionIdError as exc:
+            print(f"error: {label}: {exc}", file=sys.stderr)
+            return None
+    return checked[0], checked[1]
 
 
 def _resolve_session_key(args) -> tuple[str | None, int]:
@@ -298,8 +362,12 @@ def _cmd_session_referenced(args) -> int:
     contract then swallowed the write silently, everywhere. The reference is
     appended to the existing record in EVERY vault holding the key, consistent
     with flush flushing every dirty instance of a split session; a key no vault
-    holds is still the inert no-op (exit 0, nothing created). An unreadable vault
-    config is a refusal, not a degrade to the default vault.
+    holds is still the inert no-op (exit 0, nothing created).
+
+    ``shared: true`` vaults are excluded from the fan-out and named in a notice:
+    this is a WRITE into a record body, and a shared vault is untrusted
+    multi-user content that no local command may modify by default. An unreadable
+    vault config is a refusal, not a degrade to the default vault.
     """
     from ..record import store as record_store_mod
     from ..session import store as session_store_mod
@@ -323,6 +391,21 @@ def _cmd_session_referenced(args) -> int:
     vaults = _resolve_all_vaults_strict("log a session reference")
     if vaults is None:
         return 1
+    vaults, shared = _partition_writable_vaults(vaults)
+    # Named only when a shared vault ACTUALLY holds the key — otherwise every
+    # `referenced` call in an install that merely has a shared vault would carry
+    # a notice about a vault it was never going to touch.
+    skipped = [
+        name for name, path in shared
+        if session_store_mod.session_exists(str(path), key)
+    ]
+    if skipped:
+        print(
+            f"notice: not logging the reference into shared vault(s) "
+            f"({', '.join(skipped)}) — shared vaults are untrusted and are "
+            "never written to.",
+            file=sys.stderr,
+        )
 
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
     # `capture_referenced` is itself the no-op-on-non-existent guard, so every
