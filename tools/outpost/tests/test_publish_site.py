@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT_PATH = (
     Path(__file__).parent.parent
     / "plugins"
@@ -129,6 +131,62 @@ def test_rejects_symlink_in_payload(tmp_path):
 
     assert result.returncode != 0
     assert "symlink" in result.stderr
+
+
+def test_rejects_nested_git_directory_in_payload(tmp_path):
+    """A payload containing a ``.git`` directory would publish as a gitlink (or
+    a fatal ``git add -A``) once `lore sync`'s bare ``git add -A`` reaches it —
+    reject it at publish, before anything is written into the vault."""
+    vault = _make_vault(tmp_path)
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    git_dir = source / ".git"
+    git_dir.mkdir()
+    (git_dir / "config").write_text("[core]\n")
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert ".git" in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
+def test_rejects_git_plain_file_in_payload(tmp_path):
+    """A gitlink-style ``.git`` file (as a submodule checkout leaves behind) is
+    just as hazardous to `lore sync`'s bare ``git add -A`` as a full nested
+    repo — reject it too."""
+    vault = _make_vault(tmp_path)
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    (source / ".git").write_text("gitdir: ../.git/modules/sub\n")
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert ".git" in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
+def test_rejects_nested_git_directory_names_the_offending_path(tmp_path):
+    """The error must name the exact offending path, not just the string
+    ``.git`` — a nested ``.git`` several directories deep should be pinpointed."""
+    vault = _make_vault(tmp_path)
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    git_dir = source / "sub" / ".git"
+    git_dir.mkdir(parents=True)
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert str(Path("sub") / ".git") in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
 
 
 def test_rejects_bad_slug(tmp_path):
@@ -270,6 +328,77 @@ def test_mid_stage_failure_leaves_no_partial_site_dir(tmp_path, monkeypatch):
     assert not (vault / "sites" / "mysite").exists()
     sites_dir = vault / "sites"
     assert not sites_dir.exists() or list(sites_dir.iterdir()) == []
+
+
+def test_keyboard_interrupt_mid_stage_leaves_no_partial_site_dir(tmp_path, monkeypatch):
+    """A Ctrl-C mid-copy must not leave a ``.slug.stage-XXXX`` staging tree
+    behind for the next `lore sync` to commit — the cleanup path must run on
+    any interrupt, not just ordinary exceptions."""
+    vault = _make_vault(tmp_path)
+    source = _write_site(
+        tmp_path / "src", {"index.html": "<html></html>", "extra.html": "<p>x</p>"}
+    )
+
+    mod = _load_module()
+    real_copy2 = shutil.copy2
+    calls = {"n": 0}
+
+    def _interrupting_copy2(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt()
+        return real_copy2(src, dst, *a, **kw)
+
+    monkeypatch.setattr(mod.shutil, "copy2", _interrupting_copy2)
+
+    with pytest.raises(KeyboardInterrupt):
+        mod.main(
+            [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+            env=_env(tmp_path),
+        )
+
+    assert not (vault / "sites" / "mysite").exists()
+    sites_dir = vault / "sites"
+    assert not sites_dir.exists() or list(sites_dir.iterdir()) == []
+
+
+def test_keyboard_interrupt_during_swap_restores_the_previous_site(tmp_path, monkeypatch):
+    """A Ctrl-C between the two renames must still restore the previous site
+    rather than leaving the target missing."""
+    vault = _make_vault(tmp_path)
+    source_dir = tmp_path / "src"
+    _write_site(source_dir, {"index.html": "<html>v1</html>", "style.css": "body{}"})
+    first = _run(
+        [str(source_dir), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+    assert first.returncode == 0, first.stderr
+
+    shutil.rmtree(source_dir)
+    _write_site(source_dir, {"index.html": "<html>v2</html>"})
+
+    mod = _load_module()
+    real_rename = mod.os.rename
+    calls = {"n": 0}
+
+    def _interrupting_rename(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the swap-in of the freshly staged tree
+            raise KeyboardInterrupt()
+        return real_rename(src, dst, *a, **kw)
+
+    monkeypatch.setattr(mod.os, "rename", _interrupting_rename)
+
+    with pytest.raises(KeyboardInterrupt):
+        mod.main(
+            [str(source_dir), "mysite", "--vault-path", str(vault), "--no-sync", "--overwrite"],
+            env=_env(tmp_path),
+        )
+
+    target = vault / "sites" / "mysite"
+    assert (target / "index.html").read_text() == "<html>v1</html>"
+    assert (target / "style.css").read_text() == "body{}"
+    assert [p.name for p in (vault / "sites").iterdir()] == ["mysite"]
 
 
 def test_overwrite_leaves_exactly_the_new_tree_and_no_staging_leftovers(tmp_path):

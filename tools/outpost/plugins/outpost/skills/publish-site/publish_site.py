@@ -179,10 +179,15 @@ def _validate_source(source: Path) -> int:
 
     Denylist enforcement: every entry must be a regular file or directory —
     symlinks and other non-regular entries (fifos, devices, sockets) are
-    rejected — and every path segment must be one the daemon will serve. A
-    root ``index.html`` is required. Uses ``lstat`` throughout so a symlink is
-    caught by its own mode bit rather than resolved and treated as whatever it
-    points to.
+    rejected — and every path segment must be one the daemon will serve. No
+    entry named ``.git`` is allowed at any depth, file or directory: it would
+    publish into ``sites/<slug>/`` and then reach `lore sync`'s bare
+    ``git add -A``, which either records it as a gitlink (sync exits 0 while
+    teammates receive none of the site) or — for a commitless nested repo —
+    fails fatally and breaks that vault's sync until the directory is
+    hand-deleted. A root ``index.html`` is required. Uses ``lstat`` throughout
+    so a symlink is caught by its own mode bit rather than resolved and
+    treated as whatever it points to.
     """
     if not source.is_dir():
         raise PublishError(f"source directory not found: {source}")
@@ -192,6 +197,11 @@ def _validate_source(source: Path) -> int:
     for path in sorted(source.rglob("*")):
         rel = path.relative_to(source)
         _validate_segments(rel)
+        if ".git" in rel.parts:
+            raise PublishError(
+                f"nested .git entry not allowed in site payload: {rel} — it "
+                "would corrupt the vault's own `lore sync`"
+            )
         st = path.lstat()
         if stat.S_ISLNK(st.st_mode):
             raise PublishError(f"symlink not allowed in site payload: {rel}")
@@ -268,6 +278,12 @@ def _stage_and_replace(source: Path, sites_dir: Path, target_dir: Path, slug: st
     failure anywhere in the sequence restores the old site rather than leaving
     a half-published or missing one, and a reader that opened the old tree
     keeps reading it until it closes.
+
+    Both recovery blocks below catch ``BaseException``, not ``Exception``: a
+    Ctrl-C (``KeyboardInterrupt``) mid-copy or mid-swap must still trigger the
+    same cleanup/restore as an ordinary failure, or it leaves a stray staging
+    tree in ``sites/`` for the next `lore sync` to commit, or a swap caught
+    with the target renamed aside and nothing renamed back in its place.
     """
     temp_dir = Path(tempfile.mkdtemp(dir=sites_dir, prefix=f".{slug}.stage-"))
     try:
@@ -279,7 +295,7 @@ def _stage_and_replace(source: Path, sites_dir: Path, target_dir: Path, slug: st
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, dest)
-    except Exception:
+    except BaseException:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
@@ -289,7 +305,7 @@ def _stage_and_replace(source: Path, sites_dir: Path, target_dir: Path, slug: st
             aside_dir = _reserve_sibling(sites_dir, f".{slug}.previous-")
             os.rename(target_dir, aside_dir)
         os.rename(temp_dir, target_dir)
-    except Exception:
+    except BaseException:
         if aside_dir is not None and not target_dir.exists():
             try:
                 os.rename(aside_dir, target_dir)
