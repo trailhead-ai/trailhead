@@ -7,18 +7,31 @@ payload, stages it into a temp directory inside ``<vault>/sites/``, and
 atomically renames it into ``<vault>/sites/<slug>/``. Vault *resolution* — the
 judgment call of which vault a publish targets — is the skill's job, not this
 script's: it always receives an explicit ``--vault-path``, and an optional
-``--vault`` name used only for sync targeting.
+``--vault`` name used for sync targeting. The two must agree — a vault path is
+required to be an existing direct child of the vaults root, which makes its
+basename the vault's configured name, so a disagreeing ``--vault`` means one of
+the two is wrong and the publish stops before writing anything.
 
-Publish is atomic: a failure during staging leaves the temp directory cleaned
-up and the existing target (if any) untouched. Updating an existing site
-requires ``--overwrite`` and replaces the target wholesale — the result
-mirrors the new source exactly, deletions included. Without ``--overwrite``,
-an existing target refuses the publish and prints a file-level add/change/
-remove summary of what the replace would do.
+Publish is atomic, and so is a replace: staging happens off to the side, and
+an existing site is renamed aside before the staged tree is renamed into its
+place, so the served directory is only ever the whole old site or the whole
+new one — never a partial or missing one, at any point in the sequence or
+after any failure in it. Updating an existing site requires ``--overwrite``
+and replaces the target wholesale — the result mirrors the new source exactly,
+deletions included. Without ``--overwrite``, an existing target refuses the
+publish and prints a file-level add/change/remove summary of what the replace
+would do.
+
+Validation mirrors the serving daemon's own rules, so nothing that publishes
+cleanly can fail to serve: the slug and the vault directory's name must both
+be URL-safe, and no payload path segment may contain ``..``, a backslash, or
+a NUL byte.
 
 After a successful publish, this script itself runs ``lore sync`` so that
 "published" and "synced" can never come apart: the success URL is printed
-only when the sync subprocess exits 0. When the resolved vault name is a real
+only when the sync subprocess exits 0, and sync's own output streams straight
+through to the console rather than being captured, since sync can degrade and
+still exit 0. When the resolved vault name is a real
 string, sync is scoped (``lore sync --vault <name>``); when it is the default
 floor (no ``--vault`` given here), sync stays unscoped (bare ``lore sync``) —
 the only targeting that reaches the default-floor vault, since its configured
@@ -72,6 +85,34 @@ def _vaults_root(env: Mapping[str, str]) -> Path:
     return Path(home) / ".local" / "state" / "lore" / "vaults"
 
 
+def _assert_vault_dir(vault_path: Path) -> None:
+    """Refuse a ``--vault-path`` that is not an existing directory.
+
+    Every write below creates parents, so a mistyped vault name would otherwise
+    materialize as a brand-new tree sitting beside the real vaults — a site
+    published into a vault that does not exist, syncing nothing.
+    """
+    if not vault_path.exists():
+        raise PublishError(f"vault path does not exist: {vault_path}")
+    if not vault_path.is_dir():
+        raise PublishError(f"vault path is not a directory: {vault_path}")
+
+
+def _assert_vault_name_agrees(vault_name: str | None, vault_dir_name: str) -> None:
+    """Refuse a ``--vault`` name that disagrees with ``--vault-path``'s basename.
+
+    Because a vault path must be a direct child of the vaults root, its
+    basename IS the vault's configured name. If the two disagree, one of the
+    two is wrong: the publish would write into one vault and sync another.
+    """
+    if vault_name is not None and vault_name != vault_dir_name:
+        raise PublishError(
+            f"--vault {vault_name!r} does not name the vault at --vault-path "
+            f"(that vault is {vault_dir_name!r}) — publishing there and syncing "
+            f"{vault_name!r} would share nothing"
+        )
+
+
 def _assert_direct_child(vault_path: Path, vaults_root: Path) -> None:
     """Refuse a vault path that is not exactly one segment under the vaults root.
 
@@ -101,14 +142,47 @@ def _validate_slug(slug: str) -> None:
         )
 
 
+def _validate_vault_name(name: str) -> None:
+    """Refuse a vault directory name the serving daemon would not accept.
+
+    The vault directory's basename is the first URL segment of a published
+    site. The daemon gates that segment on the same pattern a slug must match,
+    so a vault named anything else publishes fine and then 404s on every
+    request — an error here is the only place that mismatch is visible.
+    """
+    if not _SLUG_RE.match(name):
+        raise PublishError(
+            f"vault directory name {name!r} is not URL-safe: must match "
+            f"{_SLUG_RE.pattern!r} — a site published under it would not be served"
+        )
+
+
+def _validate_segments(rel: Path) -> None:
+    """Refuse a payload path whose segments the serving daemon would reject.
+
+    The daemon validates every segment of a request path and rejects any that
+    contains ``..``, a backslash, or a NUL byte — the ``..`` check is a
+    substring test, not an equality test, so an innocuous-looking
+    ``notes..v2.html`` is unservable. Rejecting the same shapes here keeps
+    "publishes cleanly" and "serves cleanly" from coming apart.
+    """
+    for segment in rel.parts:
+        if ".." in segment or "\\" in segment or "\0" in segment:
+            raise PublishError(
+                f"unservable path segment {segment!r} in site payload ({rel}): "
+                "a segment may not contain '..', a backslash, or a NUL byte"
+            )
+
+
 def _validate_source(source: Path) -> int:
     """Validate *source* and return its total payload size in bytes.
 
     Denylist enforcement: every entry must be a regular file or directory —
     symlinks and other non-regular entries (fifos, devices, sockets) are
-    rejected. A root ``index.html`` is required. Uses ``lstat`` throughout so
-    a symlink is caught by its own mode bit rather than resolved and treated
-    as whatever it points to.
+    rejected — and every path segment must be one the daemon will serve. A
+    root ``index.html`` is required. Uses ``lstat`` throughout so a symlink is
+    caught by its own mode bit rather than resolved and treated as whatever it
+    points to.
     """
     if not source.is_dir():
         raise PublishError(f"source directory not found: {source}")
@@ -117,6 +191,7 @@ def _validate_source(source: Path) -> int:
     seen_index = False
     for path in sorted(source.rglob("*")):
         rel = path.relative_to(source)
+        _validate_segments(rel)
         st = path.lstat()
         if stat.S_ISLNK(st.st_mode):
             raise PublishError(f"symlink not allowed in site payload: {rel}")
@@ -169,13 +244,30 @@ def _diff_summary(source: Path, target: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _reserve_sibling(sites_dir: Path, prefix: str) -> Path:
+    """Return an unused dot-prefixed path inside *sites_dir*.
+
+    ``mkdtemp`` picks the name and proves it was free; removing the directory
+    it created hands back a name that ``os.rename`` can move a whole tree onto.
+    Same-directory placement is what keeps every rename below a metadata-only
+    operation on one filesystem.
+    """
+    reserved = Path(tempfile.mkdtemp(dir=sites_dir, prefix=prefix))
+    reserved.rmdir()
+    return reserved
+
+
 def _stage_and_replace(source: Path, sites_dir: Path, target_dir: Path, slug: str) -> None:
     """Copy *source* into a temp dir under *sites_dir*, then swap it into place.
 
-    A dot-prefixed staging directory name keeps it outside any ``sites/*``
-    scan pattern while the copy is in progress. On any failure the staging
-    directory is removed and *target_dir* is left exactly as it was — an
-    interrupted publish never leaves a partial site visible.
+    A dot-prefixed staging directory name keeps it outside any ``sites/*`` scan
+    pattern while the copy is in progress. The swap never deletes the live tree
+    first: an existing site is renamed aside, the staged tree is renamed into
+    its place, and only then is the set-aside copy deleted. So at every instant
+    ``target_dir`` is either the whole old site or the whole new one — a
+    failure anywhere in the sequence restores the old site rather than leaving
+    a half-published or missing one, and a reader that opened the old tree
+    keeps reading it until it closes.
     """
     temp_dir = Path(tempfile.mkdtemp(dir=sites_dir, prefix=f".{slug}.stage-"))
     try:
@@ -191,9 +283,29 @@ def _stage_and_replace(source: Path, sites_dir: Path, target_dir: Path, slug: st
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    os.rename(temp_dir, target_dir)
+    aside_dir: Path | None = None
+    try:
+        if target_dir.exists():
+            aside_dir = _reserve_sibling(sites_dir, f".{slug}.previous-")
+            os.rename(target_dir, aside_dir)
+        os.rename(temp_dir, target_dir)
+    except Exception:
+        if aside_dir is not None and not target_dir.exists():
+            try:
+                os.rename(aside_dir, target_dir)
+            except OSError:
+                # The restore is the last recovery step there is; report where
+                # the previous site now lives and let the original failure be
+                # the one raised.
+                print(
+                    f"error: could not restore the previous site — it is at {aside_dir}",
+                    file=sys.stderr,
+                )
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+    if aside_dir is not None:
+        shutil.rmtree(aside_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +323,12 @@ def _sync_and_report(
     (``--vault <name>``); ``None`` syncs bare (every configured vault) — the
     only targeting verified correct for the default floor, since its
     configured name need not be the literal string ``"default"``.
+
+    Sync's own stdout and stderr are inherited, not captured: sync can degrade
+    (no remote configured, network down) and still exit 0, so its output is the
+    operator's only evidence of what actually reached the remote. The exit code
+    still gates the URL; the streamed output is what makes a degraded success
+    legible.
     """
     if no_sync:
         print("Published locally but NOT synced (--no-sync) — run `lore sync` to share it.")
@@ -220,16 +338,19 @@ def _sync_and_report(
     if vault_name:
         cmd += ["--vault", vault_name]
 
+    sys.stdout.flush()
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd)
     except FileNotFoundError:
         print("error: `lore` not found on PATH — published locally but NOT synced", file=sys.stderr)
         return 1
 
     if result.returncode != 0:
-        print("error: published locally but NOT synced — `lore sync` failed:", file=sys.stderr)
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
+        print(
+            "error: published locally but NOT synced — `lore sync` exited "
+            f"{result.returncode} (its output is above).",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"http://127.0.0.1:{sites_port}/{vault_url_segment}/{slug}/")
@@ -277,7 +398,10 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None)
         )
 
     try:
+        _assert_vault_dir(args.vault_path)
         _assert_direct_child(args.vault_path, _vaults_root(env))
+        _assert_vault_name_agrees(args.vault, args.vault_path.resolve().name)
+        _validate_vault_name(args.vault_path.resolve().name)
     except PublishError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

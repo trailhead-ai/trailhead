@@ -54,17 +54,31 @@ def _write_site(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
-def _write_lore_stub(bin_dir: Path, *, exit_code: int, stderr: str = "", record_path: Path | None = None) -> None:
+def _write_lore_stub(
+    bin_dir: Path,
+    *,
+    exit_code: int,
+    stderr: str = "",
+    stdout: str = "",
+    record_path: Path | None = None,
+) -> None:
     bin_dir.mkdir(parents=True, exist_ok=True)
     stub = bin_dir / "lore"
     lines = ["#!/bin/sh"]
     if record_path is not None:
         lines.append(f'echo "$@" > "{record_path}"')
+    if stdout:
+        lines.append(f'echo "{stdout}"')
     if stderr:
         lines.append(f'echo "{stderr}" >&2')
     lines.append(f"exit {exit_code}")
     stub.write_text("\n".join(lines) + "\n")
     stub.chmod(0o755)
+
+
+def _url_lines(stdout: str) -> list[str]:
+    """The URL lines in *stdout* — sync's own output streams through it too."""
+    return [line.strip() for line in stdout.splitlines() if line.strip().startswith("http://")]
 
 
 def _env(tmp_path: Path, *, path: str = "/usr/bin:/bin") -> dict[str, str]:
@@ -258,6 +272,197 @@ def test_mid_stage_failure_leaves_no_partial_site_dir(tmp_path, monkeypatch):
     assert not sites_dir.exists() or list(sites_dir.iterdir()) == []
 
 
+def test_overwrite_leaves_exactly_the_new_tree_and_no_staging_leftovers(tmp_path):
+    """A successful overwrite leaves the sites dir holding only the site — no
+    staging directory and no set-aside copy of the replaced tree."""
+    vault = _make_vault(tmp_path)
+    source_dir = tmp_path / "src"
+    _write_site(source_dir, {"index.html": "<html>v1</html>", "style.css": "body{}"})
+    first = _run(
+        [str(source_dir), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+    assert first.returncode == 0, first.stderr
+
+    shutil.rmtree(source_dir)
+    _write_site(source_dir, {"index.html": "<html>v2</html>"})
+
+    result = _run(
+        [str(source_dir), "mysite", "--vault-path", str(vault), "--no-sync", "--overwrite"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    sites_dir = vault / "sites"
+    assert [p.name for p in sites_dir.iterdir()] == ["mysite"]
+    assert (sites_dir / "mysite" / "index.html").read_text() == "<html>v2</html>"
+
+
+def test_failed_overwrite_leaves_the_previous_site_intact(tmp_path, monkeypatch):
+    """The replace must never expose a partial site: if the swap fails after the
+    live tree has been moved aside, the previous site is put back and still
+    serves."""
+    vault = _make_vault(tmp_path)
+    source_dir = tmp_path / "src"
+    _write_site(source_dir, {"index.html": "<html>v1</html>", "style.css": "body{}"})
+    first = _run(
+        [str(source_dir), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+    assert first.returncode == 0, first.stderr
+
+    shutil.rmtree(source_dir)
+    _write_site(source_dir, {"index.html": "<html>v2</html>"})
+
+    mod = _load_module()
+    real_rename = mod.os.rename
+    calls = {"n": 0}
+
+    def _flaky_rename(src, dst, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the swap-in of the freshly staged tree
+            raise OSError("simulated rename failure")
+        return real_rename(src, dst, *a, **kw)
+
+    monkeypatch.setattr(mod.os, "rename", _flaky_rename)
+
+    rc = mod.main(
+        [str(source_dir), "mysite", "--vault-path", str(vault), "--no-sync", "--overwrite"],
+        env=_env(tmp_path),
+    )
+
+    assert rc != 0
+    target = vault / "sites" / "mysite"
+    assert (target / "index.html").read_text() == "<html>v1</html>"
+    assert (target / "style.css").read_text() == "body{}"
+    assert [p.name for p in (vault / "sites").iterdir()] == ["mysite"]
+
+
+# ---------------------------------------------------------------------------
+# Vault-path and vault-name preconditions
+# ---------------------------------------------------------------------------
+
+
+def test_missing_vault_path_errors_without_creating_it(tmp_path):
+    """A typo'd --vault-path must not be created as a new tree beside the real
+    vaults."""
+    _make_vault(tmp_path)  # establishes the real vaults root under tmp_path
+    typo = tmp_path / "state" / "lore" / "vaults" / "acmee"
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(typo), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert "not a directory" in result.stderr or "does not exist" in result.stderr
+    assert not typo.exists()
+
+
+def test_vault_path_that_is_a_file_errors(tmp_path):
+    _make_vault(tmp_path)
+    not_a_dir = tmp_path / "state" / "lore" / "vaults" / "afile"
+    not_a_dir.write_text("x")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(not_a_dir), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert "not a directory" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not_a_dir.is_file()
+
+
+def test_vault_name_must_match_the_vault_path_basename(tmp_path):
+    """--vault names the vault sync targets and --vault-path names the tree that
+    is written; a mismatch would sync a vault the site was never written into."""
+    vault = _make_vault(tmp_path, name="acme")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--vault", "other", "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert "other" in result.stderr and "acme" in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
+def test_vault_directory_name_must_be_url_safe(tmp_path):
+    """The vault path's basename becomes the first URL segment, which the daemon
+    gates on ^[a-z0-9][a-z0-9._-]*$ — a name that fails it would 404."""
+    vault = _make_vault(tmp_path, name="Acme Vault")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert "Acme Vault" in result.stderr
+    assert not (vault / "sites").exists()
+
+
+# ---------------------------------------------------------------------------
+# Payload path segments (mirrors the daemon's serve-time segment rule)
+# ---------------------------------------------------------------------------
+
+
+def test_rejects_file_name_containing_double_dot(tmp_path):
+    """A serve-time segment rule rejects any segment CONTAINING '..', so a file
+    like notes..v2.html would publish and then 404 — reject it at publish."""
+    vault = _make_vault(tmp_path)
+    source = _write_site(
+        tmp_path / "src", {"index.html": "<html></html>", "notes..v2.html": "<p>x</p>"}
+    )
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert "notes..v2.html" in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
+def test_rejects_directory_name_containing_double_dot(tmp_path):
+    vault = _make_vault(tmp_path)
+    source = _write_site(
+        tmp_path / "src", {"index.html": "<html></html>", "a..b/page.html": "<p>x</p>"}
+    )
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert "a..b" in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
+def test_rejects_file_name_containing_a_backslash(tmp_path):
+    vault = _make_vault(tmp_path)
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    (source / "back\\slash.html").write_text("<p>x</p>")
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert "back\\slash.html" in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
 def test_non_direct_child_vault_path_errors(tmp_path):
     _make_vault(tmp_path)  # establishes the real vaults root under tmp_path
     foreign = tmp_path / "elsewhere"
@@ -291,7 +496,47 @@ def test_sync_success_prints_url_only_on_exit_0(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "http://127.0.0.1:7314/acme/mysite/"
+    assert _url_lines(result.stdout) == ["http://127.0.0.1:7314/acme/mysite/"]
+
+
+def test_sync_output_streams_through_to_the_console(tmp_path):
+    """`lore sync`'s own stdout/stderr reach the operator rather than being
+    captured and dropped — sync can degrade (offline) and still exit 0, so its
+    output is the only signal that the remote was actually reached."""
+    vault = _make_vault(tmp_path, name="acme")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    bin_dir = tmp_path / "bin"
+    _write_lore_stub(
+        bin_dir, exit_code=0, stdout="offline: committed locally", stderr="warning: no remote"
+    )
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--vault", "acme"],
+        _env(tmp_path, path=f"{bin_dir}:/usr/bin:/bin"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "offline: committed locally" in result.stdout
+    assert "warning: no remote" in result.stderr
+    assert _url_lines(result.stdout) == ["http://127.0.0.1:7314/acme/mysite/"]
+
+
+def test_lore_missing_from_path_fails_the_sync_gate(tmp_path):
+    """No `lore` on PATH: the publish landed locally, but the sync gate fails
+    cleanly — nonzero exit, NOT-synced messaging, and no success URL."""
+    vault = _make_vault(tmp_path, name="acme")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--vault", "acme"],
+        _env(tmp_path, path=str(tmp_path / "empty-bin")),
+    )
+
+    assert result.returncode != 0
+    assert _url_lines(result.stdout) == []
+    assert "NOT synced" in result.stderr
+    assert "lore" in result.stderr
+    assert (vault / "sites" / "mysite" / "index.html").exists()
 
 
 def test_sync_failure_no_success_url_nonzero_exit(tmp_path):
@@ -349,8 +594,7 @@ def test_sites_port_override_and_trailing_slash_form(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "http://127.0.0.1:9999/acme/mysite/"
-    assert result.stdout.strip().endswith("/")
+    assert _url_lines(result.stdout) == ["http://127.0.0.1:9999/acme/mysite/"]
 
 
 def test_vault_name_omitted_syncs_bare(tmp_path):
@@ -422,7 +666,7 @@ def test_publish_multi_page_site_mirrors_source_and_syncs(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "http://127.0.0.1:7314/acme/docs/"
+    assert _url_lines(result.stdout) == ["http://127.0.0.1:7314/acme/docs/"]
 
     target = vault / "sites" / "docs"
     assert target.is_dir()
