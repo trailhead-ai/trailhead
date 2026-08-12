@@ -177,6 +177,126 @@ class TestBrokenCliManifest:
         assert "lore" in r.data["clis"]
 
 
+class TestTrailheadField:
+    """doctor reports a named top-level `trailhead` field (bare-name PATH
+    resolution + checkout verification) — separate from the manifest-derived
+    `clis` map, which never gets a trailhead entry."""
+
+    def _repo_with_bin(self, tmp_path: Path) -> Path:
+        repo = tmp_path / "repo"
+        (repo / "trailhead").mkdir(parents=True)
+        (repo / "trailhead" / "__init__.py").write_text("")
+        (repo / "bin").mkdir()
+        binpath = repo / "bin" / "trailhead"
+        binpath.write_text("#!/usr/bin/env python3\n")
+        binpath.chmod(0o755)
+        return repo
+
+    def test_checkout_present_when_repo_shaped_hit_has_executable_bin(self, tmp_path):
+        repo = self._repo_with_bin(tmp_path)
+        resolved = str(repo / "bin" / "trailhead")
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: resolved if n == "trailhead" else None,
+            python_version_runner=_fake_py,
+        )
+        assert r.data["trailhead"]["path"] == resolved
+        assert r.data["trailhead"]["checkout"] == str(repo)
+        assert r.data["trailhead"]["checkout_present"] is True
+
+    def test_checkout_missing_when_bin_trailhead_deleted(self, tmp_path):
+        repo = self._repo_with_bin(tmp_path)
+        resolved = str(repo / "bin" / "trailhead")
+        (repo / "bin" / "trailhead").unlink()
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: resolved if n == "trailhead" else None,
+            python_version_runner=_fake_py,
+        )
+        assert r.data["trailhead"]["checkout"] == str(repo)
+        assert r.data["trailhead"]["checkout_present"] is False
+
+    def test_checkout_missing_when_bin_trailhead_not_executable(self, tmp_path):
+        repo = self._repo_with_bin(tmp_path)
+        resolved = str(repo / "bin" / "trailhead")
+        (repo / "bin" / "trailhead").chmod(0o644)
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: resolved if n == "trailhead" else None,
+            python_version_runner=_fake_py,
+        )
+        assert r.data["trailhead"]["checkout_present"] is False
+
+    def test_checkout_na_for_console_script_shaped_hit(self, tmp_path):
+        venv = tmp_path / "venv" / "bin"
+        venv.mkdir(parents=True)
+        script = venv / "trailhead"
+        script.write_text("#!/usr/bin/env python3\n")
+        script.chmod(0o755)
+        resolved = str(script)
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: resolved if n == "trailhead" else None,
+            python_version_runner=_fake_py,
+        )
+        assert r.data["trailhead"]["path"] == resolved
+        assert r.data["trailhead"]["checkout"] is None
+        assert r.data["trailhead"]["checkout_present"] is None
+
+    def test_checkout_na_when_repo_shaped_but_not_a_trailhead_checkout(self, tmp_path):
+        # <parent.parent>/bin/trailhead exists but <parent.parent> has no
+        # trailhead/__init__.py — the shape heuristic must not misfire.
+        repo = tmp_path / "notrepo"
+        (repo / "bin").mkdir(parents=True)
+        binpath = repo / "bin" / "trailhead"
+        binpath.write_text("#!/usr/bin/env python3\n")
+        binpath.chmod(0o755)
+        resolved = str(binpath)
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: resolved if n == "trailhead" else None,
+            python_version_runner=_fake_py,
+        )
+        assert r.data["trailhead"]["checkout"] is None
+        assert r.data["trailhead"]["checkout_present"] is None
+
+    def test_null_resolved_path_reports_null_no_verdict(self, tmp_path):
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert r.data["trailhead"]["path"] is None
+        assert r.data["trailhead"]["checkout"] is None
+        assert r.data["trailhead"]["checkout_present"] is None
+
+    def test_null_resolved_path_human_copy_directs_to_command_v(self, tmp_path):
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert "command -v trailhead" in r.human_output
+
+    def test_human_output_has_trailhead_line_like_other_clis(self, tmp_path):
+        repo = self._repo_with_bin(tmp_path)
+        resolved = str(repo / "bin" / "trailhead")
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: resolved if n == "trailhead" else None,
+            python_version_runner=_fake_py,
+        )
+        assert f"trailhead: {resolved}" in r.human_output
+
+    def test_human_output_has_path_order_caveat(self, tmp_path):
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert "shadow" in r.human_output.lower()
+
+    def test_clis_map_has_no_trailhead_key(self, tmp_path):
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert "trailhead" not in r.data["clis"]
+
+
 class TestBookmarkRetentionWarning:
     """doctor warns when a camp bookmark's session transcript is approaching the
     harness's retention cleanup, so a user can resume or re-capture it before the

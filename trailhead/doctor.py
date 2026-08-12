@@ -7,6 +7,12 @@ has installed, discovered from on-disk state:
   - per harness: the registered marketplace + the installed tools (markers),
   - the CLI shim dir and whether each CLI-bearing tool (any tool whose manifest
     declares `cli_bin`) resolves on PATH,
+  - a named `trailhead` field for the bare-name management CLI itself (not part
+    of the manifest-derived CLI map): the `which("trailhead")` PATH resolution,
+    plus — only for a `<repo>/bin/trailhead`-shaped hit — a checkout
+    present/missing verdict. A null-resolved path is healthy in a
+    function-based install (a subprocess can't see shell functions) and gets
+    no verdict; a pip console-script hit gets checkout n/a, also no verdict.
   - the python3 version on PATH (informational).
 
 ``exit_code`` is always 0 unless the report itself crashes.
@@ -190,6 +196,32 @@ def _bookmark_retention_warnings(harness_names: list[str], env: dict[str, str]) 
     ]
 
 
+def _trailhead_field(resolved: Optional[str]) -> dict:
+    """Build the `trailhead` report field from a bare `which("trailhead")` hit.
+
+    Checkout derivation applies ONLY to a `<repo>/bin/trailhead`-shaped hit —
+    the resolved file's parent named `bin`, with `<parent.parent>` containing
+    `trailhead/__init__.py` — so a pip console-script install (which resolves
+    outside that shape) reports checkout n/a rather than a false "missing"
+    verdict. A null-resolved path (the common case for a healthy
+    shellenv-function install, invisible to this subprocess) also gets no
+    verdict; only the on-PATH, repo-shaped case is ever checked for
+    executability (is_file() + X_OK).
+    """
+    if resolved is None:
+        return {"path": None, "checkout": None, "checkout_present": None}
+
+    path = Path(resolved)
+    if path.name == "trailhead" and path.parent.name == "bin":
+        repo = path.parent.parent
+        if (repo / "trailhead" / "__init__.py").is_file():
+            bin_path = repo / "bin" / "trailhead"
+            present = bin_path.is_file() and os.access(bin_path, os.X_OK)
+            return {"path": resolved, "checkout": str(repo), "checkout_present": present}
+
+    return {"path": resolved, "checkout": None, "checkout_present": None}
+
+
 def _python_version(python_runner: Callable) -> str:
     try:
         result = python_runner(["python3", "--version"])
@@ -222,11 +254,35 @@ def run_doctor(
         "shim_dir": str(shim_dir),
         "shim_dir_present": shim_dir.exists(),
         "clis": clis,
+        "trailhead": _trailhead_field(_which("trailhead")),
         "python3_version": _python_version(_pyrunner),
         "warnings": _bookmark_retention_warnings(list(harnesses), _env),
     }
 
     return DoctorResult(data=data, human_output=_build_human(data), exit_code=0)
+
+
+def _build_trailhead_human(field: dict) -> str:
+    """Render the `trailhead:` human line: PATH resolution plus, when
+    derivable, a checkout present/missing verdict. A python subprocess can't
+    see shell functions, so a null path directs the user to check in a live
+    shell rather than implying trailhead isn't installed; and because a
+    pip-installed `trailhead` earlier on PATH can shadow (or be shadowed by)
+    the shellenv function, that ordering caveat is always shown."""
+    if field["path"] is None:
+        return (
+            "not on PATH (a shellenv function may still provide it, invisible "
+            "to this subprocess — run `command -v trailhead` in a new shell to "
+            "check; note a pip-installed trailhead earlier on PATH can shadow "
+            "or be shadowed by that function)"
+        )
+    if field["checkout"] is None:
+        return f"{field['path']} (note: a pip-installed trailhead earlier on PATH can shadow the shellenv function)"
+    verdict = "present" if field["checkout_present"] else "missing"
+    return (
+        f"{field['path']} (checkout {verdict}: {field['checkout']}; "
+        "note: a pip-installed trailhead earlier on PATH can shadow the shellenv function)"
+    )
 
 
 def _build_human(data: dict) -> str:
@@ -253,6 +309,7 @@ def _build_human(data: dict) -> str:
     lines.append("  CLIs on PATH:")
     for name, resolved in data["clis"].items():
         lines.append(f"    {name}: {resolved or 'not on PATH'}")
+    lines.append(f"    trailhead: {_build_trailhead_human(data['trailhead'])}")
     lines.append(
         f"  shim dir: {data['shim_dir']} ({'present' if data['shim_dir_present'] else 'absent'})"
     )
