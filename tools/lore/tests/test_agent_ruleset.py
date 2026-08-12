@@ -36,6 +36,32 @@ def test_contains_write_prohibition_rules():
     assert "`> file`, `>> file`, `tee`, `sed -i`, `cp`, `mv`" in content
 
 
+def test_write_prohibition_carves_out_the_sites_zone():
+    """The prohibition must scope itself to record trees and name the one
+    subtree that is directly writable, or an agent reading it will refuse the
+    publish flow the guard hook and the deny rules both allow.
+    """
+    prohibition = load_script("lore.config.agent_ruleset")._WRITE_PROHIBITION
+    assert "sites/" in prohibition, (
+        "the write-prohibition block must name the sites zone as its carve-out"
+    )
+    assert "outpost:publish-site" in prohibition, (
+        "the carve-out must point at the skill that owns the publish convention"
+    )
+    assert "nested" in prohibition and ".git" in prohibition, (
+        "the carve-out must warn against creating a nested .git inside the "
+        "sites zone — it corrupts the vault's own sync"
+    )
+
+
+def test_sites_carve_out_does_not_weaken_the_record_prohibition():
+    """The carve-out is a scope statement, not a loophole: the CLI-only rule for
+    records and the Bash-gap note must both survive beside it."""
+    content = _render()
+    assert "**only** via the `lore` CLI" in content
+    assert "opaque to Bash-mediated writes" in content
+
+
 def test_primer_names_the_three_entry_commands():
     primer = load_script("lore.config.agent_ruleset").PRIMER
     assert "lore search" in primer

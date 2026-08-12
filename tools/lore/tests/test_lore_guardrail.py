@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -67,11 +68,23 @@ def _make_payload(file_path: str, tool_name: str = "Write") -> str:
 # containing a literal ':' is not corrupted).
 GUARD_ROOT_DELIM = "\n"
 
+# The exemption pattern list uses the same NEWLINE delimiter as the root list.
+GUARD_EXEMPT_DELIM = "\n"
 
-def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None):
-    """Invoke the real guard hook with the given file_path and guard roots."""
+
+def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None, exempt=None):
+    """Invoke the real guard hook with the given file_path, roots and exemptions.
+
+    ``exempt=None`` removes ``LORE_VAULT_GUARD_EXEMPT`` from the child env
+    entirely, so a value set in the developer's own shell can never leak in and
+    turn a deny-expecting test green.
+    """
     env = dict(os.environ)
     env["LORE_VAULT_GUARD_ROOT"] = GUARD_ROOT_DELIM.join(str(r) for r in guard_roots)
+    if exempt is None:
+        env.pop("LORE_VAULT_GUARD_EXEMPT", None)
+    else:
+        env["LORE_VAULT_GUARD_EXEMPT"] = GUARD_EXEMPT_DELIM.join(str(p) for p in exempt)
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=payload if payload is not None else _make_payload(str(file_path), tool_name),
@@ -111,6 +124,62 @@ def _dirs(tmp_path):
     for d in (state, config, home):
         d.mkdir(parents=True, exist_ok=True)
     return state, config, home
+
+
+# ---------------------------------------------------------------------------
+# permissions.deny rule evaluation
+# ---------------------------------------------------------------------------
+
+
+def _vault_deny_rules(deny: list, vaults_root) -> list:
+    """The ``Edit(`` deny rules an install generated inside *vaults_root*."""
+    prefix = f"Edit(//{str(vaults_root).lstrip('/')}/"
+    return [r for r in deny if r.startswith(prefix)]
+
+
+def _rule_path_glob(rule: str) -> str:
+    """The absolute-path glob inside an ``Edit(//abs/path/glob)`` rule.
+
+    The ``//`` double-slash is the harness's absolute-path grammar (a single
+    ``/`` would be project-root-relative), so one slash is dropped to recover
+    the filesystem path.
+    """
+    assert rule.startswith("Edit(//") and rule.endswith(")"), rule
+    return rule[len("Edit(/") : -1]
+
+
+def _glob_to_regex(pattern: str):
+    """Compile a permission-rule glob under the harness's gitignore semantics.
+
+    ``*`` matches within exactly one path segment; ``**`` matches any number of
+    segments. There is no negation syntax — which is why a rule that matches a
+    directory cannot be pierced by a narrower allow, and why the deny list must
+    avoid matching the sites zone in the first place (see ``_rule_denies``).
+    """
+    parts = []
+    for segment in pattern.split("/"):
+        if segment == "**":
+            parts.append(".*")
+        else:
+            parts.append(re.escape(segment).replace(r"\*", "[^/]*"))
+    return re.compile("^" + "/".join(parts) + r"\Z")
+
+
+def _rule_denies(rule: str, path: str) -> bool:
+    """True if *rule* blocks a write to *path*.
+
+    A rule blocks the path directly, or blocks one of its ancestor directories —
+    a deny that matches a DIRECTORY cascades to everything beneath it.
+    """
+    regex = _glob_to_regex(_rule_path_glob(rule))
+    candidate = path
+    while True:
+        if regex.match(candidate):
+            return True
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            return False
+        candidate = parent
 
 
 # ===========================================================================
@@ -405,10 +474,318 @@ class TestGuardColonInPath:
         assert result.returncode == 0
 
 
+class TestGuardExemptZone:
+    """``LORE_VAULT_GUARD_EXEMPT`` carves the per-vault ``sites`` subtree out of
+    the deny, without loosening the guard anywhere else.
+
+    Patterns are newline-delimited, canonicalized like the roots (realpath +
+    casefold) and matched segment-wise against the target's real path: a ``*``
+    stands for exactly one path segment and never spans a separator. A target at
+    or under a directory a pattern names is allowed; everything else in the vault
+    is still denied.
+    """
+
+    def _vaults(self, tmp_path):
+        """Build ``<tmp>/vaults/default`` and return (vaults_root, vault)."""
+        vaults_root = tmp_path / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        return vaults_root, vault
+
+    def _pattern(self, vaults_root):
+        """The exemption pattern ``lore init`` writes."""
+        return f"{vaults_root}/*/sites"
+
+    def test_write_under_sites_is_allowed(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "sites" / "demo" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 0, (
+            "a write under a vault's sites subtree must be allowed when the "
+            f"exemption pattern covers it; stderr={result.stderr!r}"
+        )
+
+    def test_record_write_in_the_same_vault_is_still_denied(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "adr" / "some-decision.md"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 2, (
+            "the exemption must not leak past the sites subtree — a record write "
+            f"in the same vault stays denied; stderr={result.stderr!r}"
+        )
+
+    def test_sites_dir_nested_below_the_vault_top_level_is_denied(self, tmp_path):
+        """``*`` matches ONE segment, so only a vault's top-level sites is exempt."""
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "task" / "some-task" / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 2, (
+            "a sites directory nested deeper than the vault top level is a record "
+            f"tree, not the free-write zone; stderr={result.stderr!r}"
+        )
+
+    def test_sibling_directory_sharing_the_prefix_is_denied(self, tmp_path):
+        """``sites-archive`` is not ``sites`` — the segment must match whole."""
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "sites-archive" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 2, (
+            "a directory that merely shares the 'sites' prefix must not be "
+            f"exempt; stderr={result.stderr!r}"
+        )
+
+    def test_sites_write_through_an_inside_pointing_default_symlink_is_allowed(
+        self, tmp_path
+    ):
+        """The ``default`` symlink resolves to a real vault under the vaults root,
+        so the realpath the guard computes is still covered by the pattern."""
+        vaults_root = tmp_path / "vaults"
+        vaults_root.mkdir()
+        real_default = vaults_root / "real-default"
+        real_default.mkdir()
+        default_link = vaults_root / "default"
+        default_link.symlink_to(real_default)
+
+        target = default_link / "sites" / "index.html"
+        result = _run_guard(
+            target,
+            [vaults_root, default_link],
+            exempt=[self._pattern(vaults_root)],
+        )
+        assert result.returncode == 0, (
+            "a sites write through a default symlink pointing inside the vaults "
+            f"root must be allowed; stderr={result.stderr!r}"
+        )
+
+    def test_sites_write_through_an_escaped_default_symlink_stays_denied(self, tmp_path):
+        """A ``default`` symlink pointing OUTSIDE the vaults root is its own
+        realpath-resolved guard root, so the deny still fires — and the pattern,
+        anchored at the vaults root, cannot match the escaped real path. The
+        write is blocked: fail-closed, and pinned here so the posture is a
+        decision rather than an accident.
+        """
+        vaults_root = tmp_path / "vaults"
+        vaults_root.mkdir()
+        outside = tmp_path / "adopted-vault"  # sibling of vaults_root, not under it
+        outside.mkdir()
+        default_link = vaults_root / "default"
+        default_link.symlink_to(outside)
+
+        target = default_link / "sites" / "index.html"
+        result = _run_guard(
+            target,
+            [vaults_root, default_link],
+            exempt=[self._pattern(vaults_root)],
+        )
+        assert result.returncode == 2, (
+            "a sites write through a default symlink that escapes the vaults root "
+            f"must stay denied; stderr={result.stderr!r}"
+        )
+
+    def test_alternate_case_sites_path_is_allowed(self, tmp_path):
+        """Both sides are casefolded, so an alternate-case spelling of an exempt
+        path is exempt too — the same canonicalization the deny side uses."""
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "SITES" / "Index.HTML"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 0, (
+            "an alternate-case spelling names the same sites subtree on a "
+            f"case-insensitive filesystem; stderr={result.stderr!r}"
+        )
+
+    def test_unset_exempt_denies_a_sites_write(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root])  # env var absent entirely
+        assert result.returncode == 2, (
+            "with no exemption configured the guard must deny everything under a "
+            f"vault root (fail-closed); stderr={result.stderr!r}"
+        )
+
+    def test_empty_exempt_denies_a_sites_write(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=[])  # empty value
+        assert result.returncode == 2, (
+            "an empty exemption value must not be read as 'exempt everything'; "
+            f"stderr={result.stderr!r}"
+        )
+
+    def test_malformed_pattern_lines_are_ignored_and_the_guard_still_denies(
+        self, tmp_path
+    ):
+        """Junk lines are skipped; they neither crash the guard nor blanket-allow."""
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "adr" / "some-decision.md"
+        result = _run_guard(
+            target,
+            [vaults_root],
+            exempt=["", "   ", "not/an/absolute/path", "*", "**"],
+        )
+        assert result.returncode == 2, (
+            "malformed exemption lines must be ignored, leaving the guard intact; "
+            f"stderr={result.stderr!r}"
+        )
+
+    def test_malformed_lines_do_not_disable_a_valid_pattern(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(
+            target,
+            [vaults_root],
+            exempt=["   ", "relative/sites", self._pattern(vaults_root)],
+        )
+        assert result.returncode == 0, (
+            "a valid exemption pattern must still apply when malformed lines sit "
+            f"beside it; stderr={result.stderr!r}"
+        )
+
+    def test_vaults_root_containing_glob_metacharacters_keeps_its_carve_out(
+        self, tmp_path
+    ):
+        """A vaults root whose literal path contains ``[``, ``]`` or ``?`` must
+        still match its own exemption pattern: those bytes are legal in a POSIX
+        path, and reading them as glob syntax would silently drop the carve-out
+        while every other path kept working."""
+        vaults_root = tmp_path / "we[ir]d?root" / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 0, (
+            "glob metacharacters in the literal part of an exemption pattern must "
+            f"be matched literally; stderr={result.stderr!r}"
+        )
+
+    def test_metacharacter_pattern_does_not_match_a_different_real_path(self, tmp_path):
+        """Positive control for the escaping: with the literal characters taken
+        literally, a path that only matches when they are read as wildcards must
+        stay denied."""
+        vaults_root = tmp_path / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        target = vault / "sites" / "index.html"
+        # `[v]aults` and `vault?` both glob-match this real path; neither names it.
+        result = _run_guard(
+            target,
+            [vaults_root],
+            exempt=[f"{tmp_path}/[v]aults/*/sites", f"{tmp_path}/vault?/*/sites"],
+        )
+        assert result.returncode == 2, (
+            "an exemption pattern must name a real path literally, not glob onto "
+            f"it; stderr={result.stderr!r}"
+        )
+
+    def test_pattern_outside_every_guard_root_is_ignored_with_a_warning(self, tmp_path):
+        """A pattern that does not resolve under any configured guard root can
+        only widen the guard, never carve a zone out of it — a bare ``/*`` line
+        would exempt the whole filesystem. Such a pattern is ignored, and the
+        guard says so rather than failing silently."""
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=["/*"])
+        assert result.returncode == 2, (
+            "a pattern outside every guard root must not exempt anything; "
+            f"stderr={result.stderr!r}"
+        )
+        assert "/*" in result.stderr, (
+            "the ignored pattern must be named on stderr so a misconfiguration is "
+            f"observable; stderr={result.stderr!r}"
+        )
+
+    def test_root_star_pattern_is_ignored_and_record_stays_denied(self, tmp_path):
+        """``<root>/*`` matches every child of the vaults root and everything
+        under it — it would exempt every record tree wholesale. It is one segment
+        too shallow to be a real carve-out (which names a ``<vault>/<zone>``
+        subtree), so it is ignored with a warning and a record write stays denied.
+        """
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "adr" / "some-decision.md"
+        result = _run_guard(target, [vaults_root], exempt=[f"{vaults_root}/*"])
+        assert result.returncode == 2, (
+            "an over-broad `<root>/*` exemption must not exempt record trees; "
+            f"stderr={result.stderr!r}"
+        )
+        assert f"{vaults_root}/*" in result.stderr, (
+            "the ignored over-broad pattern must be named on stderr so the "
+            f"misconfiguration is observable; stderr={result.stderr!r}"
+        )
+
+    def test_bare_root_pattern_is_ignored_and_record_stays_denied(self, tmp_path):
+        """A bare ``<root>`` (no wildcard) resolves to the vaults root itself and
+        would match every path under it. It is not strictly deeper than the root,
+        so it is ignored with a warning and a record write stays denied.
+        """
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "adr" / "some-decision.md"
+        result = _run_guard(target, [vaults_root], exempt=[str(vaults_root)])
+        assert result.returncode == 2, (
+            "a bare `<root>` exemption must not exempt record trees; "
+            f"stderr={result.stderr!r}"
+        )
+        assert str(vaults_root) in result.stderr, (
+            "the ignored over-broad pattern must be named on stderr so the "
+            f"misconfiguration is observable; stderr={result.stderr!r}"
+        )
+
+    def test_legit_sites_pattern_still_carves_and_still_denies_records(self, tmp_path):
+        """The ``<root>/*/sites`` pattern names a subtree two segments below the
+        root — the real carve-out shape — so it still exempts a sites write while
+        a record write in the same vault stays denied, now that the shallower
+        `<root>/*` and bare `<root>` are rejected."""
+        vaults_root, vault = self._vaults(tmp_path)
+        sites_write = _run_guard(
+            vault / "sites" / "index.html",
+            [vaults_root],
+            exempt=[self._pattern(vaults_root)],
+        )
+        assert sites_write.returncode == 0, (
+            "the legitimate sites carve-out must still be allowed; "
+            f"stderr={sites_write.stderr!r}"
+        )
+        record_write = _run_guard(
+            vault / "adr" / "some-decision.md",
+            [vaults_root],
+            exempt=[self._pattern(vaults_root)],
+        )
+        assert record_write.returncode == 2, (
+            "the legitimate sites carve-out must not leak onto record trees; "
+            f"stderr={record_write.stderr!r}"
+        )
+
+    def test_exempt_patterns_use_the_newline_delimiter(self, tmp_path):
+        """A vaults root containing a literal ':' must still be exemptable — the
+        delimiter is a newline, which cannot appear in a POSIX path."""
+        vaults_root = tmp_path / "weird:colon" / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 0, (
+            "a colon-containing vaults root must still carve out its sites zone; "
+            f"stderr={result.stderr!r}"
+        )
+
+
 class TestGuardDocstringScope:
     """Accurate comment on the no-path allow branch, and an explicit
     accepted-out-of-scope note for Bash-mediated writes.
     """
+
+    def test_module_docstring_documents_the_exempt_env_var(self):
+        src = GUARD_SCRIPT.read_text()
+        assert "LORE_VAULT_GUARD_EXEMPT" in src
+
+    def test_module_docstring_documents_the_escaped_default_symlink(self):
+        """The one case where the exemption cannot apply must be stated where a
+        reader of the guard will find it, not left as folklore."""
+        src = GUARD_SCRIPT.read_text()
+        opening = src.index('"""')
+        docstring = src[opening + 3 : src.index('"""', opening + 3)]
+        assert "outside the vaults root" in docstring, (
+            "the guard docstring must state that a `default` symlink pointing "
+            "outside the vaults root cannot be covered by an exemption pattern"
+        )
 
     def test_module_docstring_documents_accepted_bash_gap(self):
         src = GUARD_SCRIPT.read_text()
@@ -654,10 +1031,11 @@ class TestInitInstallsGuardrail:
         )
 
     def test_init_adds_edit_deny_only(self, tmp_path):
-        """The static deny is a single Edit( rule over vaults/** (Edit(path)
-        rules cover all file-editing tools; a Write(path) rule never matches
-        and makes Claude Code warn at startup), anchored with the //
-        double-slash absolute grammar."""
+        """Every static deny is an Edit( rule (Edit(path) rules cover all
+        file-editing tools; a Write(path) rule never matches and makes Claude
+        Code warn at startup), anchored with the // double-slash absolute
+        grammar. What that rule set contains is pinned separately by
+        ``TestInitKindGeneratedDenyList``."""
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
@@ -669,32 +1047,40 @@ class TestInitInstallsGuardrail:
         assert edit_rules, f"missing Edit(//…vaults/**) static deny: {deny!r}"
         assert not write_rules, f"unmatched Write(//…) rule present: {deny!r}"
 
-    def test_init_removes_legacy_write_deny(self, tmp_path):
-        """A Write(//…/vaults/**) rule left by an earlier install is removed on
-        re-init — it never matches file-editing tools and triggers a Claude Code
-        startup warning."""
+    def test_init_removes_legacy_blanket_denies(self, tmp_path):
+        """The two blanket rules an earlier install could leave behind are
+        removed on re-init.
+
+        ``Write(//…/vaults/**)`` never matched a file-editing tool and made
+        Claude Code warn at startup; ``Edit(//…/vaults/**)`` matched the vaults
+        directory itself and so cascaded over every vault subtree — including
+        the sites zone, which no narrower rule can then re-open, because a deny
+        always beats an allow.
+        """
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
+        vaults = state / "lore" / "vaults"
+        blanket = f"//{str(vaults).lstrip('/')}/**"
+        legacy = [f"Write({blanket})", f"Edit({blanket})"]
+
         settings, data = self._read_user_settings(home)
-        edit_rule = next(
-            r for r in data["permissions"]["deny"] if r.startswith("Edit(//")
-        )
-        legacy = "Write(" + edit_rule[len("Edit("):]
-        data["permissions"]["deny"].insert(0, legacy)
+        data["permissions"]["deny"][:0] = legacy
         settings.write_text(json.dumps(data))
 
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
         _, data = self._read_user_settings(home)
         deny = data["permissions"]["deny"]
-        assert legacy not in deny, f"legacy Write rule not removed: {deny!r}"
-        assert edit_rule in deny, f"Edit rule missing after cleanup: {deny!r}"
+        for rule in legacy:
+            assert rule not in deny, f"legacy blanket rule not removed: {rule!r}"
+        assert _vault_deny_rules(deny, vaults), f"deny list emptied out: {deny!r}"
 
     def test_rerun_installs_no_duplicate_guard(self, tmp_path):
         state, config, home = _dirs(tmp_path)
         _run_init(["init"], state=state, config=config, home=home)
+        _, first = self._read_user_settings(home)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
@@ -704,11 +1090,12 @@ class TestInitInstallsGuardrail:
         assert len(guard_cmds) == 1, f"re-run duplicated the guard entry: {guard_cmds!r}"
         deny = data.get("permissions", {}).get("deny", [])
         vault_denies = [r for r in deny if "vaults" in r]
-        # One Edit( rule expected; re-run must not duplicate it.
         assert vault_denies == list(dict.fromkeys(vault_denies)), (
             f"re-run duplicated a deny rule: {vault_denies!r}"
         )
-        assert len(vault_denies) == 1, f"re-run changed the deny rules: {vault_denies!r}"
+        assert vault_denies == [
+            r for r in first["permissions"]["deny"] if "vaults" in r
+        ], f"re-run changed the deny rules: {vault_denies!r}"
 
     def test_init_preserves_unrelated_settings(self, tmp_path):
         """An existing unrelated hook + permission rule survive the guardrail install."""
@@ -741,6 +1128,19 @@ class TestInitInstallsGuardrail:
         assert "Bash(curl:*)" in data["permissions"]["deny"], "unrelated deny dropped"
         assert data.get("env", {}).get("FOO") == "bar", "unrelated env dropped"
 
+    def test_init_sets_guard_exempt_env(self, tmp_path):
+        """The hook's exemption list must name each vault's top-level sites dir."""
+        state, config, home = _dirs(tmp_path)
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+
+        _, data = self._read_user_settings(home)
+        exempt = data.get("env", {}).get("LORE_VAULT_GUARD_EXEMPT", "")
+        vaults = state / "lore" / "vaults"
+        assert exempt.split("\n") == [f"{vaults}/*/sites"], (
+            f"expected the per-vault sites exemption pattern; got {exempt!r}"
+        )
+
     def test_init_aborts_cleanly_on_corrupt_settings(self, tmp_path):
         """A present-but-corrupt settings file → clean `error:` + nonzero, no traceback
         (mirrors the config-seed pattern; settings_writer raises ValueError)."""
@@ -755,3 +1155,118 @@ class TestInitInstallsGuardrail:
         assert "error:" in res.stderr.lower()
         assert "Traceback" not in res.stderr, "must not leak a raw traceback"
         assert settings.read_text() == corrupt, "corrupt settings clobbered"
+
+
+# ===========================================================================
+# 5. The settings-layer deny list: generated per record kind, sites left open
+# ===========================================================================
+
+
+class TestInitKindGeneratedDenyList:
+    """``lore init`` denies each record tree by name instead of denying the
+    whole vaults subtree.
+
+    A blanket ``Edit(//<vaults_root>/**)`` matches the vaults directory itself,
+    and a deny that matches a directory cascades to everything beneath it with
+    no way to pierce it — so it would re-block the sites zone the hook exempts.
+    The generated list therefore names one rule per record kind plus a literal
+    rule per file lore scaffolds at a vault root, and nothing that can match a
+    directory at the vault root.
+    """
+
+    def _install(self, tmp_path):
+        """Run a clean ``lore init`` and return (vaults_root, generated rules)."""
+        state, config, home = _dirs(tmp_path)
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+        data = json.loads((home / ".claude" / "settings.json").read_text())
+        vaults = state / "lore" / "vaults"
+        return vaults, _vault_deny_rules(data["permissions"]["deny"], vaults)
+
+    def _kinds(self):
+        return load_script("lore.record.model").KINDS
+
+    def test_one_deny_per_record_kind(self, tmp_path):
+        """The rule set is derived from the record model's kind set, so a kind
+        added to the model shows up in the rendered rules on the next install —
+        and a hand-maintained list that drifted from it fails here."""
+        vaults, rules = self._install(tmp_path)
+        prefix = f"Edit(//{str(vaults).lstrip('/')}/*/"
+        denied_trees = {
+            r[len(prefix) : -len("/**)")] for r in rules if r.endswith("/**)")
+        }
+        assert denied_trees == set(self._kinds()) | {".git"}, (
+            f"the denied subtrees must be exactly the record model's kinds plus "
+            f"the vault's own .git dir; got {sorted(denied_trees)!r}"
+        )
+
+    def test_vault_git_dir_is_denied(self, tmp_path):
+        """A vault root's ``.git`` is not a record tree, but ``.git/hooks/*`` is
+        executable code that runs on every vault operation — it needs its own
+        rule, since the sites carve-out means nothing broader can cover it."""
+        vaults, rules = self._install(tmp_path)
+        prefix = f"//{str(vaults).lstrip('/')}"
+        assert f"Edit({prefix}/*/.git/**)" in rules, (
+            f"missing the vault .git deny rule; got {rules!r}"
+        )
+
+    def test_vault_root_files_are_denied_by_literal_rule(self, tmp_path):
+        """The files lore scaffolds at a vault root are named outright: a
+        directory-capable catch-all (``…/*/*``) would cascade over the sites
+        zone as well."""
+        vaults, rules = self._install(tmp_path)
+        prefix = f"//{str(vaults).lstrip('/')}"
+        lock_name = load_script("lore.locking").VAULT_LOCK_NAME
+        for name in (".gitignore", lock_name):
+            assert f"Edit({prefix}/*/{name})" in rules, (
+                f"missing literal vault-root deny for {name}; got {rules!r}"
+            )
+        assert f"Edit({prefix}/*/*)" not in rules, (
+            "a vault-root catch-all matches the sites directory itself and "
+            f"cascades over everything in it; got {rules!r}"
+        )
+
+    def test_the_rule_set_is_exactly_the_kinds_plus_git_plus_the_root_files(self, tmp_path):
+        vaults, rules = self._install(tmp_path)
+        prefix = f"//{str(vaults).lstrip('/')}"
+        expected = (
+            {f"Edit({prefix}/*/{kind}/**)" for kind in self._kinds()}
+            | {f"Edit({prefix}/*/.git/**)"}
+            | {f"Edit({prefix}/*/{name})" for name in (".gitignore", ".lore.lock")}
+        )
+        assert set(rules) == expected, (
+            f"unexpected extra or missing deny rules: {sorted(set(rules) ^ expected)!r}"
+        )
+
+    def test_no_generated_rule_matches_a_sites_path(self, tmp_path):
+        """The whole point of the restructure: nothing in the generated list may
+        block the free-write zone, directly or by cascading over a parent."""
+        vaults, rules = self._install(tmp_path)
+        vault = f"{vaults}/default"
+        for path in (
+            f"{vault}/sites",
+            f"{vault}/sites/demo",
+            f"{vault}/sites/demo/index.html",
+            f"{vault}/sites/demo/assets/app.js",
+            f"{vault}/sites/demo/.well-known/probe.txt",
+        ):
+            blocking = [r for r in rules if _rule_denies(r, path)]
+            assert not blocking, f"{path} is blocked by {blocking!r}"
+
+    def test_record_trees_and_root_files_are_still_blocked(self, tmp_path):
+        """Positive control: the same evaluation must show the rules biting
+        everywhere they are supposed to, or the test above proves nothing."""
+        vaults, rules = self._install(tmp_path)
+        vault = f"{vaults}/default"
+        for path in (
+            f"{vault}/adr/some-decision.md",
+            f"{vault}/task/some-task.md",
+            f"{vault}/session/2026/note.md",
+            f"{vault}/.gitignore",
+            f"{vault}/.lore.lock",
+            f"{vault}/.git/hooks/pre-commit",
+            f"{vault}/.git/config",
+        ):
+            assert any(_rule_denies(r, path) for r in rules), (
+                f"{path} must stay denied; rules={rules!r}"
+            )
