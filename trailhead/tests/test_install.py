@@ -85,6 +85,14 @@ class TestDetectionDrivenInstall:
         out = capsys.readouterr().out
         assert "shellenv" in out
 
+    def test_summary_names_trailhead_when_bin_is_executable(self, tmp_path, capsys):
+        with _patched(detected=True), patch(
+            "trailhead.install.trailhead_bin_executable", return_value=True
+        ):
+            run_install(env=_env(tmp_path))
+        out = capsys.readouterr().out
+        assert "trailhead" in out
+
 
 # ---------------------------------------------------------------------------
 # CLI overrides
@@ -313,3 +321,54 @@ class TestLoreInitIntegration:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), no_lore=True, quiet=True)
         m["lore_init"].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# shellenv PATH-guidance block — prints whenever path integration applies
+# ---------------------------------------------------------------------------
+
+
+class TestShellenvGuidance:
+    def test_prints_and_names_trailhead_when_all_clis_disabled(self, tmp_path, capsys):
+        cfg_path = tmp_path / "no-clis.toml"
+        cfg_path.write_text("install_ranger_cli = false\n")
+        with _patched(detected=True) as m, patch(
+            "trailhead.install.trailhead_bin_executable", return_value=True
+        ):
+            rc = run_install(
+                env=_env(tmp_path),
+                config_arg=str(cfg_path),
+                no_camp=True,
+                no_lore=True,
+                no_portage=True,
+                quiet=True,
+            )
+        m["pathint"].assert_not_called()
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "shellenv" in out
+        assert "trailhead" in out
+
+    def test_omits_trailhead_when_bin_not_executable(self, tmp_path, capsys):
+        with _patched(detected=True), patch(
+            "trailhead.install.trailhead_bin_executable", return_value=False
+        ):
+            run_install(env=_env(tmp_path), quiet=True)
+        out = capsys.readouterr().out
+        summary_lines = [ln for ln in out.splitlines() if ln.strip()]
+        commands_line = next((ln for ln in summary_lines if ln.startswith("CLIs")), "")
+        assert "trailhead" not in commands_line
+
+    def test_shim_dir_failure_stays_exit_zero_and_carries_full_path_fallback(
+        self, tmp_path, capsys
+    ):
+        with _patched(detected=True) as m, patch(
+            "trailhead.install.trailhead_bin_executable", return_value=True
+        ):
+            m["pathint"].side_effect = OSError("disk full")
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "shellenv" in out
+        assert "bin/trailhead" in out
+        assert "trailhead" in out

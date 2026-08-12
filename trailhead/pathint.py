@@ -108,6 +108,20 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def trailhead_bin_executable(root: Path | str) -> bool:
+    """Return True when ``<root>/bin/trailhead`` exists and is executable.
+
+    The single source of truth for "does this checkout have a runnable
+    ``bin/trailhead``" — used by ``_trailhead_function`` to decide whether
+    shellenv emits the bare-name ``trailhead`` function, and by install's
+    summary to decide whether it names ``trailhead`` as a command the
+    shellenv line provides. A non-editable pip install has no checkout
+    alongside it, so this is False there.
+    """
+    bin_path = Path(root) / "bin" / "trailhead"
+    return bin_path.is_file() and os.access(bin_path, os.X_OK)
+
+
 # ---------------------------------------------------------------------------
 # Shell-injection guard
 # ---------------------------------------------------------------------------
@@ -372,11 +386,10 @@ def _trailhead_function(root: str, *, shell: str) -> str:
     profile's shellenv line currently points at, re-resolved at every shell
     startup — never install-time state.
     """
-    bin_path = Path(root) / "bin" / "trailhead"
-    if not (bin_path.is_file() and os.access(bin_path, os.X_OK)):
+    if not trailhead_bin_executable(root):
         return ""
 
-    target = str(bin_path)
+    target = str(Path(root) / "bin" / "trailhead")
     _reject_unsafe_for_eval(target, label="the trailhead binary path")
 
     if shell == "fish":

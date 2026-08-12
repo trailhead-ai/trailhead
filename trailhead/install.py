@@ -44,7 +44,7 @@ from trailhead.install_config import (
     resolve_config,
     resolve_config_path,
 )
-from trailhead.pathint import create_shims, repo_root
+from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
 from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 _REPO_ROOT = repo_root()
@@ -263,9 +263,18 @@ def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
         lines.append("")
 
     clis = sorted(name for name, enabled in cfg.cli_flags.items() if enabled)
-    if shim_dir is not None and clis:
-        lines.append(f"CLIs ({', '.join(clis)}): shims in {shim_dir}")
-        lines.append("  to put them on your PATH, add this to your shell profile:")
+    commands = list(clis)
+    if trailhead_bin_executable(_REPO_ROOT):
+        commands.append("trailhead")
+    if commands:
+        if shim_dir is not None and clis:
+            lines.append(f"CLIs ({', '.join(clis)}): shims in {shim_dir}")
+        elif clis:
+            lines.append(
+                f"CLIs ({', '.join(clis)}): could not build the shim dir "
+                "(see warning above) — use each CLI's full path for now"
+            )
+        lines.append(f"  {', '.join(commands)} on your PATH: add this to your shell profile:")
         lines.append(f'    eval "$({_TRAILHEAD_BIN} shellenv)"')
         lines.append("  then restart your shell (or re-eval it in the current one)")
         lines.append("")
