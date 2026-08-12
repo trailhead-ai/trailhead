@@ -48,6 +48,10 @@ def test_write_prohibition_carves_out_the_sites_zone():
     assert "outpost:publish-site" in prohibition, (
         "the carve-out must point at the skill that owns the publish convention"
     )
+    assert "nested" in prohibition and ".git" in prohibition, (
+        "the carve-out must warn against creating a nested .git inside the "
+        "sites zone — it corrupts the vault's own sync"
+    )
 
 
 def test_sites_carve_out_does_not_weaken_the_record_prohibition():
