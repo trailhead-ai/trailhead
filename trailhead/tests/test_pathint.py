@@ -92,6 +92,12 @@ class TestCreateShims:
                 {"camp": Path('/repo/bin/camp"; evil')}, "/repo", env=_env(tmp_path)
             )
 
+    def test_rejects_unsafe_shim_name(self, tmp_path):
+        with pytest.raises(PathIntegrationError):
+            create_shims(
+                {'camp"; evil': Path("/repo/bin/camp")}, "/repo", env=_env(tmp_path)
+            )
+
 
 # ---------------------------------------------------------------------------
 # detect_shell

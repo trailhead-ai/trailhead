@@ -204,6 +204,7 @@ def create_shims(
 
 def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
     """Generate a single bash shim wrapper (TRAILHEAD_ROOT hardcoded)."""
+    _reject_unsafe_for_eval(name, label="the shim name")
     _reject_unsafe_for_eval(trailhead_root, label="TRAILHEAD_ROOT")
     _reject_unsafe_for_eval(str(bin_path), label="the shim's target binary path")
     return (
