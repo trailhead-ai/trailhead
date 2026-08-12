@@ -97,6 +97,23 @@ _GUARD_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 # never corrupts a vault root whose path contains a literal ':'.
 _GUARD_ROOT_DELIM = "\n"
 
+# The exemption-pattern delimiter passed via LORE_VAULT_GUARD_EXEMPT. Same
+# newline, for the same reason.
+_GUARD_EXEMPT_DELIM = "\n"
+
+#: The one subtree of a vault that is not a record tree: a free-write zone for
+#: static sites, written with plain file operations and distributed by
+#: ``lore sync`` like any other vault content.
+_SITES_DIR = "sites"
+
+#: The files lore scaffolds at a vault ROOT. They are denied by literal name
+#: rather than by a ``*/*`` catch-all: a deny rule that matches a DIRECTORY
+#: cascades to everything beneath it and cannot be pierced by any allow, so a
+#: catch-all at the vault root would re-block the sites zone. A root file lore
+#: does not scaffold is left to the runtime hook, which covers the whole vault
+#: subtree minus the exemption.
+_VAULT_ROOT_FILES = (".gitignore", ".lore.lock")
+
 
 def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     """Install the vault write-protection guardrail into *settings_path*.
@@ -110,24 +127,40 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
          POSIX path, so a vault path containing ':' is not corrupted). The hook
          ``realpath``s these on every call, so the ``default`` symlink's *current*
          real target is always covered — never an install-time snapshot.
-      3. Coarse static ``permissions.deny`` ``Edit(...)`` rule over ``vaults/**``
-         as **defense-in-depth only** (it cannot cover a symlink's real target,
-         so the runtime hook above is the security-sufficient mechanism).
+      3. ``env.LORE_VAULT_GUARD_EXEMPT`` = ``<vaults_root>/*/sites`` — the one
+         subtree the hook lets through, so each vault's static-site zone is
+         directly writable while every record tree stays CLI-only.
+      4. Static ``permissions.deny`` ``Edit(...)`` rules as **defense-in-depth
+         only** (they cannot cover a symlink's real target, so the runtime hook
+         above is the security-sufficient mechanism): one rule per record kind,
+         generated from the record model, plus one literal rule per file lore
+         scaffolds at a vault root. It is a generated list rather than a single
+         ``vaults/**`` rule because a deny that matches a directory cascades to
+         everything beneath it and no allow can pierce it — a blanket rule would
+         re-block the sites zone the hook exempts, at a layer with no carve-out
+         syntax. Both blanket rules an earlier install may have left are removed.
          ``Edit(path)`` rules cover all file-editing tools (Write/Edit/
          MultiEdit/NotebookEdit); a ``Write(path)`` rule never matches and makes
-         Claude Code warn at startup, so any legacy ``Write(...)`` rule from an
-         earlier install is removed. Note the ``//`` double-slash absolute-path
+         Claude Code warn at startup. Note the ``//`` double-slash absolute-path
          grammar (single ``/`` is project-root-relative — a silent footgun).
 
-    Idempotent: re-runs add no duplicate entries. All three upserts go through
+    A record kind added to the model reaches the deny list on the next
+    ``lore init``; until then the hook is its only settings-independent cover.
+
+    Idempotent: re-runs add no duplicate entries. Every upsert goes through
     ``settings_writer`` (stdlib json, atomic write, preserves unrelated keys);
     a present-but-corrupt settings file raises ``ValueError`` (caller surfaces a
     clean error rather than clobbering it).
     """
     from ..config import settings_writer as settings_writer_mod
+    from ..record.model import KINDS
 
     default_link = vaults_root / "default"
     guard_root_value = _GUARD_ROOT_DELIM.join([str(vaults_root), str(default_link)])
+    # One pattern today — each vault's top-level sites zone. The env var carries
+    # a list, so another exemption joins it without a format change.
+    exempt_patterns = [str(vaults_root / "*" / _SITES_DIR)]
+    guard_exempt_value = _GUARD_EXEMPT_DELIM.join(exempt_patterns)
 
     settings_writer_mod.upsert_hook(
         settings_path, "PreToolUse", _guard_command(), matcher=_GUARD_MATCHER
@@ -135,15 +168,23 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     settings_writer_mod.set_env_var(
         settings_path, "LORE_VAULT_GUARD_ROOT", guard_root_value
     )
-    # Defense-in-depth (breadth-only): a static Edit( deny over vaults/**. Claude
-    # Code matches file-editing tools (Write/Edit/MultiEdit/NotebookEdit) against
-    # Edit(path) rules only — a Write(path) rule never matches and triggers a
-    # startup warning, so earlier installs' Write( rule is removed here.
-    # The runtime hook above is the security-sufficient primary; this coarse
-    # //abs prefix rule cannot cover a symlink's real target.
-    vaults_glob = f"//{str(vaults_root).lstrip('/')}/**"
-    settings_writer_mod.remove_permission_deny(settings_path, f"Write({vaults_glob})")
-    settings_writer_mod.upsert_permission_deny(settings_path, f"Edit({vaults_glob})")
+    settings_writer_mod.set_env_var(
+        settings_path, "LORE_VAULT_GUARD_EXEMPT", guard_exempt_value
+    )
+
+    vaults_prefix = f"//{str(vaults_root).lstrip('/')}"
+    blanket_glob = f"{vaults_prefix}/**"
+    settings_writer_mod.remove_permission_deny(settings_path, f"Write({blanket_glob})")
+    settings_writer_mod.remove_permission_deny(settings_path, f"Edit({blanket_glob})")
+
+    for kind in sorted(KINDS):
+        settings_writer_mod.upsert_permission_deny(
+            settings_path, f"Edit({vaults_prefix}/*/{kind}/**)"
+        )
+    for name in _VAULT_ROOT_FILES:
+        settings_writer_mod.upsert_permission_deny(
+            settings_path, f"Edit({vaults_prefix}/*/{name})"
+        )
 
 
 def cmd_init(args) -> int:
