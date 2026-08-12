@@ -175,11 +175,13 @@ def run_install(
     cli_tools = _resolve_cli_tools(cfg.cli_flags)
 
     shim_dir = None
+    shim_build_failed = False
     if cli_tools:
         try:
             shim_dir = create_shims(cli_tools, str(_REPO_ROOT), env=_env).shim_dir
         except Exception as exc:
             # M1: a shim-dir failure is a warning — wiring succeeded.
+            shim_build_failed = True
             print(
                 f"trailhead: could not build the CLI shim dir: {exc}\n"
                 f"  (the plugins are installed; the CLIs just aren't shimmed)",
@@ -205,9 +207,18 @@ def run_install(
     no_harness = not cfg.harnesses
 
     if as_json:
-        _print_json_summary(cfg, wired, shim_dir, no_harness=no_harness)
+        _print_json_summary(
+            cfg, wired, shim_dir, no_harness=no_harness, shim_build_failed=shim_build_failed
+        )
     else:
-        _print_human_summary(cfg, wired, shim_dir, no_harness=no_harness)
+        _print_human_summary(
+            cfg,
+            wired,
+            shim_dir,
+            no_harness=no_harness,
+            cli_tools=cli_tools,
+            shim_build_failed=shim_build_failed,
+        )
 
     if no_harness:
         print(
@@ -246,7 +257,9 @@ def _collect_overrides(cfg) -> list[tuple[str, str, str, str, str]]:
     return out
 
 
-def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
+def _print_human_summary(
+    cfg, wired, shim_dir, *, no_harness: bool, cli_tools: dict[str, Path], shim_build_failed: bool
+) -> None:
     lines: list[str] = []
 
     if wired:
@@ -263,20 +276,34 @@ def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
         lines.append("")
 
     clis = sorted(name for name, enabled in cfg.cli_flags.items() if enabled)
-    commands = list(clis)
-    if trailhead_bin_executable(_REPO_ROOT):
+    trailhead_available = trailhead_bin_executable(_REPO_ROOT)
+
+    # The eval line only puts the plugin CLIs on PATH when the shim dir was
+    # actually built — a failed build, or no resolvable CLI binaries, means
+    # they must not be named in the "on your PATH" promise.
+    path_clis = clis if shim_dir is not None else []
+    commands = list(path_clis)
+    if trailhead_available:
         commands.append("trailhead")
-    if commands:
+
+    if clis or trailhead_available:
         if shim_dir is not None and clis:
             lines.append(f"CLIs ({', '.join(clis)}): shims in {shim_dir}")
-        elif clis:
+        elif clis and shim_build_failed:
             lines.append(
                 f"CLIs ({', '.join(clis)}): could not build the shim dir "
-                "(see warning above) — use each CLI's full path for now"
+                "(see warning above) — use each CLI's full path for now:"
             )
-        lines.append(f"  {', '.join(commands)} on your PATH: add this to your shell profile:")
-        lines.append(f'    eval "$({_TRAILHEAD_BIN} shellenv)"')
-        lines.append("  then restart your shell (or re-eval it in the current one)")
+            for name in clis:
+                bin_path = cli_tools.get(name)
+                if bin_path is not None:
+                    lines.append(f"    {name}: {bin_path}")
+        if commands:
+            lines.append(
+                f"  {', '.join(commands)} on your PATH: add this to your shell profile:"
+            )
+            lines.append(f'    eval "$({_TRAILHEAD_BIN} shellenv)"')
+            lines.append("  then restart your shell (or re-eval it in the current one)")
         lines.append("")
 
     if not no_harness:
@@ -285,11 +312,14 @@ def _print_human_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
     print("\n".join(lines).rstrip())
 
 
-def _print_json_summary(cfg, wired, shim_dir, *, no_harness: bool) -> None:
+def _print_json_summary(
+    cfg, wired, shim_dir, *, no_harness: bool, shim_build_failed: bool
+) -> None:
     data = {
         "harnesses": wired,
         "cli_flags": dict(cfg.cli_flags),
         "shim_dir": str(shim_dir) if shim_dir else None,
+        "shim_build_failed": shim_build_failed,
         "shellenv": f'eval "$({_TRAILHEAD_BIN} shellenv)"',
         "no_harness": no_harness,
     }

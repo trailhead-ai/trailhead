@@ -80,6 +80,18 @@ class TestCreateShims:
         assert (res.shim_dir / "camp").exists()
         assert not (res.shim_dir / "lore").exists()
 
+    def test_rejects_unsafe_trailhead_root(self, tmp_path):
+        with pytest.raises(PathIntegrationError):
+            create_shims(
+                {"camp": Path("/repo/bin/camp")}, '/repo"; evil', env=_env(tmp_path)
+            )
+
+    def test_rejects_unsafe_bin_path(self, tmp_path):
+        with pytest.raises(PathIntegrationError):
+            create_shims(
+                {"camp": Path('/repo/bin/camp"; evil')}, "/repo", env=_env(tmp_path)
+            )
+
 
 # ---------------------------------------------------------------------------
 # detect_shell
@@ -224,18 +236,18 @@ class TestTrailheadFunction:
 
 
 class TestInjectionHardening:
-    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n"])
+    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n", "\\"])
     def test_rejects_unsafe_root(self, tmp_path, bad_char):
         with pytest.raises(PathIntegrationError):
             shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root=f"/repo{bad_char}evil")
 
-    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n"])
+    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n", "\\"])
     def test_rejects_unsafe_shim_dir(self, tmp_path, bad_char):
         env = {"TRAILHEAD_STATE_DIR": str(tmp_path) + bad_char + "evil"}
         with pytest.raises(PathIntegrationError):
             shellenv_lines(shell="bash", env=env, trailhead_root="/repo")
 
-    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n"])
+    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n", "\\"])
     def test_rejects_unsafe_root_in_trailhead_function_path(self, tmp_path, bad_char):
         # The bin/trailhead check itself passes (real file at a safe path),
         # but the root used to build the function body is unsafe.

@@ -33,8 +33,8 @@ Shim names are checked against a denylist of system binaries.
 
 Every path interpolated into eval'd output (TRAILHEAD_ROOT, the shim dir, the
 trailhead() target) is checked for shell metacharacters (``"``, backtick,
-``$``, newline) that could break out of their quoted context; a match raises
-``PathIntegrationError`` instead of emitting unsafe output.
+``$``, newline, backslash) that could break out of their quoted context; a
+match raises ``PathIntegrationError`` instead of emitting unsafe output.
 """
 
 from __future__ import annotations
@@ -128,7 +128,7 @@ def trailhead_bin_executable(root: Path | str) -> bool:
 # Shell-injection guard
 # ---------------------------------------------------------------------------
 
-_UNSAFE_SHELL_CHARS = ('"', "`", "$", "\n")
+_UNSAFE_SHELL_CHARS = ('"', "`", "$", "\n", "\\")
 
 
 def _reject_unsafe_for_eval(value: str, *, label: str) -> None:
@@ -204,6 +204,8 @@ def create_shims(
 
 def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
     """Generate a single bash shim wrapper (TRAILHEAD_ROOT hardcoded)."""
+    _reject_unsafe_for_eval(trailhead_root, label="TRAILHEAD_ROOT")
+    _reject_unsafe_for_eval(str(bin_path), label="the shim's target binary path")
     return (
         "#!/usr/bin/env bash\n"
         f"# trailhead-managed shim for {name}\n"

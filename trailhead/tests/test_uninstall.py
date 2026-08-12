@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+from trailhead.pathint import repo_root
 from trailhead.uninstall import run_uninstall
 
 
@@ -196,3 +197,5 @@ class TestHumanSummary:
             run_uninstall(env=_env(tmp_path), assume_yes=True, runner=runner)
         out = capsys.readouterr().out
         assert "bin/trailhead install" in out
+        assert "<checkout>" not in out
+        assert str(repo_root()) in out

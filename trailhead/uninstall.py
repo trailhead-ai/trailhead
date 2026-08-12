@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 from trailhead.harness import HarnessError, get_harness
-from trailhead.pathint import resolve_shim_dir
+from trailhead.pathint import repo_root, resolve_shim_dir
 from trailhead.paths import state_dir
 from trailhead.wire import LockError, wire_lock
 
@@ -200,7 +200,7 @@ def _print_human_summary(removed: dict[str, list[str]], *, quiet: bool) -> None:
         "bare-name `trailhead` still resolves in shells that already eval'd the "
         "`… shellenv` line — remove that line from your shell profile to drop it"
     )
-    lines.append("re-install later with the full path: <checkout>/bin/trailhead install")
+    lines.append(f"re-install later with the full path: {repo_root()}/bin/trailhead install")
     lines.append("")
     lines.append("start a fresh Claude Code session so the harness drops the plugins")
     print("\n".join(lines))

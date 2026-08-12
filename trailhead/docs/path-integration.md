@@ -15,7 +15,7 @@ Location: `state_dir("trailhead")/bin/`
 - Created via `ensure_dir(..., mode=0o700)` by `create_shims()`.
 - One bash shim per **selected** plugin CLI (`camp`, `lore`). The shim dir's
   *contents* encode the selection: `--no-lore` simply omits the `lore` shim, so
-  a single PATH entry always reflects what the plugin CLIs the user asked for.
+  a single PATH entry always reflects which plugin CLIs the user asked for.
   This mechanism covers only the plugin CLIs — the management CLI itself
   (`trailhead`) never gets a shim; see "The `trailhead` function" below.
 - Each shim hardcodes `TRAILHEAD_ROOT` as an absolute literal and `exec`s
