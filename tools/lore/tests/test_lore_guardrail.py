@@ -693,6 +693,66 @@ class TestGuardExemptZone:
             f"observable; stderr={result.stderr!r}"
         )
 
+    def test_root_star_pattern_is_ignored_and_record_stays_denied(self, tmp_path):
+        """``<root>/*`` matches every child of the vaults root and everything
+        under it — it would exempt every record tree wholesale. It is one segment
+        too shallow to be a real carve-out (which names a ``<vault>/<zone>``
+        subtree), so it is ignored with a warning and a record write stays denied.
+        """
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "adr" / "some-decision.md"
+        result = _run_guard(target, [vaults_root], exempt=[f"{vaults_root}/*"])
+        assert result.returncode == 2, (
+            "an over-broad `<root>/*` exemption must not exempt record trees; "
+            f"stderr={result.stderr!r}"
+        )
+        assert f"{vaults_root}/*" in result.stderr, (
+            "the ignored over-broad pattern must be named on stderr so the "
+            f"misconfiguration is observable; stderr={result.stderr!r}"
+        )
+
+    def test_bare_root_pattern_is_ignored_and_record_stays_denied(self, tmp_path):
+        """A bare ``<root>`` (no wildcard) resolves to the vaults root itself and
+        would match every path under it. It is not strictly deeper than the root,
+        so it is ignored with a warning and a record write stays denied.
+        """
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "adr" / "some-decision.md"
+        result = _run_guard(target, [vaults_root], exempt=[str(vaults_root)])
+        assert result.returncode == 2, (
+            "a bare `<root>` exemption must not exempt record trees; "
+            f"stderr={result.stderr!r}"
+        )
+        assert str(vaults_root) in result.stderr, (
+            "the ignored over-broad pattern must be named on stderr so the "
+            f"misconfiguration is observable; stderr={result.stderr!r}"
+        )
+
+    def test_legit_sites_pattern_still_carves_and_still_denies_records(self, tmp_path):
+        """The ``<root>/*/sites`` pattern names a subtree two segments below the
+        root — the real carve-out shape — so it still exempts a sites write while
+        a record write in the same vault stays denied, now that the shallower
+        `<root>/*` and bare `<root>` are rejected."""
+        vaults_root, vault = self._vaults(tmp_path)
+        sites_write = _run_guard(
+            vault / "sites" / "index.html",
+            [vaults_root],
+            exempt=[self._pattern(vaults_root)],
+        )
+        assert sites_write.returncode == 0, (
+            "the legitimate sites carve-out must still be allowed; "
+            f"stderr={sites_write.stderr!r}"
+        )
+        record_write = _run_guard(
+            vault / "adr" / "some-decision.md",
+            [vaults_root],
+            exempt=[self._pattern(vaults_root)],
+        )
+        assert record_write.returncode == 2, (
+            "the legitimate sites carve-out must not leak onto record trees; "
+            f"stderr={record_write.stderr!r}"
+        )
+
     def test_exempt_patterns_use_the_newline_delimiter(self, tmp_path):
         """A vaults root containing a literal ':' must still be exemptable — the
         delimiter is a newline, which cannot appear in a POSIX path."""

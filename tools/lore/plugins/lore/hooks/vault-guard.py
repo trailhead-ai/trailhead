@@ -56,11 +56,15 @@ Environment:
     in a POSIX path) is matched literally, so a vaults root containing one keeps
     its carve-out instead of silently losing it to a stray syntax reading.
 
-    Anchoring: a pattern is honored only when it resolves at or under one of the
-    guarded roots. An exemption carves a zone out of a guarded subtree; one
-    anchored anywhere else can only widen the guard's reach — a bare ``/*`` line
-    would otherwise exempt the whole filesystem — so it is ignored and named in
-    a stderr warning.
+    Anchoring: a pattern is honored only when it resolves STRICTLY DEEPER than
+    one of the guarded roots — at least two segments below it, the
+    ``<vault>/<zone>`` shape a real carve-out has. An exemption carves ONE zone
+    out of a guarded subtree; it may never unguard the subtree. Two shapes are
+    ignored, each named in a stderr warning: a pattern anchored anywhere else
+    can only widen the guard's reach (a bare ``/*`` line would exempt the whole
+    filesystem), and a pattern anchored under a root but at or only one segment
+    below it (a bare ``<root>`` line, or ``<root>/*``) matches every record tree
+    under that root and would unguard them all.
 
     Fail-closed: a missing or empty value means NO exemption — the guard denies
     the whole vault subtree, which is the pre-exemption behavior. A malformed
@@ -161,12 +165,19 @@ def _is_exempt(real_target: str, real_roots: list[str]) -> bool:
     A line that is blank or not an absolute path is skipped rather than treated
     as a match, so one malformed entry cannot widen or disable the guard.
 
-    A pattern is honored only when it resolves at or under one of the guarded
-    roots in *real_roots*. An exemption exists to carve a zone out of a guarded
-    subtree; one anchored anywhere else can only ever widen the guard's reach —
-    a bare ``/*`` line would exempt the entire filesystem — so it is ignored,
-    with a warning naming it so the misconfiguration is observable rather than
-    silent.
+    A pattern is honored only when it resolves STRICTLY DEEPER than every guarded
+    root in *real_roots* it anchors under — i.e. it names a subtree at least two
+    segments below such a root, the ``<vault>/<zone>`` shape a real carve-out has
+    (``<vaults>/*/sites``). Two failure shapes are ignored, each with a warning
+    naming the pattern so the misconfiguration is observable rather than silent:
+
+    - A pattern anchored anywhere OUTSIDE every guarded root can only ever widen
+      the guard's reach — a bare ``/*`` line would exempt the entire filesystem.
+    - A pattern anchored under a root but only AT or ONE segment below it (a bare
+      ``<root>`` line, or ``<root>/*``) matches every path under that root — it
+      would silently exempt every record tree (``adr/``, ``task/``, …) wholesale.
+      An exemption exists to carve one zone out of a guarded subtree, never to
+      unguard the subtree, so this too-broad pattern is rejected.
     """
     patterns = os.environ.get("LORE_VAULT_GUARD_EXEMPT", "").split(_EXEMPT_DELIM)
 
@@ -181,10 +192,22 @@ def _is_exempt(real_target: str, real_roots: list[str]) -> bool:
             real_pattern = _real(raw_pattern)
         except (OSError, ValueError):
             continue
-        if not any(_is_under(real_pattern, root) for root in real_roots):
+        anchor_roots = [root for root in real_roots if _is_under(real_pattern, root)]
+        if not anchor_roots:
             print(
                 f"lore vault guard: ignoring exemption {raw_pattern!r} — it does "
                 "not name a path under any guarded vault root.",
+                file=sys.stderr,
+            )
+            continue
+        pattern_depth = len(real_pattern.split(os.sep))
+        if any(pattern_depth <= len(root.split(os.sep)) + 1 for root in anchor_roots):
+            print(
+                f"lore vault guard: ignoring exemption {raw_pattern!r} — it is too "
+                "broad; it matches every record tree under a guarded vault root. "
+                "An exemption must name a subtree at least two segments below a "
+                "root (e.g. `<vaults>/*/sites`), not the root itself or all of its "
+                "children.",
                 file=sys.stderr,
             )
             continue
