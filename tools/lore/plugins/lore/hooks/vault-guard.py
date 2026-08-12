@@ -51,7 +51,16 @@ Environment:
     path segment and never spans a separator, so ``<vaults>/*/sites`` covers a
     vault's top-level ``sites`` directory but not a ``sites`` directory nested
     inside a record tree. ``lore init`` writes exactly that pattern, carving the
-    per-vault static-site zone out of the deny.
+    per-vault static-site zone out of the deny. ``*`` is the ONLY wildcard: any
+    other glob metacharacter in a pattern (``[``, ``]``, ``?`` — all legal bytes
+    in a POSIX path) is matched literally, so a vaults root containing one keeps
+    its carve-out instead of silently losing it to a stray syntax reading.
+
+    Anchoring: a pattern is honored only when it resolves at or under one of the
+    guarded roots. An exemption carves a zone out of a guarded subtree; one
+    anchored anywhere else can only widen the guard's reach — a bare ``/*`` line
+    would otherwise exempt the whole filesystem — so it is ignored and named in
+    a stderr warning.
 
     Fail-closed: a missing or empty value means NO exemption — the guard denies
     the whole vault subtree, which is the pre-exemption behavior. A malformed
@@ -82,9 +91,9 @@ parse failure means we cannot identify the target anyway.
 
 from __future__ import annotations
 
-import fnmatch
 import json
 import os
+import re
 import sys
 
 
@@ -111,14 +120,26 @@ def _is_under(target: str, root: str) -> bool:
     return target == root or target.startswith(root + os.sep)
 
 
+def _segment_matcher(segment: str) -> re.Pattern[str]:
+    """Compile one pattern segment, where ``*`` is the ONLY wildcard.
+
+    Everything else is matched literally — including ``[``, ``]`` and ``?``,
+    which are legal bytes in a POSIX path but glob syntax to a matcher like
+    ``fnmatch``. Reading them as syntax would silently narrow (or widen) an
+    exemption for a vaults root that happens to contain them, so each literal
+    run between ``*``s is regex-escaped.
+    """
+    return re.compile("[^/]*".join(re.escape(part) for part in segment.split("*")))
+
+
 def _matches_pattern(target: str, pattern: str) -> bool:
     """True if *target* is the directory *pattern* names, or lives under it.
 
     Both arguments are expected to be already ``_real``-resolved. Matching is
     segment-wise — the pattern's segments are compared one-for-one against the
     target's leading segments — so a ``*`` stands for exactly one segment and
-    can never swallow a separator the way a whole-path ``fnmatch`` would. That
-    is what keeps ``<vaults>/*/sites`` from matching ``<vault>/task/x/sites``.
+    can never swallow a separator the way a whole-path glob would. That is what
+    keeps ``<vaults>/*/sites`` from matching ``<vault>/task/x/sites``.
 
     A target with MORE segments than the pattern matches on its leading
     segments: that is the "at or under" half of the contract.
@@ -128,16 +149,24 @@ def _matches_pattern(target: str, pattern: str) -> bool:
     if len(target_parts) < len(pattern_parts):
         return False
     return all(
-        fnmatch.fnmatchcase(t, p) for t, p in zip(target_parts, pattern_parts)
+        _segment_matcher(p).fullmatch(t) is not None
+        for t, p in zip(target_parts, pattern_parts)
     )
 
 
-def _is_exempt(real_target: str) -> bool:
+def _is_exempt(real_target: str, real_roots: list[str]) -> bool:
     """True if *real_target* sits in a subtree LORE_VAULT_GUARD_EXEMPT carves out.
 
     Unset or empty → False (fail closed: no exemption, deny the whole subtree).
     A line that is blank or not an absolute path is skipped rather than treated
     as a match, so one malformed entry cannot widen or disable the guard.
+
+    A pattern is honored only when it resolves at or under one of the guarded
+    roots in *real_roots*. An exemption exists to carve a zone out of a guarded
+    subtree; one anchored anywhere else can only ever widen the guard's reach —
+    a bare ``/*`` line would exempt the entire filesystem — so it is ignored,
+    with a warning naming it so the misconfiguration is observable rather than
+    silent.
     """
     patterns = os.environ.get("LORE_VAULT_GUARD_EXEMPT", "").split(_EXEMPT_DELIM)
 
@@ -151,6 +180,13 @@ def _is_exempt(real_target: str) -> bool:
             # untouched, since they name nothing on disk.
             real_pattern = _real(raw_pattern)
         except (OSError, ValueError):
+            continue
+        if not any(_is_under(real_pattern, root) for root in real_roots):
+            print(
+                f"lore vault guard: ignoring exemption {raw_pattern!r} — it does "
+                "not name a path under any guarded vault root.",
+                file=sys.stderr,
+            )
             continue
         if _matches_pattern(real_target, real_pattern):
             return True
@@ -192,12 +228,16 @@ def main() -> int:
         )
         return 0
 
-    for raw_root in roots:
-        real_root = _real(raw_root)
+    real_roots = [_real(r) for r in roots]
+
+    for raw_root, real_root in zip(roots, real_roots):
         if _is_under(real_target, real_root):
             # Exemptions are consulted only here, inside a root match: a target
-            # no root covers was already allowed and never gets this far.
-            if _is_exempt(real_target):
+            # no root covers was already allowed and never gets this far. The
+            # full root list goes along, because an exemption may be anchored at
+            # a root other than the one that matched (the vaults root covers a
+            # write that arrived through the `default` symlink root).
+            if _is_exempt(real_target, real_roots):
                 return 0
             print(
                 "lore vault guard: refusing to write to "

@@ -640,6 +640,59 @@ class TestGuardExemptZone:
             f"beside it; stderr={result.stderr!r}"
         )
 
+    def test_vaults_root_containing_glob_metacharacters_keeps_its_carve_out(
+        self, tmp_path
+    ):
+        """A vaults root whose literal path contains ``[``, ``]`` or ``?`` must
+        still match its own exemption pattern: those bytes are legal in a POSIX
+        path, and reading them as glob syntax would silently drop the carve-out
+        while every other path kept working."""
+        vaults_root = tmp_path / "we[ir]d?root" / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 0, (
+            "glob metacharacters in the literal part of an exemption pattern must "
+            f"be matched literally; stderr={result.stderr!r}"
+        )
+
+    def test_metacharacter_pattern_does_not_match_a_different_real_path(self, tmp_path):
+        """Positive control for the escaping: with the literal characters taken
+        literally, a path that only matches when they are read as wildcards must
+        stay denied."""
+        vaults_root = tmp_path / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        target = vault / "sites" / "index.html"
+        # `[v]aults` and `vault?` both glob-match this real path; neither names it.
+        result = _run_guard(
+            target,
+            [vaults_root],
+            exempt=[f"{tmp_path}/[v]aults/*/sites", f"{tmp_path}/vault?/*/sites"],
+        )
+        assert result.returncode == 2, (
+            "an exemption pattern must name a real path literally, not glob onto "
+            f"it; stderr={result.stderr!r}"
+        )
+
+    def test_pattern_outside_every_guard_root_is_ignored_with_a_warning(self, tmp_path):
+        """A pattern that does not resolve under any configured guard root can
+        only widen the guard, never carve a zone out of it — a bare ``/*`` line
+        would exempt the whole filesystem. Such a pattern is ignored, and the
+        guard says so rather than failing silently."""
+        vaults_root, vault = self._vaults(tmp_path)
+        target = vault / "sites" / "index.html"
+        result = _run_guard(target, [vaults_root], exempt=["/*"])
+        assert result.returncode == 2, (
+            "a pattern outside every guard root must not exempt anything; "
+            f"stderr={result.stderr!r}"
+        )
+        assert "/*" in result.stderr, (
+            "the ignored pattern must be named on stderr so a misconfiguration is "
+            f"observable; stderr={result.stderr!r}"
+        )
+
     def test_exempt_patterns_use_the_newline_delimiter(self, tmp_path):
         """A vaults root containing a literal ':' must still be exemptable — the
         delimiter is a newline, which cannot appear in a POSIX path."""
@@ -1079,12 +1132,22 @@ class TestInitKindGeneratedDenyList:
         and a hand-maintained list that drifted from it fails here."""
         vaults, rules = self._install(tmp_path)
         prefix = f"Edit(//{str(vaults).lstrip('/')}/*/"
-        denied_kinds = {
+        denied_trees = {
             r[len(prefix) : -len("/**)")] for r in rules if r.endswith("/**)")
         }
-        assert denied_kinds == set(self._kinds()), (
-            f"the per-kind deny set must equal the record model's kinds; "
-            f"got {sorted(denied_kinds)!r}"
+        assert denied_trees == set(self._kinds()) | {".git"}, (
+            f"the denied subtrees must be exactly the record model's kinds plus "
+            f"the vault's own .git dir; got {sorted(denied_trees)!r}"
+        )
+
+    def test_vault_git_dir_is_denied(self, tmp_path):
+        """A vault root's ``.git`` is not a record tree, but ``.git/hooks/*`` is
+        executable code that runs on every vault operation — it needs its own
+        rule, since the sites carve-out means nothing broader can cover it."""
+        vaults, rules = self._install(tmp_path)
+        prefix = f"//{str(vaults).lstrip('/')}"
+        assert f"Edit({prefix}/*/.git/**)" in rules, (
+            f"missing the vault .git deny rule; got {rules!r}"
         )
 
     def test_vault_root_files_are_denied_by_literal_rule(self, tmp_path):
@@ -1103,10 +1166,16 @@ class TestInitKindGeneratedDenyList:
             f"cascades over everything in it; got {rules!r}"
         )
 
-    def test_the_rule_set_is_exactly_the_kinds_plus_the_root_files(self, tmp_path):
+    def test_the_rule_set_is_exactly_the_kinds_plus_git_plus_the_root_files(self, tmp_path):
         vaults, rules = self._install(tmp_path)
-        assert len(rules) == len(self._kinds()) + 2, (
-            f"unexpected extra or missing deny rules: {rules!r}"
+        prefix = f"//{str(vaults).lstrip('/')}"
+        expected = (
+            {f"Edit({prefix}/*/{kind}/**)" for kind in self._kinds()}
+            | {f"Edit({prefix}/*/.git/**)"}
+            | {f"Edit({prefix}/*/{name})" for name in (".gitignore", ".lore.lock")}
+        )
+        assert set(rules) == expected, (
+            f"unexpected extra or missing deny rules: {sorted(set(rules) ^ expected)!r}"
         )
 
     def test_no_generated_rule_matches_a_sites_path(self, tmp_path):
@@ -1135,6 +1204,8 @@ class TestInitKindGeneratedDenyList:
             f"{vault}/session/2026/note.md",
             f"{vault}/.gitignore",
             f"{vault}/.lore.lock",
+            f"{vault}/.git/hooks/pre-commit",
+            f"{vault}/.git/config",
         ):
             assert any(_rule_denies(r, path) for r in rules), (
                 f"{path} must stay denied; rules={rules!r}"

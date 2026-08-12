@@ -18,8 +18,9 @@ remove_hook(settings_path, event, command)
 
 upsert_permission_deny(settings_path, rule)
     Ensure *rule* appears exactly once in ``permissions.deny``. Defense-in-depth
-    only: a coarse static prefix deny backing the runtime PreToolUse
-    guard. Idempotent; preserves unrelated permission rules and keys.
+    only: one narrow static path deny backing the runtime PreToolUse guard —
+    callers build up a deny LIST rather than passing one blanket rule.
+    Idempotent; preserves unrelated permission rules and keys.
 
 set_env_var(settings_path, name, value)
     Set ``env[name] = value`` in the settings file. Used to give the vault-guard
@@ -164,18 +165,24 @@ def remove_hook(settings_path: Path, event: str, command: str) -> None:
 def upsert_permission_deny(settings_path: Path, rule: str) -> None:
     """Ensure *rule* appears exactly once in ``permissions.deny``.
 
-    Defense-in-depth only: the static ``permissions.deny`` prefix
-    cannot cover an arbitrary symlink's real target, so it is breadth-only — the
-    runtime PreToolUse vault-guard hook is the mandatory primary mechanism. This
-    coarse rule (``Edit(//abs/.../vaults/**)`` — note the ``//`` double-slash for
-    absolute paths) adds belt-and-braces breadth on top of the hook.
+    Defense-in-depth only: a static ``permissions.deny`` path rule cannot cover
+    an arbitrary symlink's real target, so it is breadth-only — the runtime
+    PreToolUse vault-guard hook is the mandatory primary mechanism.
+
+    Callers pass one narrow rule at a time rather than a single blanket rule
+    over the whole vaults tree: a deny that matches a DIRECTORY cascades to
+    everything beneath it and no allow can pierce it, so a blanket rule would
+    also block the subtrees a vault deliberately leaves directly writable. Note
+    the ``//`` double-slash absolute-path grammar (a single ``/`` is
+    project-root-relative).
 
     If the rule is already present, leave it untouched. Preserves all unrelated
     keys and permission rules. Writes atomically.
 
     Args:
         settings_path: Path to the settings.json (or settings.local.json) file.
-        rule:          The permission rule string (e.g. ``"Edit(//x/vaults/**)"``).
+        rule:          The permission rule string
+                       (e.g. ``"Edit(//x/vaults/*/adr/**)"``).
     """
     data = _load(settings_path)
     permissions = data.setdefault("permissions", {})
@@ -191,9 +198,10 @@ def upsert_permission_deny(settings_path: Path, rule: str) -> None:
 def remove_permission_deny(settings_path: Path, rule: str) -> None:
     """Remove *rule* from ``permissions.deny`` if present.
 
-    Used to retire stale deny rules from earlier installs (e.g. a
-    ``Write(//…/vaults/**)`` rule, which Claude Code never matches for
-    file-editing tools and warns about at startup). No-op (no file write) when
+    Used to retire stale deny rules from earlier installs — a blanket
+    ``Edit(//…/vaults/**)`` rule superseded by today's narrow per-subtree
+    rules, or a ``Write(…)`` rule, which Claude Code never matches for
+    file-editing tools and warns about at startup. No-op (no file write) when
     the rule — or the file — is absent. Preserves all unrelated keys and
     permission rules. Writes atomically.
 

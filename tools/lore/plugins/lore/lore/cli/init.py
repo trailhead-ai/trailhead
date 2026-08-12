@@ -114,6 +114,12 @@ _SITES_DIR = "sites"
 #: subtree minus the exemption.
 _VAULT_ROOT_FILES = (".gitignore", ".lore.lock")
 
+#: Non-record subtrees of a vault that still must not be hand-edited. A vault's
+#: ``.git`` holds the history ``lore sync`` distributes and the hooks git runs
+#: on every vault operation — executable code, so it gets its own rule rather
+#: than riding a broader one, which the sites carve-out rules out anyway.
+_VAULT_DENIED_TREES = (".git",)
+
 
 def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     """Install the vault write-protection guardrail into *settings_path*.
@@ -133,8 +139,9 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
       4. Static ``permissions.deny`` ``Edit(...)`` rules as **defense-in-depth
          only** (they cannot cover a symlink's real target, so the runtime hook
          above is the security-sufficient mechanism): one rule per record kind,
-         generated from the record model, plus one literal rule per file lore
-         scaffolds at a vault root. It is a generated list rather than a single
+         generated from the record model, plus one rule per non-record subtree
+         that is still off-limits (a vault's ``.git``) and one literal rule per
+         file lore scaffolds at a vault root. It is a generated list rather than a single
          ``vaults/**`` rule because a deny that matches a directory cascades to
          everything beneath it and no allow can pierce it — a blanket rule would
          re-block the sites zone the hook exempts, at a layer with no carve-out
@@ -180,6 +187,10 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     for kind in sorted(KINDS):
         settings_writer_mod.upsert_permission_deny(
             settings_path, f"Edit({vaults_prefix}/*/{kind}/**)"
+        )
+    for tree in _VAULT_DENIED_TREES:
+        settings_writer_mod.upsert_permission_deny(
+            settings_path, f"Edit({vaults_prefix}/*/{tree}/**)"
         )
     for name in _VAULT_ROOT_FILES:
         settings_writer_mod.upsert_permission_deny(
