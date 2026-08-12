@@ -35,7 +35,7 @@ from typing import Callable, Optional
 from trailhead.capabilities import ConfineError, ManifestError, cli_bearing_manifests
 from trailhead.harness import HarnessError, get_harness
 from trailhead.harness.base import SESSION_RETENTION_WARNING_FRACTION
-from trailhead.pathint import resolve_shim_dir
+from trailhead.pathint import resolve_shim_dir, trailhead_bin_executable
 from trailhead.paths import state_dir
 from trailhead.wire import default_manifest_paths
 
@@ -206,7 +206,9 @@ def _trailhead_field(resolved: Optional[str]) -> dict:
     verdict. A null-resolved path (the common case for a healthy
     shellenv-function install, invisible to this subprocess) also gets no
     verdict; only the on-PATH, repo-shaped case is ever checked for
-    executability (is_file() + X_OK).
+    executability, via pathint's shared ``trailhead_bin_executable`` — the same
+    check shellenv uses to decide whether to emit the bare-name function, so
+    the two can never disagree about whether a checkout is runnable.
     """
     if resolved is None:
         return {"path": None, "checkout": None, "checkout_present": None}
@@ -215,8 +217,7 @@ def _trailhead_field(resolved: Optional[str]) -> dict:
     if path.name == "trailhead" and path.parent.name == "bin":
         repo = path.parent.parent
         if (repo / "trailhead" / "__init__.py").is_file():
-            bin_path = repo / "bin" / "trailhead"
-            present = bin_path.is_file() and os.access(bin_path, os.X_OK)
+            present = trailhead_bin_executable(repo)
             return {"path": resolved, "checkout": str(repo), "checkout_present": present}
 
     return {"path": resolved, "checkout": None, "checkout_present": None}
@@ -276,13 +277,11 @@ def _build_trailhead_human(field: dict) -> str:
             "check; note a pip-installed trailhead earlier on PATH can shadow "
             "or be shadowed by that function)"
         )
+    shadow_note = "note: a pip-installed trailhead earlier on PATH can shadow the shellenv function"
     if field["checkout"] is None:
-        return f"{field['path']} (note: a pip-installed trailhead earlier on PATH can shadow the shellenv function)"
+        return f"{field['path']} ({shadow_note})"
     verdict = "present" if field["checkout_present"] else "missing"
-    return (
-        f"{field['path']} (checkout {verdict}: {field['checkout']}; "
-        "note: a pip-installed trailhead earlier on PATH can shadow the shellenv function)"
-    )
+    return f"{field['path']} (checkout {verdict}: {field['checkout']}; {shadow_note})"
 
 
 def _build_human(data: dict) -> str:
