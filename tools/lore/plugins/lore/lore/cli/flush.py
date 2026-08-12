@@ -11,7 +11,9 @@ from .common import (
     DRIFT_SYNC_FIXABLE,
     _add_session_selectors,
     _git,
+    _partition_writable_vaults,
     _resolve_all_vaults,
+    _resolve_all_vaults_strict,
     _vault_drift,
     _vault_is_git_toplevel,
 )
@@ -229,32 +231,96 @@ def cmd_flush(args) -> int:
 def _flush_current_session(args) -> int:
     """Flush the CURRENT session record: dirty → clean + commit, else no-op.
 
-    Reads `session/<key>.json` for the resolved current-session key:
+    Reads `session/<key>.json` for the resolved current-session key, in EVERY
+    configured vault that holds it:
 
-      - no record → exit 0 with a "no session exists" notice (distinct from a
-        clean session); writes nothing, no commit.
+      - no record in any vault → exit 0 with a "no session exists" notice
+        (distinct from a clean session); writes nothing, no commit.
       - already `clean` → exit 0 with a "clean — nothing to flush" notice; an
         idempotent no-op, no commit.
       - `dirty` → flip `status` to `clean`, stamp `annotations[flushed-at]` (the
         pinned key/ISO-UTC format), reindex the one record, then commit the
         record's EXPLICIT paths only (the `.json` + `.md`; never `git add -A`).
+
+    **All vaults, not just the active one.** `lore session candidate --vault NAME`
+    writes the session record into the ELECTED vault, so pinning the flush to the
+    active vault left such a session permanently un-flushable — reported as "no
+    session exists" while sitting `dirty` on disk with an empty watermark. The
+    session KEY itself is vault-independent (a session id or the worktree name),
+    so resolution is simply "which vaults hold `session/<key>`".
+
+    A key held by more than one vault is a session split across them: EVERY dirty
+    instance is flushed, each as its own flip + commit in its own vault. Flushing
+    only one would leave the other half dirty and re-trigger the same dead end.
+    A per-vault failure does not abort the rest — the remaining vaults are still
+    flushed and the command exits non-zero.
+
+    **`shared: true` vaults are excluded.** A shared vault is untrusted,
+    multi-user content, and a flush is a WRITE that also commits and pushes under
+    this operator's git identity — so a dirty session record planted there must
+    never actuate one. The skip is announced by name (`_writable_vaults`),
+    never silent.
+
+    An unreadable vault config REFUSES (non-zero, nothing flipped) rather than
+    degrading to the default vault: with the vault set unknown, "no session
+    exists — nothing to flush" is a false success over a session that may be
+    sitting `dirty` in a vault the broken config never named.
     """
     from ..session import store as session_store_mod
-    from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
 
-    vault = Path(vault_config_mod.resolve_active_vault())
     key, rc = _resolve_session_key(args)
     if key is None:
         return rc
 
+    vaults = _resolve_all_vaults_strict("flush")
+    if vaults is None:
+        return 1
+
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 
-    # Probed BEFORE the lock so a flush with no session here creates nothing —
-    # not even the lock sidecar. `flush_session` re-checks under the lock.
-    if not session_store_mod.session_exists(str(vault), key):
-        print(f"notice: no session exists for {key!r} — nothing to flush.")
+    all_holders = [
+        (name, path) for name, path in vaults
+        if session_store_mod.session_exists(str(path), key)
+    ]
+    holding_pairs, shared_holders = _partition_writable_vaults(all_holders)
+    if shared_holders:
+        print(
+            f"notice: session {key!r} also exists in shared vault(s) "
+            f"({', '.join(name for name, _ in shared_holders)}) — not flushed; "
+            "a flush writes, commits and pushes, and shared vaults are untrusted.",
+            file=sys.stderr,
+        )
+    holders = [path for _, path in holding_pairs]
+    if not holders:
+        if not shared_holders:
+            print(f"notice: no session exists for {key!r} — nothing to flush.")
         return 0
+
+    worst = 0
+    for vault in holders:
+        rc = _flush_one_session(vault, key, committer)
+        if rc != 0:
+            worst = rc
+    return worst
+
+
+def _flush_one_session(vault: Path, key: str, committer: str) -> int:
+    """Flush `session/<key>` in ONE vault: flip + commit as a unit, then push.
+
+    The per-vault primitive behind the current-session path — extracted so a key
+    held by several vaults is flushed once per vault, each with its own atomic
+    flip + commit and its own rollback on commit failure, rather than N flips
+    against one vault. Returns the exit code for this vault alone.
+
+    The caller has ALREADY established that this vault holds the key (that is how
+    it picked the vaults to iterate), so no pre-lock existence probe runs here —
+    a vault without the session never reaches this function and so never creates
+    even a lock sidecar. The record vanishing between that probe and the lock is
+    covered by `flush_session`'s own check under the lock, whose
+    ``FLUSH_NO_SESSION`` verdict is handled below.
+    """
+    from ..session import store as session_store_mod
 
     # The flip and the commit are ONE unit under the session-key lock: a
     # `session candidate` that landed between them would flip the sidecar back to
@@ -288,26 +354,44 @@ def _flush_current_session(args) -> int:
         if _vault_is_git_toplevel(vault):
             _flush_push(vault)
     else:
-        # Same orphan-gap guarantee as the batch path: `flush_session` flips the
-        # record `clean` on disk BEFORE the commit, so a commit failure would leave
-        # a clean-on-disk-but-uncommitted record that `status:dirty` re-discovery
-        # could never re-find. Revert the flip so a re-run can retry it
-        # (the single path shares the batch's atomicity need).
-        try:
-            session_store_mod.revert_flush(
-                key,
-                vault_root=str(vault),
-                committer=committer,
-                open_index=_open_session_index,
-            )
-        except Exception as exc:
-            print(
-                f"warning: flush commit failed AND rollback failed for session/{key}: "
-                f"{exc}\n  the record may be clean-on-disk but uncommitted — inspect "
-                "manually before re-running.",
-                file=sys.stderr,
-            )
+        _revert_flip(vault, key, committer)
     return rc
+
+
+def _revert_flip(vault: Path, key: str, committer: str) -> None:
+    """Roll a flushed session record back to `dirty` after its commit failed.
+
+    `flush_session` flips the record `clean` on disk BEFORE the commit, so a
+    commit failure would otherwise leave a clean-on-disk-but-uncommitted record
+    that a re-run's `status:dirty` discovery could never re-find. Reverting the
+    flip keeps the failed session retry-discoverable — the orphan gap both flush
+    paths have to close.
+
+    Shared by BOTH paths (single-session and the batch loop) deliberately: the
+    guarantee is identical, and a second copy would be an unexercised second
+    implementation of it that could silently drift.
+
+    A failed rollback re-creates the very orphan this exists to prevent, so it is
+    never swallowed: the warning names the record and states what condition it may
+    be left in. Never raises — the caller is already on a failure path and owns
+    the exit code.
+    """
+    from ..session import store as session_store_mod
+
+    try:
+        session_store_mod.revert_flush(
+            key,
+            vault_root=str(vault),
+            committer=committer,
+            open_index=_open_session_index,
+        )
+    except Exception as exc:
+        print(
+            f"warning: flush commit failed AND rollback failed for session/{key}: "
+            f"{exc}\n  the record may be clean-on-disk but uncommitted — inspect "
+            "manually before re-running.",
+            file=sys.stderr,
+        )
 
 
 # Discovery must return EVERY dirty session, not the search facade's default page
@@ -318,8 +402,8 @@ def _flush_current_session(args) -> int:
 _FLUSH_DISCOVERY_LIMIT = 100_000
 
 
-def _discover_dirty_session_keys(query: str) -> list[str]:
-    """Run *query* through the search facade and return the matching DIRTY session keys.
+def _discover_dirty_session_keys(query: str) -> list[tuple[Path, str]]:
+    """Run *query* through the search facade and return the matching DIRTY sessions.
 
     REUSES the KQL search facade (`search.run_search`) — never a second query engine.
     The facade is the injection boundary: it compiles *query*
@@ -335,6 +419,14 @@ def _discover_dirty_session_keys(query: str) -> list[str]:
     clean sessions still only flushes the dirty ones: a hit is kept iff its `kind` is
     `session` AND its `status` is `dirty`. The session KEY is the last path segment of
     the index `id` (`<vault>/session/<key>`); session keys never contain `/`.
+
+    Returns `(vault_root, key)` pairs, NOT bare keys. The index spans every vault,
+    so discovery legitimately returns sessions from several — and the caller must
+    flush each in the vault that actually holds it. Dropping the vault and running
+    every key against the active one both misses non-default-vault sessions and
+    reports success for a flush that never happened. The vault comes from the hit's
+    own `vault` column (the vault ROOT path the record was indexed under), falling
+    back to the `id` prefix, which encodes the same value.
     """
     from ..search import engine as search_mod
 
@@ -349,12 +441,52 @@ def _discover_dirty_session_keys(query: str) -> list[str]:
             f"dirty-session discovery exceeded {_FLUSH_DISCOVERY_LIMIT} results — "
             "refusing to flush a partial set; narrow the <search> scope"
         )
-    keys: list[str] = []
+    hits: list[tuple[Path, str]] = []
     for hit in payload.get("hits", []):
         if hit.get("kind") != "session" or hit.get("status") != "dirty":
             continue
-        keys.append(hit["id"].rsplit("/", 1)[-1])
-    return keys
+        record_id = hit["id"]
+        vault_root = hit.get("vault") or record_id.rsplit("/", 2)[0]
+        hits.append((Path(vault_root), record_id.rsplit("/", 1)[-1]))
+    return hits
+
+
+def _keep_writable_hits(
+    discovered: list[tuple[Path, str]],
+    writable: set[str],
+    shared_names: dict[str, str],
+) -> list[tuple[Path, str]]:
+    """Keep only the discovery hits whose vault is a live, writable vault.
+
+    *writable* holds the resolved paths of the currently configured non-shared
+    vaults; *shared_names* maps the resolved path of each configured
+    ``shared: true`` vault to its name. A hit in neither is a STALE index row —
+    the vault it names is not part of this install any more (or never was) — and
+    a hit in *shared_names* is untrusted content that must not actuate a commit.
+
+    Both are dropped WITH a notice naming the vault: an unflushed dirty session
+    the operator cannot see is exactly how the original defect (a permanently
+    un-flushable session reported as absent) manifested.
+    """
+    kept: list[tuple[Path, str]] = []
+    for vault, key in discovered:
+        resolved = str(Path(vault).resolve())
+        if resolved in writable:
+            kept.append((vault, key))
+        elif resolved in shared_names:
+            print(
+                f"notice: skipping session/{key} in shared vault "
+                f"{shared_names[resolved]!r} — a flush writes, commits and pushes, "
+                "and shared vaults are untrusted.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"notice: skipping session/{key} — its indexed vault is not a "
+                f"configured vault (stale index row): {vault}",
+                file=sys.stderr,
+            )
+    return kept
 
 
 def _flush_batch(args, *, query: str, scope_label: str) -> int:
@@ -372,26 +504,55 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
     pushed by the next successful run or `lore sync`), and exits non-zero. An empty
     match set is a clean no-op (exit 0). A roll-up of the flushed count closes a
     successful batch.
+
+    **Each session is flushed in the vault that HOLDS it.** The index spans every
+    vault, so discovery returns `(vault_root, key)` pairs that may name several;
+    the flip, the commit, and the session-key lock all follow the hit's own vault.
+    Running the batch against the active vault instead skipped every session a
+    `--vault` capture had routed elsewhere while still reporting them flushed. The
+    push stays hoisted out of the loop, now ONCE PER TOUCHED VAULT — a commit is
+    only pushable by the repo that carries it.
+
+    **The hit's own `vault` column is never trusted as a write destination.**
+    It is an index row — index state outlives the config that produced it, so a
+    stale (or planted) row can name a path this install no longer governs, and
+    acting on it verbatim would steer a flip + commit at an arbitrary location.
+    Every hit is intersected with the LIVE configured vault set, minus the
+    `shared: true` vaults a flush must never write/commit/push into
+    (`_partition_writable_vaults`). Each dropped hit is NAMED, so a session that
+    really is sitting dirty somewhere unreachable is visible rather than silently
+    passed over.
     """
     from ..session import store as session_store_mod
-    from ..vault import config as vault_config_mod
     from ..vault import vault as vault_mod
 
-    vault = Path(vault_config_mod.resolve_active_vault())
     committer = vault_mod.resolve_committer_email() or vault_mod.resolve_user()
 
+    vaults = _resolve_all_vaults_strict(f"flush {scope_label}")
+    if vaults is None:
+        return 1
+    writable_pairs, shared_pairs = _partition_writable_vaults(vaults)
+    writable = {str(Path(path).resolve()) for _, path in writable_pairs}
+    shared_names = {str(Path(path).resolve()): name for name, path in shared_pairs}
+
     try:
-        keys = _discover_dirty_session_keys(query)
+        discovered = _discover_dirty_session_keys(query)
     except ValueError as exc:
         print(f"error: flush {scope_label} — search failed: {exc}", file=sys.stderr)
         return 1
 
-    if not keys:
+    discovered = _keep_writable_hits(discovered, writable, shared_names)
+
+    if not discovered:
         print(f"notice: no dirty sessions match {scope_label} — nothing to flush.")
         return 0
 
     flushed: list[str] = []
-    for key in keys:
+    # Insertion-ordered so the end-of-batch pushes run in discovery order; keyed by
+    # the resolved path string so one vault is pushed once however many of its
+    # sessions the batch flushed.
+    touched_vaults: dict[str, Path] = {}
+    for vault, key in discovered:
         flipped = False
         try:
             # Flip + commit as ONE unit under the session-key lock, so a
@@ -417,28 +578,10 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
                     raise RuntimeError(f"commit failed (rc={rc})")
         except Exception as exc:
             # Per-session atomicity: the flip happened before the commit, so on a
-            # commit failure roll the flip BACK to `dirty` — otherwise the session
-            # is clean-on-disk-but-uncommitted and a re-run's discovery query
-            # (`status:dirty`) could never re-find it. Reverting keeps the failed
-            # session retry-discoverable.
+            # commit failure roll the flip BACK to `dirty` (shared with the
+            # single-session path — see :func:`_revert_flip`).
             if flipped:
-                try:
-                    session_store_mod.revert_flush(
-                        key,
-                        vault_root=str(vault),
-                        committer=committer,
-                        open_index=_open_session_index,
-                    )
-                except Exception as revert_exc:
-                    # A failed rollback re-creates the very orphan revert exists to
-                    # prevent — never swallow it silently; surface it so the operator
-                    # knows this session may be clean-on-disk but uncommitted.
-                    print(
-                        f"warning: rollback failed for session/{key}: {revert_exc}\n"
-                        f"  the record may be clean-on-disk but uncommitted — inspect "
-                        "manually.",
-                        file=sys.stderr,
-                    )
+                _revert_flip(vault, key, committer)
             print(f"Flushed: {len(flushed)} session(s) before the failure:")
             for done in flushed:
                 print(f"  - session/{done} (dirty -> clean)")
@@ -450,14 +593,15 @@ def _flush_batch(args, *, query: str, scope_label: str) -> int:
             )
             return 1
         flushed.append(key)
+        touched_vaults[str(vault)] = vault
         print(f"Flushed: session/{key} (dirty -> clean)")
 
     print(f"Flushed {len(flushed)} session(s) [{scope_label}].")
-    # One push for the whole batch (efficiency follow-up): every session was
-    # committed locally above; push them together rather than once per session.
-    # Only probe/push when something actually committed — an all-raced-clean batch
-    # (every verdict != FLUSH_FLUSHED) leaves nothing to push.
-    if flushed:
+    # One push per TOUCHED VAULT after the batch: every session was committed
+    # locally above; push them together rather than once per session. A vault the
+    # batch never committed to is never probed — an all-raced-clean batch (every
+    # verdict != FLUSH_FLUSHED) touches nothing and pushes nothing.
+    for vault in touched_vaults.values():
         _flush_push(vault)
     return 0
 

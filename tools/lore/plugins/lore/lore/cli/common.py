@@ -10,7 +10,9 @@ the command modules stay free of cross-imports for generic plumbing:
     default so the CLI works in a vanilla checkout;
   - ``_load_vault_config`` — the single gate for config-driven behavior;
   - ``_resolve_all_vaults`` — the whole-install vault enumeration used by ``sync``
-    and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view;
+    and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view,
+    plus ``_partition_writable_vaults`` — the ``shared: true`` exclusion every
+    WRITE/PUSH fan-out over that enumeration applies;
   - the git primitives (``_git`` / ``_vault_is_git_toplevel``) shared by ``sync``
     and ``flush``, plus ``_vault_drift`` — the "is this vault actually backed up?"
     probe shared by ``status`` and ``flush``;
@@ -190,6 +192,86 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
     except (vault_config_mod.VaultConfigError, OSError, ValueError) as exc:
         return floor, f"cannot read {config_path}: {exc}"
     return [(v.name, Path(v.path)) for v in vaults], None
+
+
+def _resolve_all_vaults_strict(what: str) -> list[tuple[str, Path]] | None:
+    """``_resolve_all_vaults`` that REFUSES on an unreadable config.
+
+    Returns the ``(name, path)`` pairs, or ``None`` after printing the diagnostic —
+    the caller then exits non-zero without touching a vault.
+
+    The session surface resolves a key by asking every configured vault whether it
+    holds it, so a config that will not load makes "no vault holds it" unknowable
+    rather than false. Degrading to the floor list turned that into a confident
+    wrong answer: ``lore flush`` printed "no session exists — nothing to flush" and
+    exited 0 for a session sitting ``dirty`` in a vault the broken config never
+    named. Same refusing posture as ``lore sync``'s ``_select_targets`` — *what*
+    names the operation being refused (e.g. ``"flush"``).
+    """
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"error: {error}", file=sys.stderr)
+        print(
+            f"  Aborting — refusing to {what} against a partial vault set.",
+            file=sys.stderr,
+        )
+        return None
+    return vaults
+
+
+def _shared_vault_paths() -> set[str]:
+    """Resolved paths of every ``shared: true`` vault in the live config.
+
+    A ``shared`` vault is a multi-user vault: its content is UNTRUSTED input, so
+    no local command may let it actuate a write, a commit, or a push under this
+    user's git identity. This is the lookup behind
+    :func:`_writable_vaults`; reads are fenced separately (the index's
+    ``shared`` column) and are not restricted here.
+
+    Vanilla usage (no ``config.json``) and an unreadable config both yield an
+    empty set — the former has no shared vault to name, and the latter is
+    already a REFUSAL at every write surface (:func:`_resolve_all_vaults_strict`)
+    that reaches this helper, so there is no path on which an empty set here
+    silently widens a write.
+    """
+    loaded = _load_vault_config()
+    if loaded is None:
+        return set()
+    _, vaults = loaded
+    return {
+        str(Path(v.path).resolve())
+        for v in vaults
+        if vault_config_mod.is_shared(v)
+    }
+
+
+def _partition_writable_vaults(vaults) -> tuple[list, list]:
+    """Split ``(name, path)`` pairs into ``(writable, shared)``, order preserved.
+
+    The session surface resolves a key by asking every configured vault whether
+    it holds it. That is fine for reads, but it also made every configured vault
+    a WRITE target: a dirty session record planted in a shared vault would be
+    flipped ``clean``, committed, and pushed by a bare ``lore flush`` — untrusted
+    content actuating a local commit under the operator's git identity.
+    Excluding ``shared: true`` vaults from a write fan-out is the same default
+    ``lore record rename``'s reference sweep already takes.
+
+    The ``shared`` half is RETURNED rather than dropped so callers can name what
+    they skipped once they know it was relevant: an operator whose session really
+    does live in a shared vault must be told why nothing happened, and an
+    operator who merely HAS a shared vault must not be told anything at all.
+
+    ``vaults`` may be ``(name, path)`` pairs or bare paths; the shared half is
+    matched on the resolved path either way.
+    """
+    shared_paths = _shared_vault_paths()
+    if not shared_paths:
+        return list(vaults), []
+    writable, shared = [], []
+    for entry in vaults:
+        path = entry[1] if isinstance(entry, tuple) else entry
+        (shared if str(Path(path).resolve()) in shared_paths else writable).append(entry)
+    return writable, shared
 
 
 def _git(vault: Path, *args: str) -> tuple[int, str, str]:

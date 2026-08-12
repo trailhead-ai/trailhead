@@ -343,3 +343,39 @@ class TestSessionShow:
         assert r.returncode != 0
         # The diagnostic names what was tried so callers don't go spelunking.
         assert "no session record resolved" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# ``lore session show`` — the key is sanitized BEFORE any path is constructed
+# ---------------------------------------------------------------------------
+
+class TestSessionShowKeyConfinement:
+    """`show` builds `session/<key>.{md,json}` from caller-supplied selectors.
+
+    An ABSOLUTE `--session-id` resets a `pathlib` join, so `/etc/passwd` probed
+    `/etc/passwd.md` outside the vault entirely; a `../` key walked out the same
+    way. The read path therefore runs the selectors through the SAME sanitizers
+    the write paths use — rejected non-zero with a plain `error:` line, never a
+    traceback.
+    """
+
+    @pytest.mark.parametrize(
+        "selector,value",
+        [
+            ("--session-id", "/etc/passwd"),
+            ("--session-id", "../../etc/passwd"),
+            ("--worktree", "../x"),
+            ("--worktree", "/etc"),
+        ],
+    )
+    def test_off_shape_key_is_rejected(self, tmp_path, selector, value):
+        vault, state = _make_vault(tmp_path)
+        r = _run(
+            ["session", "show", selector, value], vault=vault, state_dir=state,
+            # No ambient session id: the `--worktree` cases must exercise the
+            # worktree key, not fall back to the harness's own session GUID.
+            env_extra={"CLAUDE_CODE_SESSION_ID": "", "CLAUDE_SESSION_ID": ""},
+        )
+        assert r.returncode != 0, r.stdout
+        assert "Traceback" not in r.stderr, r.stderr
+        assert r.stderr.strip().startswith("error:"), r.stderr
