@@ -1,5 +1,5 @@
 """Behavioral tests for trailhead/outpost_lifecycle.py — the
-``trailhead outpost start|stop|status`` verbs.
+``trailhead outpost start|stop|status|restart`` verbs.
 
 TDD: written before the implementation. The real daemon is a Node dist build;
 these tests stand a tiny stdlib ``http.server`` in for it (spawned via the
@@ -176,29 +176,38 @@ def outpost(tmp_path):
 _REPO_ROOT = Path(trailhead.__file__).resolve().parent.parent
 
 
-def _start(o) -> int:
-    """Run ``start`` in a short-lived subprocess so the daemon is genuinely
-    orphaned to init on exit — exactly as the real CLI process does. Running it
-    in-process would leave the daemon as pytest's own child, where a killed
-    process lingers as an unreaped zombie and os.kill(pid, 0) never reports it
-    dead (masking the very liveness primitive under test)."""
+def _run_verb(
+    o, call: str, *, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """Run a lifecycle verb (``call`` is the ``ol.<verb>(...)`` expression) in a
+    short-lived subprocess, so any daemon it spawns is genuinely orphaned to init
+    on exit — exactly as the real CLI process does. Running it in-process would
+    leave the daemon as pytest's own child, where a killed process lingers as an
+    unreaped zombie and os.kill(pid, 0) never reports it dead (masking the very
+    liveness primitive under test)."""
     code = (
         "import os, sys\n"
         "from trailhead import outpost_lifecycle as ol\n"
-        "sys.exit(ol.start(node_bin=sys.executable, "
-        "port=int(os.environ['OUTPOST_TEST_PORT'])))\n"
+        f"sys.exit(ol.{call})\n"
     )
     proc_env = {
         **o.env,
+        **(extra_env or {}),
         "OUTPOST_TEST_PORT": str(o.port),
         "PYTHONPATH": str(_REPO_ROOT),
     }
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-c", code],
         env=proc_env,
         capture_output=True,
         text=True,
         timeout=15,
+    )
+
+
+def _start(o) -> int:
+    result = _run_verb(
+        o, "start(node_bin=sys.executable, port=int(os.environ['OUTPOST_TEST_PORT']))"
     )
     assert result.returncode == 0, f"start subprocess failed: {result.stderr}"
     return result.returncode
@@ -422,13 +431,219 @@ def test_entrypoint_outside_checkout_raises_named_error_nothing_spawned(tmp_path
 
 
 # ---------------------------------------------------------------------------
+# restart — rebuild-then-restart
+# ---------------------------------------------------------------------------
+
+
+def _build_script(
+    tmp_path: Path,
+    *,
+    exit_code: int = 0,
+    assets: tuple[str, ...] = ("index-abc123.js", "index-def456.css"),
+    record_old_pid_env: str | None = None,
+) -> list[str]:
+    """A fake build_cmd: writes dist-web/assets/* under cwd, then exits.
+
+    When ``record_old_pid_env`` names an env var holding a pid, the script also
+    writes ``build_order.txt`` recording whether that pid was still alive at the
+    moment the build ran — used to prove build-before-stop ordering.
+    """
+    script = tmp_path / "fake_build.py"
+    lines = [
+        "import os, pathlib, sys",
+        "assets = pathlib.Path('dist-web/assets')",
+        "assets.mkdir(parents=True, exist_ok=True)",
+    ]
+    for name in assets:
+        lines.append(f"(assets / {name!r}).write_text('built')")
+    if record_old_pid_env:
+        lines += [
+            f"old_pid = os.environ.get({record_old_pid_env!r})",
+            "alive = True",
+            "if old_pid:",
+            "    try:",
+            "        os.kill(int(old_pid), 0)",
+            "    except ProcessLookupError:",
+            "        alive = False",
+            "    pathlib.Path('build_order.txt').write_text('alive' if alive else 'dead')",
+        ]
+    lines.append(f"sys.exit({exit_code})")
+    script.write_text("\n".join(lines) + "\n")
+    return [sys.executable, str(script)]
+
+
+def _restart(
+    o,
+    build_cmd: list[str],
+    extra_env: dict[str, str] | None = None,
+    restart_health_timeout: float | None = None,
+) -> subprocess.CompletedProcess:
+    """Run ``restart`` the same orphaning way ``_start`` does. No cwd is set:
+    ``restart`` runs the build with ``cwd=<checkout>`` itself, so the fake build
+    script's relative writes land in the checkout regardless of the caller's cwd."""
+    call = (
+        "restart(node_bin=sys.executable, "
+        "build_cmd=eval(os.environ['OUTPOST_TEST_BUILD_CMD']), "
+        "port=int(os.environ['OUTPOST_TEST_PORT'])"
+    )
+    if restart_health_timeout is not None:
+        call += f", restart_health_timeout={restart_health_timeout!r}"
+    call += ")"
+    return _run_verb(
+        o,
+        call,
+        extra_env={**(extra_env or {}), "OUTPOST_TEST_BUILD_CMD": repr(build_cmd)},
+    )
+
+
+def test_restart_running_daemon_builds_before_stopping(outpost, tmp_path):
+    assert _start(outpost) == 0
+    old_pid = _pid(outpost)
+    assert _wait_until(lambda: _pid_alive(old_pid), timeout=3.0)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+
+    build_cmd = _build_script(tmp_path, record_old_pid_env="OUTPOST_TEST_OLD_PID")
+    result = _restart(outpost, build_cmd, extra_env={"OUTPOST_TEST_OLD_PID": str(old_pid)})
+
+    assert result.returncode == 0, result.stderr
+    assert (outpost.checkout / "build_order.txt").read_text() == "alive"
+
+    new_pid = _pid(outpost)
+    assert new_pid != old_pid
+    assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
+    assert _wait_until(lambda: not _pid_alive(old_pid), timeout=3.0)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=3.0)
+
+
+def test_restart_output_includes_asset_filenames(outpost, tmp_path):
+    assert _start(outpost) == 0
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+
+    build_cmd = _build_script(tmp_path, assets=("index-abc123.js", "index-def456.css"))
+    result = _restart(outpost, build_cmd)
+
+    assert result.returncode == 0, result.stderr
+    assert "index-abc123.js" in result.stdout
+    assert "index-def456.css" in result.stdout
+
+
+def test_restart_build_failure_raises_named_error_daemon_untouched(outpost, tmp_path):
+    assert _start(outpost) == 0
+    old_pid = _pid(outpost)
+    assert _wait_until(lambda: _pid_alive(old_pid), timeout=3.0)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+
+    build_cmd = _build_script(tmp_path, exit_code=1)
+
+    with pytest.raises(OutpostLifecycleError):
+        outpost_lifecycle.restart(env=outpost.env, build_cmd=build_cmd, port=outpost.port)
+
+    assert _pid_alive(old_pid)
+    pidfile = outpost.state_dir / "outpost.pid"
+    assert pidfile.exists()
+    assert int(pidfile.read_text().strip()) == old_pid
+
+
+def test_restart_when_stopped_builds_then_starts(outpost, tmp_path):
+    assert not (outpost.state_dir / "outpost.pid").exists()
+
+    build_cmd = _build_script(tmp_path)
+    result = _restart(outpost, build_cmd)
+
+    assert result.returncode == 0, result.stderr
+    pidfile = outpost.state_dir / "outpost.pid"
+    assert pidfile.exists()
+    new_pid = int(pidfile.read_text().strip())
+    assert _wait_until(lambda: _pid_alive(new_pid), timeout=3.0)
+
+
+# A stand-in for a daemon that spawns (so its pid is alive) but never binds its
+# HTTP server — simulates a new process that dies/hangs post-EADDRINUSE before
+# it can serve /health.
+_HUNG_DAEMON = """\
+import signal
+import threading
+
+stop = threading.Event()
+signal.signal(signal.SIGTERM, lambda *a: stop.set())
+stop.wait()
+"""
+
+
+def test_restart_raises_when_new_daemon_never_answers_health(outpost, tmp_path):
+    # Simulate a rebuild that succeeds but whose restarted process never comes
+    # up healthy (e.g. died on EADDRINUSE against a still-alive old daemon).
+    outpost.entry.write_text(_HUNG_DAEMON)
+
+    build_cmd = _build_script(tmp_path)
+    result = _restart(outpost, build_cmd)
+
+    assert result.returncode != 0
+    assert "OutpostLifecycleError" in result.stderr
+    assert "health" in result.stderr.lower()
+
+
+def test_restart_raises_when_new_process_dies_but_stale_process_still_answers_health(
+    outpost, tmp_path
+):
+    # An unmanaged process is already bound to the port (not tracked by any
+    # pidfile trailhead knows about — e.g. a daemon started outside trailhead,
+    # or one whose pidfile was lost). restart's spawn dies immediately on
+    # EADDRINUSE, but /health keeps answering because the unmanaged process
+    # answers it. restart must not report success: the pid it recorded is
+    # dead, so it isn't the process actually serving /health.
+    unmanaged_script = tmp_path / "unmanaged_daemon.py"
+    unmanaged_script.write_text(FAKE_DAEMON)
+    unmanaged = subprocess.Popen(
+        [sys.executable, str(unmanaged_script)],
+        env={**os.environ, "HTTP_PORT": str(outpost.port)},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert _wait_until(lambda: _health_reachable(outpost.port), timeout=3.0)
+
+        build_cmd = _build_script(tmp_path)
+        result = _restart(outpost, build_cmd, restart_health_timeout=1.0)
+
+        assert result.returncode != 0
+        assert "OutpostLifecycleError" in result.stderr
+    finally:
+        unmanaged.kill()
+        unmanaged.wait(timeout=5)
+
+
+def test_restart_missing_build_command_raises_named_error(outpost):
+    with pytest.raises(OutpostLifecycleError, match="not-a-real-build-command"):
+        outpost_lifecycle.restart(
+            env=outpost.env,
+            build_cmd=["not-a-real-build-command"],
+            port=outpost.port,
+        )
+
+
+def test_restart_build_failure_includes_stdout_diagnostics(outpost, tmp_path):
+    script = tmp_path / "fake_build_stdout.py"
+    script.write_text(
+        "import sys\n"
+        "print('tsc: error TS2322 something is wrong')\n"
+        "sys.exit(1)\n"
+    )
+    build_cmd = [sys.executable, str(script)]
+
+    with pytest.raises(OutpostLifecycleError, match="TS2322"):
+        outpost_lifecycle.restart(env=outpost.env, build_cmd=build_cmd, port=outpost.port)
+
+
+# ---------------------------------------------------------------------------
 # CLI wiring
 # ---------------------------------------------------------------------------
 
 
 def test_outpost_verbs_parse():
     parser = cli._build_parser()
-    for verb in ("start", "stop", "status"):
+    for verb in ("start", "stop", "status", "restart"):
         args = parser.parse_args(["outpost", verb])
         assert args.command == "outpost"
         assert args.outpost_command == verb

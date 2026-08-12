@@ -27,7 +27,7 @@ from trailhead.doctor import run_doctor
 from trailhead.harness import HarnessError
 from trailhead.install import run_install
 from trailhead.install_config import ConfigResolveError
-from trailhead.outpost_lifecycle import OutpostLifecycleError, start, status, stop
+from trailhead.outpost_lifecycle import OutpostLifecycleError, restart, start, status, stop
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
@@ -114,7 +114,7 @@ def _cmd_shellenv(args: argparse.Namespace) -> int:
 
 
 def _cmd_outpost(args: argparse.Namespace) -> int:
-    dispatch = {"start": start, "stop": stop, "status": status}
+    dispatch = {"start": start, "stop": stop, "status": status, "restart": restart}
     handler = dispatch.get(args.outpost_command)
     if handler is None:
         # No subcommand given — print the group's help and signal misuse.
@@ -236,12 +236,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     outpost_p = subparsers.add_parser(
         "outpost",
-        help="Manage the outpost daemon (start | stop | status).",
+        help="Manage the outpost daemon (start | stop | status | restart).",
     )
     outpost_sub = outpost_p.add_subparsers(dest="outpost_command", metavar="<verb>")
     outpost_sub.add_parser("start", help="Spawn the outpost daemon detached (idempotent).")
     outpost_sub.add_parser("stop", help="Stop the outpost daemon and remove its pidfile.")
     outpost_sub.add_parser("status", help="Report daemon liveness + /health (structured exit codes).")
+    outpost_sub.add_parser(
+        "restart", help="Rebuild the outpost checkout, then stop and start the daemon."
+    )
     # Carry the parser so the handler can print help when no verb is given.
     outpost_p.set_defaults(outpost_parser=outpost_p)
 
