@@ -189,6 +189,45 @@ def test_rejects_nested_git_directory_names_the_offending_path(tmp_path):
     assert not (vault / "sites" / "mysite").exists()
 
 
+def test_rejects_uppercase_git_directory_in_payload(tmp_path):
+    """A ``.GIT`` entry is as hazardous as ``.git``: on a case-insensitive
+    filesystem (macOS default) git's own ``.git``-name protection skips it during
+    `lore sync`'s ``git add -A``, so the site would publish and sync 0 while the
+    directory never reaches teammates. The segment check must fold case."""
+    vault = _make_vault(tmp_path)
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    git_dir = source / ".GIT"
+    git_dir.mkdir()
+    (git_dir / "config").write_text("[core]\n")
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert ".GIT" in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
+def test_rejects_mixedcase_git_file_nested_in_payload(tmp_path):
+    """A mixed-case ``.Git`` entry nested below the top level must be rejected
+    too — the fold applies at every depth, matching the nested lowercase case."""
+    vault = _make_vault(tmp_path)
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    (source / "sub").mkdir()
+    (source / "sub" / ".Git").write_text("gitdir: ../.git/modules/sub\n")
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode != 0
+    assert str(Path("sub") / ".Git") in result.stderr
+    assert not (vault / "sites" / "mysite").exists()
+
+
 def test_rejects_bad_slug(tmp_path):
     vault = _make_vault(tmp_path)
     source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})

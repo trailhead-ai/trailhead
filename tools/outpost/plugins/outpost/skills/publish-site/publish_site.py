@@ -180,12 +180,16 @@ def _validate_source(source: Path) -> int:
     Denylist enforcement: every entry must be a regular file or directory —
     symlinks and other non-regular entries (fifos, devices, sockets) are
     rejected — and every path segment must be one the daemon will serve. No
-    entry named ``.git`` is allowed at any depth, file or directory: it would
-    publish into ``sites/<slug>/`` and then reach `lore sync`'s bare
-    ``git add -A``, which either records it as a gitlink (sync exits 0 while
-    teammates receive none of the site) or — for a commitless nested repo —
-    fails fatally and breaks that vault's sync until the directory is
-    hand-deleted. A root ``index.html`` is required. Uses ``lstat`` throughout
+    entry whose name folds to ``.git`` is allowed at any depth, file or
+    directory: it would publish into ``sites/<slug>/`` and then reach `lore
+    sync`'s bare ``git add -A``, which either records it as a gitlink (sync exits
+    0 while teammates receive none of the site) or — for a commitless nested repo
+    — fails fatally and breaks that vault's sync until the directory is
+    hand-deleted. The comparison is case-insensitive (``casefold``): on a
+    case-insensitive filesystem (macOS default) git's own ``.git``-name
+    protection skips a ``.GIT``/``.Git`` entry too, so a case-sensitive check
+    here would let one publish and silently never sync. A root ``index.html`` is
+    required. Uses ``lstat`` throughout
     so a symlink is caught by its own mode bit rather than resolved and
     treated as whatever it points to.
     """
@@ -197,7 +201,7 @@ def _validate_source(source: Path) -> int:
     for path in sorted(source.rglob("*")):
         rel = path.relative_to(source)
         _validate_segments(rel)
-        if ".git" in rel.parts:
+        if any(segment.casefold() == ".git" for segment in rel.parts):
             raise PublishError(
                 f"nested .git entry not allowed in site payload: {rel} — it "
                 "would corrupt the vault's own `lore sync`"
