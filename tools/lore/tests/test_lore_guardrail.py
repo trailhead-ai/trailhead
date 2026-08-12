@@ -918,10 +918,11 @@ class TestInitInstallsGuardrail:
         )
 
     def test_init_adds_edit_deny_only(self, tmp_path):
-        """The static deny is a single Edit( rule over vaults/** (Edit(path)
-        rules cover all file-editing tools; a Write(path) rule never matches
-        and makes Claude Code warn at startup), anchored with the //
-        double-slash absolute grammar."""
+        """Every static deny is an Edit( rule (Edit(path) rules cover all
+        file-editing tools; a Write(path) rule never matches and makes Claude
+        Code warn at startup), anchored with the // double-slash absolute
+        grammar. What that rule set contains is pinned separately by
+        ``TestInitKindGeneratedDenyList``."""
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr

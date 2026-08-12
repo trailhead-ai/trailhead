@@ -11,14 +11,10 @@ shells out to is a stubbed executable placed on ``PATH``.
 from __future__ import annotations
 
 import importlib.util
-import os
 import shutil
-import stat
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 SCRIPT_PATH = (
     Path(__file__).parent.parent
