@@ -355,9 +355,9 @@ class TestShellenvGuidance:
         ):
             run_install(env=_env(tmp_path), quiet=True)
         out = capsys.readouterr().out
-        summary_lines = [ln for ln in out.splitlines() if ln.strip()]
-        commands_line = next((ln for ln in summary_lines if ln.startswith("CLIs")), "")
-        assert "trailhead" not in commands_line
+        path_line = next((ln for ln in out.splitlines() if "on your PATH" in ln), "")
+        assert path_line, "PATH guidance line should still print for the plugin CLIs"
+        assert "trailhead" not in path_line
 
     def test_shim_dir_failure_stays_exit_zero_and_carries_full_path_fallback(
         self, tmp_path, capsys
