@@ -173,3 +173,26 @@ class TestJson:
         data = json.loads(capsys.readouterr().out)
         assert set(data["removed"]) == {"claude_code"}
         assert set(data["removed"]["claude_code"]) == {"lore", "camp"}
+
+
+# ---------------------------------------------------------------------------
+# Human summary copy
+# ---------------------------------------------------------------------------
+
+
+class TestHumanSummary:
+    def test_bare_name_trailhead_persistence_noted(self, tmp_path, capsys):
+        _make_harness_tree(tmp_path, "claude_code", ["lore"])
+        with _recording() as (calls, runner, _):
+            run_uninstall(env=_env(tmp_path), assume_yes=True, runner=runner)
+        out = capsys.readouterr().out
+        assert "removed the camp/lore CLI shims; your data was kept" in out
+        assert "bare-name `trailhead` still resolves" in out
+        assert "shellenv" in out and "shell profile" in out
+
+    def test_reinstall_uses_full_path(self, tmp_path, capsys):
+        _make_harness_tree(tmp_path, "claude_code", ["lore"])
+        with _recording() as (calls, runner, _):
+            run_uninstall(env=_env(tmp_path), assume_yes=True, runner=runner)
+        out = capsys.readouterr().out
+        assert "bin/trailhead install" in out

@@ -196,7 +196,11 @@ def _print_human_summary(removed: dict[str, list[str]], *, quiet: bool) -> None:
             lines.append(f"  {hname}: {', '.join(tools) or '(no tools)'}")
         lines.append("")
     lines.append("removed the camp/lore CLI shims; your data was kept")
-    lines.append("(remove the `… shellenv` line from your shell profile if you added one)")
+    lines.append(
+        "bare-name `trailhead` still resolves in shells that already eval'd the "
+        "`… shellenv` line — remove that line from your shell profile to drop it"
+    )
+    lines.append("re-install later with the full path: <checkout>/bin/trailhead install")
     lines.append("")
     lines.append("start a fresh Claude Code session so the harness drops the plugins")
     print("\n".join(lines))
