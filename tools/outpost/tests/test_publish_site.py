@@ -389,3 +389,70 @@ def test_vault_name_given_syncs_scoped(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert record.read_text().strip() == "sync --vault acme"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end payload (spec's End-to-end proof acceptance criterion)
+# ---------------------------------------------------------------------------
+
+_MULTI_PAGE_SITE = {
+    "index.html": (
+        "<html><head><title>Docs Home</title>"
+        '<link rel="stylesheet" href="style.css"></head>'
+        '<body><h1>Docs Home</h1><a href="about.html">About</a></body></html>'
+    ),
+    "about.html": (
+        "<html><head><title>About</title>"
+        '<link rel="stylesheet" href="style.css"></head>'
+        '<body><h1>About</h1><a href="index.html">Home</a></body></html>'
+    ),
+    "style.css": "body { font-family: sans-serif; }",
+}
+
+
+def test_publish_multi_page_site_mirrors_source_and_syncs(tmp_path):
+    """Two HTML pages linking each other plus one CSS asset, the exact shape
+    the spec's end-to-end acceptance criterion names, publishes cleanly into a
+    real-shaped tmp vault and only prints the success URL once sync succeeds.
+    """
+    vault = _make_vault(tmp_path, name="acme")
+    source = _write_site(tmp_path / "src", _MULTI_PAGE_SITE)
+    bin_dir = tmp_path / "bin"
+    _write_lore_stub(bin_dir, exit_code=0)
+
+    result = _run(
+        [str(source), "docs", "--vault-path", str(vault), "--vault", "acme"],
+        _env(tmp_path, path=f"{bin_dir}:/usr/bin:/bin"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "http://127.0.0.1:7314/acme/docs/"
+
+    target = vault / "sites" / "docs"
+    assert target.is_dir()
+    assert (target / "index.html").read_text() == _MULTI_PAGE_SITE["index.html"]
+    assert (target / "about.html").read_text() == _MULTI_PAGE_SITE["about.html"]
+    assert (target / "style.css").read_text() == _MULTI_PAGE_SITE["style.css"]
+    # The relative links between the two pages and the shared stylesheet
+    # survive the copy byte-for-byte — nothing rewrites them.
+    assert 'href="style.css"' in (target / "index.html").read_text()
+    assert 'href="about.html"' in (target / "index.html").read_text()
+    assert 'href="index.html"' in (target / "about.html").read_text()
+
+
+def test_rejects_symlink_crafted_into_multi_page_site_payload(tmp_path):
+    """The same multi-page payload, with a symlink manually placed inside it,
+    is refused at publish time before anything is written into the vault.
+    """
+    vault = _make_vault(tmp_path, name="acme")
+    source = _write_site(tmp_path / "src", _MULTI_PAGE_SITE)
+    (source / "shortcut.html").symlink_to(source / "index.html")
+
+    result = _run(
+        [str(source), "docs", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),  # no `lore` stub on PATH — publish must fail before sync
+    )
+
+    assert result.returncode != 0
+    assert "symlink" in result.stderr
+    assert not (vault / "sites" / "docs").exists()
