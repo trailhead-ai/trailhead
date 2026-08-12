@@ -7,9 +7,11 @@ selected CLI (camp/lore), and you add a single line to your shell profile:
     eval "$(/path/to/trailhead/bin/trailhead shellenv)"
 
 ``trailhead shellenv`` prints the export lines (TRAILHEAD_ROOT + the shim dir on
-PATH) for your shell — exactly like ``brew shellenv``.  Because the shim dir's
-*contents* encode which CLIs were selected (``--no-camp`` etc.), a single PATH
-entry is all the profile needs, and re-running install updates it in place.
+PATH) for your shell — exactly like ``brew shellenv``.  For the plugin CLIs
+(camp/lore), the shim dir's *contents* encode which were selected
+(``--no-camp`` etc.), so a single PATH entry is all the profile needs for
+them, and re-running install updates it in place. The management CLI itself
+(``trailhead``) is handled separately — see below — never via a shim.
 
 camp is the forcing case: it's the front door, run outside any Claude Code
 session.  Each shim hardcodes TRAILHEAD_ROOT so the monorepo is reachable
