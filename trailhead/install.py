@@ -44,10 +44,10 @@ from trailhead.install_config import (
     resolve_config,
     resolve_config_path,
 )
-from trailhead.pathint import create_shims
+from trailhead.pathint import create_shims, repo_root
 from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
-_REPO_ROOT = Path(__file__).parent.parent
+_REPO_ROOT = repo_root()
 _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 
 

@@ -12,9 +12,11 @@ from pathlib import Path
 import pytest
 
 from trailhead.pathint import (
+    PathIntegrationError,
     ShimDenylistError,
     create_shims,
     detect_shell,
+    repo_root,
     resolve_shim_dir,
     shellenv_lines,
 )
@@ -130,6 +132,117 @@ class TestShellenv:
         out = shellenv_lines(shell="zsh", env=_env(tmp_path))
         assert "TRAILHEAD_ROOT=" in out
         assert "trailhead" in out
+
+    def test_default_root_matches_shared_helper(self, tmp_path):
+        out = shellenv_lines(shell="zsh", env=_env(tmp_path))
+        assert f'export TRAILHEAD_ROOT="{repo_root()}"' in out
+
+    def test_shared_helper_uses_resolve(self):
+        assert repo_root() == repo_root().resolve()
+
+
+# ---------------------------------------------------------------------------
+# trailhead() shell function
+# ---------------------------------------------------------------------------
+
+
+def _fake_repo_with_bin(tmp_path: Path, *, executable: bool = True, directory: bool = False) -> Path:
+    root = tmp_path / "fakerepo"
+    bin_dir = root / "bin"
+    bin_dir.mkdir(parents=True)
+    trailhead_bin = bin_dir / "trailhead"
+    if directory:
+        trailhead_bin.mkdir()
+    else:
+        trailhead_bin.write_text("#!/usr/bin/env python3\n")
+        mode = 0o755 if executable else 0o644
+        trailhead_bin.chmod(mode)
+    return root
+
+
+class TestTrailheadFunction:
+    @pytest.mark.parametrize("shell", ["bash", "zsh", "fish"])
+    def test_emitted_when_bin_trailhead_is_executable(self, tmp_path, shell):
+        root = _fake_repo_with_bin(tmp_path)
+        out = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root=str(root))
+        target = str(root / "bin" / "trailhead")
+        if shell == "fish":
+            assert "function trailhead" in out
+            assert f'"{target}" $argv' in out
+        else:
+            assert "trailhead() {" in out
+            assert f'"{target}" "$@"' in out
+
+    @pytest.mark.parametrize("shell", ["bash", "zsh", "fish"])
+    def test_not_emitted_when_bin_trailhead_missing(self, tmp_path, shell):
+        root = tmp_path / "norepo"
+        root.mkdir()
+        out = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root=str(root))
+        assert "trailhead()" not in out
+        assert "function trailhead" not in out
+        # Remaining output stays eval-valid (root/PATH lines still present).
+        assert "TRAILHEAD_ROOT" in out
+
+    @pytest.mark.parametrize("shell", ["bash", "zsh", "fish"])
+    def test_not_emitted_when_bin_trailhead_not_executable(self, tmp_path, shell):
+        root = _fake_repo_with_bin(tmp_path, executable=False)
+        out = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root=str(root))
+        assert "trailhead()" not in out
+        assert "function trailhead" not in out
+
+    @pytest.mark.parametrize("shell", ["bash", "zsh", "fish"])
+    def test_not_emitted_when_bin_trailhead_is_a_directory(self, tmp_path, shell):
+        root = _fake_repo_with_bin(tmp_path, directory=True)
+        out = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root=str(root))
+        assert "trailhead()" not in out
+        assert "function trailhead" not in out
+
+    def test_invokes_the_real_binary(self, tmp_path):
+        root = _fake_repo_with_bin(tmp_path)
+        marker = tmp_path / "ran.txt"
+        (root / "bin" / "trailhead").write_text(
+            "#!/usr/bin/env bash\n"
+            f'printf "%s" "$*" > {marker}\n'
+        )
+        (root / "bin" / "trailhead").chmod(0o755)
+
+        wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root=str(root))
+        script = f'{wrapper}\ntrailhead doctor --json\n'
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert marker.read_text() == "doctor --json"
+
+
+# ---------------------------------------------------------------------------
+# Injection hardening
+# ---------------------------------------------------------------------------
+
+
+class TestInjectionHardening:
+    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n"])
+    def test_rejects_unsafe_root(self, tmp_path, bad_char):
+        with pytest.raises(PathIntegrationError):
+            shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root=f"/repo{bad_char}evil")
+
+    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n"])
+    def test_rejects_unsafe_shim_dir(self, tmp_path, bad_char):
+        env = {"TRAILHEAD_STATE_DIR": str(tmp_path) + bad_char + "evil"}
+        with pytest.raises(PathIntegrationError):
+            shellenv_lines(shell="bash", env=env, trailhead_root="/repo")
+
+    @pytest.mark.parametrize("bad_char", ['"', "`", "$", "\n"])
+    def test_rejects_unsafe_root_in_trailhead_function_path(self, tmp_path, bad_char):
+        # The bin/trailhead check itself passes (real file at a safe path),
+        # but the root used to build the function body is unsafe.
+        safe_root = _fake_repo_with_bin(tmp_path)
+        unsafe_root = str(safe_root) + bad_char + "evil"
+        with pytest.raises(PathIntegrationError):
+            shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root=unsafe_root)
 
 
 # ---------------------------------------------------------------------------
