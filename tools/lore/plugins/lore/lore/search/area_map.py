@@ -9,10 +9,23 @@ area-membered memory lookup is ``lore search 'area:<name>'``:
      on-demand area menu (alpha order, hard caps applied). Served on
      demand by `lore areas`.
 
-  2. render_area_menu(entries)      -> str
+  2. build_area_map_multi(vaults)   -> list[AreaEntry]
+     Merges `build_area_map` across every vault root passed in, deduping
+     same-named areas (first-in-input-order wins), then re-sorting the
+     merged set alpha. Hard caps are already applied per entry by
+     build_area_map. The multi-vault counterpart `cmd_areas` calls once it
+     resolves every configured non-shared vault, rather than the
+     `default`-scope vault alone. This dedupe mirrors `lore record show
+     area/<name>`'s cross-vault resolution EXCEPT when a shared vault holds
+     a same-named area earlier in config order: `record show`'s scan does
+     not filter shared vaults, so it can resolve to a different vault's copy
+     than this (shared-excluding) merge does. Parity holds only among
+     non-shared vaults.
+
+  3. render_area_menu(entries)      -> str
      Renders the full on-demand menu (called by `lore areas`).
 
-  3. render_area_pointer(vault)     -> str
+  4. render_area_pointer(vault)     -> str
      Single-line pointer summarizing the area count and a trigger cue for
      `lore areas` / `lore search 'area:<name>'`. Not currently wired to any
      caller — lore has no push hook to inject it into; see its own docstring.
@@ -28,6 +41,7 @@ Interpreter gotcha: ``@dataclass`` + ``importlib``-loaded module +
 field resolution — this module OMITS that future import for that reason.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +50,20 @@ from . import frontmatter as _fm_mod
 # Hard caps
 _ONE_LINER_MAX = 120
 _KEYWORDS_MAX = 8
+
+# Strips ASCII control characters (incl. \n, \r, tab, ESC) from frontmatter-
+# sourced strings before they reach the rendered menu. render_area_menu emits
+# `name`/`one_liner`/keywords as undelimited plaintext lines with no escaping,
+# so an embedded newline in area frontmatter can inject arbitrary extra
+# lines — including a forged "--- end lore area map ---" delimiter followed
+# by fabricated instruction text — into an AI agent's context. See module
+# docstring's Security note.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _strip_control_chars(value: str) -> str:
+    """Remove ASCII control characters from *value* (newlines, ESC, etc.)."""
+    return _CONTROL_CHARS_RE.sub("", value)
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +138,7 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
         except Exception:
             continue
 
-        name = (fm.get("name") or p.stem).strip()
+        name = _strip_control_chars((fm.get("name") or p.stem).strip()).strip()
         if not name:
             continue
 
@@ -120,6 +148,7 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
             one_liner = summary[:_ONE_LINER_MAX]
         else:
             one_liner = _first_overview_sentence(text)[:_ONE_LINER_MAX]
+        one_liner = _strip_control_chars(one_liner)
 
         # Keywords (cap)
         raw_kw = fm.get("keywords") or []
@@ -129,9 +158,78 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
             keywords = [raw_kw.strip()]
         else:
             keywords = []
-        keywords = keywords[:_KEYWORDS_MAX]
+        keywords = [
+            k for k in (_strip_control_chars(k) for k in keywords[:_KEYWORDS_MAX]) if k
+        ]
 
         entries.append(AreaEntry(name=name, one_liner=one_liner, keywords=keywords))
+
+    entries.sort(key=lambda e: e.name.lower())
+    return entries
+
+
+def build_area_map_multi(
+    vaults: list[Path], errors: list | None = None
+) -> list[AreaEntry]:
+    """Build the compact area menu spanning multiple vault roots.
+
+    Calls :func:`build_area_map` once per root in ``vaults`` and merges the
+    results. Same-named areas across roots collapse to a single entry — the
+    first root (in input order, i.e. config order) to define the name wins,
+    mirroring how ``lore record show area/<name>`` resolves the same
+    cross-vault collision (with one exception — see below). The merged set is
+    then re-sorted alpha by name, since per-vault ordering says nothing about
+    the cross-vault order.
+
+    **Caller precondition:** ``vaults`` must already exclude every
+    ``shared: true`` root. This function has no visibility into vault scope
+    and applies no filtering of its own — the area menu it renders is
+    undelimited plaintext that reaches agent context directly, so a shared
+    (untrusted) vault's areas must never reach this function's input in the
+    first place. `cmd_areas` is the caller that enforces this today.
+
+    The ``_ONE_LINER_MAX`` / ``_KEYWORDS_MAX`` caps are NOT re-applied here:
+    they bound a single entry's one-liner and keyword list, not the menu as a
+    whole, and every entry this function returns came from
+    :func:`build_area_map`, which already capped it. Merging entries cannot
+    push an already-capped entry over its cap, so the cap lives at its one
+    source rather than being restated per caller.
+
+    A root that yields no areas (absent ``area/`` dir, or every file
+    unreadable) simply contributes nothing. A root whose ``build_area_map``
+    call raises is likewise skipped rather than propagated — one bad vault
+    root must not cost every other root its areas, extending
+    ``build_area_map``'s own never-raise contract across the merge. Pass a
+    list via ``errors`` to observe which roots (and exceptions) were skipped
+    this way — callers that need to distinguish "legitimately empty" from
+    "a root silently failed" (e.g. to decide whether to emit a degradation
+    signal) read it after the call; it is left untouched (``None`` stays
+    ``None``, an empty list stays empty) when nothing failed.
+
+    Dedup only ever collapses a name across DIFFERENT roots. Two files
+    colliding on the same frontmatter ``name`` within a single root are both
+    kept — ``build_area_map`` on one root, called directly (the single-vault,
+    pre-multi-vault path), never deduped its own output, and a single-root
+    call through this function must stay byte-identical to that. The
+    single-writer-wins collapse is specifically a cross-vault concern (the
+    same name declared independently in two vaults), not a same-vault one.
+    """
+    seen_names: set[str] = set()
+    entries: list[AreaEntry] = []
+    for vault in vaults:
+        try:
+            vault_entries = build_area_map(vault)
+        except Exception as exc:
+            if errors is not None:
+                errors.append((vault, exc))
+            continue
+        this_vault_names: set[str] = set()
+        for entry in vault_entries:
+            if entry.name in seen_names and entry.name not in this_vault_names:
+                continue
+            entries.append(entry)
+            this_vault_names.add(entry.name)
+        seen_names |= this_vault_names
 
     entries.sort(key=lambda e: e.name.lower())
     return entries

@@ -1,47 +1,148 @@
 """``lore areas`` / ``lore reindex`` — the area menu + derived-index rebuild."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-from .common import _load_vault_config
+from .common import _load_vault_config, _resolve_all_vaults_and_shared
 
 
 def cmd_areas(args) -> int:
     """Print the full area menu (names, one-liners, keywords) to stdout.
 
-    Exit code is always 0 — must never fail a session.
-    Prints a one-line stderr signal and a degraded stdout "no areas" line when
-    the resolved vault path does not exist on disk, or when build_area_map
-    raises. Empty or absent areas/ dir prints a friendly "no areas" line.
+    Spans **every configured non-shared vault**, not just the `default`-scope
+    vault: resolves the whole-install vault set (and its shared-name set, from
+    one `config.json` read) via `_resolve_all_vaults_and_shared` (built on the
+    same enumeration `lore sync`/`lore status` use), then
+    `_dedupe_and_exclude_shared_roots` drops any configured-but-absent root
+    and any root whose PHYSICAL directory (`os.stat` device+inode, not the
+    path string) is claimed by a `shared: true` entry — the area menu is
+    personal-scoped, a shared vault's content only reaches context through
+    the explicitly-delimited `lore search` path, and that must hold even when
+    a differently-cased or symlinked alias names the same directory under a
+    non-shared entry. `build_area_map_multi` merges the surviving per-vault
+    menus, deduping same-named areas config-order-first-wins, and already
+    isolates a single root's `build_area_map` failure from the rest.
+
+    Exit code is always 0 — must never fail a session. The one-line stderr
+    signal fires only when nothing legitimately resolved: either the config
+    read itself failed (malformed/wrong-shape config), vault resolution raised
+    something outside that (e.g. an unresolvable ``XDG_CONFIG_HOME``/``HOME``),
+    no root resolved at all (every configured root was absent/shared), or
+    every resolved root's `build_area_map` call raised. A healthy vault that
+    simply has zero areas defined is not an error — it renders the degraded
+    "no areas" stdout line with a silent stderr, matching vanilla's
+    byte-identical behavior. A single failing root among several (its
+    `build_area_map` call raised) does not trigger the signal either, as long
+    as another root produced entries — the surviving roots' areas render
+    normally.
+
+    The whole body runs under a single total guard: this is the command
+    boundary, and nothing below it — vault/shared-path resolution, the merge —
+    may ever escape as a traceback. `_resolve_all_vaults_and_shared` and
+    `build_area_map_multi` already narrow the *expected* failure modes (a
+    malformed config, a single root's `build_area_map` blowing up) to a
+    reported error rather than a raise; this guard exists for the
+    unenumerated rest (e.g. path resolution itself failing) so the contract
+    holds regardless of what a callee below decides is worth its own typed
+    error.
     """
     from ..search import area_map as area_map_mod
-    from ..vault import config as vault_config_mod
 
     _NO_AREAS_LINE = "No areas defined yet."
 
     try:
-        vault = Path(vault_config_mod.resolve_active_vault())
-        if not vault.exists():
-            raise FileNotFoundError(vault)
+        all_vaults, shared_names, error = _resolve_all_vaults_and_shared()
+        roots = _dedupe_and_exclude_shared_roots(all_vaults, shared_names)
+
+        root_errors: list = []
+        entries = area_map_mod.build_area_map_multi(roots, errors=root_errors)
     except Exception as exc:
         print(f"lore areas: could not resolve vault ({exc})", file=sys.stderr)
         print(_NO_AREAS_LINE)
         return 0
 
-    try:
-        entries = area_map_mod.build_area_map(vault)
-    except Exception as exc:
-        print(f"lore areas: could not build area map ({exc})", file=sys.stderr)
+    if error is not None:
+        print(f"lore areas: could not resolve vaults ({error})", file=sys.stderr)
+    elif not entries and (not roots or root_errors):
+        print("lore areas: no areas found in any configured vault", file=sys.stderr)
+
+    if not entries:
         print(_NO_AREAS_LINE)
         return 0
 
-    menu = area_map_mod.render_area_menu(entries)
-    if menu:
-        print(menu)
-    else:
-        print(_NO_AREAS_LINE)
+    print(area_map_mod.render_area_menu(entries))
     return 0
+
+
+def _dedupe_and_exclude_shared_roots(
+    all_vaults: list, shared_names: set
+) -> list:
+    """Return the existing, non-shared vault roots — deduped by PHYSICAL identity.
+
+    ``shared_names`` names which config entries are ``shared: true`` (the
+    authoritative flag, carried straight from ``Vault.shared`` — see
+    :func:`._resolve_all_vaults_and_shared`), but a name-keyed exclusion
+    alone is not enough: two config entries can point at the exact same
+    directory on disk under different path strings (different case on a
+    case-insensitive filesystem, a symlink, a bind mount, ...), and only ONE
+    of those entries need be the one marked ``shared: true``. Excluding by
+    name alone would still hand the OTHER entry's (nominally non-shared) root
+    straight to :func:`build_area_map_multi`, which would scan the very same
+    directory and merge its area files into the menu anyway — reproducing
+    the leak `shared: true` exists to prevent, just one alias removed.
+
+    This resolves each candidate root's PHYSICAL identity via
+    ``os.stat().st_dev``/``st_ino`` — the one comparison that is authoritative
+    regardless of path string, case-folding, or symlink form — and treats a
+    physical directory as shared if ANY vault entry naming it is
+    ``shared: true``, independent of which entry a given root came from.
+    Non-shared roots are additionally deduped to one entry per physical
+    directory (first in config order) so an aliased non-shared vault is not
+    scanned twice for no benefit.
+
+    A root that no longer exists, or that a broken ``stat()`` call cannot
+    identify (races, permission errors), is silently dropped — the existing
+    ``path.exists()`` guard this replaces already tolerated absent roots the
+    same way. ``exists()`` itself is called per-root inside its own
+    ``try/except``: a root whose check raises (e.g. a symlink loop, or a
+    permission error on a parent directory) must degrade like any other
+    single-root failure — the surviving roots still render — rather than
+    escaping to `cmd_areas`'s outer total guard and blanking the whole menu.
+    """
+    existing: list = []
+    for name, path in all_vaults:
+        try:
+            if path.exists():
+                existing.append((name, path))
+        except OSError:
+            continue
+
+    identity_by_name: dict = {}
+    shared_identities: set = set()
+    for name, path in existing:
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        identity = (st.st_dev, st.st_ino)
+        identity_by_name[name] = identity
+        if name in shared_names:
+            shared_identities.add(identity)
+
+    roots: list = []
+    seen_identities: set = set()
+    for name, path in existing:
+        identity = identity_by_name.get(name)
+        if identity is None or identity in shared_identities:
+            continue
+        if identity in seen_identities:
+            continue
+        seen_identities.add(identity)
+        roots.append(path)
+
+    return roots
 
 
 def cmd_reindex(args) -> int:

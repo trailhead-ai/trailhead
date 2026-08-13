@@ -148,14 +148,22 @@ def _load_vault_config():
     A *present but malformed/invalid* config returns ``None`` too: the freshness +
     routing layers are best-effort, and a broken config must not brick a plain
     ``record create``; ``lore vault ls``/``add`` are the surfaces that surface the
-    config error explicitly.
+    config error explicitly. This includes a well-formed-JSON-but-wrong-shape
+    config (e.g. a top-level list, or a ``"vaults"`` array of non-dict entries) —
+    ``validate_config`` normalizes those shapes to ``VaultConfigError`` (its
+    single parse+validate boundary), so catching that one type here covers them
+    too, and callers must not brick on them either.
     """
     config_path = _resolve_config_path()
     if not config_path.exists():
         return None
     try:
         vaults = vault_config_mod.load_config(str(config_path))
-    except (vault_config_mod.VaultConfigError, OSError, ValueError):
+    except (
+        vault_config_mod.VaultConfigError,
+        OSError,
+        ValueError,
+    ):
         return None
     return config_path, vaults
 
@@ -179,7 +187,11 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
       list, plus a non-``None`` ``error`` naming the problem. Callers MUST surface
       it: degrading silently to one vault is precisely the failure mode this
       function exists to prevent, so unlike ``_load_vault_config`` (best-effort,
-      returns ``None``) the breakage is reported rather than swallowed.
+      returns ``None``) the breakage is reported rather than swallowed. This case
+      also covers a well-formed-JSON-but-wrong-shape config (e.g. a top-level
+      list, or non-dict ``"vaults"`` entries) — ``validate_config`` normalizes
+      those shapes to ``VaultConfigError`` too, so this catches them the same
+      way it catches any other invalid config.
     - **Valid config** → one ``(name, path)`` pair per vault, in config order,
       names already normalized by ``load_config``.
     """
@@ -189,7 +201,11 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
         return floor, None
     try:
         vaults = vault_config_mod.load_config(str(config_path))
-    except (vault_config_mod.VaultConfigError, OSError, ValueError) as exc:
+    except (
+        vault_config_mod.VaultConfigError,
+        OSError,
+        ValueError,
+    ) as exc:
         return floor, f"cannot read {config_path}: {exc}"
     return [(v.name, Path(v.path)) for v in vaults], None
 
@@ -243,6 +259,60 @@ def _shared_vault_paths() -> set[str]:
         for v in vaults
         if vault_config_mod.is_shared(v)
     }
+
+
+def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], str | None]:
+    """Single-read counterpart to calling ``_resolve_all_vaults`` then
+    deriving the shared set from the same config read.
+
+    Calling those two helpers separately reads and re-parses ``config.json``
+    twice; if the file changes between the reads (a concurrent ``lore vault
+    add``/edit), the vault list and the shared-set can disagree — and the
+    shared filter fails **open** (empty set) rather than closed, which is the
+    wrong direction for a trust boundary (an undelimited plaintext area menu
+    reaching agent context). This function's ONE read of ``config.json`` — the
+    single ``load_config`` call below — is what the vault list and shared-set
+    both derive from, so the two views can never diverge from each other. The
+    floor vault (``resolve_active_vault()``) is resolved separately and only
+    lazily, on the two paths that actually need it (no config / unreadable
+    config); it plays no part in the divergence this function exists to
+    prevent, since the valid-config path never touches it.
+
+    The shared set is keyed by ``Vault.name`` — the config's own
+    globally-unique-after-normalization key (``validate_config`` rejects a
+    duplicate) — rather than by resolved path string. A resolved-path key
+    lets two config entries pointing at the same physical directory under
+    different casing (e.g. ``vaults/SharedTeam`` vs ``vaults/sharedteam``)
+    each resolve to a *different* string on a case-insensitive filesystem —
+    ``Path.resolve()`` normalizes ``..`` and symlinks but never casefolds —
+    so a non-shared alias of a ``shared: true`` vault would resolve to a
+    string absent from a path-keyed set and slip past the filter. Keying on
+    ``name`` instead carries the authoritative ``Vault.shared`` flag through
+    by construction: whether a root is excluded depends on what its own
+    config entry declared, never on how its path happens to compare against
+    another entry's.
+
+    Same three-case contract as :func:`_resolve_all_vaults` (no config →
+    floor vault + no error; unparseable/wrong-shape config → floor vault +
+    named error; valid config → full vault list), with the shared-name set
+    derived from that same read (empty in both floor cases).
+    """
+    config_path = _resolve_config_path()
+    if not config_path.exists():
+        floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
+        return floor, set(), None
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (
+        vault_config_mod.VaultConfigError,
+        OSError,
+        ValueError,
+    ) as exc:
+        floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
+        return floor, set(), f"cannot read {config_path}: {exc}"
+    all_vaults = [(v.name, Path(v.path)) for v in vaults]
+    shared_names = {v.name for v in vaults if vault_config_mod.is_shared(v)}
+    return all_vaults, shared_names, None
 
 
 def _partition_writable_vaults(vaults) -> tuple[list, list]:
