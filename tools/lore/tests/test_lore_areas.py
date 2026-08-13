@@ -20,6 +20,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Module loader
 # ---------------------------------------------------------------------------
@@ -528,10 +530,11 @@ class TestAreasMultiVault:
         _write_area(default_vault, "core", ["x"], summary="Default area.")
 
         alias_path = vaults_dir / "sharedteam"  # case-flipped alias of shared_dir
-        assert (alias_path / "area" / "untrusted.md").is_file(), (
-            "sandbox filesystem is case-sensitive — this reproduction needs "
-            "a case-insensitive volume (e.g. macOS APFS)"
-        )
+        if not (alias_path / "area" / "untrusted.md").is_file():
+            pytest.skip(
+                "sandbox filesystem is case-sensitive — this reproduction needs "
+                "a case-insensitive volume (e.g. macOS APFS)"
+            )
 
         env_ctx = _multi_config_env(
             tmp_path,
