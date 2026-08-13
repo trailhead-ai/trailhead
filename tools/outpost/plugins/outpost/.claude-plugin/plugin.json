@@ -1,5 +1,5 @@
 {
   "name": "outpost",
   "version": "0.1.0",
-  "description": "Close the human→agent review loop: pick up the diff reviews Tom authored in the outpost cockpit and act on them over HTTP."
+  "description": "Close the human→agent review loop: pick up the human-authored diff reviews in the outpost cockpit and act on them over HTTP."
 }
