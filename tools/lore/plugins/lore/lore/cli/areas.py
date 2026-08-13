@@ -1,6 +1,7 @@
 """``lore areas`` / ``lore reindex`` — the area menu + derived-index rebuild."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -11,14 +12,18 @@ def cmd_areas(args) -> int:
     """Print the full area menu (names, one-liners, keywords) to stdout.
 
     Spans **every configured non-shared vault**, not just the `default`-scope
-    vault: resolves the whole-install vault set (and its shared-path set, from
+    vault: resolves the whole-install vault set (and its shared-name set, from
     one `config.json` read) via `_resolve_all_vaults_and_shared` (built on the
-    same enumeration `lore sync`/`lore status` use), drops any `shared: true`
-    vault (the area menu is personal-scoped — a shared vault's content only
-    reaches context through the explicitly-delimited `lore search` path), and
-    drops any configured-but-absent root. `build_area_map_multi` merges the
-    per-vault menus, deduping same-named areas config-order-first-wins, and
-    already isolates a single root's `build_area_map` failure from the rest.
+    same enumeration `lore sync`/`lore status` use), then
+    `_dedupe_and_exclude_shared_roots` drops any configured-but-absent root
+    and any root whose PHYSICAL directory (`os.stat` device+inode, not the
+    path string) is claimed by a `shared: true` entry — the area menu is
+    personal-scoped, a shared vault's content only reaches context through
+    the explicitly-delimited `lore search` path, and that must hold even when
+    a differently-cased or symlinked alias names the same directory under a
+    non-shared entry. `build_area_map_multi` merges the surviving per-vault
+    menus, deduping same-named areas config-order-first-wins, and already
+    isolates a single root's `build_area_map` failure from the rest.
 
     Exit code is always 0 — must never fail a session. The one-line stderr
     signal fires only when nothing legitimately resolved: either the config
@@ -48,12 +53,8 @@ def cmd_areas(args) -> int:
     _NO_AREAS_LINE = "No areas defined yet."
 
     try:
-        all_vaults, shared_paths, error = _resolve_all_vaults_and_shared()
-        roots = [
-            path
-            for _name, path in all_vaults
-            if str(path.resolve()) not in shared_paths and path.exists()
-        ]
+        all_vaults, shared_names, error = _resolve_all_vaults_and_shared()
+        roots = _dedupe_and_exclude_shared_roots(all_vaults, shared_names)
 
         root_errors: list = []
         entries = area_map_mod.build_area_map_multi(roots, errors=root_errors)
@@ -73,6 +74,75 @@ def cmd_areas(args) -> int:
 
     print(area_map_mod.render_area_menu(entries))
     return 0
+
+
+def _dedupe_and_exclude_shared_roots(
+    all_vaults: list, shared_names: set
+) -> list:
+    """Return the existing, non-shared vault roots — deduped by PHYSICAL identity.
+
+    ``shared_names`` names which config entries are ``shared: true`` (the
+    authoritative flag, carried straight from ``Vault.shared`` — see
+    :func:`._resolve_all_vaults_and_shared`), but a name-keyed exclusion
+    alone is not enough: two config entries can point at the exact same
+    directory on disk under different path strings (different case on a
+    case-insensitive filesystem, a symlink, a bind mount, ...), and only ONE
+    of those entries need be the one marked ``shared: true``. Excluding by
+    name alone would still hand the OTHER entry's (nominally non-shared) root
+    straight to :func:`build_area_map_multi`, which would scan the very same
+    directory and merge its area files into the menu anyway — reproducing
+    the leak `shared: true` exists to prevent, just one alias removed.
+
+    This resolves each candidate root's PHYSICAL identity via
+    ``os.stat().st_dev``/``st_ino`` — the one comparison that is authoritative
+    regardless of path string, case-folding, or symlink form — and treats a
+    physical directory as shared if ANY vault entry naming it is
+    ``shared: true``, independent of which entry a given root came from.
+    Non-shared roots are additionally deduped to one entry per physical
+    directory (first in config order) so an aliased non-shared vault is not
+    scanned twice for no benefit.
+
+    A root that no longer exists, or that a broken ``stat()`` call cannot
+    identify (races, permission errors), is silently dropped — the existing
+    ``path.exists()`` guard this replaces already tolerated absent roots the
+    same way. ``exists()`` itself is called per-root inside its own
+    ``try/except``: a root whose check raises (e.g. a symlink loop, or a
+    permission error on a parent directory) must degrade like any other
+    single-root failure — the surviving roots still render — rather than
+    escaping to `cmd_areas`'s outer total guard and blanking the whole menu.
+    """
+    existing: list = []
+    for name, path in all_vaults:
+        try:
+            if path.exists():
+                existing.append((name, path))
+        except OSError:
+            continue
+
+    identity_by_name: dict = {}
+    shared_identities: set = set()
+    for name, path in existing:
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        identity = (st.st_dev, st.st_ino)
+        identity_by_name[name] = identity
+        if name in shared_names:
+            shared_identities.add(identity)
+
+    roots: list = []
+    seen_identities: set = set()
+    for name, path in existing:
+        identity = identity_by_name.get(name)
+        if identity is None or identity in shared_identities:
+            continue
+        if identity in seen_identities:
+            continue
+        seen_identities.add(identity)
+        roots.append(path)
+
+    return roots
 
 
 def cmd_reindex(args) -> int:

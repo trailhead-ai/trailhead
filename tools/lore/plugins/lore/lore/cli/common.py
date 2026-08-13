@@ -263,7 +263,7 @@ def _shared_vault_paths() -> set[str]:
 
 def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], str | None]:
     """Single-read counterpart to calling ``_resolve_all_vaults`` then
-    ``_shared_vault_paths`` back to back.
+    deriving the shared set from the same config read.
 
     Calling those two helpers separately reads and re-parses ``config.json``
     twice; if the file changes between the reads (a concurrent ``lore vault
@@ -278,9 +278,23 @@ def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], 
     config); it plays no part in the divergence this function exists to
     prevent, since the valid-config path never touches it.
 
+    The shared set is keyed by ``Vault.name`` — the config's own
+    globally-unique-after-normalization key (``validate_config`` rejects a
+    duplicate) — rather than by resolved path string. A resolved-path key
+    lets two config entries pointing at the same physical directory under
+    different casing (e.g. ``vaults/SharedTeam`` vs ``vaults/sharedteam``)
+    each resolve to a *different* string on a case-insensitive filesystem —
+    ``Path.resolve()`` normalizes ``..`` and symlinks but never casefolds —
+    so a non-shared alias of a ``shared: true`` vault would resolve to a
+    string absent from a path-keyed set and slip past the filter. Keying on
+    ``name`` instead carries the authoritative ``Vault.shared`` flag through
+    by construction: whether a root is excluded depends on what its own
+    config entry declared, never on how its path happens to compare against
+    another entry's.
+
     Same three-case contract as :func:`_resolve_all_vaults` (no config →
     floor vault + no error; unparseable/wrong-shape config → floor vault +
-    named error; valid config → full vault list), with the shared-path set
+    named error; valid config → full vault list), with the shared-name set
     derived from that same read (empty in both floor cases).
     """
     config_path = _resolve_config_path()
@@ -297,10 +311,8 @@ def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], 
         floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
         return floor, set(), f"cannot read {config_path}: {exc}"
     all_vaults = [(v.name, Path(v.path)) for v in vaults]
-    shared_paths = {
-        str(Path(v.path).resolve()) for v in vaults if vault_config_mod.is_shared(v)
-    }
-    return all_vaults, shared_paths, None
+    shared_names = {v.name for v in vaults if vault_config_mod.is_shared(v)}
+    return all_vaults, shared_names, None
 
 
 def _partition_writable_vaults(vaults) -> tuple[list, list]:

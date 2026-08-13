@@ -166,6 +166,47 @@ class TestBuildAreaMap:
         assert len(entries) == 1
         assert entries[0].name == "empty-area"
 
+    def test_control_char_stripped_from_name(self, tmp_path):
+        """A control character (here ESC, \\x1b) embedded in the `name`
+        frontmatter field must not survive into the rendered `AreaEntry` —
+        `render_area_menu` concatenates it into a plaintext line with no
+        escaping, so an ANSI escape or an embedded control char reaches an
+        AI agent's context verbatim."""
+        vault = _make_vault(tmp_path)
+        p = vault / "area" / "escaped.md"
+        p.write_text(
+            "---\ntype: area\nname: esc\x1b[31mape\nkeywords: [x]\n"
+            "summary: fine\n---\n\n## Overview\n\nBody.\n"
+        )
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
+        assert len(entries) == 1
+        assert "\x1b" not in entries[0].name
+
+    def test_control_char_stripped_from_keyword(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        p = vault / "area" / "kw-escape.md"
+        p.write_text(
+            "---\ntype: area\nname: kw-escape\nkeywords: [safe, ba\x1b[2Jd]\n"
+            "summary: fine\n---\n\n## Overview\n\nBody.\n"
+        )
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
+        assert len(entries) == 1
+        assert all("\x1b" not in k for k in entries[0].keywords)
+
+    def test_control_char_stripped_from_one_liner(self, tmp_path):
+        vault = _make_vault(tmp_path)
+        p = vault / "area" / "summary-escape.md"
+        p.write_text(
+            "---\ntype: area\nname: summary-escape\nkeywords: [x]\n"
+            "summary: legit text\x1b[0m more text\n---\n\n## Overview\n\nBody.\n"
+        )
+        area_map = load_area_map()
+        entries = area_map.build_area_map(vault)
+        assert len(entries) == 1
+        assert "\x1b" not in entries[0].one_liner
+
     def test_empty_areas_dir_returns_empty_list(self, tmp_path):
         vault = _make_vault(tmp_path)
         area_map = load_area_map()

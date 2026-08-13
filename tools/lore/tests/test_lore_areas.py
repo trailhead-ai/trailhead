@@ -490,6 +490,65 @@ class TestAreasMultiVault:
         assert "untrusted" not in stdout
         assert "Shared one-liner leak check." not in stdout
 
+    def test_shared_vault_content_excluded_despite_case_only_path_alias(
+        self, tmp_path
+    ):
+        """Regression: a ``shared: true`` vault's content must stay out of the
+        menu even when a second, non-shared config entry names the exact same
+        physical directory under different-case path string.
+
+        Reproduces the exact two-entry shape from the report — a
+        ``shared: true`` ``sharedteam`` vault plus a ``sharedteam-alias``
+        entry whose path is ``sharedteam``'s with its case flipped. On this
+        sandbox's case-insensitive (APFS) filesystem the two entries are
+        genuinely the same physical directory (confirmed below), so a
+        resolved-path-*string*-keyed exclusion set — built from
+        ``str(Path(v.path).resolve())`` for the shared entry only — never
+        contains the alias's differently-cased string and the alias's own
+        root gets scanned directly, handing the shared vault's area straight
+        to the merged menu one hop removed. A purely name-keyed exclusion
+        (checking only whether the *scanned* entry's own name is
+        ``shared: true``) does not fully close this either: the alias entry
+        is legitimately not marked shared, so its root would still be
+        scanned and would still contain the shared vault's files. Closing it
+        requires recognizing that the alias's root is, physically, the same
+        directory as an entry that IS marked shared — the fix does this via
+        ``os.stat`` device+inode identity rather than any path string.
+        """
+        vaults_dir = tmp_path / "vaults"
+        shared_dir = vaults_dir / "SharedTeam"
+        shared_dir.mkdir(parents=True)
+        (shared_dir / "area").mkdir()
+        _write_area(
+            shared_dir, "untrusted", ["x"], summary="Shared one-liner leak check."
+        )
+
+        default_vault = tmp_path / "v-default"
+        (default_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "core", ["x"], summary="Default area.")
+
+        alias_path = vaults_dir / "sharedteam"  # case-flipped alias of shared_dir
+        assert (alias_path / "area" / "untrusted.md").is_file(), (
+            "sandbox filesystem is case-sensitive — this reproduction needs "
+            "a case-insensitive volume (e.g. macOS APFS)"
+        )
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [
+                ("default", "default", default_vault),
+                ("sharedteam", "team", shared_dir),
+                ("sharedteam-alias", "team", alias_path),
+            ],
+            shared_names=("sharedteam",),
+        )
+        stdout, _, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert "untrusted" not in stdout
+        assert "Shared one-liner leak check." not in stdout
+        assert "core" in stdout
+
     def test_one_absent_root_still_renders_the_rest(self, tmp_path):
         default_vault = tmp_path / "v-default"
         absent_vault = tmp_path / "v-does-not-exist"
@@ -552,6 +611,46 @@ class TestAreasMultiVault:
                         "lore.search.area_map.build_area_map",
                         side_effect=_raise_for_default,
                     ):
+                        rc = cli.cmd_areas(args)
+
+        assert rc == 0
+        assert "billing" in out.getvalue()
+
+    def test_one_root_exists_check_raising_still_renders_the_rest(self, tmp_path):
+        """A single root whose ``exists()`` check itself raises (symlink loop,
+        permission error on a parent directory) must degrade like any other
+        single-root failure — the surviving roots still render — rather than
+        propagating past `_dedupe_and_exclude_shared_roots` into `cmd_areas`'s
+        outer total guard and blanking the whole menu (contradicting the
+        docstring's claim that a single failing root leaves survivors
+        rendering)."""
+        default_vault = tmp_path / "v-default"
+        other_vault = tmp_path / "v-team"
+        (default_vault / "area").mkdir(parents=True)
+        (other_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "auth", ["oauth"], summary="Auth area.")
+        _write_area(other_vault, "billing", ["stripe"], summary="Billing area.")
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", default_vault), ("teamvault", "team", other_vault)],
+        )
+        cli = _load_cli()
+        out = io.StringIO()
+        err = io.StringIO()
+        args = SimpleNamespace()
+
+        original_exists = Path.exists
+
+        def _raising_exists(self, *a, **kw):
+            if self == default_vault:
+                raise OSError("simulated symlink loop")
+            return original_exists(self, *a, **kw)
+
+        with env_ctx:
+            with mock.patch("sys.stdout", out):
+                with mock.patch("sys.stderr", err):
+                    with mock.patch.object(Path, "exists", _raising_exists):
                         rc = cli.cmd_areas(args)
 
         assert rc == 0

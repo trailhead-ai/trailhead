@@ -41,6 +41,7 @@ Interpreter gotcha: ``@dataclass`` + ``importlib``-loaded module +
 field resolution — this module OMITS that future import for that reason.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +50,20 @@ from . import frontmatter as _fm_mod
 # Hard caps
 _ONE_LINER_MAX = 120
 _KEYWORDS_MAX = 8
+
+# Strips ASCII control characters (incl. \n, \r, tab, ESC) from frontmatter-
+# sourced strings before they reach the rendered menu. render_area_menu emits
+# `name`/`one_liner`/keywords as undelimited plaintext lines with no escaping,
+# so an embedded newline in area frontmatter can inject arbitrary extra
+# lines — including a forged "--- end lore area map ---" delimiter followed
+# by fabricated instruction text — into an AI agent's context. See module
+# docstring's Security note.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _strip_control_chars(value: str) -> str:
+    """Remove ASCII control characters from *value* (newlines, ESC, etc.)."""
+    return _CONTROL_CHARS_RE.sub("", value)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +138,7 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
         except Exception:
             continue
 
-        name = (fm.get("name") or p.stem).strip()
+        name = _strip_control_chars((fm.get("name") or p.stem).strip()).strip()
         if not name:
             continue
 
@@ -133,6 +148,7 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
             one_liner = summary[:_ONE_LINER_MAX]
         else:
             one_liner = _first_overview_sentence(text)[:_ONE_LINER_MAX]
+        one_liner = _strip_control_chars(one_liner)
 
         # Keywords (cap)
         raw_kw = fm.get("keywords") or []
@@ -142,7 +158,9 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
             keywords = [raw_kw.strip()]
         else:
             keywords = []
-        keywords = keywords[:_KEYWORDS_MAX]
+        keywords = [
+            k for k in (_strip_control_chars(k) for k in keywords[:_KEYWORDS_MAX]) if k
+        ]
 
         entries.append(AreaEntry(name=name, one_liner=one_liner, keywords=keywords))
 
