@@ -4,14 +4,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .common import _load_vault_config, _resolve_all_vaults, _shared_vault_paths
+from .common import _load_vault_config, _resolve_all_vaults_and_shared
 
 
 def cmd_areas(args) -> int:
     """Print the full area menu (names, one-liners, keywords) to stdout.
 
     Spans **every configured non-shared vault**, not just the `default`-scope
-    vault: resolves the whole-install vault set via `_resolve_all_vaults` (the
+    vault: resolves the whole-install vault set (and its shared-path set, from
+    one `config.json` read) via `_resolve_all_vaults_and_shared` (built on the
     same enumeration `lore sync`/`lore status` use), drops any `shared: true`
     vault (the area menu is personal-scoped — a shared vault's content only
     reaches context through the explicitly-delimited `lore search` path), and
@@ -20,29 +21,33 @@ def cmd_areas(args) -> int:
     already isolates a single root's `build_area_map` failure from the rest.
 
     Exit code is always 0 — must never fail a session. The one-line stderr
-    signal plus the degraded "no areas" stdout line fire only when nothing
-    resolves at all: either `_resolve_all_vaults` itself failed (malformed
-    config), or every root was absent/shared/empty/unreadable and the merge
-    came back with zero entries. A single failing root among several does
-    not trigger the signal — the surviving roots' areas render normally.
+    signal fires only when nothing legitimately resolved: either the config
+    read itself failed (malformed/wrong-shape config), no root resolved at
+    all (every configured root was absent/shared), or every resolved root's
+    `build_area_map` call raised. A healthy vault that simply has zero areas
+    defined is not an error — it renders the degraded "no areas" stdout line
+    with a silent stderr, matching vanilla's byte-identical behavior. A
+    single failing root among several (its `build_area_map` call raised)
+    does not trigger the signal either, as long as another root produced
+    entries — the surviving roots' areas render normally.
     """
     from ..search import area_map as area_map_mod
 
     _NO_AREAS_LINE = "No areas defined yet."
 
-    all_vaults, error = _resolve_all_vaults()
-    shared_paths = _shared_vault_paths()
+    all_vaults, shared_paths, error = _resolve_all_vaults_and_shared()
     roots = [
         path
         for _name, path in all_vaults
         if str(path.resolve()) not in shared_paths and path.exists()
     ]
 
-    entries = area_map_mod.build_area_map_multi(roots)
+    root_errors: list = []
+    entries = area_map_mod.build_area_map_multi(roots, errors=root_errors)
 
     if error is not None:
         print(f"lore areas: could not resolve vaults ({error})", file=sys.stderr)
-    elif not entries:
+    elif not entries and (not roots or root_errors):
         print("lore areas: no areas found in any configured vault", file=sys.stderr)
 
     if not entries:

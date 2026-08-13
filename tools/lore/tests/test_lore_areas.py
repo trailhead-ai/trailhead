@@ -244,6 +244,17 @@ class TestAreasEmpty:
 
         assert "no areas" in stdout.lower()
 
+    def test_stderr_is_silent_for_a_healthy_vault_with_zero_areas(self, tmp_path):
+        """A resolvable, healthy vault that simply has no area/ files defined
+        yet must not emit the degradation stderr signal — that signal is
+        reserved for actual resolution failure, not a legitimately empty
+        vault (a freshly-initialized vault must not read as an error)."""
+        vault = _make_vault(tmp_path)
+
+        _, stderr, _ = _run_areas(str(vault))
+
+        assert stderr == ""
+
     def test_no_traceback(self, tmp_path):
         vault = _make_vault(tmp_path)
 
@@ -463,7 +474,9 @@ class TestAreasMultiVault:
         (default_vault / "area").mkdir(parents=True)
         (shared_vault / "area").mkdir(parents=True)
         _write_area(default_vault, "auth", ["oauth"], summary="Auth area.")
-        _write_area(shared_vault, "untrusted", ["x"], summary="Should not appear.")
+        _write_area(
+            shared_vault, "untrusted", ["x"], summary="Shared one-liner leak check."
+        )
 
         env_ctx = _multi_config_env(
             tmp_path,
@@ -475,6 +488,7 @@ class TestAreasMultiVault:
         assert rc == 0
         assert "auth" in stdout
         assert "untrusted" not in stdout
+        assert "Shared one-liner leak check." not in stdout
 
     def test_one_absent_root_still_renders_the_rest(self, tmp_path):
         default_vault = tmp_path / "v-default"
@@ -562,3 +576,78 @@ class TestAreasMultiVault:
         assert len(stderr.strip().splitlines()) == 1
         assert "Traceback" not in stdout
         assert "Traceback" not in stderr
+
+    def test_config_json_top_level_list_falls_back_to_floor_vault_with_stderr_signal(
+        self, tmp_path
+    ):
+        """A well-formed-JSON-but-wrong-shape config (top-level list instead of
+        an object) must degrade like any other malformed config, not raise
+        AttributeError out of ``validate_config``'s ``data.get("vaults", [])``."""
+        config_home = tmp_path / "_xdg_config"
+        state_home = tmp_path / "_xdg_state"
+        lore_cfg = config_home / "lore"
+        lore_cfg.mkdir(parents=True)
+        (lore_cfg / "config.json").write_text(json.dumps([]), encoding="utf-8")
+
+        env_ctx = mock.patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+            clear=False,
+        )
+        stdout, stderr, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
+        assert "Traceback" not in stdout
+        assert "Traceback" not in stderr
+
+    def test_config_json_vaults_entries_not_objects_falls_back_to_floor_vault(
+        self, tmp_path
+    ):
+        """A ``"vaults"`` array of non-dict entries (e.g. bare strings) must
+        degrade too, not raise AttributeError out of ``entry.get("name", "")``."""
+        config_home = tmp_path / "_xdg_config"
+        state_home = tmp_path / "_xdg_state"
+        lore_cfg = config_home / "lore"
+        lore_cfg.mkdir(parents=True)
+        (lore_cfg / "config.json").write_text(
+            json.dumps({"vaults": ["default"]}), encoding="utf-8"
+        )
+
+        env_ctx = mock.patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+            clear=False,
+        )
+        stdout, stderr, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
+        assert "Traceback" not in stdout
+        assert "Traceback" not in stderr
+
+    def test_no_config_json_at_all_is_vanilla_with_silent_stderr(self, tmp_path):
+        """The true vanilla path: no ``config.json`` on disk at all (every other
+        case in this suite writes one, including the malformed ones). A healthy
+        empty floor vault (``state/lore/vaults/default``, pre-created the way
+        ``lore init``/first use would leave it) must produce the plain "no
+        areas" stdout line and NO stderr signal — byte-identical to the
+        pre-multi-vault base behavior."""
+        config_home = tmp_path / "_xdg_config"
+        state_home = tmp_path / "_xdg_state"
+        floor_vault = state_home / "lore" / "vaults" / "default"
+        (floor_vault / "area").mkdir(parents=True)
+        assert not (config_home / "lore" / "config.json").exists()
+
+        env_ctx = mock.patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+            clear=False,
+        )
+        stdout, stderr, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert "no areas" in stdout.lower()
+        assert stderr == ""

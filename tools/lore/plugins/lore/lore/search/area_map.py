@@ -15,7 +15,12 @@ area-membered memory lookup is ``lore search 'area:<name>'``:
      merged set alpha. Hard caps are already applied per entry by
      build_area_map. The multi-vault counterpart `cmd_areas` calls once it
      resolves every configured non-shared vault, rather than the
-     `default`-scope vault alone.
+     `default`-scope vault alone. This dedupe mirrors `lore record show
+     area/<name>`'s cross-vault resolution EXCEPT when a shared vault holds
+     a same-named area earlier in config order: `record show`'s scan does
+     not filter shared vaults, so it can resolve to a different vault's copy
+     than this (shared-excluding) merge does. Parity holds only among
+     non-shared vaults.
 
   3. render_area_menu(entries)      -> str
      Renders the full on-demand menu (called by `lore areas`).
@@ -145,15 +150,25 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
     return entries
 
 
-def build_area_map_multi(vaults: list[Path]) -> list[AreaEntry]:
+def build_area_map_multi(
+    vaults: list[Path], errors: list | None = None
+) -> list[AreaEntry]:
     """Build the compact area menu spanning multiple vault roots.
 
     Calls :func:`build_area_map` once per root in ``vaults`` and merges the
     results. Same-named areas across roots collapse to a single entry — the
     first root (in input order, i.e. config order) to define the name wins,
     mirroring how ``lore record show area/<name>`` resolves the same
-    cross-vault collision. The merged set is then re-sorted alpha by name,
-    since per-vault ordering says nothing about the cross-vault order.
+    cross-vault collision (with one exception — see below). The merged set is
+    then re-sorted alpha by name, since per-vault ordering says nothing about
+    the cross-vault order.
+
+    **Caller precondition:** ``vaults`` must already exclude every
+    ``shared: true`` root. This function has no visibility into vault scope
+    and applies no filtering of its own — the area menu it renders is
+    undelimited plaintext that reaches agent context directly, so a shared
+    (untrusted) vault's areas must never reach this function's input in the
+    first place. `cmd_areas` is the caller that enforces this today.
 
     The ``_ONE_LINER_MAX`` / ``_KEYWORDS_MAX`` caps are NOT re-applied here:
     they bound a single entry's one-liner and keyword list, not the menu as a
@@ -166,13 +181,20 @@ def build_area_map_multi(vaults: list[Path]) -> list[AreaEntry]:
     unreadable) simply contributes nothing. A root whose ``build_area_map``
     call raises is likewise skipped rather than propagated — one bad vault
     root must not cost every other root its areas, extending
-    ``build_area_map``'s own never-raise contract across the merge.
+    ``build_area_map``'s own never-raise contract across the merge. Pass a
+    list via ``errors`` to observe which roots (and exceptions) were skipped
+    this way — callers that need to distinguish "legitimately empty" from
+    "a root silently failed" (e.g. to decide whether to emit a degradation
+    signal) read it after the call; it is left untouched (``None`` stays
+    ``None``, an empty list stays empty) when nothing failed.
     """
     seen: dict[str, AreaEntry] = {}
     for vault in vaults:
         try:
             vault_entries = build_area_map(vault)
-        except Exception:
+        except Exception as exc:
+            if errors is not None:
+                errors.append((vault, exc))
             continue
         for entry in vault_entries:
             if entry.name not in seen:

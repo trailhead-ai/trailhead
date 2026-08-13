@@ -72,7 +72,7 @@ lore sync                 Stage, commit, pull, and push every configured vault (
 lore status               Report ruleset drift and any vault holding unsynced records
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)
-lore areas                List the area profiles in the vault
+lore areas                List the area profiles across every configured non-shared vault
 ```
 
 Run `lore <subcommand> --help` for full options.
