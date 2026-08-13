@@ -21,9 +21,9 @@ here — those are the leak gate's exclusive responsibility, by the same
 established convention restated in test_lore_skills_generic.py,
 tools/craft/tests/test_agents_generic.py, and
 tools/craft/tests/test_craft_skills_generic.py. Concretely: this test does
-**not** assert that librarian.md is free of a hardcoded personal name (e.g.
-"Tom") — that class of drift is the machine-local leak-gate's job, not this
-test's. Only the structural brain-vault seams above are in scope here.
+**not** assert that an agent is free of a hardcoded personal name — that class
+of drift is the machine-local leak-gate's job, not this test's. Only the
+structural brain-vault seams above are in scope here.
 """
 
 from __future__ import annotations
