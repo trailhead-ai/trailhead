@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -88,6 +89,50 @@ def _config_env(vault_path: str):
         {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
         clear=False,
     )
+
+
+def _multi_config_env(tmp_path: Path, vaults, *, shared_names=()):
+    """Seed config.json with multiple vaults and return an os.environ patch.
+
+    ``vaults`` is an iterable of ``(name, scope, path)`` triples, mirroring
+    ``write_vault_config``. ``shared_names`` marks the named entries
+    ``shared: true`` after writing, the same pattern
+    ``test_flush_scoping.py``'s ``_set_vault_shared`` uses. Fences
+    XDG_CONFIG_HOME/XDG_STATE_HOME at tmp_path-scoped dirs so nothing touches
+    the live install (Axiom 6).
+    """
+    from conftest import write_vault_config
+
+    config_home = tmp_path / "_xdg_config"
+    state_home = tmp_path / "_xdg_state"
+    write_vault_config(config_home, vaults)
+    if shared_names:
+        cfg_path = config_home / "lore" / "config.json"
+        cfg = json.loads(cfg_path.read_text())
+        for entry in cfg["vaults"]:
+            if entry["name"] in shared_names:
+                entry["shared"] = True
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    return mock.patch.dict(
+        os.environ,
+        {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+        clear=False,
+    )
+
+
+def _run_areas_with_env(env_ctx) -> tuple[str, str, int]:
+    """Invoke cmd_areas in-process under an already-built env context manager."""
+    cli = _load_cli()
+    out = io.StringIO()
+    err = io.StringIO()
+    args = SimpleNamespace()
+
+    with env_ctx:
+        with mock.patch("sys.stdout", out):
+            with mock.patch("sys.stderr", err):
+                rc = cli.cmd_areas(args)
+
+    return out.getvalue(), err.getvalue(), rc
 
 
 def _run_areas(vault_path: str) -> tuple[str, str, int]:
@@ -355,3 +400,171 @@ class TestAreasBuildAreaMapRaises:
         stderr = err.getvalue()
         assert stderr.strip() != ""
         assert len(stderr.strip().splitlines()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: multi-vault enumeration (the regression this task fixes)
+# ---------------------------------------------------------------------------
+
+
+class TestAreasMultiVault:
+    def test_area_in_default_vault_appears(self, tmp_path):
+        default_vault = tmp_path / "v-default"
+        other_vault = tmp_path / "v-team"
+        (default_vault / "area").mkdir(parents=True)
+        (other_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "auth", ["oauth"], summary="Auth in default.")
+        _write_area(other_vault, "billing", ["stripe"], summary="Billing in team.")
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", default_vault), ("teamvault", "team", other_vault)],
+        )
+        stdout, _, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert "auth" in stdout
+
+    def test_area_in_scoped_vault_appears(self, tmp_path):
+        """The reported regression: an area living only in a scoped (non-default)
+        vault must still show up in `lore areas`."""
+        default_vault = tmp_path / "v-default"
+        other_vault = tmp_path / "v-team"
+        (default_vault / "area").mkdir(parents=True)
+        (other_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "auth", ["oauth"], summary="Auth in default.")
+        _write_area(other_vault, "billing", ["stripe"], summary="Billing in team.")
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", default_vault), ("teamvault", "team", other_vault)],
+        )
+        stdout, _, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert "billing" in stdout
+
+    def test_same_named_area_in_two_vaults_appears_once(self, tmp_path):
+        default_vault = tmp_path / "v-default"
+        other_vault = tmp_path / "v-team"
+        (default_vault / "area").mkdir(parents=True)
+        (other_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "auth", ["oauth"], summary="Default one-liner.")
+        _write_area(other_vault, "auth", ["saml"], summary="Team one-liner.")
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", default_vault), ("teamvault", "team", other_vault)],
+        )
+        stdout, _, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert stdout.count("  auth  ") == 1
+        assert "Default one-liner." in stdout
+        assert "Team one-liner." not in stdout
+
+    def test_shared_vault_areas_excluded(self, tmp_path):
+        default_vault = tmp_path / "v-default"
+        shared_vault = tmp_path / "v-shared"
+        (default_vault / "area").mkdir(parents=True)
+        (shared_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "auth", ["oauth"], summary="Auth area.")
+        _write_area(shared_vault, "untrusted", ["x"], summary="Should not appear.")
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", default_vault), ("sharedvault", "team", shared_vault)],
+            shared_names=("sharedvault",),
+        )
+        stdout, _, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert "auth" in stdout
+        assert "untrusted" not in stdout
+
+    def test_one_absent_root_still_renders_the_rest(self, tmp_path):
+        default_vault = tmp_path / "v-default"
+        absent_vault = tmp_path / "v-does-not-exist"
+        (default_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "auth", ["oauth"], summary="Auth area.")
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", default_vault), ("teamvault", "team", absent_vault)],
+        )
+        stdout, _, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert "auth" in stdout
+
+    def test_every_root_absent_emits_stderr_signal_and_no_areas_line(self, tmp_path):
+        absent_default = tmp_path / "v-default-absent"
+        absent_other = tmp_path / "v-team-absent"
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", absent_default), ("teamvault", "team", absent_other)],
+        )
+        stdout, stderr, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert "no areas" in stdout.lower()
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
+
+    def test_one_vault_build_area_map_raising_still_renders_the_rest(self, tmp_path):
+        default_vault = tmp_path / "v-default"
+        other_vault = tmp_path / "v-team"
+        (default_vault / "area").mkdir(parents=True)
+        (other_vault / "area").mkdir(parents=True)
+        _write_area(default_vault, "auth", ["oauth"], summary="Auth area.")
+        _write_area(other_vault, "billing", ["stripe"], summary="Billing area.")
+
+        env_ctx = _multi_config_env(
+            tmp_path,
+            [("default", "default", default_vault), ("teamvault", "team", other_vault)],
+        )
+        cli = _load_cli()
+        out = io.StringIO()
+        err = io.StringIO()
+        args = SimpleNamespace()
+
+        from lore.search import area_map as area_map_mod
+        original = area_map_mod.build_area_map
+
+        def _raise_for_default(vault, *a, **kw):
+            if Path(vault) == default_vault:
+                raise RuntimeError("boom")
+            return original(vault, *a, **kw)
+
+        with env_ctx:
+            with mock.patch("sys.stdout", out):
+                with mock.patch("sys.stderr", err):
+                    with mock.patch(
+                        "lore.search.area_map.build_area_map",
+                        side_effect=_raise_for_default,
+                    ):
+                        rc = cli.cmd_areas(args)
+
+        assert rc == 0
+        assert "billing" in out.getvalue()
+
+    def test_malformed_config_falls_back_to_floor_vault_with_stderr_signal(self, tmp_path):
+        config_home = tmp_path / "_xdg_config"
+        state_home = tmp_path / "_xdg_state"
+        lore_cfg = config_home / "lore"
+        lore_cfg.mkdir(parents=True)
+        (lore_cfg / "config.json").write_text("{not valid json", encoding="utf-8")
+
+        env_ctx = mock.patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": str(config_home), "XDG_STATE_HOME": str(state_home)},
+            clear=False,
+        )
+        stdout, stderr, rc = _run_areas_with_env(env_ctx)
+
+        assert rc == 0
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
+        assert "Traceback" not in stdout
+        assert "Traceback" not in stderr

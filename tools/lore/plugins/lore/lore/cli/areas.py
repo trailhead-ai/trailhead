@@ -4,43 +4,52 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from .common import _load_vault_config
+from .common import _load_vault_config, _resolve_all_vaults, _shared_vault_paths
 
 
 def cmd_areas(args) -> int:
     """Print the full area menu (names, one-liners, keywords) to stdout.
 
-    Exit code is always 0 — must never fail a session.
-    Prints a one-line stderr signal and a degraded stdout "no areas" line when
-    the resolved vault path does not exist on disk, or when build_area_map
-    raises. Empty or absent areas/ dir prints a friendly "no areas" line.
+    Spans **every configured non-shared vault**, not just the `default`-scope
+    vault: resolves the whole-install vault set via `_resolve_all_vaults` (the
+    same enumeration `lore sync`/`lore status` use), drops any `shared: true`
+    vault (the area menu is personal-scoped — a shared vault's content only
+    reaches context through the explicitly-delimited `lore search` path), and
+    drops any configured-but-absent root. `build_area_map_multi` merges the
+    per-vault menus, deduping same-named areas config-order-first-wins, and
+    already isolates a single root's `build_area_map` failure from the rest.
+
+    Exit code is always 0 — must never fail a session. The one-line stderr
+    signal plus the degraded "no areas" stdout line fire only when nothing
+    resolves at all: either `_resolve_all_vaults` itself failed (malformed
+    config), or every root was absent/shared/empty/unreadable and the merge
+    came back with zero entries. A single failing root among several does
+    not trigger the signal — the surviving roots' areas render normally.
     """
     from ..search import area_map as area_map_mod
-    from ..vault import config as vault_config_mod
 
     _NO_AREAS_LINE = "No areas defined yet."
 
-    try:
-        vault = Path(vault_config_mod.resolve_active_vault())
-        if not vault.exists():
-            raise FileNotFoundError(vault)
-    except Exception as exc:
-        print(f"lore areas: could not resolve vault ({exc})", file=sys.stderr)
+    all_vaults, error = _resolve_all_vaults()
+    shared_paths = _shared_vault_paths()
+    roots = [
+        path
+        for _name, path in all_vaults
+        if str(path.resolve()) not in shared_paths and path.exists()
+    ]
+
+    entries = area_map_mod.build_area_map_multi(roots) if roots else []
+
+    if error is not None:
+        print(f"lore areas: could not resolve vaults ({error})", file=sys.stderr)
+    elif not entries:
+        print("lore areas: no areas found in any configured vault", file=sys.stderr)
+
+    if not entries:
         print(_NO_AREAS_LINE)
         return 0
 
-    try:
-        entries = area_map_mod.build_area_map(vault)
-    except Exception as exc:
-        print(f"lore areas: could not build area map ({exc})", file=sys.stderr)
-        print(_NO_AREAS_LINE)
-        return 0
-
-    menu = area_map_mod.render_area_menu(entries)
-    if menu:
-        print(menu)
-    else:
-        print(_NO_AREAS_LINE)
+    print(area_map_mod.render_area_menu(entries))
     return 0
 
 

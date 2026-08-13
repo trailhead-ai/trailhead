@@ -9,10 +9,17 @@ area-membered memory lookup is ``lore search 'area:<name>'``:
      on-demand area menu (alpha order, hard caps applied). Served on
      demand by `lore areas`.
 
-  2. render_area_menu(entries)      -> str
+  2. build_area_map_multi(vaults)   -> list[AreaEntry]
+     Merges `build_area_map` across every vault root passed in, deduping
+     same-named areas (first-in-input-order wins), then re-applying the
+     alpha sort and hard caps to the merged set. The multi-vault
+     counterpart `cmd_areas` calls once it resolves every configured
+     non-shared vault, rather than the `default`-scope vault alone.
+
+  3. render_area_menu(entries)      -> str
      Renders the full on-demand menu (called by `lore areas`).
 
-  3. render_area_pointer(vault)     -> str
+  4. render_area_pointer(vault)     -> str
      Single-line pointer summarizing the area count and a trigger cue for
      `lore areas` / `lore search 'area:<name>'`. Not currently wired to any
      caller — lore has no push hook to inject it into; see its own docstring.
@@ -134,6 +141,42 @@ def build_area_map(vault: Path) -> list[AreaEntry]:
         entries.append(AreaEntry(name=name, one_liner=one_liner, keywords=keywords))
 
     entries.sort(key=lambda e: e.name.lower())
+    return entries
+
+
+def build_area_map_multi(vaults: list[Path]) -> list[AreaEntry]:
+    """Build the compact area menu spanning multiple vault roots.
+
+    Calls :func:`build_area_map` once per root in ``vaults`` and merges the
+    results. Same-named areas across roots collapse to a single entry — the
+    first root (in input order, i.e. config order) to define the name wins,
+    mirroring how ``lore record show area/<name>`` resolves the same
+    cross-vault collision. The merged set is then re-sorted alpha by name and
+    re-capped with the same ``_ONE_LINER_MAX`` / ``_KEYWORDS_MAX`` limits
+    ``build_area_map`` already applies per vault — a merge that skipped this
+    step could let two under-cap per-vault menus combine into an over-cap one.
+
+    A root that yields no areas (absent ``area/`` dir, or every file
+    unreadable) simply contributes nothing. A root whose ``build_area_map``
+    call raises is likewise skipped rather than propagated — one bad vault
+    root must not cost every other root its areas, extending
+    ``build_area_map``'s own never-raise contract across the merge.
+    """
+    seen: dict[str, AreaEntry] = {}
+    for vault in vaults:
+        try:
+            vault_entries = build_area_map(vault)
+        except Exception:
+            continue
+        for entry in vault_entries:
+            if entry.name not in seen:
+                seen[entry.name] = entry
+
+    entries = list(seen.values())
+    entries.sort(key=lambda e: e.name.lower())
+    for e in entries:
+        e.one_liner = e.one_liner[:_ONE_LINER_MAX]
+        e.keywords = e.keywords[:_KEYWORDS_MAX]
     return entries
 
 

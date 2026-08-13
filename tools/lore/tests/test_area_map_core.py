@@ -176,3 +176,104 @@ class TestBuildAreaMap:
         vault.mkdir()
         area_map = load_area_map()
         assert area_map.build_area_map(vault) == []
+
+
+# ---------------------------------------------------------------------------
+# build_area_map_multi
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAreaMapMulti:
+    def test_areas_from_both_vaults_present(self, tmp_path):
+        v1 = tmp_path / "v1"
+        v2 = tmp_path / "v2"
+        (v1 / "area").mkdir(parents=True)
+        (v2 / "area").mkdir(parents=True)
+        _write_area(v1, "auth", ["oauth"], summary="Auth in v1.")
+        _write_area(v2, "billing", ["stripe"], summary="Billing in v2.")
+
+        area_map = load_area_map()
+        entries = area_map.build_area_map_multi([v1, v2])
+        names = [e.name for e in entries]
+
+        assert "auth" in names
+        assert "billing" in names
+
+    def test_same_name_in_two_vaults_dedupes_to_first_in_order(self, tmp_path):
+        v1 = tmp_path / "v1"
+        v2 = tmp_path / "v2"
+        (v1 / "area").mkdir(parents=True)
+        (v2 / "area").mkdir(parents=True)
+        _write_area(v1, "auth", ["oauth"], summary="First vault wins.")
+        _write_area(v2, "auth", ["saml"], summary="Second vault loses.")
+
+        area_map = load_area_map()
+        entries = area_map.build_area_map_multi([v1, v2])
+        matching = [e for e in entries if e.name == "auth"]
+
+        assert len(matching) == 1
+        assert matching[0].one_liner == "First vault wins."
+
+    def test_merged_order_is_alpha_across_vault_boundaries(self, tmp_path):
+        v1 = tmp_path / "v1"
+        v2 = tmp_path / "v2"
+        (v1 / "area").mkdir(parents=True)
+        (v2 / "area").mkdir(parents=True)
+        _write_area(v1, "zebra", ["z"], summary="Z area.")
+        _write_area(v2, "alpha", ["a"], summary="A area.")
+
+        area_map = load_area_map()
+        entries = area_map.build_area_map_multi([v1, v2])
+        names = [e.name for e in entries]
+
+        assert names == sorted(names)
+
+    def test_one_liner_cap_applied_to_merged_set(self, tmp_path):
+        v1 = tmp_path / "v1"
+        (v1 / "area").mkdir(parents=True)
+        _write_area(v1, "verbosity", ["v"], summary="x" * 200)
+
+        area_map = load_area_map()
+        entries = area_map.build_area_map_multi([v1])
+
+        assert len(entries[0].one_liner) <= 120
+
+    def test_keywords_cap_applied_to_merged_set(self, tmp_path):
+        v1 = tmp_path / "v1"
+        (v1 / "area").mkdir(parents=True)
+        many_kw = [f"kw{i}" for i in range(20)]
+        _write_area(v1, "verbose-kw", many_kw, summary="Many keywords.")
+
+        area_map = load_area_map()
+        entries = area_map.build_area_map_multi([v1])
+
+        assert len(entries[0].keywords) <= 8
+
+    def test_one_vault_raising_does_not_lose_the_others(self, tmp_path):
+        v1 = tmp_path / "v1"
+        v2 = tmp_path / "v2"
+        (v1 / "area").mkdir(parents=True)
+        (v2 / "area").mkdir(parents=True)
+        _write_area(v1, "auth", ["oauth"], summary="Auth area.")
+        _write_area(v2, "billing", ["stripe"], summary="Billing area.")
+
+        area_map = load_area_map()
+        original = area_map.build_area_map
+
+        def _raise_for_v1(vault, *a, **kw):
+            if Path(vault) == v1:
+                raise RuntimeError("boom")
+            return original(vault, *a, **kw)
+
+        from unittest import mock
+
+        with mock.patch.object(area_map, "build_area_map", side_effect=_raise_for_v1):
+            entries = area_map.build_area_map_multi([v1, v2])
+
+        names = [e.name for e in entries]
+        assert "billing" in names
+        assert "auth" not in names
+
+    def test_empty_vault_list_returns_empty_list(self):
+        area_map = load_area_map()
+        assert area_map.build_area_map_multi([]) == []
