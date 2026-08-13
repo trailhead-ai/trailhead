@@ -421,7 +421,10 @@ class TestShellenvGuidance:
 def _outpost_ruleset() -> tuple[str, str]:
     """The ruleset name + content outpost's manifest declares, read from disk."""
     manifest = load_manifest(_REPO_ROOT / "tools" / "outpost" / "capabilities.toml")
-    return f"trailhead-{manifest.tool_name}", (manifest.plugin_root / manifest.ruleset).read_text()
+    # utf-8 explicitly: install pins it, and the ruleset carries non-ASCII prose
+    # that a locale-default codec would fail to read (or read differently).
+    content = (manifest.plugin_root / manifest.ruleset).read_text(encoding="utf-8")
+    return f"trailhead-{manifest.tool_name}", content
 
 
 class _RecordingHarness(ClaudeCodeHarness):
@@ -503,7 +506,8 @@ class TestRulesetInstall:
         name, content = _outpost_ruleset()
         with _patched(detected=True):
             run_install(env=env, quiet=True)
-        assert (tmp_path / "claude" / "rules" / f"{name}.md").read_text() == content
+        installed = tmp_path / "claude" / "rules" / f"{name}.md"
+        assert installed.read_text(encoding="utf-8") == content
 
     def test_reinstall_is_a_no_op_and_reports_up_to_date(self, tmp_path, capsys):
         env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
@@ -565,23 +569,53 @@ class TestRulesetInstall:
         plugin_root.mkdir()
         rules = plugin_root / "rules.md"
         rules.write_text("rules\n", encoding="utf-8")
-        rules.chmod(0o000)
         harness = _RecordingHarness()
-        try:
-            with _patched(detected=True), patch(
-                "trailhead.install.get_harness", return_value=harness
-            ), patch(
-                "trailhead.install.ruleset_bearing_manifests",
-                return_value={"outpost": self._manifest_with_ruleset(plugin_root)},
-            ):
-                rc = run_install(env=_env(tmp_path), quiet=True)
-        finally:
-            rules.chmod(0o600)
+        # The denial is injected rather than expressed as a permission bit:
+        # chmod(0o000) does not deny root, so a suite running as root in a
+        # container would silently lose the failure this test exists to check.
+        real_read_text = Path.read_text
+
+        def denied(self, *args, **kwargs):
+            if self.resolve() == rules.resolve():
+                raise PermissionError(13, "Permission denied")
+            return real_read_text(self, *args, **kwargs)
+
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ), patch(
+            "trailhead.install.ruleset_bearing_manifests",
+            return_value={"outpost": self._manifest_with_ruleset(plugin_root)},
+        ), patch.object(Path, "read_text", denied):
+            rc = run_install(env=_env(tmp_path), quiet=True)
         assert rc == 0
         assert harness.ruleset_calls == []
         err = capsys.readouterr().err
         assert "trailhead: could not install the outpost ruleset" in err
         assert "Traceback" not in err
+
+    def test_non_utf8_file_on_the_ruleset_surface_warns_and_install_continues(
+        self, tmp_path, capsys
+    ):
+        """A pre-existing rules file with invalid utf-8 bytes degrades cleanly.
+
+        The drift compare decodes the file already on disk as strict utf-8, so a
+        hand-edited or legacy file there can raise a decode error. That must warn
+        and leave the rest of the install — shim build, CLI bootstrap — running.
+        """
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        name, _ = _outpost_ruleset()
+        target = tmp_path / "claude" / "rules" / f"{name}.md"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"legacy rules \xff\xfe not utf-8\n")
+        with _patched(detected=True) as m:
+            rc = run_install(env=env, quiet=True)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "trailhead: could not install the outpost ruleset" in err
+        assert "Traceback" not in err
+        # The steps that follow the ruleset install still ran.
+        m["pathint"].assert_called_once()
+        m["lore_init"].assert_called_once()
 
     def test_missing_declared_ruleset_warns_without_failing_the_install(
         self, tmp_path, capsys

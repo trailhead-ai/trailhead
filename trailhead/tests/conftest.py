@@ -8,7 +8,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _redirect_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point every test's ambient environment at a throwaway Claude dir.
+    """Point this suite's ambient environment at a throwaway Claude dir.
+
+    Scope is `trailhead/tests/` only — this conftest does not reach the tool
+    suites under `tools/`, which pin their own locations per test.
 
     Code under test falls back to `os.environ` whenever `env` is None, and any
     env dict built from `os.environ` inherits a developer's real

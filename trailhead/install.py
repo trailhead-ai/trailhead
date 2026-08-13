@@ -39,7 +39,11 @@ import os
 import sys
 from pathlib import Path
 
-from trailhead.capabilities import cli_bearing_manifests, ruleset_bearing_manifests
+from trailhead.capabilities import (
+    ConfineError,
+    cli_bearing_manifests,
+    ruleset_bearing_manifests,
+)
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
 from trailhead.harness import detect_harnesses, get_harness
 from trailhead.install_config import (
@@ -96,6 +100,9 @@ def install_user_rulesets(
     stderr regardless of ``quiet``, so nobody is left believing rules installed.
     An unreadable declared ruleset, or an unwritable ruleset surface, is likewise
     a warning rather than a traceback — the plugins themselves already installed.
+    "Unreadable" includes bytes that are not valid utf-8 on EITHER side of the
+    drift compare: a hand-edited or legacy ruleset file already on disk decodes
+    through the same strict codec, and its failure must degrade the same way.
     """
     for name, manifest in ruleset_bearing_manifests(default_manifest_paths()).items():
         if name not in plugin_names:
@@ -106,7 +113,7 @@ def install_user_rulesets(
             # encoding would corrupt the bytes the drift compare depends on.
             content = manifest.ruleset_path().read_text(encoding="utf-8")
             status = harness.user_ruleset_status(ruleset_name, content, env=env)
-        except OSError as exc:
+        except (OSError, UnicodeError, ConfineError) as exc:
             # The plugins are installed; only the rules file failed to load.
             print(
                 f"trailhead: could not install the {name} ruleset for "
@@ -123,7 +130,7 @@ def install_user_rulesets(
             continue
         try:
             harness.install_user_ruleset(ruleset_name, content, env=env)
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             # The plugins are installed; only the rules file failed to land.
             print(
                 f"trailhead: could not install the {name} ruleset for "
@@ -239,6 +246,13 @@ def run_install(
     # resolved harness. Additive and idempotent, and deliberately OUTSIDE the
     # wire lock: rules are harness-global guidance, not part of the composed
     # tree the lock protects.
+    #
+    # Placed here — right after wiring, ahead of the shim build and the CLI
+    # bootstraps — because a ruleset belongs to the plugin selection just wired
+    # and depends on nothing later: it needs no shim dir and no CLI on PATH.
+    # Running it before those steps also keeps a rules-file problem from
+    # interacting with them, since every failure mode above is a warning that
+    # leaves the remaining install steps to run normally.
     # ------------------------------------------------------------------
     for rh in cfg.harnesses:
         install_user_rulesets(
