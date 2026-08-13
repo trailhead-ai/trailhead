@@ -349,14 +349,16 @@ class ClaudeCodeHarness(Harness):
         ``mkstemp(dir=target.parent)`` + ``os.replace`` so the swap is atomic and
         the rename can't fail cross-filesystem; clean up the temp on any error.
         A re-run with byte-identical content is a true no-op (no write, no swap).
+        Read and write both pin utf-8: rulesets carry non-ASCII prose, and a
+        locale-dependent codec on either side would break the drift compare.
         """
         target = self.user_ruleset_path(name, env=env)
-        if target.is_file() and target.read_text() == content:
+        if target.is_file() and target.read_text(encoding="utf-8") == content:
             return
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{name}-", suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
             os.replace(tmp, str(target))
         except Exception:
@@ -372,7 +374,7 @@ class ClaudeCodeHarness(Harness):
         target = self.user_ruleset_path(name, env=env)
         if not target.is_file():
             return "missing"
-        return "current" if target.read_text() == content else "stale"
+        return "current" if target.read_text(encoding="utf-8") == content else "stale"
 
     # -- session transcripts --------------------------------------------------
     #

@@ -14,6 +14,7 @@ Pinned rules:
   - validate=true asserts base dirs exist (dir) and hooks_json exists (file).
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -431,6 +432,28 @@ class TestRuleset:
         content = '[tool]\nname = "mytool"\nruleset = "rules.md"\n'
         m = load_manifest(_write_manifest(tmp_path, content))
         assert m.ruleset == "rules.md"
+
+    def test_ruleset_path_is_the_confined_resolved_file(self, tmp_path):
+        root = _make_plugin_dir(tmp_path, "mytool")
+        target = _make_ruleset(root, "rules.md")
+        content = '[tool]\nname = "mytool"\nruleset = "rules.md"\n'
+        m = load_manifest(_write_manifest(tmp_path, content))
+        assert m.ruleset_path() == target.resolve()
+
+    def test_ruleset_path_reasserts_confinement(self, tmp_path):
+        """Confinement is re-checked on access, not only at load time."""
+        root = _make_plugin_dir(tmp_path, "mytool")
+        m = load_manifest(_write_manifest(tmp_path, '[tool]\nname = "mytool"\n'))
+        escaped = replace(m, ruleset="../../etc/passwd", plugin_root=root)
+        with pytest.raises(ConfineError) as exc_info:
+            escaped.ruleset_path()
+        assert exc_info.value.context == "ruleset"
+
+    def test_ruleset_path_without_a_declared_ruleset_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "mytool")
+        m = load_manifest(_write_manifest(tmp_path, '[tool]\nname = "mytool"\n'))
+        with pytest.raises(ValueError):
+            m.ruleset_path()
 
     def test_ruleset_absent_is_none(self, tmp_path):
         _make_plugin_dir(tmp_path, "mytool")

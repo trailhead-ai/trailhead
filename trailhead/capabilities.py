@@ -129,6 +129,21 @@ class Manifest:
     subagents: dict[str, str]
     skills: dict[str, str]
 
+    def ruleset_path(self) -> Path:
+        """Return the confined absolute path to the declared ruleset file.
+
+        Callers must go through this rather than joining ``plugin_root`` with
+        ``ruleset`` themselves: confinement is re-asserted here, so the read
+        can never follow a traversal the manifest smuggled in.
+
+        Raises:
+            ConfineError: if the declared path escapes the plugin root.
+            ValueError:   if no ruleset is declared.
+        """
+        if self.ruleset is None:
+            raise ValueError(f"tool {self.tool_name!r} declares no ruleset")
+        return _confine(self.plugin_root, self.ruleset, self.tool_name, "ruleset")
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers

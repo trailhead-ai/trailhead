@@ -94,15 +94,26 @@ def install_user_rulesets(
 
     A harness without user-ruleset support degrades VISIBLY: the notice goes to
     stderr regardless of ``quiet``, so nobody is left believing rules installed.
-    An unwritable ruleset surface is likewise a warning rather than a traceback —
-    the plugins themselves already installed.
+    An unreadable declared ruleset, or an unwritable ruleset surface, is likewise
+    a warning rather than a traceback — the plugins themselves already installed.
     """
     for name, manifest in ruleset_bearing_manifests(default_manifest_paths()).items():
         if name not in plugin_names:
             continue
         ruleset_name = f"trailhead-{manifest.tool_name}"
-        content = (manifest.plugin_root / manifest.ruleset).read_text()
-        status = harness.user_ruleset_status(ruleset_name, content, env=env)
+        try:
+            # utf-8 explicitly: rulesets carry non-ASCII prose, and the locale
+            # encoding would corrupt the bytes the drift compare depends on.
+            content = manifest.ruleset_path().read_text(encoding="utf-8")
+            status = harness.user_ruleset_status(ruleset_name, content, env=env)
+        except OSError as exc:
+            # The plugins are installed; only the rules file failed to load.
+            print(
+                f"trailhead: could not install the {name} ruleset for "
+                f"{harness.name}: {exc}",
+                file=sys.stderr,
+            )
+            continue
         if status == "unsupported":
             print(
                 f"trailhead: notice: harness {harness.name!r} has no user-level "

@@ -1,7 +1,8 @@
 # outpost — the human→agent review loop over the local outpost cockpit daemon.
 # tool.name MUST equal the plugins/<name>/ dir ("outpost").
 # No python package, no subagents, no always-on base. The skills (skills/*/) are
-# pure-HTTP contracts, discovered on disk by name; `ruleset` carries the
+# discovered on disk by name — mostly HTTP contracts against the cockpit daemon,
+# plus `publish-site`, which runs a script bundled beside it; `ruleset` carries the
 # always-loaded publish posture that makes the sites capability discoverable
 # before a user thinks to ask for it.
 
