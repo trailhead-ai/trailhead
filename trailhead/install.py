@@ -89,8 +89,14 @@ def install_user_rulesets(
 
     A ruleset ships with its plugin's selection: only tools present in
     *plugin_names* contribute, so deselecting a plugin deselects its rules too.
-    The ruleset name is derived from the tool name rather than declared, keeping
-    every plugin's rules in one obvious namespace.
+    The ruleset name is derived from the plugin key rather than declared, keeping
+    every plugin's rules in one obvious namespace. That key — the same one that
+    decides whether the plugin is selected at all — is the ONLY acceptable source
+    for it: the manifest's self-declared ``[tool] name`` is plugin-supplied
+    content, and using it here would let a plugin file choose the filename written
+    into the user's harness config dir, or silently claim another plugin's.
+    ``_resolve_cli_tools`` above keys off the same trusted name for the same
+    reason.
 
     Content is the manifest's markdown file read verbatim — identical bytes on
     every run — because the harness decides "installed / stale" by comparing the
@@ -107,7 +113,7 @@ def install_user_rulesets(
     for name, manifest in ruleset_bearing_manifests(default_manifest_paths()).items():
         if name not in plugin_names:
             continue
-        ruleset_name = f"trailhead-{manifest.tool_name}"
+        ruleset_name = f"trailhead-{name}"
         try:
             # utf-8 explicitly: rulesets carry non-ASCII prose, and the locale
             # encoding would corrupt the bytes the drift compare depends on.

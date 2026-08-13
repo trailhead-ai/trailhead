@@ -27,7 +27,11 @@ marker filenames.
 Input guard
 -----------
 Every ``tool`` value is validated against ``^[a-z][a-z0-9_-]*$`` before it
-reaches any CLI arg, marker filename, or ``source`` path.
+reaches any CLI arg, marker filename, or ``source`` path.  Every ruleset ``name``
+is likewise validated (``^[A-Za-z0-9][A-Za-z0-9._-]*$``, then re-confined to the
+rules dir) before any directory is created or any byte is written — a ruleset
+lands under the user's Claude config dir, outside every trailhead-owned tree, so
+the name may never address anything but a file directly inside ``rules/``.
 
 Hermeticity contract
 --------------------
@@ -60,7 +64,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from trailhead.harness.base import Harness
+from trailhead.harness.base import Harness, HarnessError
 
 _REGISTERED_MARKER = ".trailhead-registered"
 _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
@@ -69,6 +73,9 @@ _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
 _RULES_SUBDIR = "rules"
 
 _TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+#: A ruleset name is a bare file stem written directly into the user's
+#: Claude config dir: no separators, no leading dot, no traversal.
+_RULESET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 #: Subdir under the Claude dir holding one directory of session transcripts per
 #: project (``~/.claude/projects/<munged-cwd>/<session-id>.jsonl``).
@@ -119,6 +126,20 @@ def _validate_tool(tool: str) -> None:
     """Raise ValueError if tool does not match ^[a-z][a-z0-9_-]*$."""
     if not isinstance(tool, str) or not _TOOL_NAME_RE.match(tool):
         raise ValueError(f"Invalid tool name {tool!r}: must match ^[a-z][a-z0-9_-]*$")
+
+
+def _validate_ruleset_name(name: str) -> None:
+    """Raise HarnessError unless *name* is a bare, separator-free file stem.
+
+    A ruleset name becomes a filename directly under the user's Claude config
+    dir, so anything that could steer the write elsewhere — a separator, a
+    leading dot, ``..``, an empty stem — is refused outright rather than relied
+    on to resolve harmlessly.
+    """
+    if not isinstance(name, str) or not _RULESET_NAME_RE.match(name):
+        raise HarnessError(
+            f"invalid ruleset name {name!r}: must match {_RULESET_NAME_RE.pattern}"
+        )
 
 
 def _default_runner(args, **kw):
@@ -337,8 +358,24 @@ class ClaudeCodeHarness(Harness):
     # ``~/.claude`` (Axiom 6).
 
     def user_ruleset_path(self, name: str, *, env: dict[str, str] | None = None) -> Path:
+        """Resolve ``<claude-dir>/rules/<name>.md``, refusing any escaping name.
+
+        Every path-building entry point for a ruleset goes through here, so this
+        is the one place the name has to be confined — and it is confined here
+        rather than at the caller because the write lands under ``~/.claude``,
+        outside any trailhead-owned tree, in files Claude Code loads into every
+        session on the machine.
+        """
+        _validate_ruleset_name(name)
         _env = env if env is not None else dict(os.environ)
-        return _claude_dir(_env) / _RULES_SUBDIR / f"{name}.md"
+        rules_dir = _claude_dir(_env) / _RULES_SUBDIR
+        target = rules_dir / f"{name}.md"
+        # Belt and braces: the name pattern above already forbids separators, but
+        # the resolved answer is re-checked so no future relaxation of the
+        # pattern can quietly turn this into a write outside the rules dir.
+        if not target.resolve().is_relative_to(rules_dir.resolve()):
+            raise HarnessError(f"invalid ruleset name {name!r}: resolves outside {rules_dir}")
+        return target
 
     def install_user_ruleset(
         self, name: str, content: str, *, env: dict[str, str] | None = None
@@ -349,6 +386,9 @@ class ClaudeCodeHarness(Harness):
         ``mkstemp(dir=target.parent)`` + ``os.replace`` so the swap is atomic and
         the rename can't fail cross-filesystem; clean up the temp on any error.
         A re-run with byte-identical content is a true no-op (no write, no swap).
+        The name is confined by ``user_ruleset_path`` before this method touches
+        the filesystem, so neither the ``mkdir(parents=True)`` nor the temp file
+        can be steered outside the rules dir.
         Read and write both pin utf-8: rulesets carry non-ASCII prose, and a
         locale-dependent codec on either side would break the drift compare.
         """

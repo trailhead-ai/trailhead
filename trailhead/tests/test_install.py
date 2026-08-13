@@ -493,6 +493,31 @@ class TestRulesetInstall:
         assert rc == 0
         assert harness.ruleset_calls == [_outpost_ruleset()]
 
+    def test_ruleset_name_comes_from_the_plugin_key_not_the_manifest(
+        self, tmp_path, capsys
+    ):
+        """The installed filename is derived from the plugin key install already
+        trusts (the same key that decides whether the plugin is selected at all),
+        never from the ``[tool] name`` the plugin file declares about itself —
+        which is why a manifest cannot aim the write at a path of its choosing,
+        nor collide with another plugin's ruleset by declaring its name.
+        """
+        plugin_root = tmp_path / "plugin"
+        plugin_root.mkdir()
+        (plugin_root / "rules.md").write_text("rules\n", encoding="utf-8")
+        manifest = self._manifest_with_ruleset(plugin_root, tool_name="/../../CLAUDE")
+        harness = _RecordingHarness()
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ), patch(
+            "trailhead.install.ruleset_bearing_manifests",
+            return_value={"outpost": manifest},
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert harness.ruleset_calls == [("trailhead-outpost", "rules\n")]
+        assert "Traceback" not in capsys.readouterr().err
+
     def test_unwired_plugin_contributes_no_ruleset(self, tmp_path):
         harness = _RecordingHarness()
         with _patched(detected=True), patch(
@@ -546,11 +571,11 @@ class TestRulesetInstall:
         assert rc == 0
         assert "could not install the outpost ruleset" in capsys.readouterr().err
 
-    def _manifest_with_ruleset(self, plugin_root: Path):
+    def _manifest_with_ruleset(self, plugin_root: Path, *, tool_name: str = "outpost"):
         from trailhead.capabilities import Manifest
 
         return Manifest(
-            tool_name="outpost",
+            tool_name=tool_name,
             plugin_root=plugin_root,
             base=[],
             hooks_json=None,

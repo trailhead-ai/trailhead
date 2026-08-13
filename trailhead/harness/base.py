@@ -171,6 +171,15 @@ class Harness(ABC):
     # All three accept an injectable ``env`` so a caller can redirect the harness
     # config dir; the defaults ignore it (there is nothing to resolve), but every
     # caller may pass it uniformly without knowing which harness it holds.
+    #
+    # ``name`` CONTRACT: a ruleset name is an opaque identifier, not a path — it
+    # may never contain a path separator, ``..``, or a leading dot.  An
+    # implementation that turns the name into a filesystem path writes OUTSIDE
+    # any trailhead-owned tree (into the user's harness config dir), so it MUST
+    # reject a name violating this before creating a directory or writing a byte,
+    # raising ``HarnessError`` — which the CLI renders as a clean
+    # ``trailhead: <message>``.  Callers must not rely on their own name-building
+    # being the only guard.
 
     def install_user_ruleset(
         self, name: str, content: str, *, env: dict[str, str] | None = None
