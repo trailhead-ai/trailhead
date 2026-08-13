@@ -10,9 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+from trailhead.capabilities import load_manifest
 from trailhead.harness import ClaudeCodeHarness
 from trailhead.install import run_install
 from trailhead.pathint import ShimDirResult
+
+_REPO_ROOT = Path(__file__).parent.parent.parent
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -401,3 +404,100 @@ class TestShellenvGuidance:
         m["pathint"].assert_not_called()
         out = capsys.readouterr().out
         assert "could not build the shim dir" not in out
+
+
+# ---------------------------------------------------------------------------
+# Plugin-declared rulesets
+# ---------------------------------------------------------------------------
+
+
+def _outpost_ruleset() -> tuple[str, str]:
+    """The ruleset name + content outpost's manifest declares, read from disk."""
+    manifest = load_manifest(_REPO_ROOT / "tools" / "outpost" / "capabilities.toml")
+    return f"trailhead-{manifest.tool_name}", (manifest.plugin_root / manifest.ruleset).read_text()
+
+
+class _RecordingHarness(ClaudeCodeHarness):
+    """Claude Code harness that records the ruleset installs asked of it."""
+
+    def __init__(self):
+        self.ruleset_calls = []
+
+    def install_user_ruleset(self, name, content, *, env=None):
+        self.ruleset_calls.append((name, content))
+
+
+class _RulesetlessHarness(ClaudeCodeHarness):
+    """Stands in for a harness with no user-level ruleset support."""
+
+    def user_ruleset_path(self, name, *, env=None):
+        return None
+
+    def user_ruleset_status(self, name, content, *, env=None):
+        return "unsupported"
+
+    def install_user_ruleset(self, name, content, *, env=None):
+        raise AssertionError("an unsupported harness must never be asked to install")
+
+
+class TestRulesetInstall:
+    def test_declared_ruleset_installed_once_per_harness(self, tmp_path):
+        harness = _RecordingHarness()
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert harness.ruleset_calls == [_outpost_ruleset()]
+
+    def test_unwired_plugin_contributes_no_ruleset(self, tmp_path):
+        harness = _RecordingHarness()
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ):
+            run_install(env=_env(tmp_path), plugins=["lore"], quiet=True)
+        assert harness.ruleset_calls == []
+
+    def test_ruleset_written_to_the_injected_claude_dir(self, tmp_path):
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        name, content = _outpost_ruleset()
+        with _patched(detected=True):
+            run_install(env=env, quiet=True)
+        assert (tmp_path / "claude" / "rules" / f"{name}.md").read_text() == content
+
+    def test_reinstall_is_a_no_op_and_reports_up_to_date(self, tmp_path, capsys):
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        name, _ = _outpost_ruleset()
+        target = tmp_path / "claude" / "rules" / f"{name}.md"
+        with _patched(detected=True):
+            run_install(env=env, quiet=True)
+            first_mtime = target.stat().st_mtime_ns
+            capsys.readouterr()
+            run_install(env=env)
+        out = capsys.readouterr().out
+        assert target.stat().st_mtime_ns == first_mtime  # no write, no swap
+        assert "up to date" in out
+
+    def test_unsupported_harness_says_so_and_writes_nothing(self, tmp_path, capsys):
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=_RulesetlessHarness()
+        ):
+            rc = run_install(env=env, quiet=True)
+        assert rc == 0
+        assert "no user-level ruleset support" in capsys.readouterr().err
+        assert not (tmp_path / "claude" / "rules").exists()
+
+    def test_unwritable_ruleset_surface_warns_without_failing_the_install(
+        self, tmp_path, capsys
+    ):
+        harness = _RecordingHarness()
+        harness.install_user_ruleset = lambda *a, **kw: (_ for _ in ()).throw(
+            OSError("read-only file system")
+        )
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert "could not install the outpost ruleset" in capsys.readouterr().err

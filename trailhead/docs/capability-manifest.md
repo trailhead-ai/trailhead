@@ -21,6 +21,7 @@ that model is gone. Selection today is per-subagent / per-skill **by name**
 name = "lore"                       # required — MUST equal the plugins/<name>/ dir
 base = ["skills/_shared"]           # always-on, non-selectable dirs
 hooks_json = "hooks/hooks.json"     # optional — see "Hooks are a whole-tool unit"
+ruleset = "rules.md"                # optional — see "User-level rulesets"
 validate = true                     # optional, default true — see validate=false escape hatch
 ```
 
@@ -29,6 +30,7 @@ validate = true                     # optional, default true — see validate=fa
 | `name` | string | yes | Tool identifier. Must match the plugin directory name under `plugins/`. |
 | `base` | list of strings | no (default `[]`) | Dirs that ship on every install of this tool, regardless of which subagents/skills are selected. Typically shared includes with no `SKILL.md` of their own (e.g. `skills/_shared`), so they're never independently selectable. |
 | `hooks_json` | string | no | Path to the hooks registration file, relative to the plugin root. See [Hooks are a whole-tool unit](#hooks-are-a-whole-tool-unit). |
+| `ruleset` | string | no | Path to a markdown file of user-level agent rules, relative to the plugin root. See [User-level rulesets](#user-level-rulesets). |
 | `validate` | bool | no (default `true`) | When `false`, the loader parses and structures the manifest but skips all directory/file existence checks. See [validate=false escape hatch](#validatefalse-escape-hatch). |
 
 A manifest with no capabilities to speak of is a valid, complete manifest —
@@ -58,8 +60,8 @@ plugin string (see `install_config.py`).
 
 ## Path resolution
 
-Every path in `base` and `hooks_json` is **relative to the tool's plugin
-root**:
+Every path in `base`, `hooks_json`, and `ruleset` is **relative to the tool's
+plugin root**:
 
 ```
 <manifest_dir>/plugins/<tool.name>/
@@ -76,6 +78,7 @@ tools/craft/plugins/craft/skills/_shared
 
 - `base` entries must resolve to **directories**.
 - `hooks_json` must resolve to a **file**.
+- `ruleset` must resolve to a **file**.
 - Discovered `agents/<name>.md` entries are always files (globbed with `*.md`);
   discovered `skills/<name>/` entries are always directories containing a
   `SKILL.md` file — both are inherently well-typed by how they're found, so
@@ -97,9 +100,39 @@ hooks file. Tools without hooks (e.g. craft) omit `hooks_json` entirely.
 
 ---
 
+## User-level rulesets
+
+A *user-level ruleset* is always-loaded agent guidance installed once per
+machine into the harness's own rules surface (for Claude Code,
+`~/.claude/rules/<name>.md`) — not per project, and not into the composed tree.
+A tool opts in by naming one markdown file:
+
+```toml
+[tool]
+name = "outpost"
+ruleset = "rules.md"
+```
+
+`trailhead install` installs it under the name `trailhead-<tool.name>` into
+every resolved harness, but only for the tools that install actually wired — a
+ruleset ships with its plugin's selection, so deselecting the plugin deselects
+its rules. A harness with no user-ruleset support says so on stderr rather than
+skipping silently.
+
+The file's bytes are installed **verbatim**, with nothing interpolated. The
+install path decides "installed / stale" by comparing the whole file, so any
+per-run variation would report permanent drift.
+
+Declaring rules in the manifest is what puts the capability within reach of a
+skill-only plugin, which has no python package or CLI of its own to carry
+content in. Keep the file to load-time instructions: it is in context for every
+session, whether or not the tool is used.
+
+---
+
 ## Confinement guarantee
 
-Every referenced path (`base` entries and `hooks_json`) is verified to stay
+Every referenced path (`base` entries, `hooks_json`, and `ruleset`) is verified to stay
 **inside the plugin root** before any filesystem stat is performed:
 
 ```python
@@ -125,7 +158,7 @@ they can never escape it.
 ## `validate=false` escape hatch
 
 Set `validate = false` in `[tool]` to skip all existence and type checks on
-`base` and `hooks_json`. The manifest is still parsed and structurally
+`base`, `hooks_json`, and `ruleset`. The manifest is still parsed and structurally
 validated (required fields, confinement); only the filesystem checks are
 skipped.
 

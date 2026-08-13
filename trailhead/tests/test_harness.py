@@ -229,6 +229,17 @@ class TestUserRulesetBaseDefault:
         assert out.strip() == UNSUPPORTED_RULESET_NOTICE
         assert "trailhead-lore" not in out  # static notice, no per-name interpolation
 
+    def test_defaults_accept_an_injected_env_and_still_degrade(self, tmp_path, capsys):
+        # Callers pass ``env=`` so tests never touch the real Claude dir; a harness
+        # without ruleset support must accept it and degrade all the same.
+        h = _BareHarness()
+        env = {"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        assert h.user_ruleset_path("trailhead-outpost", env=env) is None
+        assert h.user_ruleset_status("trailhead-outpost", "body", env=env) == "unsupported"
+        assert h.install_user_ruleset("trailhead-outpost", "body", env=env) is None
+        assert capsys.readouterr().out.strip() == UNSUPPORTED_RULESET_NOTICE
+        assert not (tmp_path / "claude").exists()  # nothing written anywhere
+
 
 class TestClaudeConfigDirRelocation:
     """Every path derived from the Claude config dir follows ``CLAUDE_CONFIG_DIR``.

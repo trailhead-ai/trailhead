@@ -18,6 +18,7 @@ manifest only needs to declare what always ships::
     base = ["skills/_shared"]           # always-on, NON-selectable dirs
     hooks_json = "hooks/hooks.json"     # optional; the whole containing dir ships
     cli_bin = "bin/lore"                # optional; path to a shippable CLI binary
+    ruleset = "rules.md"                # optional; path to a user-level ruleset
     validate = true                     # optional, default true
 
 Convention-based inventory
@@ -34,7 +35,8 @@ include) is therefore never selectable; list it in ``base`` so it still ships.
 
 Confinement guarantee (D-F)
 ---------------------------
-``base``, ``hooks_json``, and ``cli_bin`` entries are confined to the tool's plugin root
+``base``, ``hooks_json``, ``cli_bin``, and ``ruleset`` entries are confined to the
+tool's plugin root
 (``<manifest_dir>/plugins/<tool.name>/``) BEFORE any stat/existence call, using::
 
     candidate = (plugin_root.resolve() / entry).resolve()
@@ -50,6 +52,17 @@ Type conventions
 * ``base`` entries must resolve to **directories** (when ``validate``).
 * ``hooks_json`` must resolve to a **file** (when ``validate``).
 * ``cli_bin`` must resolve to a **file** (when ``validate``).
+* ``ruleset`` must resolve to a **file** (when ``validate``).
+
+User-level rulesets
+-------------------
+``ruleset`` names a markdown file of always-loaded agent guidance that ships to
+the harness's user-level ruleset surface (e.g. Claude Code's ``~/.claude/rules/``)
+when the tool is selected.  It is a plain file rather than generated text because
+the install path compares the whole file to decide "installed / stale", so the
+bytes must be identical on every run — nothing is interpolated at install time.
+Declaring it in the manifest is what puts the capability within reach of a
+skill-only plugin, which has no python package or CLI to carry content in.
 """
 
 import tomllib
@@ -71,7 +84,7 @@ class ConfineError(Exception):
 
     Attributes:
         tool:    Tool name (or None if tool name could not be determined).
-        context: ``"base"``, ``"hooks_json"``, or ``"cli_bin"``.
+        context: ``"base"``, ``"hooks_json"``, ``"cli_bin"``, or ``"ruleset"``.
         entry:   The raw string entry that failed confinement.
     """
 
@@ -100,6 +113,7 @@ class Manifest:
         hooks_json:  Optional relative path to the hooks JSON; the whole containing
                      dir is wired by the composer so sibling scripts ship too.
         cli_bin:     Optional relative path to a shippable CLI binary.
+        ruleset:     Optional relative path to a user-level ruleset markdown file.
         validate:    Whether existence/type checks ran (default True).
         subagents:   ``{name: "agents/<name>.md"}`` — discovered, selectable.
         skills:      ``{name: "skills/<name>"}`` — discovered (SKILL.md dirs minus base).
@@ -110,6 +124,7 @@ class Manifest:
     base: list[str]
     hooks_json: str | None
     cli_bin: str | None
+    ruleset: str | None
     validate: bool
     subagents: dict[str, str]
     skills: dict[str, str]
@@ -202,14 +217,16 @@ def load_manifest(manifest_path: Path) -> Manifest:
     1. Parse TOML; wrap ``TOMLDecodeError`` as ``ManifestError``.
     2. Validate required ``[tool]`` fields.
     3. Derive ``plugin_root = manifest_path.parent / "plugins" / tool_name``.
-    4. Confine ``base`` + ``hooks_json`` + ``cli_bin`` (D-F) before any stat call.
-    5. If ``validate``, assert ``base`` dirs, ``hooks_json``, and ``cli_bin``
-       exist with the right type.
+    4. Confine ``base`` + ``hooks_json`` + ``cli_bin`` + ``ruleset`` (D-F) before
+       any stat call.
+    5. If ``validate``, assert ``base`` dirs, ``hooks_json``, ``cli_bin``, and
+       ``ruleset`` exist with the right type.
     6. Discover the selectable subagent + skill inventory by convention.
 
     Raises:
         ManifestError: Structural/missing-field/validation failure.
-        ConfineError:  A ``base`` / ``hooks_json`` / ``cli_bin`` path escapes the plugin root.
+        ConfineError:  A ``base`` / ``hooks_json`` / ``cli_bin`` / ``ruleset`` path
+                       escapes the plugin root.
     """
     try:
         with open(manifest_path, "rb") as fh:
@@ -231,6 +248,7 @@ def load_manifest(manifest_path: Path) -> Manifest:
     base: list[str] = list(tool_data.get("base", []))
     hooks_json: str | None = tool_data.get("hooks_json")
     cli_bin: str | None = tool_data.get("cli_bin")
+    ruleset: str | None = tool_data.get("ruleset")
     should_validate: bool = tool_data.get("validate", True)
 
     # ------------------------------------------------------------------
@@ -244,6 +262,8 @@ def load_manifest(manifest_path: Path) -> Manifest:
         _confine(plugin_root, hooks_json, tool_name, "hooks_json")
     if cli_bin is not None:
         _confine(plugin_root, cli_bin, tool_name, "cli_bin")
+    if ruleset is not None:
+        _confine(plugin_root, ruleset, tool_name, "ruleset")
 
     # ------------------------------------------------------------------
     # Existence + type validation (only when validate=true)
@@ -258,6 +278,9 @@ def load_manifest(manifest_path: Path) -> Manifest:
         if cli_bin is not None:
             candidate = _confine(plugin_root, cli_bin, tool_name, "cli_bin")
             _validate_path(candidate, cli_bin, tool_name, "cli_bin", must_be_file=True)
+        if ruleset is not None:
+            candidate = _confine(plugin_root, ruleset, tool_name, "ruleset")
+            _validate_path(candidate, ruleset, tool_name, "ruleset", must_be_file=True)
 
     # ------------------------------------------------------------------
     # Convention-based selectable inventory
@@ -271,6 +294,7 @@ def load_manifest(manifest_path: Path) -> Manifest:
         base=base,
         hooks_json=hooks_json,
         cli_bin=cli_bin,
+        ruleset=ruleset,
         validate=should_validate,
         subagents=subagents,
         skills=skills,
@@ -291,4 +315,21 @@ def cli_bearing_manifests(manifest_paths: dict[str, Path]) -> dict[str, Manifest
         name: manifest
         for name, path in manifest_paths.items()
         if (manifest := load_manifest(path)).cli_bin is not None
+    }
+
+
+def ruleset_bearing_manifests(manifest_paths: dict[str, Path]) -> dict[str, Manifest]:
+    """Load the manifests of every ruleset-bearing tool in *manifest_paths*.
+
+    A tool is *ruleset-bearing* when its ``capabilities.toml`` declares
+    ``ruleset``.  Like ``cli_bearing_manifests``, this is the single predicate
+    defining that set, so "which tools ship a user-level ruleset" is decided in
+    one place rather than reimplemented per caller.
+
+    Returns ``{name: Manifest}`` preserving *manifest_paths* iteration order.
+    """
+    return {
+        name: manifest
+        for name, path in manifest_paths.items()
+        if (manifest := load_manifest(path)).ruleset is not None
     }

@@ -11,11 +11,14 @@ Config-driven, non-interactive, multi-harness:
      tool (any tool whose manifest declares `cli_bin`) whose flag is enabled.
      trailhead does NOT edit your shell rc — it tells you to add
      `eval "$(… shellenv)"`.
-  5. Bootstrap the lore machine via `lore init` (non-interactive + idempotent):
+  5. Install the user-level ruleset of every wired tool whose manifest declares
+     one, into each resolved harness. A harness with no user-ruleset support
+     degrades visibly (it says so) rather than silently skipping.
+  6. Bootstrap the lore machine via `lore init` (non-interactive + idempotent):
      vault + global index + write-protection guardrail + agent rules. A failed
      bootstrap propagates as a non-zero install exit with the lore stderr — it is
      never swallowed. Harness-agnostic (Axiom 1): no harness-specific branching.
-  6. Print the summary.
+  7. Print the summary.
 
 No presets, no interactive prompts, no remote fetch, no install manifest — the
 repo checkout IS the source ("install = clone the repo").
@@ -36,7 +39,7 @@ import os
 import sys
 from pathlib import Path
 
-from trailhead.capabilities import cli_bearing_manifests
+from trailhead.capabilities import cli_bearing_manifests, ruleset_bearing_manifests
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
 from trailhead.harness import detect_harnesses, get_harness
 from trailhead.install_config import (
@@ -69,6 +72,58 @@ def _resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
         if bin_path.exists():
             tools[name] = bin_path
     return tools
+
+
+def install_user_rulesets(
+    harness,
+    plugin_names: list[str],
+    *,
+    env: dict[str, str],
+    quiet: bool = False,
+) -> None:
+    """Install every wired plugin's declared user-level ruleset into *harness*.
+
+    A ruleset ships with its plugin's selection: only tools present in
+    *plugin_names* contribute, so deselecting a plugin deselects its rules too.
+    The ruleset name is derived from the tool name rather than declared, keeping
+    every plugin's rules in one obvious namespace.
+
+    Content is the manifest's markdown file read verbatim — identical bytes on
+    every run — because the harness decides "installed / stale" by comparing the
+    whole file; anything interpolated here would report permanent drift.
+
+    A harness without user-ruleset support degrades VISIBLY: the notice goes to
+    stderr regardless of ``quiet``, so nobody is left believing rules installed.
+    An unwritable ruleset surface is likewise a warning rather than a traceback —
+    the plugins themselves already installed.
+    """
+    for name, manifest in ruleset_bearing_manifests(default_manifest_paths()).items():
+        if name not in plugin_names:
+            continue
+        ruleset_name = f"trailhead-{manifest.tool_name}"
+        content = (manifest.plugin_root / manifest.ruleset).read_text()
+        status = harness.user_ruleset_status(ruleset_name, content, env=env)
+        if status == "unsupported":
+            print(
+                f"trailhead: notice: harness {harness.name!r} has no user-level "
+                f"ruleset support — the {name} ruleset was not installed for it",
+                file=sys.stderr,
+            )
+            continue
+        try:
+            harness.install_user_ruleset(ruleset_name, content, env=env)
+        except OSError as exc:
+            # The plugins are installed; only the rules file failed to land.
+            print(
+                f"trailhead: could not install the {name} ruleset for "
+                f"{harness.name}: {exc}",
+                file=sys.stderr,
+            )
+            continue
+        if not quiet:
+            path = harness.user_ruleset_path(ruleset_name, env=env)
+            verb = "up to date" if status == "current" else "installed"
+            print(f"{harness.name}: {name} ruleset {verb} ({path})")
 
 
 def run_lore_init(
@@ -167,6 +222,17 @@ def run_install(
         except WireError as exc:
             print(f"trailhead: {exc}", file=sys.stderr)
             return 1
+
+    # ------------------------------------------------------------------
+    # Install each wired plugin's declared user-level ruleset into every
+    # resolved harness. Additive and idempotent, and deliberately OUTSIDE the
+    # wire lock: rules are harness-global guidance, not part of the composed
+    # tree the lock protects.
+    # ------------------------------------------------------------------
+    for rh in cfg.harnesses:
+        install_user_rulesets(
+            get_harness(rh.name), wired[rh.name], env=_env, quiet=quiet or as_json
+        )
 
     # ------------------------------------------------------------------
     # Build the CLI shim dir (harness-independent, additive).
