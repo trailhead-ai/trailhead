@@ -501,22 +501,41 @@ class TestAreasMultiVault:
 
         Reproduces the exact two-entry shape from the report — a
         ``shared: true`` ``sharedteam`` vault plus a ``sharedteam-alias``
-        entry whose path is ``sharedteam``'s with its case flipped. On this
-        sandbox's case-insensitive (APFS) filesystem the two entries are
-        genuinely the same physical directory (confirmed below), so a
-        resolved-path-*string*-keyed exclusion set — built from
-        ``str(Path(v.path).resolve())`` for the shared entry only — never
-        contains the alias's differently-cased string and the alias's own
-        root gets scanned directly, handing the shared vault's area straight
-        to the merged menu one hop removed. A purely name-keyed exclusion
-        (checking only whether the *scanned* entry's own name is
-        ``shared: true``) does not fully close this either: the alias entry
-        is legitimately not marked shared, so its root would still be
-        scanned and would still contain the shared vault's files. Closing it
-        requires recognizing that the alias's root is, physically, the same
-        directory as an entry that IS marked shared — the fix does this via
-        ``os.stat`` device+inode identity rather than any path string.
+        entry whose path is ``sharedteam``'s with its case flipped. This
+        reproduction only exists on a case-insensitive filesystem (APFS on
+        macOS); on a case-sensitive one (e.g. CI's Linux runners) the two
+        entries are genuinely distinct directories and the test is skipped
+        rather than failed — the FS-independent unit test below,
+        ``test_dedupe_and_exclude_shared_roots_by_physical_identity``, pins
+        the same device+inode dedupe logic without relying on filesystem
+        case-folding, so the regression stays covered everywhere. On a
+        case-insensitive filesystem, the two entries here are genuinely the
+        same physical directory, so a resolved-path-*string*-keyed exclusion
+        set — built from ``str(Path(v.path).resolve())`` for the shared
+        entry only — never contains the alias's differently-cased string and
+        the alias's own root gets scanned directly, handing the shared
+        vault's area straight to the merged menu one hop removed. A purely
+        name-keyed exclusion (checking only whether the *scanned* entry's
+        own name is ``shared: true``) does not fully close this either: the
+        alias entry is legitimately not marked shared, so its root would
+        still be scanned and would still contain the shared vault's files.
+        Closing it requires recognizing that the alias's root is, physically,
+        the same directory as an entry that IS marked shared — the fix does
+        this via ``os.stat`` device+inode identity rather than any path
+        string.
         """
+        # Probe case-(in)sensitivity independently of the fixture below, so a
+        # broken fixture (not filesystem case-folding) fails loudly instead
+        # of silently skipping.
+        probe_dir = tmp_path / "_case_probe"
+        probe_dir.mkdir()
+        (probe_dir / "marker").write_text("x")
+        if not (probe_dir / "MARKER").is_file():
+            pytest.skip(
+                "sandbox filesystem is case-sensitive — this reproduction needs "
+                "a case-insensitive volume (e.g. macOS APFS)"
+            )
+
         vaults_dir = tmp_path / "vaults"
         shared_dir = vaults_dir / "SharedTeam"
         shared_dir.mkdir(parents=True)
@@ -530,11 +549,10 @@ class TestAreasMultiVault:
         _write_area(default_vault, "core", ["x"], summary="Default area.")
 
         alias_path = vaults_dir / "sharedteam"  # case-flipped alias of shared_dir
-        if not (alias_path / "area" / "untrusted.md").is_file():
-            pytest.skip(
-                "sandbox filesystem is case-sensitive — this reproduction needs "
-                "a case-insensitive volume (e.g. macOS APFS)"
-            )
+        assert (alias_path / "area" / "untrusted.md").is_file(), (
+            "case-insensitive filesystem confirmed by probe above, but the "
+            "case-flipped alias fixture did not resolve — fixture bug"
+        )
 
         env_ctx = _multi_config_env(
             tmp_path,
@@ -551,6 +569,58 @@ class TestAreasMultiVault:
         assert "untrusted" not in stdout
         assert "Shared one-liner leak check." not in stdout
         assert "core" in stdout
+
+    def test_dedupe_and_exclude_shared_roots_by_physical_identity(self, tmp_path):
+        """FS-independent pin for the ``os.stat`` device+inode dedupe logic in
+        ``_dedupe_and_exclude_shared_roots``.
+
+        The case-alias regression test above
+        (``test_shared_vault_content_excluded_despite_case_only_path_alias``)
+        only runs on a case-insensitive filesystem, so it skips on Linux CI —
+        exactly the environment that gates every merge. This test exercises
+        the same physical-identity dedupe directly, with ``os.stat`` patched
+        to report identical ``(st_dev, st_ino)`` for two *distinct* path
+        strings that both genuinely exist on disk, so the security-relevant
+        logic (a physically-shared root is excluded even when named by a
+        non-shared config entry) stays covered regardless of filesystem
+        case-folding behavior.
+        """
+        cli = _load_cli()
+
+        shared_dir = tmp_path / "shared-root"
+        shared_dir.mkdir()
+        alias_dir = tmp_path / "alias-root"  # distinct path, same identity below
+        alias_dir.mkdir()
+        default_dir = tmp_path / "default-root"
+        default_dir.mkdir()
+
+        all_vaults = [
+            ("default", default_dir),
+            ("sharedteam", shared_dir),
+            ("sharedteam-alias", alias_dir),
+        ]
+        shared_names = {"sharedteam"}
+
+        shared_identity = os.stat_result(
+            (0o40755, 1, 1, 1, 0, 0, 0, 0, 0, 0)
+        )
+        default_identity = os.stat_result(
+            (0o40755, 2, 1, 1, 0, 0, 0, 0, 0, 0)
+        )
+
+        real_stat = os.stat
+
+        def fake_stat(path, *args, **kwargs):
+            if Path(path) in (shared_dir, alias_dir):
+                return shared_identity
+            if Path(path) == default_dir:
+                return default_identity
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch("os.stat", side_effect=fake_stat):
+            roots = cli._dedupe_and_exclude_shared_roots(all_vaults, shared_names)
+
+        assert roots == [default_dir]
 
     def test_one_absent_root_still_renders_the_rest(self, tmp_path):
         default_vault = tmp_path / "v-default"
