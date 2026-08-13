@@ -3,7 +3,7 @@
 ``tools/outpost`` is the fifth trailhead plugin: skill-only (no python package, no
 agents), modelled on ``tools/portage``'s anatomy. Its single skill,
 ``pickup-review``, is a **pure-HTTP contract** against the local outpost daemon —
-it reads reviews Tom authored in the cockpit, acts on each comment, and replies on
+it reads human-authored reviews in the cockpit, acts on each comment, and replies on
 the token-less agent-permitted endpoints. It never touches the daemon's DB or
 files directly, and it never possesses the human UI session token.
 
