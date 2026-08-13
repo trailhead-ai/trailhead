@@ -11,10 +11,11 @@ area-membered memory lookup is ``lore search 'area:<name>'``:
 
   2. build_area_map_multi(vaults)   -> list[AreaEntry]
      Merges `build_area_map` across every vault root passed in, deduping
-     same-named areas (first-in-input-order wins), then re-applying the
-     alpha sort and hard caps to the merged set. The multi-vault
-     counterpart `cmd_areas` calls once it resolves every configured
-     non-shared vault, rather than the `default`-scope vault alone.
+     same-named areas (first-in-input-order wins), then re-sorting the
+     merged set alpha. Hard caps are already applied per entry by
+     build_area_map. The multi-vault counterpart `cmd_areas` calls once it
+     resolves every configured non-shared vault, rather than the
+     `default`-scope vault alone.
 
   3. render_area_menu(entries)      -> str
      Renders the full on-demand menu (called by `lore areas`).
@@ -151,10 +152,15 @@ def build_area_map_multi(vaults: list[Path]) -> list[AreaEntry]:
     results. Same-named areas across roots collapse to a single entry — the
     first root (in input order, i.e. config order) to define the name wins,
     mirroring how ``lore record show area/<name>`` resolves the same
-    cross-vault collision. The merged set is then re-sorted alpha by name and
-    re-capped with the same ``_ONE_LINER_MAX`` / ``_KEYWORDS_MAX`` limits
-    ``build_area_map`` already applies per vault — a merge that skipped this
-    step could let two under-cap per-vault menus combine into an over-cap one.
+    cross-vault collision. The merged set is then re-sorted alpha by name,
+    since per-vault ordering says nothing about the cross-vault order.
+
+    The ``_ONE_LINER_MAX`` / ``_KEYWORDS_MAX`` caps are NOT re-applied here:
+    they bound a single entry's one-liner and keyword list, not the menu as a
+    whole, and every entry this function returns came from
+    :func:`build_area_map`, which already capped it. Merging entries cannot
+    push an already-capped entry over its cap, so the cap lives at its one
+    source rather than being restated per caller.
 
     A root that yields no areas (absent ``area/`` dir, or every file
     unreadable) simply contributes nothing. A root whose ``build_area_map``
@@ -174,9 +180,6 @@ def build_area_map_multi(vaults: list[Path]) -> list[AreaEntry]:
 
     entries = list(seen.values())
     entries.sort(key=lambda e: e.name.lower())
-    for e in entries:
-        e.one_liner = e.one_liner[:_ONE_LINER_MAX]
-        e.keywords = e.keywords[:_KEYWORDS_MAX]
     return entries
 
 

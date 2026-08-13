@@ -136,18 +136,12 @@ def _run_areas_with_env(env_ctx) -> tuple[str, str, int]:
 
 
 def _run_areas(vault_path: str) -> tuple[str, str, int]:
-    """Invoke cmd_areas in-process; returns (stdout, stderr, returncode)."""
-    cli = _load_cli()
-    out = io.StringIO()
-    err = io.StringIO()
-    args = SimpleNamespace()
+    """Invoke cmd_areas against a single-default-vault config.
 
-    with _config_env(vault_path):
-        with mock.patch("sys.stdout", out):
-            with mock.patch("sys.stderr", err):
-                rc = cli.cmd_areas(args)
-
-    return out.getvalue(), err.getvalue(), rc
+    Returns (stdout, stderr, returncode). The single-vault convenience wrapper
+    over :func:`_run_areas_with_env`.
+    """
+    return _run_areas_with_env(_config_env(vault_path))
 
 
 # ---------------------------------------------------------------------------

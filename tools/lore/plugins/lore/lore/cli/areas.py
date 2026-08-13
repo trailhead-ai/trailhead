@@ -38,7 +38,7 @@ def cmd_areas(args) -> int:
         if str(path.resolve()) not in shared_paths and path.exists()
     ]
 
-    entries = area_map_mod.build_area_map_multi(roots) if roots else []
+    entries = area_map_mod.build_area_map_multi(roots)
 
     if error is not None:
         print(f"lore areas: could not resolve vaults ({error})", file=sys.stderr)
