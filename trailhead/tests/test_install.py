@@ -85,6 +85,16 @@ class TestDetectionDrivenInstall:
         out = capsys.readouterr().out
         assert "shellenv" in out
 
+    def test_summary_names_trailhead_when_bin_is_executable(self, tmp_path, capsys):
+        with _patched(detected=True), patch(
+            "trailhead.install.trailhead_bin_executable", return_value=True
+        ):
+            run_install(env=_env(tmp_path))
+        out = capsys.readouterr().out
+        path_line = next((ln for ln in out.splitlines() if "on your PATH" in ln), "")
+        assert path_line, "PATH guidance line should print"
+        assert "trailhead" in path_line
+
 
 # ---------------------------------------------------------------------------
 # CLI overrides
@@ -313,3 +323,81 @@ class TestLoreInitIntegration:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), no_lore=True, quiet=True)
         m["lore_init"].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# shellenv PATH-guidance block — prints whenever path integration applies
+# ---------------------------------------------------------------------------
+
+
+class TestShellenvGuidance:
+    def test_prints_and_names_trailhead_when_all_clis_disabled(self, tmp_path, capsys):
+        cfg_path = tmp_path / "no-clis.toml"
+        cfg_path.write_text("install_ranger_cli = false\n")
+        with _patched(detected=True) as m, patch(
+            "trailhead.install.trailhead_bin_executable", return_value=True
+        ):
+            rc = run_install(
+                env=_env(tmp_path),
+                config_arg=str(cfg_path),
+                no_camp=True,
+                no_lore=True,
+                no_portage=True,
+                quiet=True,
+            )
+        m["pathint"].assert_not_called()
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "shellenv" in out
+        path_line = next((ln for ln in out.splitlines() if "on your PATH" in ln), "")
+        assert path_line, "PATH guidance line should print"
+        assert "trailhead" in path_line
+
+    def test_omits_trailhead_when_bin_not_executable(self, tmp_path, capsys):
+        with _patched(detected=True), patch(
+            "trailhead.install.trailhead_bin_executable", return_value=False
+        ):
+            run_install(env=_env(tmp_path), quiet=True)
+        out = capsys.readouterr().out
+        path_line = next((ln for ln in out.splitlines() if "on your PATH" in ln), "")
+        assert path_line, "PATH guidance line should still print for the plugin CLIs"
+        assert "trailhead" not in path_line
+
+    def test_shim_dir_failure_stays_exit_zero_and_carries_full_path_fallback(
+        self, tmp_path, capsys
+    ):
+        with _patched(detected=True) as m, patch(
+            "trailhead.install.trailhead_bin_executable", return_value=True
+        ):
+            m["pathint"].side_effect = OSError("disk full")
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "shellenv" in out
+        assert "bin/trailhead" in out
+        # the explicit full-path fallback for each unshimmed CLI, not just prose
+        assert "tools/camp/plugins/camp/bin/camp" in out
+        assert "tools/lore/plugins/lore/bin/lore" in out
+        # the failed plugin CLIs are dropped from the "on your PATH" promise —
+        # the eval line does not provide them when the shim build failed
+        path_line = next((ln for ln in out.splitlines() if "on your PATH" in ln), "")
+        assert path_line, "PATH guidance line should still print"
+        assert "camp" not in path_line
+        assert "lore" not in path_line
+        assert "trailhead" in path_line
+
+    def test_no_cli_binaries_resolved_skips_shim_build_without_failure_copy(
+        self, tmp_path, capsys
+    ):
+        # cli_flags enabled but _resolve_cli_tools drops every CLI (bins missing
+        # on disk) — no shim build is attempted, so the "could not build the
+        # shim dir (see warning above)" copy (which implies an attempt/warning)
+        # must not appear.
+        with _patched(detected=True) as m, patch(
+            "trailhead.install._resolve_cli_tools", return_value={}
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        m["pathint"].assert_not_called()
+        out = capsys.readouterr().out
+        assert "could not build the shim dir" not in out

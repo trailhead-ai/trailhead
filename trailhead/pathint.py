@@ -7,18 +7,34 @@ selected CLI (camp/lore), and you add a single line to your shell profile:
     eval "$(/path/to/trailhead/bin/trailhead shellenv)"
 
 ``trailhead shellenv`` prints the export lines (TRAILHEAD_ROOT + the shim dir on
-PATH) for your shell — exactly like ``brew shellenv``.  Because the shim dir's
-*contents* encode which CLIs were selected (``--no-camp`` etc.), a single PATH
-entry is all the profile needs, and re-running install updates it in place.
+PATH) for your shell — exactly like ``brew shellenv``.  For the plugin CLIs
+(camp/lore), the shim dir's *contents* encode which were selected
+(``--no-camp`` etc.), so a single PATH entry is all the profile needs for
+them, and re-running install updates it in place. The management CLI itself
+(``trailhead``) is handled separately — see below — never via a shim.
 
 camp is the forcing case: it's the front door, run outside any Claude Code
 session.  Each shim hardcodes TRAILHEAD_ROOT so the monorepo is reachable
 without CLAUDE_PLUGIN_ROOT; shellenv also exports it for good measure.
 
+``shellenv`` also emits a ``trailhead`` shell function so the management CLI
+itself is invokable by bare name — self-refreshing: it always calls
+``<repo-root>/bin/trailhead``, re-resolved from the profile line's own root at
+every shell startup, never from install-time state. Emitted unconditionally of
+which CLIs were selected, and only when ``<repo-root>/bin/trailhead`` exists
+and is executable — a non-editable pip install has no checkout alongside it,
+so nothing is emitted and the rest of the output stays eval-valid. The
+function never enters the shim dir or the CLI selection machinery.
+
 Shell detection: ``$SHELL`` basename, with a ``--shell`` override (fish|zsh|bash).
   fish → ``set -gx`` / ``fish_add_path``;  zsh/bash → ``export``.
 
 Shim names are checked against a denylist of system binaries.
+
+Every path interpolated into eval'd output (TRAILHEAD_ROOT, the shim dir, the
+trailhead() target) is checked for shell metacharacters (``"``, backtick,
+``$``, newline, backslash) that could break out of their quoted context; a
+match raises ``PathIntegrationError`` instead of emitting unsafe output.
 """
 
 from __future__ import annotations
@@ -56,7 +72,9 @@ _SHIM_DENYLIST = frozenset(
 
 
 class PathIntegrationError(Exception):
-    """Raised when the shim directory cannot be created/written."""
+    """Raised when the shim directory cannot be created/written, or when a
+    value destined for interpolation into eval'd shellenv output contains a
+    shell metacharacter that would make the output unsafe to eval."""
 
 
 class ShimDenylistError(Exception):
@@ -74,6 +92,60 @@ class ShimDirResult:
 
     shim_dir: Path
     shims: dict[str, Path]
+
+
+# ---------------------------------------------------------------------------
+# Repo root
+# ---------------------------------------------------------------------------
+
+
+def repo_root() -> Path:
+    """Return the trailhead repo root containing this file, resolved.
+
+    The single source of truth for "what checkout am I running from" —
+    reused by shellenv_lines()'s default trailhead_root and by install.py's
+    module-level repo-root constant, so the computation isn't duplicated
+    (and doesn't drift) across call sites.
+    """
+    return Path(__file__).resolve().parent.parent
+
+
+def trailhead_bin_executable(root: Path | str) -> bool:
+    """Return True when ``<root>/bin/trailhead`` exists and is executable.
+
+    The single source of truth for "does this checkout have a runnable
+    ``bin/trailhead``" — used by ``_trailhead_function`` to decide whether
+    shellenv emits the bare-name ``trailhead`` function, and by install's
+    summary to decide whether it names ``trailhead`` as a command the
+    shellenv line provides. A non-editable pip install has no checkout
+    alongside it, so this is False there.
+    """
+    bin_path = Path(root) / "bin" / "trailhead"
+    return bin_path.is_file() and os.access(bin_path, os.X_OK)
+
+
+# ---------------------------------------------------------------------------
+# Shell-injection guard
+# ---------------------------------------------------------------------------
+
+_UNSAFE_SHELL_CHARS = ('"', "`", "$", "\n", "\\")
+
+
+def _reject_unsafe_for_eval(value: str, *, label: str) -> None:
+    """Raise if ``value`` contains a character that would break out of the
+    double-quoted context it's interpolated into in eval'd shellenv output.
+
+    Applies to every path interpolated into shellenv output (TRAILHEAD_ROOT,
+    the shim dir, and the trailhead() function body's target path) — a path
+    containing one of these characters could inject arbitrary shell code into
+    a profile that gets eval'd on every new shell.
+    """
+    for ch in _UNSAFE_SHELL_CHARS:
+        if ch in value:
+            raise PathIntegrationError(
+                f"refused to emit shellenv output: {label} contains an unsafe "
+                f"character ({ch!r}) that would break out of its quoted context"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +204,9 @@ def create_shims(
 
 def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
     """Generate a single bash shim wrapper (TRAILHEAD_ROOT hardcoded)."""
+    _reject_unsafe_for_eval(name, label="the shim name")
+    _reject_unsafe_for_eval(trailhead_root, label="TRAILHEAD_ROOT")
+    _reject_unsafe_for_eval(str(bin_path), label="the shim's target binary path")
     return (
         "#!/usr/bin/env bash\n"
         f"# trailhead-managed shim for {name}\n"
@@ -284,7 +359,10 @@ def shellenv_lines(
     _env = env if env is not None else dict(os.environ)
     _shell = shell or detect_shell(_env)
     shim_dir = resolve_shim_dir(env=_env)
-    root = trailhead_root or str(Path(__file__).parent.parent)
+    root = trailhead_root or str(repo_root())
+
+    _reject_unsafe_for_eval(root, label="TRAILHEAD_ROOT")
+    _reject_unsafe_for_eval(str(shim_dir), label="the shim directory path")
 
     if _shell == "fish":
         lines = [
@@ -298,4 +376,27 @@ def shellenv_lines(
             f'export PATH="{shim_dir}:$PATH";',
         ]
         wrapper = _CAMP_WRAPPER_POSIX
-    return "\n".join(lines) + "\n" + wrapper
+
+    trailhead_fn = _trailhead_function(root, shell=_shell)
+    return "\n".join(lines) + "\n" + wrapper + trailhead_fn
+
+
+def _trailhead_function(root: str, *, shell: str) -> str:
+    """Return the per-shell `trailhead` function snippet, or "" when
+    ``<root>/bin/trailhead`` isn't an executable file (e.g. a non-editable
+    pip install with no checkout alongside it) — output stays eval-valid
+    either way.
+
+    The function is self-refreshing: it always invokes the checkout the
+    profile's shellenv line currently points at, re-resolved at every shell
+    startup — never install-time state.
+    """
+    if not trailhead_bin_executable(root):
+        return ""
+
+    target = str(Path(root) / "bin" / "trailhead")
+    _reject_unsafe_for_eval(target, label="the trailhead binary path")
+
+    if shell == "fish":
+        return f'\nfunction trailhead\n    "{target}" $argv\nend\n'
+    return f'\ntrailhead() {{\n    "{target}" "$@"\n}}\n'
