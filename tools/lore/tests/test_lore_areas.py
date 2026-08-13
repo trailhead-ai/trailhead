@@ -651,3 +651,76 @@ class TestAreasMultiVault:
         assert rc == 0
         assert "no areas" in stdout.lower()
         assert stderr == ""
+
+
+# ---------------------------------------------------------------------------
+# Tests: vault resolution raises something outside the enumerated config-
+# parse exceptions (e.g. trailhead.paths.PathResolutionError) — cmd_areas
+# must still never let a traceback escape (total guard at the command
+# boundary, not another widened `except` tuple downstream).
+# ---------------------------------------------------------------------------
+
+
+class TestAreasTotalGuardAgainstUnenumeratedExceptions:
+    def _run(self, env_patch) -> tuple[str, str, int]:
+        cli = _load_cli()
+        out = io.StringIO()
+        err = io.StringIO()
+        args = SimpleNamespace()
+        with env_patch:
+            with mock.patch("sys.stdout", out):
+                with mock.patch("sys.stderr", err):
+                    rc = cli.cmd_areas(args)
+        return out.getvalue(), err.getvalue(), rc
+
+    def test_relative_xdg_config_home_does_not_raise(self, tmp_path, monkeypatch):
+        """A relative XDG_CONFIG_HOME makes trailhead.paths.config_dir raise
+        PathResolutionError — a type `_resolve_all_vaults_and_shared`'s except
+        tuple does not (and must not) enumerate. cmd_areas must still degrade
+        cleanly rather than let it escape as a traceback."""
+        monkeypatch.chdir(tmp_path)
+        env_patch = mock.patch.dict(
+            os.environ,
+            {"XDG_CONFIG_HOME": "relconf", "XDG_STATE_HOME": str(tmp_path / "_xdg_state")},
+            clear=False,
+        )
+        stdout, stderr, rc = self._run(env_patch)
+
+        assert rc == 0
+        assert "Traceback" not in stdout
+        assert "Traceback" not in stderr
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
+        assert "no areas" in stdout.lower()
+
+    def test_relative_lore_config_dir_does_not_raise(self, tmp_path, monkeypatch):
+        """Same failure class via LORE_CONFIG_DIR set to a relative path."""
+        monkeypatch.chdir(tmp_path)
+        env_patch = mock.patch.dict(
+            os.environ,
+            {"LORE_CONFIG_DIR": "relative/path", "XDG_STATE_HOME": str(tmp_path / "_xdg_state")},
+            clear=False,
+        )
+        stdout, stderr, rc = self._run(env_patch)
+
+        assert rc == 0
+        assert "Traceback" not in stdout
+        assert "Traceback" not in stderr
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
+        assert "no areas" in stdout.lower()
+
+    def test_unset_home_does_not_raise(self, tmp_path, monkeypatch):
+        """Same failure class via an unset HOME — trailhead.paths.home_dir()
+        raises PathResolutionError when HOME is absent."""
+        monkeypatch.delenv("HOME", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+        stdout, stderr, rc = self._run(mock.patch.dict(os.environ, {}, clear=False))
+
+        assert rc == 0
+        assert "Traceback" not in stdout
+        assert "Traceback" not in stderr
+        assert stderr.strip() != ""
+        assert len(stderr.strip().splitlines()) == 1
+        assert "no areas" in stdout.lower()

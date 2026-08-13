@@ -150,9 +150,9 @@ def _load_vault_config():
     ``record create``; ``lore vault ls``/``add`` are the surfaces that surface the
     config error explicitly. This includes a well-formed-JSON-but-wrong-shape
     config (e.g. a top-level list, or a ``"vaults"`` array of non-dict entries) —
-    ``load_config`` raises a bare ``AttributeError``/``TypeError`` for those
-    shapes rather than ``VaultConfigError``, and callers must not brick on them
-    either.
+    ``validate_config`` normalizes those shapes to ``VaultConfigError`` (its
+    single parse+validate boundary), so catching that one type here covers them
+    too, and callers must not brick on them either.
     """
     config_path = _resolve_config_path()
     if not config_path.exists():
@@ -163,8 +163,6 @@ def _load_vault_config():
         vault_config_mod.VaultConfigError,
         OSError,
         ValueError,
-        AttributeError,
-        TypeError,
     ):
         return None
     return config_path, vaults
@@ -191,8 +189,9 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
       function exists to prevent, so unlike ``_load_vault_config`` (best-effort,
       returns ``None``) the breakage is reported rather than swallowed. This case
       also covers a well-formed-JSON-but-wrong-shape config (e.g. a top-level
-      list, or non-dict ``"vaults"`` entries) — ``load_config`` raises a bare
-      ``AttributeError``/``TypeError`` for those, not just ``VaultConfigError``.
+      list, or non-dict ``"vaults"`` entries) — ``validate_config`` normalizes
+      those shapes to ``VaultConfigError`` too, so this catches them the same
+      way it catches any other invalid config.
     - **Valid config** → one ``(name, path)`` pair per vault, in config order,
       names already normalized by ``load_config``.
     """
@@ -206,8 +205,6 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
         vault_config_mod.VaultConfigError,
         OSError,
         ValueError,
-        AttributeError,
-        TypeError,
     ) as exc:
         return floor, f"cannot read {config_path}: {exc}"
     return [(v.name, Path(v.path)) for v in vaults], None
@@ -273,8 +270,13 @@ def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], 
     add``/edit), the vault list and the shared-set can disagree — and the
     shared filter fails **open** (empty set) rather than closed, which is the
     wrong direction for a trust boundary (an undelimited plaintext area menu
-    reaching agent context). This function reads the config exactly once so
-    the two views can never diverge.
+    reaching agent context). This function's ONE read of ``config.json`` — the
+    single ``load_config`` call below — is what the vault list and shared-set
+    both derive from, so the two views can never diverge from each other. The
+    floor vault (``resolve_active_vault()``) is resolved separately and only
+    lazily, on the two paths that actually need it (no config / unreadable
+    config); it plays no part in the divergence this function exists to
+    prevent, since the valid-config path never touches it.
 
     Same three-case contract as :func:`_resolve_all_vaults` (no config →
     floor vault + no error; unparseable/wrong-shape config → floor vault +
@@ -282,8 +284,8 @@ def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], 
     derived from that same read (empty in both floor cases).
     """
     config_path = _resolve_config_path()
-    floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
     if not config_path.exists():
+        floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
         return floor, set(), None
     try:
         vaults = vault_config_mod.load_config(str(config_path))
@@ -291,9 +293,8 @@ def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], 
         vault_config_mod.VaultConfigError,
         OSError,
         ValueError,
-        AttributeError,
-        TypeError,
     ) as exc:
+        floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
         return floor, set(), f"cannot read {config_path}: {exc}"
     all_vaults = [(v.name, Path(v.path)) for v in vaults]
     shared_paths = {

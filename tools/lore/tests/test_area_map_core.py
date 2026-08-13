@@ -277,3 +277,63 @@ class TestBuildAreaMapMulti:
     def test_empty_vault_list_returns_empty_list(self):
         area_map = load_area_map()
         assert area_map.build_area_map_multi([]) == []
+
+    def test_same_name_within_one_vault_both_kept_not_deduped(self, tmp_path):
+        """Dedup is a cross-vault concern only. Two files in the SAME root
+        colliding on frontmatter ``name`` (the file stem differs from the
+        declared name) must both survive the merge — this call has only one
+        root, so it must render byte-identically to calling
+        ``build_area_map`` directly on that root (the pre-multi-vault,
+        single-vault path), which applies no dedup at all."""
+        v1 = tmp_path / "v1"
+        (v1 / "area").mkdir(parents=True)
+        (v1 / "area" / "auth-1.md").write_text(
+            "---\ntype: area\nname: auth\nkeywords: [oauth]\nsummary: First file.\n---\n"
+        )
+        (v1 / "area" / "auth-2.md").write_text(
+            "---\ntype: area\nname: auth\nkeywords: [saml]\nsummary: Second file.\n---\n"
+        )
+
+        area_map = load_area_map()
+        direct = area_map.build_area_map(v1)
+        merged = area_map.build_area_map_multi([v1])
+
+        assert len(direct) == 2
+        assert [e.one_liner for e in merged] == [e.one_liner for e in direct]
+
+    def test_errors_out_param_populated_with_vault_and_exception(self, tmp_path):
+        v1 = tmp_path / "v1"
+        v2 = tmp_path / "v2"
+        (v1 / "area").mkdir(parents=True)
+        (v2 / "area").mkdir(parents=True)
+        _write_area(v2, "billing", ["stripe"], summary="Billing area.")
+
+        area_map = load_area_map()
+        original = area_map.build_area_map
+        boom = RuntimeError("boom")
+
+        def _raise_for_v1(vault, *a, **kw):
+            if Path(vault) == v1:
+                raise boom
+            return original(vault, *a, **kw)
+
+        from unittest import mock
+
+        errors: list = []
+        with mock.patch.object(area_map, "build_area_map", side_effect=_raise_for_v1):
+            entries = area_map.build_area_map_multi([v1, v2], errors=errors)
+
+        assert [e.name for e in entries] == ["billing"]
+        assert errors == [(v1, boom)]
+
+    def test_errors_out_param_left_untouched_when_nothing_fails(self, tmp_path):
+        v1 = tmp_path / "v1"
+        (v1 / "area").mkdir(parents=True)
+        _write_area(v1, "auth", ["oauth"], summary="Auth area.")
+
+        area_map = load_area_map()
+        errors: list = []
+        entries = area_map.build_area_map_multi([v1], errors=errors)
+
+        assert [e.name for e in entries] == ["auth"]
+        assert errors == []

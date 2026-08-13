@@ -187,8 +187,17 @@ def build_area_map_multi(
     "a root silently failed" (e.g. to decide whether to emit a degradation
     signal) read it after the call; it is left untouched (``None`` stays
     ``None``, an empty list stays empty) when nothing failed.
+
+    Dedup only ever collapses a name across DIFFERENT roots. Two files
+    colliding on the same frontmatter ``name`` within a single root are both
+    kept — ``build_area_map`` on one root, called directly (the single-vault,
+    pre-multi-vault path), never deduped its own output, and a single-root
+    call through this function must stay byte-identical to that. The
+    single-writer-wins collapse is specifically a cross-vault concern (the
+    same name declared independently in two vaults), not a same-vault one.
     """
-    seen: dict[str, AreaEntry] = {}
+    seen_names: set[str] = set()
+    entries: list[AreaEntry] = []
     for vault in vaults:
         try:
             vault_entries = build_area_map(vault)
@@ -196,11 +205,14 @@ def build_area_map_multi(
             if errors is not None:
                 errors.append((vault, exc))
             continue
+        this_vault_names: set[str] = set()
         for entry in vault_entries:
-            if entry.name not in seen:
-                seen[entry.name] = entry
+            if entry.name in seen_names and entry.name not in this_vault_names:
+                continue
+            entries.append(entry)
+            this_vault_names.add(entry.name)
+        seen_names |= this_vault_names
 
-    entries = list(seen.values())
     entries.sort(key=lambda e: e.name.lower())
     return entries
 

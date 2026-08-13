@@ -22,28 +22,45 @@ def cmd_areas(args) -> int:
 
     Exit code is always 0 — must never fail a session. The one-line stderr
     signal fires only when nothing legitimately resolved: either the config
-    read itself failed (malformed/wrong-shape config), no root resolved at
-    all (every configured root was absent/shared), or every resolved root's
-    `build_area_map` call raised. A healthy vault that simply has zero areas
-    defined is not an error — it renders the degraded "no areas" stdout line
-    with a silent stderr, matching vanilla's byte-identical behavior. A
-    single failing root among several (its `build_area_map` call raised)
-    does not trigger the signal either, as long as another root produced
-    entries — the surviving roots' areas render normally.
+    read itself failed (malformed/wrong-shape config), vault resolution raised
+    something outside that (e.g. an unresolvable ``XDG_CONFIG_HOME``/``HOME``),
+    no root resolved at all (every configured root was absent/shared), or
+    every resolved root's `build_area_map` call raised. A healthy vault that
+    simply has zero areas defined is not an error — it renders the degraded
+    "no areas" stdout line with a silent stderr, matching vanilla's
+    byte-identical behavior. A single failing root among several (its
+    `build_area_map` call raised) does not trigger the signal either, as long
+    as another root produced entries — the surviving roots' areas render
+    normally.
+
+    The whole body runs under a single total guard: this is the command
+    boundary, and nothing below it — vault/shared-path resolution, the merge —
+    may ever escape as a traceback. `_resolve_all_vaults_and_shared` and
+    `build_area_map_multi` already narrow the *expected* failure modes (a
+    malformed config, a single root's `build_area_map` blowing up) to a
+    reported error rather than a raise; this guard exists for the
+    unenumerated rest (e.g. path resolution itself failing) so the contract
+    holds regardless of what a callee below decides is worth its own typed
+    error.
     """
     from ..search import area_map as area_map_mod
 
     _NO_AREAS_LINE = "No areas defined yet."
 
-    all_vaults, shared_paths, error = _resolve_all_vaults_and_shared()
-    roots = [
-        path
-        for _name, path in all_vaults
-        if str(path.resolve()) not in shared_paths and path.exists()
-    ]
+    try:
+        all_vaults, shared_paths, error = _resolve_all_vaults_and_shared()
+        roots = [
+            path
+            for _name, path in all_vaults
+            if str(path.resolve()) not in shared_paths and path.exists()
+        ]
 
-    root_errors: list = []
-    entries = area_map_mod.build_area_map_multi(roots, errors=root_errors)
+        root_errors: list = []
+        entries = area_map_mod.build_area_map_multi(roots, errors=root_errors)
+    except Exception as exc:
+        print(f"lore areas: could not resolve vault ({exc})", file=sys.stderr)
+        print(_NO_AREAS_LINE)
+        return 0
 
     if error is not None:
         print(f"lore areas: could not resolve vaults ({error})", file=sys.stderr)

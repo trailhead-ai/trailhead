@@ -353,8 +353,23 @@ def validate_config(data: dict, env: dict | None = None) -> list:
         A list of :class:`Vault` instances in config order, names normalized.
 
     Raises:
-        VaultConfigError: On any validation failure (see module docstring).
+        VaultConfigError: On any validation failure (see module docstring),
+            including a well-formed-JSON-but-wrong-shape ``data`` (e.g. a
+            top-level list instead of an object, or a ``"vaults"`` array
+            containing non-dict entries) — those raise a bare
+            ``AttributeError``/``TypeError`` from the ``.get()`` calls below,
+            normalized here to ``VaultConfigError`` so this stays the module's
+            single parse+validate boundary: every caller can catch one
+            exception type for "config is bad" rather than also anticipating
+            whatever a malformed shape happens to raise.
     """
+    try:
+        return _validate_config(data, env)
+    except (AttributeError, TypeError) as exc:
+        raise VaultConfigError(f"lore: config.json has an invalid shape: {exc}") from exc
+
+
+def _validate_config(data: dict, env: dict | None) -> list:
     raw_entries = data.get("vaults", [])
 
     # Derive the vaults root for path confinement. We pass the current
