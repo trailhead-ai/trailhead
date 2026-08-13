@@ -10,15 +10,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+from trailhead.capabilities import load_manifest
 from trailhead.harness import ClaudeCodeHarness
 from trailhead.install import run_install
 from trailhead.pathint import ShimDirResult
+
+_REPO_ROOT = Path(__file__).parent.parent.parent
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    return {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path), "HOME": str(home)}
+    return {
+        **os.environ,
+        "TRAILHEAD_STATE_DIR": str(tmp_path),
+        "HOME": str(home),
+        # Pinned, not inherited: TRAILHEAD_CLAUDE_DIR outranks CLAUDE_CONFIG_DIR,
+        # so a developer with a relocated Claude dir still can't be written to.
+        "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude-dir"),
+    }
 
 
 @contextmanager
@@ -401,3 +411,251 @@ class TestShellenvGuidance:
         m["pathint"].assert_not_called()
         out = capsys.readouterr().out
         assert "could not build the shim dir" not in out
+
+
+# ---------------------------------------------------------------------------
+# Plugin-declared rulesets
+# ---------------------------------------------------------------------------
+
+
+def _outpost_ruleset() -> tuple[str, str]:
+    """The ruleset name + content outpost's manifest declares, read from disk."""
+    manifest = load_manifest(_REPO_ROOT / "tools" / "outpost" / "capabilities.toml")
+    # utf-8 explicitly: install pins it, and the ruleset carries non-ASCII prose
+    # that a locale-default codec would fail to read (or read differently).
+    content = (manifest.plugin_root / manifest.ruleset).read_text(encoding="utf-8")
+    return f"trailhead-{manifest.tool_name}", content
+
+
+class _RecordingHarness(ClaudeCodeHarness):
+    """Claude Code harness that records the ruleset installs asked of it."""
+
+    def __init__(self):
+        self.ruleset_calls = []
+
+    def install_user_ruleset(self, name, content, *, env=None):
+        self.ruleset_calls.append((name, content))
+
+
+class _RulesetlessHarness(ClaudeCodeHarness):
+    """Stands in for a harness with no user-level ruleset support."""
+
+    def user_ruleset_path(self, name, *, env=None):
+        return None
+
+    def user_ruleset_status(self, name, content, *, env=None):
+        return "unsupported"
+
+    def install_user_ruleset(self, name, content, *, env=None):
+        raise AssertionError("an unsupported harness must never be asked to install")
+
+
+class _RecorderA(ClaudeCodeHarness):
+    """Registry-constructed recorder; get_harness builds a fresh instance per call,
+    so installs are recorded on the CLASS."""
+
+    name = "claude_code"
+    installs: list[tuple[str, str]] = []
+
+    def install_user_ruleset(self, name, content, *, env=None):
+        type(self).installs.append((self.name, name))
+
+
+class _RecorderB(_RecorderA):
+    name = "codex"
+    installs: list[tuple[str, str]] = []
+
+
+class TestRulesetInstall:
+    def test_declared_ruleset_installed_into_every_resolved_harness(self, tmp_path):
+        """Two resolved harnesses each get the ruleset — not just the first."""
+        _RecorderA.installs = []
+        _RecorderB.installs = []
+        name, _ = _outpost_ruleset()
+        registry = {"claude_code": _RecorderA, "codex": _RecorderB}
+        with _patched(detected=True), patch.dict(
+            "trailhead.harness._HARNESSES", registry, clear=True
+        ), patch(
+            "trailhead.install.detect_harnesses",
+            return_value=[_RecorderA(), _RecorderB()],
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert _RecorderA.installs == [("claude_code", name)]
+        assert _RecorderB.installs == [("codex", name)]
+
+    def test_declared_ruleset_installed_once_per_harness(self, tmp_path):
+        harness = _RecordingHarness()
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert harness.ruleset_calls == [_outpost_ruleset()]
+
+    def test_ruleset_name_comes_from_the_plugin_key_not_the_manifest(
+        self, tmp_path, capsys
+    ):
+        """The installed filename is derived from the plugin key install already
+        trusts (the same key that decides whether the plugin is selected at all),
+        never from the ``[tool] name`` the plugin file declares about itself —
+        which is why a manifest cannot aim the write at a path of its choosing,
+        nor collide with another plugin's ruleset by declaring its name.
+        """
+        plugin_root = tmp_path / "plugin"
+        plugin_root.mkdir()
+        (plugin_root / "rules.md").write_text("rules\n", encoding="utf-8")
+        manifest = self._manifest_with_ruleset(plugin_root, tool_name="/../../CLAUDE")
+        harness = _RecordingHarness()
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ), patch(
+            "trailhead.install.ruleset_bearing_manifests",
+            return_value={"outpost": manifest},
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert harness.ruleset_calls == [("trailhead-outpost", "rules\n")]
+        assert "Traceback" not in capsys.readouterr().err
+
+    def test_unwired_plugin_contributes_no_ruleset(self, tmp_path):
+        harness = _RecordingHarness()
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ):
+            run_install(env=_env(tmp_path), plugins=["lore"], quiet=True)
+        assert harness.ruleset_calls == []
+
+    def test_ruleset_written_to_the_injected_claude_dir(self, tmp_path):
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        name, content = _outpost_ruleset()
+        with _patched(detected=True):
+            run_install(env=env, quiet=True)
+        installed = tmp_path / "claude" / "rules" / f"{name}.md"
+        assert installed.read_text(encoding="utf-8") == content
+
+    def test_reinstall_is_a_no_op_and_reports_up_to_date(self, tmp_path, capsys):
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        name, _ = _outpost_ruleset()
+        target = tmp_path / "claude" / "rules" / f"{name}.md"
+        with _patched(detected=True):
+            run_install(env=env, quiet=True)
+            first_mtime = target.stat().st_mtime_ns
+            capsys.readouterr()
+            run_install(env=env)
+        out = capsys.readouterr().out
+        assert target.stat().st_mtime_ns == first_mtime  # no write, no swap
+        assert "up to date" in out
+
+    def test_unsupported_harness_says_so_and_writes_nothing(self, tmp_path, capsys):
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=_RulesetlessHarness()
+        ):
+            rc = run_install(env=env, quiet=True)
+        assert rc == 0
+        assert "no user-level ruleset support" in capsys.readouterr().err
+        assert not (tmp_path / "claude" / "rules").exists()
+
+    def test_unwritable_ruleset_surface_warns_without_failing_the_install(
+        self, tmp_path, capsys
+    ):
+        harness = _RecordingHarness()
+        harness.install_user_ruleset = lambda *a, **kw: (_ for _ in ()).throw(
+            OSError("read-only file system")
+        )
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert "could not install the outpost ruleset" in capsys.readouterr().err
+
+    def _manifest_with_ruleset(self, plugin_root: Path, *, tool_name: str = "outpost"):
+        from trailhead.capabilities import Manifest
+
+        return Manifest(
+            tool_name=tool_name,
+            plugin_root=plugin_root,
+            base=[],
+            hooks_json=None,
+            cli_bin=None,
+            ruleset="rules.md",
+            validate=False,
+            subagents={},
+            skills={},
+        )
+
+    def test_unreadable_declared_ruleset_warns_without_failing_the_install(
+        self, tmp_path, capsys
+    ):
+        """A declared ruleset that cannot be READ is a clean warning, not a traceback."""
+        plugin_root = tmp_path / "plugin"
+        plugin_root.mkdir()
+        rules = plugin_root / "rules.md"
+        rules.write_text("rules\n", encoding="utf-8")
+        harness = _RecordingHarness()
+        # The denial is injected rather than expressed as a permission bit:
+        # chmod(0o000) does not deny root, so a suite running as root in a
+        # container would silently lose the failure this test exists to check.
+        real_read_text = Path.read_text
+
+        def denied(self, *args, **kwargs):
+            if self.resolve() == rules.resolve():
+                raise PermissionError(13, "Permission denied")
+            return real_read_text(self, *args, **kwargs)
+
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ), patch(
+            "trailhead.install.ruleset_bearing_manifests",
+            return_value={"outpost": self._manifest_with_ruleset(plugin_root)},
+        ), patch.object(Path, "read_text", denied):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert harness.ruleset_calls == []
+        err = capsys.readouterr().err
+        assert "trailhead: could not install the outpost ruleset" in err
+        assert "Traceback" not in err
+
+    def test_non_utf8_file_on_the_ruleset_surface_warns_and_install_continues(
+        self, tmp_path, capsys
+    ):
+        """A pre-existing rules file with invalid utf-8 bytes degrades cleanly.
+
+        The drift compare decodes the file already on disk as strict utf-8, so a
+        hand-edited or legacy file there can raise a decode error. That must warn
+        and leave the rest of the install — shim build, CLI bootstrap — running.
+        """
+        env = {**_env(tmp_path), "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        name, _ = _outpost_ruleset()
+        target = tmp_path / "claude" / "rules" / f"{name}.md"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"legacy rules \xff\xfe not utf-8\n")
+        with _patched(detected=True) as m:
+            rc = run_install(env=env, quiet=True)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "trailhead: could not install the outpost ruleset" in err
+        assert "Traceback" not in err
+        # The steps that follow the ruleset install still ran.
+        m["pathint"].assert_called_once()
+        m["lore_init"].assert_called_once()
+
+    def test_missing_declared_ruleset_warns_without_failing_the_install(
+        self, tmp_path, capsys
+    ):
+        """A manifest that declares a ruleset file it doesn't ship degrades cleanly."""
+        plugin_root = tmp_path / "plugin"
+        plugin_root.mkdir()
+        harness = _RecordingHarness()
+        with _patched(detected=True), patch(
+            "trailhead.install.get_harness", return_value=harness
+        ), patch(
+            "trailhead.install.ruleset_bearing_manifests",
+            return_value={"outpost": self._manifest_with_ruleset(plugin_root)},
+        ):
+            rc = run_install(env=_env(tmp_path), quiet=True)
+        assert rc == 0
+        assert harness.ruleset_calls == []
+        assert "could not install the outpost ruleset" in capsys.readouterr().err

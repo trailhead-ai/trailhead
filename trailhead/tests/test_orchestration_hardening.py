@@ -70,7 +70,14 @@ class TestCliErrorGuard:
 def _env(tmp_path: Path) -> dict[str, str]:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    return {**os.environ, "TRAILHEAD_STATE_DIR": str(tmp_path), "HOME": str(home)}
+    return {
+        **os.environ,
+        "TRAILHEAD_STATE_DIR": str(tmp_path),
+        "HOME": str(home),
+        # Pinned, not inherited: TRAILHEAD_CLAUDE_DIR outranks CLAUDE_CONFIG_DIR,
+        # so a developer with a relocated Claude dir still can't be written to.
+        "TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude-dir"),
+    }
 
 
 @contextmanager

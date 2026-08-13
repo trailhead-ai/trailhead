@@ -167,16 +167,33 @@ class Harness(ABC):
     # writes nothing but emits ``UNSUPPORTED_RULESET_NOTICE`` so a user is never
     # left believing the ruleset installed.  Harnesses that DO support it (e.g.
     # Claude Code → ``~/.claude/rules/<name>.md``) override all three.
+    #
+    # All three accept an injectable ``env`` so a caller can redirect the harness
+    # config dir; the defaults ignore it (there is nothing to resolve), but every
+    # caller may pass it uniformly without knowing which harness it holds.
+    #
+    # ``name`` CONTRACT: a ruleset name is an opaque identifier, not a path — it
+    # may never contain a path separator, ``..``, or a leading dot.  An
+    # implementation that turns the name into a filesystem path writes OUTSIDE
+    # any trailhead-owned tree (into the user's harness config dir), so it MUST
+    # reject a name violating this before creating a directory or writing a byte,
+    # raising ``HarnessError`` — which the CLI renders as a clean
+    # ``trailhead: <message>``.  Callers must not rely on their own name-building
+    # being the only guard.
 
-    def install_user_ruleset(self, name: str, content: str) -> None:
+    def install_user_ruleset(
+        self, name: str, content: str, *, env: dict[str, str] | None = None
+    ) -> None:
         """Install a user-level ruleset; default no-op that announces itself."""
         print(UNSUPPORTED_RULESET_NOTICE)
 
-    def user_ruleset_path(self, name: str) -> Path | None:
+    def user_ruleset_path(self, name: str, *, env: dict[str, str] | None = None) -> Path | None:
         """Path to the installed ruleset, or ``None`` when unsupported."""
         return None
 
-    def user_ruleset_status(self, name: str, content: str) -> str:
+    def user_ruleset_status(
+        self, name: str, content: str, *, env: dict[str, str] | None = None
+    ) -> str:
         """One of ``current`` / ``stale`` / ``missing`` / ``unsupported``."""
         return "unsupported"
 

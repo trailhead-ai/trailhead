@@ -229,6 +229,17 @@ class TestUserRulesetBaseDefault:
         assert out.strip() == UNSUPPORTED_RULESET_NOTICE
         assert "trailhead-lore" not in out  # static notice, no per-name interpolation
 
+    def test_defaults_accept_an_injected_env_and_still_degrade(self, tmp_path, capsys):
+        # Callers pass ``env=`` so tests never touch the real Claude dir; a harness
+        # without ruleset support must accept it and degrade all the same.
+        h = _BareHarness()
+        env = {"TRAILHEAD_CLAUDE_DIR": str(tmp_path / "claude")}
+        assert h.user_ruleset_path("trailhead-outpost", env=env) is None
+        assert h.user_ruleset_status("trailhead-outpost", "body", env=env) == "unsupported"
+        assert h.install_user_ruleset("trailhead-outpost", "body", env=env) is None
+        assert capsys.readouterr().out.strip() == UNSUPPORTED_RULESET_NOTICE
+        assert not (tmp_path / "claude").exists()  # nothing written anywhere
+
 
 class TestClaudeConfigDirRelocation:
     """Every path derived from the Claude config dir follows ``CLAUDE_CONFIG_DIR``.
@@ -348,6 +359,63 @@ class TestClaudeCodeUserRuleset:
         h.install_user_ruleset("trailhead-lore", content, env=env)
         (claude_dir / "rules" / "trailhead-lore.md").unlink()
         assert h.user_ruleset_status("trailhead-lore", content, env=env) == "missing"
+
+
+class TestClaudeCodeUserRulesetNameConfinement:
+    """A ruleset name may only ever address a file DIRECTLY inside the rules dir.
+
+    ``~/.claude`` is outside any trailhead-owned tree, and the files under it are
+    loaded into every session on the machine — so a name carrying separators or
+    ``..`` must be refused BEFORE any directory is created or any byte written,
+    not merely be unlikely to resolve.
+    """
+
+    def _env(self, claude_dir):
+        return {"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+
+    ESCAPES = [
+        "/../../CLAUDE",
+        "../CLAUDE",
+        "../../CLAUDE",
+        "sub/nested",
+        "/abs",
+        "..",
+        ".",
+        "",
+    ]
+
+    @pytest.mark.parametrize("name", ESCAPES)
+    def test_path_rejects_an_escaping_name(self, tmp_path, name):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        with pytest.raises(HarnessError, match="ruleset name"):
+            h.user_ruleset_path(name, env=self._env(claude_dir))
+
+    @pytest.mark.parametrize("name", ESCAPES)
+    def test_install_rejects_an_escaping_name_and_creates_nothing(self, tmp_path, name):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        with pytest.raises(HarnessError, match="ruleset name"):
+            h.install_user_ruleset(name, "payload\n", env=self._env(claude_dir))
+        assert list(claude_dir.iterdir()) == []  # no rules/, no attacker-directed dirs
+        assert not (tmp_path / "CLAUDE.md").exists()
+
+    @pytest.mark.parametrize("name", ESCAPES)
+    def test_status_rejects_an_escaping_name(self, tmp_path, name):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        with pytest.raises(HarnessError, match="ruleset name"):
+            h.user_ruleset_status(name, "payload\n", env=self._env(claude_dir))
+
+    def test_ordinary_name_still_works(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        h = ClaudeCodeHarness()
+        h.install_user_ruleset("trailhead-outpost", "body\n", env=self._env(claude_dir))
+        assert (claude_dir / "rules" / "trailhead-outpost.md").read_text() == "body\n"
 
 
 class TestSessionTranscriptPathBaseDefault:

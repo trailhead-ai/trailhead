@@ -14,6 +14,7 @@ Pinned rules:
   - validate=true asserts base dirs exist (dir) and hooks_json exists (file).
 """
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from trailhead.capabilities import (
     Manifest,
     ManifestError,
     load_manifest,
+    ruleset_bearing_manifests,
 )
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
@@ -31,6 +33,7 @@ _CRAFT_MANIFEST = _REPO_ROOT / "tools" / "craft" / "capabilities.toml"
 _CAMP_MANIFEST = _REPO_ROOT / "tools" / "camp" / "capabilities.toml"
 _PORTAGE_MANIFEST = _REPO_ROOT / "tools" / "portage" / "capabilities.toml"
 _RANGER_MANIFEST = _REPO_ROOT / "tools" / "ranger" / "capabilities.toml"
+_OUTPOST_MANIFEST = _REPO_ROOT / "tools" / "outpost" / "capabilities.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -408,3 +411,108 @@ class TestCliBin:
         m = load_manifest(_RANGER_MANIFEST)
         assert m.cli_bin == "bin/ranger"
         assert (m.plugin_root / m.cli_bin).is_file()
+
+
+# ---------------------------------------------------------------------------
+# ruleset
+# ---------------------------------------------------------------------------
+
+
+def _make_ruleset(plugin_root: Path, rel: str) -> Path:
+    p = plugin_root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("# rules\n")
+    return p
+
+
+class TestRuleset:
+    def test_ruleset_parses(self, tmp_path):
+        root = _make_plugin_dir(tmp_path, "mytool")
+        _make_ruleset(root, "rules.md")
+        content = '[tool]\nname = "mytool"\nruleset = "rules.md"\n'
+        m = load_manifest(_write_manifest(tmp_path, content))
+        assert m.ruleset == "rules.md"
+
+    def test_ruleset_path_is_the_confined_resolved_file(self, tmp_path):
+        root = _make_plugin_dir(tmp_path, "mytool")
+        target = _make_ruleset(root, "rules.md")
+        content = '[tool]\nname = "mytool"\nruleset = "rules.md"\n'
+        m = load_manifest(_write_manifest(tmp_path, content))
+        assert m.ruleset_path() == target.resolve()
+
+    def test_ruleset_path_reasserts_confinement(self, tmp_path):
+        """Confinement is re-checked on access, not only at load time."""
+        root = _make_plugin_dir(tmp_path, "mytool")
+        m = load_manifest(_write_manifest(tmp_path, '[tool]\nname = "mytool"\n'))
+        escaped = replace(m, ruleset="../../etc/passwd", plugin_root=root)
+        with pytest.raises(ConfineError) as exc_info:
+            escaped.ruleset_path()
+        assert exc_info.value.context == "ruleset"
+
+    def test_ruleset_path_without_a_declared_ruleset_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "mytool")
+        m = load_manifest(_write_manifest(tmp_path, '[tool]\nname = "mytool"\n'))
+        with pytest.raises(ValueError):
+            m.ruleset_path()
+
+    def test_ruleset_absent_is_none(self, tmp_path):
+        _make_plugin_dir(tmp_path, "mytool")
+        m = load_manifest(_write_manifest(tmp_path, '[tool]\nname = "mytool"\n'))
+        assert m.ruleset is None
+
+    def test_existing_manifests_without_ruleset_still_load(self):
+        for path in (_LORE_MANIFEST, _CRAFT_MANIFEST, _CAMP_MANIFEST):
+            assert load_manifest(path).ruleset is None
+
+    def test_ruleset_traversal_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "badtool")
+        content = '[tool]\nname = "badtool"\nruleset = "../../../etc/passwd"\nvalidate = false\n'
+        with pytest.raises(ConfineError) as exc_info:
+            load_manifest(_write_manifest(tmp_path, content))
+        assert exc_info.value.context == "ruleset"
+
+    def test_absolute_ruleset_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "badtool")
+        content = '[tool]\nname = "badtool"\nruleset = "/etc/passwd"\nvalidate = false\n'
+        with pytest.raises(ConfineError) as exc_info:
+            load_manifest(_write_manifest(tmp_path, content))
+        assert exc_info.value.context == "ruleset"
+
+    def test_ruleset_pointing_at_a_directory_raises(self, tmp_path):
+        root = _make_plugin_dir(tmp_path, "mytool")
+        (root / "rules.md").mkdir()
+        content = '[tool]\nname = "mytool"\nruleset = "rules.md"\n'
+        with pytest.raises(ManifestError):
+            load_manifest(_write_manifest(tmp_path, content))
+
+    def test_missing_ruleset_raises(self, tmp_path):
+        _make_plugin_dir(tmp_path, "mytool")
+        content = '[tool]\nname = "mytool"\nruleset = "rules.md"\n'
+        with pytest.raises(ManifestError):
+            load_manifest(_write_manifest(tmp_path, content))
+
+    def test_outpost_declares_a_ruleset(self):
+        m = load_manifest(_OUTPOST_MANIFEST)
+        assert m.ruleset is not None
+        assert (m.plugin_root / m.ruleset).is_file()
+
+
+class TestRulesetBearingManifests:
+    def test_returns_only_declaring_manifests_in_input_order(self, tmp_path):
+        for name, declares in (("a", False), ("b", True), ("c", True)):
+            tool_dir = tmp_path / name
+            root = _make_plugin_dir(tool_dir, name)
+            body = f'[tool]\nname = "{name}"\n'
+            if declares:
+                _make_ruleset(root, "rules.md")
+                body += 'ruleset = "rules.md"\n'
+            _write_manifest(tool_dir, body)
+
+        paths = {n: tmp_path / n / "capabilities.toml" for n in ("c", "a", "b")}
+        result = ruleset_bearing_manifests(paths)
+        assert list(result) == ["c", "b"]
+        assert all(m.ruleset == "rules.md" for m in result.values())
+
+    def test_outpost_is_ruleset_bearing_in_the_repo(self):
+        paths = {"lore": _LORE_MANIFEST, "outpost": _OUTPOST_MANIFEST}
+        assert list(ruleset_bearing_manifests(paths)) == ["outpost"]
