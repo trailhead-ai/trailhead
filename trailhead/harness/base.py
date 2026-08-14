@@ -344,6 +344,16 @@ class Harness(ABC):
     # ``workspace`` and applying the env scrub returned by
     # ``session_launch_env_unset`` are the exec-owning caller's job, done at
     # exec time, not here.
+    #
+    # Both-or-neither invariants (enforced by ``test_harness.py``, not by this
+    # class): a harness that overrides ``session_launch`` must override
+    # ``session_launch_modality`` and ``session_launch_env_unset`` too — all
+    # three non-``None`` together, or all three left at the base ``None``
+    # together, never a partial trio. A non-``None`` modality must additionally
+    # be a member of :data:`MODALITIES`, not merely non-``None``. Likewise,
+    # ``session_enumerate`` and ``parse_session_list`` must be overridden
+    # together or not at all. A half-implemented harness is worse than an
+    # unimplemented one: it advertises a capability it cannot actually honor.
 
     def session_launch(self, workspace: Path, session_id: str) -> list[str] | None:
         """DIVERGES: raises :class:`HarnessError` on a malformed ``session_id``, where

@@ -1,5 +1,7 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
+from pathlib import Path
+
 import pytest
 
 from trailhead.harness import (
@@ -11,6 +13,7 @@ from trailhead.harness import (
     get_harness,
     known_harness_names,
 )
+from trailhead.harness import _HARNESSES
 from trailhead.harness.base import MODALITIES, MODALITY_TTY_REQUIRED, UNSUPPORTED_RULESET_NOTICE
 
 
@@ -733,6 +736,113 @@ class TestModalityVocabulary:
 
         assert MODALITIES == {MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI}
         assert isinstance(MODALITIES, frozenset)
+
+
+class _LaunchOnlyBrokenHarness(_BareHarness):
+    """Implements session_launch but not the other two launch-trio members —
+    the base defaults leave modality/env_unset at None, breaking the triple."""
+
+    name = "launch-only-broken"
+
+    def session_launch(self, workspace, session_id):
+        return ["fake", "argv"]
+
+
+class _BadModalityHarness(_BareHarness):
+    """Implements the full launch trio, but the modality is spelled outside
+    MODALITIES — the membership assertion, not just non-None, must catch it."""
+
+    name = "bad-modality"
+
+    def session_launch(self, workspace, session_id):
+        return ["fake", "argv"]
+
+    def session_launch_modality(self):
+        return "headless"
+
+    def session_launch_env_unset(self):
+        return []
+
+
+class _EnumerateOnlyBrokenHarness(_BareHarness):
+    """Implements session_enumerate but not parse_session_list — the base
+    default leaves parse_session_list at None, breaking the pair."""
+
+    name = "enumerate-only-broken"
+
+    def session_enumerate(self, workspace=None):
+        return ["fake"]
+
+
+class TestBothOrNeitherInvariants:
+    """Both-or-neither contracts on the launch trio and the enumeration pair.
+
+    (a) session_launch / session_launch_modality / session_launch_env_unset must
+    be non-None together or None together, and a non-None modality must be a
+    MEMBER of MODALITIES — not merely non-None. (b) session_enumerate and
+    parse_session_list must likewise be non-None together or None together.
+
+    ``test_every_registered_harness_satisfies_both_invariants`` iterates the
+    real registry (``_HARNESSES``), which holds exactly ONE entry
+    (ClaudeCodeHarness) today. Passing that test proves the invariant holds for
+    that one harness — it is the CONTRACT every future harness added to the
+    registry must satisfy, NOT evidence that this test exercises cross-harness
+    coverage. The fixture-based tests above it are what prove the assertions
+    inside the helper actually bite, by breaking each half deliberately and
+    watching the helper fail.
+    """
+
+    @staticmethod
+    def _assert_launch_triple(harness: Harness) -> None:
+        launch = harness.session_launch(Path("/tmp/workspace"), "sess-1")
+        modality = harness.session_launch_modality()
+        env_unset = harness.session_launch_env_unset()
+        values = (launch, modality, env_unset)
+        non_none = [v is not None for v in values]
+        assert all(non_none) or not any(non_none), (
+            f"{type(harness).__name__}: session_launch/session_launch_modality/"
+            f"session_launch_env_unset must be non-None together or None "
+            f"together, got {values!r}"
+        )
+        if modality is not None:
+            assert modality in MODALITIES, (
+                f"{type(harness).__name__}: session_launch_modality() returned "
+                f"{modality!r}, which is not a member of MODALITIES"
+            )
+
+    @staticmethod
+    def _assert_enumeration_pair(harness: Harness) -> None:
+        enumerate_result = harness.session_enumerate()
+        parse_result = harness.parse_session_list("[]")
+        pair = (enumerate_result is None, parse_result is None)
+        assert pair[0] == pair[1], (
+            f"{type(harness).__name__}: session_enumerate/parse_session_list "
+            f"must be non-None together or None together, got "
+            f"enumerate={enumerate_result!r} parse={parse_result!r}"
+        )
+
+    def test_launch_only_broken_harness_fails_the_triple_invariant(self):
+        with pytest.raises(AssertionError):
+            self._assert_launch_triple(_LaunchOnlyBrokenHarness())
+
+    def test_modality_outside_vocabulary_fails_the_membership_assertion(self):
+        with pytest.raises(AssertionError):
+            self._assert_launch_triple(_BadModalityHarness())
+
+    def test_enumerate_only_broken_harness_fails_the_pair_invariant(self):
+        with pytest.raises(AssertionError):
+            self._assert_enumeration_pair(_EnumerateOnlyBrokenHarness())
+
+    def test_bare_harness_with_neither_concept_passes_both_invariants(self):
+        self._assert_launch_triple(_BareHarness())
+        self._assert_enumeration_pair(_BareHarness())
+
+    def test_every_registered_harness_satisfies_both_invariants(self):
+        assert len(_HARNESSES) >= 1
+        for cls in _HARNESSES.values():
+            harness = cls()
+            self._assert_launch_triple(harness)
+            self._assert_enumeration_pair(harness)
 
 
 class TestSessionRecord:
