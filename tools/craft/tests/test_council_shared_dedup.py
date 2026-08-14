@@ -124,31 +124,69 @@ PRESENTATION_ELEMENTS = (
     "before any mechanism",
     # 2. mechanism paragraph names the concrete worst case
     "concrete worst case",
-    # 3. the remedy gets its own line
+    # 3. the remedy gets its own line, under a label callers can rely on
     "on its own line",
+    "`Fix:`",
     # 4. internal shorthand is last, and only when it earns its place
     "only after the plain statement",
 )
 
+# The subset distinctive enough to mean "this file re-states the contract" rather
+# than "this file happens to use ordinary English". Generic phrases make bad
+# canaries: an unrelated future sentence would trip them with a misleading message.
+PRESENTATION_CANARIES = (
+    "what goes wrong, and for whom",
+    "concrete worst case",
+    "only after the plain statement",
+)
 
-def test_presentation_contract_in_shared():
-    text = SHARED.read_text()
+
+def synthesis_section(text):
+    """The Synthesis section body — the contract has to live inside it.
+
+    Item 3 of the synthesis list ends "in the shape below", so a contract block
+    hoisted above Synthesis would leave that pointer aimed at nothing.
+    """
+    start = text.index("## Synthesis")
+    rest = text.find("\n## ", start + 1)
+    return text[start:] if rest == -1 else text[start:rest]
+
+
+def test_presentation_contract_in_shared_synthesis_section():
+    section = synthesis_section(SHARED.read_text())
     for element in PRESENTATION_ELEMENTS:
-        assert element in text, (
-            f"_shared/council.md must state {element!r} — the per-finding presentation "
-            "contract for findings shown to a human lives here, in one copy"
+        assert element in section, (
+            f"_shared/council.md's Synthesis section must state {element!r} — the "
+            "per-finding presentation contract for findings shown to a human lives "
+            "here, in one copy, below the list item that points at it"
         )
 
 
 def test_presentation_contract_not_duplicated_into_callers():
     for skill in (PLAN, CONSULT, GAUNTLET):
         text = skill.read_text()
-        for element in PRESENTATION_ELEMENTS:
+        for element in PRESENTATION_CANARIES:
             assert element not in text, (
                 f"{skill.parent.name}/SKILL.md copies the presentation contract "
                 f"({element!r}) instead of referencing _shared/council.md — two copies "
                 "are how the wording drifts apart"
             )
+
+
+def test_human_facing_callers_bind_to_the_finding_shape():
+    """Every skill that presents a consolidated list must point at the shape.
+
+    Restating the "present the consolidated list" instruction without the pointer
+    is how a caller silently stops inheriting the contract — the report reads fine
+    to its author and reverts to shorthand-first prose for everyone else.
+    """
+    for skill in (PLAN, CONSULT, GAUNTLET):
+        text = skill.read_text()
+        assert "How a finding reads" in text, (
+            f"{skill.parent.name}/SKILL.md presents a consolidated list to a human but "
+            "never points at 'How a finding reads' in _shared/council.md, so it does not "
+            "inherit the per-finding shape"
+        )
 
 
 def test_prompt_template_skeleton_in_shared():

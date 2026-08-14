@@ -169,7 +169,7 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
 Present the consolidated change list grouped **Critical → Important → Minor**, with the passes
 behind each finding named alongside it. Write every finding in the shape "How a finding reads"
 defines in `_shared/council.md` — that shape is what makes the list readable by someone who has
-not read the spec.
+not read the document under review.
 
 ### 5. Disposition (required for every Critical)
 

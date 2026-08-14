@@ -74,7 +74,8 @@ here: members write in a voice that stands on content, not on the role tag.
 Synthesize per `_shared/council.md`: de-duplicate by issue (not by member),
 auto-downgrade speculative Criticals (stating which and why), and present the
 consolidated list grouped Critical → Important → Minor with the member count
-behind each multi-lens finding.
+behind each multi-lens finding, writing every finding in the shape
+"How a finding reads" defines there.
 
 The synthesis is the deliverable. Unlike the planning Council Review there is no
 plan file to persist into and no disposition gate — `consult` answers a question

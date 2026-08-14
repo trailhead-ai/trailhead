@@ -197,9 +197,11 @@ After all four members return:
 2. **Auto-downgrade speculative Criticals.** A Critical that is vague ("this could be a problem"), requires guessing about scale / future state / user behavior, or names no concrete failure scenario is reclassified Important. State explicitly which findings were downgraded and why.
 3. **Present the consolidated list**, grouped Critical → Important → Minor, noting the member count behind each multi-lens finding, and writing each finding in the shape below.
 
+The planning Council Review step adds a disposition gate and persists findings into the plan file; `consult` stops here and hands the synthesized view back to the user.
+
 ### How a finding reads
 
-Every finding shown to a human takes this shape. Someone who has not read the document under review should understand the Critical list on the first pass.
+Every finding in that consolidated list — the one presented to the user in session — takes this shape. Someone who has not read the document under review should understand the Critical list on the first pass. (The `## Council Review` section `plan` persists into the plan file is a separate, one-line-per-finding record schema; `plan/SKILL.md` owns its shape, and this contract does not govern it.)
 
 - **Headline first.** One line, everyday words: what goes wrong, and for whom. It comes *before any mechanism* — no setup, no citation, no shorthand.
 - **Then the mechanism.** A short paragraph: what the document says, what reality does, and the concrete worst case, stated as an event ("we delete a workspace with a live session still in it").
@@ -207,5 +209,3 @@ Every finding shown to a human takes this shape. Someone who has not read the do
 - **Shorthand last, if at all.** Pass names, invariant tags, flag trivia and other internal labels belong only after the plain statement, and only when the reader needs them to act. Which lens or pass raised a finding rides beside it, not inside its body.
 
 If a finding only makes sense to someone who has already read the document, rewrite it.
-
-The planning Council Review step adds a disposition gate and persists findings into the plan file; `consult` stops here and hands the synthesized view back to the user.
