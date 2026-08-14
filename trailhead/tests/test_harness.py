@@ -609,3 +609,98 @@ class TestSessionRetentionSetting:
 
     def test_claude_code_names_its_cleanup_key(self):
         assert ClaudeCodeHarness().session_retention_setting() == "cleanupPeriodDays"
+
+
+class TestLaunchEnumerationBaseDefaults:
+    """The launch/enumeration seam is CONCRETE with degrading defaults: a harness
+    with no launch or enumeration concept answers None for all five, never
+    raises, and never requires implementing anything to instantiate."""
+
+    def test_session_launch_returns_none(self, tmp_path):
+        assert _BareHarness().session_launch(tmp_path, "sess-1") is None
+
+    def test_session_launch_modality_returns_none(self):
+        assert _BareHarness().session_launch_modality() is None
+
+    def test_session_launch_env_unset_returns_none(self):
+        assert _BareHarness().session_launch_env_unset() is None
+
+    def test_session_enumerate_returns_none(self, tmp_path):
+        assert _BareHarness().session_enumerate(tmp_path) is None
+
+    def test_session_enumerate_returns_none_with_no_workspace(self):
+        assert _BareHarness().session_enumerate() is None
+
+    def test_parse_session_list_returns_none(self):
+        assert _BareHarness().parse_session_list("anything") is None
+
+    def test_bare_harness_instantiates_without_implementing_any_of_the_five(self, tmp_path):
+        """All five are non-abstract: subclassing Harness without overriding them
+        must not raise TypeError at instantiation."""
+        h = _BareHarness()
+        assert h.session_launch(tmp_path, "sess-1") is None
+        assert h.session_launch_modality() is None
+        assert h.session_launch_env_unset() is None
+        assert h.session_enumerate() is None
+        assert h.parse_session_list("x") is None
+
+
+class TestModalityVocabulary:
+    def test_constants_have_exact_spec_values(self):
+        from trailhead.harness.base import MODALITY_DETACHED_GUI, MODALITY_TTY_REQUIRED
+
+        assert MODALITY_TTY_REQUIRED == "tty-required"
+        assert MODALITY_DETACHED_GUI == "detached-gui"
+
+    def test_modalities_frozenset_is_exactly_the_two_constants(self):
+        from trailhead.harness.base import (
+            MODALITIES,
+            MODALITY_DETACHED_GUI,
+            MODALITY_TTY_REQUIRED,
+        )
+
+        assert MODALITIES == {MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI}
+        assert isinstance(MODALITIES, frozenset)
+
+
+class TestSessionRecord:
+    def test_is_frozen(self, tmp_path):
+        import dataclasses
+
+        from trailhead.harness.base import SessionRecord
+
+        rec = SessionRecord(
+            session_id="sess-1",
+            cwd=tmp_path,
+            kind="tmux",
+            controllable=True,
+            name=None,
+            pid=None,
+            started_at=None,
+        )
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            rec.session_id = "sess-2"
+
+    def test_accepts_none_for_optional_fields(self, tmp_path):
+        from trailhead.harness.base import SessionRecord
+
+        rec = SessionRecord(
+            session_id="sess-1",
+            cwd=tmp_path,
+            kind="tmux",
+            controllable=True,
+            name=None,
+            pid=None,
+            started_at=None,
+        )
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+    def test_requires_the_four_non_optional_fields(self):
+        import pytest as _pytest
+
+        from trailhead.harness.base import SessionRecord
+
+        with _pytest.raises(TypeError):
+            SessionRecord()
