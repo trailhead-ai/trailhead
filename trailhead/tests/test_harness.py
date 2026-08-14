@@ -1,10 +1,14 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
+import dataclasses
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from trailhead.harness import (
+    _HARNESSES,
     ClaudeCodeHarness,
     Harness,
     HarnessError,
@@ -13,8 +17,13 @@ from trailhead.harness import (
     get_harness,
     known_harness_names,
 )
-from trailhead.harness import _HARNESSES
-from trailhead.harness.base import MODALITIES, MODALITY_TTY_REQUIRED, UNSUPPORTED_RULESET_NOTICE
+from trailhead.harness.base import (
+    MODALITIES,
+    MODALITY_DETACHED_GUI,
+    MODALITY_TTY_REQUIRED,
+    UNSUPPORTED_RULESET_NOTICE,
+    SessionRecord,
+)
 
 
 class TestFactory:
@@ -722,18 +731,10 @@ class TestLaunchEnumerationBaseDefaults:
 
 class TestModalityVocabulary:
     def test_constants_have_exact_spec_values(self):
-        from trailhead.harness.base import MODALITY_DETACHED_GUI, MODALITY_TTY_REQUIRED
-
         assert MODALITY_TTY_REQUIRED == "tty-required"
         assert MODALITY_DETACHED_GUI == "detached-gui"
 
     def test_modalities_frozenset_is_exactly_the_two_constants(self):
-        from trailhead.harness.base import (
-            MODALITIES,
-            MODALITY_DETACHED_GUI,
-            MODALITY_TTY_REQUIRED,
-        )
-
         assert MODALITIES == {MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI}
         assert isinstance(MODALITIES, frozenset)
 
@@ -847,10 +848,6 @@ class TestBothOrNeitherInvariants:
 
 class TestSessionRecord:
     def test_is_frozen(self, tmp_path):
-        import dataclasses
-
-        from trailhead.harness.base import SessionRecord
-
         rec = SessionRecord(
             session_id="sess-1",
             cwd=tmp_path,
@@ -864,8 +861,6 @@ class TestSessionRecord:
             rec.session_id = "sess-2"
 
     def test_accepts_none_for_optional_fields(self, tmp_path):
-        from trailhead.harness.base import SessionRecord
-
         rec = SessionRecord(
             session_id="sess-1",
             cwd=tmp_path,
@@ -880,11 +875,7 @@ class TestSessionRecord:
         assert rec.started_at is None
 
     def test_requires_the_four_non_optional_fields(self):
-        import pytest as _pytest
-
-        from trailhead.harness.base import SessionRecord
-
-        with _pytest.raises(TypeError):
+        with pytest.raises(TypeError):
             SessionRecord()
 
 
@@ -910,15 +901,12 @@ class TestClaudeCodeParseSessionListRoundTrip:
     parses into fully-typed SessionRecords."""
 
     def test_round_trip_parses_every_field(self, tmp_path):
-        import json as _json
-        from datetime import timezone
-
         real = tmp_path / "real"
         real.mkdir()
         link = tmp_path / "link"
         link.symlink_to(real)
 
-        payload = _json.dumps(
+        payload = json.dumps(
             [
                 {
                     "sessionId": "sess-1",
@@ -942,9 +930,7 @@ class TestClaudeCodeParseSessionListRoundTrip:
         assert rec.name == "my session"
         assert rec.pid == 4242
         assert rec.started_at.tzinfo is not None
-        expected = __import__("datetime").datetime.fromtimestamp(
-            1755100800123 / 1000, tz=timezone.utc
-        )
+        expected = datetime.fromtimestamp(1755100800123 / 1000, tz=timezone.utc)
         assert rec.started_at == expected
 
 
