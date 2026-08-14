@@ -27,6 +27,7 @@ SKILLS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "skills"
 SHARED = SKILLS_DIR / "_shared" / "council.md"
 PLAN = SKILLS_DIR / "plan" / "SKILL.md"
 CONSULT = SKILLS_DIR / "consult" / "SKILL.md"
+GAUNTLET = SKILLS_DIR / "gauntlet" / "SKILL.md"
 
 
 # --- byte-for-byte bar strings, captured from plan/SKILL.md before the hoist ---
@@ -108,6 +109,46 @@ def test_synthesis_rule_in_shared():
     text = SHARED.read_text()
     assert "De-duplicate by issue, not by member" in text
     assert "Auto-downgrade speculative" in text
+
+
+# --- how a finding shown to a human must read ---
+#
+# The four elements of the per-finding presentation contract. A report that drops
+# any one of them is the failure this contract exists to prevent: findings stated
+# in internal shorthand before the plain problem, with the remedy buried mid-
+# paragraph. The contract is written once, in the shared file, so every caller
+# that reads it inherits the same shape.
+PRESENTATION_ELEMENTS = (
+    # 1. plain-language headline, and it comes first
+    "what goes wrong, and for whom",
+    "before any mechanism",
+    # 2. mechanism paragraph names the concrete worst case
+    "concrete worst case",
+    # 3. the remedy gets its own line
+    "on its own line",
+    # 4. internal shorthand is last, and only when it earns its place
+    "only after the plain statement",
+)
+
+
+def test_presentation_contract_in_shared():
+    text = SHARED.read_text()
+    for element in PRESENTATION_ELEMENTS:
+        assert element in text, (
+            f"_shared/council.md must state {element!r} — the per-finding presentation "
+            "contract for findings shown to a human lives here, in one copy"
+        )
+
+
+def test_presentation_contract_not_duplicated_into_callers():
+    for skill in (PLAN, CONSULT, GAUNTLET):
+        text = skill.read_text()
+        for element in PRESENTATION_ELEMENTS:
+            assert element not in text, (
+                f"{skill.parent.name}/SKILL.md copies the presentation contract "
+                f"({element!r}) instead of referencing _shared/council.md — two copies "
+                "are how the wording drifts apart"
+            )
 
 
 def test_prompt_template_skeleton_in_shared():
