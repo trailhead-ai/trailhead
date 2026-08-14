@@ -330,6 +330,42 @@ def test_gauntlet_reads_the_shared_council_file():
     )
 
 
+def test_gauntlet_presentation_binds_to_the_shared_finding_shape():
+    """How a finding reads is a contract, and it is defined in one place.
+
+    The adjudicated list is the only gauntlet output a human reads, so the
+    instruction that orders it must also say where the per-finding shape comes
+    from. Without the pointer in that same paragraph, an editor tidying the
+    sentence drops the binding and the report reverts to shorthand-first prose
+    with no test to catch it.
+    """
+    paragraphs = [
+        p
+        for p in GAUNTLET.read_text().split("\n\n")
+        if "Present the consolidated change list" in p
+    ]
+    assert paragraphs, (
+        "gauntlet/SKILL.md must keep the instruction that presents the adjudicated change list"
+    )
+    for paragraph in paragraphs:
+        assert "_shared/council.md" in paragraph, (
+            "gauntlet/SKILL.md's presentation instruction must point at _shared/council.md "
+            "for the per-finding shape, the same way adjudication defers to it for the "
+            f"speculative-Critical downgrade rule; got: {paragraph!r}"
+        )
+        assert "How a finding reads" in paragraph, (
+            "gauntlet/SKILL.md's presentation instruction must name the 'How a finding "
+            "reads' section, not just the file — a bare file reference survives that "
+            f"section being renamed away underneath it; got: {paragraph!r}"
+        )
+
+    shared = GAUNTLET.parent.parent / "_shared" / "council.md"
+    assert "How a finding reads" in shared.read_text(), (
+        "_shared/council.md must keep the 'How a finding reads' heading gauntlet points "
+        "at, or the cross-file reference dangles"
+    )
+
+
 def test_gauntlet_does_not_reinline_council_scaffolding():
     """The roster, prompt template, and bars live in _shared/council.md — one copy."""
     text = GAUNTLET.read_text()
