@@ -466,13 +466,21 @@ class Harness(ABC):
         - Returns ``[]`` ONLY for a well-formed, empty listing.
         - RAISES :class:`HarnessError` on output that cannot be decoded —
           never silently drops it and never returns ``None`` for that case.
-          Every raised error names the offending field and carries a
+          Every raised error names the offending field (or the decode
+          failure, which belongs to no single field) and carries a
           BOUNDED excerpt of the raw output — bounded across the whole
           payload, not per field, since a field such as ``cwd`` can carry a
           username-bearing path that must never spill unbounded into logs.
+        - A record whose ``session_id``, ``cwd``, or ``kind`` is absent,
+          null, or of the wrong type RAISES — those three are required, and
+          neither a record's identity nor its location can be guessed. This
+          is a positive rule, not merely the complement of the next one.
         - ``name``, ``pid``, and ``started_at`` map to ``None`` when absent,
           null, or of the wrong type — they are optional fields, and a
-          malformed value degrades rather than raising.
+          malformed value degrades rather than raising. "Cannot be used"
+          counts as malformed even when the type is right (an out-of-range
+          ``started_at``, say): degrading costs one field, while raising
+          would discard every well-formed record in the same payload.
         - An unrecognized ``kind`` is KEPT in the record, with
           ``controllable=False`` — a session of a kind this harness version
           doesn't yet classify is still a real, live session, not one to

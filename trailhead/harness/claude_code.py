@@ -679,11 +679,17 @@ class ClaudeCodeHarness(Harness):
                     started_at = datetime.fromtimestamp(
                         started_at_raw / 1000, tz=timezone.utc
                     )
-                except (ValueError, OverflowError) as exc:
-                    raise HarnessError(
-                        f"claude agents --json: record has invalid "
-                        f"'startedAt': {exc}: {_excerpt(output)}"
-                    ) from None
+                except (ValueError, OverflowError):
+                    # DEGRADE, don't raise.  ``startedAt`` is an OPTIONAL field,
+                    # so the base contract maps an unusable value to None rather
+                    # than discarding the record — and with it every well-formed
+                    # record in the same payload.  The values that land here are
+                    # exactly the schema drift the spec anticipates: a CLI that
+                    # starts emitting epoch MICROS or NANOS instead of millis, or
+                    # a bare Infinity/NaN (which ``json.loads`` accepts).
+                    # Degrading turns that into "sessions with unknown start
+                    # times" instead of "no sessions at all".
+                    started_at = None
 
             records.append(
                 SessionRecord(

@@ -16,6 +16,7 @@ from trailhead.harness import (
     get_harness,
     known_harness_names,
 )
+from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
 from trailhead.harness.base import (
     MODALITIES,
     MODALITY_DETACHED_GUI,
@@ -764,6 +765,24 @@ class _BadModalityHarness(_BareHarness):
         return []
 
 
+class _NoScrubListHarness(_BareHarness):
+    """Overrides the whole launch trio but answers None for the scrub list —
+    so override-detection alone passes it. The value assertion must catch it:
+    a launch-capable harness with nothing to scrub returns [], and None here
+    would make a caller skip the credential scrub."""
+
+    name = "no-scrub-list"
+
+    def session_launch(self, workspace, session_id):
+        return ["fake", "argv"]
+
+    def session_launch_modality(self):
+        return MODALITY_TTY_REQUIRED
+
+    def session_launch_env_unset(self):
+        return None
+
+
 class _EnumerateOnlyBrokenHarness(_BareHarness):
     """Implements session_enumerate but not parse_session_list — the base
     default leaves parse_session_list at None, breaking the pair."""
@@ -816,9 +835,25 @@ class TestBothOrNeitherInvariants:
                 f"{type(harness).__name__}: session_launch_modality() returned "
                 f"{modality!r}, which is not a member of MODALITIES"
             )
+            # The VALUE half, not just the override half. A harness that
+            # advertises launch but answers None here would have its caller
+            # skip the credential scrub entirely — and unlike session_launch,
+            # this takes no probe input, so the override-detection rationale
+            # above does not apply. `[]` is the honest "nothing to scrub".
+            assert harness.session_launch_env_unset() is not None, (
+                f"{type(harness).__name__}: advertises launch but "
+                f"session_launch_env_unset() returned None; a harness with "
+                f"nothing to scrub must return [], since None means "
+                f"'launch unsupported'"
+            )
 
     @staticmethod
     def _assert_enumeration_pair(harness: Harness) -> None:
+        # Override detection only — the value half of this pair is NOT enforced
+        # here: parse_session_list needs harness-specific input to call, and
+        # base.py's contract (a concrete override must never return None) is
+        # therefore left to each harness's own tests. Residual gap, stated so it
+        # is not mistaken for enforced.
         cls = type(harness)
         overrides = (
             cls.session_enumerate is not Harness.session_enumerate,
@@ -836,6 +871,12 @@ class TestBothOrNeitherInvariants:
     def test_modality_outside_vocabulary_fails_the_membership_assertion(self):
         with pytest.raises(AssertionError):
             self._assert_launch_triple(_BadModalityHarness())
+
+    def test_no_scrub_list_harness_fails_the_triple_invariant(self):
+        """Override detection alone would pass this one — the value half is what
+        catches it, and the credential scrub is what's at stake."""
+        with pytest.raises(AssertionError):
+            self._assert_launch_triple(_NoScrubListHarness())
 
     def test_enumerate_only_broken_harness_fails_the_pair_invariant(self):
         with pytest.raises(AssertionError):
@@ -1001,21 +1042,62 @@ class TestClaudeCodeParseSessionListFailures:
         with pytest.raises(HarnessError, match="kind"):
             ClaudeCodeHarness().parse_session_list(payload)
 
-    def test_started_at_epoch_micros_out_of_range_raises_harness_error(self, tmp_path):
-        payload = json.dumps(
-            [
-                {
-                    "sessionId": "s1",
-                    "cwd": str(tmp_path),
-                    "kind": "interactive",
-                    "startedAt": 1755100800123000,
-                }
-            ]
-        )
-        with pytest.raises(HarnessError, match="startedAt"):
-            ClaudeCodeHarness().parse_session_list(payload)
+    def _assert_started_at_degrades_keeping_the_record(self, payload):
+        """``startedAt`` is OPTIONAL: an unusable value maps to None and the
+        record SURVIVES. Asserting the record is present is the point — raising
+        here would discard every well-formed session in the same payload over
+        one unreadable timestamp, turning anticipated schema drift into a total
+        enumeration outage."""
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert len(records) == 1
+        assert records[0].session_id == "s1"
+        assert records[0].started_at is None
 
-    def test_started_at_epoch_nanos_out_of_range_raises_harness_error(self, tmp_path):
+    def test_started_at_epoch_micros_degrades_to_none(self, tmp_path):
+        """A CLI that switched millis -> MICROS is the drift the spec anticipates."""
+        self._assert_started_at_degrades_keeping_the_record(
+            json.dumps(
+                [
+                    {
+                        "sessionId": "s1",
+                        "cwd": str(tmp_path),
+                        "kind": "interactive",
+                        "startedAt": 1755100800123000,
+                    }
+                ]
+            )
+        )
+
+    def test_started_at_epoch_nanos_degrades_to_none(self, tmp_path):
+        self._assert_started_at_degrades_keeping_the_record(
+            json.dumps(
+                [
+                    {
+                        "sessionId": "s1",
+                        "cwd": str(tmp_path),
+                        "kind": "interactive",
+                        "startedAt": 1755100800123000000,
+                    }
+                ]
+            )
+        )
+
+    def test_started_at_infinity_degrades_to_none(self, tmp_path):
+        """``json.loads`` accepts a bare ``Infinity``, so it reaches the parser."""
+        self._assert_started_at_degrades_keeping_the_record(
+            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
+            '"startedAt": Infinity}]' % tmp_path
+        )
+
+    def test_started_at_nan_degrades_to_none(self, tmp_path):
+        self._assert_started_at_degrades_keeping_the_record(
+            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
+            '"startedAt": NaN}]' % tmp_path
+        )
+
+    def test_one_unreadable_started_at_does_not_lose_its_sibling_records(self, tmp_path):
+        """The regression this degrade path exists to prevent: a single bad
+        timestamp must not take the whole listing down with it."""
         payload = json.dumps(
             [
                 {
@@ -1023,27 +1105,19 @@ class TestClaudeCodeParseSessionListFailures:
                     "cwd": str(tmp_path),
                     "kind": "interactive",
                     "startedAt": 1755100800123000000,
-                }
+                },
+                {
+                    "sessionId": "s2",
+                    "cwd": str(tmp_path),
+                    "kind": "interactive",
+                    "startedAt": 1755100800123,
+                },
             ]
         )
-        with pytest.raises(HarnessError, match="startedAt"):
-            ClaudeCodeHarness().parse_session_list(payload)
-
-    def test_started_at_infinity_raises_harness_error(self, tmp_path):
-        payload = (
-            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
-            '"startedAt": Infinity}]' % tmp_path
-        )
-        with pytest.raises(HarnessError, match="startedAt"):
-            ClaudeCodeHarness().parse_session_list(payload)
-
-    def test_started_at_nan_raises_harness_error(self, tmp_path):
-        payload = (
-            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
-            '"startedAt": NaN}]' % tmp_path
-        )
-        with pytest.raises(HarnessError, match="startedAt"):
-            ClaudeCodeHarness().parse_session_list(payload)
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert [r.session_id for r in records] == ["s1", "s2"]
+        assert records[0].started_at is None
+        assert records[1].started_at is not None
 
 
 class TestClaudeCodeParseSessionListEmpty:
@@ -1089,6 +1163,11 @@ class TestClaudeCodeParseSessionListErrorExcerpt:
         with pytest.raises(HarnessError) as exc_info:
             ClaudeCodeHarness().parse_session_list(payload)
         message = str(exc_info.value)
+        # Against the ACTUAL limit, not merely against the payload: a
+        # "< len(payload)" bound on a 5000-char payload would still pass if
+        # _ERROR_EXCERPT_LIMIT crept up to 4000, which is exactly the
+        # regression this test exists to catch.
+        assert len(message) < _ERROR_EXCERPT_LIMIT + 200
         assert len(message) < len(payload)
         assert long_cwd not in message
 
