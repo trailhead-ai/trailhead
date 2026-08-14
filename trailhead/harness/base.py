@@ -35,7 +35,10 @@ See ``docs/vision.md``.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 
 class HarnessError(Exception):
@@ -55,6 +58,45 @@ UNSUPPORTED_RULESET_NOTICE = (
 #: two independent surfaces warn off it — ``trailhead doctor`` and
 #: ``camp bookmark ls`` — and a user reading both must see the same cutoff.
 SESSION_RETENTION_WARNING_FRACTION = 0.8
+
+#: Closed modality vocabulary for how a launched session can be reached again.
+#: Callers compare against these constants, never against their own literal —
+#: the string values are caller-visible wire-ish vocabulary and are pinned by
+#: ``test_harness.py``.
+MODALITY_TTY_REQUIRED = "tty-required"
+MODALITY_DETACHED_GUI = "detached-gui"
+
+#: The closed set of valid :data:`Modality` values.
+MODALITIES: frozenset[str] = frozenset({MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI})
+
+#: A session's launch modality: whether re-entering it requires a TTY the
+#: caller controls, or whether the harness owns its own detached GUI surface.
+Modality = Literal["tty-required", "detached-gui"]
+
+
+@dataclass(frozen=True)
+class SessionRecord:
+    """One session as enumerated by a harness.
+
+    ``session_id`` is the record's identity — callers diff snapshots on
+    ``session_id``, never on whole-record equality. ``started_at`` is always
+    timezone-aware UTC, never naive. Harness-native fields beyond this set are
+    dropped, never passed through. ``cwd`` is the session's LAUNCH root — the
+    directory it was started under — never its current working directory,
+    which may have since changed.
+    """
+
+    session_id: str
+    cwd: Path
+    kind: str
+    #: this session is of a class the harness can remote-address — NOT a
+    #: liveness flag (every enumerated record is live) and conveys NO attach
+    #: capability or authorization (no attach-authz model exists; a consumer
+    #: building attach must define one first). Not a connection probe.
+    controllable: bool
+    name: str | None
+    pid: int | None
+    started_at: datetime | None
 
 
 class Harness(ABC):
@@ -288,5 +330,174 @@ class Harness(ABC):
         harness-specific knowledge, so a core caller asks for it here rather than
         naming any harness's key itself.  ``None`` means "not reportable", and a
         caller must then omit the remedy rather than invent one.
+        """
+        return None
+
+    # -- session launch & enumeration ------------------------------------------
+    #
+    # Launching a session means starting a brand-new one (as opposed to resuming
+    # an existing one via ``session_resume``). Enumeration lists sessions already
+    # running. Both are CONCRETE with degrading defaults, following the same
+    # convention as ``session_resume`` above — ``None`` means "this harness has
+    # no such concept" for every method here EXCEPT ``session_launch`` (see its
+    # docstring for that deliberate divergence).
+    #
+    # The seam never execs and never sets a child's cwd: rooting the child at
+    # ``workspace`` and applying the env scrub returned by
+    # ``session_launch_env_unset`` are the exec-owning caller's job, done at
+    # exec time, not here.
+    #
+    # Both-or-neither invariants (enforced by ``test_harness.py``, not by this
+    # class): a harness that overrides ``session_launch`` must override
+    # ``session_launch_modality`` and ``session_launch_env_unset`` too — all
+    # three non-``None`` together, or all three left at the base ``None``
+    # together, never a partial trio. A non-``None`` modality must additionally
+    # be a member of :data:`MODALITIES`, not merely non-``None``. Likewise,
+    # ``session_enumerate`` and ``parse_session_list`` must be overridden
+    # together or not at all. A half-implemented harness is worse than an
+    # unimplemented one: it advertises a capability it cannot actually honor.
+
+    def session_launch(self, workspace: Path, session_id: str) -> list[str] | None:
+        """DIVERGES: raises :class:`HarnessError` on a malformed ``session_id``, where
+        ``session_resume`` returns ``None`` for the same input.
+
+        Returns the argv that starts a brand-new session, or ``None`` if the
+        harness cannot launch sessions at all.
+
+        The divergence above is from the ``None``-on-malformed-input
+        convention used elsewhere in this module. A consumer who learned "check for ``None``, else
+        use the argv" from ``session_resume`` and applies that uniformly here
+        will hit an uncaught exception on their first bad id — most likely at
+        the call site that hands this method a freshly-generated, unvalidated
+        id. The raise guards path/argv safety (the id must be a safe token
+        before it reaches the launch argv), not id validity in any broader
+        sense — a non-UUID like ``"sess-1"`` passes this guard and only fails
+        later, at exec, if the harness's CLI itself rejects it. Elsewhere in
+        this module, ``None`` from any of these seams means
+        "the harness has no such concept" for a fixed, harness-level
+        capability; ``session_launch`` is the single exception to that rule.
+
+        ``session_launch`` is constant-valued per harness: for a given
+        harness it never returns ``None`` for a particular ``session_id`` —
+        ``None`` from a concrete override means only "this harness cannot
+        launch sessions at all," never "not for this argument."
+
+        Performs no filesystem validation of ``workspace`` — it does not
+        check that ``workspace`` exists, is a directory, or is writable.
+
+        A harness may legitimately ignore ``workspace`` entirely (Claude
+        Code does — it roots a launched session on the process's cwd at exec
+        time, not on any argument). Passing ``workspace=A`` while the caller
+        ends up exec'ing at cwd ``B`` then yields valid-looking argv for the
+        wrong location, with no error signal from this method. Every future
+        harness author must see this before deciding to honor or ignore
+        ``workspace``.
+
+        The seam does not exec: the returned argv still needs the caller to
+        root the child process at ``workspace`` and apply
+        :meth:`session_launch_env_unset` at spawn time.
+        """
+        return None
+
+    def session_launch_modality(self) -> Modality | None:
+        """The modality a launched session requires, or ``None`` if unsupported.
+
+        ``None`` means this harness has no launch concept at all — distinct
+        from a harness that launches but has no meaningful modality to
+        report (not currently possible in this vocabulary, but the ``None``
+        here is reserved for "unsupported", not "not applicable").
+        """
+        return None
+
+    def session_launch_env_unset(self) -> list[str] | None:
+        """Env var names a launching caller must scrub before spawning, or ``None``.
+
+        Launching a new session from inside an existing harness session
+        leaks parent markers and credentials to the child. With Claude Code
+        specifically, an unscrubbed child becomes invisible to enumeration
+        and inherits the parent's session access token.
+
+        The tmux case: a tmux server started by an agent propagates its
+        launch-time environment to every pane subsequently opened in that
+        server, so the scrub must happen at spawn — via ``env -u`` on the
+        launch command or ``tmux set-environment -u`` on the target
+        variables — not after the fact. A pre-existing, user-started tmux
+        server is typically already clean, but the scrub is mandatory
+        regardless of that; a caller must not skip it based on a guess about
+        the server's provenance.
+
+        The returned list is a FLOOR, not an exhaustive guarantee: a harness
+        CLI may add new leaking variables in a later version, so a caller
+        must not treat this list as proof of complete coverage.
+
+        Returns ``None`` only when launch itself is unsupported. A
+        launch-capable harness with nothing to scrub returns ``[]``, per the
+        both-or-neither invariant above — ``None`` here means "launch
+        unsupported", never "nothing to scrub".
+        """
+        return None
+
+    def session_enumerate(self, workspace: Path | None = None) -> list[str] | None:
+        """Return the argv that lists this harness's live sessions, or ``None``.
+
+        Like ``session_resume`` and ``session_launch``, the seam owns the
+        ARGV — this method never execs; a caller runs it and hands the
+        output to :meth:`parse_session_list`.
+
+        ``workspace``, when given, scopes the listing with PREFIX semantics
+        — "rooted under" — so a session launched in a member worktree
+        beneath ``workspace`` is in scope, not just a session launched
+        exactly at ``workspace`` itself.
+
+        An implementation MAY raise :class:`HarnessError` on a ``workspace``
+        that is unsafe to place in its argv — one whose string form begins
+        with ``-`` reads as a flag in the value slot of whatever option
+        carries it. That is argv safety, not filesystem validation: like
+        :meth:`session_launch`, this method never checks that ``workspace``
+        exists. Note the asymmetry a caller must respect — ``session_id`` is
+        guard-checked wherever it reaches an argv, so it is provably free of
+        shell-active characters; ``workspace`` is not. The returned argv is
+        safe to EXEC; it is not guaranteed safe to hand to a shell.
+
+        Returns ``None`` when the harness has no enumeration concept.
+        Parsing the returned output into :class:`SessionRecord` values is
+        :meth:`parse_session_list`'s job, not this method's.
+        """
+        return None
+
+    def parse_session_list(self, output: str) -> list[SessionRecord] | None:
+        """Parse :meth:`session_enumerate`'s raw output into records.
+
+        Failure semantics, binding on every implementation:
+
+        - Returns ``None`` ONLY from this base default — "this harness has
+          no enumeration/parse concept." A concrete override must never
+          return ``None``.
+        - Returns ``[]`` ONLY for a well-formed, empty listing.
+        - RAISES :class:`HarnessError` on output that cannot be decoded —
+          never silently drops it and never returns ``None`` for that case.
+          Every raised error names the offending field (or the decode
+          failure, which belongs to no single field) and carries a
+          BOUNDED excerpt of the raw output — bounded across the whole
+          payload, not per field, since a field such as ``cwd`` can carry a
+          username-bearing path that must never spill unbounded into logs.
+        - A record whose ``session_id``, ``cwd``, or ``kind`` is absent,
+          null, or of the wrong type RAISES — those three are required, and
+          neither a record's identity nor its location can be guessed. This
+          is a positive rule, not merely the complement of the next one.
+        - ``name``, ``pid``, and ``started_at`` map to ``None`` when absent,
+          null, or of the wrong type — they are optional fields, and a
+          malformed value degrades rather than raising. "Cannot be used"
+          counts as malformed even when the type is right (an out-of-range
+          ``started_at``, say): degrading costs one field, while raising
+          would discard every well-formed record in the same payload.
+        - An unrecognized ``kind`` is KEPT in the record, with
+          ``controllable=False`` — a session of a kind this harness version
+          doesn't yet classify is still a real, live session, not one to
+          drop.
+
+        Result order preserves the harness's own output order. Every parsed
+        ``session_id`` satisfies the same validity guard that
+        :meth:`session_resume` applies to its ``session_id`` argument.
         """
         return None

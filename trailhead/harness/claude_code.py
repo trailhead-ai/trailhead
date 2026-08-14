@@ -62,9 +62,16 @@ import os
 import re
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead.harness.base import Harness, HarnessError
+from trailhead.harness.base import (
+    MODALITY_TTY_REQUIRED,
+    Harness,
+    HarnessError,
+    Modality,
+    SessionRecord,
+)
 
 _REGISTERED_MARKER = ".trailhead-registered"
 _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
@@ -95,6 +102,56 @@ def _is_session_id(session_id: object) -> bool:
     a session id this harness recognizes at all.
     """
     return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
+
+
+#: Cap on the raw-output excerpt embedded in a ``parse_session_list``
+#: ``HarnessError`` message. Bounded across the WHOLE payload (not per field):
+#: a ``cwd`` carries an absolute path — usually including the username — into
+#: terminal scrollback and logs, so a single whole-payload bound is what
+#: actually keeps that out, not a per-field one.
+_ERROR_EXCERPT_LIMIT = 200
+
+
+def _excerpt(output: str) -> str:
+    """A home-redacted, length-bounded, single-line excerpt of raw output.
+
+    The length bound alone is NOT a confidentiality control: an ordinary
+    ``cwd`` is a few dozen characters, so it — and the username inside it —
+    fits inside the limit intact. The bound stops a pathological payload from
+    flooding a log; REDACTION is what keeps the operator's home path out of
+    one, and the realistic leak (a benign ``kind`` schema drift raising an
+    error a user then pastes into a bug report) needs the latter. Redact
+    first, then bound, so truncation can never strip the prefix that makes a
+    path recognizable as home and leave the tail behind.
+    """
+    flat = output.replace("\n", "\\n")
+    try:
+        home = str(Path.home())
+    except (RuntimeError, OSError):  # no resolvable home; nothing to redact
+        home = ""
+    if home:
+        flat = flat.replace(home, "~")
+    if len(flat) > _ERROR_EXCERPT_LIMIT:
+        return flat[:_ERROR_EXCERPT_LIMIT] + "…"
+    return flat
+
+
+#: Env markers Claude Code sets for its own child sessions.  Verified twice
+#: (v2.1.229 / v2.1.232) that a session launched with ``CLAUDE_CODE_CHILD_SESSION``
+#: inherited runs and connects remote-control but NEVER appears in
+#: ``claude agents --json`` — and the leaked env also carries the parent's live
+#: session access token, so scrubbing this list is a credential-hygiene
+#: requirement, not merely an enumeration fix.  This is a FLOOR, not an
+#: exhaustive guarantee (see the base contract).  Applying the scrub is the
+#: exec-owning caller's job, done at spawn time — this seam only names them.
+_LAUNCH_ENV_UNSET = [
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+]
 
 #: The user-level settings file under the Claude dir, and the top-level key in it
 #: that sets how many days a session transcript is kept before cleanup.  Claude
@@ -508,3 +565,174 @@ class ClaudeCodeHarness(Harness):
     def session_retention_setting(self) -> str | None:
         """The settings key a user raises to keep transcripts longer."""
         return _CLEANUP_PERIOD_KEY
+
+    # -- session launch & enumeration ------------------------------------------
+    #
+    # ``claude agents --json`` lists this machine's Claude Code sessions.
+    # ``--cwd`` is the CLI's native started-under PREFIX filter (verified
+    # empirically 2026-08-14) — exactly the "rooted under" scoping the base
+    # seam documents, so it is passed straight through rather than re-derived.
+    #
+    # ``claude --remote-control --session-id <id>`` starts a brand-new session
+    # under the caller-chosen id (confirmed by an operator TTY check on
+    # 2026-08-14: the CLI honors a supplied id and it enumerates under exactly
+    # that id in ``claude agents --json``). Deliberately absent from the argv,
+    # each for a verified reason:
+    #
+    # - no session-NAME flag — names are not settable on launch; both the
+    #   positional name and ``--remote-control-session-name-prefix`` are
+    #   ignored, and the name Claude Code derives is the cwd basename plus two
+    #   hex characters.
+    # - no ``--bg`` — it silently discards ``--remote-control`` and yields
+    #   ``kind: background`` instead of a controllable session.
+    # - no workspace path — Claude Code roots a launched session on the
+    #   process's cwd, which the exec-owning caller sets; ``workspace`` is
+    #   accepted for the seam signature and is unused here.
+
+    def session_launch(self, workspace: Path, session_id: str) -> list[str]:
+        """Return ``["claude", "--remote-control", "--session-id", <session-id>]``.
+
+        Raises :class:`HarnessError` on a malformed ``session_id`` — see the
+        base contract's DIVERGES note: this is the one seam here that raises
+        instead of degrading to ``None`` on bad input, since launch is
+        constant-valued and ``None`` is reserved for "cannot launch at all".
+        """
+        if not _is_session_id(session_id):
+            raise HarnessError(f"session_launch: invalid session_id: {session_id!r}")
+        return ["claude", "--remote-control", "--session-id", session_id]
+
+    def session_launch_modality(self) -> Modality:
+        """Claude Code launch requires a TTY (interactive terminal)."""
+        return MODALITY_TTY_REQUIRED
+
+    def session_launch_env_unset(self) -> list[str]:
+        """Env var names a launching caller must scrub before spawning.
+
+        See :data:`_LAUNCH_ENV_UNSET` for why each name is here.
+        """
+        return list(_LAUNCH_ENV_UNSET)
+
+    def session_enumerate(self, workspace: Path | None = None) -> list[str]:
+        """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.
+
+        Raises :class:`HarnessError` on a ``workspace`` whose string form
+        begins with ``-``: it would land in the value slot right after
+        ``--cwd`` and read as a flag, silently unscoping the enumeration —
+        or worse, being parsed as a real CLI flag. This is argv safety only,
+        NOT filesystem validation: a nonexistent workspace still returns argv,
+        matching :meth:`session_launch`. Beyond the leading dash the value is
+        passed through as given, so an argv from this seam is safe to exec but
+        is NOT guaranteed free of shell-active characters the way a
+        guard-checked ``session_id`` is — do not hand it to a shell.
+
+        ``workspace`` is passed to ``--cwd`` unresolved (as given) while
+        :meth:`parse_session_list` resolves each record's ``cwd`` before
+        comparison — a caller wanting exact prefix-match behavior against a
+        symlinked workspace root must pass an already-resolved path here.
+        """
+        args = ["claude", "agents", "--json"]
+        if workspace is not None:
+            as_arg = str(workspace)
+            if as_arg.startswith("-"):
+                raise HarnessError(
+                    f"session_enumerate: workspace would read as a flag in "
+                    f"argv: {as_arg!r}"
+                )
+            args += ["--cwd", as_arg]
+        return args
+
+    def parse_session_list(self, output: str) -> list[SessionRecord]:
+        """Parse ``claude agents --json`` output into :class:`SessionRecord` values.
+
+        See the base contract for the full failure semantics. Every raised
+        :class:`HarnessError` names the offending field (or the decode failure)
+        and includes a bounded excerpt of the raw output — bounded across the
+        WHOLE payload, not per field, since a ``cwd`` carries an absolute path
+        (often including the username) that must never spill unbounded into
+        terminal scrollback or logs.
+        """
+        try:
+            data = json.loads(output)
+        except (json.JSONDecodeError, ValueError):
+            raise HarnessError(
+                f"claude agents --json: failed to decode output: {_excerpt(output)}"
+            ) from None
+
+        if not isinstance(data, list):
+            raise HarnessError(
+                f"claude agents --json: expected a JSON array, got "
+                f"{type(data).__name__}: {_excerpt(output)}"
+            )
+
+        records = []
+        for record in data:
+            if not isinstance(record, dict):
+                raise HarnessError(
+                    f"claude agents --json: expected a JSON object per record, got "
+                    f"{type(record).__name__}: {_excerpt(output)}"
+                )
+
+            session_id = record.get("sessionId")
+            if not _is_session_id(session_id):
+                raise HarnessError(
+                    f"claude agents --json: record has missing or invalid "
+                    f"'sessionId': {_excerpt(output)}"
+                )
+
+            raw_cwd = record.get("cwd")
+            if not isinstance(raw_cwd, str) or not raw_cwd:
+                raise HarnessError(
+                    f"claude agents --json: record has missing or invalid "
+                    f"'cwd': {_excerpt(output)}"
+                )
+            cwd = Path(raw_cwd).resolve()
+
+            kind = record.get("kind")
+            if not isinstance(kind, str) or not kind:
+                raise HarnessError(
+                    f"claude agents --json: record has missing or invalid "
+                    f"'kind': {_excerpt(output)}"
+                )
+
+            name = record.get("name")
+            if not isinstance(name, str):
+                name = None
+
+            pid = record.get("pid")
+            if isinstance(pid, bool) or not isinstance(pid, int):
+                pid = None
+
+            started_at_raw = record.get("startedAt")
+            started_at = None
+            if isinstance(started_at_raw, (int, float)) and not isinstance(
+                started_at_raw, bool
+            ):
+                try:
+                    started_at = datetime.fromtimestamp(
+                        started_at_raw / 1000, tz=timezone.utc
+                    )
+                except (ValueError, OverflowError):
+                    # DEGRADE, don't raise.  ``startedAt`` is an OPTIONAL field,
+                    # so the base contract maps an unusable value to None rather
+                    # than discarding the record — and with it every well-formed
+                    # record in the same payload.  The values that land here are
+                    # exactly the schema drift the spec anticipates: a CLI that
+                    # starts emitting epoch MICROS or NANOS instead of millis, or
+                    # a bare Infinity/NaN (which ``json.loads`` accepts).
+                    # Degrading turns that into "sessions with unknown start
+                    # times" instead of "no sessions at all".
+                    started_at = None
+
+            records.append(
+                SessionRecord(
+                    session_id=session_id,
+                    cwd=cwd,
+                    kind=kind,
+                    controllable=kind == "interactive",
+                    name=name,
+                    pid=pid,
+                    started_at=started_at,
+                )
+            )
+
+        return records

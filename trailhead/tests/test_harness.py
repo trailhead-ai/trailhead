@@ -1,8 +1,14 @@
 """Tests for trailhead/harness/ — the harness interface, factory, and detection."""
 
+import dataclasses
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
 import pytest
 
 from trailhead.harness import (
+    _HARNESSES,
     ClaudeCodeHarness,
     Harness,
     HarnessError,
@@ -11,7 +17,14 @@ from trailhead.harness import (
     get_harness,
     known_harness_names,
 )
-from trailhead.harness.base import UNSUPPORTED_RULESET_NOTICE
+from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
+from trailhead.harness.base import (
+    MODALITIES,
+    MODALITY_DETACHED_GUI,
+    MODALITY_TTY_REQUIRED,
+    UNSUPPORTED_RULESET_NOTICE,
+    SessionRecord,
+)
 
 
 class TestFactory:
@@ -533,6 +546,78 @@ class TestClaudeCodeSessionResume:
         assert ClaudeCodeHarness().session_resume(None) is None
 
 
+class TestClaudeCodeSessionLaunch:
+    """Claude Code launches a brand-new session by caller-chosen id. The seam
+    OWNS the argv the same way ``session_resume`` does."""
+
+    def test_returns_launch_argv_for_the_session(self, tmp_path):
+        assert ClaudeCodeHarness().session_launch(tmp_path, "sess-1") == [
+            "claude",
+            "--remote-control",
+            "--session-id",
+            "sess-1",
+        ]
+
+    def test_argv_is_a_token_list_needing_no_shell(self, tmp_path):
+        """Every element is a separate token — nothing is pre-joined or quoted, so
+        an exec-style caller passes it through untouched."""
+        argv = ClaudeCodeHarness().session_launch(tmp_path, "sess-1")
+        assert all(isinstance(tok, str) for tok in argv)
+        assert not any(" " in tok for tok in argv)
+        # A shell-active character would have to be quoted before a shell saw it;
+        # its absence is what lets an exec-style caller skip quoting entirely.
+        shell_active = set("|&;<>()$`\\\"'\t\n*?[]{}#~")
+        assert not any(shell_active & set(tok) for tok in argv)
+
+    def test_malformed_id_raises_unlike_session_resume_which_returns_none(self, tmp_path):
+        """Pin the deliberate divergence: session_resume degrades to None on a bad
+        id, session_launch raises — a caller who learned "check for None" from
+        session_resume must not silently pass a malformed id through to argv."""
+        for bad in ("", "a b", "a;rm -rf /", "$(whoami)", "../escape", "a/b", "-x"):
+            assert ClaudeCodeHarness().session_resume(bad) is None, bad
+            with pytest.raises(HarnessError):
+                ClaudeCodeHarness().session_launch(tmp_path, bad)
+
+    def test_rejects_a_non_string_session_id(self, tmp_path):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(tmp_path, None)
+
+    def test_rejects_a_leading_dash_session_id_as_flag_injection(self, tmp_path):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(tmp_path, "--dangerously-skip-permissions")
+
+    def test_no_filesystem_validation_of_workspace(self, tmp_path):
+        missing = tmp_path / "does-not-exist"
+        assert ClaudeCodeHarness().session_launch(missing, "sess-1") == [
+            "claude",
+            "--remote-control",
+            "--session-id",
+            "sess-1",
+        ]
+
+
+class TestClaudeCodeSessionLaunchModality:
+    def test_returns_tty_required(self):
+        assert ClaudeCodeHarness().session_launch_modality() == MODALITY_TTY_REQUIRED
+
+    def test_is_a_member_of_modalities(self):
+        assert ClaudeCodeHarness().session_launch_modality() in MODALITIES
+
+
+class TestClaudeCodeSessionLaunchEnvUnset:
+    def test_contains_the_documented_leaking_vars(self):
+        unset = ClaudeCodeHarness().session_launch_env_unset()
+        for var in (
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDECODE",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+            "CLAUDE_CODE_MESSAGING_SOCKET",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+        ):
+            assert var in unset
+
+
 class TestSessionRetentionDaysBaseDefault:
     """The retention seam is CONCRETE with a degrading default: a harness that
     does not clean up transcripts on a schedule answers None, and a caller must
@@ -609,3 +694,522 @@ class TestSessionRetentionSetting:
 
     def test_claude_code_names_its_cleanup_key(self):
         assert ClaudeCodeHarness().session_retention_setting() == "cleanupPeriodDays"
+
+
+class TestLaunchEnumerationBaseDefaults:
+    """The launch/enumeration seam is CONCRETE with degrading defaults: a harness
+    with no launch or enumeration concept answers None for all five, never
+    raises, and never requires implementing anything to instantiate."""
+
+    def test_session_launch_returns_none(self, tmp_path):
+        assert _BareHarness().session_launch(tmp_path, "sess-1") is None
+
+    def test_session_launch_modality_returns_none(self):
+        assert _BareHarness().session_launch_modality() is None
+
+    def test_session_launch_env_unset_returns_none(self):
+        assert _BareHarness().session_launch_env_unset() is None
+
+    def test_session_enumerate_returns_none(self, tmp_path):
+        assert _BareHarness().session_enumerate(tmp_path) is None
+
+    def test_session_enumerate_returns_none_with_no_workspace(self):
+        assert _BareHarness().session_enumerate() is None
+
+    def test_parse_session_list_returns_none(self):
+        assert _BareHarness().parse_session_list("anything") is None
+
+    def test_bare_harness_instantiates_without_implementing_any_of_the_five(self, tmp_path):
+        """All five are non-abstract: subclassing Harness without overriding them
+        must not raise TypeError at instantiation."""
+        h = _BareHarness()
+        assert h.session_launch(tmp_path, "sess-1") is None
+        assert h.session_launch_modality() is None
+        assert h.session_launch_env_unset() is None
+        assert h.session_enumerate() is None
+        assert h.parse_session_list("x") is None
+
+
+class TestModalityVocabulary:
+    def test_constants_have_exact_spec_values(self):
+        assert MODALITY_TTY_REQUIRED == "tty-required"
+        assert MODALITY_DETACHED_GUI == "detached-gui"
+
+    def test_modalities_frozenset_is_exactly_the_two_constants(self):
+        assert MODALITIES == {MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI}
+        assert isinstance(MODALITIES, frozenset)
+
+
+class _LaunchOnlyBrokenHarness(_BareHarness):
+    """Implements session_launch but not the other two launch-trio members —
+    the base defaults leave modality/env_unset at None, breaking the triple."""
+
+    name = "launch-only-broken"
+
+    def session_launch(self, workspace, session_id):
+        return ["fake", "argv"]
+
+
+class _BadModalityHarness(_BareHarness):
+    """Implements the full launch trio, but the modality is spelled outside
+    MODALITIES — the membership assertion, not just non-None, must catch it."""
+
+    name = "bad-modality"
+
+    def session_launch(self, workspace, session_id):
+        return ["fake", "argv"]
+
+    def session_launch_modality(self):
+        return "headless"
+
+    def session_launch_env_unset(self):
+        return []
+
+
+class _NoScrubListHarness(_BareHarness):
+    """Overrides the whole launch trio but answers None for the scrub list —
+    so override-detection alone passes it. The value assertion must catch it:
+    a launch-capable harness with nothing to scrub returns [], and None here
+    would make a caller skip the credential scrub."""
+
+    name = "no-scrub-list"
+
+    def session_launch(self, workspace, session_id):
+        return ["fake", "argv"]
+
+    def session_launch_modality(self):
+        return MODALITY_TTY_REQUIRED
+
+    def session_launch_env_unset(self):
+        return None
+
+
+class _EnumerateOnlyBrokenHarness(_BareHarness):
+    """Implements session_enumerate but not parse_session_list — the base
+    default leaves parse_session_list at None, breaking the pair."""
+
+    name = "enumerate-only-broken"
+
+    def session_enumerate(self, workspace=None):
+        return ["fake"]
+
+
+class TestBothOrNeitherInvariants:
+    """Both-or-neither contracts on the launch trio and the enumeration pair.
+
+    (a) session_launch / session_launch_modality / session_launch_env_unset must
+    be non-None together or None together, and a non-None modality must be a
+    MEMBER of MODALITIES — not merely non-None. (b) session_enumerate and
+    parse_session_list must likewise be non-None together or None together.
+
+    ``test_every_registered_harness_satisfies_both_invariants`` iterates the
+    real registry (``_HARNESSES``), which holds exactly ONE entry
+    (ClaudeCodeHarness) today. Passing that test proves the invariant holds for
+    that one harness — it is the CONTRACT every future harness added to the
+    registry must satisfy, NOT evidence that this test exercises cross-harness
+    coverage. The fixture-based tests above it are what prove the assertions
+    inside the helper actually bite, by breaking each half deliberately and
+    watching the helper fail.
+    """
+
+    @staticmethod
+    def _assert_launch_triple(harness: Harness) -> None:
+        # Detects implementation by OVERRIDE, not by probing with a fixed
+        # session_id/workspace: a real harness's id guard may reject
+        # "sess-1" outright (raising HarnessError, not returning None),
+        # which would misreport a correctly-implemented trio as violating
+        # the invariant.
+        cls = type(harness)
+        overrides = (
+            cls.session_launch is not Harness.session_launch,
+            cls.session_launch_modality is not Harness.session_launch_modality,
+            cls.session_launch_env_unset is not Harness.session_launch_env_unset,
+        )
+        assert all(overrides) or not any(overrides), (
+            f"{type(harness).__name__}: session_launch/session_launch_modality/"
+            f"session_launch_env_unset must be overridden together or not at "
+            f"all, got {overrides!r}"
+        )
+        if any(overrides):
+            modality = harness.session_launch_modality()
+            assert modality in MODALITIES, (
+                f"{type(harness).__name__}: session_launch_modality() returned "
+                f"{modality!r}, which is not a member of MODALITIES"
+            )
+            # The VALUE half, not just the override half. A harness that
+            # advertises launch but answers None here would have its caller
+            # skip the credential scrub entirely — and unlike session_launch,
+            # this takes no probe input, so the override-detection rationale
+            # above does not apply. `[]` is the honest "nothing to scrub".
+            assert harness.session_launch_env_unset() is not None, (
+                f"{type(harness).__name__}: advertises launch but "
+                f"session_launch_env_unset() returned None; a harness with "
+                f"nothing to scrub must return [], since None means "
+                f"'launch unsupported'"
+            )
+
+    @staticmethod
+    def _assert_enumeration_pair(harness: Harness) -> None:
+        # Override detection only — the value half of this pair is NOT enforced
+        # here: parse_session_list needs harness-specific input to call, and
+        # base.py's contract (a concrete override must never return None) is
+        # therefore left to each harness's own tests. Residual gap, stated so it
+        # is not mistaken for enforced.
+        cls = type(harness)
+        overrides = (
+            cls.session_enumerate is not Harness.session_enumerate,
+            cls.parse_session_list is not Harness.parse_session_list,
+        )
+        assert overrides[0] == overrides[1], (
+            f"{type(harness).__name__}: session_enumerate/parse_session_list "
+            f"must be overridden together or not at all, got {overrides!r}"
+        )
+
+    def test_launch_only_broken_harness_fails_the_triple_invariant(self):
+        with pytest.raises(AssertionError):
+            self._assert_launch_triple(_LaunchOnlyBrokenHarness())
+
+    def test_modality_outside_vocabulary_fails_the_membership_assertion(self):
+        with pytest.raises(AssertionError):
+            self._assert_launch_triple(_BadModalityHarness())
+
+    def test_no_scrub_list_harness_fails_the_triple_invariant(self):
+        """Override detection alone would pass this one — the value half is what
+        catches it, and the credential scrub is what's at stake."""
+        with pytest.raises(AssertionError):
+            self._assert_launch_triple(_NoScrubListHarness())
+
+    def test_enumerate_only_broken_harness_fails_the_pair_invariant(self):
+        with pytest.raises(AssertionError):
+            self._assert_enumeration_pair(_EnumerateOnlyBrokenHarness())
+
+    def test_bare_harness_with_neither_concept_passes_both_invariants(self):
+        self._assert_launch_triple(_BareHarness())
+        self._assert_enumeration_pair(_BareHarness())
+
+    def test_every_registered_harness_satisfies_both_invariants(self):
+        assert len(_HARNESSES) >= 1
+        for cls in _HARNESSES.values():
+            harness = cls()
+            self._assert_launch_triple(harness)
+            self._assert_enumeration_pair(harness)
+
+
+class TestSessionRecord:
+    def test_is_frozen(self, tmp_path):
+        rec = SessionRecord(
+            session_id="sess-1",
+            cwd=tmp_path,
+            kind="tmux",
+            controllable=True,
+            name=None,
+            pid=None,
+            started_at=None,
+        )
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            rec.session_id = "sess-2"
+
+    def test_accepts_none_for_optional_fields(self, tmp_path):
+        rec = SessionRecord(
+            session_id="sess-1",
+            cwd=tmp_path,
+            kind="tmux",
+            controllable=True,
+            name=None,
+            pid=None,
+            started_at=None,
+        )
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+    def test_requires_the_four_non_optional_fields(self):
+        with pytest.raises(TypeError):
+            SessionRecord()
+
+
+class TestClaudeCodeSessionEnumerate:
+    """``session_enumerate`` returns the raw ``claude agents --json`` argv; the
+    seam OWNS the argv the same way ``session_resume`` does."""
+
+    def test_returns_bare_argv_with_no_workspace(self):
+        assert ClaudeCodeHarness().session_enumerate() == ["claude", "agents", "--json"]
+
+    def test_appends_cwd_flag_with_workspace(self, tmp_path):
+        assert ClaudeCodeHarness().session_enumerate(tmp_path) == [
+            "claude",
+            "agents",
+            "--json",
+            "--cwd",
+            str(tmp_path),
+        ]
+
+    def test_rejects_a_flag_shaped_workspace(self):
+        """A workspace beginning with '-' occupies --cwd's value slot and reads
+        as a flag: enumeration silently unscopes, or the CLI parses it as a real
+        flag. Guard it the way session_launch guards its session_id."""
+        for bad in ("--dangerously-skip-permissions", "-x", "--cwd"):
+            with pytest.raises(HarnessError):
+                ClaudeCodeHarness().session_enumerate(Path(bad))
+
+    def test_no_filesystem_validation_of_workspace(self, tmp_path):
+        """The guard above is argv safety, NOT existence checking — a missing
+        workspace still yields argv, matching session_launch."""
+        missing = tmp_path / "does-not-exist"
+        assert ClaudeCodeHarness().session_enumerate(missing)[-1] == str(missing)
+
+
+class TestClaudeCodeParseSessionListRoundTrip:
+    """A captured real ``claude agents --json`` payload (live 2026-08-14 shape)
+    parses into fully-typed SessionRecords."""
+
+    def test_round_trip_parses_every_field(self, tmp_path):
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+
+        payload = json.dumps(
+            [
+                {
+                    "sessionId": "sess-1",
+                    "cwd": str(link),
+                    "kind": "interactive",
+                    "name": "my session",
+                    "pid": 4242,
+                    "startedAt": 1755100800123,
+                }
+            ]
+        )
+
+        records = ClaudeCodeHarness().parse_session_list(payload)
+
+        assert len(records) == 1
+        rec = records[0]
+        assert rec.session_id == "sess-1"
+        assert rec.cwd == real.resolve()
+        assert rec.kind == "interactive"
+        assert rec.controllable is True
+        assert rec.name == "my session"
+        assert rec.pid == 4242
+        assert rec.started_at.tzinfo is not None
+        assert rec.started_at == datetime(2025, 8, 13, 16, 0, 0, 123000, tzinfo=timezone.utc)
+        assert rec.started_at.microsecond == 123000
+
+
+class TestClaudeCodeParseSessionListControllable:
+    def test_interactive_is_controllable(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive"}}]'
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert records[0].controllable is True
+
+    def test_background_is_not_controllable(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "background"}}]'
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert records[0].controllable is False
+
+    def test_unknown_kind_is_kept_with_controllable_false(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "sdk"}}]'
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert len(records) == 1
+        assert records[0].kind == "sdk"
+        assert records[0].controllable is False
+
+
+class TestClaudeCodeParseSessionListFailures:
+    def test_non_json_stdout_raises_with_offending_field_named(self):
+        with pytest.raises(HarnessError, match="decode"):
+            ClaudeCodeHarness().parse_session_list("not json at all")
+
+    def test_empty_stdout_raises(self):
+        with pytest.raises(HarnessError, match="decode"):
+            ClaudeCodeHarness().parse_session_list("")
+
+    def test_whitespace_only_stdout_raises(self):
+        with pytest.raises(HarnessError, match="decode"):
+            ClaudeCodeHarness().parse_session_list("   \n\t  ")
+
+    def test_json_object_instead_of_array_raises(self):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().parse_session_list('{"sessionId": "s1"}')
+
+    def test_non_dict_element_raises(self):
+        with pytest.raises(HarnessError, match="object"):
+            ClaudeCodeHarness().parse_session_list("[1, 2]")
+
+    def test_record_missing_session_id_raises_naming_the_field(self, tmp_path):
+        payload = f'[{{"cwd": "{tmp_path}", "kind": "interactive"}}]'
+        with pytest.raises(HarnessError, match="sessionId"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_record_with_invalid_session_id_raises(self, tmp_path):
+        payload = f'[{{"sessionId": "../evil", "cwd": "{tmp_path}", "kind": "interactive"}}]'
+        with pytest.raises(HarnessError, match="sessionId"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_record_missing_cwd_raises_naming_the_field(self):
+        payload = '[{"sessionId": "s1", "kind": "interactive"}]'
+        with pytest.raises(HarnessError, match="cwd"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_record_missing_kind_raises_naming_the_field(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}"}}]'
+        with pytest.raises(HarnessError, match="kind"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def _assert_started_at_degrades_keeping_the_record(self, payload):
+        """``startedAt`` is OPTIONAL: an unusable value maps to None and the
+        record SURVIVES. Asserting the record is present is the point — raising
+        here would discard every well-formed session in the same payload over
+        one unreadable timestamp, turning anticipated schema drift into a total
+        enumeration outage."""
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert len(records) == 1
+        assert records[0].session_id == "s1"
+        assert records[0].started_at is None
+
+    def test_started_at_epoch_micros_degrades_to_none(self, tmp_path):
+        """A CLI that switched millis -> MICROS is the drift the spec anticipates."""
+        self._assert_started_at_degrades_keeping_the_record(
+            json.dumps(
+                [
+                    {
+                        "sessionId": "s1",
+                        "cwd": str(tmp_path),
+                        "kind": "interactive",
+                        "startedAt": 1755100800123000,
+                    }
+                ]
+            )
+        )
+
+    def test_started_at_epoch_nanos_degrades_to_none(self, tmp_path):
+        self._assert_started_at_degrades_keeping_the_record(
+            json.dumps(
+                [
+                    {
+                        "sessionId": "s1",
+                        "cwd": str(tmp_path),
+                        "kind": "interactive",
+                        "startedAt": 1755100800123000000,
+                    }
+                ]
+            )
+        )
+
+    def test_started_at_infinity_degrades_to_none(self, tmp_path):
+        """``json.loads`` accepts a bare ``Infinity``, so it reaches the parser."""
+        self._assert_started_at_degrades_keeping_the_record(
+            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
+            '"startedAt": Infinity}]' % tmp_path
+        )
+
+    def test_started_at_nan_degrades_to_none(self, tmp_path):
+        self._assert_started_at_degrades_keeping_the_record(
+            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
+            '"startedAt": NaN}]' % tmp_path
+        )
+
+    def test_one_unreadable_started_at_does_not_lose_its_sibling_records(self, tmp_path):
+        """The regression this degrade path exists to prevent: a single bad
+        timestamp must not take the whole listing down with it."""
+        payload = json.dumps(
+            [
+                {
+                    "sessionId": "s1",
+                    "cwd": str(tmp_path),
+                    "kind": "interactive",
+                    "startedAt": 1755100800123000000,
+                },
+                {
+                    "sessionId": "s2",
+                    "cwd": str(tmp_path),
+                    "kind": "interactive",
+                    "startedAt": 1755100800123,
+                },
+            ]
+        )
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert [r.session_id for r in records] == ["s1", "s2"]
+        assert records[0].started_at is None
+        assert records[1].started_at is not None
+
+
+class TestClaudeCodeParseSessionListEmpty:
+    def test_empty_array_yields_empty_list_not_none(self):
+        result = ClaudeCodeHarness().parse_session_list("[]")
+        assert result == []
+        assert result is not None
+
+
+class TestClaudeCodeParseSessionListOptionalFields:
+    def test_absent_optional_fields_map_to_none(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive"}}]'
+        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+    def test_null_optional_fields_map_to_none(self, tmp_path):
+        payload = (
+            f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive", '
+            '"name": null, "pid": null, "startedAt": null}]'
+        )
+        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+    def test_wrongly_typed_optional_fields_map_to_none(self, tmp_path):
+        payload = (
+            f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive", '
+            '"name": 5, "pid": "not-an-int", "startedAt": "not-a-number"}]'
+        )
+        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+
+class TestClaudeCodeParseSessionListErrorExcerpt:
+    def test_error_message_is_bounded_and_truncates_path_bearing_fields(self, tmp_path):
+        long_cwd = str(tmp_path / ("x" * 5000))
+        payload = f'[{{"cwd": "{long_cwd}", "kind": "interactive"}}]'
+        with pytest.raises(HarnessError) as exc_info:
+            ClaudeCodeHarness().parse_session_list(payload)
+        message = str(exc_info.value)
+        # Against the ACTUAL limit, not merely against the payload: a
+        # "< len(payload)" bound on a 5000-char payload would still pass if
+        # _ERROR_EXCERPT_LIMIT crept up to 4000, which is exactly the
+        # regression this test exists to catch.
+        assert len(message) < _ERROR_EXCERPT_LIMIT + 200
+        assert len(message) < len(payload)
+        assert long_cwd not in message
+
+    def test_home_path_is_redacted_not_merely_bounded(self):
+        """The realistic leak is an ORDINARY path, which fits inside the bound
+        intact: a benign `kind` drift raises, and the user pastes the message
+        into a bug report carrying their username. Length bounding cannot catch
+        that — redaction is what does."""
+        home = str(Path.home())
+        payload = f'[{{"sessionId": "s1", "cwd": "{home}/secretproject", "kind": null}}]'
+        with pytest.raises(HarnessError) as exc_info:
+            ClaudeCodeHarness().parse_session_list(payload)
+        message = str(exc_info.value)
+        assert len(message) < _ERROR_EXCERPT_LIMIT + 200  # bound alone would pass
+        assert home not in message
+        assert "~/secretproject" in message
+
+
+class TestClaudeCodeParseSessionListDuplicateIds:
+    def test_duplicate_session_ids_are_both_kept_in_output_order(self, tmp_path):
+        payload = (
+            f'[{{"sessionId": "dup", "cwd": "{tmp_path}", "kind": "interactive", "pid": 1}}, '
+            f'{{"sessionId": "dup", "cwd": "{tmp_path}", "kind": "background", "pid": 2}}]'
+        )
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert len(records) == 2
+        assert records[0].session_id == "dup"
+        assert records[1].session_id == "dup"
+        assert records[0].pid == 1
+        assert records[1].pid == 2
