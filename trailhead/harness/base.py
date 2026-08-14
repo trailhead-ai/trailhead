@@ -346,12 +346,14 @@ class Harness(ABC):
     # exec time, not here.
 
     def session_launch(self, workspace: Path, session_id: str) -> list[str] | None:
-        """Return the argv that starts a brand-new session, or ``None``.
+        """DIVERGES: raises :class:`HarnessError` on a malformed ``session_id``, where
+        ``session_resume`` returns ``None`` for the same input.
 
-        DIVERGES from the ``None``-on-malformed-input convention used
-        elsewhere in this module (e.g. ``session_resume``): this method
-        raises :class:`HarnessError` on a malformed ``session_id`` instead of
-        returning ``None``. A consumer who learned "check for ``None``, else
+        Returns the argv that starts a brand-new session, or ``None`` if the
+        harness cannot launch sessions at all.
+
+        The divergence above is from the ``None``-on-malformed-input
+        convention used elsewhere in this module. A consumer who learned "check for ``None``, else
         use the argv" from ``session_resume`` and applies that uniformly here
         will hit an uncaught exception on their first bad id — most likely at
         the call site that hands this method a freshly-generated, unvalidated
