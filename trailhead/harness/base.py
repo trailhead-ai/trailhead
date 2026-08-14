@@ -449,6 +449,16 @@ class Harness(ABC):
         beneath ``workspace`` is in scope, not just a session launched
         exactly at ``workspace`` itself.
 
+        An implementation MAY raise :class:`HarnessError` on a ``workspace``
+        that is unsafe to place in its argv — one whose string form begins
+        with ``-`` reads as a flag in the value slot of whatever option
+        carries it. That is argv safety, not filesystem validation: like
+        :meth:`session_launch`, this method never checks that ``workspace``
+        exists. Note the asymmetry a caller must respect — ``session_id`` is
+        guard-checked wherever it reaches an argv, so it is provably free of
+        shell-active characters; ``workspace`` is not. The returned argv is
+        safe to EXEC; it is not guaranteed safe to hand to a shell.
+
         Returns ``None`` when the harness has no enumeration concept.
         Parsing the returned output into :class:`SessionRecord` values is
         :meth:`parse_session_list`'s job, not this method's.

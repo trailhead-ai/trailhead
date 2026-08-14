@@ -3,6 +3,7 @@
 import dataclasses
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -943,6 +944,20 @@ class TestClaudeCodeSessionEnumerate:
             str(tmp_path),
         ]
 
+    def test_rejects_a_flag_shaped_workspace(self):
+        """A workspace beginning with '-' occupies --cwd's value slot and reads
+        as a flag: enumeration silently unscopes, or the CLI parses it as a real
+        flag. Guard it the way session_launch guards its session_id."""
+        for bad in ("--dangerously-skip-permissions", "-x", "--cwd"):
+            with pytest.raises(HarnessError):
+                ClaudeCodeHarness().session_enumerate(Path(bad))
+
+    def test_no_filesystem_validation_of_workspace(self, tmp_path):
+        """The guard above is argv safety, NOT existence checking — a missing
+        workspace still yields argv, matching session_launch."""
+        missing = tmp_path / "does-not-exist"
+        assert ClaudeCodeHarness().session_enumerate(missing)[-1] == str(missing)
+
 
 class TestClaudeCodeParseSessionListRoundTrip:
     """A captured real ``claude agents --json`` payload (live 2026-08-14 shape)
@@ -1170,6 +1185,20 @@ class TestClaudeCodeParseSessionListErrorExcerpt:
         assert len(message) < _ERROR_EXCERPT_LIMIT + 200
         assert len(message) < len(payload)
         assert long_cwd not in message
+
+    def test_home_path_is_redacted_not_merely_bounded(self):
+        """The realistic leak is an ORDINARY path, which fits inside the bound
+        intact: a benign `kind` drift raises, and the user pastes the message
+        into a bug report carrying their username. Length bounding cannot catch
+        that — redaction is what does."""
+        home = str(Path.home())
+        payload = f'[{{"sessionId": "s1", "cwd": "{home}/secretproject", "kind": null}}]'
+        with pytest.raises(HarnessError) as exc_info:
+            ClaudeCodeHarness().parse_session_list(payload)
+        message = str(exc_info.value)
+        assert len(message) < _ERROR_EXCERPT_LIMIT + 200  # bound alone would pass
+        assert home not in message
+        assert "~/secretproject" in message
 
 
 class TestClaudeCodeParseSessionListDuplicateIds:

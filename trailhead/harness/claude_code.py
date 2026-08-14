@@ -113,8 +113,24 @@ _ERROR_EXCERPT_LIMIT = 200
 
 
 def _excerpt(output: str) -> str:
-    """A length-bounded, single-line excerpt of raw enumeration output for errors."""
+    """A home-redacted, length-bounded, single-line excerpt of raw output.
+
+    The length bound alone is NOT a confidentiality control: an ordinary
+    ``cwd`` is a few dozen characters, so it — and the username inside it —
+    fits inside the limit intact. The bound stops a pathological payload from
+    flooding a log; REDACTION is what keeps the operator's home path out of
+    one, and the realistic leak (a benign ``kind`` schema drift raising an
+    error a user then pastes into a bug report) needs the latter. Redact
+    first, then bound, so truncation can never strip the prefix that makes a
+    path recognizable as home and leave the tail behind.
+    """
     flat = output.replace("\n", "\\n")
+    try:
+        home = str(Path.home())
+    except (RuntimeError, OSError):  # no resolvable home; nothing to redact
+        home = ""
+    if home:
+        flat = flat.replace(home, "~")
     if len(flat) > _ERROR_EXCERPT_LIMIT:
         return flat[:_ERROR_EXCERPT_LIMIT] + "…"
     return flat
@@ -599,6 +615,16 @@ class ClaudeCodeHarness(Harness):
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.
 
+        Raises :class:`HarnessError` on a ``workspace`` whose string form
+        begins with ``-``: it would land in the value slot right after
+        ``--cwd`` and read as a flag, silently unscoping the enumeration —
+        or worse, being parsed as a real CLI flag. This is argv safety only,
+        NOT filesystem validation: a nonexistent workspace still returns argv,
+        matching :meth:`session_launch`. Beyond the leading dash the value is
+        passed through as given, so an argv from this seam is safe to exec but
+        is NOT guaranteed free of shell-active characters the way a
+        guard-checked ``session_id`` is — do not hand it to a shell.
+
         ``workspace`` is passed to ``--cwd`` unresolved (as given) while
         :meth:`parse_session_list` resolves each record's ``cwd`` before
         comparison — a caller wanting exact prefix-match behavior against a
@@ -606,7 +632,13 @@ class ClaudeCodeHarness(Harness):
         """
         args = ["claude", "agents", "--json"]
         if workspace is not None:
-            args += ["--cwd", str(workspace)]
+            as_arg = str(workspace)
+            if as_arg.startswith("-"):
+                raise HarnessError(
+                    f"session_enumerate: workspace would read as a flag in "
+                    f"argv: {as_arg!r}"
+                )
+            args += ["--cwd", as_arg]
         return args
 
     def parse_session_list(self, output: str) -> list[SessionRecord]:
