@@ -3,7 +3,6 @@
 import dataclasses
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
@@ -795,17 +794,24 @@ class TestBothOrNeitherInvariants:
 
     @staticmethod
     def _assert_launch_triple(harness: Harness) -> None:
-        launch = harness.session_launch(Path("/tmp/workspace"), "sess-1")
-        modality = harness.session_launch_modality()
-        env_unset = harness.session_launch_env_unset()
-        values = (launch, modality, env_unset)
-        non_none = [v is not None for v in values]
-        assert all(non_none) or not any(non_none), (
-            f"{type(harness).__name__}: session_launch/session_launch_modality/"
-            f"session_launch_env_unset must be non-None together or None "
-            f"together, got {values!r}"
+        # Detects implementation by OVERRIDE, not by probing with a fixed
+        # session_id/workspace: a real harness's id guard may reject
+        # "sess-1" outright (raising HarnessError, not returning None),
+        # which would misreport a correctly-implemented trio as violating
+        # the invariant.
+        cls = type(harness)
+        overrides = (
+            cls.session_launch is not Harness.session_launch,
+            cls.session_launch_modality is not Harness.session_launch_modality,
+            cls.session_launch_env_unset is not Harness.session_launch_env_unset,
         )
-        if modality is not None:
+        assert all(overrides) or not any(overrides), (
+            f"{type(harness).__name__}: session_launch/session_launch_modality/"
+            f"session_launch_env_unset must be overridden together or not at "
+            f"all, got {overrides!r}"
+        )
+        if any(overrides):
+            modality = harness.session_launch_modality()
             assert modality in MODALITIES, (
                 f"{type(harness).__name__}: session_launch_modality() returned "
                 f"{modality!r}, which is not a member of MODALITIES"
@@ -813,13 +819,14 @@ class TestBothOrNeitherInvariants:
 
     @staticmethod
     def _assert_enumeration_pair(harness: Harness) -> None:
-        enumerate_result = harness.session_enumerate()
-        parse_result = harness.parse_session_list("[]")
-        pair = (enumerate_result is None, parse_result is None)
-        assert pair[0] == pair[1], (
+        cls = type(harness)
+        overrides = (
+            cls.session_enumerate is not Harness.session_enumerate,
+            cls.parse_session_list is not Harness.parse_session_list,
+        )
+        assert overrides[0] == overrides[1], (
             f"{type(harness).__name__}: session_enumerate/parse_session_list "
-            f"must be non-None together or None together, got "
-            f"enumerate={enumerate_result!r} parse={parse_result!r}"
+            f"must be overridden together or not at all, got {overrides!r}"
         )
 
     def test_launch_only_broken_harness_fails_the_triple_invariant(self):
@@ -930,8 +937,8 @@ class TestClaudeCodeParseSessionListRoundTrip:
         assert rec.name == "my session"
         assert rec.pid == 4242
         assert rec.started_at.tzinfo is not None
-        expected = datetime.fromtimestamp(1755100800123 / 1000, tz=timezone.utc)
-        assert rec.started_at == expected
+        assert rec.started_at == datetime(2025, 8, 13, 16, 0, 0, 123000, tzinfo=timezone.utc)
+        assert rec.started_at.microsecond == 123000
 
 
 class TestClaudeCodeParseSessionListControllable:
@@ -970,6 +977,10 @@ class TestClaudeCodeParseSessionListFailures:
         with pytest.raises(HarnessError):
             ClaudeCodeHarness().parse_session_list('{"sessionId": "s1"}')
 
+    def test_non_dict_element_raises(self):
+        with pytest.raises(HarnessError, match="object"):
+            ClaudeCodeHarness().parse_session_list("[1, 2]")
+
     def test_record_missing_session_id_raises_naming_the_field(self, tmp_path):
         payload = f'[{{"cwd": "{tmp_path}", "kind": "interactive"}}]'
         with pytest.raises(HarnessError, match="sessionId"):
@@ -988,6 +999,50 @@ class TestClaudeCodeParseSessionListFailures:
     def test_record_missing_kind_raises_naming_the_field(self, tmp_path):
         payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}"}}]'
         with pytest.raises(HarnessError, match="kind"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_started_at_epoch_micros_out_of_range_raises_harness_error(self, tmp_path):
+        payload = json.dumps(
+            [
+                {
+                    "sessionId": "s1",
+                    "cwd": str(tmp_path),
+                    "kind": "interactive",
+                    "startedAt": 1755100800123000,
+                }
+            ]
+        )
+        with pytest.raises(HarnessError, match="startedAt"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_started_at_epoch_nanos_out_of_range_raises_harness_error(self, tmp_path):
+        payload = json.dumps(
+            [
+                {
+                    "sessionId": "s1",
+                    "cwd": str(tmp_path),
+                    "kind": "interactive",
+                    "startedAt": 1755100800123000000,
+                }
+            ]
+        )
+        with pytest.raises(HarnessError, match="startedAt"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_started_at_infinity_raises_harness_error(self, tmp_path):
+        payload = (
+            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
+            '"startedAt": Infinity}]' % tmp_path
+        )
+        with pytest.raises(HarnessError, match="startedAt"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_started_at_nan_raises_harness_error(self, tmp_path):
+        payload = (
+            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
+            '"startedAt": NaN}]' % tmp_path
+        )
+        with pytest.raises(HarnessError, match="startedAt"):
             ClaudeCodeHarness().parse_session_list(payload)
 
 

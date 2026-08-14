@@ -81,7 +81,9 @@ class SessionRecord:
     ``session_id`` is the record's identity — callers diff snapshots on
     ``session_id``, never on whole-record equality. ``started_at`` is always
     timezone-aware UTC, never naive. Harness-native fields beyond this set are
-    dropped, never passed through.
+    dropped, never passed through. ``cwd`` is the session's LAUNCH root — the
+    directory it was started under — never its current working directory,
+    which may have since changed.
     """
 
     session_id: str
@@ -367,7 +369,11 @@ class Harness(ABC):
         use the argv" from ``session_resume`` and applies that uniformly here
         will hit an uncaught exception on their first bad id — most likely at
         the call site that hands this method a freshly-generated, unvalidated
-        id. Elsewhere in this module, ``None`` from any of these seams means
+        id. The raise guards path/argv safety (the id must be a safe token
+        before it reaches the launch argv), not id validity in any broader
+        sense — a non-UUID like ``"sess-1"`` passes this guard and only fails
+        later, at exec, if the harness's CLI itself rejects it. Elsewhere in
+        this module, ``None`` from any of these seams means
         "the harness has no such concept" for a fixed, harness-level
         capability; ``session_launch`` is the single exception to that rule.
 
@@ -424,13 +430,19 @@ class Harness(ABC):
         CLI may add new leaking variables in a later version, so a caller
         must not treat this list as proof of complete coverage.
 
-        Returns ``None`` when the harness has no such concept (e.g. nothing
-        to scrub, or launch isn't supported at all).
+        Returns ``None`` only when launch itself is unsupported. A
+        launch-capable harness with nothing to scrub returns ``[]``, per the
+        both-or-neither invariant above — ``None`` here means "launch
+        unsupported", never "nothing to scrub".
         """
         return None
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str] | None:
-        """Return raw, harness-native session listing output, or ``None``.
+        """Return the argv that lists this harness's live sessions, or ``None``.
+
+        Like ``session_resume`` and ``session_launch``, the seam owns the
+        ARGV — this method never execs; a caller runs it and hands the
+        output to :meth:`parse_session_list`.
 
         ``workspace``, when given, scopes the listing with PREFIX semantics
         — "rooted under" — so a session launched in a member worktree
@@ -454,6 +466,17 @@ class Harness(ABC):
         - Returns ``[]`` ONLY for a well-formed, empty listing.
         - RAISES :class:`HarnessError` on output that cannot be decoded —
           never silently drops it and never returns ``None`` for that case.
+          Every raised error names the offending field and carries a
+          BOUNDED excerpt of the raw output — bounded across the whole
+          payload, not per field, since a field such as ``cwd`` can carry a
+          username-bearing path that must never spill unbounded into logs.
+        - ``name``, ``pid``, and ``started_at`` map to ``None`` when absent,
+          null, or of the wrong type — they are optional fields, and a
+          malformed value degrades rather than raising.
+        - An unrecognized ``kind`` is KEPT in the record, with
+          ``controllable=False`` — a session of a kind this harness version
+          doesn't yet classify is still a real, live session, not one to
+          drop.
 
         Result order preserves the harness's own output order. Every parsed
         ``session_id`` satisfies the same validity guard that

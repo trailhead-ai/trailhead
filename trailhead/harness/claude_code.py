@@ -596,8 +596,14 @@ class ClaudeCodeHarness(Harness):
         """
         return list(_LAUNCH_ENV_UNSET)
 
-    def session_enumerate(self, workspace: Path | None = None) -> list[str] | None:
-        """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``."""
+    def session_enumerate(self, workspace: Path | None = None) -> list[str]:
+        """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.
+
+        ``workspace`` is passed to ``--cwd`` unresolved (as given) while
+        :meth:`parse_session_list` resolves each record's ``cwd`` before
+        comparison — a caller wanting exact prefix-match behavior against a
+        symlinked workspace root must pass an already-resolved path here.
+        """
         args = ["claude", "agents", "--json"]
         if workspace is not None:
             args += ["--cwd", str(workspace)]
@@ -669,7 +675,15 @@ class ClaudeCodeHarness(Harness):
             if isinstance(started_at_raw, (int, float)) and not isinstance(
                 started_at_raw, bool
             ):
-                started_at = datetime.fromtimestamp(started_at_raw / 1000, tz=timezone.utc)
+                try:
+                    started_at = datetime.fromtimestamp(
+                        started_at_raw / 1000, tz=timezone.utc
+                    )
+                except (ValueError, OverflowError) as exc:
+                    raise HarnessError(
+                        f"claude agents --json: record has invalid "
+                        f"'startedAt': {exc}: {_excerpt(output)}"
+                    ) from None
 
             records.append(
                 SessionRecord(
