@@ -11,7 +11,7 @@ from trailhead.harness import (
     get_harness,
     known_harness_names,
 )
-from trailhead.harness.base import UNSUPPORTED_RULESET_NOTICE
+from trailhead.harness.base import MODALITIES, MODALITY_TTY_REQUIRED, UNSUPPORTED_RULESET_NOTICE
 
 
 class TestFactory:
@@ -531,6 +531,78 @@ class TestClaudeCodeSessionResume:
 
     def test_rejects_a_non_string_session_id(self):
         assert ClaudeCodeHarness().session_resume(None) is None
+
+
+class TestClaudeCodeSessionLaunch:
+    """Claude Code launches a brand-new session by caller-chosen id. The seam
+    OWNS the argv the same way ``session_resume`` does."""
+
+    def test_returns_launch_argv_for_the_session(self, tmp_path):
+        assert ClaudeCodeHarness().session_launch(tmp_path, "sess-1") == [
+            "claude",
+            "--remote-control",
+            "--session-id",
+            "sess-1",
+        ]
+
+    def test_argv_is_a_token_list_needing_no_shell(self, tmp_path):
+        """Every element is a separate token — nothing is pre-joined or quoted, so
+        an exec-style caller passes it through untouched."""
+        argv = ClaudeCodeHarness().session_launch(tmp_path, "sess-1")
+        assert all(isinstance(tok, str) for tok in argv)
+        assert not any(" " in tok for tok in argv)
+        # A shell-active character would have to be quoted before a shell saw it;
+        # its absence is what lets an exec-style caller skip quoting entirely.
+        shell_active = set("|&;<>()$`\\\"'\t\n*?[]{}#~")
+        assert not any(shell_active & set(tok) for tok in argv)
+
+    def test_malformed_id_raises_unlike_session_resume_which_returns_none(self, tmp_path):
+        """Pin the deliberate divergence: session_resume degrades to None on a bad
+        id, session_launch raises — a caller who learned "check for None" from
+        session_resume must not silently pass a malformed id through to argv."""
+        for bad in ("", "a b", "a;rm -rf /", "$(whoami)", "../escape", "a/b", "-x"):
+            assert ClaudeCodeHarness().session_resume(bad) is None, bad
+            with pytest.raises(HarnessError):
+                ClaudeCodeHarness().session_launch(tmp_path, bad)
+
+    def test_rejects_a_non_string_session_id(self, tmp_path):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(tmp_path, None)
+
+    def test_rejects_a_leading_dash_session_id_as_flag_injection(self, tmp_path):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().session_launch(tmp_path, "--dangerously-skip-permissions")
+
+    def test_no_filesystem_validation_of_workspace(self, tmp_path):
+        missing = tmp_path / "does-not-exist"
+        assert ClaudeCodeHarness().session_launch(missing, "sess-1") == [
+            "claude",
+            "--remote-control",
+            "--session-id",
+            "sess-1",
+        ]
+
+
+class TestClaudeCodeSessionLaunchModality:
+    def test_returns_tty_required(self):
+        assert ClaudeCodeHarness().session_launch_modality() == MODALITY_TTY_REQUIRED
+
+    def test_is_a_member_of_modalities(self):
+        assert ClaudeCodeHarness().session_launch_modality() in MODALITIES
+
+
+class TestClaudeCodeSessionLaunchEnvUnset:
+    def test_contains_the_documented_leaking_vars(self):
+        unset = ClaudeCodeHarness().session_launch_env_unset()
+        for var in (
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDECODE",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+            "CLAUDE_CODE_MESSAGING_SOCKET",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+        ):
+            assert var in unset
 
 
 class TestSessionRetentionDaysBaseDefault:

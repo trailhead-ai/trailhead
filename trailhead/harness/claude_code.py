@@ -65,7 +65,13 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead.harness.base import Harness, HarnessError, SessionRecord
+from trailhead.harness.base import (
+    MODALITY_TTY_REQUIRED,
+    Harness,
+    HarnessError,
+    Modality,
+    SessionRecord,
+)
 
 _REGISTERED_MARKER = ".trailhead-registered"
 _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
@@ -113,6 +119,23 @@ def _excerpt(output: str) -> str:
         return flat[:_ERROR_EXCERPT_LIMIT] + "…"
     return flat
 
+
+#: Env markers Claude Code sets for its own child sessions.  Verified twice
+#: (v2.1.229 / v2.1.232) that a session launched with ``CLAUDE_CODE_CHILD_SESSION``
+#: inherited runs and connects remote-control but NEVER appears in
+#: ``claude agents --json`` — and the leaked env also carries the parent's live
+#: session access token, so scrubbing this list is a credential-hygiene
+#: requirement, not merely an enumeration fix.  This is a FLOOR, not an
+#: exhaustive guarantee (see the base contract).  Applying the scrub is the
+#: exec-owning caller's job, done at spawn time — this seam only names them.
+_LAUNCH_ENV_UNSET = [
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+]
 
 #: The user-level settings file under the Claude dir, and the top-level key in it
 #: that sets how many days a session transcript is kept before cleanup.  Claude
@@ -533,6 +556,45 @@ class ClaudeCodeHarness(Harness):
     # ``--cwd`` is the CLI's native started-under PREFIX filter (verified
     # empirically 2026-08-14) — exactly the "rooted under" scoping the base
     # seam documents, so it is passed straight through rather than re-derived.
+    #
+    # ``claude --remote-control --session-id <id>`` starts a brand-new session
+    # under the caller-chosen id (confirmed by an operator TTY check on
+    # 2026-08-14: the CLI honors a supplied id and it enumerates under exactly
+    # that id in ``claude agents --json``). Deliberately absent from the argv,
+    # each for a verified reason:
+    #
+    # - no session-NAME flag — names are not settable on launch; both the
+    #   positional name and ``--remote-control-session-name-prefix`` are
+    #   ignored, and the name Claude Code derives is the cwd basename plus two
+    #   hex characters.
+    # - no ``--bg`` — it silently discards ``--remote-control`` and yields
+    #   ``kind: background`` instead of a controllable session.
+    # - no workspace path — Claude Code roots a launched session on the
+    #   process's cwd, which the exec-owning caller sets; ``workspace`` is
+    #   accepted for the seam signature and is unused here.
+
+    def session_launch(self, workspace: Path, session_id: str) -> list[str]:
+        """Return ``["claude", "--remote-control", "--session-id", <session-id>]``.
+
+        Raises :class:`HarnessError` on a malformed ``session_id`` — see the
+        base contract's DIVERGES note: this is the one seam here that raises
+        instead of degrading to ``None`` on bad input, since launch is
+        constant-valued and ``None`` is reserved for "cannot launch at all".
+        """
+        if not _is_session_id(session_id):
+            raise HarnessError(f"session_launch: invalid session_id: {session_id!r}")
+        return ["claude", "--remote-control", "--session-id", session_id]
+
+    def session_launch_modality(self) -> Modality:
+        """Claude Code launch requires a TTY (interactive terminal)."""
+        return MODALITY_TTY_REQUIRED
+
+    def session_launch_env_unset(self) -> list[str]:
+        """Env var names a launching caller must scrub before spawning.
+
+        See :data:`_LAUNCH_ENV_UNSET` for why each name is here.
+        """
+        return list(_LAUNCH_ENV_UNSET)
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str] | None:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``."""
