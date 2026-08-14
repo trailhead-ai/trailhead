@@ -704,3 +704,181 @@ class TestSessionRecord:
 
         with _pytest.raises(TypeError):
             SessionRecord()
+
+
+class TestClaudeCodeSessionEnumerate:
+    """``session_enumerate`` returns the raw ``claude agents --json`` argv; the
+    seam OWNS the argv the same way ``session_resume`` does."""
+
+    def test_returns_bare_argv_with_no_workspace(self):
+        assert ClaudeCodeHarness().session_enumerate() == ["claude", "agents", "--json"]
+
+    def test_appends_cwd_flag_with_workspace(self, tmp_path):
+        assert ClaudeCodeHarness().session_enumerate(tmp_path) == [
+            "claude",
+            "agents",
+            "--json",
+            "--cwd",
+            str(tmp_path),
+        ]
+
+
+class TestClaudeCodeParseSessionListRoundTrip:
+    """A captured real ``claude agents --json`` payload (live 2026-08-14 shape)
+    parses into fully-typed SessionRecords."""
+
+    def test_round_trip_parses_every_field(self, tmp_path):
+        import json as _json
+        from datetime import timezone
+
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+
+        payload = _json.dumps(
+            [
+                {
+                    "sessionId": "sess-1",
+                    "cwd": str(link),
+                    "kind": "interactive",
+                    "name": "my session",
+                    "pid": 4242,
+                    "startedAt": 1755100800123,
+                }
+            ]
+        )
+
+        records = ClaudeCodeHarness().parse_session_list(payload)
+
+        assert len(records) == 1
+        rec = records[0]
+        assert rec.session_id == "sess-1"
+        assert rec.cwd == real.resolve()
+        assert rec.kind == "interactive"
+        assert rec.controllable is True
+        assert rec.name == "my session"
+        assert rec.pid == 4242
+        assert rec.started_at.tzinfo is not None
+        expected = __import__("datetime").datetime.fromtimestamp(
+            1755100800123 / 1000, tz=timezone.utc
+        )
+        assert rec.started_at == expected
+
+
+class TestClaudeCodeParseSessionListControllable:
+    def test_interactive_is_controllable(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive"}}]'
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert records[0].controllable is True
+
+    def test_background_is_not_controllable(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "background"}}]'
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert records[0].controllable is False
+
+    def test_unknown_kind_is_kept_with_controllable_false(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "sdk"}}]'
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert len(records) == 1
+        assert records[0].kind == "sdk"
+        assert records[0].controllable is False
+
+
+class TestClaudeCodeParseSessionListFailures:
+    def test_non_json_stdout_raises_with_offending_field_named(self):
+        with pytest.raises(HarnessError, match="decode"):
+            ClaudeCodeHarness().parse_session_list("not json at all")
+
+    def test_empty_stdout_raises(self):
+        with pytest.raises(HarnessError, match="decode"):
+            ClaudeCodeHarness().parse_session_list("")
+
+    def test_whitespace_only_stdout_raises(self):
+        with pytest.raises(HarnessError, match="decode"):
+            ClaudeCodeHarness().parse_session_list("   \n\t  ")
+
+    def test_json_object_instead_of_array_raises(self):
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().parse_session_list('{"sessionId": "s1"}')
+
+    def test_record_missing_session_id_raises_naming_the_field(self, tmp_path):
+        payload = f'[{{"cwd": "{tmp_path}", "kind": "interactive"}}]'
+        with pytest.raises(HarnessError, match="sessionId"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_record_with_invalid_session_id_raises(self, tmp_path):
+        payload = f'[{{"sessionId": "../evil", "cwd": "{tmp_path}", "kind": "interactive"}}]'
+        with pytest.raises(HarnessError, match="sessionId"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_record_missing_cwd_raises_naming_the_field(self):
+        payload = '[{"sessionId": "s1", "kind": "interactive"}]'
+        with pytest.raises(HarnessError, match="cwd"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+    def test_record_missing_kind_raises_naming_the_field(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}"}}]'
+        with pytest.raises(HarnessError, match="kind"):
+            ClaudeCodeHarness().parse_session_list(payload)
+
+
+class TestClaudeCodeParseSessionListEmpty:
+    def test_empty_array_yields_empty_list_not_none(self):
+        result = ClaudeCodeHarness().parse_session_list("[]")
+        assert result == []
+        assert result is not None
+
+
+class TestClaudeCodeParseSessionListOptionalFields:
+    def test_absent_optional_fields_map_to_none(self, tmp_path):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive"}}]'
+        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+    def test_null_optional_fields_map_to_none(self, tmp_path):
+        payload = (
+            f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive", '
+            '"name": null, "pid": null, "startedAt": null}]'
+        )
+        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+    def test_wrongly_typed_optional_fields_map_to_none(self, tmp_path):
+        payload = (
+            f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive", '
+            '"name": 5, "pid": "not-an-int", "startedAt": "not-a-number"}]'
+        )
+        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
+        assert rec.name is None
+        assert rec.pid is None
+        assert rec.started_at is None
+
+
+class TestClaudeCodeParseSessionListErrorExcerpt:
+    def test_error_message_is_bounded_and_truncates_path_bearing_fields(self, tmp_path):
+        long_cwd = str(tmp_path / ("x" * 5000))
+        payload = f'[{{"cwd": "{long_cwd}", "kind": "interactive"}}]'
+        with pytest.raises(HarnessError) as exc_info:
+            ClaudeCodeHarness().parse_session_list(payload)
+        message = str(exc_info.value)
+        assert len(message) < len(payload)
+        assert long_cwd not in message
+
+
+class TestClaudeCodeParseSessionListDuplicateIds:
+    def test_duplicate_session_ids_are_both_kept_in_output_order(self, tmp_path):
+        payload = (
+            f'[{{"sessionId": "dup", "cwd": "{tmp_path}", "kind": "interactive", "pid": 1}}, '
+            f'{{"sessionId": "dup", "cwd": "{tmp_path}", "kind": "background", "pid": 2}}]'
+        )
+        records = ClaudeCodeHarness().parse_session_list(payload)
+        assert len(records) == 2
+        assert records[0].session_id == "dup"
+        assert records[1].session_id == "dup"
+        assert records[0].pid == 1
+        assert records[1].pid == 2

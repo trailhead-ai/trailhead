@@ -62,9 +62,10 @@ import os
 import re
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead.harness.base import Harness, HarnessError
+from trailhead.harness.base import Harness, HarnessError, SessionRecord
 
 _REGISTERED_MARKER = ".trailhead-registered"
 _INSTALLED_MARKER_PREFIX = ".trailhead-installed-"
@@ -95,6 +96,23 @@ def _is_session_id(session_id: object) -> bool:
     a session id this harness recognizes at all.
     """
     return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
+
+
+#: Cap on the raw-output excerpt embedded in a ``parse_session_list``
+#: ``HarnessError`` message. Bounded across the WHOLE payload (not per field):
+#: a ``cwd`` carries an absolute path — usually including the username — into
+#: terminal scrollback and logs, so a single whole-payload bound is what
+#: actually keeps that out, not a per-field one.
+_ERROR_EXCERPT_LIMIT = 200
+
+
+def _excerpt(output: str) -> str:
+    """A length-bounded, single-line excerpt of raw enumeration output for errors."""
+    flat = output.replace("\n", "\\n")
+    if len(flat) > _ERROR_EXCERPT_LIMIT:
+        return flat[:_ERROR_EXCERPT_LIMIT] + "…"
+    return flat
+
 
 #: The user-level settings file under the Claude dir, and the top-level key in it
 #: that sets how many days a session transcript is kept before cleanup.  Claude
@@ -508,3 +526,99 @@ class ClaudeCodeHarness(Harness):
     def session_retention_setting(self) -> str | None:
         """The settings key a user raises to keep transcripts longer."""
         return _CLEANUP_PERIOD_KEY
+
+    # -- session launch & enumeration ------------------------------------------
+    #
+    # ``claude agents --json`` lists this machine's Claude Code sessions.
+    # ``--cwd`` is the CLI's native started-under PREFIX filter (verified
+    # empirically 2026-08-14) — exactly the "rooted under" scoping the base
+    # seam documents, so it is passed straight through rather than re-derived.
+
+    def session_enumerate(self, workspace: Path | None = None) -> list[str] | None:
+        """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``."""
+        args = ["claude", "agents", "--json"]
+        if workspace is not None:
+            args += ["--cwd", str(workspace)]
+        return args
+
+    def parse_session_list(self, output: str) -> list[SessionRecord]:
+        """Parse ``claude agents --json`` output into :class:`SessionRecord` values.
+
+        See the base contract for the full failure semantics. Every raised
+        :class:`HarnessError` names the offending field (or the decode failure)
+        and includes a bounded excerpt of the raw output — bounded across the
+        WHOLE payload, not per field, since a ``cwd`` carries an absolute path
+        (often including the username) that must never spill unbounded into
+        terminal scrollback or logs.
+        """
+        try:
+            data = json.loads(output)
+        except (json.JSONDecodeError, ValueError):
+            raise HarnessError(
+                f"claude agents --json: failed to decode output: {_excerpt(output)}"
+            ) from None
+
+        if not isinstance(data, list):
+            raise HarnessError(
+                f"claude agents --json: expected a JSON array, got "
+                f"{type(data).__name__}: {_excerpt(output)}"
+            )
+
+        records = []
+        for record in data:
+            if not isinstance(record, dict):
+                raise HarnessError(
+                    f"claude agents --json: expected a JSON object per record, got "
+                    f"{type(record).__name__}: {_excerpt(output)}"
+                )
+
+            session_id = record.get("sessionId")
+            if not _is_session_id(session_id):
+                raise HarnessError(
+                    f"claude agents --json: record has missing or invalid "
+                    f"'sessionId': {_excerpt(output)}"
+                )
+
+            raw_cwd = record.get("cwd")
+            if not isinstance(raw_cwd, str) or not raw_cwd:
+                raise HarnessError(
+                    f"claude agents --json: record has missing or invalid "
+                    f"'cwd': {_excerpt(output)}"
+                )
+            cwd = Path(raw_cwd).resolve()
+
+            kind = record.get("kind")
+            if not isinstance(kind, str) or not kind:
+                raise HarnessError(
+                    f"claude agents --json: record has missing or invalid "
+                    f"'kind': {_excerpt(output)}"
+                )
+
+            name = record.get("name")
+            if not isinstance(name, str):
+                name = None
+
+            pid = record.get("pid")
+            if isinstance(pid, bool) or not isinstance(pid, int):
+                pid = None
+
+            started_at_raw = record.get("startedAt")
+            started_at = None
+            if isinstance(started_at_raw, (int, float)) and not isinstance(
+                started_at_raw, bool
+            ):
+                started_at = datetime.fromtimestamp(started_at_raw / 1000, tz=timezone.utc)
+
+            records.append(
+                SessionRecord(
+                    session_id=session_id,
+                    cwd=cwd,
+                    kind=kind,
+                    controllable=kind == "interactive",
+                    name=name,
+                    pid=pid,
+                    started_at=started_at,
+                )
+            )
+
+        return records
