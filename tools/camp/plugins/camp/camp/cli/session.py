@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -37,7 +36,6 @@ from pathlib import Path
 #: forever with no liveness signal, so an unbounded wait would hang the caller.
 _PROVISION_POLL_INTERVAL_SECONDS = 1.0
 _PROVISION_POLL_TIMEOUT_SECONDS = 900.0
-
 
 
 def _refusal(exc: Exception) -> str:
@@ -205,25 +203,15 @@ def _enumerate_sessions(group: dict, workspace: Path | None, env: dict[str, str]
     and stays silent for the second.
     """
     from ..bookmark import harness_for
-    from ..launch.session import _ENUMERATE_TIMEOUT_SECONDS
+    from ..launch.session import enumerate_records
 
     harness = harness_for(group)
     if harness is None:
         return None
     try:
-        argv = harness.session_enumerate(workspace)
-        if not argv:
-            return None
-        completed = subprocess.run(
-            argv,
-            env=dict(env) if env is not None else dict(os.environ),
-            capture_output=True,
-            text=True,
-            timeout=_ENUMERATE_TIMEOUT_SECONDS,
+        return enumerate_records(
+            harness, workspace, dict(env) if env is not None else dict(os.environ)
         )
-        if completed.returncode != 0:
-            return None
-        return harness.parse_session_list(completed.stdout)
     except Exception:  # noqa: BLE001 — every failure of a read-only query degrades
         return None
 

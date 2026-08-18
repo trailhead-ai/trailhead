@@ -117,6 +117,43 @@ def _assert_trust(profile, launch_dir: Path, ws_dir: Path, env: dict[str, str]) 
         )
 
 
+def enumerate_records(
+    harness,
+    workspace: Path | None,
+    env: dict[str, str],
+    *,
+    cwd: Path | None = None,
+):
+    """Ask *harness* which sessions are live under *workspace*, and parse the answer.
+
+    The single enumeration mechanic in camp: the pre-spawn advisory probe, the
+    confirmation poll, and `camp sessions` all read live sessions through here, so
+    all three ask the same question the same way.
+
+    Returns the parsed records, or ``None`` when no answer could be obtained — the
+    harness has no enumeration concept, or the enumeration command failed. ``None``
+    is deliberately distinct from ``[]`` ("nothing is running"), which is an answer.
+
+    Exceptions propagate. What to DO about an unanswerable enumeration — degrade to
+    silence, tolerate it and keep polling, or degrade to a notice — is the caller's
+    posture, not this function's.
+    """
+    argv = harness.session_enumerate(workspace)
+    if not argv:
+        return None
+    completed = subprocess.run(
+        argv,
+        cwd=str(cwd) if cwd is not None else None,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=_ENUMERATE_TIMEOUT_SECONDS,
+    )
+    if completed.returncode != 0:
+        return None
+    return harness.parse_session_list(completed.stdout)
+
+
 def _report_live_sessions(harness, launch_dir: Path, env: dict[str, str]) -> None:
     """Best-effort notice about sessions already rooted under *launch_dir*.
 
@@ -125,20 +162,7 @@ def _report_live_sessions(harness, launch_dir: Path, env: dict[str, str]) -> Non
     hinge on camp's ability to describe what is already running.
     """
     try:
-        argv = harness.session_enumerate(launch_dir)
-        if not argv:
-            return
-        completed = subprocess.run(
-            argv,
-            cwd=str(launch_dir),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=_ENUMERATE_TIMEOUT_SECONDS,
-        )
-        if completed.returncode != 0:
-            return
-        records = harness.parse_session_list(completed.stdout)
+        records = enumerate_records(harness, launch_dir, env, cwd=launch_dir)
     except Exception:  # noqa: BLE001 — advisory probe, never blocks a launch
         return
     if records:
@@ -223,23 +247,11 @@ def _poll_enumerated(
     """One enumeration attempt: True iff *session_id* is exactly among the live ids.
 
     Membership is exact-string on ``SessionRecord.session_id`` — never prefix or
-    name matching, which could mistake an unrelated session for camp's own.
+    name matching, which could mistake an unrelated session for camp's own. An
+    unanswerable enumeration is simply "not yet found": the caller keeps polling.
     """
-    argv = harness.session_enumerate(launch_dir)
-    if not argv:
-        return False
-    completed = subprocess.run(
-        argv,
-        cwd=str(launch_dir),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=_ENUMERATE_TIMEOUT_SECONDS,
-    )
-    if completed.returncode != 0:
-        return False
-    records = harness.parse_session_list(completed.stdout)
-    return any(record.session_id == session_id for record in records)
+    records = enumerate_records(harness, launch_dir, env, cwd=launch_dir)
+    return any(record.session_id == session_id for record in records or ())
 
 
 def confirm_session(
