@@ -9,6 +9,7 @@ Contract:
 - VERB_ALIASES maps the short aliases rm→remove, ls→list.
 - canonical_verb normalizes an alias to its canonical verb (identity otherwise).
 - NEEDS_GROUP_VERBS is the canonical set {new, remove, pwd, activate, setup,
+  launch, sessions,
   bookmark} — `resume` is absent because it addresses a session by ref and is
   served from any cwd, and `bookmark` is listed only for its cwd-scoped bare
   capture spelling.
@@ -75,6 +76,8 @@ def test_needs_group_verbs_is_canonical_set() -> None:
         "activate",
         "setup",
         "bookmark",
+        "launch",
+        "sessions",
     }
 
 
@@ -193,6 +196,8 @@ def test_reserved_membership_is_pinned() -> None:
             "activate",
             "setup",
             "bookmark",
+            "launch",
+            "sessions",
             # Static: canonical/fleet verbs, meta verbs, hook handlers.
             "group",
             "list",

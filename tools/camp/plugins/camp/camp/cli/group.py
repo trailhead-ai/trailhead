@@ -8,6 +8,7 @@ workspace lives in ``workspace`` / ``lifecycle``.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -216,7 +217,7 @@ def _cmd_new_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp new <slug> — create or re-enter a workspace.
+    """camp new <slug> [--launch [--no-wait]] [--json] — create or re-enter a workspace.
 
     NEW slug: bring_up_workspace — synchronous seed (workspace dir + manifest with
     each member pending) + a DETACHED provisioner (camp setup --background) that runs
@@ -229,10 +230,21 @@ def _cmd_new_group_cli(
     success; on seed/provision failure exit nonzero with a stderr message and EMPTY
     stdout.
 
-    No session lock, no harness launch, no synchronous activation: provisioning is
-    async (check it with `camp status <slug>`) and activation is deferred — the
-    workspace activates when ready / via `camp activate <slug>`. That next-step
-    guidance is part of the stderr confirmation so the user is not stranded.
+    No session lock and no synchronous activation: provisioning is async (check it
+    with `camp status <slug>`) and activation is deferred — the workspace activates
+    when ready / via `camp activate <slug>`. That next-step guidance is part of the
+    stderr confirmation so the user is not stranded.
+
+    `--launch` additionally starts a detached harness session in the new workspace,
+    via the same engine `camp launch` uses. It BLOCKS on provisioning-ready first
+    (a harness launched into a half-cloned workspace is not usefully launched);
+    `--no-wait` skips that wait and says so, naming `camp status <slug>` as where a
+    later provisioning failure will surface. The launch NEVER changes the exit code
+    or the stdout path: a workspace that was created is a success even if the
+    session could not start, and a failed launch is a `camp launch: …` stderr line.
+    `--json` (which requires `--launch`) replaces the bare path line with
+    `{"workspace": <abs path>, "session_id": <id or null>}` — the single stdout
+    shape a machine caller parses on both outcomes.
     """
     from ..spine import _resolve_slug, _consume_flag_value, _die
     from ..provision.provision import bring_up_workspace
@@ -240,6 +252,17 @@ def _cmd_new_group_cli(
 
     rest = list(args)
     _consume_flag_value(rest, "--group")  # already resolved upstream; drop it
+
+    launch = "--launch" in rest
+    no_wait = "--no-wait" in rest
+    as_json = "--json" in rest
+    rest = [arg for arg in rest if arg not in ("--launch", "--no-wait", "--json")]
+
+    # --json only has a defined meaning alongside --launch: it exists to carry the
+    # session id next to the path. Refusing it outright beats inventing a second
+    # machine shape for a command whose non-launch output is a single path.
+    if as_json and not launch:
+        _die("camp new: --json requires --launch")
 
     if not rest:
         print("camp new: a slug is required\n  usage: camp new <slug>", file=sys.stderr)
@@ -297,6 +320,26 @@ def _cmd_new_group_cli(
             "automatically",
             file=sys.stderr,
         )
+
+    session_id: str | None = None
+    if launch:
+        from .session import launch_for_new, wait_for_provisioning
+
+        if no_wait:
+            print(
+                f"camp new: --no-wait — launching without waiting for provisioning; "
+                f"a later provisioning failure surfaces in `camp status {slug}`",
+                file=sys.stderr,
+            )
+            ready = True
+        else:
+            ready = wait_for_provisioning(group, slug, env=env)
+        if ready:
+            session_id = launch_for_new(group, slug, env=env)
+
+    if as_json:
+        print(json.dumps({"workspace": str(ws_dir), "session_id": session_id}))
+        return
 
     # The workspace abs path is the ONLY thing on stdout: exactly one line, no
     # trailing whitespace (print() appends the single newline).
