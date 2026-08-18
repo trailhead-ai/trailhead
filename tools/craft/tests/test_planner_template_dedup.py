@@ -104,3 +104,19 @@ def test_plan_checklist_carries_all_required_sections():
         f"{missing}. The fields-to-fill checklist must name every section a plan "
         "needs (including Observability & Failure Visibility and Known Unknowns)."
     )
+
+
+def test_planner_gate_description_reflects_recommend_then_accept():
+    """The gauntlet no longer gates on a user dispositioning each Critical finding
+    individually — it presents one recommendation the user accepts or overrides.
+    planner.md's explanation of why it cannot freeze a spec must match."""
+    text = _text()
+    assert "dispositioning each Critical finding" not in text, (
+        "planner.md must not describe the gauntlet's retired per-finding "
+        "disposition interrogation — the gauntlet now presents a recommendation "
+        "the user accepts or overrides"
+    )
+    assert "accepting" in text and "overriding" in text and "recommendation" in text, (
+        "planner.md must describe the gauntlet's gate in recommend-then-accept "
+        "terms, matching gauntlet/SKILL.md's resolution flow"
+    )

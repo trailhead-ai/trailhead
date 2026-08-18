@@ -258,16 +258,16 @@ spec, and every draft ADR, passes before it freezes.
 
 > "The spec is saved as a lore `spec` record (status `draft`). Next it goes through the gauntlet —
 > eight parallel passes that attack its facts, premises, consistency, and underdetermination — and
-> the gauntlet flips it to `ready` once you've dispositioned what it finds. Run `/craft:gauntlet
-> <spec-id>`."
+> the gauntlet flips it to `ready` once you've accepted its recommendation — or overridden it. Run
+> `/craft:gauntlet <spec-id>`."
 
 **Altitude-gate case (6b):**
 
 > "The decision is saved as a lore `adr` record (status `draft`), with its derived specs seeded as
 > `related: adr=` from birth. Next the ADR goes through the gauntlet's adr mode — seven passes,
-> adjudicated the same way — and it flips the record once you've dispositioned what it finds. Run
-> `/craft:gauntlet <adr-id>`. Each seeded spec gets its own brainstorm-then-gauntlet pass,
-> separately, once you pick it up."
+> adjudicated the same way — and it flips the record once you've accepted its recommendation — or
+> overridden it. Run `/craft:gauntlet <adr-id>`. Each seeded spec gets its own brainstorm-then-gauntlet
+> pass, separately, once you pick it up."
 
 **Print the handoff command fully formed** — substitute the real record id (e.g. `/craft:gauntlet
 spec/streaming-export` or `/craft:gauntlet adr/streaming-export-decision`), never a `<placeholder>`,
@@ -295,9 +295,10 @@ is **frozen**: no more edits; new thinking on the same topic creates a new spec 
 `Related → Prior specs` link back.
 
 **The `draft` → `ready` edge is the gauntlet's.** Brainstorm leaves the spec at `draft`; the
-`gauntlet` skill flips it once its Criticals are dispositioned. A gauntlet Critical dispositioned
-`reframed` sends the spec to `superseded` instead — the framing didn't survive, so this spec never
-freezes and a new one takes its place. That is the review working, not the spec failing.
+`gauntlet` skill flips it once the operator has accepted its recommendation. A gauntlet Critical
+dispositioned `reframed` sends the spec to `superseded` instead — the framing didn't survive, so
+this spec never freezes and a new one takes its place. That is the review working, not the spec
+failing.
 
 ## Bounce-Back from Planning
 

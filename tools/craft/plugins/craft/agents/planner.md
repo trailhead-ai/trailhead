@@ -101,8 +101,9 @@ If all green, **leave the spec at `status: draft`** and proceed to Planning.
 
 **You cannot freeze a spec.** The `draft` → `ready` edge belongs to the `gauntlet` skill — the
 adversarial spec review that every spec passes before it becomes load-bearing. You cannot run it:
-it dispatches eight parallel review agents (you have no `Agent` tool) and it gates on a *user*
-dispositioning each Critical finding, and you run in an isolated context with no user in it.
+it dispatches eight parallel review agents (you have no `Agent` tool) and it gates on the *user*
+accepting — or overriding — its recommendation, and you run in an isolated context with no user
+in it.
 
 So the plan you write here is **provisional against an un-reviewed spec**. Say exactly that in your
 returned summary, and tell the caller what closes it:

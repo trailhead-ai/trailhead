@@ -139,3 +139,46 @@ def test_brainstorm_never_writes_the_adr_active_flip():
         "brainstorm/SKILL.md must never carry the literal `--status active` write — "
         "the gauntlet alone flips an adr to active, never brainstorm"
     )
+
+
+def test_spec_handoff_reflects_recommend_then_accept():
+    """The gauntlet no longer walks the user through a per-finding disposition
+    interrogation — it presents one recommendation the user accepts or overrides.
+    Regression guard for the spec-branch (6a) handoff quote."""
+    text = _text()
+    assert "dispositioned what it finds" not in text, (
+        "brainstorm/SKILL.md's spec handoff must not describe the retired "
+        "per-finding disposition interrogation — the gauntlet now presents a "
+        "recommendation the user accepts or overrides"
+    )
+    assert "accepted its recommendation" in text, (
+        "brainstorm/SKILL.md's spec handoff must describe flipping to `ready` "
+        "once the user has accepted the gauntlet's recommendation, matching "
+        "gauntlet's recommend-then-accept resolution flow"
+    )
+
+
+def test_adr_handoff_reflects_recommend_then_accept():
+    """Same recommend-then-accept alignment for the altitude-gate (6b) handoff quote."""
+    text = _text()
+    assert text.count("accepted its recommendation") >= 2, (
+        "brainstorm/SKILL.md must describe both the spec-branch and adr-branch "
+        "handoffs in recommend-then-accept terms — the gauntlet flips a record "
+        "once its recommendation is accepted, not once every finding is "
+        "individually dispositioned"
+    )
+
+
+def test_ready_edge_description_reflects_recommend_then_accept():
+    """The Status Lifecycle section's prose description of the draft -> ready edge
+    must also describe recommend-then-accept, not per-finding disposition."""
+    text = _text()
+    assert "Criticals are dispositioned" not in text, (
+        "brainstorm/SKILL.md must not describe the gauntlet's `draft` -> `ready` "
+        "flip as happening once Criticals 'are dispositioned' — the flip follows "
+        "the operator accepting the gauntlet's recommendation"
+    )
+    assert "operator has accepted" in text or "operator accepts" in text, (
+        "brainstorm/SKILL.md's Status Lifecycle section must describe the "
+        "gauntlet's flip in operator-accepts-the-recommendation terms"
+    )
