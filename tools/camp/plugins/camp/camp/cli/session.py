@@ -109,22 +109,29 @@ def wait_for_provisioning(group: dict, slug: str, *, env: dict[str, str] | None 
     can usefully be launched into, so `camp new --launch` waits by default. A
     failed or timed-out provisioning refuses the launch rather than racing it —
     the timeout report already names `camp status <slug>` as where the real state
-    is, so the refusal repeats it verbatim.
+    is, so the refusal repeats it verbatim. A missing or corrupt manifest
+    (:class:`ManifestError`) is the same refusal shape, not a traceback — the
+    provisioner never got far enough to leave a readable state.
     """
+    from ..group.manifest import ManifestError
     from ..provision.lifecycle import wait_for_provisioning_ready
 
     print(
         f"camp new: waiting for provisioning of {slug!r} to finish before launching",
         file=sys.stderr,
     )
-    outcome, report = wait_for_provisioning_ready(
-        group,
-        slug,
-        env=env,
-        interval=_PROVISION_POLL_INTERVAL_SECONDS,
-        timeout=_PROVISION_POLL_TIMEOUT_SECONDS,
-        sleep=time.sleep,
-    )
+    try:
+        outcome, report = wait_for_provisioning_ready(
+            group,
+            slug,
+            env=env,
+            interval=_PROVISION_POLL_INTERVAL_SECONDS,
+            timeout=_PROVISION_POLL_TIMEOUT_SECONDS,
+            sleep=time.sleep,
+        )
+    except ManifestError as exc:
+        print(f"camp launch: refusing to launch — {exc}", file=sys.stderr)
+        return False
     if outcome == "ready":
         return True
     detail = report.get("message") or f"provisioning of workspace {slug!r} failed"
@@ -239,7 +246,17 @@ def _cmd_sessions_group_cli(
     slug = _slug_from_args_or_cwd(
         rest, group, verb="sessions", consume_positional=True, allow_none=True, env=env
     )
-    workspace = workspace_dir(group["group"]["name"], slug, env=env) if slug else None
+    workspace = None
+    if slug:
+        workspace = workspace_dir(group["group"]["name"], slug, env=env)
+        try:
+            # Mirror the launch engine's resolution (`_resolve_launch_dir`): a
+            # symlinked workspace dir must scope enumeration by the same
+            # resolved path a just-launched session registered under, or a
+            # slug-scoped query never finds it.
+            workspace = workspace.resolve(strict=True)
+        except OSError:
+            pass
 
     records = _enumerate_sessions(group, workspace, env)
     if records is None:

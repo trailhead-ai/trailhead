@@ -268,9 +268,11 @@ def confirm_session(
 
     Polls ``harness.session_enumerate(launched.launch_dir)`` at *interval* up to
     *timeout*, testing exact-string membership of ``launched.session_id``. A
-    :class:`HarnessError` mid-poll (e.g. an unsafe-argv guard tripping) is a
-    failed POLL, not a failed launch — polling continues to timeout expiry, since
-    the harness itself may simply not be up yet.
+    :class:`HarnessError` mid-poll (e.g. an unsafe-argv guard tripping), a missing
+    harness binary (:class:`FileNotFoundError` — camp only which-checks tmux, not
+    the harness), or a hung enumeration subprocess (:class:`subprocess.TimeoutExpired`)
+    is a failed POLL, not a failed launch — polling continues to timeout expiry,
+    since the harness itself may simply not be up yet.
 
     Confirmed → returns normally: the process exists and is enumerable, no claim
     of usability beyond that.
@@ -293,7 +295,7 @@ def confirm_session(
         try:
             if _poll_enumerated(harness, launched.session_id, launched.launch_dir, env):
                 return
-        except HarnessError:
+        except (HarnessError, FileNotFoundError, subprocess.TimeoutExpired):
             pass
         elapsed = clock() - start
         if elapsed >= timeout:

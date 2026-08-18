@@ -321,6 +321,63 @@ class TestRefusals:
 # ---------------------------------------------------------------------------
 
 
+class TestParseSessionListNoneIsTolerated:
+    """Regression pin: every caller of enumerate_records treats a None answer
+    (no enumeration concept / a harness whose parse_session_list itself answers
+    None) as "not yet found" / "nothing to report", never as an iterable it
+    crashes on. Removing the `records or ()` / falsy guard at any caller must
+    fail one of these."""
+
+    def test_already_live_probe_stays_silent_when_parse_session_list_returns_none(
+        self, rig, capsys, monkeypatch
+    ):
+        rig["harness"] = FakeHarness(enumerate_argv=["fakeharness", "agents"])
+        monkeypatch.setattr(rig["harness"], "parse_session_list", lambda output: None)
+        monkeypatch.setattr(
+            rig["module"].subprocess,
+            "run",
+            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+        )
+
+        result = _launch(rig)
+
+        assert len(rig["popen"].calls) == 1
+        assert result.session_id
+        assert capsys.readouterr().err == ""
+
+    def test_confirm_poll_treats_a_none_answer_as_not_yet_found(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+        monkeypatch.setattr(harness, "parse_session_list", lambda output: None)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+    def test_confirm_poll_none_then_a_real_match_still_confirms(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+        answers = iter([None, [_record("target-id")]])
+        monkeypatch.setattr(harness, "parse_session_list", lambda output: next(answers))
+
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=10.0,
+            sleep=lambda s: None,
+            clock=FakeClock(0.5),
+        )
+
+        assert next(answers, "exhausted") == "exhausted"
+
+
 class TestNonRefusingWarnings:
     def test_pretrust_disabled_by_config_spawns_with_a_stderr_warning(self, rig, capsys):
         result = _launch(rig, group=GROUP_NO_PRETRUST)
@@ -541,6 +598,93 @@ class TestConfirmSession:
         )
 
         assert harness.run_calls == 2
+
+    def test_missing_harness_binary_mid_poll_is_tolerated_and_polling_continues(
+        self, confirm_rig, monkeypatch
+    ):
+        """A harness binary absent from PATH raises FileNotFoundError from Popen —
+        camp only which-checks tmux, not the harness — and that must be treated
+        as a failed poll, same as HarnessError, not escape as a raw traceback."""
+        session = confirm_rig["module"]
+        calls = {"n": 0}
+
+        def fake_run(argv, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise FileNotFoundError("no such file or directory: 'fakeharness'")
+            return type("R", (), {"returncode": 0, "stdout": "target-id", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+        harness = SequencedHarness([["target-id"]])
+        monkeypatch.setattr(harness, "parse_session_list", lambda output: [_record("target-id")])
+
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=10.0,
+            sleep=lambda s: None,
+            clock=FakeClock(0.5),
+        )
+
+        assert calls["n"] == 2
+
+    def test_timeout_expired_mid_poll_is_tolerated_and_polling_continues(
+        self, confirm_rig, monkeypatch
+    ):
+        """A hung enumeration subprocess raises subprocess.TimeoutExpired; that is
+        a failed poll, not a failed launch — the caller keeps polling to timeout."""
+        import subprocess as subprocess_mod
+
+        session = confirm_rig["module"]
+        calls = {"n": 0}
+
+        def fake_run(argv, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=10)
+            return type("R", (), {"returncode": 0, "stdout": "target-id", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+        harness = SequencedHarness([["target-id"]])
+        monkeypatch.setattr(harness, "parse_session_list", lambda output: [_record("target-id")])
+
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=10.0,
+            sleep=lambda s: None,
+            clock=FakeClock(0.5),
+        )
+
+        assert calls["n"] == 2
+
+    def test_missing_harness_binary_through_timeout_still_kills_tmux(
+        self, confirm_rig, monkeypatch
+    ):
+        """A FileNotFoundError that persists to timeout is a normal timed-out
+        confirmation — tmux gets killed and the refusal is reported, no
+        traceback."""
+        session = confirm_rig["module"]
+
+        def fake_run(argv, **kwargs):
+            if argv[0] == "tmux":
+                return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            raise FileNotFoundError("no such file or directory: 'fakeharness'")
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+        harness = SequencedHarness([[]])
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
 
     def test_poll_count_is_bounded_by_timeout_over_interval(self, confirm_rig):
         session = confirm_rig["module"]
