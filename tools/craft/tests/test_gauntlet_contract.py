@@ -2,8 +2,9 @@
 
 The gauntlet is the review a spec passes before it freezes: eight parallel passes
 (fact verification, premise attack, the four council lenses, an internal-consistency
-audit, a plan-divergence probe), adjudicated in the main session, with every Critical
-dispositioned by the user.
+audit, a plan-divergence probe), adjudicated in the main session and delivered to the
+operator as one compact recommendation — synthesis, route, per-Critical dispositions —
+which they accept or override in a single round-trip before anything is written.
 
 The user-facing decision was "mandatory, no skip flag" — but a checklist item saying
 "don't skip this" is honored only as well as the next agent feels like honoring it.
@@ -330,42 +331,6 @@ def test_gauntlet_reads_the_shared_council_file():
     )
 
 
-def test_gauntlet_presentation_binds_to_the_shared_finding_shape():
-    """How a finding reads is a contract, and it is defined in one place.
-
-    The adjudicated list is the only gauntlet output a human reads, so the
-    instruction that orders it must also say where the per-finding shape comes
-    from. Without the pointer in that same paragraph, an editor tidying the
-    sentence drops the binding and the report reverts to shorthand-first prose
-    with no test to catch it.
-    """
-    paragraphs = [
-        p
-        for p in GAUNTLET.read_text().split("\n\n")
-        if "Present the consolidated change list" in p
-    ]
-    assert paragraphs, (
-        "gauntlet/SKILL.md must keep the instruction that presents the adjudicated change list"
-    )
-    for paragraph in paragraphs:
-        assert "_shared/council.md" in paragraph, (
-            "gauntlet/SKILL.md's presentation instruction must point at _shared/council.md "
-            "for the per-finding shape, the same way adjudication defers to it for the "
-            f"speculative-Critical downgrade rule; got: {paragraph!r}"
-        )
-        assert "How a finding reads" in paragraph, (
-            "gauntlet/SKILL.md's presentation instruction must name the 'How a finding "
-            "reads' section, not just the file — a bare file reference survives that "
-            f"section being renamed away underneath it; got: {paragraph!r}"
-        )
-
-    shared = GAUNTLET.parent.parent / "_shared" / "council.md"
-    assert "How a finding reads" in shared.read_text(), (
-        "_shared/council.md must keep the 'How a finding reads' heading gauntlet points "
-        "at, or the cross-file reference dangles"
-    )
-
-
 def test_gauntlet_does_not_reinline_council_scaffolding():
     """The roster, prompt template, and bars live in _shared/council.md — one copy."""
     text = GAUNTLET.read_text()
@@ -573,3 +538,368 @@ def test_adr_review_bars_live_in_shared_council():
     for lens in ("*Builder — adr review:*", "*Reliability — adr review:*",
                  "*Security — adr review:*", "*Advocate — adr review:*"):
         assert lens in text, f"_shared/council.md missing the {lens!r} bar block"
+
+
+
+# --- resolution: one compact recommendation, accepted or overridden ---
+
+# The resolution step is the only gauntlet output an operator acts on, so its shape
+# is behavior. Anchored on the heading so most checks below can be scoped to the
+# step: a phrase that happens to appear in the adr-mode section must not satisfy a
+# pin about the shared resolution step.
+RESOLUTION_HEADER = "### 5. Recommend, then accept"
+
+# The seam between deciding and writing. Named as its own subsection so the two
+# halves of the step can be edited independently without either one guessing where
+# the other ends.
+ACCEPTED_TAIL_ANCHOR = "#### The accepted tail"
+
+# The points where the step hands control to a human. Named — rather than left
+# implicit in the prose — so an unattended caller would be a re-route table over
+# these names instead of a redesign, the pattern `_shared/execute.md` establishes.
+_ESCALATION_POINTS: list[str] = [
+    "operator acceptance gate",
+    "override round-trip",
+    "route-change re-present",
+    "failed-write report",
+]
+
+
+def _flat(text: str) -> str:
+    """Whitespace-collapsed prose, so a pinned sentence survives a line wrap.
+
+    The contract is the sentence, not where the paragraph happens to break.
+    """
+    return " ".join(text.split())
+
+
+def _resolution_step(text: str) -> str:
+    """The resolution step's body, from its heading to the next step heading.
+
+    `#### ` subsections inside the step do not terminate it; only the next `### `
+    step heading does.
+    """
+    assert RESOLUTION_HEADER in text, (
+        f"gauntlet/SKILL.md must carry a {RESOLUTION_HEADER!r} step — the adjudicated "
+        "findings reach the operator as one recommendation, not as a per-finding "
+        "interrogation"
+    )
+    start = text.index(RESOLUTION_HEADER)
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end == -1 else text[start:end]
+
+
+def test_resolution_step_exists():
+    _resolution_step(GAUNTLET.read_text())
+
+
+def test_deliverable_is_compact_and_leads_with_a_capped_synthesis():
+    """The operator's job here is to decide, not to re-derive the review.
+
+    A finding dump makes them re-open the record to judge each item; a capped
+    synthesis written in the record's own vocabulary is what lets them judge in
+    place.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "target one terminal screen (~40 lines)" in step, (
+        "the resolution step must state the compactness target for the default "
+        "deliverable — without it the step degrades back into the finding dump it "
+        "replaced"
+    )
+    assert "**Synthesis — at most five sentences.**" in step, (
+        "the deliverable must lead with a hard-capped synthesis; an uncapped one "
+        "grows into the finding list it replaced"
+    )
+    assert "in the design's own terms" in step, (
+        "the synthesis must be written in the reviewed design's own terms — a "
+        "per-pass roll-up forces the operator to re-open the record to orient"
+    )
+
+
+def test_criticals_carry_stable_presentation_ordered_ids():
+    """Ids are the operator's handle for an override and the audit trail's label.
+
+    Assigned late, or renumbered after presenting, and an override lands on a
+    different finding than the one the operator named.
+    """
+    text = _flat(GAUNTLET.read_text())
+    assert "`C1`…`Cn`" in text, (
+        "gauntlet/SKILL.md must give each Critical a stable id `C1`…`Cn` — the "
+        "override syntax and the audit trail both quote them"
+    )
+    assert "in the order you will present them" in text, (
+        "ids must be assigned in presentation order, so an operator scanning the "
+        "table can name a row without counting"
+    )
+    assert "stable for the rest of the run" in text, (
+        "ids must be pinned stable across override round-trips — renumbering "
+        "mid-run silently retargets an override the operator already gave"
+    )
+
+
+def test_only_resolved_and_reframed_are_agent_proposable():
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "The agent proposes **only `resolved` or `reframed`**" in step, (
+        "the resolution step must restrict agent-proposed dispositions to "
+        "`resolved` and `reframed` — those are judgments about the document, which "
+        "the adjudicator has read in full"
+    )
+
+
+def test_risk_and_dispute_are_operator_only_overrides():
+    """Accepting a risk is a statement about what the project will live with.
+
+    An agent that proposes `accepted-as-risk` — or drafts the reason text — signs
+    the operator's name to a judgment only the operator can make, and the audit
+    trail records it as theirs.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "are **operator-only overrides**" in step, (
+        "`accepted-as-risk` and `disputed` must be marked operator-only overrides"
+    )
+    for name in ("accepted-as-risk", "disputed"):
+        assert f"`{name}: <reason>`" in step, (
+            f"the resolution step must carry `{name}: <reason>` with its reason slot"
+        )
+    assert "**never drafted for them**" in step, (
+        "the reason text on an override must be the operator's own — a drafted "
+        "reason turns the audit trail into the agent's opinion wearing the "
+        "operator's signature"
+    )
+
+
+def test_both_route_names_are_pinned():
+    """Two routes, two names, used everywhere — including the per-mode tails.
+
+    Unnamed routes get re-described wherever they are mentioned, and the
+    descriptions drift until "the spec doesn't freeze" means two different things
+    in two sections.
+    """
+    text = GAUNTLET.read_text()
+    for route in ("freeze route", "reframe route"):
+        assert route in text, (
+            f"gauntlet/SKILL.md must name the {route!r} — the two routes are the "
+            "vocabulary the resolution step and both per-mode tails share"
+        )
+
+
+def test_route_rule_is_total_over_the_disposition_vocabulary():
+    """Every combination of dispositions must land on exactly one route.
+
+    A partial rule leaves the agent freelancing the outcome for whatever it does
+    not cover — which is how a record ends up in a state the lifecycle vocabulary
+    has no name for.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "total over the disposition vocabulary" in step, (
+        "the route rule must be stated as total — an incomplete rule is an "
+        "invitation to invent an outcome for the uncovered case"
+    )
+    assert "**Any Critical dispositioned `reframed`**" in step, (
+        "the reframe arm must fire on any `reframed` Critical, proposed or overridden"
+    )
+    assert "**Every other combination**" in step, (
+        "the freeze arm must be stated as the complement, covering every remaining "
+        "combination of `resolved` / `accepted-as-risk` / `disputed`"
+    )
+
+
+def test_security_criticals_are_exempt_from_compression():
+    """Compression is a convenience; it must not eat the costliest finding class.
+
+    A one-clause summary of a security finding reads as reasonable no matter what
+    it elides, so the operator cannot tell what they accepted.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**Security Criticals are never compressed.**" in step, (
+        "the resolution step must exempt attacker-lens Criticals from compression"
+    )
+    assert "the actual proposed edit text" in step, (
+        "a security Critical's row must carry the real edit text, not a clause "
+        "standing in for it — the clause is exactly what hides the change being "
+        "accepted"
+    )
+
+
+def test_important_and_minor_compress_to_count_and_theme():
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "a count plus a one-line theme" in step, (
+        "Important and Minor findings must compress in the default output — they "
+        "take no disposition, and enumerating them is what makes the deliverable "
+        "too long to read"
+    )
+
+
+def test_resolved_edits_are_drafted_before_the_deliverable_is_presented():
+    """Acceptance must be able to apply text that already exists.
+
+    If the edit is composed after acceptance, the operator accepted a promise, and
+    what lands in the record is unreviewed.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**Draft every `resolved` edit in full before you present.**" in step, (
+        "the resolution step must require every `resolved` edit be written before "
+        "the deliverable is presented"
+    )
+    assert "acceptance applies that text verbatim" in step, (
+        "acceptance must apply the drafted text verbatim — anything else means the "
+        "operator approved a summary and the record received something else"
+    )
+
+
+def test_full_detail_is_on_request_and_binds_to_the_shared_finding_shape():
+    """The compact default is only safe because the full detail is one ask away.
+
+    And when it is printed it must read in the shape defined in one place. Without
+    the pointer in that same paragraph, an editor tidying the sentence drops the
+    binding and the detail view reverts to shorthand-first prose with no test to
+    catch it.
+    """
+    paragraphs = [
+        _flat(p)
+        for p in GAUNTLET.read_text().split("\n\n")
+        if "**Full finding detail is not printed by default.**" in _flat(p)
+    ]
+    assert paragraphs, (
+        "gauntlet/SKILL.md must state that full finding detail is withheld from the "
+        "default deliverable and available on request"
+    )
+    for paragraph in paragraphs:
+        assert "show me the detail on C2" in paragraph, (
+            "the detail-on-request instruction must show the request form, keyed to "
+            f"a Critical id; got: {paragraph!r}"
+        )
+        assert "_shared/council.md" in paragraph, (
+            "the detail view must point at _shared/council.md for the per-finding "
+            "shape, the same way adjudication defers to it for the "
+            f"speculative-Critical downgrade rule; got: {paragraph!r}"
+        )
+        assert "How a finding reads" in paragraph, (
+            "the detail view must name the 'How a finding reads' section, not just "
+            "the file — a bare file reference survives that section being renamed "
+            f"away underneath it; got: {paragraph!r}"
+        )
+
+    shared = GAUNTLET.parent.parent / "_shared" / "council.md"
+    assert "How a finding reads" in shared.read_text(), (
+        "_shared/council.md must keep the 'How a finding reads' heading gauntlet "
+        "points at, or the cross-file reference dangles"
+    )
+
+
+def test_zero_critical_runs_still_gate_on_acceptance():
+    """A clean sweep is a result to accept, not a licence to freeze unattended."""
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "#### Zero Criticals is still a decision" in step, (
+        "the resolution step must cover the zero-Critical run explicitly"
+    )
+    assert "still gates on operator acceptance" in step, (
+        "a run with no Criticals must still present the deliverable and wait — a "
+        "gauntlet never freezes a record on its own reading of a clean sweep"
+    )
+
+
+def test_overrides_apply_in_one_round_trip():
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**one round-trip**" in step, (
+        "overrides must be collected from one reply and applied together — walking "
+        "back through the table finding by finding is the interrogation this step "
+        "replaces"
+    )
+
+
+def test_full_post_override_table_is_echoed_before_the_tail():
+    """A route line cannot show a misapplied override.
+
+    "dispute C3" recorded against C4 changes nothing the route line displays, and
+    the audit trail it lands in is permanent.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**Echo the full post-override table.**" in step, (
+        "the resolution step must re-render the complete disposition table after "
+        "any override"
+    )
+    assert "**not just the route line**" in step, (
+        "the echo must be pinned as the full table rather than the route line alone"
+    )
+    assert "as the last thing before the accepted tail executes" in step, (
+        "the echo must be positioned as the final output before the tail runs — an "
+        "echo printed earlier can be followed by another change the operator never "
+        "saw"
+    )
+
+
+def test_override_with_an_unknown_id_is_rejected_not_guessed():
+    """An id outside the presented range means the operator and the agent disagree
+    about what is on the table. Guessing settles that disagreement silently, in
+    favor of the guess, straight into a permanent record.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**An override naming an id outside the presented range is rejected.**" in step, (
+        "the resolution step must reject an override naming an unpresented id"
+    )
+    assert "**Never map an unknown id onto the id you think was meant.**" in step, (
+        "the rejection must forbid inferring the intended id — the re-ask is the "
+        "only safe resolution"
+    )
+
+
+def test_route_changing_override_re_presents_before_any_write():
+    """The route is the one thing an override can change that the operator did not
+    directly name — so it goes back for acceptance before anything is written.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "**A route-changing override re-presents once.**" in step, (
+        "an override that changes the route must re-present the revised recommendation"
+    )
+    assert "**before anything is written**" in step, (
+        "the re-present must precede every write — a route change discovered after "
+        "the tail has started is a record already flipped the wrong way"
+    )
+
+
+def test_resolution_names_its_escalation_points_in_the_execute_style():
+    """Named escalation points are what make a future unattended mode a re-route
+    table rather than a redesign. No unattended mode ships here — the naming is
+    the whole of it.
+    """
+    step = _flat(_resolution_step(GAUNTLET.read_text()))
+    assert "#### Escalation points" in step, (
+        "the resolution step must collect its escalation points under a heading"
+    )
+    assert "_shared/execute.md" in step, (
+        "the escalation-point naming must cite the shared execute contract it "
+        "follows, rather than inventing a second convention for the same idea"
+    )
+    assert "Two modes, one procedure" in step, (
+        "the citation must name the section, not just the file — a bare file "
+        "reference survives that section being renamed away underneath it"
+    )
+    for point in _ESCALATION_POINTS:
+        assert point in step, (
+            f"escalation point {point!r} must be named in the resolution step"
+        )
+    assert "**No unattended mode ships here**" in step, (
+        "the step must state that no unattended caller is wired — naming the "
+        "escalation points is not the same as authorizing an auto-accept path"
+    )
+
+
+def test_resolution_ends_at_the_accepted_tail_anchor():
+    """The anchor is the seam between deciding and writing.
+
+    Everything before it is presentation and acceptance; everything after it runs
+    only once the operator has accepted. Naming it keeps the two halves editable
+    independently of each other.
+    """
+    step = _resolution_step(GAUNTLET.read_text())
+    assert ACCEPTED_TAIL_ANCHOR in step, (
+        f"the resolution step must end with a {ACCEPTED_TAIL_ANCHOR!r} subsection — "
+        "the named seam between the acceptance gate and the writes that follow it"
+    )
+    after_anchor = step[step.index(ACCEPTED_TAIL_ANCHOR) + len(ACCEPTED_TAIL_ANCHOR):]
+    assert "\n#### " not in after_anchor, (
+        f"{ACCEPTED_TAIL_ANCHOR!r} must be the LAST subsection of the resolution "
+        "step — a subsection after it would run after acceptance while reading as "
+        "part of the decision"
+    )

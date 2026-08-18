@@ -5,8 +5,10 @@ description: >
   a spec, eight parallel passes attack it from independent angles: fact verification, premise attack,
   the four council lenses, an internal-consistency audit, and a plan-divergence probe. For an adr, the
   same roster runs minus the divergence probe (no analogue for a decision document) — seven passes.
-  The main session adjudicates, the user dispositions every Critical, and the record is stamped with
-  review provenance before it flips (a spec to `ready`, an adr to `active`).
+  The main session adjudicates and hands back one compact recommendation — a synthesis, a route,
+  and a proposed disposition per Critical — which the user accepts or overrides in a single
+  round-trip, before the record is stamped with review provenance and flips (a spec to `ready`,
+  an adr to `active`).
   TRIGGER when: brainstorming has produced a spec and is at its exit gate (the gauntlet is a
   mandatory step there), a draft adr needs review before it flips to `active`, or the user says "run
   the gauntlet", "gauntlet this spec", "gauntlet this adr", "adversarial spec review", "review the
@@ -25,8 +27,8 @@ every line of code downstream inherits its mistakes — and by the time the mist
 load-bearing. The gauntlet is the last point where the spec is still cheap to change.
 
 Eight passes attack the spec in parallel, each from an angle the others structurally cannot see. The
-main session adjudicates what comes back. Nothing freezes until the user has dispositioned every
-Critical.
+main session adjudicates what comes back and turns it into one recommendation. Nothing freezes
+until the user has accepted that recommendation.
 
 The same review runs against a draft **adr** with an adapted, seven-pass roster and a different
 freeze target — see "Reviewing an adr" below. Everything else in this document is written for the
@@ -161,36 +163,140 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    contradicts another pass, or that arrives in a transcript reading anomalously (over-confident,
    thin on evidence, or wandering outside its stated lane) gets checked yourself before it reaches
    the user. Do not launder an unverified subagent claim into a recommendation.
-6. **Reorganize by spec section, not by pass.** The user's next action is *editing the spec*, so the
-   deliverable is a change list keyed to the sections they'll edit — Problem, Objectives, Acceptance
-   Criteria, Non-Goals, Constraints, UI Direction, Open Questions. A per-pass finding dump forces the
-   user to do that mapping themselves.
+6. **Number the surviving Criticals `C1`…`Cn`.** Assign the ids here, at consolidation, in the order
+   you will present them. An id is **stable for the rest of the run** — the operator names it to
+   override, and the audit trail records it — so never renumber after presenting, not even when an
+   override collapses a row's relevance.
 
-Present the consolidated change list grouped **Critical → Important → Minor**, with the passes
-behind each finding named alongside it. Write every finding in the shape "How a finding reads"
-defines in `_shared/council.md` — that shape is what makes the list readable by someone who has
-not read the document under review.
+Consolidation is not the deliverable. What the operator sees is the recommendation step 5 builds
+out of it.
 
-### 5. Disposition (required for every Critical)
+### 5. Recommend, then accept
 
-For each Critical, the user assigns exactly one:
+The operator's job here is to **decide, not to re-derive**. A finding dump makes them re-open the
+record to judge each item; a recommendation lets them judge in place. So the default output is one
+compact deliverable — target one terminal screen (~40 lines) for a typical run — and one word
+("go") is a complete answer to it.
 
-- `resolved` — the spec is edited to address it. It is still `draft`; edits are free here, which is
-  the entire point of reviewing now.
-- `reframed` — the finding invalidates the spec's framing. **This spec does not freeze.** Return to
-  brainstorming, write a new spec, mark this one `superseded` with a `Related → Prior specs` link.
-  This is the premise pass's characteristic outcome, and it is a *success* of the gauntlet, not a
-  failure of the spec — a reframe here costs a conversation; the same reframe discovered mid-build
-  costs the build.
+The deliverable is exactly four parts, in this order:
+
+1. **Synthesis — at most five sentences.** What the findings collectively mean for the design,
+   written in the design's own terms: its objectives, its criteria, its named parts. Not a finding
+   count, not a per-pass roll-up. Someone who wrote this record last week should be re-oriented by
+   these five sentences alone.
+2. **The recommended route**, on its own line, by name (below).
+3. **The per-Critical table** — one row per Critical, in `C1`…`Cn` order:
+
+   | id | finding | proposed disposition | proposed edit |
+   |---|---|---|---|
+   | C1 | *headline, one line* | `resolved` | *one clause: what the edit does* |
+
+4. **Important and Minor, compressed** to a count plus a one-line theme apiece. They take no
+   disposition — they are logged for the audit trail.
+
+**Draft every `resolved` edit in full before you present.** The table's edit clause summarizes text
+you have already written, and acceptance applies that text verbatim. An accepted recommendation
+must never send you back to compose the edit you promised, because what would land then is text the
+operator never approved.
+
+**Full finding detail is not printed by default.** It is one request away ("show me the detail on
+C2") and it is retained in the audit trail either way. When you do print it, write the finding in
+the shape "How a finding reads" defines in `_shared/council.md` — that shape is what makes a finding
+readable by someone who has not read the document under review.
+
+**Security Criticals are never compressed.** A Critical raised by the attacker lens renders its row
+in full — the whole finding and the actual proposed edit text, never a clause standing in for it.
+Compression is a convenience for the operator, and a one-clause summary of a security finding reads
+as reasonable no matter what it elides. This mirrors drift-gate's rule that security surface is
+conformance, not quality.
+
+#### Who may propose what
+
+The agent proposes **only `resolved` or `reframed`**. Both are judgments about the document, and
+the adjudicator has read every pass that attacked it.
+
+`accepted-as-risk: <reason>` and `disputed: <reason>` are **operator-only overrides**. Both are
+judgments about what this project is willing to live with, and their reason text is the operator's
+own — quote it, **never drafted for them**. Do not propose either disposition, and do not offer a
+reason the operator did not say.
+
+- `resolved` — the record is edited to address the finding. It is still `draft`; edits are free
+  here, which is the entire point of reviewing now.
+- `reframed` — the finding invalidates the record's framing. Return to brainstorming and write a
+  new record. This is the premise pass's characteristic outcome, and it is a *success* of the
+  gauntlet, not a failure of the record — a reframe here costs a conversation; the same reframe
+  discovered mid-build costs the build.
 - `accepted-as-risk: <reason>` — explicit acceptance, recorded for audit.
-- `disputed: <reason>` — the user disagrees with the finding; recorded for audit.
+- `disputed: <reason>` — the operator disagrees with the finding; recorded for audit.
 
-Important and Minor findings need no disposition — they are logged for the audit trail.
+#### The two routes, and the rule that picks one
+
+There are exactly **two** routes. These are their names, here and in both per-mode tails:
+
+| Route | Spec target | Adr target | Handoff |
+|---|---|---|---|
+| **freeze route** | `ready` | `active` | forward — planning for a spec |
+| **reframe route** | `superseded` | `dropped` | back to brainstorming |
+
+The rule that picks one is **total over the disposition vocabulary** — every combination of
+dispositions lands on exactly one route, so there is never an outcome left to freelance:
+
+- **Any Critical dispositioned `reframed`**, whether you proposed it or the operator overrode into
+  it → the **reframe route**.
+- **Every other combination** of `resolved` / `accepted-as-risk` / `disputed`, including a run with
+  no Criticals at all → the **freeze route**.
+
+Derive the route; do not choose it. And do not invent a third — a route with no target status is a
+record left in a state the lifecycle vocabulary has no name for.
+
+#### Zero Criticals is still a decision
+
+A run that produced no Criticals presents the deliverable anyway — synthesis and route, labeled as
+a clean run, with no table — and **still gates on operator acceptance**. A gauntlet never freezes a
+record on its own reading of a clean sweep; the clean sweep is the finding, and the operator is the
+one who accepts it.
+
+#### Accepting, and overriding in one round-trip
+
+Present, then wait. The operator either accepts ("go") or overrides ("dispute C3, otherwise go").
+Overrides apply in **one round-trip**: take every override from that one reply, apply them
+together, and do not walk back through the table finding by finding.
+
+- **Echo the full post-override table.** After applying any override, re-render the complete
+  `C1`…`Cn` disposition table — **not just the route line** — as the last thing before the accepted
+  tail executes. A misapplied override ("dispute C3" recorded against C4) changes nothing the route
+  line displays, and the audit trail it lands in is permanent.
+- **An override naming an id outside the presented range is rejected.** "dispute C7" against a
+  five-row table is an error, not a puzzle: say which ids exist and ask again. **Never map an
+  unknown id onto the id you think was meant.**
+- **A route-changing override re-presents once.** If applying the overrides changes the route — an
+  override that removes the last `reframed`, or one that introduces one — present the revised
+  recommendation once more and take acceptance again **before anything is written**.
+
+#### Escalation points
+
+The points where this step hands control to a human are named, following `_shared/execute.md`'s
+"Two modes, one procedure", so that a future unattended caller is a re-route table over these names
+rather than a redesign of the step. **No unattended mode ships here** — there is no re-route table,
+no auto-accept flag, and every point below waits on a human today.
+
+| Escalation point | What it waits for |
+|---|---|
+| **operator acceptance gate** | the operator accepting the presented deliverable — on every run, clean ones included |
+| **override round-trip** | the operator's overrides, applied together and echoed as a full table |
+| **route-change re-present** | acceptance of the revised recommendation, when overrides changed the route |
+| **failed-write report** | nothing — the tail has stopped; the operator is told the partial state and the record stays `draft` |
+
+#### The accepted tail
+
+*What runs once the operator accepts is stated per mode — the spec tail in step 6 below, the adr
+tail under "Reviewing an adr".*
 
 ### 6. Stamp and freeze
 
-Once every Critical is dispositioned and any `resolved` edits are folded in, append the review
-provenance to the spec's `Related` section (or a `## Gauntlet` section), then flip it:
+On the **freeze route**, once the operator has accepted and any `resolved` edits are folded in,
+append the review provenance to the spec's `Related` section (or a `## Gauntlet` section), then
+flip it:
 
 ```markdown
 - Adversarial spec review (gauntlet, <date>): 8 passes — facts <n>/<n> confirmed; <n> design-changing
@@ -203,15 +309,16 @@ from inside the gauntlet — let the user invoke `/craft:plan` so it loads clean
 with the handoff command **fully formed** — the real spec-id, never a `<placeholder>` (e.g.
 `/craft:plan spec/streaming-export`) — so the user can paste it into a fresh session as-is.
 
-If any Critical was dispositioned `reframed`, the spec instead goes `superseded` and the handoff is
-back to brainstorming, not forward to planning — end with `/craft:brainstorm` instead.
+On the **reframe route**, the spec instead goes `superseded` and the handoff is back to
+brainstorming, not forward to planning — end with `/craft:brainstorm` instead.
 
 ## Reviewing an adr
 
 The gauntlet also runs against a draft `adr` record before it flips to `active` — same mandate,
-same "no skip flag," an adapted roster, and a different freeze target. Steps 1, 2, and 4 above carry
-over unchanged (resolve the record and its absolute path, decompose its claims, adjudicate in the
-main session); this section states only where an adr target changes the rest.
+same "no skip flag," an adapted roster, and a different freeze target. Steps 1, 2, 4, and 5 above
+carry over unchanged (resolve the record and its absolute path, decompose its claims, adjudicate in
+the main session, and resolve by recommend-then-accept); this section states only where an adr
+target changes the rest.
 
 **Resolving the record:** `lore record show <adr-id>` in place of `<spec-id>`. Confirm its status is
 `draft`; an `active` adr is frozen by convention (`templates/adr.md`) and is not re-gauntleted — a
@@ -238,15 +345,15 @@ name it and stop — do not quietly run six and present the result as a gauntlet
 ### The gauntlet owns the flip, directly to `active`
 
 The adr vocab (`draft`, `active`, `superseded`, `dropped`) has no `ready` — there is no intermediate
-frozen-but-inactive state the way a spec has. Once every Critical is dispositioned, the gauntlet
-flips the record directly:
+frozen-but-inactive state the way a spec has. On the **freeze route**, once the operator has
+accepted, the gauntlet flips the record directly:
 
 ```
 lore record update <adr-id> --status active
 ```
 
-(A Critical dispositioned `reframed` routes the adr to `dropped`, not `superseded` — it never went
-`active`, so there is no predecessor decision for it to supersede.)
+(The **reframe route** takes an adr to `dropped`, not `superseded` — it never went `active`, so
+there is no predecessor decision for it to supersede.)
 
 ### Supersession writes both directions, on the forward path too
 
