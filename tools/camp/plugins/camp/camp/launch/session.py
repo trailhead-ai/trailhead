@@ -55,6 +55,11 @@ _ENUMERATE_TIMEOUT_SECONDS = 10
 _CONFIRM_POLL_INTERVAL_SECONDS = 0.5
 _CONFIRM_POLL_TIMEOUT_SECONDS = 10.0
 
+#: Bound on the cleanup `tmux kill-session` call in :func:`confirm_session`. The
+#: failure was already reported by the time this runs, so a wedged or vanished
+#: tmux must not be able to hang — or crash — the refusal that follows it.
+_KILL_SESSION_TIMEOUT_SECONDS = 10
+
 
 class LaunchError(Exception):
     """A launch camp refused. Guarantees no process was started."""
@@ -102,6 +107,11 @@ def _assert_trust(profile, launch_dir: Path, ws_dir: Path, env: dict[str, str]) 
     so a pre-seed that reports failure is a refusal, not a warning. The opt-out is
     the operator's own call — it warns and proceeds, because the operator who
     disabled it is the one who will answer the prompt.
+
+    An exception from ``pretrust_workspace`` itself (e.g. its atomic write
+    failing mid ``os.replace``) is folded into the same refusal rather than left
+    to propagate raw — every caller of this engine relies on ``LaunchError``
+    being the only failure mode of a launch attempt.
     """
     if not profile.should_pretrust():
         print(
@@ -110,7 +120,14 @@ def _assert_trust(profile, launch_dir: Path, ws_dir: Path, env: dict[str, str]) 
             file=sys.stderr,
         )
         return
-    if not pretrust_workspace(launch_dir, workspace_root=ws_dir, env=env):
+    try:
+        trusted = pretrust_workspace(launch_dir, workspace_root=ws_dir, env=env)
+    except Exception as exc:  # noqa: BLE001 — engine-wide contract: refuse, never traceback
+        raise LaunchError(
+            f"camp: refusing to launch — could not pre-seed harness trust for "
+            f"workspace {launch_dir}: {exc}"
+        ) from exc
+    if not trusted:
         raise LaunchError(
             f"camp: refusing to launch — could not pre-seed harness trust for "
             f"workspace {launch_dir}"
@@ -209,7 +226,12 @@ def launch_session(
 
     _assert_trust(profile, launch_dir, ws_dir, env)
 
-    scrub = harness.session_launch_env_unset() or []
+    scrub = harness.session_launch_env_unset()
+    if scrub is None:
+        raise LaunchError(
+            f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
+            f"(configured binary {profile.binary!r}) cannot launch sessions"
+        )
 
     # The scrub rides INSIDE the pane command, as `env -u` operands sitting
     # between tmux's own options and the harness argv. Scrubbing camp's Popen
@@ -268,11 +290,15 @@ def confirm_session(
 
     Polls ``harness.session_enumerate(launched.launch_dir)`` at *interval* up to
     *timeout*, testing exact-string membership of ``launched.session_id``. A
-    :class:`HarnessError` mid-poll (e.g. an unsafe-argv guard tripping), a missing
-    harness binary (:class:`FileNotFoundError` — camp only which-checks tmux, not
-    the harness), or a hung enumeration subprocess (:class:`subprocess.TimeoutExpired`)
-    is a failed POLL, not a failed launch — polling continues to timeout expiry,
-    since the harness itself may simply not be up yet.
+    :class:`HarnessError` mid-poll (e.g. an unsafe-argv guard tripping), any
+    :class:`OSError` (a missing harness binary as :class:`FileNotFoundError` — camp
+    only which-checks tmux, not the harness — or a launch dir yanked out from under
+    a running enumeration as :class:`PermissionError`/:class:`NotADirectoryError`),
+    or a hung enumeration subprocess (:class:`subprocess.TimeoutExpired`) is a
+    failed POLL, not a failed launch — polling continues to timeout expiry, since
+    the harness itself may simply not be up yet. This mirrors the other two
+    ``enumerate_records`` callers in this module, which both catch broadly for the
+    same reason: a read-only query never escapes as a raw traceback.
 
     Confirmed → returns normally: the process exists and is enumerable, no claim
     of usability beyond that.
@@ -295,7 +321,7 @@ def confirm_session(
         try:
             if _poll_enumerated(harness, launched.session_id, launched.launch_dir, env):
                 return
-        except (HarnessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (HarnessError, OSError, subprocess.TimeoutExpired):
             pass
         elapsed = clock() - start
         if elapsed >= timeout:
@@ -309,11 +335,22 @@ def confirm_session(
         f"{launched.tmux_name}",
         file=sys.stderr,
     )
-    kill = subprocess.run(
-        ["tmux", "kill-session", "-t", launched.tmux_name],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        kill = subprocess.run(
+            ["tmux", "kill-session", "-t", launched.tmux_name],
+            capture_output=True,
+            text=True,
+            timeout=_KILL_SESSION_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(
+            f"camp: failed to kill tmux session {launched.tmux_name}: {exc}",
+            file=sys.stderr,
+        )
+        raise LaunchError(
+            f"camp: launch of session {launched.session_id} could not be confirmed — "
+            f"likely stalled at an unaccepted trust prompt in {launched.launch_dir}"
+        ) from exc
     if kill.returncode != 0:
         print(
             f"camp: failed to kill tmux session {launched.tmux_name}: "

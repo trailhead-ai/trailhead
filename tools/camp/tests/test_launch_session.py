@@ -273,6 +273,24 @@ class TestRefusals:
         assert str(rig["workspace"].resolve()) in str(excinfo.value)
         assert rig["popen"].calls == []
 
+    def test_pretrust_raising_refuses_naming_the_workspace_no_process_spawned(
+        self, rig, monkeypatch
+    ):
+        """pretrust_workspace's atomic-write path can raise (e.g. a disk error
+        mid os.replace) rather than returning False. That must still surface as
+        a LaunchError refusal with no process spawned — never a raw traceback."""
+
+        def boom(launch_dir, workspace_root, env=None):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(rig["module"], "pretrust_workspace", boom)
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch(rig)
+
+        assert str(rig["workspace"].resolve()) in str(excinfo.value)
+        assert rig["popen"].calls == []
+
     def test_unlaunchable_harness_refuses_naming_the_harness(self, rig):
         rig["harness"] = FakeHarness(launch_argv=None)
 
@@ -314,6 +332,29 @@ class TestRefusals:
         with pytest.raises(rig["module"].LaunchError):
             _launch(rig)
         assert rig["popen"].calls == []
+
+    def test_none_scrub_refuses_naming_the_harness_no_process_spawned(self, rig, monkeypatch):
+        """`None` from session_launch_env_unset means launch is unsupported for
+        this harness — never "nothing to scrub". Collapsing it to `[]` would
+        spawn an unscrubbed pane; the contract instead demands a refusal."""
+        monkeypatch.setattr(rig["harness"], "session_launch_env_unset", lambda: None)
+
+        with pytest.raises(rig["module"].LaunchError) as excinfo:
+            _launch(rig)
+
+        assert "fakeharness" in str(excinfo.value)
+        assert rig["popen"].calls == []
+
+    def test_empty_list_scrub_is_genuinely_nothing_to_scrub_and_proceeds(self, rig, monkeypatch):
+        """`[]` is the honest "nothing to scrub" answer — distinct from `None` —
+        and must proceed with the launch, with no `-u` operands in the pane."""
+        monkeypatch.setattr(rig["harness"], "session_launch_env_unset", lambda: [])
+
+        _launch(rig)
+
+        pane = _pane_command(rig["popen"].argv)
+        assert pane[0] == "env"
+        assert pane[1] == "fakeharness"
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +670,36 @@ class TestConfirmSession:
 
         assert calls["n"] == 2
 
+    def test_permission_error_mid_poll_is_tolerated_and_polling_continues(
+        self, confirm_rig, monkeypatch
+    ):
+        """A PermissionError (e.g. a launch dir yanked out from under a running
+        enumeration) is a failed POLL, not a failed launch — every other
+        enumerate_records caller in this module tolerates OSError broadly."""
+        session = confirm_rig["module"]
+        calls = {"n": 0}
+
+        def fake_run(argv, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise PermissionError("permission denied")
+            return type("R", (), {"returncode": 0, "stdout": "target-id", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+        harness = SequencedHarness([["target-id"]])
+        monkeypatch.setattr(harness, "parse_session_list", lambda output: [_record("target-id")])
+
+        session.confirm_session(
+            harness,
+            confirm_rig["launched"],
+            interval=0.5,
+            timeout=10.0,
+            sleep=lambda s: None,
+            clock=FakeClock(0.5),
+        )
+
+        assert calls["n"] == 2
+
     def test_timeout_expired_mid_poll_is_tolerated_and_polling_continues(
         self, confirm_rig, monkeypatch
     ):
@@ -752,6 +823,63 @@ class TestConfirmSession:
         err = capsys.readouterr().err
         assert "camp-feat-x-abcd1234" in err
         assert len([c for c in calls if c[0] == "tmux"]) == 1
+
+    def test_kill_session_call_carries_a_timeout(self, confirm_rig, monkeypatch):
+        """A wedged tmux must not hang the refusal — the kill call itself needs
+        a bound, same posture as every other subprocess call in this module."""
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+        captured_kwargs = {}
+
+        def fake_run(argv, **kwargs):
+            if argv[0] == "tmux":
+                captured_kwargs.update(kwargs)
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+        assert captured_kwargs.get("timeout") is not None
+
+    def test_kill_session_erroring_is_reported_not_raised(
+        self, confirm_rig, monkeypatch, capsys
+    ):
+        """A vanished/wedged tmux raising from the kill call (e.g.
+        TimeoutExpired or an OSError) must not escape as a traceback — the
+        failure was already reported, so a failing kill degrades the same way."""
+        import subprocess as subprocess_mod
+
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+
+        def fake_run(argv, **kwargs):
+            if argv[0] == "tmux":
+                raise subprocess_mod.TimeoutExpired(cmd=argv, timeout=kwargs.get("timeout"))
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+        err = capsys.readouterr().err
+        assert "camp-feat-x-abcd1234" in err
 
     def test_enumerate_argument_is_the_resolved_directory_symlink_case(
         self, confirm_rig, tmp_path, monkeypatch
