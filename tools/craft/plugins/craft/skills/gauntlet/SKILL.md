@@ -289,28 +289,80 @@ no auto-accept flag, and every point below waits on a human today.
 
 #### The accepted tail
 
-*What runs once the operator accepts is stated per mode — the spec tail in step 6 below, the adr
-tail under "Reviewing an adr".*
+What runs once the operator accepts is **ordered and fail-closed**, and it is the same sequence in
+both modes. The per-mode tails restate only their own deltas — what the write carries and where the
+detail goes — the spec tail in step 6 below, the adr tail under "Reviewing an adr".
+
+1. **One atomic write.** Every `resolved` edit and the provenance stamp apply as a single
+   `lore record update --diff` write. Not one write per Critical, and not the edits now with the
+   stamp to follow: `--diff` leaves the body byte-for-byte unmodified on any rejected hunk, and that
+   property is the only thing making the accepted set all-or-nothing. A record holding half its
+   accepted edits is a record nobody reviewed.
+2. **Then the status flip** — and, where the mode has one, the predecessor supersession write —
+   **only after that write has succeeded**. The flip is what freezes the record; running it ahead of
+   the edits freezes a record whose accepted edits are still hypothetical.
+
+**On any rejected hunk or failed write, nothing further runs.** Not the flip, not the supersession
+write, not a retry with the hunks re-cut. The record stays `draft` and you **report the partial
+state explicitly** — which writes landed, which did not, and what the record holds right now. That
+is the `failed-write report` escalation point: a half-applied acceptance is precisely the state an
+agent must not resolve on its own reading.
+
+**A successfully executing tail asks nothing.** Acceptance was the gate. There is no "about to flip
+— confirm?" between the write and the flip; a second prompt after the operator has already decided
+teaches them to wave through the one prompt that would have mattered.
+
+**The provenance stamp distinguishes accepted-from-proposal dispositions from operator overrides**,
+and it quotes the `C1`…`Cn` ids so an auditor can line every disposition up against the table the
+operator actually saw. Derive that split from the dispositions themselves, never from memory:
+
+- `accepted-as-risk` and `disputed` are **operator overrides by construction** — you may not propose
+  either, so a Critical carrying one was overridden, whatever you recall of the round-trip.
+- `resolved` and `reframed` are accepted-from-proposal *unless* this run's override reply changed
+  that row — which the echoed post-override table records.
 
 ### 6. Stamp and freeze
 
-On the **freeze route**, once the operator has accepted and any `resolved` edits are folded in,
-append the review provenance to the spec's `Related` section (or a `## Gauntlet` section), then
-flip it:
+This is the accepted tail in the spec's own terms; its sequence and failure behavior are the shared
+ones above.
+
+**The atomic write carries three things** — every `resolved` edit, the provenance stamp, and the
+**full consolidated finding detail** the deliverable did not print, retained as a `## Gauntlet`
+section appended to the spec body. The detail is part of the same atomic write, not a second write
+after the flip: a `ready` spec missing its own review record is exactly the artifact the audit trail
+exists to prevent. A spec body has no exhaustive-section contract, so the detail belongs in the
+record it reviewed:
 
 ```markdown
+## Gauntlet
+
 - Adversarial spec review (gauntlet, <date>): 8 passes — facts <n>/<n> confirmed; <n> design-changing
-  findings folded in (<one-clause each>). Criticals dispositioned: <n> resolved, <n> accepted-as-risk,
-  <n> disputed.
+  findings folded in (<one-clause each>). Criticals dispositioned: C1 `resolved` (from proposal),
+  C2 `disputed` (operator override — "<their reason, quoted>"), … — <n> from proposal, <n> operator
+  overrides. Important <n>, Minor <n>, detail below.
+- <the consolidated detail, per finding, in the shape `_shared/council.md` defines>
 ```
 
-Then `lore record update <spec-id> --status ready` and hand off to planning. Do not enter planning
-from inside the gauntlet — let the user invoke `/craft:plan` so it loads cleanly. End the wrap-up
-with the handoff command **fully formed** — the real spec-id, never a `<placeholder>` (e.g.
-`/craft:plan spec/streaming-export`) — so the user can paste it into a fresh session as-is.
+**Then, and only once that write has succeeded, flip.** On the **freeze route**:
 
-On the **reframe route**, the spec instead goes `superseded` and the handoff is back to
-brainstorming, not forward to planning — end with `/craft:brainstorm` instead.
+```
+lore record update <spec-id> --status ready
+```
+
+and hand off to planning. Do not enter planning from inside the gauntlet — let the user invoke
+`/craft:plan` so it loads cleanly. End the wrap-up with the handoff command **fully formed** — the
+real spec-id, never a `<placeholder>` (e.g. `/craft:plan spec/streaming-export`) — so the user can
+paste it into a fresh session as-is.
+
+On the **reframe route** the write is identical — a reframed spec still keeps its review record —
+and only the flip and the handoff differ:
+
+```
+lore record update <spec-id> --status superseded
+```
+
+The handoff is back to brainstorming, not forward to planning — end with `/craft:brainstorm`,
+equally fully formed.
 
 ## Reviewing an adr
 
@@ -381,11 +433,51 @@ because only distilled ADRs are on distill's resume path.
 The four-section body contract (`templates/adr.md`) is exhaustive — Context, Decision, Consequences,
 Alternatives rejected, nothing else.
 
-Gauntlet provenance for an adr target goes to the record's annotations, never the body:
+Gauntlet provenance for an adr target goes to the record's annotations, never the body. The full
+consolidated finding detail has nowhere to live in an exhaustive body either — it goes to a linked
+`lesson` record rather than being dropped, so the evidence behind an immutable decision survives the
+freeze.
+
+### The accepted tail, in adr terms
+
+The shared accepted tail's sequence and failure behavior hold here. The exhaustive body adds one
+write ahead of them, and the order of all three is fixed:
 
 ```
-lore record update <adr-id> --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-accepted-as-risk,<n>-disputed --status active
+printf '%s' "$DETAIL" | lore record create --kind lesson --title "Gauntlet detail — <adr title>" --related adr=<adr-id>
+lore record update <adr-id> --annotation gauntlet=<date>:7-passes:<n>-resolved,<n>-accepted-as-risk,<n>-disputed:<n>-from-proposal,<n>-operator-override
+lore record update <adr-id> --status active
 ```
+
+1. **The `lesson` record is written first**, carrying the consolidated detail and its
+   `--related adr=<adr-id>` edge on the same command — an edge added by a later write is an edge
+   that a failure between the two never writes. It also carries the per-Critical `C1`…`Cn`
+   dispositions the shared stamp quotes: an annotation is a key/value, so the ids need a record with
+   a body, and this is it.
+2. **Then the adr's atomic annotation write** — the disposition counts alongside the
+   accepted-from-proposal / operator-override split. Those two together are how the provenance stamp
+   renders for an adr.
+3. **Then the status flip** — `--status active` on the freeze route, and, when the successor's edge
+   names an `active` predecessor, the two-write supersession above in its pinned order.
+
+The **reframe route** runs the first two writes identically — a dropped adr keeps its review
+evidence, which is often the whole reason it was dropped — and differs only in the last one:
+
+```
+lore record update <adr-id> --status dropped
+```
+
+with no supersession write, since a dropped adr never became the decision of record.
+
+Lesson-first is chosen for the state a crash leaves behind. Its worst surviving artifact is a
+`draft` adr with an extra record pointing at it, which is harmless and re-runnable; the reverse
+order's is an `active`, immutable decision whose review evidence was never written at all.
+
+**Any failure stops the sequence**: the adr stays `draft`, and a `lesson` record already written
+when a later write fails is **never silently abandoned** — report the orphaned `lesson` record to
+the operator by name, so they can re-run or delete it. Give them the lookup rather than the claim:
+`lore search "kind:lesson related-adr:<adr-name>"` finds it from the adr, which is what makes
+reporting it enough.
 
 ### Distilled ADRs skip the gauntlet
 

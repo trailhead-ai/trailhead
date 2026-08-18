@@ -903,3 +903,317 @@ def test_resolution_ends_at_the_accepted_tail_anchor():
         "step — a subsection after it would run after acceptance while reading as "
         "part of the decision"
     )
+
+
+# --- the accepted tail: one atomic write, then the flip, fail-closed ---
+
+# The spec-mode tail. Scoped like the adr-mode section so a phrase that happens to
+# appear in the shared step cannot satisfy a pin about what the spec tail states.
+SPEC_TAIL_HEADER = "### 6. Stamp and freeze"
+
+# The adr-mode tail's ordered write sequence. Its own section because the order is
+# the contract — a reader who finds only the individual commands, scattered across
+# the sections that motivate them, has no way to know which runs first.
+ADR_TAIL_HEADER = "### The accepted tail, in adr terms"
+
+_ATOMIC_WRITE = "a single `lore record update --diff` write"
+_ADR_LESSON_CREATE = "lore record create --kind lesson"
+_ADR_LESSON_EDGE = "--related adr=<adr-id>"
+_ADR_COUNTS_ANNOTATION = "--annotation gauntlet="
+
+
+def _accepted_tail(text: str) -> str:
+    """The shared accepted tail — everything from its anchor to the end of the step.
+
+    The anchor is pinned as the step's last subsection, so "to the end of the step"
+    is exactly the tail's body.
+    """
+    step = _resolution_step(text)
+    assert ACCEPTED_TAIL_ANCHOR in step, (
+        f"the resolution step must carry a {ACCEPTED_TAIL_ANCHOR!r} subsection"
+    )
+    return step[step.index(ACCEPTED_TAIL_ANCHOR):]
+
+
+def _section(text: str, header: str, stop: str) -> str:
+    assert header in text, f"gauntlet/SKILL.md must carry a {header!r} section"
+    start = text.index(header)
+    end = text.find(stop, start + 1)
+    return text[start:] if end == -1 else text[start:end]
+
+
+def _spec_tail(text: str) -> str:
+    """The spec tail, bounded by the adr-mode heading that follows it.
+
+    Bounded on that exact heading rather than on any `## ` line: the tail quotes a
+    literal `## Gauntlet` body section inside a fenced block, and a generic bound
+    would read that example as the end of the section.
+    """
+    return _section(text, SPEC_TAIL_HEADER, "\n" + ADR_SECTION_HEADER)
+
+
+def _adr_tail(text: str) -> str:
+    return _section(_adr_mode_section(text), ADR_TAIL_HEADER, "\n### ")
+
+
+def test_accepted_tail_is_one_atomic_write_then_the_status_flip():
+    """Edits and stamp land together, or not at all — and the flip goes last.
+
+    A record carrying half its accepted edits is a record nobody reviewed, and a
+    flip that runs ahead of the edits freezes a record whose accepted edits are
+    still hypothetical.
+    """
+    tail = _flat(_accepted_tail(GAUNTLET.read_text()))
+    assert "**One atomic write.**" in tail, (
+        "the accepted tail must open with the single-write step — one write is what "
+        "makes the accepted set all-or-nothing"
+    )
+    assert _ATOMIC_WRITE in tail, (
+        "the tail must name the write form: every `resolved` edit plus the "
+        f"provenance stamp apply as {_ATOMIC_WRITE} — not one write per Critical, "
+        "and not edits now with the stamp to follow"
+    )
+    assert "**Then the status flip**" in tail, (
+        "the tail's second step must be the status flip"
+    )
+    assert "only after that write has succeeded" in tail, (
+        "the flip must be conditioned on the atomic write succeeding — an "
+        "unconditional flip is the failure mode the ordering exists to prevent"
+    )
+    assert tail.index(_ATOMIC_WRITE) < tail.index("**Then the status flip**"), (
+        "the atomic write must be stated before the status flip — the tail is an "
+        "ordered sequence, and prose order is the only thing carrying that order"
+    )
+
+
+def test_accepted_tail_is_fail_closed():
+    """A half-applied acceptance is not a state an agent may resolve on its own.
+
+    Retrying, re-cutting the hunks, or flipping anyway all turn a visible failure
+    into an invisible one — on a record that is about to freeze.
+    """
+    tail = _flat(_accepted_tail(GAUNTLET.read_text()))
+    assert "**On any rejected hunk or failed write, nothing further runs.**" in tail, (
+        "the tail must stop dead on a failed write — no flip, no supersession "
+        "write, no retry"
+    )
+    assert "The record stays `draft`" in tail, (
+        "a failed tail must leave the record `draft` — the one status from which "
+        "the run can simply be repeated"
+    )
+    assert "report the partial state explicitly" in tail, (
+        "the agent must report which writes landed and which did not; a failure "
+        "reported as 'something went wrong' leaves the operator to diff the record "
+        "themselves"
+    )
+    assert "`failed-write report`" in tail, (
+        "the tail must name the `failed-write report` escalation point it lands on, "
+        "so the stop is the same named hand-back the escalation table lists"
+    )
+
+
+def test_accepted_tail_does_not_re_confirm_once_it_is_running():
+    """Acceptance was the gate.
+
+    A second confirmation inside the tail trains the operator to wave through the
+    one prompt that would have mattered.
+    """
+    tail = _flat(_accepted_tail(GAUNTLET.read_text()))
+    assert "**A successfully executing tail asks nothing.**" in tail, (
+        "the tail must forbid mid-tail re-confirmation on the success path"
+    )
+
+
+def test_provenance_stamp_separates_proposals_accepted_from_overrides():
+    """The audit trail's whole value is whose judgment each disposition was.
+
+    A stamp that records only the disposition values loses the authorship the
+    disposition rules exist to protect.
+    """
+    tail = _flat(_accepted_tail(GAUNTLET.read_text()))
+    assert "distinguishes accepted-from-proposal dispositions from operator overrides" in tail, (
+        "the provenance stamp must separate what the operator accepted as proposed "
+        "from what they overrode"
+    )
+    assert "quotes the `C1`…`Cn` ids" in tail, (
+        "the stamp must quote the Critical ids, so an auditor can line each "
+        "disposition up against the table the operator actually saw"
+    )
+
+
+def test_provenance_split_is_derived_structurally_not_recalled():
+    """`accepted-as-risk` and `disputed` cannot be agent-proposed.
+
+    So their presence *is* the override, derivable from the record itself — which
+    is what keeps the stamp from being the agent's recollection of the round-trip.
+    """
+    tail = _flat(_accepted_tail(GAUNTLET.read_text()))
+    assert "**operator overrides by construction**" in tail, (
+        "the tail must state the structural rule: a Critical carrying "
+        "`accepted-as-risk` or `disputed` was overridden by definition, because the "
+        "agent may not propose either"
+    )
+    assert "never from memory" in tail, (
+        "the accepted/overridden split must be derived rather than recalled — a "
+        "remembered split is an assertion, and the audit trail cannot tell the "
+        "difference"
+    )
+
+
+def test_spec_tail_retains_full_detail_in_a_gauntlet_body_section():
+    """The compact deliverable is only safe because nothing is thrown away.
+
+    The detail the operator did not read still has to be reconstructable by whoever
+    reads the frozen spec later.
+    """
+    tail = _flat(_spec_tail(GAUNTLET.read_text()))
+    assert "full consolidated finding detail" in tail, (
+        "the spec tail must say the withheld detail is retained, not discarded"
+    )
+    assert "`## Gauntlet` section appended to the spec body" in tail, (
+        "the spec's detail target is a `## Gauntlet` body section — a spec body has "
+        "no exhaustive-section contract, so the detail belongs in it"
+    )
+    assert "part of the same atomic write" in tail, (
+        "the detail section must land in the one atomic write, not a second write "
+        "after the flip — a `ready` spec missing its own review record is exactly "
+        "the artifact the audit trail exists to prevent"
+    )
+
+
+def test_spec_tail_flips_per_route_with_a_formed_handoff():
+    tail = _spec_tail(GAUNTLET.read_text())
+    assert "<spec-id> --status ready" in tail, (
+        "the spec tail's freeze route must carry the `ready` flip"
+    )
+    assert "<spec-id> --status superseded" in tail, (
+        "the spec tail's reframe route must carry the `superseded` flip as a "
+        "command, not only as prose — the route that does not freeze still writes"
+    )
+    flat = _flat(tail)
+    assert "/craft:brainstorm" in flat, (
+        "the reframe route must hand back to brainstorming"
+    )
+    assert "fully formed" in flat, (
+        "the handoff command must be emitted with the real record id, so the "
+        "operator can paste it into a fresh session as-is"
+    )
+
+
+def test_adr_full_detail_goes_to_a_linked_lesson_record():
+    """The adr body contract is exhaustive, so the detail cannot live in it.
+
+    A linked `lesson` record is the target that keeps the detail without violating
+    the four-section contract — and the `related adr=` edge is what makes it
+    findable from the decision it reviewed.
+    """
+    adr_section = _adr_mode_section(GAUNTLET.read_text())
+    lesson_lines = [
+        line for line in adr_section.splitlines() if _ADR_LESSON_CREATE in line
+    ]
+    assert lesson_lines, (
+        "the adr tail must create a linked `lesson` record for the full finding "
+        f"detail ({_ADR_LESSON_CREATE}) — the four-section body cannot hold it"
+    )
+    for line in lesson_lines:
+        assert _ADR_LESSON_EDGE in line, (
+            "the lesson record must be created with its `related adr=` edge on the "
+            "same command; an edge added by a later write is an edge that a failure "
+            f"between the two never writes. Got: {line!r}"
+        )
+    assert _ANNOTATION_PROVENANCE_SENTENCE in adr_section, (
+        "the lesson-record target must not displace the annotation-provenance rule "
+        "— provenance still goes to annotations, never the body"
+    )
+
+
+def test_adr_tail_writes_the_lesson_first_then_annotates_then_flips():
+    """Order is the whole contract here, and it is chosen for its failure states.
+
+    Lesson-first leaves, at worst, a `draft` adr with an extra record pointing at
+    it — discoverable and harmless. The reverse order leaves an `active`, immutable
+    decision whose review evidence was never written.
+    """
+    tail = _adr_tail(GAUNTLET.read_text())
+    lesson_idx = tail.index(_ADR_LESSON_CREATE)
+    annotation_idx = tail.index(_ADR_COUNTS_ANNOTATION)
+    flip_match = _ADR_ADVANCE_RE.search(tail)
+    assert flip_match, (
+        "the adr tail must show the `--status active` flip as the last write in the "
+        "sequence, or the order it pins is incomplete"
+    )
+    assert lesson_idx < annotation_idx < flip_match.start(), (
+        "the adr tail's sequence must be: create the `lesson` record, then the "
+        "adr's atomic annotation write, then the status flip"
+    )
+    flat = _flat(tail)
+    assert "<n>-resolved,<n>-accepted-as-risk,<n>-disputed" in flat, (
+        "the counts annotation must survive — the lesson record carries the detail "
+        "alongside it, it does not replace it"
+    )
+
+
+def test_adr_tail_is_fail_closed_and_reports_an_orphaned_lesson():
+    """A lesson record left behind by a later failure is not garbage to ignore.
+
+    It is the only trace that a review happened, and the operator cannot act on a
+    record they were never told exists.
+    """
+    flat = _flat(_adr_tail(GAUNTLET.read_text()))
+    assert "the adr stays `draft`" in flat, (
+        "a failure anywhere in the adr sequence must leave the adr `draft`"
+    )
+    assert "**never silently abandoned**" in flat, (
+        "an orphaned lesson record must be surfaced, not dropped"
+    )
+    assert "report the orphaned `lesson` record to the operator" in flat, (
+        "the report must name the orphan explicitly — the operator decides whether "
+        "to re-run or delete it"
+    )
+
+
+def test_reframe_route_targets_stay_pinned_per_mode():
+    """One route, two targets — and neither may drift into the other's vocabulary."""
+    text = GAUNTLET.read_text()
+    assert "<spec-id> --status superseded" in _spec_tail(text), (
+        "the reframe route takes a spec to `superseded`"
+    )
+    adr_flat = _flat(_adr_mode_section(text))
+    assert "takes an adr to `dropped`" in adr_flat, (
+        "the reframe route takes an adr to `dropped`, not `superseded` — a draft "
+        "adr never went `active`, so it has no predecessor decision to supersede"
+    )
+
+
+def test_adr_tail_says_where_the_per_id_dispositions_land():
+    """An annotation is a key/value; it cannot hold the shared stamp's id detail.
+
+    The shared tail requires the stamp to quote `C1`…`Cn`. For an adr that has to
+    land somewhere, or the mode silently drops half the stamp contract.
+    """
+    flat = _flat(_adr_tail(GAUNTLET.read_text()))
+    assert "`C1`…`Cn` dispositions" in flat, (
+        "the adr tail must say where the per-id dispositions land — an annotation "
+        "carries counts, so the ids belong in the linked `lesson` record"
+    )
+
+
+def test_adr_tail_carries_the_reframe_flip_too():
+    """The sequence is the same on both routes; only its last write differs."""
+    tail = _adr_tail(GAUNTLET.read_text())
+    assert "<adr-id> --status dropped" in tail, (
+        "the adr tail's reframe route must carry the `dropped` flip as a command — "
+        "the detail record and the annotation are written on that route too"
+    )
+
+
+def test_orphaned_lesson_report_names_the_recovery_query():
+    """"Discoverable" is a claim the operator has to be able to act on.
+
+    A reverse-edge lookup they have to invent is one they will not run.
+    """
+    flat = _flat(_adr_tail(GAUNTLET.read_text()))
+    assert "kind:lesson related-adr:<adr-name>" in flat, (
+        "the orphan report must name the query that finds the lesson record again, "
+        "not merely assert the edge makes it discoverable"
+    )
